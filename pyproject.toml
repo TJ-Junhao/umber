@@ -33,3 +33,32 @@ module-name = "umber._umber"
 [tool.pytest.ini_options]
 testpaths = ["tests/python", "python/umber"]
 addopts = "--doctest-modules --import-mode=importlib"
+pythonpath = ["tests/python"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["python", "tests/python"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+
+[tool.pyright]
+include = ["python", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+reportUnnecessaryTypeIgnoreComment = "error"
+extraPaths = ["tests/python"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+files = ["python/umber", "tests"]
+mypy_path = "tests/python"
