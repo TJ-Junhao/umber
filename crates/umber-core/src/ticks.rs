@@ -1,4 +1,19 @@
 //! Tick positions (Extended Wilkinson) and tick label formatting.
+//!
+//! Ticks are produced by [`ContinuousScale::ticks`](crate::ContinuousScale::ticks). Labels are
+//! clean (`0.3`, never `0.30000000000000004`), use U+2212 for negatives, and never read `-0`.
+//!
+//! # Examples
+//!
+//! ```
+//! use umber_core::{ContinuousScale, Transform};
+//!
+//! let scale = ContinuousScale::new(Transform::Linear, -40.0, 120.0, "doc").unwrap();
+//! let labels: Vec<String> = scale.ticks(5).into_iter().map(|t| t.label).collect();
+//! assert_eq!(labels, ["\u{2212}40", "0", "40", "80", "120"]);
+//! ```
+
+use std::collections::HashMap;
 
 /// One axis tick: a position in data space and the text printed next to it.
 ///
@@ -191,37 +206,98 @@ fn decimals(step: f64) -> usize {
         .map_or(12, |d| d as usize)
 }
 
-/// Scientific form with U+2212 minus signs: `5e6`, `2.5e6`, `-3e-5`. `exact` keeps the
-/// shortest round-trip mantissa; otherwise the mantissa is rounded to 12 significant digits
-/// so that products like `3 * 1e-5` read `3e-5`.
-fn scientific(v: f64, exact: bool) -> String {
+/// Most decimals tried in fixed form before falling back to shortest round-trip.
+const MAX_DECIMALS: usize = 15;
+/// Significant digits tried in scientific form: from the default up to the `f64` limit.
+const SCIENTIFIC_DIGITS: std::ops::RangeInclusive<usize> = 12..=17;
+
+/// Scientific form `<mantissa>e<exp>` of a non-zero `v`. `digits` is the number of significant
+/// digits (trailing zeros are trimmed), or `None` for the shortest round-trip mantissa.
+fn scientific(v: f64, digits: Option<usize>) -> String {
     if !v.is_finite() {
         return v.to_string();
     }
-    let text = if exact {
-        format!("{v:e}")
-    } else {
-        let rounded = format!("{v:.11e}");
-        match rounded.split_once('e') {
-            Some((mantissa, exp)) => {
-                let mantissa = if mantissa.contains('.') {
-                    mantissa.trim_end_matches('0').trim_end_matches('.')
-                } else {
-                    mantissa
-                };
-                format!("{mantissa}e{exp}")
+    let text = match digits {
+        None => format!("{v:e}"),
+        Some(n) => {
+            let rounded = format!("{v:.prec$e}", prec = n.saturating_sub(1));
+            match rounded.split_once('e') {
+                Some((mantissa, exp)) => {
+                    let mantissa = if mantissa.contains('.') {
+                        mantissa.trim_end_matches('0').trim_end_matches('.')
+                    } else {
+                        mantissa
+                    };
+                    format!("{mantissa}e{exp}")
+                }
+                None => rounded,
             }
-            None => rounded,
         }
     };
     text.replace('-', "\u{2212}")
 }
 
-/// Labels for tick `values` spaced `step` apart.
+/// Fixed-point form of `v`: `decimals` places, or shortest round-trip for `None`. A value that
+/// rounds to zero prints without a sign, and negatives use U+2212.
+fn fixed(v: f64, decimals: Option<usize>) -> String {
+    let text = match decimals {
+        Some(d) => format!("{v:.d$}"),
+        None => format!("{v}"),
+    };
+    let unsigned = text.trim_start_matches('-');
+    if unsigned.chars().all(|c| c == '0' || c == '.') {
+        unsigned.to_string()
+    } else {
+        text.replace('-', "\u{2212}")
+    }
+}
+
+/// True when no two distinct values share a label.
+fn labels_are_unique(values: &[f64], labels: &[String]) -> bool {
+    let mut seen: HashMap<&str, u64> = HashMap::with_capacity(labels.len());
+    values.iter().zip(labels).all(|(v, label)| {
+        let bits = v.to_bits();
+        *seen.entry(label.as_str()).or_insert(bits) == bits
+    })
+}
+
+/// Fixed-point labels with `start` decimals, raising the decimals one at a time (up to
+/// [`MAX_DECIMALS`], then shortest round-trip) until distinct values get distinct labels.
+fn unique_fixed(values: &[f64], start: usize) -> Vec<String> {
+    for d in start..=MAX_DECIMALS {
+        let labels: Vec<String> = values.iter().map(|&v| fixed(v, Some(d))).collect();
+        if labels_are_unique(values, &labels) {
+            return labels;
+        }
+    }
+    values.iter().map(|&v| fixed(v, None)).collect()
+}
+
+/// Scientific labels (zero stays `0`), raising the significant digits one at a time until
+/// distinct values get distinct labels, then shortest round-trip.
+fn unique_scientific(values: &[f64]) -> Vec<String> {
+    let label = |v: f64, digits: Option<usize>| {
+        if v == 0.0 {
+            "0".to_string()
+        } else {
+            scientific(v, digits)
+        }
+    };
+    for digits in SCIENTIFIC_DIGITS {
+        let labels: Vec<String> = values.iter().map(|&v| label(v, Some(digits))).collect();
+        if labels_are_unique(values, &labels) {
+            return labels;
+        }
+    }
+    values.iter().map(|&v| label(v, None)).collect()
+}
+
+/// Labels for tick `values` spaced `step` apart (the grid policy).
 ///
 /// The number of decimals follows from `step`, values within `step * 1e-9` of zero print as an
 /// unsigned zero, negatives use U+2212, and a set containing a value of at least `1e6` or a
-/// non-zero value below `1e-4` is written in scientific form.
+/// non-zero value below `1e-4` is written in scientific form. If distinct values would share a
+/// label, the precision is raised until they do not.
 pub(crate) fn format_ticks(values: &[f64], step: f64) -> Vec<String> {
     let step = step.abs();
     let tiny = step * 1e-9;
@@ -233,43 +309,27 @@ pub(crate) fn format_ticks(values: &[f64], step: f64) -> Vec<String> {
         .iter()
         .any(|&v| v != 0.0 && (v.abs() >= 1e6 || v.abs() < 1e-4));
     if use_scientific {
-        return snapped
-            .iter()
-            .map(|&v| {
-                if v == 0.0 {
-                    "0".to_string()
-                } else {
-                    scientific(v, false)
-                }
-            })
-            .collect();
+        unique_scientific(&snapped)
+    } else {
+        unique_fixed(&snapped, decimals(step))
     }
-    let d = decimals(step);
-    snapped
-        .iter()
-        .map(|&v| {
-            let text = format!("{v:.d$}");
-            // Rounding can leave a negative that reads as zero; it must not show a sign.
-            let unsigned = text.trim_start_matches('-');
-            if unsigned.chars().all(|c| c == '0' || c == '.') {
-                unsigned.to_string()
-            } else {
-                text.replace('-', "\u{2212}")
-            }
-        })
-        .collect()
 }
 
-/// Labels in scientific form for every non-zero value, used for degenerate ranges where the
-/// values are too close together (or too extreme) for fixed-point labels.
-pub(crate) fn format_ticks_scientific(values: &[f64]) -> Vec<String> {
+/// Labels for values that do not sit on a regular grid (the value policy).
+///
+/// Each value is written with its shortest round-trip digits: fixed form when
+/// `1e-4 <= |v| < 1e6`, otherwise `<mantissa>e<exp>`; zero is `0`. Distinct values therefore
+/// always get distinct labels.
+pub(crate) fn format_values(values: &[f64]) -> Vec<String> {
     values
         .iter()
         .map(|&v| {
             if v == 0.0 {
                 "0".to_string()
+            } else if (1e-4..1e6).contains(&v.abs()) {
+                fixed(v, None)
             } else {
-                scientific(v, true)
+                scientific(v, None)
             }
         })
         .collect()
@@ -363,6 +423,42 @@ mod tests {
     fn zero_never_signed() {
         assert_eq!(format_ticks(&[-1e-17, 0.5], 0.5), ["0.0", "0.5"]);
         assert_eq!(format_ticks(&[-0.0], 1.0), ["0"]);
+    }
+
+    #[test]
+    fn scientific_labels_keep_enough_digits() {
+        assert_eq!(
+            format_ticks(&[0.0, 2.5e6, 5e6], 2.5e6),
+            ["0", "2.5e6", "5e6"]
+        );
+        assert_eq!(
+            format_ticks(&[0.0, 1.5e-5, 3e-5], 1.5e-5),
+            ["0", "1.5e\u{2212}5", "3e\u{2212}5"]
+        );
+    }
+
+    #[test]
+    fn colliding_labels_raise_precision() {
+        let labels = format_ticks(&[1.0, 1.0 + 5e-13, 1.0 + 1e-12], 1e-12);
+        assert_eq!(labels.len(), 3);
+        assert!(labels[0] != labels[1] && labels[1] != labels[2]);
+        let labels = format_ticks(&[1e9, 1e9 + 2.5e-4], 2.5e-4);
+        assert!(labels[0] != labels[1], "{labels:?}");
+    }
+
+    #[test]
+    fn value_policy_is_shortest_round_trip() {
+        assert_eq!(
+            format_values(&[0.0, 3.375, -0.001, 1e6, 2.5e-5, -3e-5]),
+            [
+                "0",
+                "3.375",
+                "\u{2212}0.001",
+                "1e6",
+                "2.5e\u{2212}5",
+                "\u{2212}3e\u{2212}5"
+            ]
+        );
     }
 
     #[test]

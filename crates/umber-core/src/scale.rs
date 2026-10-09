@@ -1,4 +1,19 @@
 //! Scales: how values along one axis map to positions in `[0, 1]`.
+//!
+//! A [`ContinuousScale`] maps numbers (linear or logarithmic) and produces ticks; a
+//! [`CategoryScale`] maps named categories to equal bands.
+//!
+//! # Examples
+//!
+//! ```
+//! use umber_core::{CategoryScale, ContinuousScale, LogBase, Transform};
+//!
+//! let log = ContinuousScale::new(Transform::Log(LogBase::TEN), 1.0, 100.0, "doc").unwrap();
+//! assert!((log.normalize(10.0) - 0.5).abs() < 1e-12);
+//!
+//! let categories = CategoryScale::from_first_appearance(["a", "b"]);
+//! assert_eq!(categories.band(1), (0.5, 1.0));
+//! ```
 
 use std::collections::HashMap;
 
@@ -48,6 +63,14 @@ pub struct LogBase(f64); // private field: only constructible through `new`
 
 impl LogBase {
     /// Base ten.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::LogBase;
+    ///
+    /// assert_eq!(LogBase::TEN.get(), 10.0);
+    /// ```
     pub const TEN: LogBase = LogBase(10.0);
 
     /// Creates a base, or `Error::Style` unless `base` is finite and greater than 1.
@@ -505,7 +528,9 @@ impl ContinuousScale {
     /// Tick positions and labels for about `target` ticks (at least 2).
     ///
     /// Linear ticks lie inside the domain. Log ticks are the powers of the base inside the
-    /// domain, thinned to every n-th power when there are more than `2 * target`.
+    /// domain, thinned to every n-th power when there are more than `2 * target`; when fewer
+    /// than two powers fit, they are ordinary linear ticks over the domain. Distinct tick values
+    /// always get distinct labels.
     ///
     /// # Examples
     ///
@@ -534,7 +559,7 @@ impl ContinuousScale {
 
     fn end_ticks(&self) -> Vec<Tick> {
         let values = vec![self.lo, self.hi];
-        let labels = ticks::format_ticks(&values, self.hi - self.lo);
+        let labels = ticks::format_values(&values);
         Self::pair(values, labels)
     }
 
@@ -547,7 +572,7 @@ impl ContinuousScale {
                     .map(|v| v.clamp(lo, hi))
                     .collect(),
             );
-            let labels = ticks::format_ticks_scientific(&values);
+            let labels = ticks::format_values(&values);
             return Self::pair(values, labels);
         }
         let tol = 1e-9 * (hi - lo);
@@ -580,11 +605,13 @@ impl ContinuousScale {
     }
 
     fn log_ticks(&self, base: f64, target: usize) -> Vec<Tick> {
+        // Fewer than two powers of the base inside the domain cannot form an axis; fall back to
+        // ordinary linear ticks over the same domain.
         let (Some(first), Some(last)) = (ceil_exp(self.lo, base), floor_exp(self.hi, base)) else {
-            return self.end_ticks();
+            return self.linear_ticks(target);
         };
-        if first > last {
-            return self.end_ticks();
+        if first >= last {
+            return self.linear_ticks(target);
         }
         let count = last.saturating_sub(first).saturating_add(1);
         let target_i = target as i64;
@@ -606,10 +633,10 @@ impl ContinuousScale {
                 None => break,
             }
         }
-        let Some(&smallest) = values.first() else {
-            return self.end_ticks();
-        };
-        let labels = ticks::format_ticks(&values, smallest);
+        if values.len() < 2 {
+            return self.linear_ticks(target);
+        }
+        let labels = ticks::format_values(&values);
         Self::pair(values, labels)
     }
 }
@@ -1025,6 +1052,81 @@ mod tests {
         let v: Vec<f64> = s.ticks(5).iter().map(|t| t.value).collect();
         assert!(v.len() >= 2 && v.iter().all(|x| *x > 0.0));
         assert!(v.windows(2).all(|w| w[1] > w[0]));
+    }
+
+    fn assert_distinct_labels(lo: f64, hi: f64) {
+        let ticks = lin(lo, hi).ticks(5);
+        assert!(ticks.len() >= 2, "{lo}..{hi}: {ticks:?}");
+        assert!(
+            ticks.windows(2).all(|w| w[1].value > w[0].value),
+            "{lo}..{hi}"
+        );
+        let labels: std::collections::HashSet<&str> =
+            ticks.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels.len(), ticks.len(), "{lo}..{hi}: {ticks:?}");
+        assert!(ticks.iter().all(|t| !t.label.is_empty()));
+    }
+
+    #[test]
+    fn distinct_values_get_distinct_labels() {
+        assert_distinct_labels(1e9, 1e9 + 1e-3);
+        assert_distinct_labels(1e6, 1e6 + 2e-6);
+        assert_distinct_labels(1e-5, 1e-5 + 2e-17);
+        assert_distinct_labels(-1e9, -1e9 + 2e-3);
+        assert_distinct_labels(1.0, 1.0 + 2e-12);
+        assert_distinct_labels(0.1, 0.1 + 2e-13);
+        assert_distinct_labels(1e-4, 1e-4 + 2e-16);
+        assert_distinct_labels(1.0, 1.0 + f64::EPSILON);
+        assert_distinct_labels(0.0, f64::from_bits(1));
+    }
+
+    #[test]
+    fn log_powers_are_labelled_by_value() {
+        let base = LogBase::new(1.5).unwrap();
+        let s = ContinuousScale::new(Transform::Log(base), 1.0, 5.0, "t").unwrap();
+        let labels: Vec<String> = s.ticks(5).into_iter().map(|t| t.label).collect();
+        assert_eq!(labels, ["1", "1.5", "2.25", "3.375"]);
+
+        let wide = ContinuousScale::new(Transform::Log(LogBase::TEN), 1e-5, 1e9, "t").unwrap();
+        let labels: Vec<String> = wide.ticks(5).into_iter().map(|t| t.label).collect();
+        assert_eq!(labels, ["1e\u{2212}5", "0.01", "10", "10000", "1e7"]);
+
+        let near = LogBase::new(1.0001).unwrap();
+        let s = ContinuousScale::new(Transform::Log(near), 1.0, 1.01, "t").unwrap();
+        let ticks = s.ticks(5);
+        let distinct: std::collections::HashSet<&str> =
+            ticks.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(distinct.len(), ticks.len());
+    }
+
+    #[test]
+    fn log_without_two_powers_falls_back_to_linear_ticks() {
+        let s = ContinuousScale::new(Transform::Log(LogBase::TEN), 2.2, 3.2, "t").unwrap();
+        let ticks = s.ticks(5);
+        assert!(ticks.len() >= 2, "{ticks:?}");
+        for t in &ticks {
+            assert!(t.value >= 2.2 && t.value <= 3.2, "{t:?}");
+            let parsed: f64 = t.label.replace('\u{2212}', "-").parse().unwrap();
+            assert!((parsed - t.value).abs() <= 1e-9 * t.value.abs(), "{t:?}");
+        }
+        // Exactly one power inside is still too few.
+        let one = ContinuousScale::new(Transform::Log(LogBase::TEN), 2.0, 50.0, "t").unwrap();
+        assert!(one.ticks(5).len() >= 2);
+    }
+
+    #[test]
+    fn log_ticks_are_thinned_evenly_in_exponent() {
+        let s = ContinuousScale::new(Transform::Log(LogBase::TEN), 1e-30, 1e30, "t").unwrap();
+        let ticks = s.ticks(5);
+        assert!(
+            ticks.len() >= 2 && ticks.len() <= 11,
+            "{} ticks",
+            ticks.len()
+        );
+        let exps: Vec<f64> = ticks.iter().map(|t| t.value.log10().round()).collect();
+        let gap = exps[1] - exps[0];
+        assert!(gap > 1.0);
+        assert!(exps.windows(2).all(|w| w[1] - w[0] == gap), "{exps:?}");
     }
 
     proptest! {
