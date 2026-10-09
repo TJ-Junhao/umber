@@ -1,4 +1,16 @@
 //! Colors: concrete sRGB values and color specifications that resolve against a theme palette.
+//!
+//! # Examples
+//!
+//! ```
+//! use umber_core::{Alpha, ColorSpec, Rgba};
+//!
+//! let palette = [Rgba::RED, Rgba::BLUE];
+//! let faded = ColorSpec::AUTO.with_alpha(Alpha::new(0.5)?);
+//! let color = faded.resolve(&palette, 1);
+//! assert_eq!(color.to_hex(), "#3366B880");
+//! # Ok::<(), umber_core::Error>(())
+//! ```
 
 use crate::{Error, Result};
 
@@ -540,5 +552,86 @@ mod tests {
     #[test]
     fn resolve_with_empty_palette_falls_back_to_black() {
         assert_eq!(ColorSpec::AUTO.resolve(&[], 3), Rgba::BLACK);
+    }
+
+    #[test]
+    fn alpha_boundaries_are_checked_on_the_f64_input() {
+        for bad in [-f64::from_bits(1), f64::from_bits(1.0_f64.to_bits() + 1)] {
+            let err = Alpha::new(bad).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::Style {
+                        context: "Color.alpha()",
+                        ..
+                    }
+                ),
+                "{bad:e}"
+            );
+        }
+        for ok in [-0.0, 0.0, 1.0, 0.999999] {
+            assert!(Alpha::new(ok).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn palette_with_alpha_replaces_palette_alpha_and_keeps_index() {
+        let translucent_red = Rgba::hex("#FF000080").unwrap();
+        let pal = [Rgba::BLUE, translucent_red, Rgba::GREEN];
+        let half = Alpha::new(0.5).unwrap();
+        let spec = ColorSpec::Palette {
+            index: 1,
+            alpha: Alpha::OPAQUE,
+        }
+        .with_alpha(half);
+        assert_eq!(
+            spec,
+            ColorSpec::Palette {
+                index: 1,
+                alpha: half
+            }
+        );
+        assert_eq!(
+            spec.resolve(&pal, 0),
+            Rgba {
+                r: 0xFF,
+                g: 0,
+                b: 0,
+                a: 128
+            }
+        );
+        // Opaque alpha also replaces the palette color's own alpha.
+        let opaque = ColorSpec::Palette {
+            index: 1,
+            alpha: Alpha::OPAQUE,
+        };
+        assert_eq!(opaque.resolve(&pal, 0), Rgba::opaque(0xFF, 0, 0));
+        // Index wraps around and is not taken from auto_index.
+        let wrapped = ColorSpec::Palette {
+            index: 4,
+            alpha: half,
+        };
+        assert_eq!(
+            wrapped.resolve(&pal, 2),
+            Rgba {
+                a: 128,
+                ..translucent_red
+            }
+        );
+    }
+
+    #[test]
+    fn fixed_ignores_palette_and_auto_index() {
+        let half = Alpha::new(0.5).unwrap();
+        let spec = ColorSpec::Fixed(Rgba::BLUE).with_alpha(half);
+        let want = Rgba {
+            a: 128,
+            ..Rgba::BLUE
+        };
+        for pal in [&[][..], &[Rgba::RED][..]] {
+            for auto_index in [0, 5] {
+                assert_eq!(spec.resolve(pal, auto_index), want);
+            }
+        }
     }
 }
