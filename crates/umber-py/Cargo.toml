@@ -1,0 +1,4 @@
+[package]
+name = "umber-py"
+version.workspace = true
+edition.workspace = true
