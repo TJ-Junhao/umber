@@ -11,11 +11,21 @@
 //! keep the database alive through an `Arc`.
 //!
 //! Work and memory are bounded:
-//! - the index holds at most [`Limits::max_faces`] faces, skips faces larger than
-//!   [`Limits::max_bytes`] and faces with more than [`Limits::max_ranges`] coverage ranges, and
-//!   gives up on a `cmap` with more than [`RAW_RANGE_LIMIT`] raw ranges;
-//! - one layout performs at most [`LOOKUPS_PER_LAYOUT`] uncached lookups;
+//! - the index holds at most [`Limits::max_faces`] faces and [`Limits::max_total_ranges`]
+//!   coverage ranges in total; it skips faces larger than [`Limits::max_bytes`] and faces with
+//!   more than [`Limits::max_ranges`] ranges;
+//! - reading `cmap` tables visits each subtable once and at most [`Limits::max_face_visits`]
+//!   segments or groups per face and [`Limits::max_build_visits`] per index build;
+//! - one layout performs at most [`LOOKUPS_PER_LAYOUT`] uncached lookups and
+//!   [`CONFIRMATIONS_PER_LAYOUT`] candidate confirmations, and one lookup at most
+//!   [`CONFIRMATIONS_PER_LOOKUP`];
 //! - the lookup cache holds at most [`CACHE_LIMIT`] entries.
+//!
+//! These caps apply after fontdb's own discovery: `load_system_fonts` enumerates every font in
+//! the system font directories and keeps its metadata, bounded only by those directories.
+//!
+//! Concurrent misses on the same character are not merged; each one is bounded by the caps
+//! above and cheap.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,9 +44,29 @@ pub(super) const LOOKUPS_PER_LAYOUT: usize = 1024;
 /// are not cached; nothing is evicted.
 pub(super) const CACHE_LIMIT: usize = 65_536;
 
-/// The most unmerged ranges read from one face's `cmap`: twice the number of code points, which
-/// no well-formed font exceeds even with overlapping subtables.
-const RAW_RANGE_LIMIT: usize = 2 * 0x11_0000;
+/// The most candidate confirmations (open, parse, outline check) one uncached lookup performs.
+/// When they are used up the character resolves to the primary font's `.notdef`.
+pub(super) const CONFIRMATIONS_PER_LOOKUP: usize = 16;
+
+/// The most candidate confirmations one layout call performs. When they are used up the
+/// remaining characters resolve to the primary font's `.notdef`, and are not cached.
+pub(super) const CONFIRMATIONS_PER_LAYOUT: usize = 4096;
+
+/// The system font work one layout call may still do.
+#[derive(Debug)]
+pub(super) struct Budget {
+    lookups: usize,
+    confirmations: usize,
+}
+
+impl Budget {
+    pub(super) fn per_layout() -> Budget {
+        Budget {
+            lookups: LOOKUPS_PER_LAYOUT,
+            confirmations: CONFIRMATIONS_PER_LAYOUT,
+        }
+    }
+}
 
 /// Bounds on the system font index.
 #[derive(Debug, Clone, Copy)]
@@ -47,6 +77,13 @@ pub(super) struct Limits {
     pub(super) max_bytes: usize,
     /// At most this many faces are indexed, the first ones in sorted order.
     pub(super) max_faces: usize,
+    /// The most merged ranges kept in the whole index. A face whose ranges do not fit is
+    /// skipped, not truncated.
+    pub(super) max_total_ranges: usize,
+    /// Faces whose `cmap` needs more segment or group visits than this are skipped.
+    pub(super) max_face_visits: usize,
+    /// Once this many segment or group visits have been spent, no further faces are indexed.
+    pub(super) max_build_visits: usize,
 }
 
 impl Limits {
@@ -54,6 +91,9 @@ impl Limits {
         max_ranges: 65_536,
         max_bytes: 256 * 1024 * 1024,
         max_faces: 10_000,
+        max_total_ranges: 2_097_152,
+        max_face_visits: 262_144,
+        max_build_visits: 8_388_608,
     };
 }
 
@@ -191,22 +231,156 @@ fn u32_at(data: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_be_bytes(word))
 }
 
+/// Collects ranges while counting every segment or group visited, kept or not.
+struct RangeScan {
+    ranges: Vec<(u32, u32)>,
+    visited: usize,
+    max_visits: usize,
+}
+
+impl RangeScan {
+    /// Records one visited segment or group; keeps `lo..=hi` if it is a valid range. Returns
+    /// false once the visit budget is exceeded.
+    fn visit(&mut self, lo: u32, hi: u32) -> bool {
+        const MAX: u32 = 0x10_FFFF;
+        self.visited += 1;
+        if self.visited > self.max_visits {
+            return false;
+        }
+        if lo <= hi && lo <= MAX {
+            self.ranges.push((lo, hi.min(MAX)));
+        }
+        true
+    }
+
+    /// Counts a visit that yields no range.
+    fn skip(&mut self) -> bool {
+        self.visit(1, 0)
+    }
+
+    /// Reads one subtable. Returns false once the visit budget is exceeded.
+    fn subtable(&mut self, sub: &[u8]) -> bool {
+        match u16_at(sub, 0) {
+            Some(0) => self.visit(0, 255),
+            Some(2) => self.format2(sub),
+            Some(4) => {
+                let segments2 = usize::from(u16_at(sub, 6).unwrap_or(0));
+                for s in 0..segments2 / 2 {
+                    let end = u16_at(sub, 14 + 2 * s);
+                    let start = u16_at(sub, 16 + segments2 + 2 * s);
+                    let (Some(start), Some(end)) = (start, end) else {
+                        break;
+                    };
+                    let ok = if start == 0xFFFF && end == 0xFFFF {
+                        self.skip()
+                    } else {
+                        self.visit(u32::from(start), u32::from(end))
+                    };
+                    if !ok {
+                        return false;
+                    }
+                }
+                true
+            }
+            Some(6) => match (u16_at(sub, 6), u16_at(sub, 8)) {
+                (Some(first), Some(count)) if count > 0 => {
+                    let first = u32::from(first);
+                    self.visit(first, first + u32::from(count) - 1)
+                }
+                _ => self.skip(),
+            },
+            Some(10) => match (u32_at(sub, 12), u32_at(sub, 16)) {
+                (Some(first), Some(count)) if count > 0 => {
+                    self.visit(first, first.saturating_add(count - 1))
+                }
+                _ => self.skip(),
+            },
+            Some(12 | 13) => {
+                let groups = u32_at(sub, 12).unwrap_or(0);
+                for g in 0..usize::try_from(groups).unwrap_or(0) {
+                    let at = 16 + 12 * g;
+                    let (Some(start), Some(end)) = (u32_at(sub, at), u32_at(sub, at + 4)) else {
+                        break;
+                    };
+                    if !self.visit(start, end) {
+                        return false;
+                    }
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
+    /// Format 2 (high-byte mapping): 256 sub-header keys, one visit each.
+    fn format2(&mut self, sub: &[u8]) -> bool {
+        const HEADERS: usize = 6 + 2 * 256;
+        for high in 0..256u16 {
+            let Some(key) = u16_at(sub, 6 + 2 * usize::from(high)) else {
+                return self.skip();
+            };
+            let header = HEADERS + 8 * usize::from(key / 8);
+            let (Some(first), Some(count)) = (u16_at(sub, header), u16_at(sub, header + 2)) else {
+                if !self.skip() {
+                    return false;
+                }
+                continue;
+            };
+            let (first, count) = (u32::from(first), u32::from(count));
+            let ok = if key / 8 == 0 {
+                // A single-byte code, valid if the sub-header's range contains it.
+                let code = u32::from(high);
+                if first <= code && code < first + count {
+                    self.visit(code, code)
+                } else {
+                    self.skip()
+                }
+            } else {
+                let base = (u32::from(high) << 8) + first;
+                if count > 0 && base <= 0xFFFF {
+                    self.visit(base, (base + count - 1).min(0xFFFF))
+                } else {
+                    self.skip()
+                }
+            };
+            if !ok {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Why reading a `cmap` table gave no ranges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CmapError {
+    /// The table header cannot be read.
+    Unreadable,
+    /// More than the allowed number of segments or groups were visited.
+    TooManyVisits,
+}
+
+/// Ranges read from a `cmap` table, unmerged, with the number of segments and groups visited.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct CmapRanges {
+    pub(super) ranges: Vec<(u32, u32)>,
+    pub(super) visited: usize,
+}
+
 /// The code point ranges a `cmap` table declares in its Unicode subtables, unmerged.
 ///
 /// Ranges are read from the subtable headers (segments and groups) without enumerating code
-/// points, so the cost is linear in the table size. Code points the font maps to glyph 0 are
-/// included; a lookup confirms the glyph before using a face. Returns `None` when the table
-/// declares more than [`RAW_RANGE_LIMIT`] ranges.
-pub(super) fn cmap_ranges(cmap: &[u8]) -> Option<Vec<(u32, u32)>> {
-    const MAX: u32 = 0x10_FFFF;
-    let mut ranges: Vec<(u32, u32)> = Vec::new();
-    let push = |lo: u32, hi: u32, ranges: &mut Vec<(u32, u32)>| {
-        if lo <= hi && lo <= MAX {
-            ranges.push((lo, hi.min(MAX)));
-        }
-        ranges.len() <= RAW_RANGE_LIMIT
+/// points. Each subtable is read once, however many encoding records point at it, and every
+/// segment or group visited counts against `max_visits`, including invalid ones. Code points the
+/// font maps to glyph 0 are included; a lookup confirms the glyph before using a face.
+pub(super) fn cmap_ranges(cmap: &[u8], max_visits: usize) -> Result<CmapRanges, CmapError> {
+    let records = u16_at(cmap, 2).ok_or(CmapError::Unreadable)?;
+    let mut scan = RangeScan {
+        ranges: Vec::new(),
+        visited: 0,
+        max_visits,
     };
-    let records = u16_at(cmap, 2)?;
+    let mut seen: HashSet<u32> = HashSet::new();
     for record in 0..usize::from(records) {
         let at = 4 + 8 * record;
         let (Some(platform), Some(encoding), Some(offset)) =
@@ -215,77 +389,56 @@ pub(super) fn cmap_ranges(cmap: &[u8]) -> Option<Vec<(u32, u32)>> {
             break;
         };
         let unicode = platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10));
-        let Some(sub) = cmap.get(usize::try_from(offset).ok()?..) else {
-            continue;
-        };
-        if !unicode {
+        if !unicode || !seen.insert(offset) {
             continue;
         }
-        let within_limit = match u16_at(sub, 0) {
-            Some(0) => push(0, 255, &mut ranges),
-            Some(4) => {
-                let segments2 = usize::from(u16_at(sub, 6).unwrap_or(0));
-                let mut ok = true;
-                for s in 0..segments2 / 2 {
-                    let end = u16_at(sub, 14 + 2 * s);
-                    let start = u16_at(sub, 16 + segments2 + 2 * s);
-                    let (Some(start), Some(end)) = (start, end) else {
-                        break;
-                    };
-                    if start == 0xFFFF && end == 0xFFFF {
-                        continue;
-                    }
-                    ok = push(u32::from(start), u32::from(end), &mut ranges);
-                    if !ok {
-                        break;
-                    }
-                }
-                ok
-            }
-            Some(6) => match (u16_at(sub, 6), u16_at(sub, 8)) {
-                (Some(first), Some(count)) if count > 0 => {
-                    let first = u32::from(first);
-                    push(first, first + u32::from(count) - 1, &mut ranges)
-                }
-                _ => true,
-            },
-            Some(10) => match (u32_at(sub, 12), u32_at(sub, 16)) {
-                (Some(first), Some(count)) if count > 0 => {
-                    push(first, first.saturating_add(count - 1), &mut ranges)
-                }
-                _ => true,
-            },
-            Some(12 | 13) => {
-                let groups = u32_at(sub, 12).unwrap_or(0);
-                let mut ok = true;
-                for g in 0..usize::try_from(groups).unwrap_or(0) {
-                    let at = 16 + 12 * g;
-                    let (Some(start), Some(end)) = (u32_at(sub, at), u32_at(sub, at + 4)) else {
-                        break;
-                    };
-                    ok = push(start, end, &mut ranges);
-                    if !ok {
-                        break;
-                    }
-                }
-                ok
-            }
-            _ => true,
+        let Some(sub) = usize::try_from(offset).ok().and_then(|o| cmap.get(o..)) else {
+            continue;
         };
-        if !within_limit {
-            return None;
+        if !scan.subtable(sub) {
+            return Err(CmapError::TooManyVisits);
         }
     }
-    Some(ranges)
+    Ok(CmapRanges {
+        ranges: scan.ranges,
+        visited: scan.visited,
+    })
+}
+
+/// The result of indexing one face.
+struct FaceCoverage {
+    /// Segments and groups visited, kept or not.
+    visited: usize,
+    /// Sorted, merged ranges; `None` if the face is skipped.
+    ranges: Option<Vec<(u32, u32)>>,
+    /// Whether the visit budget was exceeded.
+    too_many_visits: bool,
 }
 
 /// The coverage of a face as sorted, merged, inclusive ranges.
 ///
-/// Returns `None` when the face does not parse, has no Unicode coverage, or has more than
-/// `max_ranges` merged ranges.
-fn coverage(data: &[u8], index: u32, max_ranges: usize) -> Option<Vec<(u32, u32)>> {
-    let raw = ttf_parser::RawFace::parse(data, index).ok()?;
-    let mut ranges = cmap_ranges(raw.table(ttf_parser::Tag::from_bytes(b"cmap"))?)?;
+/// The face is skipped (`ranges` is `None`) when it does not parse, has no Unicode coverage,
+/// needs more than `max_visits` visits, or has more than `max_ranges` merged ranges.
+fn coverage(data: &[u8], index: u32, max_ranges: usize, max_visits: usize) -> FaceCoverage {
+    let skipped = |visited, too_many_visits| FaceCoverage {
+        visited,
+        ranges: None,
+        too_many_visits,
+    };
+    let Some(cmap) = ttf_parser::RawFace::parse(data, index)
+        .ok()
+        .and_then(|raw| raw.table(ttf_parser::Tag::from_bytes(b"cmap")))
+    else {
+        return skipped(0, false);
+    };
+    let CmapRanges {
+        mut ranges,
+        visited,
+    } = match cmap_ranges(cmap, max_visits) {
+        Ok(found) => found,
+        Err(CmapError::TooManyVisits) => return skipped(max_visits.saturating_add(1), true),
+        Err(CmapError::Unreadable) => return skipped(0, false),
+    };
     ranges.sort_unstable();
     let mut merged: Vec<(u32, u32)> = Vec::new();
     for (lo, hi) in ranges {
@@ -295,10 +448,14 @@ fn coverage(data: &[u8], index: u32, max_ranges: usize) -> Option<Vec<(u32, u32)
         }
     }
     if merged.is_empty() || merged.len() > max_ranges {
-        return None;
+        return skipped(visited, false);
     }
     merged.shrink_to_fit();
-    Some(merged)
+    FaceCoverage {
+        visited,
+        ranges: Some(merged),
+        too_many_visits: false,
+    }
 }
 
 /// Where the system font database comes from.
@@ -318,6 +475,9 @@ pub(super) struct FaceIndex {
     by_family: HashMap<String, Vec<usize>>,
     /// Every face sorted by family, then by [`IndexedFace::rank`]; one order per weight.
     ordered: [Vec<usize>; 2],
+    /// `cmap` segments and groups visited while building the index; read by tests.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) visited: usize,
 }
 
 fn source_path(source: &fontdb::Source) -> String {
@@ -366,18 +526,34 @@ impl FaceIndex {
         infos.truncate(limits.max_faces);
 
         let mut faces = Vec::new();
+        let mut visited = 0usize;
+        let mut total_ranges = 0usize;
         for (family, post_script_name, path, face_index, info) in infos {
-            let ranges = db
+            let remaining = limits.max_build_visits.saturating_sub(visited);
+            let max_visits = limits.max_face_visits.min(remaining);
+            let found = db
                 .with_face_data(info.id, |data, index| {
                     if data.len() > limits.max_bytes {
                         return None;
                     }
-                    guarded(|| coverage(data, index, limits.max_ranges)).flatten()
+                    guarded(|| coverage(data, index, limits.max_ranges, max_visits))
                 })
                 .flatten();
-            let Some(ranges) = ranges else {
+            let Some(found) = found else {
                 continue;
             };
+            visited = visited.saturating_add(found.visited);
+            if found.too_many_visits && remaining < limits.max_face_visits {
+                // The build budget, not this face, ran out: index nothing more.
+                break;
+            }
+            let Some(ranges) = found.ranges else {
+                continue;
+            };
+            if total_ranges + ranges.len() > limits.max_total_ranges {
+                continue;
+            }
+            total_ranges += ranges.len();
             faces.push(IndexedFace {
                 id: info.id,
                 families: info.families.iter().map(|(f, _)| normalize(f)).collect(),
@@ -416,6 +592,7 @@ impl FaceIndex {
             faces,
             by_family,
             ordered,
+            visited,
         }
     }
 
@@ -452,7 +629,7 @@ impl FaceIndex {
         &self,
         c: char,
         weight: Weight,
-        mut accept: impl FnMut(usize) -> bool,
+        mut accept: impl FnMut(usize) -> Verdict,
     ) -> Option<usize> {
         let cp = u32::from(c);
         let target = target_weight(weight);
@@ -468,18 +645,35 @@ impl FaceIndex {
                 _ => a.cmp(&b),
             });
             for face in members {
-                if tried.insert(face) && accept(face) {
-                    return Some(face);
+                if tried.insert(face) {
+                    match accept(face) {
+                        Verdict::Accept => return Some(face),
+                        Verdict::Reject => {}
+                        Verdict::Stop => return None,
+                    }
                 }
             }
         }
         let ordered = self.ordered.get(weight_slot(weight))?;
-        ordered
-            .iter()
-            .copied()
-            .filter(covers)
-            .find(|face| !tried.contains(face) && accept(*face))
+        for face in ordered.iter().copied().filter(covers) {
+            if !tried.contains(&face) {
+                match accept(face) {
+                    Verdict::Accept => return Some(face),
+                    Verdict::Reject => {}
+                    Verdict::Stop => return None,
+                }
+            }
+        }
+        None
     }
+}
+
+/// What [`FaceIndex::find`] does with a candidate.
+enum Verdict {
+    Accept,
+    Reject,
+    /// Give up on this character.
+    Stop,
 }
 
 /// System font fallback state of one [`FontLibrary`](super::FontLibrary).
@@ -491,6 +685,8 @@ pub(super) struct SystemFonts {
     cache: Mutex<HashMap<(char, Weight), Option<usize>>>,
     /// Uncached lookups performed, for tests.
     lookups: AtomicUsize,
+    /// Candidate confirmations performed, for tests.
+    confirmations: AtomicUsize,
 }
 
 impl SystemFonts {
@@ -501,6 +697,7 @@ impl SystemFonts {
             index: OnceLock::new(),
             cache: Mutex::new(HashMap::new()),
             lookups: AtomicUsize::new(0),
+            confirmations: AtomicUsize::new(0),
         }
     }
 
@@ -509,22 +706,46 @@ impl SystemFonts {
             .get_or_init(|| FaceIndex::build(&self.source, self.limits))
     }
 
-    /// The face to draw `c` with, if any. An uncached lookup spends one unit of `budget`; with
-    /// no budget left the answer is `None` and nothing is cached.
-    pub(super) fn face_for(&self, c: char, weight: Weight, budget: &mut usize) -> Option<usize> {
+    /// The face to draw `c` with, if any.
+    ///
+    /// An uncached lookup spends one lookup from `budget` and at most
+    /// [`CONFIRMATIONS_PER_LOOKUP`] of its confirmations. A lookup that uses up its own
+    /// confirmations answers `None`, which is cached like any other answer. When the layout's
+    /// budget runs out the answer is `None` and nothing is cached.
+    pub(super) fn face_for(&self, c: char, weight: Weight, budget: &mut Budget) -> Option<usize> {
         if let Some(found) = lock(&self.cache).get(&(c, weight)) {
             return *found;
         }
-        if *budget == 0 {
+        if budget.lookups == 0 || budget.confirmations == 0 {
             return None;
         }
-        *budget -= 1;
+        budget.lookups -= 1;
         self.lookups.fetch_add(1, Ordering::Relaxed);
         let index = self.index();
-        let found = index.find(c, weight, |face| self.confirm(index, face, c));
-        let mut cache = lock(&self.cache);
-        if cache.len() < CACHE_LIMIT {
-            cache.insert((c, weight), found);
+        let mut left = CONFIRMATIONS_PER_LOOKUP;
+        let mut layout_budget_ran_out = false;
+        let found = index.find(c, weight, |face| {
+            if left == 0 {
+                return Verdict::Stop;
+            }
+            if budget.confirmations == 0 {
+                layout_budget_ran_out = true;
+                return Verdict::Stop;
+            }
+            left -= 1;
+            budget.confirmations -= 1;
+            self.confirmations.fetch_add(1, Ordering::Relaxed);
+            if self.confirm(index, face, c) {
+                Verdict::Accept
+            } else {
+                Verdict::Reject
+            }
+        });
+        if !layout_budget_ran_out {
+            let mut cache = lock(&self.cache);
+            if cache.len() < CACHE_LIMIT {
+                cache.insert((c, weight), found);
+            }
         }
         found
     }
@@ -558,6 +779,11 @@ impl SystemFonts {
     #[cfg(test)]
     pub(super) fn face(&self, face: usize) -> Option<&IndexedFace> {
         self.index.get()?.faces.get(face)
+    }
+
+    #[cfg(test)]
+    pub(super) fn confirmations(&self) -> usize {
+        self.confirmations.load(Ordering::Relaxed)
     }
 
     #[cfg(test)]

@@ -11,7 +11,13 @@
 //! no bidirectional reordering.
 //!
 //! Nothing here panics or fails: unreadable fonts are skipped, including fonts that make the
-//! shaper panic, and missing glyphs degrade to `.notdef`.
+//! shaper panic, and missing glyphs degrade to `.notdef`. Such panics are caught, but the panic
+//! hook is left alone: in debug builds the default or host hook may print a message for a
+//! malformed fallback or system font.
+//!
+//! System fonts are memory-mapped by `fontdb` whenever they are read, including when a layout is
+//! outlined. A system font file that changes or disappears between layout and outline yields the
+//! new contents or nothing for those glyphs; the outline never panics.
 //!
 //! # Examples
 //!
@@ -29,18 +35,17 @@
 mod marks;
 mod system;
 
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex, MutexGuard, Once, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use rustybuzz::ttf_parser::{self, GlyphId, OutlineBuilder, Tag};
 use rustybuzz::{BufferFlags, Direction, Feature, Script, ShapePlan, UnicodeBuffer};
 
 use crate::fonts::{Font, Weight, font_bytes};
 use crate::geometry::{Path, Point};
-use system::{LOOKUPS_PER_LAYOUT, Limits, SystemFonts};
+use system::{Budget, Limits, SystemFonts};
 
 /// How a piece of text is set: font, weight, size and figure style.
 ///
@@ -252,7 +257,9 @@ impl TextLayout {
     /// Converts the layout into glyph outlines, in points, y-down.
     ///
     /// The baseline is at `origin.y` and the text starts at `origin.x`. Glyphs without outlines,
-    /// such as spaces, contribute nothing.
+    /// such as spaces, contribute nothing. System fonts are read again here; if such a font file
+    /// changed or disappeared since the layout, its glyphs come from the new file or are left
+    /// out.
     ///
     /// # Examples
     ///
@@ -361,34 +368,15 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-thread_local! {
-    /// Set while [`guarded`] runs on this thread, to keep caught panics off stderr.
-    static QUIET_PANICS: Cell<bool> = const { Cell::new(false) };
-}
-
 /// Runs `f`, which parses or shapes font bytes that did not ship with the crate, and turns a
 /// panic into `None`.
 ///
 /// Malformed fonts can trigger arithmetic-overflow panics inside `rustybuzz` in debug builds.
-/// Such a font is treated as unreadable. On first use this installs a process-wide panic hook
-/// that stays silent for panics caught here, on the thread that runs `f`, and delegates every
-/// other panic to the hook that was installed before. The flag is thread-local, so a panic on
-/// another thread is never silenced. An application that replaces the panic hook later only
-/// makes caught panics visible again. With `panic = "abort"` nothing can be caught.
+/// Such a font is treated as unreadable. The panic hook is left alone, so the default or host
+/// hook may still print a message for the caught panic. With `panic = "abort"` nothing can be
+/// caught.
 fn guarded<T>(f: impl FnOnce() -> T) -> Option<T> {
-    static INSTALL: Once = Once::new();
-    INSTALL.call_once(|| {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            if !QUIET_PANICS.with(Cell::get) {
-                previous(info);
-            }
-        }));
-    });
-    let was_quiet = QUIET_PANICS.with(|quiet| quiet.replace(true));
-    let result = catch_unwind(AssertUnwindSafe(f));
-    QUIET_PANICS.with(|quiet| quiet.set(was_quiet));
-    result.ok()
+    catch_unwind(AssertUnwindSafe(f)).ok()
 }
 
 /// The glyph for `c`, treating a mapping to glyph 0 (`.notdef`) as missing.
@@ -649,6 +637,9 @@ impl FontLibrary {
     /// fallback is only used for a character it can draw with an outline. This gives
     /// reproducible output regardless of the fonts installed on the machine.
     ///
+    /// Fonts that make the parser or shaper panic (possible in debug builds) are skipped. The
+    /// panic is caught, but the process's panic hook still runs, so a message may be printed.
+    ///
     /// # Examples
     ///
     /// ```
@@ -702,8 +693,9 @@ impl FontLibrary {
     /// same weight, then with the fallback fonts, and as `.notdef` if no font has them.
     ///
     /// One call looks up at most 1,024 distinct characters in the system fonts that are not
-    /// already cached; characters beyond that limit are drawn as `.notdef`. This bounds the work
-    /// a single string can cause.
+    /// already cached, and opens at most 4,096 candidate system fonts to confirm a glyph (at
+    /// most 16 per character). Characters beyond these limits are drawn as `.notdef`. This
+    /// bounds the work a single string can cause.
     ///
     /// # Examples
     ///
@@ -833,7 +825,7 @@ impl FontLibrary {
         let primary = self.bundled_face(style.font, style.weight);
         let mut extras: Option<ParsedExtras<'_>> = None;
         let mut chosen: HashMap<char, FontKey> = HashMap::new();
-        let mut budget = LOOKUPS_PER_LAYOUT;
+        let mut budget = Budget::per_layout();
         let mut runs: Vec<TextRun> = Vec::new();
         for (start, c) in text.char_indices() {
             let end = start + c.len_utf8();
@@ -868,14 +860,13 @@ impl FontLibrary {
 
     /// The first font after the primary one that can draw `c`: (a) the other bundled families,
     /// (b) the `with_fallbacks` fonts, then the system fonts. Fallback and system fonts must
-    /// have an outline for the glyph. An uncached system font lookup spends one unit of
-    /// `budget`.
+    /// have an outline for the glyph. System font lookups spend `budget`.
     fn fallback_for<'a>(
         &'a self,
         c: char,
         style: &TextStyle,
         extras: &mut Option<ParsedExtras<'a>>,
-        budget: &mut usize,
+        budget: &mut Budget,
     ) -> Option<FontKey> {
         for font in Font::ALL {
             if font == style.font {
@@ -1212,19 +1203,9 @@ mod tests {
         u32::from_be_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]]) as usize
     }
 
-    /// `fallback-only.ttf` rebuilt with a new name, weight and style, and its one outlined glyph
-    /// mapped to every code point in `codepoints`.
-    fn fixture_font(family: &str, weight: u16, italic: bool, codepoints: &[u32]) -> Vec<u8> {
-        let base: &[u8] = include_bytes!("../tests/fixtures/fallback-only.ttf");
-        let mut tables: Vec<([u8; 4], Vec<u8>)> = (0..be16(base, 4))
-            .map(|i| {
-                let record = 12 + 16 * i;
-                let tag: [u8; 4] = base[record..record + 4].try_into().unwrap();
-                let (offset, length) = (be32(base, record + 8), be32(base, record + 12));
-                (tag, base[offset..offset + length].to_vec())
-            })
-            .collect();
-
+    /// A `cmap` table whose `records` encoding records (Windows, Unicode full repertoire) all
+    /// point at one format 12 subtable that maps every code point in `codepoints` to glyph 1.
+    fn format12_cmap(codepoints: &[u32], records: u16) -> Vec<u8> {
         let mut points = codepoints.to_vec();
         points.sort_unstable();
         points.dedup();
@@ -1233,10 +1214,13 @@ mod tests {
         let groups: Vec<(u32, u32)> = points.iter().map(|&cp| (cp, cp)).collect();
         let mut cmap = Vec::new();
         cmap.extend(0u16.to_be_bytes()); // version
-        cmap.extend(1u16.to_be_bytes()); // one encoding record
-        cmap.extend(3u16.to_be_bytes()); // Windows
-        cmap.extend(10u16.to_be_bytes()); // Unicode full repertoire
-        cmap.extend(12u32.to_be_bytes()); // subtable offset
+        cmap.extend(records.to_be_bytes());
+        let offset = 4 + 8 * u32::from(records);
+        for _ in 0..records {
+            cmap.extend(3u16.to_be_bytes()); // Windows
+            cmap.extend(10u16.to_be_bytes()); // Unicode full repertoire
+            cmap.extend(offset.to_be_bytes());
+        }
         cmap.extend(12u16.to_be_bytes()); // format 12
         cmap.extend(0u16.to_be_bytes());
         cmap.extend((16 + 12 * groups.len() as u32).to_be_bytes());
@@ -1247,6 +1231,26 @@ mod tests {
             cmap.extend(hi.to_be_bytes());
             cmap.extend(1u32.to_be_bytes()); // glyph 1, the outlined glyph
         }
+        cmap
+    }
+
+    /// `fallback-only.ttf` rebuilt with a new name, weight and style, and its one outlined glyph
+    /// mapped to every code point in `codepoints`.
+    fn fixture_font(family: &str, weight: u16, italic: bool, codepoints: &[u32]) -> Vec<u8> {
+        font_with_cmap(family, weight, italic, format12_cmap(codepoints, 1))
+    }
+
+    /// `fallback-only.ttf` rebuilt with a new name, weight and style, and the given `cmap`.
+    fn font_with_cmap(family: &str, weight: u16, italic: bool, cmap: Vec<u8>) -> Vec<u8> {
+        let base: &[u8] = include_bytes!("../tests/fixtures/fallback-only.ttf");
+        let mut tables: Vec<([u8; 4], Vec<u8>)> = (0..be16(base, 4))
+            .map(|i| {
+                let record = 12 + 16 * i;
+                let tag: [u8; 4] = base[record..record + 4].try_into().unwrap();
+                let (offset, length) = (be32(base, record + 8), be32(base, record + 12));
+                (tag, base[offset..offset + length].to_vec())
+            })
+            .collect();
 
         let post_script = format!(
             "{}-{weight}{}",
@@ -1681,8 +1685,22 @@ mod tests {
         let layout = lib.layout(&text, &s);
         assert!(layout.width() > 0.0);
         assert!(!layout.outline(Point { x: 0.0, y: 0.0 }).is_empty());
-        // The panic guard leaves ordinary panics alone.
-        let caught = std::panic::catch_unwind(|| panic!("ordinary"));
+    }
+
+    #[test]
+    fn building_a_library_while_unwinding_does_not_abort() {
+        struct BuildOnDrop;
+        impl Drop for BuildOnDrop {
+            fn drop(&mut self) {
+                let fixture = include_bytes!("../tests/fixtures/fallback-only.ttf").to_vec();
+                let lib = FontLibrary::with_fallbacks(vec![fixture]);
+                assert_eq!(lib.extra.len(), 1);
+            }
+        }
+        let caught = std::panic::catch_unwind(|| {
+            let _guard = BuildOnDrop;
+            panic!("host panic, caught outside the Drop");
+        });
         assert!(caught.is_err());
     }
 
@@ -1760,6 +1778,183 @@ mod tests {
         assert_eq!(indexed_names(&lib), ["Alpha-400", "Bravo-400"]);
     }
 
+    /// Empties the `glyf` and `loca` tables, so the font still claims its code points but
+    /// has no outlines.
+    fn without_outlines(mut bytes: Vec<u8>) -> Vec<u8> {
+        for i in 0..be16(&bytes, 4) {
+            let at = 12 + 16 * i;
+            if &bytes[at..at + 4] == b"glyf" || &bytes[at..at + 4] == b"loca" {
+                bytes[at + 12..at + 16].copy_from_slice(&0u32.to_be_bytes());
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn format_2_cmaps_are_indexed() {
+        // A Windows Unicode format 2 subtable mapping U+E000 to the outlined glyph 1.
+        let mut sub = Vec::new();
+        for word in [2u16, 536, 0] {
+            sub.extend(word.to_be_bytes());
+        }
+        for high in 0..256 {
+            sub.extend((if high == 0xE0 { 8u16 } else { 0 }).to_be_bytes());
+        }
+        // Sub-header 0 (empty), sub-header 1 for 0xE0xx: first code 0, one entry, delta 0,
+        // range offset 2 (the glyph array right after it), then the glyph array [1].
+        for word in [0u16, 0, 0, 0, 0, 1, 0, 2, 1] {
+            sub.extend(word.to_be_bytes());
+        }
+        assert_eq!(sub.len(), 536);
+        let mut cmap = Vec::new();
+        for word in [0u16, 1, 3, 1] {
+            cmap.extend(word.to_be_bytes());
+        }
+        cmap.extend(12u32.to_be_bytes());
+        cmap.extend(sub);
+        let read = system::cmap_ranges(&cmap, Limits::DEFAULT.max_face_visits).unwrap();
+        assert_eq!(read.ranges, [(0xE000, 0xE000)]);
+        assert_eq!(read.visited, 256);
+
+        let font = font_with_cmap("Format Two", 400, false, cmap);
+        let face = ttf_parser::Face::parse(&font, 0).unwrap();
+        assert!(draws(&face, '\u{E000}'));
+        let s = style(Font::Inter, 10.0);
+        let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout("\u{E000}", &s);
+        assert_eq!(extra.runs[0].font, FontKey::Extra(0));
+        let lib = FontLibrary::with_test_system_fonts(vec![font]);
+        assert_eq!(
+            system_picks(&lib, "\u{E000}", Weight::Regular),
+            ["FormatTwo-400"]
+        );
+    }
+
+    /// 32 system fonts that claim `codepoints` but have no outlines.
+    fn outline_free_candidates(codepoints: &[u32]) -> FontLibrary {
+        FontLibrary::with_test_system_fonts(
+            (0..32)
+                .map(|k| {
+                    without_outlines(fixture_font(
+                        &format!("Claim {k:02}"),
+                        400,
+                        false,
+                        codepoints,
+                    ))
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn confirmations_per_lookup_are_capped() {
+        let codepoints: Vec<u32> = (0xF3000..0xF3000 + 64).collect();
+        let text: String = codepoints
+            .iter()
+            .filter_map(|&cp| char::from_u32(cp))
+            .collect();
+        assert_no_bundled_font_has(&text);
+        let lib = outline_free_candidates(&codepoints);
+        let system = lib.system.as_ref().unwrap();
+        let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+        assert_eq!(system.lookups(), 64);
+        assert_eq!(
+            system.confirmations(),
+            64 * system::CONFIRMATIONS_PER_LOOKUP
+        );
+        assert!(system.confirmations() <= system::CONFIRMATIONS_PER_LAYOUT);
+        let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
+        assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
+        // A lookup that used up its own confirmations is cached.
+        let _ = lib.layout(&text, &style(Font::Inter, 10.0));
+        assert_eq!(system.lookups(), 64);
+    }
+
+    #[test]
+    fn confirmations_per_layout_are_capped() {
+        let codepoints: Vec<u32> = (0xF4000..0xF4000 + 300).collect();
+        let text: String = codepoints
+            .iter()
+            .filter_map(|&cp| char::from_u32(cp))
+            .collect();
+        assert_no_bundled_font_has(&text);
+        let lib = outline_free_candidates(&codepoints);
+        let system = lib.system.as_ref().unwrap();
+        let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+        // 300 characters would need 300 * 16 = 4,800 confirmations.
+        assert_eq!(system.confirmations(), system::CONFIRMATIONS_PER_LAYOUT);
+        assert_eq!(system.lookups(), system::CONFIRMATIONS_PER_LAYOUT / 16);
+        assert!(layout.width() > 0.0);
+        // Characters cut off by the layout budget are not cached; the next call continues.
+        let _ = lib.layout(&text, &style(Font::Inter, 10.0));
+        assert_eq!(system.lookups(), 300);
+        assert_eq!(system.confirmations(), 300 * 16);
+    }
+
+    #[test]
+    fn index_keeps_a_bounded_number_of_ranges() {
+        let spaced = |base: u32, n: u32| -> Vec<u32> { (0..n).map(|k| base + 2 * k).collect() };
+        let limits = Limits {
+            max_total_ranges: 15,
+            ..Limits::DEFAULT
+        };
+        let lib = FontLibrary::with_test_system_fonts_and_limits(
+            vec![
+                fixture_font("Alpha", 400, false, &spaced(0xF5000, 10)),
+                fixture_font("Bravo", 400, false, &spaced(0xF6000, 10)),
+                fixture_font("Charlie", 400, false, &spaced(0xF7000, 3)),
+            ],
+            limits,
+        );
+        // Bravo does not fit after Alpha and is skipped whole; Charlie still fits.
+        assert_eq!(indexed_names(&lib), ["Alpha-400", "Charlie-400"]);
+        assert_eq!(lib.system.as_ref().unwrap().index().range_count(), 13);
+    }
+
+    #[test]
+    fn cmap_subtables_are_read_once_and_every_visit_counts() {
+        let codepoints: Vec<u32> = (0..1_000).map(|k| 0xF8000 + 2 * k).collect();
+        // 64 encoding records point at one 1,000-group subtable.
+        let cmap = format12_cmap(&codepoints, 64);
+        let read = system::cmap_ranges(&cmap, Limits::DEFAULT.max_face_visits).unwrap();
+        assert_eq!(read.visited, 1_000);
+        assert_eq!(read.ranges.len(), 1_000);
+        // Invalid groups yield nothing but are still counted.
+        let invalid = format12_cmap(&[0xFFFF_FFFF], 64);
+        let read = system::cmap_ranges(&invalid, Limits::DEFAULT.max_face_visits).unwrap();
+        assert_eq!((read.ranges.len(), read.visited), (0, 1));
+        assert_eq!(
+            system::cmap_ranges(&cmap, 999),
+            Err(system::CmapError::TooManyVisits)
+        );
+
+        let font = |name: &str| font_with_cmap(name, 400, false, format12_cmap(&codepoints, 64));
+        // Per face: 1,000 visits are needed.
+        let limits = Limits {
+            max_face_visits: 999,
+            ..Limits::DEFAULT
+        };
+        let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font("Alpha")], limits);
+        assert!(indexed_names(&lib).is_empty());
+        assert_eq!(lib.system.as_ref().unwrap().index().visited, 1_000);
+        let limits = Limits {
+            max_face_visits: 1_000,
+            ..Limits::DEFAULT
+        };
+        let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font("Alpha")], limits);
+        assert_eq!(indexed_names(&lib), ["Alpha-400"]);
+        // Per build: the third face no longer fits and indexing stops.
+        let limits = Limits {
+            max_build_visits: 2_500,
+            ..Limits::DEFAULT
+        };
+        let lib = FontLibrary::with_test_system_fonts_and_limits(
+            vec![font("Alpha"), font("Bravo"), font("Charlie"), font("Delta")],
+            limits,
+        );
+        assert_eq!(indexed_names(&lib), ["Alpha-400", "Bravo-400"]);
+        assert_eq!(lib.system.as_ref().unwrap().index().visited, 2_501);
+    }
+
     #[test]
     fn cmap_ranges_are_read_without_enumerating_code_points() {
         // A format 12 group spanning every code point is one range, not 1.1 million.
@@ -1776,10 +1971,16 @@ mod tests {
         for field in [0u32, u32::MAX, 1] {
             cmap.extend(field.to_be_bytes());
         }
-        assert_eq!(system::cmap_ranges(&cmap), Some(vec![(0, 0x10_FFFF)]));
+        let max = Limits::DEFAULT.max_face_visits;
+        let read = system::cmap_ranges(&cmap, max).unwrap();
+        assert_eq!(read.ranges, [(0, 0x10_FFFF)]);
+        assert_eq!(read.visited, 1);
         // Truncated and empty tables give no ranges and no panic.
-        assert_eq!(system::cmap_ranges(&cmap[..30]), Some(vec![]));
-        assert_eq!(system::cmap_ranges(&[]), None);
+        assert_eq!(system::cmap_ranges(&cmap[..30], max).unwrap().ranges, []);
+        assert_eq!(
+            system::cmap_ranges(&[], max),
+            Err(system::CmapError::Unreadable)
+        );
     }
 
     #[test]
@@ -1799,7 +2000,10 @@ mod tests {
             );
             assert_eq!(members, &[n, n + 100_000]);
         }
-        assert!(elapsed < std::time::Duration::from_secs(1), "{elapsed:?}");
+        // The quadratic version takes about 28 s even in release builds. Unoptimized builds
+        // running the whole suite in parallel get headroom.
+        let limit = std::time::Duration::from_secs(if cfg!(debug_assertions) { 10 } else { 1 });
+        assert!(elapsed < limit, "{elapsed:?}");
     }
 
     #[test]
