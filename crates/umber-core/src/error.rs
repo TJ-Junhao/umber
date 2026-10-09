@@ -49,6 +49,20 @@ pub enum Error {
 }
 
 /// Shorthand for `std::result::Result<T, umber_core::Error>`.
+///
+/// # Examples
+///
+/// ```
+/// fn parse_alpha(text: &str) -> umber_core::Result<f64> {
+///     text.parse().map_err(|_| umber_core::Error::Style {
+///         context: "Color.alpha()",
+///         message: format!("{text:?} is not a number; use a value from 0.0 to 1.0."),
+///     })
+/// }
+///
+/// assert_eq!(parse_alpha("0.5").unwrap(), 0.5);
+/// assert!(parse_alpha("half").is_err());
+/// ```
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
