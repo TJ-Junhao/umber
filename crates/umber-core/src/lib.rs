@@ -13,9 +13,11 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+pub mod color;
 pub mod downsample;
 mod error;
 
+pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
 
