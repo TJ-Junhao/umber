@@ -7,8 +7,15 @@
 //! character's script, then a generic list, then every other face sorted by name. Within a
 //! family the face closest to the requested weight wins, upright before italic.
 //!
-//! Work is bounded: one layout performs at most [`LOOKUPS_PER_LAYOUT`] uncached lookups, and the
-//! process-wide lookup cache holds at most [`CACHE_LIMIT`] entries.
+//! Font data is never copied: fontdb memory-maps a font file each time it is read, and layouts
+//! keep the database alive through an `Arc`.
+//!
+//! Work and memory are bounded:
+//! - the index holds at most [`Limits::max_faces`] faces, skips faces larger than
+//!   [`Limits::max_bytes`] and faces with more than [`Limits::max_ranges`] coverage ranges, and
+//!   gives up on a `cmap` with more than [`RAW_RANGE_LIMIT`] raw ranges;
+//! - one layout performs at most [`LOOKUPS_PER_LAYOUT`] uncached lookups;
+//! - the lookup cache holds at most [`CACHE_LIMIT`] entries.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,7 +23,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use rustybuzz::ttf_parser;
 
-use super::{NoOutline, glyph_for, lock};
+use super::{FontData, FontHandle, draws, guarded, lock};
 use crate::fonts::Weight;
 
 /// The most uncached system font lookups one layout call performs. Characters beyond it are
@@ -26,6 +33,29 @@ pub(super) const LOOKUPS_PER_LAYOUT: usize = 1024;
 /// The most `(character, weight)` entries the lookup cache holds. When it is full, new results
 /// are not cached; nothing is evicted.
 pub(super) const CACHE_LIMIT: usize = 65_536;
+
+/// The most unmerged ranges read from one face's `cmap`: twice the number of code points, which
+/// no well-formed font exceeds even with overlapping subtables.
+const RAW_RANGE_LIMIT: usize = 2 * 0x11_0000;
+
+/// Bounds on the system font index.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Limits {
+    /// Faces with more merged coverage ranges than this are skipped.
+    pub(super) max_ranges: usize,
+    /// Faces whose font file is larger than this many bytes are skipped.
+    pub(super) max_bytes: usize,
+    /// At most this many faces are indexed, the first ones in sorted order.
+    pub(super) max_faces: usize,
+}
+
+impl Limits {
+    pub(super) const DEFAULT: Limits = Limits {
+        max_ranges: 65_536,
+        max_bytes: 256 * 1024 * 1024,
+        max_faces: 10_000,
+    };
+}
 
 /// Ranked families for Han ideographs.
 const HAN: &[&str] = &[
@@ -125,8 +155,6 @@ pub(super) struct IndexedFace {
     pub(super) italic: bool,
     path: String,
     pub(super) face_index: u32,
-    /// Identifies the font file, so that faces of one collection share their loaded bytes.
-    file: usize,
     /// Sorted, merged, inclusive code point ranges from the Unicode `cmap` subtables.
     ranges: Vec<(u32, u32)>,
 }
@@ -151,31 +179,126 @@ impl IndexedFace {
     }
 }
 
-/// The coverage of a face as sorted, merged, inclusive ranges. Empty if it does not parse.
-fn coverage(data: &[u8], index: u32) -> Vec<(u32, u32)> {
-    let Ok(face) = ttf_parser::Face::parse(data, index) else {
-        return Vec::new();
-    };
-    let Some(cmap) = face.tables().cmap else {
-        return Vec::new();
-    };
-    let mut points: Vec<u32> = Vec::new();
-    for subtable in cmap.subtables {
-        if subtable.is_unicode() {
-            subtable.codepoints(|cp| points.push(cp));
-        }
-    }
-    points.sort_unstable();
-    points.dedup();
+fn u16_at(data: &[u8], at: usize) -> Option<u16> {
+    let bytes = data.get(at..at.checked_add(2)?)?;
+    Some(u16::from_be_bytes([*bytes.first()?, *bytes.get(1)?]))
+}
+
+fn u32_at(data: &[u8], at: usize) -> Option<u32> {
+    let bytes = data.get(at..at.checked_add(4)?)?;
+    let mut word = [0; 4];
+    word.copy_from_slice(bytes);
+    Some(u32::from_be_bytes(word))
+}
+
+/// The code point ranges a `cmap` table declares in its Unicode subtables, unmerged.
+///
+/// Ranges are read from the subtable headers (segments and groups) without enumerating code
+/// points, so the cost is linear in the table size. Code points the font maps to glyph 0 are
+/// included; a lookup confirms the glyph before using a face. Returns `None` when the table
+/// declares more than [`RAW_RANGE_LIMIT`] ranges.
+pub(super) fn cmap_ranges(cmap: &[u8]) -> Option<Vec<(u32, u32)>> {
+    const MAX: u32 = 0x10_FFFF;
     let mut ranges: Vec<(u32, u32)> = Vec::new();
-    for cp in points {
-        match ranges.last_mut() {
-            Some((_, hi)) if hi.checked_add(1) == Some(cp) => *hi = cp,
-            _ => ranges.push((cp, cp)),
+    let push = |lo: u32, hi: u32, ranges: &mut Vec<(u32, u32)>| {
+        if lo <= hi && lo <= MAX {
+            ranges.push((lo, hi.min(MAX)));
+        }
+        ranges.len() <= RAW_RANGE_LIMIT
+    };
+    let records = u16_at(cmap, 2)?;
+    for record in 0..usize::from(records) {
+        let at = 4 + 8 * record;
+        let (Some(platform), Some(encoding), Some(offset)) =
+            (u16_at(cmap, at), u16_at(cmap, at + 2), u32_at(cmap, at + 4))
+        else {
+            break;
+        };
+        let unicode = platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10));
+        let Some(sub) = cmap.get(usize::try_from(offset).ok()?..) else {
+            continue;
+        };
+        if !unicode {
+            continue;
+        }
+        let within_limit = match u16_at(sub, 0) {
+            Some(0) => push(0, 255, &mut ranges),
+            Some(4) => {
+                let segments2 = usize::from(u16_at(sub, 6).unwrap_or(0));
+                let mut ok = true;
+                for s in 0..segments2 / 2 {
+                    let end = u16_at(sub, 14 + 2 * s);
+                    let start = u16_at(sub, 16 + segments2 + 2 * s);
+                    let (Some(start), Some(end)) = (start, end) else {
+                        break;
+                    };
+                    if start == 0xFFFF && end == 0xFFFF {
+                        continue;
+                    }
+                    ok = push(u32::from(start), u32::from(end), &mut ranges);
+                    if !ok {
+                        break;
+                    }
+                }
+                ok
+            }
+            Some(6) => match (u16_at(sub, 6), u16_at(sub, 8)) {
+                (Some(first), Some(count)) if count > 0 => {
+                    let first = u32::from(first);
+                    push(first, first + u32::from(count) - 1, &mut ranges)
+                }
+                _ => true,
+            },
+            Some(10) => match (u32_at(sub, 12), u32_at(sub, 16)) {
+                (Some(first), Some(count)) if count > 0 => {
+                    push(first, first.saturating_add(count - 1), &mut ranges)
+                }
+                _ => true,
+            },
+            Some(12 | 13) => {
+                let groups = u32_at(sub, 12).unwrap_or(0);
+                let mut ok = true;
+                for g in 0..usize::try_from(groups).unwrap_or(0) {
+                    let at = 16 + 12 * g;
+                    let (Some(start), Some(end)) = (u32_at(sub, at), u32_at(sub, at + 4)) else {
+                        break;
+                    };
+                    ok = push(start, end, &mut ranges);
+                    if !ok {
+                        break;
+                    }
+                }
+                ok
+            }
+            _ => true,
+        };
+        if !within_limit {
+            return None;
         }
     }
-    ranges.shrink_to_fit();
-    ranges
+    Some(ranges)
+}
+
+/// The coverage of a face as sorted, merged, inclusive ranges.
+///
+/// Returns `None` when the face does not parse, has no Unicode coverage, or has more than
+/// `max_ranges` merged ranges.
+fn coverage(data: &[u8], index: u32, max_ranges: usize) -> Option<Vec<(u32, u32)>> {
+    let raw = ttf_parser::RawFace::parse(data, index).ok()?;
+    let mut ranges = cmap_ranges(raw.table(ttf_parser::Tag::from_bytes(b"cmap"))?)?;
+    ranges.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::new();
+    for (lo, hi) in ranges {
+        match merged.last_mut() {
+            Some((_, last)) if lo <= last.saturating_add(1) => *last = (*last).max(hi),
+            _ => merged.push((lo, hi)),
+        }
+    }
+    if merged.is_empty() || merged.len() > max_ranges {
+        return None;
+    }
+    merged.shrink_to_fit();
+    Some(merged)
 }
 
 /// Where the system font database comes from.
@@ -189,7 +312,7 @@ pub(super) enum Source {
 
 /// The indexed system fonts.
 pub(super) struct FaceIndex {
-    db: fontdb::Database,
+    db: Arc<fontdb::Database>,
     pub(super) faces: Vec<IndexedFace>,
     /// Normalized family name to faces, for the ranked lists.
     by_family: HashMap<String, Vec<usize>>,
@@ -197,8 +320,17 @@ pub(super) struct FaceIndex {
     ordered: [Vec<usize>; 2],
 }
 
+fn source_path(source: &fontdb::Source) -> String {
+    match source {
+        fontdb::Source::Binary(_) => String::new(),
+        fontdb::Source::File(path) | fontdb::Source::SharedFile(path, _) => {
+            path.to_string_lossy().into_owned()
+        }
+    }
+}
+
 impl FaceIndex {
-    fn build(source: &Source) -> FaceIndex {
+    fn build(source: &Source, limits: Limits) -> FaceIndex {
         let mut db = fontdb::Database::new();
         match source {
             Source::Os => db.load_system_fonts(),
@@ -209,41 +341,52 @@ impl FaceIndex {
                 }
             }
         }
-        let mut faces = Vec::new();
-        let mut files: HashMap<String, usize> = HashMap::new();
-        for info in db.faces() {
+        // The face cap keeps the first faces in the deterministic order of the last preference
+        // tier: family name, PostScript name, path, face index.
+        let mut infos: Vec<(String, &str, String, u32, &fontdb::FaceInfo)> = db
+            .faces()
             // macOS's LastResort font maps every code point to a placeholder symbol.
-            if info.post_script_name.starts_with("LastResort") {
+            .filter(|info| !info.post_script_name.starts_with("LastResort"))
+            .map(|info| {
+                let family = info
+                    .families
+                    .first()
+                    .map(|(f, _)| normalize(f))
+                    .unwrap_or_default();
+                (
+                    family,
+                    info.post_script_name.as_str(),
+                    source_path(&info.source),
+                    info.index,
+                    info,
+                )
+            })
+            .collect();
+        infos.sort_by(|a, b| (&a.0, a.1, &a.2, a.3).cmp(&(&b.0, b.1, &b.2, b.3)));
+        infos.truncate(limits.max_faces);
+
+        let mut faces = Vec::new();
+        for (family, post_script_name, path, face_index, info) in infos {
+            let ranges = db
+                .with_face_data(info.id, |data, index| {
+                    if data.len() > limits.max_bytes {
+                        return None;
+                    }
+                    guarded(|| coverage(data, index, limits.max_ranges)).flatten()
+                })
+                .flatten();
+            let Some(ranges) = ranges else {
                 continue;
-            }
-            let ranges = db.with_face_data(info.id, coverage).unwrap_or_default();
-            if ranges.is_empty() {
-                continue;
-            }
-            let families: Vec<String> = info.families.iter().map(|(f, _)| normalize(f)).collect();
-            let path = match &info.source {
-                fontdb::Source::Binary(_) => String::new(),
-                fontdb::Source::File(path) | fontdb::Source::SharedFile(path, _) => {
-                    path.to_string_lossy().into_owned()
-                }
-            };
-            // In-memory fonts have no path; each is its own file.
-            let next_file = files.len() + faces.len();
-            let file = if path.is_empty() {
-                next_file
-            } else {
-                *files.entry(path.clone()).or_insert(next_file)
             };
             faces.push(IndexedFace {
                 id: info.id,
-                family: families.first().cloned().unwrap_or_default(),
-                families,
-                post_script_name: info.post_script_name.clone(),
+                families: info.families.iter().map(|(f, _)| normalize(f)).collect(),
+                family,
+                post_script_name: post_script_name.to_string(),
                 weight: info.weight.0,
                 italic: info.style != fontdb::Style::Normal,
                 path,
-                face_index: info.index,
-                file,
+                face_index,
                 ranges,
             });
         }
@@ -269,7 +412,7 @@ impl FaceIndex {
         };
         let ordered = [order(Weight::Regular), order(Weight::SemiBold)];
         FaceIndex {
-            db,
+            db: Arc::new(db),
             faces,
             by_family,
             ordered,
@@ -339,47 +482,31 @@ impl FaceIndex {
     }
 }
 
-/// Whether the face has a glyph with an outline for `c` (whitespace needs no outline).
-fn has_outline(data: &[u8], index: u32, c: char) -> bool {
-    let Ok(face) = ttf_parser::Face::parse(data, index) else {
-        return false;
-    };
-    glyph_for(&face, c)
-        .is_some_and(|g| c.is_whitespace() || face.outline_glyph(g, &mut NoOutline).is_some())
-}
-
-/// The bytes of a chosen system face, shared between layouts and outlines.
-pub(super) struct LoadedFace {
-    pub(super) data: Arc<Vec<u8>>,
-    pub(super) index: u32,
-}
-
 /// System font fallback state of one [`FontLibrary`](super::FontLibrary).
 pub(super) struct SystemFonts {
     source: Source,
+    limits: Limits,
     index: OnceLock<FaceIndex>,
     /// `(character, weight)` to the chosen face, or `None` when no face qualifies.
     cache: Mutex<HashMap<(char, Weight), Option<usize>>>,
-    /// The bytes of every font file with a face chosen so far, by [`IndexedFace::file`]; bounded
-    /// by the number of files.
-    loaded: Mutex<HashMap<usize, Arc<Vec<u8>>>>,
     /// Uncached lookups performed, for tests.
     lookups: AtomicUsize,
 }
 
 impl SystemFonts {
-    pub(super) fn new(source: Source) -> SystemFonts {
+    pub(super) fn new(source: Source, limits: Limits) -> SystemFonts {
         SystemFonts {
             source,
+            limits,
             index: OnceLock::new(),
             cache: Mutex::new(HashMap::new()),
-            loaded: Mutex::new(HashMap::new()),
             lookups: AtomicUsize::new(0),
         }
     }
 
     pub(super) fn index(&self) -> &FaceIndex {
-        self.index.get_or_init(|| FaceIndex::build(&self.source))
+        self.index
+            .get_or_init(|| FaceIndex::build(&self.source, self.limits))
     }
 
     /// The face to draw `c` with, if any. An uncached lookup spends one unit of `budget`; with
@@ -402,40 +529,32 @@ impl SystemFonts {
         found
     }
 
-    /// Opens the face and checks that it really draws `c`; keeps its bytes when it does.
+    /// Opens the face and checks that it really draws `c`.
     fn confirm(&self, index: &FaceIndex, face: usize, c: char) -> bool {
         let Some(info) = index.faces.get(face) else {
             return false;
         };
-        if let Some(data) = lock(&self.loaded).get(&info.file).cloned() {
-            return has_outline(&data, info.face_index, c);
-        }
-        let data = index
+        index
             .db
             .with_face_data(info.id, |data, i| {
-                has_outline(data, i, c).then(|| Arc::new(data.to_vec()))
+                data.len() <= self.limits.max_bytes
+                    && guarded(|| ttf_parser::Face::parse(data, i).is_ok_and(|f| draws(&f, c)))
+                        .unwrap_or(false)
             })
-            .flatten();
-        match data {
-            Some(data) => {
-                lock(&self.loaded).entry(info.file).or_insert(data);
-                true
-            }
-            None => false,
-        }
+            .unwrap_or(false)
     }
 
-    /// The bytes of a face chosen by [`SystemFonts::face_for`].
-    pub(super) fn loaded(&self, face: usize) -> Option<LoadedFace> {
-        let info = self.index.get()?.faces.get(face)?;
-        let data = lock(&self.loaded).get(&info.file).cloned()?;
-        Some(LoadedFace {
-            data,
+    /// A shared handle to a face chosen by [`SystemFonts::face_for`].
+    pub(super) fn handle(&self, face: usize) -> Option<FontHandle> {
+        let index = self.index.get()?;
+        let info = index.faces.get(face)?;
+        Some(FontHandle {
+            data: FontData::System(Arc::clone(&index.db), info.id),
             index: info.face_index,
         })
     }
 
-    /// The face's PostScript name, for diagnostics.
+    /// An indexed face, for diagnostics.
     #[cfg(test)]
     pub(super) fn face(&self, face: usize) -> Option<&IndexedFace> {
         self.index.get()?.faces.get(face)
