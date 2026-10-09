@@ -1,4 +1,19 @@
 //! M4 downsampling: reduce a long line to the points that are visible at a given pixel width.
+//!
+//! # Examples
+//!
+//! ```
+//! use umber_core::downsample::m4_indices;
+//!
+//! // 1000 points drawn across 10 pixel columns shrink to at most 4 points per column.
+//! let xs: Vec<f64> = (0..1000).map(f64::from).collect();
+//! let ys: Vec<f64> = xs.iter().map(|x| x.sin()).collect();
+//! let kept = m4_indices(&xs, &ys, (0.0, 1000.0), 10);
+//! assert!(kept.len() <= 40);
+//!
+//! // A short line is returned unchanged.
+//! assert_eq!(m4_indices(&xs[..8], &ys[..8], (0.0, 8.0), 2), (0..8).collect::<Vec<_>>());
+//! ```
 
 /// Indices of the points to draw when a line spanning `x_range` is rendered across `columns`
 /// device-pixel columns.
@@ -29,9 +44,14 @@ pub fn m4_indices(xs: &[f64], ys: &[f64], x_range: (f64, f64), columns: usize) -
     {
         return identity();
     }
-    let width = hi - lo;
+    // Halve every operand so a finite range such as (-1e308, 1e308) cannot overflow to infinity.
+    let (half_lo, half_hi) = (lo * 0.5, hi * 0.5);
+    let width = half_hi - half_lo;
+    if !(width.is_finite() && width > 0.0) {
+        return identity();
+    }
     let col = |x: f64| -> usize {
-        let c = ((x - lo) / width * columns as f64).floor();
+        let c = ((x * 0.5 - half_lo) / width * columns as f64).floor();
         if c <= 0.0 {
             0
         } else {
@@ -132,6 +152,92 @@ mod tests {
         assert_eq!(m4_indices(&xs, &xs, (5.0, 5.0), 4).len(), 100);
         assert_eq!(m4_indices(&xs, &xs, (0.0, f64::NAN), 4).len(), 100);
         assert_eq!(m4_indices(&xs, &xs, (0.0, 100.0), 0).len(), 100);
+    }
+
+    #[test]
+    fn span_overflow_does_not_collapse_columns() {
+        let xs: Vec<f64> = (0..20).map(|i| (f64::from(i) - 10.0) * 1e307).collect();
+        let mut ys = vec![0.0; 20];
+        ys[3] = 5.0;
+        ys[6] = -5.0;
+        ys[12] = 9.0;
+        ys[17] = -9.0;
+        let got = m4_indices(&xs, &ys, (-1e308, 1e308), 2);
+        assert_eq!(got, [0, 3, 6, 9, 10, 12, 17, 19]);
+    }
+
+    #[test]
+    fn unsorted_x_within_one_column_is_full_identity() {
+        // 12 points, all in column 0 of 2; x goes up and down.
+        let xs = [1.0, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0, 2.5, 6.5, 1.5, 9.0];
+        let ys: Vec<f64> = (0..12).map(f64::from).collect();
+        assert_eq!(
+            m4_indices(&xs, &ys, (0.0, 100.0), 2),
+            (0..12).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn nan_in_x_is_a_gap_and_keeps_segment_endpoints() {
+        // 2 columns, 20 points; x[10] is NaN while y[10] is finite.
+        let mut xs: Vec<f64> = (0..20).map(f64::from).collect();
+        xs[10] = f64::NAN;
+        let ys = vec![0.0; 20];
+        let got = m4_indices(&xs, &ys, (0.0, 20.0), 2);
+        // Segment 0 is 0..=9 (column 0), gap at 10, segment 1 is 11..=19 (column 1).
+        assert_eq!(got, [0, 9, 10, 11, 19]);
+    }
+
+    #[test]
+    fn repeated_extrema_keep_the_first_occurrence() {
+        // 2 columns, 10 points each. Column 0: max 5.0 at 2 and 7, min -5.0 at 4 and 8.
+        // Column 1: max 9.0 at 11 and 15, min -9.0 at 13 and 18.
+        let xs: Vec<f64> = (0..20).map(f64::from).collect();
+        let mut ys = vec![0.0; 20];
+        for i in [2, 7] {
+            ys[i] = 5.0;
+        }
+        for i in [4, 8] {
+            ys[i] = -5.0;
+        }
+        for i in [11, 15] {
+            ys[i] = 9.0;
+        }
+        for i in [13, 18] {
+            ys[i] = -9.0;
+        }
+        let got = m4_indices(&xs, &ys, (0.0, 20.0), 2);
+        assert_eq!(got, [0, 2, 4, 9, 10, 11, 13, 19]);
+    }
+
+    #[test]
+    fn x_outside_range_is_clamped_into_edge_columns() {
+        // Range 10..20 over 2 columns; x runs from 0 to 29, so 10 points lie below the
+        // range, 10 inside and 10 above. Below-range points join column 0, above-range
+        // points join column 1.
+        let xs: Vec<f64> = (0..30).map(f64::from).collect();
+        let mut ys = vec![0.0; 30];
+        ys[2] = 5.0; // max of column 0 (below range)
+        ys[7] = -5.0; // min of column 0 (below range)
+        ys[22] = 9.0; // max of column 1 (above range)
+        ys[27] = -9.0; // min of column 1 (above range)
+        let got = m4_indices(&xs, &ys, (10.0, 20.0), 2);
+        // Column 0 spans x 0..=14, column 1 spans x 15..=29.
+        assert_eq!(got, [0, 2, 7, 14, 15, 22, 27, 29]);
+    }
+
+    #[test]
+    fn length_mismatch_uses_the_common_prefix() {
+        let xs: Vec<f64> = (0..30).map(f64::from).collect();
+        let ys = vec![0.0; 20];
+        // xs longer: only 0..20 is considered, 20 > 4 * 2 so it is downsampled.
+        assert_eq!(m4_indices(&xs, &ys, (0.0, 20.0), 2), [0, 9, 10, 19]);
+        // ys longer.
+        let xs2: Vec<f64> = (0..20).map(f64::from).collect();
+        let ys2 = vec![0.0; 30];
+        assert_eq!(m4_indices(&xs2, &ys2, (0.0, 20.0), 2), [0, 9, 10, 19]);
+        // Short common prefix is returned as identity over the prefix.
+        assert_eq!(m4_indices(&xs, &ys[..5], (0.0, 20.0), 2), [0, 1, 2, 3, 4]);
     }
 
     fn sorted_xs() -> impl Strategy<Value = Vec<f64>> {
