@@ -26,6 +26,8 @@
 //! assert!(!path.is_empty());
 //! ```
 
+mod system;
+
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
@@ -35,6 +37,7 @@ use rustybuzz::{BufferFlags, Direction, Feature, Script, ShapePlan, UnicodeBuffe
 
 use crate::fonts::{Font, Weight, font_bytes};
 use crate::geometry::{Path, Point};
+use system::{LOOKUPS_PER_LAYOUT, SystemFonts};
 
 /// How a piece of text is set: font, weight, size and figure style.
 ///
@@ -64,7 +67,8 @@ enum FontKey {
     Bundled(Font, Weight),
     /// Index into [`FontLibrary::extra`].
     Extra(usize),
-    System(fontdb::ID),
+    /// Index into the system font index.
+    System(usize),
 }
 
 /// A piece of the input text drawn with one font.
@@ -181,12 +185,6 @@ impl TextLayout {
     pub fn is_empty(&self) -> bool {
         self.runs.iter().all(|run| run.glyphs.is_empty())
     }
-}
-
-/// The system font database, loaded on first use, and a per-character lookup cache.
-struct SystemFonts {
-    db: OnceLock<fontdb::Database>,
-    cache: Mutex<HashMap<char, Option<fontdb::ID>>>,
 }
 
 /// Number of bundled font files: every family in every weight.
@@ -440,8 +438,13 @@ impl FontLibrary {
 
     /// The bundled fonts, falling back to the system fonts for characters none of them has.
     ///
-    /// The system fonts are only enumerated the first time a character is missing from every
-    /// bundled font. Prefer [`FontLibrary::global`], which shares one library and its caches.
+    /// The system fonts are only enumerated and indexed the first time a character is missing
+    /// from every bundled font. A missing character then tries, in order: a ranked family list
+    /// for its script (Han, Kana, Hangul, Arabic, Hebrew), the generic families Noto Sans,
+    /// DejaVu Sans and Arial Unicode MS, and every other face sorted by family name. Within a
+    /// family the face closest to the requested weight wins, upright before italic. Results are
+    /// cached per character and weight, up to 65,536 entries; beyond that new results are not
+    /// cached. Prefer [`FontLibrary::global`], which shares one library and its caches.
     ///
     /// # Examples
     ///
@@ -454,12 +457,15 @@ impl FontLibrary {
     /// ```
     #[must_use]
     pub fn bundled() -> FontLibrary {
+        FontLibrary::new(Vec::new(), Some(SystemFonts::new(system::Source::Os)))
+    }
+
+    /// Like [`FontLibrary::bundled`], with in-memory fonts standing in for the system fonts.
+    #[cfg(test)]
+    fn with_test_system_fonts(fonts: Vec<Vec<u8>>) -> FontLibrary {
         FontLibrary::new(
             Vec::new(),
-            Some(SystemFonts {
-                db: OnceLock::new(),
-                cache: Mutex::new(HashMap::new()),
-            }),
+            Some(SystemFonts::new(system::Source::Memory(fonts))),
         )
     }
 
@@ -508,6 +514,10 @@ impl FontLibrary {
     /// Characters missing from `style.font` are drawn with the other bundled families in the
     /// same weight, then with the fallback fonts, and as `.notdef` if no font has them.
     ///
+    /// One call looks up at most 1,024 distinct characters in the system fonts that are not
+    /// already cached; characters beyond that limit are drawn as `.notdef`. This bounds the work
+    /// a single string can cause.
+    ///
     /// # Examples
     ///
     /// ```
@@ -548,16 +558,16 @@ impl FontLibrary {
         let features = features(style.tabular_figures);
         let primary_key = FontKey::Bundled(style.font, style.weight);
         let mut shaped: Vec<Option<(FontKey, ShapedRun)>> = runs.iter().map(|_| None).collect();
-        for key in distinct_keys(runs.iter().map(|run| run.font)) {
+        for (key, members) in group_by_font(runs.iter().map(|run| run.font)) {
             let shape_all =
                 |face: &rustybuzz::Face<'_>, shaped: &mut [Option<(FontKey, ShapedRun)>]| {
                     let mut shaper = Shaper::new(face, &features);
-                    for (run, slot) in runs.iter().zip(shaped.iter_mut()) {
-                        if run.font == key {
-                            if let Some(run_text) = text.get(run.range.clone()) {
-                                *slot =
-                                    Some((key, shaper.shape(run_text, run.preserve_ignorables)));
-                            }
+                    for &i in &members {
+                        let (Some(run), Some(slot)) = (runs.get(i), shaped.get_mut(i)) else {
+                            continue;
+                        };
+                        if let Some(run_text) = text.get(run.range.clone()) {
+                            *slot = Some((key, shaper.shape(run_text, run.preserve_ignorables)));
                         }
                     }
                 };
@@ -576,13 +586,13 @@ impl FontLibrary {
                         shape_all(&face, &mut shaped);
                     }
                 }
-                FontKey::System(id) => {
-                    if let Some(db) = self.system.as_ref().and_then(|s| s.db.get()) {
-                        db.with_face_data(id, |data, index| {
-                            if let Some(face) = rustybuzz::Face::from_slice(data, index) {
-                                shape_all(&face, &mut shaped);
-                            }
-                        });
+                FontKey::System(face) => {
+                    let loaded = self.system.as_ref().and_then(|s| s.loaded(face));
+                    if let Some(loaded) = loaded {
+                        if let Some(face) = rustybuzz::Face::from_slice(&loaded.data, loaded.index)
+                        {
+                            shape_all(&face, &mut shaped);
+                        }
                     }
                 }
             }
@@ -641,6 +651,7 @@ impl FontLibrary {
         let primary = self.bundled_face(style.font, style.weight);
         let mut extras: Option<ParsedExtras<'_>> = None;
         let mut chosen: HashMap<char, FontKey> = HashMap::new();
+        let mut budget = LOOKUPS_PER_LAYOUT;
         let mut runs: Vec<TextRun> = Vec::new();
         for (start, c) in text.char_indices() {
             let end = start + c.len_utf8();
@@ -654,7 +665,7 @@ impl FontLibrary {
                 (*key, false)
             } else {
                 let key = self
-                    .fallback_for(c, style, &mut extras)
+                    .fallback_for(c, style, &mut extras, &mut budget)
                     .unwrap_or(primary_key);
                 chosen.insert(c, key);
                 (key, false)
@@ -673,12 +684,14 @@ impl FontLibrary {
         runs
     }
 
-    /// The first font after the primary one that has a glyph for `c`.
+    /// The first font after the primary one that has a glyph for `c`. An uncached system font
+    /// lookup spends one unit of `budget`.
     fn fallback_for<'a>(
         &'a self,
         c: char,
         style: &TextStyle,
         extras: &mut Option<ParsedExtras<'a>>,
+        budget: &mut usize,
     ) -> Option<FontKey> {
         for font in Font::ALL {
             if font == style.font {
@@ -702,40 +715,10 @@ impl FontLibrary {
                 return Some(FontKey::Extra(index));
             }
         }
-        self.system.as_ref()?;
-        self.system_font_for(c).map(FontKey::System)
-    }
-
-    /// The first system font, in database order, with an outlined glyph for `c`. Cached.
-    fn system_font_for(&self, c: char) -> Option<fontdb::ID> {
-        let system = self.system.as_ref()?;
-        if let Some(found) = lock(&system.cache).get(&c) {
-            return *found;
-        }
-        let db = system.db.get_or_init(|| {
-            let mut db = fontdb::Database::new();
-            db.load_system_fonts();
-            db
-        });
-        let found = db
-            .faces()
-            // macOS's LastResort font maps every code point to a placeholder symbol.
-            .filter(|info| !info.post_script_name.starts_with("LastResort"))
-            .find(|info| {
-                db.with_face_data(info.id, |data, index| {
-                    let Ok(face) = ttf_parser::Face::parse(data, index) else {
-                        return false;
-                    };
-                    // Bitmap-only glyphs (such as color emoji) have no outline to draw.
-                    glyph_for(&face, c).is_some_and(|g| {
-                        c.is_whitespace() || face.outline_glyph(g, &mut NoOutline).is_some()
-                    })
-                })
-                .unwrap_or(false)
-            })
-            .map(|info| info.id);
-        lock(&system.cache).insert(c, found);
-        found
+        self.system
+            .as_ref()?
+            .face_for(c, style.weight, budget)
+            .map(FontKey::System)
     }
 
     /// Converts a layout into glyph outlines, in points, y-down.
@@ -758,10 +741,10 @@ impl FontLibrary {
     #[must_use]
     pub fn outline(&self, layout: &TextLayout, origin: Point) -> Path {
         let mut run_paths: Vec<Path> = layout.runs.iter().map(|_| Path::new()).collect();
-        for key in distinct_keys(layout.runs.iter().map(|run| run.font)) {
+        for (key, members) in group_by_font(layout.runs.iter().map(|run| run.font)) {
             let draw_all = |face: &ttf_parser::Face<'_>, run_paths: &mut [Path]| {
-                for (run, path) in layout.runs.iter().zip(run_paths.iter_mut()) {
-                    if run.font == key {
+                for &i in &members {
+                    if let (Some(run), Some(path)) = (layout.runs.get(i), run_paths.get_mut(i)) {
                         outline_run(face, run, origin, path);
                     }
                 }
@@ -781,13 +764,12 @@ impl FontLibrary {
                         draw_all(&face, &mut run_paths);
                     }
                 }
-                FontKey::System(id) => {
-                    if let Some(db) = self.system.as_ref().and_then(|s| s.db.get()) {
-                        db.with_face_data(id, |data, index| {
-                            if let Ok(face) = ttf_parser::Face::parse(data, index) {
-                                draw_all(&face, &mut run_paths);
-                            }
-                        });
+                FontKey::System(face) => {
+                    let loaded = self.system.as_ref().and_then(|s| s.loaded(face));
+                    if let Some(loaded) = loaded {
+                        if let Ok(face) = ttf_parser::Face::parse(&loaded.data, loaded.index) {
+                            draw_all(&face, &mut run_paths);
+                        }
                     }
                 }
             }
@@ -819,15 +801,23 @@ fn outline_run(face: &ttf_parser::Face<'_>, run: &GlyphRun, origin: Point, path:
     }
 }
 
-/// The distinct keys of `keys`, in order of first appearance.
-fn distinct_keys(keys: impl Iterator<Item = FontKey>) -> Vec<FontKey> {
-    let mut distinct: Vec<FontKey> = Vec::new();
-    for key in keys {
-        if !distinct.contains(&key) {
-            distinct.push(key);
+/// The indices of the items of `keys`, grouped by key, groups in order of first appearance.
+///
+/// One pass with a hash map, so the cost is linear in the number of runs whatever the number of
+/// distinct fonts.
+fn group_by_font(keys: impl Iterator<Item = FontKey>) -> Vec<(FontKey, Vec<usize>)> {
+    let mut slots: HashMap<FontKey, usize> = HashMap::new();
+    let mut groups: Vec<(FontKey, Vec<usize>)> = Vec::new();
+    for (i, key) in keys.enumerate() {
+        let slot = *slots.entry(key).or_insert_with(|| {
+            groups.push((key, Vec::new()));
+            groups.len() - 1
+        });
+        if let Some((_, members)) = groups.get_mut(slot) {
+            members.push(i);
         }
     }
-    distinct
+    groups
 }
 
 /// The OpenType features applied to every run.
@@ -1082,20 +1072,439 @@ mod tests {
         assert!(lib.layout("", &style(Font::Inter, f32::INFINITY)).ascent() == 0.0);
     }
 
+    // --- System fallback, with in-memory fonts standing in for the system fonts. ---
+
+    fn be16(data: &[u8], at: usize) -> usize {
+        usize::from(u16::from_be_bytes([data[at], data[at + 1]]))
+    }
+
+    fn be32(data: &[u8], at: usize) -> usize {
+        u32::from_be_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]]) as usize
+    }
+
+    /// `fallback-only.ttf` rebuilt with a new name, weight and style, and its one outlined glyph
+    /// mapped to every code point in `codepoints`.
+    fn fixture_font(family: &str, weight: u16, italic: bool, codepoints: &[u32]) -> Vec<u8> {
+        let base: &[u8] = include_bytes!("../tests/fixtures/fallback-only.ttf");
+        let mut tables: Vec<([u8; 4], Vec<u8>)> = (0..be16(base, 4))
+            .map(|i| {
+                let record = 12 + 16 * i;
+                let tag: [u8; 4] = base[record..record + 4].try_into().unwrap();
+                let (offset, length) = (be32(base, record + 8), be32(base, record + 12));
+                (tag, base[offset..offset + length].to_vec())
+            })
+            .collect();
+
+        let mut points = codepoints.to_vec();
+        points.sort_unstable();
+        points.dedup();
+        // One group per code point: a format 12 group maps consecutive code points to
+        // consecutive glyphs, and every code point here must map to glyph 1.
+        let groups: Vec<(u32, u32)> = points.iter().map(|&cp| (cp, cp)).collect();
+        let mut cmap = Vec::new();
+        cmap.extend(0u16.to_be_bytes()); // version
+        cmap.extend(1u16.to_be_bytes()); // one encoding record
+        cmap.extend(3u16.to_be_bytes()); // Windows
+        cmap.extend(10u16.to_be_bytes()); // Unicode full repertoire
+        cmap.extend(12u32.to_be_bytes()); // subtable offset
+        cmap.extend(12u16.to_be_bytes()); // format 12
+        cmap.extend(0u16.to_be_bytes());
+        cmap.extend((16 + 12 * groups.len() as u32).to_be_bytes());
+        cmap.extend(0u32.to_be_bytes()); // language
+        cmap.extend((groups.len() as u32).to_be_bytes());
+        for (lo, hi) in groups {
+            cmap.extend(lo.to_be_bytes());
+            cmap.extend(hi.to_be_bytes());
+            cmap.extend(1u32.to_be_bytes()); // glyph 1, the outlined glyph
+        }
+
+        let post_script = format!(
+            "{}-{weight}{}",
+            family.replace(' ', ""),
+            if italic { "Italic" } else { "" }
+        );
+        let names = [
+            (1u16, family.to_string()),
+            (2, "Regular".into()),
+            (4, family.into()),
+            (6, post_script),
+        ];
+        let mut strings = Vec::new();
+        let mut name = Vec::new();
+        name.extend(0u16.to_be_bytes());
+        name.extend((names.len() as u16).to_be_bytes());
+        name.extend((6 + 12 * names.len() as u16).to_be_bytes());
+        for (id, text) in &names {
+            let encoded: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+            for field in [
+                3u16,
+                1,
+                0x409,
+                *id,
+                encoded.len() as u16,
+                strings.len() as u16,
+            ] {
+                name.extend(field.to_be_bytes());
+            }
+            strings.extend(encoded);
+        }
+        name.extend(strings);
+
+        for (tag, data) in &mut tables {
+            match &*tag {
+                b"cmap" => *data = cmap.clone(),
+                b"name" => *data = name.clone(),
+                b"OS/2" => {
+                    data[4..6].copy_from_slice(&weight.to_be_bytes());
+                    let mut selection = u16::from_be_bytes([data[62], data[63]]);
+                    selection = if italic {
+                        (selection | 1) & !(1 << 6)
+                    } else {
+                        selection & !1
+                    };
+                    data[62..64].copy_from_slice(&selection.to_be_bytes());
+                }
+                b"post" => {
+                    let angle: i32 = if italic { -12 << 16 } else { 0 };
+                    data[4..8].copy_from_slice(&angle.to_be_bytes());
+                }
+                _ => {}
+            }
+        }
+
+        tables.sort_by_key(|(tag, _)| *tag);
+        let count = tables.len();
+        let selector = usize::BITS - 1 - count.leading_zeros();
+        let search_range = (1usize << selector) * 16;
+        let mut font = Vec::new();
+        font.extend_from_slice(&base[0..4]);
+        for field in [
+            count,
+            search_range,
+            selector as usize,
+            count * 16 - search_range,
+        ] {
+            font.extend((field as u16).to_be_bytes());
+        }
+        let mut offset = 12 + 16 * count;
+        let mut body = Vec::new();
+        for (tag, data) in &tables {
+            let mut padded = data.clone();
+            padded.resize(data.len().div_ceil(4) * 4, 0);
+            let checksum = padded
+                .chunks(4)
+                .map(|w| u32::from_be_bytes(w.try_into().unwrap()))
+                .fold(0u32, u32::wrapping_add);
+            font.extend(tag);
+            font.extend(checksum.to_be_bytes());
+            font.extend((offset as u32).to_be_bytes());
+            font.extend((data.len() as u32).to_be_bytes());
+            offset += padded.len();
+            body.extend(padded);
+        }
+        font.extend(body);
+        font
+    }
+
+    fn assert_no_bundled_font_has(text: &str) {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        for c in text.chars() {
+            for face in lib.bundled.iter().flatten() {
+                assert!(glyph_for(face, c).is_none(), "a bundled font has {c:?}");
+            }
+        }
+    }
+
+    /// The PostScript names of the system faces the runs of `text` were drawn with.
+    fn system_picks(lib: &FontLibrary, text: &str, weight: Weight) -> Vec<String> {
+        let s = TextStyle {
+            weight,
+            ..style(Font::Inter, 10.0)
+        };
+        let system = lib.system.as_ref().unwrap();
+        lib.layout(text, &s)
+            .runs
+            .iter()
+            .map(|run| match run.font {
+                FontKey::System(face) => system.face(face).unwrap().post_script_name.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    fn lookups(lib: &FontLibrary) -> usize {
+        lib.system.as_ref().unwrap().lookups()
+    }
+
+    #[test]
+    fn fixture_fonts_parse_with_the_requested_properties() {
+        let bytes = fixture_font("Test Family", 600, true, &[0xF0000, 0xF0001, 0xF0005]);
+        let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
+        assert!(glyph_for(&face, '\u{F0005}').is_some());
+        assert!(glyph_for(&face, '\u{F0002}').is_none());
+        let mut db = fontdb::Database::new();
+        db.load_font_data(bytes);
+        let info = db.faces().next().unwrap();
+        assert_eq!(info.families[0].0, "Test Family");
+        assert_eq!(info.post_script_name, "TestFamily-600Italic");
+        assert_eq!(info.weight.0, 600);
+        assert_ne!(info.style, fontdb::Style::Normal);
+    }
+
+    #[test]
+    fn system_fallback_prefers_ranked_families_then_sorted_names() {
+        let han = '\u{4E00}';
+        let (generic, unranked) = ('\u{F0010}', '\u{F0020}');
+        assert_no_bundled_font_has(&format!("{han}{generic}{unranked}"));
+        // Database order puts the losing face first every time.
+        let lib = FontLibrary::with_test_system_fonts(vec![
+            fixture_font("Aardvark Sans", 400, false, &[0x4E00, 0xF0010]),
+            fixture_font("Zulu Sans", 400, false, &[0xF0020]),
+            fixture_font("Hiragino Sans", 400, false, &[0x4E00]),
+            fixture_font("PingFang SC", 400, false, &[0x4E00]),
+            fixture_font("DejaVu Sans", 400, false, &[0xF0010]),
+            fixture_font("Noto Sans", 400, false, &[0xF0010]),
+            fixture_font("Bravo Sans", 400, false, &[0xF0020]),
+        ]);
+        // Han: PingFang SC is ranked above Hiragino Sans; Aardvark is unranked.
+        assert_eq!(
+            system_picks(&lib, &han.to_string(), Weight::Regular),
+            ["PingFangSC-400"]
+        );
+        // Generic list: Noto Sans before DejaVu Sans, both before unranked families.
+        assert_eq!(
+            system_picks(&lib, &generic.to_string(), Weight::Regular),
+            ["NotoSans-400"]
+        );
+        // Unranked: by family name, not database order.
+        assert_eq!(
+            system_picks(&lib, &unranked.to_string(), Weight::Regular),
+            ["BravoSans-600".replace("600", "400")]
+        );
+    }
+
+    #[test]
+    fn system_fallback_matches_weight_then_upright_style() {
+        let c = '\u{4E01}';
+        assert_no_bundled_font_has(&c.to_string());
+        let lib = FontLibrary::with_test_system_fonts(vec![
+            fixture_font("PingFang SC", 700, false, &[0x4E01]),
+            fixture_font("PingFang SC", 600, true, &[0x4E01]),
+            fixture_font("PingFang SC", 300, false, &[0x4E01]),
+            fixture_font("PingFang SC", 600, false, &[0x4E01]),
+            fixture_font("PingFang SC", 400, true, &[0x4E01]),
+            fixture_font("PingFang SC", 400, false, &[0x4E01]),
+        ]);
+        let text = c.to_string();
+        assert_eq!(
+            system_picks(&lib, &text, Weight::Regular),
+            ["PingFangSC-400"]
+        );
+        assert_eq!(
+            system_picks(&lib, &text, Weight::SemiBold),
+            ["PingFangSC-600"]
+        );
+        // Unranked families follow the same rule.
+        let lib = FontLibrary::with_test_system_fonts(vec![
+            fixture_font("Other", 400, true, &[0xF0030]),
+            fixture_font("Other", 800, false, &[0xF0030]),
+            fixture_font("Other", 500, false, &[0xF0030]),
+        ]);
+        assert_eq!(
+            system_picks(&lib, "\u{F0030}", Weight::SemiBold),
+            ["Other-500"]
+        );
+        // Weight distance comes before style: 400 italic beats 500 upright for Regular.
+        assert_eq!(
+            system_picks(&lib, "\u{F0030}", Weight::Regular),
+            ["Other-400Italic"]
+        );
+    }
+
+    #[test]
+    fn system_lookups_per_layout_are_capped() {
+        let codepoints: Vec<u32> = (0xF0100..0xF0100 + 1_100).collect();
+        let text: String = codepoints
+            .iter()
+            .filter_map(|&cp| char::from_u32(cp))
+            .collect();
+        assert_no_bundled_font_has(&text);
+        let lib = FontLibrary::with_test_system_fonts(vec![fixture_font(
+            "Cover",
+            400,
+            false,
+            &codepoints,
+        )]);
+        let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+        assert_eq!(lookups(&lib), system::LOOKUPS_PER_LAYOUT);
+        // The first 1,024 characters use the system font, the rest the primary font's .notdef.
+        let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
+        assert!(
+            matches!(
+                fonts.as_slice(),
+                [
+                    FontKey::System(_),
+                    FontKey::Bundled(Font::Inter, Weight::Regular)
+                ]
+            ),
+            "{fonts:?}"
+        );
+        assert_eq!(layout.runs[0].glyphs.len(), 1_024);
+        assert_eq!(layout.runs[1].glyphs.len(), 76);
+        // The next call looks up only the 76 characters that were not cached.
+        let again = lib.layout(&text, &style(Font::Inter, 10.0));
+        assert_eq!(lookups(&lib), 1_100);
+        assert_eq!(again.runs.len(), 1);
+    }
+
+    #[test]
+    fn system_lookups_are_cached_across_layouts() {
+        let hit: String = (0xF0200..0xF0200 + 500)
+            .filter_map(char::from_u32)
+            .collect();
+        let miss: String = (0xF0400..0xF0400 + 300)
+            .filter_map(char::from_u32)
+            .collect();
+        let text = format!("{hit}{miss}");
+        assert_no_bundled_font_has(&text);
+        let covered: Vec<u32> = (0xF0200..0xF0200 + 500).collect();
+        let lib =
+            FontLibrary::with_test_system_fonts(vec![fixture_font("Cover", 400, false, &covered)]);
+        let s = style(Font::Inter, 10.0);
+        let layout = lib.layout(&text, &s);
+        assert_eq!(lookups(&lib), 800);
+        let fonts: Vec<(FontKey, usize)> = layout
+            .runs
+            .iter()
+            .map(|r| (r.font, r.glyphs.len()))
+            .collect();
+        assert!(
+            matches!(
+                fonts.as_slice(),
+                [(FontKey::System(_), 500), (FontKey::Bundled(..), 300)]
+            ),
+            "{fonts:?}"
+        );
+        let first = lib.outline(&layout, Point { x: 0.0, y: 0.0 });
+        // Found and not-found results are both cached.
+        let second = lib.outline(&lib.layout(&text, &s), Point { x: 0.0, y: 0.0 });
+        assert_eq!(lookups(&lib), 800);
+        assert_eq!(first, second);
+        // The weight is part of the key.
+        let _ = lib.layout(
+            &hit,
+            &TextStyle {
+                weight: Weight::SemiBold,
+                ..s
+            },
+        );
+        assert_eq!(lookups(&lib), 1_300);
+    }
+
+    #[test]
+    fn system_lookup_cache_is_bounded() {
+        let lib = FontLibrary::with_test_system_fonts(vec![]);
+        let system = lib.system.as_ref().unwrap();
+        let s = style(Font::Inter, 10.0);
+        let total = system::CACHE_LIMIT + 4_000;
+        let chars: Vec<char> = (0xF0000..).filter_map(char::from_u32).take(total).collect();
+        for chunk in chars.chunks(system::LOOKUPS_PER_LAYOUT) {
+            let text: String = chunk.iter().collect();
+            let _ = lib.layout(&text, &s);
+        }
+        assert_eq!(system.lookups(), total);
+        assert_eq!(system.cache_len(), system::CACHE_LIMIT);
+        // Characters that did not fit are looked up again; cached ones are not.
+        let late: String = chars[total - 10..].iter().collect();
+        let early: String = chars[..10].iter().collect();
+        let _ = lib.layout(&format!("{early}{late}"), &s);
+        assert_eq!(system.lookups(), total + 10);
+        assert_eq!(system.cache_len(), system::CACHE_LIMIT);
+    }
+
+    #[test]
+    fn grouping_runs_by_font_is_linear() {
+        // 200,000 runs over 100,000 distinct fonts: a per-font rescan of all runs would take
+        // 2 * 10^10 steps.
+        let keys: Vec<FontKey> = (0..200_000).map(|i| FontKey::Extra(i % 100_000)).collect();
+        let start = std::time::Instant::now();
+        let groups = group_by_font(keys.iter().copied());
+        let elapsed = start.elapsed();
+        assert_eq!(groups.len(), 100_000);
+        for (n, (key, members)) in groups.iter().enumerate() {
+            assert_eq!(
+                *key,
+                FontKey::Extra(n),
+                "groups keep first-appearance order"
+            );
+            assert_eq!(members, &[n, n + 100_000]);
+        }
+        assert!(elapsed < std::time::Duration::from_secs(1), "{elapsed:?}");
+    }
+
+    #[test]
+    fn many_runs_and_fallback_fonts_lay_out_in_linear_time() {
+        const FONTS: u32 = 1_000;
+        let fonts: Vec<Vec<u8>> = (0..FONTS)
+            .map(|k| fixture_font(&format!("Fallback {k}"), 400, false, &[0xF1000 + k]))
+            .collect();
+        let lib = FontLibrary::with_fallbacks(fonts);
+        let text: String = (0..100_000u32)
+            .flat_map(|i| ['a', char::from_u32(0xF1000 + i % FONTS).unwrap()])
+            .collect();
+        assert_no_bundled_font_has(&text.replace('a', ""));
+        let s = style(Font::Inter, 10.0);
+        let start = std::time::Instant::now();
+        let layout = lib.layout(&text, &s);
+        let laid_out = start.elapsed();
+        let path = lib.outline(&layout, Point { x: 0.0, y: 0.0 });
+        let total = start.elapsed();
+        assert_eq!(layout.runs.len(), 200_000);
+        let distinct: std::collections::HashSet<FontKey> =
+            layout.runs.iter().map(|r| r.font).collect();
+        assert_eq!(distinct.len(), FONTS as usize + 1);
+        assert!(!path.is_empty());
+        // Release builds must lay out in under a second; unoptimized test builds get headroom.
+        let limit = std::time::Duration::from_secs(if cfg!(debug_assertions) { 30 } else { 1 });
+        assert!(laid_out < limit, "layout {laid_out:?}");
+        println!(
+            "200,000 runs, {} fonts: layout {laid_out:?}, layout + outline {total:?}",
+            FONTS + 1
+        );
+    }
+
     /// Depends on the fonts installed on the machine, so it is not run by default:
     /// `cargo test -p umber-core system_fallback -- --ignored --nocapture`.
     #[test]
     #[ignore = "depends on the system fonts"]
     fn system_fallback_draws_cjk() {
+        let rss_kib = || {
+            std::process::Command::new("ps")
+                .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .and_then(|o| o.trim().parse::<u64>().ok())
+                .unwrap_or(0)
+        };
         let lib = FontLibrary::bundled();
+        let system = lib.system.as_ref().expect("system fallback");
+        let before = rss_kib();
+        let start = std::time::Instant::now();
+        let index = system.index();
+        println!(
+            "index: {} faces, {} ranges, ~{} KiB heap, built in {:?}, RSS +{} KiB",
+            index.faces.len(),
+            index.range_count(),
+            index.heap_bytes() / 1024,
+            start.elapsed(),
+            rss_kib().saturating_sub(before)
+        );
         let s = style(Font::Inter, 10.0);
         let name = |key: FontKey| match key {
-            FontKey::System(id) => lib
-                .system
-                .as_ref()
-                .and_then(|system| system.db.get())
-                .and_then(|db| db.face(id))
-                .map_or_else(String::new, |info| info.post_script_name.clone()),
+            FontKey::System(face) => system.face(face).map_or_else(String::new, |f| {
+                format!("{} (weight {})", f.post_script_name, f.weight)
+            }),
             other => format!("{other:?}"),
         };
         let layout = lib.layout("A数据可视化", &s);
@@ -1112,13 +1521,51 @@ mod tests {
         let path = lib.outline(&layout, Point { x: 0.0, y: 0.0 });
         let a_only = lib.layout("A", &s).width();
         assert!(path.bounds().expect("outline").1.x > a_only + 30.0);
-        // The second lookup of the same characters is served from the cache.
+        let semibold = lib.layout(
+            "数",
+            &TextStyle {
+                weight: Weight::SemiBold,
+                ..s
+            },
+        );
+        println!(
+            "SemiBold: {:?}",
+            semibold
+                .runs
+                .iter()
+                .map(|r| name(r.font))
+                .collect::<Vec<_>>()
+        );
+
+        let distinct: String = (0x4E00..0x4E00 + 1024).filter_map(char::from_u32).collect();
+        let lookups = system.lookups();
         let start = std::time::Instant::now();
-        let again = lib.layout(&"数据可视化".repeat(2_000), &s);
-        println!("10,000 cached CJK characters: {:?}", start.elapsed());
-        assert!(again.width() > 0.0);
+        let cold = lib.layout(&distinct, &s);
+        println!(
+            "1,024 distinct CJK characters, cold: {:?} ({} lookups)",
+            start.elapsed(),
+            system.lookups() - lookups
+        );
+        let start = std::time::Instant::now();
+        let warm = lib.layout(&distinct, &s);
+        println!("same, warm: {:?}", start.elapsed());
+        assert!(cold.width() > 0.0 && (cold.width() - warm.width()).abs() < 1e-3);
+        println!(
+            "RSS after layouts: +{} KiB",
+            rss_kib().saturating_sub(before)
+        );
+
         // Emoji and Arabic must not panic, whatever the system offers.
-        for text in ["👍🏽", "مرحبا", "e\u{301}", "\u{FE0F}", "a\u{200D}b"] {
+        for text in [
+            "👍🏽",
+            "مرحبا",
+            "שלום",
+            "한국어",
+            "かな",
+            "e\u{301}",
+            "\u{FE0F}",
+            "a\u{200D}b",
+        ] {
             let l = lib.layout(text, &s);
             println!(
                 "{text:?}: width {}, runs {:?}",
