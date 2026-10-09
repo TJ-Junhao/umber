@@ -1,0 +1,64 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "umber"
+description = "A plotting library for Python, written in Rust."
+requires-python = ">=3.12"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+dependencies = ["numpy>=2.0", "typing_extensions>=4.12"]
+dynamic = ["version"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Typing :: Typed",
+]
+
+[dependency-groups]
+dev = [
+    "maturin>=1.15,<2",
+    "pytest>=9.1",
+    "ruff>=0.16.10",
+    "pyright>=1.1.414",
+    "mypy>=2.4",
+]
+
+[tool.maturin]
+manifest-path = "crates/umber-py/Cargo.toml"
+python-source = "python"
+module-name = "umber._umber"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python", "python/umber"]
+addopts = "--doctest-modules --import-mode=importlib"
+pythonpath = ["tests/python"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["python", "tests/python"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+
+[tool.pyright]
+include = ["python", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+reportUnnecessaryTypeIgnoreComment = "error"
+extraPaths = ["tests/python"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+files = ["python/umber", "tests"]
+mypy_path = "tests/python"
