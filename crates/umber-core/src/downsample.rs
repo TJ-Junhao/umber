@@ -44,14 +44,19 @@ pub fn m4_indices(xs: &[f64], ys: &[f64], x_range: (f64, f64), columns: usize) -
     {
         return identity();
     }
-    // Halve every operand so a finite range such as (-1e308, 1e308) cannot overflow to infinity.
-    let (half_lo, half_hi) = (lo * 0.5, hi * 0.5);
-    let width = half_hi - half_lo;
+    // Normalize with the plain span. Only when the span itself overflows to infinity (for
+    // example (-1e308, 1e308)) halve every operand; halving otherwise loses bits near the
+    // smallest floats and would shift column boundaries.
+    let (scale, width) = if (hi - lo).is_finite() {
+        (1.0, hi - lo)
+    } else {
+        (0.5, hi * 0.5 - lo * 0.5)
+    };
     if !(width.is_finite() && width > 0.0) {
         return identity();
     }
     let col = |x: f64| -> usize {
-        let c = ((x * 0.5 - half_lo) / width * columns as f64).floor();
+        let c = ((x * scale - lo * scale) / width * columns as f64).floor();
         if c <= 0.0 {
             0
         } else {
@@ -238,6 +243,42 @@ mod tests {
         assert_eq!(m4_indices(&xs2, &ys2, (0.0, 20.0), 2), [0, 9, 10, 19]);
         // Short common prefix is returned as identity over the prefix.
         assert_eq!(m4_indices(&xs, &ys[..5], (0.0, 20.0), 2), [0, 1, 2, 3, 4]);
+    }
+
+    /// 20 points in two groups of 10 with extrema at fixed positions.
+    fn extrema_ys() -> Vec<f64> {
+        let mut ys = vec![0.0; 20];
+        ys[3] = 5.0;
+        ys[6] = -5.0;
+        ys[10] = 9.0;
+        ys[17] = -9.0;
+        ys
+    }
+
+    #[test]
+    fn subnormal_range_keeps_column_boundaries() {
+        let u = f64::from_bits(1);
+        let xs: Vec<f64> = (0..20).map(|i| f64::from(i / 2) * u).collect();
+        let got = m4_indices(&xs, &extrema_ys(), (0.0, 10.0 * u), 2);
+        assert_eq!(got, [0, 3, 6, 9, 10, 17, 19]);
+    }
+
+    #[test]
+    fn range_near_min_positive_keeps_column_boundaries() {
+        let b = f64::MIN_POSITIVE.to_bits();
+        let xs: Vec<f64> = (0..20).map(|i| f64::from_bits(b + i / 2)).collect();
+        let range = (f64::from_bits(b), f64::from_bits(b + 10));
+        let got = m4_indices(&xs, &extrema_ys(), range, 2);
+        assert_eq!(got, [0, 3, 6, 9, 10, 17, 19]);
+    }
+
+    #[test]
+    fn identical_subnormal_x_is_downsampled_not_identity() {
+        let u = f64::from_bits(1);
+        let xs = vec![3.0 * u; 20];
+        // One column holds everything: first 0, max 9.0 at 10, min -9.0 at 17, last 19.
+        let got = m4_indices(&xs, &extrema_ys(), (3.0 * u, 4.0 * u), 2);
+        assert_eq!(got, [0, 10, 17, 19]);
     }
 
     fn sorted_xs() -> impl Strategy<Value = Vec<f64>> {
