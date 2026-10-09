@@ -315,24 +315,40 @@ pub(crate) fn format_ticks(values: &[f64], step: f64) -> Vec<String> {
     }
 }
 
+/// `v` rounded to `digits` significant digits.
+fn round_significant(v: f64, digits: usize) -> f64 {
+    format!("{v:.prec$e}", prec = digits.saturating_sub(1))
+        .parse()
+        .unwrap_or(v)
+}
+
 /// Labels for values that do not sit on a regular grid (the value policy).
 ///
-/// Each value is written with its shortest round-trip digits: fixed form when
-/// `1e-4 <= |v| < 1e6`, otherwise `<mantissa>e<exp>`; zero is `0`. Distinct values therefore
-/// always get distinct labels.
+/// The whole set uses one form: scientific (`<mantissa>e<exp>`) when any non-zero value lies
+/// outside `1e-4 <= |v| < 1e6`, otherwise fixed. Zero is `0`. Values are written with 12
+/// significant digits (trailing zeros trimmed, so `1.1^2` reads `1.21`); if distinct values
+/// would collide, with 17, and finally with the shortest round-trip digits, which always
+/// separates distinct values.
 pub(crate) fn format_values(values: &[f64]) -> Vec<String> {
-    values
+    let use_scientific = values
         .iter()
-        .map(|&v| {
-            if v == 0.0 {
-                "0".to_string()
-            } else if (1e-4..1e6).contains(&v.abs()) {
-                fixed(v, None)
-            } else {
-                scientific(v, None)
-            }
-        })
-        .collect()
+        .any(|&v| v != 0.0 && !(1e-4..1e6).contains(&v.abs()));
+    let label = |v: f64, digits: Option<usize>| -> String {
+        if v == 0.0 {
+            "0".to_string()
+        } else if use_scientific {
+            scientific(v, digits)
+        } else {
+            fixed(digits.map_or(v, |n| round_significant(v, n)), None)
+        }
+    };
+    for digits in [12, 17] {
+        let labels: Vec<String> = values.iter().map(|&v| label(v, Some(digits))).collect();
+        if labels_are_unique(values, &labels) {
+            return labels;
+        }
+    }
+    values.iter().map(|&v| label(v, None)).collect()
 }
 
 #[cfg(test)]
@@ -447,18 +463,31 @@ mod tests {
     }
 
     #[test]
-    fn value_policy_is_shortest_round_trip() {
+    fn value_policy_uses_one_form_per_axis() {
+        // Any value outside [1e-4, 1e6) puts the whole set in scientific form.
         assert_eq!(
             format_values(&[0.0, 3.375, -0.001, 1e6, 2.5e-5, -3e-5]),
             [
                 "0",
-                "3.375",
-                "\u{2212}0.001",
+                "3.375e0",
+                "\u{2212}1e\u{2212}3",
                 "1e6",
                 "2.5e\u{2212}5",
                 "\u{2212}3e\u{2212}5"
             ]
         );
+        assert_eq!(
+            format_values(&[0.0, 3.375, -0.001, 999999.0]),
+            ["0", "3.375", "\u{2212}0.001", "999999"]
+        );
+    }
+
+    #[test]
+    fn value_policy_trims_float_noise_unless_labels_collide() {
+        assert_eq!(format_values(&[1.1, 1.1 * 1.1]), ["1.1", "1.21"]);
+        // Distinct at 17 digits but not at 12.
+        let labels = format_values(&[1.0, 1.0 + f64::EPSILON]);
+        assert_eq!(labels, ["1", "1.0000000000000002"]);
     }
 
     #[test]

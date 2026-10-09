@@ -312,7 +312,7 @@ impl ContinuousScale {
     ///
     /// `None` gives `(0, 1)` for linear and `(1, 10)` for log. A single-valued extent is padded:
     /// `v +- 0.5` when `v == 0`, otherwise `v +- max(5%, 1e-300)` for linear, and
-    /// `(v / base, v * base)` for log, both kept within the supported magnitudes. A log extent
+    /// `(v / f, v * f)` with `f = max(base, 1.1)` for log, both kept within the supported magnitudes. A log extent
     /// narrower than a factor of `1 + 1e-9` counts as a single value. Returns `Error::Data` for
     /// non-finite bounds, for bounds beyond [`MAX_MAGNITUDE`], and for a log transform when the
     /// extent starts below [`MIN_LOG_VALUE`].
@@ -402,10 +402,14 @@ impl ContinuousScale {
                     (lo + pad).min(MAX_MAGNITUDE),
                 )
             }
-            Transform::Log(base) => (
-                (lo / base.get()).max(MIN_LOG_VALUE),
-                (lo * base.get()).min(MAX_MAGNITUDE),
-            ),
+            Transform::Log(base) => {
+                // At least 1.1, so the padded domain always satisfies the minimum ratio.
+                let factor = base.get().max(1.1);
+                (
+                    (lo / factor).max(MIN_LOG_VALUE),
+                    (lo * factor).min(MAX_MAGNITUDE),
+                )
+            }
         };
         // Rounding must never collapse the padded domain.
         if lo >= hi {
@@ -576,10 +580,20 @@ impl ContinuousScale {
             return Self::pair(values, labels);
         }
         let tol = 1e-9 * (hi - lo);
+        let is_log = matches!(self.transform, Transform::Log(_));
         for t in target..=target + 6 {
+            // On a log scale a tick must be a real positive value inside the domain: snapping
+            // one to an endpoint would put a label on the wrong value (a zero candidate next to
+            // a tiny `lo` would read "0").
             let inside: Vec<f64> = ticks::extended(lo, hi, t, false)
                 .into_iter()
-                .filter(|v| *v >= lo - tol && *v <= hi + tol)
+                .filter(|&v| {
+                    if is_log {
+                        v > 0.0 && v >= lo && v <= hi
+                    } else {
+                        v >= lo - tol && v <= hi + tol
+                    }
+                })
                 .collect();
             if let (Some(a), Some(b)) = (inside.first(), inside.get(1)) {
                 let step = b - a;
@@ -587,7 +601,9 @@ impl ContinuousScale {
                     inside
                         .iter()
                         .map(|&v| {
-                            if (v - lo).abs() <= tol {
+                            if is_log {
+                                v
+                            } else if (v - lo).abs() <= tol {
                                 lo
                             } else if (v - hi).abs() <= tol {
                                 hi
@@ -597,7 +613,15 @@ impl ContinuousScale {
                         })
                         .collect(),
                 );
-                let labels = ticks::format_ticks(&values, step);
+                let mut labels = ticks::format_ticks(&values, step);
+                if is_log {
+                    // The grid formatter shows values within `step * 1e-9` of zero as `0`.
+                    for (value, label) in values.iter().zip(labels.iter_mut()) {
+                        if *value > 0.0 && label == "0" {
+                            *label = ticks::format_values(&[*value]).concat();
+                        }
+                    }
+                }
                 return Self::pair(values, labels);
             }
         }
@@ -1089,7 +1113,7 @@ mod tests {
 
         let wide = ContinuousScale::new(Transform::Log(LogBase::TEN), 1e-5, 1e9, "t").unwrap();
         let labels: Vec<String> = wide.ticks(5).into_iter().map(|t| t.label).collect();
-        assert_eq!(labels, ["1e\u{2212}5", "0.01", "10", "10000", "1e7"]);
+        assert_eq!(labels, ["1e\u{2212}5", "1e\u{2212}2", "1e1", "1e4", "1e7"]);
 
         let near = LogBase::new(1.0001).unwrap();
         let s = ContinuousScale::new(Transform::Log(near), 1.0, 1.01, "t").unwrap();
@@ -1127,6 +1151,58 @@ mod tests {
         let gap = exps[1] - exps[0];
         assert!(gap > 1.0);
         assert!(exps.windows(2).all(|w| w[1] - w[0] == gap), "{exps:?}");
+    }
+
+    #[test]
+    fn log_singleton_with_near_one_base_still_pads() {
+        for base in [1.0000000001, next_up(1.0), 1.05] {
+            let t = Transform::Log(LogBase::new(base).unwrap());
+            let (lo, hi) = ContinuousScale::from_extent(t, Some((1.0, 1.0)), "t")
+                .unwrap()
+                .domain();
+            assert!(
+                (lo - 1.0 / 1.1).abs() < 1e-12 && (hi - 1.1).abs() < 1e-12,
+                "{base}: {lo}..{hi}"
+            );
+        }
+        // Bases above 1.1 keep their own padding.
+        let t = Transform::Log(LogBase::TEN);
+        let near =
+            ContinuousScale::from_extent(t, Some((MAX_MAGNITUDE, MAX_MAGNITUDE)), "t").unwrap();
+        assert!(near.domain().1 <= MAX_MAGNITUDE);
+    }
+
+    #[test]
+    fn log_fallback_never_labels_a_positive_tick_zero() {
+        let base = LogBase::new(1e20).unwrap();
+        let s = ContinuousScale::new(Transform::Log(base), 1e-10, 1e4, "t").unwrap();
+        let ticks = s.ticks(5);
+        assert!(ticks.len() >= 2, "{ticks:?}");
+        let (lo, hi) = s.domain();
+        for t in &ticks {
+            assert!(t.value > 0.0 && t.value >= lo && t.value <= hi, "{t:?}");
+            assert_ne!(t.label, "0", "{t:?}");
+            let parsed: f64 = t.label.replace('\u{2212}', "-").parse().unwrap();
+            assert!((parsed - t.value).abs() <= 1e-9 * t.value.abs(), "{t:?}");
+        }
+    }
+
+    #[test]
+    fn log_labels_have_at_most_twelve_significant_digits() {
+        let s = ContinuousScale::new(Transform::Log(LogBase::new(1.1).unwrap()), 1.0, 2.0, "t")
+            .unwrap();
+        let labels: Vec<String> = s.ticks(5).into_iter().map(|t| t.label).collect();
+        assert!(labels.contains(&"1.21".to_string()), "{labels:?}");
+        for label in &labels {
+            let digits = label
+                .split('e')
+                .next()
+                .unwrap_or("")
+                .chars()
+                .filter(char::is_ascii_digit)
+                .collect::<String>();
+            assert!(digits.trim_start_matches('0').len() <= 12, "{label}");
+        }
     }
 
     proptest! {
