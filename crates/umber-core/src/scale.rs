@@ -106,6 +106,34 @@ pub enum Transform {
     Log(LogBase),
 }
 
+/// The largest magnitude a [`ContinuousScale`] bound can have.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{ContinuousScale, Transform, MAX_MAGNITUDE};
+///
+/// assert!(ContinuousScale::new(Transform::Linear, 0.0, MAX_MAGNITUDE, "doc").is_ok());
+/// assert!(ContinuousScale::new(Transform::Linear, 0.0, 1e308, "doc").is_err());
+/// ```
+pub const MAX_MAGNITUDE: f64 = 1e300;
+
+/// The smallest positive value a log [`ContinuousScale`] can show.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{ContinuousScale, LogBase, Transform, MIN_LOG_VALUE};
+///
+/// let log = Transform::Log(LogBase::TEN);
+/// assert!(ContinuousScale::new(log, MIN_LOG_VALUE, 1.0, "doc").is_ok());
+/// assert!(ContinuousScale::new(log, 1e-310, 1.0, "doc").is_err());
+/// ```
+pub const MIN_LOG_VALUE: f64 = 1e-300;
+
+/// A log domain must span at least this ratio, or `ln(hi) - ln(lo)` loses all precision.
+const MIN_LOG_RATIO: f64 = 1.0 + 1e-9;
+
 /// A numeric axis: a transform plus a domain `[lo, hi]` that maps onto `[0, 1]`.
 ///
 /// # Examples
@@ -131,41 +159,71 @@ fn is_degenerate(lo: f64, hi: f64) -> bool {
     span < 1e-12 * magnitude || !(1e-200..=1e200).contains(&span)
 }
 
-/// The smallest `e` with `base^e >= v`, or `None` if it does not fit an `i32`.
-fn ceil_exp(v: f64, base: f64) -> Option<i32> {
+fn power(base: f64, e: i64) -> f64 {
+    base.powf(e as f64)
+}
+
+/// The smallest `e` with `base^e >= v`.
+fn ceil_exp(v: f64, base: f64) -> Option<i64> {
     let e = (v.ln() / base.ln()).ceil();
-    if !e.is_finite() || e.abs() > 1e9 {
+    if !e.is_finite() {
         return None;
     }
-    let mut e = e as i32;
-    if base.powi(e.checked_sub(1)?) >= v {
-        e = e.checked_sub(1)?;
-    } else if base.powi(e) < v {
-        e = e.checked_add(1)?;
+    let mut e = e as i64;
+    if power(base, e.saturating_sub(1)) >= v {
+        e = e.saturating_sub(1);
+    } else if power(base, e) < v {
+        e = e.saturating_add(1);
     }
     Some(e)
 }
 
-/// The largest `e` with `base^e <= v`, or `None` if it does not fit an `i32`.
-fn floor_exp(v: f64, base: f64) -> Option<i32> {
+/// The largest `e` with `base^e <= v`.
+fn floor_exp(v: f64, base: f64) -> Option<i64> {
     let e = (v.ln() / base.ln()).floor();
-    if !e.is_finite() || e.abs() > 1e9 {
+    if !e.is_finite() {
         return None;
     }
-    let mut e = e as i32;
-    if base.powi(e) > v {
-        e = e.checked_sub(1)?;
-    } else if base.powi(e.checked_add(1)?) <= v {
-        e = e.checked_add(1)?;
+    let mut e = e as i64;
+    if power(base, e) > v {
+        e = e.saturating_sub(1);
+    } else if power(base, e.saturating_add(1)) <= v {
+        e = e.saturating_add(1);
     }
     Some(e)
+}
+
+/// The next representable `f64` above a finite `x` (`f64::next_up` needs Rust 1.86).
+fn next_up(x: f64) -> f64 {
+    if x == 0.0 {
+        return f64::from_bits(1);
+    }
+    let bits = x.to_bits();
+    f64::from_bits(if x > 0.0 { bits + 1 } else { bits - 1 })
+}
+
+/// The next representable `f64` below a finite `x`.
+fn next_down(x: f64) -> f64 {
+    -next_up(-x)
+}
+
+/// Drops values that do not rise strictly above their predecessor.
+fn strictly_increasing(values: Vec<f64>) -> Vec<f64> {
+    let mut out: Vec<f64> = Vec::with_capacity(values.len());
+    for v in values {
+        if out.last().is_none_or(|last| v > *last) {
+            out.push(v);
+        }
+    }
+    out
 }
 
 impl ContinuousScale {
     /// Creates a scale over `[lo, hi]`.
     ///
     /// Returns `Error::Style` (with the caller's `context`) unless both limits are finite and
-    /// `lo < hi`, and, for a log transform, `lo > 0`.
+    /// `lo < hi`. Linear limits must not exceed [`MAX_MAGNITUDE`] in magnitude. Log limits must lie
+    /// in `[MIN_LOG_VALUE, MAX_MAGNITUDE]` with `hi / lo >= 1 + 1e-9`.
     ///
     /// # Examples
     ///
@@ -186,13 +244,43 @@ impl ContinuousScale {
                 ),
             });
         }
-        if matches!(transform, Transform::Log(_)) && lo <= 0.0 {
-            return Err(Error::Style {
-                context,
-                message: format!(
-                    "the lower limit is {lo}; a log scale needs a positive lower limit."
-                ),
-            });
+        match transform {
+            Transform::Linear => {
+                if lo.abs() > MAX_MAGNITUDE || hi.abs() > MAX_MAGNITUDE {
+                    return Err(Error::Style {
+                        context,
+                        message: format!(
+                            "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}."
+                        ),
+                    });
+                }
+            }
+            Transform::Log(_) => {
+                if lo <= 0.0 {
+                    return Err(Error::Style {
+                        context,
+                        message: format!(
+                            "the lower limit is {lo}; a log scale needs a positive lower limit."
+                        ),
+                    });
+                }
+                if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
+                    return Err(Error::Style {
+                        context,
+                        message: format!(
+                            "the limits are {lo} and {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                        ),
+                    });
+                }
+                if hi / lo < MIN_LOG_RATIO {
+                    return Err(Error::Style {
+                        context,
+                        message: format!(
+                            "the limits are {lo} and {hi}; the upper limit must be at least a factor of 1.000000001 above the lower limit."
+                        ),
+                    });
+                }
+            }
         }
         Ok(ContinuousScale { transform, lo, hi })
     }
@@ -200,9 +288,11 @@ impl ContinuousScale {
     /// Creates a scale that fits a data `extent` (`None` when there is no data).
     ///
     /// `None` gives `(0, 1)` for linear and `(1, 10)` for log. A single-valued extent is padded:
-    /// `v +- 0.5` when `v == 0`, otherwise `v +- 5%` for linear, and `(v / base, v * base)` for
-    /// log. Returns `Error::Data` for non-finite bounds, or for a log transform when the extent
-    /// starts at or below zero.
+    /// `v +- 0.5` when `v == 0`, otherwise `v +- max(5%, 1e-300)` for linear, and
+    /// `(v / base, v * base)` for log, both kept within the supported magnitudes. A log extent
+    /// narrower than a factor of `1 + 1e-9` counts as a single value. Returns `Error::Data` for
+    /// non-finite bounds, for bounds beyond [`MAX_MAGNITUDE`], and for a log transform when the
+    /// extent starts below [`MIN_LOG_VALUE`].
     ///
     /// # Examples
     ///
@@ -240,25 +330,68 @@ impl ContinuousScale {
                 ),
             });
         }
-        if matches!(transform, Transform::Log(_)) && lo <= 0.0 {
-            return Err(Error::Data {
-                context,
-                message: format!(
-                    "the data range starts at {lo}; a log scale can only show positive values."
-                ),
-            });
-        }
-        let (lo, hi) = if lo == hi {
-            match transform {
-                Transform::Linear => {
-                    let pad = if lo == 0.0 { 0.5 } else { lo.abs() * 0.05 };
-                    (lo - pad, lo + pad)
+        match transform {
+            Transform::Linear => {
+                if lo.abs() > MAX_MAGNITUDE || hi.abs() > MAX_MAGNITUDE {
+                    return Err(Error::Data {
+                        context,
+                        message: format!(
+                            "the data range is {lo} to {hi}; values must not exceed {MAX_MAGNITUDE:e} in magnitude."
+                        ),
+                    });
                 }
-                Transform::Log(base) => (lo / base.get(), lo * base.get()),
             }
-        } else {
-            (lo, hi)
+            Transform::Log(_) => {
+                if lo <= 0.0 {
+                    return Err(Error::Data {
+                        context,
+                        message: format!(
+                            "the data range starts at {lo}; a log scale can only show positive values."
+                        ),
+                    });
+                }
+                if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
+                    return Err(Error::Data {
+                        context,
+                        message: format!(
+                            "the data range is {lo} to {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                        ),
+                    });
+                }
+            }
+        }
+        let singleton = match transform {
+            Transform::Linear => lo == hi,
+            Transform::Log(_) => hi / lo < MIN_LOG_RATIO,
         };
+        if !singleton {
+            return Self::new(transform, lo, hi, context);
+        }
+        let (mut lo, mut hi) = match transform {
+            Transform::Linear => {
+                let pad = if lo == 0.0 {
+                    0.5
+                } else {
+                    (lo.abs() * 0.05).max(MIN_LOG_VALUE)
+                };
+                (
+                    (lo - pad).max(-MAX_MAGNITUDE),
+                    (lo + pad).min(MAX_MAGNITUDE),
+                )
+            }
+            Transform::Log(base) => (
+                (lo / base.get()).max(MIN_LOG_VALUE),
+                (lo * base.get()).min(MAX_MAGNITUDE),
+            ),
+        };
+        // Rounding must never collapse the padded domain.
+        if lo >= hi {
+            if hi >= MAX_MAGNITUDE {
+                lo = next_down(hi);
+            } else {
+                hi = next_up(lo);
+            }
+        }
         Self::new(transform, lo, hi, context)
     }
 
@@ -327,7 +460,7 @@ impl ContinuousScale {
     /// assert_eq!(scale.nice(5).domain(), (0.0, 10.0));
     /// ```
     pub fn nice(&self, target: usize) -> ContinuousScale {
-        let target = target.max(2);
+        let target = ticks::clamp_target(target);
         let widened = match self.transform {
             Transform::Linear => {
                 if is_degenerate(self.lo, self.hi) {
@@ -339,17 +472,23 @@ impl ContinuousScale {
             }
             Transform::Log(base) => {
                 let b = base.get();
-                let lo = floor_exp(self.lo, b).map(|e| b.powi(e));
-                let hi = ceil_exp(self.hi, b).map(|e| b.powi(e));
+                let lo = floor_exp(self.lo, b).map(|e| power(b, e));
+                let hi = ceil_exp(self.hi, b).map(|e| power(b, e));
                 lo.zip(hi)
             }
         };
         match widened {
             Some((lo, hi)) => {
-                // Never narrow the domain, whatever rounding did.
-                let (lo, hi) = (lo.min(self.lo), hi.max(self.hi));
-                let positive = matches!(self.transform, Transform::Linear) || lo > 0.0;
-                if lo.is_finite() && hi.is_finite() && lo < hi && positive {
+                // Never narrow the domain, whatever rounding did, and stay within the limits.
+                let floor = match self.transform {
+                    Transform::Linear => -MAX_MAGNITUDE,
+                    Transform::Log(_) => MIN_LOG_VALUE,
+                };
+                let (lo, hi) = (
+                    lo.min(self.lo).max(floor),
+                    hi.max(self.hi).min(MAX_MAGNITUDE),
+                );
+                if lo.is_finite() && hi.is_finite() && lo < hi {
                     ContinuousScale {
                         transform: self.transform,
                         lo,
@@ -378,7 +517,7 @@ impl ContinuousScale {
     /// assert_eq!(labels, ["2.5", "5.0", "7.5"]);
     /// ```
     pub fn ticks(&self, target: usize) -> Vec<Tick> {
-        let target = target.max(2);
+        let target = ticks::clamp_target(target);
         match self.transform {
             Transform::Linear => self.linear_ticks(target),
             Transform::Log(base) => self.log_ticks(base.get(), target),
@@ -402,7 +541,12 @@ impl ContinuousScale {
     fn linear_ticks(&self, target: usize) -> Vec<Tick> {
         let (lo, hi) = (self.lo, self.hi);
         if is_degenerate(lo, hi) {
-            let values = ticks::evenly_spaced(lo, hi, target);
+            let values = strictly_increasing(
+                ticks::evenly_spaced(lo, hi, target)
+                    .into_iter()
+                    .map(|v| v.clamp(lo, hi))
+                    .collect(),
+            );
             let labels = ticks::format_ticks_scientific(&values);
             return Self::pair(values, labels);
         }
@@ -414,18 +558,20 @@ impl ContinuousScale {
                 .collect();
             if let (Some(a), Some(b)) = (inside.first(), inside.get(1)) {
                 let step = b - a;
-                let values: Vec<f64> = inside
-                    .iter()
-                    .map(|&v| {
-                        if (v - lo).abs() <= tol {
-                            lo
-                        } else if (v - hi).abs() <= tol {
-                            hi
-                        } else {
-                            v
-                        }
-                    })
-                    .collect();
+                let values = strictly_increasing(
+                    inside
+                        .iter()
+                        .map(|&v| {
+                            if (v - lo).abs() <= tol {
+                                lo
+                            } else if (v - hi).abs() <= tol {
+                                hi
+                            } else {
+                                v
+                            }
+                        })
+                        .collect(),
+                );
                 let labels = ticks::format_ticks(&values, step);
                 return Self::pair(values, labels);
             }
@@ -440,19 +586,25 @@ impl ContinuousScale {
         if first > last {
             return self.end_ticks();
         }
-        let count = i64::from(last) - i64::from(first) + 1;
+        let count = last.saturating_sub(first).saturating_add(1);
         let target_i = target as i64;
-        let every = if count > target_i * 2 {
-            (count + target_i - 1) / target_i
+        let every = if count > target_i.saturating_mul(2) {
+            (count / target_i + i64::from(count % target_i != 0)).max(1)
         } else {
             1
         };
+        let (floor, ceiling) = (self.lo * (1.0 - 1e-9), self.hi * (1.0 + 1e-9));
         let mut values = Vec::new();
-        let mut e = i64::from(first);
-        while e <= i64::from(last) {
-            let Ok(exp) = i32::try_from(e) else { break };
-            values.push(base.powi(exp));
-            e += every;
+        let mut e = first;
+        while e <= last {
+            let v = power(base, e);
+            if v.is_finite() && v > 0.0 && v >= floor && v <= ceiling {
+                values.push(v);
+            }
+            match e.checked_add(every) {
+                Some(next) => e = next,
+                None => break,
+            }
         }
         let Some(&smallest) = values.first() else {
             return self.end_ticks();
@@ -711,6 +863,168 @@ mod tests {
             CategoryScale::from_first_appearance(std::iter::empty::<&str>()).band(0),
             (0.0, 1.0)
         );
+    }
+
+    fn rel_close(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 1e-9 * b.abs()
+    }
+
+    #[test]
+    fn huge_targets_are_clamped_not_overflowed() {
+        let scales = [
+            lin(0.0, 1.0),
+            lin(0.0, 1e300),
+            ContinuousScale::new(Transform::Log(LogBase::TEN), 1.0, 100.0, "t").unwrap(),
+        ];
+        for s in scales {
+            for target in [usize::MAX, i64::MAX as usize, usize::MAX - 3, 0, 1] {
+                let ticks = s.ticks(target);
+                assert!(!ticks.is_empty());
+                assert!(ticks.len() <= 2 * 64 + 1, "{} ticks", ticks.len());
+                let (lo, hi) = s.nice(target).domain();
+                let (dlo, dhi) = s.domain();
+                assert!(lo <= dlo && hi >= dhi);
+            }
+        }
+    }
+
+    #[test]
+    fn linear_domain_beyond_max_magnitude_is_rejected() {
+        assert!(matches!(
+            ContinuousScale::new(Transform::Linear, -1e308, 1e308, "t"),
+            Err(Error::Style { .. })
+        ));
+        assert!(
+            ContinuousScale::new(Transform::Linear, -MAX_MAGNITUDE, MAX_MAGNITUDE, "t").is_ok()
+        );
+        assert!(matches!(
+            ContinuousScale::from_extent(Transform::Linear, Some((-1e308, 1e308)), "t"),
+            Err(Error::Data { .. })
+        ));
+        let s = lin(-MAX_MAGNITUDE, MAX_MAGNITUDE);
+        assert_eq!(s.normalize(0.0), 0.5);
+        assert_eq!(s.normalize(MAX_MAGNITUDE), 1.0);
+    }
+
+    #[test]
+    fn log_domain_limits_and_adjacent_bounds() {
+        let t = Transform::Log(LogBase::TEN);
+        assert!(matches!(
+            ContinuousScale::new(t, 1e9, next_up(1e9), "t"),
+            Err(Error::Style { .. })
+        ));
+        assert!(matches!(
+            ContinuousScale::new(t, f64::from_bits(1), 1.0, "t"),
+            Err(Error::Style { .. })
+        ));
+        assert!(matches!(
+            ContinuousScale::new(t, 1.0, f64::MAX, "t"),
+            Err(Error::Style { .. })
+        ));
+        assert!(matches!(
+            ContinuousScale::from_extent(t, Some((f64::from_bits(1), 1.0)), "t"),
+            Err(Error::Data { .. })
+        ));
+        assert!(matches!(
+            ContinuousScale::from_extent(t, Some((1.0, f64::MAX)), "t"),
+            Err(Error::Data { .. })
+        ));
+        let ok = ContinuousScale::new(t, MIN_LOG_VALUE, MAX_MAGNITUDE, "t").unwrap();
+        assert!(ok.normalize(1.0) > 0.0 && ok.normalize(1.0) < 1.0);
+        assert!(
+            ok.ticks(5)
+                .iter()
+                .all(|t| t.value.is_finite() && t.value > 0.0)
+        );
+    }
+
+    #[test]
+    fn singleton_padding_stays_representable() {
+        let log = Transform::Log(LogBase::TEN);
+        let d = ContinuousScale::from_extent(log, Some((1e9, 1e9)), "t")
+            .unwrap()
+            .domain();
+        assert_eq!(d, (1e8, 1e10));
+        // A log extent narrower than 1 + 1e-9 is a singleton at its lower bound.
+        let near = ContinuousScale::from_extent(log, Some((1e9, next_up(1e9))), "t").unwrap();
+        assert_eq!(near.domain(), (1e8, 1e10));
+        let tiny = ContinuousScale::from_extent(
+            Transform::Linear,
+            Some((f64::from_bits(1), f64::from_bits(1))),
+            "t",
+        )
+        .unwrap();
+        let (lo, hi) = tiny.domain();
+        assert!(lo.is_finite() && hi.is_finite() && lo < hi);
+        let big = ContinuousScale::from_extent(
+            Transform::Linear,
+            Some((MAX_MAGNITUDE, MAX_MAGNITUDE)),
+            "t",
+        )
+        .unwrap();
+        let (lo, hi) = big.domain();
+        assert!(lo < hi && hi <= MAX_MAGNITUDE);
+        let top =
+            ContinuousScale::from_extent(log, Some((MAX_MAGNITUDE, MAX_MAGNITUDE)), "t").unwrap();
+        let (lo, hi) = top.domain();
+        assert!(lo < hi && hi <= MAX_MAGNITUDE);
+        let bottom =
+            ContinuousScale::from_extent(log, Some((MIN_LOG_VALUE, MIN_LOG_VALUE)), "t").unwrap();
+        let (lo, hi) = bottom.domain();
+        assert!(lo >= MIN_LOG_VALUE && lo < hi);
+    }
+
+    #[test]
+    fn nice_is_scale_invariant_for_extreme_spans() {
+        for scale in [1e-180, 1e180] {
+            let (lo, hi) = lin(1.3 * scale, 8.7 * scale).nice(5).domain();
+            assert!(rel_close(lo, 1.0 * scale), "{lo} vs {}", 1.0 * scale);
+            assert!(rel_close(hi, 9.0 * scale), "{hi} vs {}", 9.0 * scale);
+        }
+    }
+
+    #[test]
+    fn ticks_have_strictly_increasing_positions() {
+        let s = lin(1.0, 1.0 + f64::EPSILON);
+        let ticks = s.ticks(5);
+        assert_eq!(ticks.len(), 2);
+        assert_eq!(ticks[0].value, 1.0);
+        assert_eq!(ticks[1].value, 1.0 + f64::EPSILON);
+        for (lo, hi) in [
+            (0.0, f64::from_bits(1)),
+            (1e9, 1e9 + 1e-3),
+            (0.0, 1e-320),
+            (0.0, 1.0),
+            (-7.0, 1e300),
+        ] {
+            let v: Vec<f64> = lin(lo, hi).ticks(8).iter().map(|t| t.value).collect();
+            assert!(v.len() >= 2, "{lo}..{hi}");
+            assert!(v.windows(2).all(|w| w[1] > w[0]), "{lo}..{hi}: {v:?}");
+        }
+    }
+
+    #[test]
+    fn log_ticks_with_base_near_one_are_thinned_before_powers_are_computed() {
+        let base = LogBase::new(1.000000001).unwrap();
+        let s = ContinuousScale::new(Transform::Log(base), 2.0, 4.0, "t").unwrap();
+        let ticks = s.ticks(5);
+        assert!(!ticks.is_empty() && ticks.len() <= 5);
+        assert!(
+            ticks
+                .iter()
+                .all(|t| t.value >= 2.0 * (1.0 - 1e-9) && t.value <= 4.0 * (1.0 + 1e-9))
+        );
+        let (lo, hi) = s.nice(5).domain();
+        assert!(lo <= 2.0 && hi >= 4.0);
+    }
+
+    #[test]
+    fn log_ticks_cover_subnormal_free_extremes() {
+        let t = Transform::Log(LogBase::TEN);
+        let s = ContinuousScale::new(t, 1e-300, 1e-290, "t").unwrap();
+        let v: Vec<f64> = s.ticks(5).iter().map(|t| t.value).collect();
+        assert!(v.len() >= 2 && v.iter().all(|x| *x > 0.0));
+        assert!(v.windows(2).all(|w| w[1] > w[0]));
     }
 
     proptest! {

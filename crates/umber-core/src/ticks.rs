@@ -20,6 +20,14 @@ pub struct Tick {
     pub label: String,
 }
 
+/// Largest number of ticks any function here aims for; larger targets are clamped to it.
+pub(crate) const MAX_TARGET: usize = 64;
+
+/// Clamps a caller-supplied tick target to `2..=MAX_TARGET`.
+pub(crate) fn clamp_target(target: usize) -> usize {
+    target.clamp(2, MAX_TARGET)
+}
+
 const Q: [f64; 6] = [1.0, 5.0, 2.0, 2.5, 4.0, 3.0];
 const W: [f64; 4] = [0.25, 0.2, 0.5, 0.05];
 const EPS: f64 = 1e-10;
@@ -37,16 +45,32 @@ fn simplicity_max(qi: usize, j: f64) -> f64 {
     1.0 - qi as f64 / Q_LAST - j + 1.0
 }
 
+/// `1 - 0.5 * sum_sq / (0.1 * range)^2`, where `sum_sq` is the sum of the squared `diffs`.
+///
+/// The direct form reproduces the reference implementation bit for bit, which matters because
+/// candidates can tie exactly. When a square would overflow or underflow (spans below about
+/// 1e-150 or above about 1e150), each difference is divided by `0.1 * range` before squaring.
+fn coverage_penalty(range: f64, diffs: [f64; 2]) -> f64 {
+    let den = (0.1 * range).powi(2);
+    let num = diffs[0].powi(2) + diffs[1].powi(2);
+    if den.is_normal() && num.is_finite() {
+        1.0 - 0.5 * num / den
+    } else {
+        let scale = 0.1 * range;
+        let (a, b) = (diffs[0] / scale, diffs[1] / scale);
+        1.0 - 0.5 * (a * a + b * b)
+    }
+}
+
 fn coverage(dmin: f64, dmax: f64, lmin: f64, lmax: f64) -> f64 {
-    let r = dmax - dmin;
-    1.0 - 0.5 * ((dmax - lmax).powi(2) + (dmin - lmin).powi(2)) / (0.1 * r).powi(2)
+    coverage_penalty(dmax - dmin, [dmax - lmax, dmin - lmin])
 }
 
 fn coverage_max(dmin: f64, dmax: f64, span: f64) -> f64 {
     let r = dmax - dmin;
     if span > r {
         let half = (span - r) / 2.0;
-        1.0 - 0.5 * (2.0 * half * half) / (0.1 * r).powi(2)
+        coverage_penalty(r, [half, half])
     } else {
         1.0
     }
@@ -68,7 +92,7 @@ fn density_max(k: f64, m: f64) -> f64 {
 
 /// `n` values from `lo` to `hi` inclusive, each computed from its index (no accumulation).
 pub(crate) fn evenly_spaced(lo: f64, hi: f64, n: usize) -> Vec<f64> {
-    let n = n.max(2);
+    let n = clamp_target(n);
     let last = (n - 1) as f64;
     (0..n)
         .map(|i| {
@@ -84,7 +108,7 @@ pub(crate) fn evenly_spaced(lo: f64, hi: f64, n: usize) -> Vec<f64> {
 /// `start * step`, never by accumulation. Invalid input (non-finite or `dmin >= dmax`) and the
 /// case where no candidate is found yield `max(target, 2)` evenly spaced values instead.
 pub(crate) fn extended(dmin: f64, dmax: f64, target: usize, loose: bool) -> Vec<f64> {
-    let target = target.max(2);
+    let target = clamp_target(target);
     if !(dmin.is_finite() && dmax.is_finite() && dmin < dmax) {
         return evenly_spaced(dmin, dmax, target);
     }
@@ -112,7 +136,7 @@ pub(crate) fn extended(dmin: f64, dmax: f64, target: usize, loose: bool) -> Vec<
                 if zf.is_finite() && zf.abs() < 1e6 {
                     let mut z = zf as i32;
                     while z < 400 {
-                        let step = jf * q * 10f64.powi(z);
+                        let step = jf * q * 10f64.powf(f64::from(z));
                         if !step.is_finite() || step <= 0.0 {
                             break;
                         }
@@ -286,6 +310,28 @@ mod tests {
             (1200.0, 98000.0, 4, false, &[0.0, 50000.0, 100000.0]),
             (0.0, 8.0, 4, false, &[0.0, 2.5, 5.0, 7.5]),
             (0.0, 8.0, 4, true, &[0.0, 2.0, 4.0, 6.0, 8.0]),
+            // Random ranges where `powi(10, z)` diverged from the Python reference.
+            (
+                -2.6178863563145905e68,
+                2.301814660011723e68,
+                2,
+                true,
+                &[-3e68, 3e68],
+            ),
+            (
+                -5.219454767136544e37,
+                4.908864837878777e37,
+                6,
+                true,
+                &[-6e37, -3e37, 0.0, 3e37, 6e37],
+            ),
+            (
+                -1.161350009461411e101,
+                2.0915500407958136e100,
+                8,
+                false,
+                &[-1.25e101, -1e101, -7.5e100, -5e100, -2.5e100, 0.0, 2.5e100],
+            ),
         ];
         for &(lo, hi, m, loose, want) in cases {
             let got = extended(lo, hi, m, loose);
