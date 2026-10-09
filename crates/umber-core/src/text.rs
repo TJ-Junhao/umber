@@ -1,0 +1,1137 @@
+//! Text shaping, measurement and outlines.
+//!
+//! A [`FontLibrary`] shapes a string with one of the bundled fonts, applying kerning, standard
+//! ligatures and, on request, tabular figures. Characters the requested font lacks are drawn with
+//! another bundled family, then with fallback fonts: the system fonts for
+//! [`FontLibrary::bundled`], or explicit font files for [`FontLibrary::with_fallbacks`].
+//! Characters that no font covers are drawn as the primary font's `.notdef` glyph.
+//!
+//! All lengths are in points. Outlines are y-down with the baseline at `y = 0` of the origin
+//! passed to [`FontLibrary::outline`]. Runs are placed left to right in logical order; there is
+//! no bidirectional reordering.
+//!
+//! Nothing here panics or fails: unreadable fonts are skipped and missing glyphs degrade to
+//! `.notdef`.
+//!
+//! # Examples
+//!
+//! ```
+//! use umber_core::text::{FontLibrary, TextStyle};
+//! use umber_core::{Font, Point, Weight};
+//!
+//! let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 10.0, tabular_figures: false };
+//! let layout = FontLibrary::global().layout("Revenue", &style);
+//! assert!(layout.width() > 0.0);
+//! let path = FontLibrary::global().outline(&layout, Point { x: 0.0, y: 20.0 });
+//! assert!(!path.is_empty());
+//! ```
+
+use std::collections::HashMap;
+use std::ops::Range;
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+
+use rustybuzz::ttf_parser::{self, GlyphId, OutlineBuilder, Tag};
+use rustybuzz::{BufferFlags, Direction, Feature, Script, ShapePlan, UnicodeBuffer};
+
+use crate::fonts::{Font, Weight, font_bytes};
+use crate::geometry::{Path, Point};
+
+/// How a piece of text is set: font, weight, size and figure style.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Font, TextStyle, Weight};
+///
+/// let style = TextStyle { font: Font::Geist, weight: Weight::SemiBold, size: 13.0, tabular_figures: true };
+/// assert_eq!(style.size, 13.0);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextStyle {
+    /// The primary font family.
+    pub font: Font,
+    /// The weight, used for the primary family and for bundled fallbacks.
+    pub weight: Weight,
+    /// The font size in points. NaN, zero and negative sizes are treated as 0.
+    pub size: f32,
+    /// Whether to request tabular (fixed-width) figures with the OpenType `tnum` feature.
+    pub tabular_figures: bool,
+}
+
+/// Which font a run of text is drawn with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum FontKey {
+    Bundled(Font, Weight),
+    /// Index into [`FontLibrary::extra`].
+    Extra(usize),
+    System(fontdb::ID),
+}
+
+/// A piece of the input text drawn with one font.
+#[derive(Debug, Clone)]
+struct TextRun {
+    font: FontKey,
+    /// Draw default-ignorable characters as glyphs (`.notdef` if the font lacks them) instead of
+    /// hiding them. Set only for marks and invisible characters at the very start of the text,
+    /// which have no base character to attach to.
+    preserve_ignorables: bool,
+    range: Range<usize>,
+}
+
+/// A glyph placed relative to the layout origin, in points, y-down.
+#[derive(Debug, Clone, Copy)]
+struct PlacedGlyph {
+    id: u16,
+    x: f32,
+    y: f32,
+}
+
+/// Consecutive glyphs drawn with one font.
+#[derive(Debug, Clone)]
+struct GlyphRun {
+    font: FontKey,
+    /// Points per font unit.
+    scale: f32,
+    glyphs: Vec<PlacedGlyph>,
+}
+
+/// Shaped and measured text, ready to be outlined.
+///
+/// Produced by [`FontLibrary::layout`]. Outline it with the same library, or with one built the
+/// same way: fallback fonts are referred to by their position in the library.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+///
+/// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 12.0, tabular_figures: false };
+/// let layout = FontLibrary::global().layout("Hg", &style);
+/// assert!(layout.width() > 0.0 && layout.ascent() > 0.0 && layout.descent() > 0.0);
+/// ```
+#[derive(Debug, Clone)]
+pub struct TextLayout {
+    runs: Vec<GlyphRun>,
+    width: f32,
+    ascent: f32,
+    descent: f32,
+}
+
+impl TextLayout {
+    /// The total advance width in points.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    ///
+    /// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// let lib = FontLibrary::global();
+    /// assert!(lib.layout("wide text", &style).width() > lib.layout("w", &style).width());
+    /// ```
+    #[must_use]
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    /// The primary font's ascender above the baseline in points, positive.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    ///
+    /// let style = TextStyle { font: Font::SourceSerif4, weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// let ascent = FontLibrary::global().layout("", &style).ascent();
+    /// assert!(ascent > 5.0 && ascent < 15.0);
+    /// ```
+    #[must_use]
+    pub fn ascent(&self) -> f32 {
+        self.ascent
+    }
+
+    /// The primary font's descender below the baseline in points, positive.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    ///
+    /// let style = TextStyle { font: Font::IbmPlexSans, weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// let descent = FontLibrary::global().layout("g", &style).descent();
+    /// assert!(descent > 0.0 && descent < 5.0);
+    /// ```
+    #[must_use]
+    pub fn descent(&self) -> f32 {
+        self.descent
+    }
+
+    /// Whether the layout has no glyphs: the text was empty or the size was not positive.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    ///
+    /// let style = TextStyle { font: Font::Geist, weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// assert!(FontLibrary::global().layout("", &style).is_empty());
+    /// assert!(!FontLibrary::global().layout("x", &style).is_empty());
+    /// ```
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.runs.iter().all(|run| run.glyphs.is_empty())
+    }
+}
+
+/// The system font database, loaded on first use, and a per-character lookup cache.
+struct SystemFonts {
+    db: OnceLock<fontdb::Database>,
+    cache: Mutex<HashMap<char, Option<fontdb::ID>>>,
+}
+
+/// Number of bundled font files: every family in every weight.
+const BUNDLED_COUNT: usize = Font::ALL.len() * Weight::ALL.len();
+
+/// Shapes, measures and outlines text with the bundled fonts and fallbacks.
+///
+/// `FontLibrary` is `Send + Sync`; one library can lay out text from several threads at once,
+/// with deterministic results.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+///
+/// let lib = FontLibrary::with_fallbacks(Vec::new());
+/// let style = TextStyle { font: Font::JetBrainsMono, weight: Weight::Regular, size: 9.0, tabular_figures: true };
+/// assert!(lib.layout("1,234.5", &style).width() > 0.0);
+/// ```
+pub struct FontLibrary {
+    /// Indexed by [`bundled_slot`]. `None` if the font failed to parse.
+    bundled: [Option<rustybuzz::Face<'static>>; BUNDLED_COUNT],
+    /// Fallback font files that parsed, in the caller's order.
+    extra: Vec<Vec<u8>>,
+    /// `Some` for [`FontLibrary::bundled`]; `None` disables system lookup.
+    system: Option<SystemFonts>,
+}
+
+impl std::fmt::Debug for FontLibrary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FontLibrary")
+            .field("extra_fonts", &self.extra.len())
+            .field("system_fallback", &self.system.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+fn bundled_slot(font: Font, weight: Weight) -> usize {
+    let family = match font {
+        Font::SourceSerif4 => 0,
+        Font::IbmPlexSans => 1,
+        Font::Geist => 2,
+        Font::Inter => 3,
+        Font::JetBrainsMono => 4,
+    };
+    let weight = match weight {
+        Weight::Regular => 0,
+        Weight::SemiBold => 1,
+    };
+    family * Weight::ALL.len() + weight
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The glyph for `c`, treating a mapping to glyph 0 (`.notdef`) as missing.
+fn glyph_for(face: &ttf_parser::Face<'_>, c: char) -> Option<GlyphId> {
+    face.glyph_index(c).filter(|g| g.0 != 0)
+}
+
+/// Characters that stay in the run of the character before them instead of choosing a font of
+/// their own: combining marks that are not letters, variation selectors, emoji modifiers and
+/// tags, joiners, invisible format characters and controls.
+///
+/// This keeps a base character and its marks in one font, and keeps invisible characters from
+/// triggering a fallback search.
+fn attaches_to_previous(c: char) -> bool {
+    if c.is_control() {
+        return true;
+    }
+    if c.is_alphanumeric() {
+        return false;
+    }
+    matches!(
+        u32::from(c),
+        0x0300..=0x036F // Combining Diacritical Marks
+            | 0x0483..=0x0489 // Combining Cyrillic
+            | 0x1AB0..=0x1AFF // Combining Diacritical Marks Extended
+            | 0x1DC0..=0x1DFF // Combining Diacritical Marks Supplement
+            | 0x20D0..=0x20FF // Combining Diacritical Marks for Symbols
+            | 0xFE20..=0xFE2F // Combining Half Marks
+            | 0xFE00..=0xFE0F // Variation Selectors
+            | 0xE0100..=0xE01EF // Variation Selectors Supplement
+            | 0x180B..=0x180F // Mongolian free variation selectors
+            | 0x1F3FB..=0x1F3FF // Emoji skin tone modifiers
+            | 0xE0020..=0xE007F // Tags
+            | 0x00AD // Soft hyphen
+            | 0x061C // Arabic letter mark
+            | 0x200B..=0x200F // Zero-width space, non-joiner, joiner, direction marks
+            | 0x202A..=0x202E // Bidi embeddings and overrides
+            | 0x2060..=0x206F // Word joiner, invisible operators, bidi isolates
+            | 0xFEFF // Zero-width no-break space
+    )
+}
+
+/// An [`OutlineBuilder`] that ignores everything, used to test whether a glyph has an outline.
+struct NoOutline;
+
+impl OutlineBuilder for NoOutline {
+    fn move_to(&mut self, _: f32, _: f32) {}
+    fn line_to(&mut self, _: f32, _: f32) {}
+    fn quad_to(&mut self, _: f32, _: f32, _: f32, _: f32) {}
+    fn curve_to(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) {}
+    fn close(&mut self) {}
+}
+
+/// Maps font units to points: `x * scale + dx`, `-y * scale + dy` (y-down).
+struct PathBuilder {
+    path: Path,
+    scale: f32,
+    dx: f32,
+    dy: f32,
+}
+
+impl PathBuilder {
+    fn point(&self, x: f32, y: f32) -> Point {
+        Point {
+            x: x * self.scale + self.dx,
+            y: -y * self.scale + self.dy,
+        }
+    }
+}
+
+impl OutlineBuilder for PathBuilder {
+    fn move_to(&mut self, x: f32, y: f32) {
+        let p = self.point(x, y);
+        self.path.move_to(p);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        let p = self.point(x, y);
+        self.path.line_to(p);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let (c, p) = (self.point(x1, y1), self.point(x, y));
+        self.path.quad_to(c, p);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let (c1, c2, p) = (self.point(x1, y1), self.point(x2, y2), self.point(x, y));
+        self.path.cubic_to(c1, c2, p);
+    }
+
+    fn close(&mut self) {
+        self.path.close();
+    }
+}
+
+/// One shaped glyph, in font units.
+#[derive(Debug, Clone, Copy)]
+struct ShapedGlyph {
+    id: u16,
+    advance: i32,
+    x_offset: i32,
+    y_offset: i32,
+}
+
+/// The shaped glyphs of one run, with the font's units per em.
+struct ShapedRun {
+    units_per_em: i32,
+    glyphs: Vec<ShapedGlyph>,
+}
+
+/// Shapes several runs of text with one face, reusing shape plans across runs.
+struct Shaper<'f, 'a> {
+    face: &'f rustybuzz::Face<'a>,
+    features: &'f [Feature],
+    plans: Vec<(Direction, Option<Script>, ShapePlan)>,
+}
+
+impl<'f, 'a> Shaper<'f, 'a> {
+    fn new(face: &'f rustybuzz::Face<'a>, features: &'f [Feature]) -> Self {
+        Shaper {
+            face,
+            features,
+            plans: Vec::new(),
+        }
+    }
+
+    fn shape(&mut self, text: &str, preserve_ignorables: bool) -> ShapedRun {
+        let mut buffer = UnicodeBuffer::new();
+        buffer.push_str(text);
+        if preserve_ignorables {
+            buffer.set_flags(BufferFlags::PRESERVE_DEFAULT_IGNORABLES);
+        }
+        buffer.guess_segment_properties();
+        let direction = buffer.direction();
+        let script = Some(buffer.script()).filter(|s| *s != rustybuzz::script::UNKNOWN);
+        let index = match self
+            .plans
+            .iter()
+            .position(|(d, s, _)| *d == direction && *s == script)
+        {
+            Some(index) => index,
+            None => {
+                let plan = ShapePlan::new(self.face, direction, script, None, self.features);
+                self.plans.push((direction, script, plan));
+                self.plans.len() - 1
+            }
+        };
+        let glyphs = match self.plans.get(index) {
+            Some((_, _, plan)) => {
+                let output = rustybuzz::shape_with_plan(self.face, plan, buffer);
+                output
+                    .glyph_infos()
+                    .iter()
+                    .zip(output.glyph_positions())
+                    .map(|(info, pos)| ShapedGlyph {
+                        id: u16::try_from(info.glyph_id).unwrap_or(0),
+                        advance: pos.x_advance,
+                        x_offset: pos.x_offset,
+                        y_offset: pos.y_offset,
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        ShapedRun {
+            units_per_em: self.face.units_per_em(),
+            glyphs,
+        }
+    }
+}
+
+/// Fallback faces parsed for the duration of one layout call.
+type ParsedExtras<'a> = Vec<Option<ttf_parser::Face<'a>>>;
+
+impl FontLibrary {
+    fn new(extra: Vec<Vec<u8>>, system: Option<SystemFonts>) -> FontLibrary {
+        let mut bundled: [Option<rustybuzz::Face<'static>>; BUNDLED_COUNT] =
+            std::array::from_fn(|_| None);
+        for font in Font::ALL {
+            for weight in Weight::ALL {
+                if let Some(slot) = bundled.get_mut(bundled_slot(font, weight)) {
+                    *slot = rustybuzz::Face::from_slice(font_bytes(font, weight), 0);
+                }
+            }
+        }
+        let extra = extra
+            .into_iter()
+            .filter(|bytes| rustybuzz::Face::from_slice(bytes, 0).is_some())
+            .collect();
+        FontLibrary {
+            bundled,
+            extra,
+            system,
+        }
+    }
+
+    /// The bundled fonts, falling back to the system fonts for characters none of them has.
+    ///
+    /// The system fonts are only enumerated the first time a character is missing from every
+    /// bundled font. Prefer [`FontLibrary::global`], which shares one library and its caches.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    ///
+    /// let lib = FontLibrary::bundled();
+    /// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// assert!(lib.layout("Profit", &style).width() > 0.0);
+    /// ```
+    #[must_use]
+    pub fn bundled() -> FontLibrary {
+        FontLibrary::new(
+            Vec::new(),
+            Some(SystemFonts {
+                db: OnceLock::new(),
+                cache: Mutex::new(HashMap::new()),
+            }),
+        )
+    }
+
+    /// The bundled fonts plus the given fallback font files, without any system font lookup.
+    ///
+    /// Fallbacks are tried in order. Bytes that do not parse as a font are ignored. This gives
+    /// reproducible output regardless of the fonts installed on the machine.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    ///
+    /// let lib = FontLibrary::with_fallbacks(vec![b"not a font".to_vec()]);
+    /// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// assert!(lib.layout("AB", &style).width() > 0.0);
+    /// ```
+    #[must_use]
+    pub fn with_fallbacks(fonts: Vec<Vec<u8>>) -> FontLibrary {
+        FontLibrary::new(fonts, None)
+    }
+
+    /// A process-wide [`FontLibrary::bundled`] library, created on first use.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::FontLibrary;
+    ///
+    /// assert!(std::ptr::eq(FontLibrary::global(), FontLibrary::global()));
+    /// ```
+    #[must_use]
+    pub fn global() -> &'static FontLibrary {
+        static GLOBAL: OnceLock<FontLibrary> = OnceLock::new();
+        GLOBAL.get_or_init(FontLibrary::bundled)
+    }
+
+    fn bundled_face(&self, font: Font, weight: Weight) -> Option<&rustybuzz::Face<'static>> {
+        self.bundled
+            .get(bundled_slot(font, weight))
+            .and_then(Option::as_ref)
+    }
+
+    /// Shapes `text` with `style` and measures it.
+    ///
+    /// Characters missing from `style.font` are drawn with the other bundled families in the
+    /// same weight, then with the fallback fonts, and as `.notdef` if no font has them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    ///
+    /// let lib = FontLibrary::global();
+    /// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// let small = lib.layout("Signal", &style).width();
+    /// let large = lib.layout("Signal", &TextStyle { size: 20.0, ..style }).width();
+    /// assert!((large - 2.0 * small).abs() < 1e-3);
+    /// ```
+    #[must_use]
+    pub fn layout(&self, text: &str, style: &TextStyle) -> TextLayout {
+        let size = if style.size.is_finite() && style.size > 0.0 {
+            style.size
+        } else {
+            0.0
+        };
+        let primary = self.bundled_face(style.font, style.weight);
+        let (ascent, descent) = primary.map_or((0.0, 0.0), |face| {
+            let scale = size / face.units_per_em().max(1) as f32;
+            (
+                (f32::from(face.ascender()) * scale).max(0.0),
+                (-f32::from(face.descender()) * scale).max(0.0),
+            )
+        });
+        let mut layout = TextLayout {
+            runs: Vec::new(),
+            width: 0.0,
+            ascent,
+            descent,
+        };
+        if size == 0.0 || text.is_empty() {
+            return layout;
+        }
+
+        let runs = self.split_runs(text, style);
+        let features = features(style.tabular_figures);
+        let primary_key = FontKey::Bundled(style.font, style.weight);
+        let mut shaped: Vec<Option<(FontKey, ShapedRun)>> = runs.iter().map(|_| None).collect();
+        for key in distinct_keys(runs.iter().map(|run| run.font)) {
+            let shape_all =
+                |face: &rustybuzz::Face<'_>, shaped: &mut [Option<(FontKey, ShapedRun)>]| {
+                    let mut shaper = Shaper::new(face, &features);
+                    for (run, slot) in runs.iter().zip(shaped.iter_mut()) {
+                        if run.font == key {
+                            if let Some(run_text) = text.get(run.range.clone()) {
+                                *slot =
+                                    Some((key, shaper.shape(run_text, run.preserve_ignorables)));
+                            }
+                        }
+                    }
+                };
+            match key {
+                FontKey::Bundled(font, weight) => {
+                    if let Some(face) = self.bundled_face(font, weight) {
+                        shape_all(face, &mut shaped);
+                    }
+                }
+                FontKey::Extra(index) => {
+                    let face = self
+                        .extra
+                        .get(index)
+                        .and_then(|bytes| rustybuzz::Face::from_slice(bytes, 0));
+                    if let Some(face) = face {
+                        shape_all(&face, &mut shaped);
+                    }
+                }
+                FontKey::System(id) => {
+                    if let Some(db) = self.system.as_ref().and_then(|s| s.db.get()) {
+                        db.with_face_data(id, |data, index| {
+                            if let Some(face) = rustybuzz::Face::from_slice(data, index) {
+                                shape_all(&face, &mut shaped);
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // A fallback font that could not be loaded again (for example a system font file that
+        // disappeared) is replaced by the primary font, so the text keeps a width.
+        if let Some(face) = primary {
+            let mut shaper = Shaper::new(face, &features);
+            for (slot, run) in shaped.iter_mut().zip(&runs) {
+                if slot.is_none() {
+                    if let Some(run_text) = text.get(run.range.clone()) {
+                        *slot =
+                            Some((primary_key, shaper.shape(run_text, run.preserve_ignorables)));
+                    }
+                }
+            }
+        }
+
+        let mut pen = 0.0_f32;
+        for (key, run) in shaped.into_iter().flatten() {
+            let scale = size / run.units_per_em.max(1) as f32;
+            let mut units: i64 = 0;
+            let glyphs = run
+                .glyphs
+                .iter()
+                .map(|g| {
+                    let placed = PlacedGlyph {
+                        id: g.id,
+                        x: pen + (units + i64::from(g.x_offset)) as f32 * scale,
+                        y: -(g.y_offset as f32) * scale,
+                    };
+                    units += i64::from(g.advance);
+                    placed
+                })
+                .collect();
+            pen += units as f32 * scale;
+            layout.runs.push(GlyphRun {
+                font: key,
+                scale,
+                glyphs,
+            });
+        }
+        layout.width = pen;
+        layout
+    }
+
+    /// Splits `text` into byte ranges, each drawn with one font.
+    ///
+    /// Characters that [attach to the previous one](attaches_to_previous) join its run. At the
+    /// very start of the text they have nothing to attach to, so they form a primary-font run
+    /// that keeps them visible (as `.notdef` when the font lacks them) instead of shaping to
+    /// nothing.
+    fn split_runs(&self, text: &str, style: &TextStyle) -> Vec<TextRun> {
+        let primary_key = FontKey::Bundled(style.font, style.weight);
+        let primary = self.bundled_face(style.font, style.weight);
+        let mut extras: Option<ParsedExtras<'_>> = None;
+        let mut chosen: HashMap<char, FontKey> = HashMap::new();
+        let mut runs: Vec<TextRun> = Vec::new();
+        for (start, c) in text.char_indices() {
+            let end = start + c.len_utf8();
+            let (key, preserve) = if attaches_to_previous(c) {
+                runs.last().map_or((primary_key, true), |run| {
+                    (run.font, run.preserve_ignorables)
+                })
+            } else if primary.is_some_and(|face| glyph_for(face, c).is_some()) {
+                (primary_key, false)
+            } else if let Some(key) = chosen.get(&c) {
+                (*key, false)
+            } else {
+                let key = self
+                    .fallback_for(c, style, &mut extras)
+                    .unwrap_or(primary_key);
+                chosen.insert(c, key);
+                (key, false)
+            };
+            match runs.last_mut() {
+                Some(last) if last.font == key && last.preserve_ignorables == preserve => {
+                    last.range.end = end;
+                }
+                _ => runs.push(TextRun {
+                    font: key,
+                    preserve_ignorables: preserve,
+                    range: start..end,
+                }),
+            }
+        }
+        runs
+    }
+
+    /// The first font after the primary one that has a glyph for `c`.
+    fn fallback_for<'a>(
+        &'a self,
+        c: char,
+        style: &TextStyle,
+        extras: &mut Option<ParsedExtras<'a>>,
+    ) -> Option<FontKey> {
+        for font in Font::ALL {
+            if font == style.font {
+                continue;
+            }
+            if self
+                .bundled_face(font, style.weight)
+                .is_some_and(|face| glyph_for(face, c).is_some())
+            {
+                return Some(FontKey::Bundled(font, style.weight));
+            }
+        }
+        let extras = extras.get_or_insert_with(|| {
+            self.extra
+                .iter()
+                .map(|bytes| ttf_parser::Face::parse(bytes, 0).ok())
+                .collect()
+        });
+        for (index, face) in extras.iter().enumerate() {
+            if face.as_ref().is_some_and(|f| glyph_for(f, c).is_some()) {
+                return Some(FontKey::Extra(index));
+            }
+        }
+        self.system.as_ref()?;
+        self.system_font_for(c).map(FontKey::System)
+    }
+
+    /// The first system font, in database order, with an outlined glyph for `c`. Cached.
+    fn system_font_for(&self, c: char) -> Option<fontdb::ID> {
+        let system = self.system.as_ref()?;
+        if let Some(found) = lock(&system.cache).get(&c) {
+            return *found;
+        }
+        let db = system.db.get_or_init(|| {
+            let mut db = fontdb::Database::new();
+            db.load_system_fonts();
+            db
+        });
+        let found = db
+            .faces()
+            // macOS's LastResort font maps every code point to a placeholder symbol.
+            .filter(|info| !info.post_script_name.starts_with("LastResort"))
+            .find(|info| {
+                db.with_face_data(info.id, |data, index| {
+                    let Ok(face) = ttf_parser::Face::parse(data, index) else {
+                        return false;
+                    };
+                    // Bitmap-only glyphs (such as color emoji) have no outline to draw.
+                    glyph_for(&face, c).is_some_and(|g| {
+                        c.is_whitespace() || face.outline_glyph(g, &mut NoOutline).is_some()
+                    })
+                })
+                .unwrap_or(false)
+            })
+            .map(|info| info.id);
+        lock(&system.cache).insert(c, found);
+        found
+    }
+
+    /// Converts a layout into glyph outlines, in points, y-down.
+    ///
+    /// The baseline is at `origin.y` and the text starts at `origin.x`. Glyphs without outlines,
+    /// such as spaces, contribute nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, FontLibrary, Point, TextStyle, Weight};
+    ///
+    /// let lib = FontLibrary::global();
+    /// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 12.0, tabular_figures: false };
+    /// let layout = lib.layout("H", &style);
+    /// let (min, max) = lib.outline(&layout, Point { x: 10.0, y: 30.0 }).bounds().unwrap();
+    /// assert!(min.x >= 10.0 && max.x <= 10.0 + layout.width());
+    /// assert!(min.y < 30.0 && max.y <= 30.0 + 0.01);
+    /// ```
+    #[must_use]
+    pub fn outline(&self, layout: &TextLayout, origin: Point) -> Path {
+        let mut run_paths: Vec<Path> = layout.runs.iter().map(|_| Path::new()).collect();
+        for key in distinct_keys(layout.runs.iter().map(|run| run.font)) {
+            let draw_all = |face: &ttf_parser::Face<'_>, run_paths: &mut [Path]| {
+                for (run, path) in layout.runs.iter().zip(run_paths.iter_mut()) {
+                    if run.font == key {
+                        outline_run(face, run, origin, path);
+                    }
+                }
+            };
+            match key {
+                FontKey::Bundled(font, weight) => {
+                    if let Some(face) = self.bundled_face(font, weight) {
+                        draw_all(face, &mut run_paths);
+                    }
+                }
+                FontKey::Extra(index) => {
+                    let face = self
+                        .extra
+                        .get(index)
+                        .and_then(|bytes| ttf_parser::Face::parse(bytes, 0).ok());
+                    if let Some(face) = face {
+                        draw_all(&face, &mut run_paths);
+                    }
+                }
+                FontKey::System(id) => {
+                    if let Some(db) = self.system.as_ref().and_then(|s| s.db.get()) {
+                        db.with_face_data(id, |data, index| {
+                            if let Ok(face) = ttf_parser::Face::parse(data, index) {
+                                draw_all(&face, &mut run_paths);
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        let mut path = Path::new();
+        for run_path in &run_paths {
+            path.extend(run_path);
+        }
+        path
+    }
+}
+
+/// Appends the outlines of every glyph of `run` to `path`.
+fn outline_run(face: &ttf_parser::Face<'_>, run: &GlyphRun, origin: Point, path: &mut Path) {
+    for glyph in &run.glyphs {
+        let mut builder = PathBuilder {
+            path: Path::new(),
+            scale: run.scale,
+            dx: origin.x + glyph.x,
+            dy: origin.y + glyph.y,
+        };
+        // A glyph whose outline fails part-way contributes nothing rather than a broken shape.
+        if face
+            .outline_glyph(GlyphId(glyph.id), &mut builder)
+            .is_some()
+        {
+            path.extend(&builder.path);
+        }
+    }
+}
+
+/// The distinct keys of `keys`, in order of first appearance.
+fn distinct_keys(keys: impl Iterator<Item = FontKey>) -> Vec<FontKey> {
+    let mut distinct: Vec<FontKey> = Vec::new();
+    for key in keys {
+        if !distinct.contains(&key) {
+            distinct.push(key);
+        }
+    }
+    distinct
+}
+
+/// The OpenType features applied to every run.
+fn features(tabular_figures: bool) -> Vec<Feature> {
+    let mut features = vec![
+        Feature::new(Tag::from_bytes(b"kern"), 1, ..),
+        Feature::new(Tag::from_bytes(b"liga"), 1, ..),
+    ];
+    if tabular_figures {
+        features.push(Feature::new(Tag::from_bytes(b"tnum"), 1, ..));
+    }
+    features
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fonts::{Font, Weight};
+
+    fn style(font: Font, size: f32) -> TextStyle {
+        TextStyle {
+            font,
+            weight: Weight::Regular,
+            size,
+            tabular_figures: false,
+        }
+    }
+    fn omega_lib() -> FontLibrary {
+        FontLibrary::with_fallbacks(vec![
+            include_bytes!("../tests/fixtures/fallback-only.ttf").to_vec(),
+        ])
+    }
+
+    #[test]
+    fn width_scales_linearly_with_size() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        let a = lib.layout("Signal 2026", &style(Font::Inter, 10.0)).width();
+        let b = lib.layout("Signal 2026", &style(Font::Inter, 20.0)).width();
+        assert!(a > 0.0 && (b - 2.0 * a).abs() < 1e-3 * b, "{a} {b}");
+    }
+
+    #[test]
+    fn kerning_is_applied() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        let s = style(Font::Inter, 20.0);
+        let av = lib.layout("AV", &s).width();
+        let sep = lib.layout("A", &s).width() + lib.layout("V", &s).width();
+        assert!(av < sep, "AV {av} vs A+V {sep}");
+    }
+
+    #[test]
+    fn tabular_figures_have_equal_widths() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        for font in Font::ALL {
+            let s = TextStyle {
+                font,
+                weight: Weight::Regular,
+                size: 10.0,
+                tabular_figures: true,
+            };
+            let one = lib.layout("1111", &s).width();
+            let eight = lib.layout("8888", &s).width();
+            assert!((one - eight).abs() < 1e-3, "{font:?}: {one} vs {eight}");
+        }
+    }
+
+    #[test]
+    fn outline_sits_on_the_baseline_within_the_advance() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        let layout = lib.layout("Hg", &style(Font::Inter, 12.0));
+        let path = lib.outline(&layout, Point { x: 5.0, y: 50.0 });
+        let (min, max) = path.bounds().expect("non-empty");
+        assert!(min.x >= 5.0 - 1.0 && max.x <= 5.0 + layout.width() + 1.0);
+        assert!(
+            min.y < 50.0 && max.y > 50.0,
+            "H above and g below the baseline"
+        );
+        assert!(min.y >= 50.0 - layout.ascent() - 1.0 && max.y <= 50.0 + layout.descent() + 1.0);
+    }
+
+    #[test]
+    fn empty_and_degenerate_sizes() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        let empty = lib.layout("", &style(Font::Geist, 10.0));
+        assert_eq!(empty.width(), 0.0);
+        assert!(empty.ascent() > 0.0);
+        assert!(lib.outline(&empty, Point { x: 0.0, y: 0.0 }).is_empty());
+        for size in [0.0, -3.0, f32::NAN] {
+            let l = lib.layout("abc", &style(Font::Geist, size));
+            assert_eq!(l.width(), 0.0);
+            assert!(lib.outline(&l, Point { x: 0.0, y: 0.0 }).is_empty());
+        }
+    }
+
+    #[test]
+    fn missing_glyph_uses_fallback_font() {
+        let text = format!("A{}", crate::fonts::FALLBACK_TEST_CODEPOINT);
+        let with = omega_lib().layout(&text, &style(Font::Inter, 10.0));
+        let a_only = omega_lib().layout("A", &style(Font::Inter, 10.0)).width();
+        assert!(with.width() > a_only);
+        // The fallback glyph is an outlined Ω, so the outline must extend past the "A".
+        let path = omega_lib().outline(&with, Point { x: 0.0, y: 0.0 });
+        assert!(path.bounds().expect("outline").1.x > a_only);
+        // Without the fallback the code point is drawn as .notdef: width still positive, no panic.
+        let without = FontLibrary::with_fallbacks(vec![]).layout(&text, &style(Font::Inter, 10.0));
+        assert!(without.width() > a_only);
+    }
+
+    #[test]
+    fn corrupt_fallback_bytes_are_ignored() {
+        let lib = FontLibrary::with_fallbacks(vec![vec![0, 1, 2, 3], Vec::new()]);
+        assert!(lib.layout("AB", &style(Font::Inter, 10.0)).width() > 0.0);
+    }
+
+    #[test]
+    fn unsupported_text_never_panics() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        for text in [
+            "数据可视化",
+            "👍🏽",
+            "مرحبا",
+            "e\u{301}",
+            "\u{FE0F}",
+            "a\u{200D}b",
+        ] {
+            let l = lib.layout(text, &style(Font::IbmPlexSans, 10.0));
+            assert!(l.width() > 0.0, "{text:?}");
+            let _ = lib.outline(&l, Point { x: 0.0, y: 0.0 });
+        }
+    }
+
+    #[test]
+    fn concurrent_layout_is_deterministic() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        let s = style(Font::SourceSerif4, 11.0);
+        let reference = lib.outline(&lib.layout("Revenue −12.5%", &s), Point { x: 0.0, y: 0.0 });
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for _ in 0..50 {
+                        let p = lib
+                            .outline(&lib.layout("Revenue −12.5%", &s), Point { x: 0.0, y: 0.0 });
+                        assert_eq!(p.verbs(), reference.verbs());
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn long_text_layout_is_fast_enough() {
+        let lib = omega_lib();
+        let text: String = format!("{}数a", crate::fonts::FALLBACK_TEST_CODEPOINT).repeat(3_334);
+        let start = std::time::Instant::now();
+        let l = lib.layout(&text, &style(Font::Inter, 10.0));
+        assert!(l.width() > 0.0);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn global_library_is_shared() {
+        assert!(std::ptr::eq(FontLibrary::global(), FontLibrary::global()));
+    }
+
+    #[test]
+    fn font_library_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<FontLibrary>();
+        assert_send_sync::<TextLayout>();
+    }
+
+    #[test]
+    fn every_bundled_font_is_loaded_in_its_own_slot() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        let mut slots: Vec<usize> = Font::ALL
+            .iter()
+            .flat_map(|&f| Weight::ALL.iter().map(move |&w| bundled_slot(f, w)))
+            .collect();
+        slots.sort_unstable();
+        slots.dedup();
+        assert_eq!(slots.len(), BUNDLED_COUNT);
+        assert!(lib.bundled.iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn missing_characters_fall_back_to_other_bundled_families_first() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        let mut checked = 0;
+        for font in Font::ALL {
+            let face = lib
+                .bundled_face(font, Weight::Regular)
+                .expect("bundled font parses");
+            let missing = crate::fonts::EXTENDED_CODEPOINTS
+                .iter()
+                .flat_map(|&(lo, hi)| lo..=hi)
+                .filter_map(char::from_u32)
+                .find(|&c| glyph_for(face, c).is_none() && !attaches_to_previous(c));
+            let Some(c) = missing else { continue };
+            let layout = lib.layout(&format!("a{c}"), &style(font, 10.0));
+            let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
+            assert_eq!(fonts.len(), 2, "{font:?} U+{:04X}: {fonts:?}", u32::from(c));
+            assert_eq!(fonts[0], FontKey::Bundled(font, Weight::Regular));
+            assert!(
+                matches!(fonts[1], FontKey::Bundled(other, Weight::Regular) if other != font),
+                "{font:?} U+{:04X}: {fonts:?}",
+                u32::from(c)
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "every family covers every extended code point");
+    }
+
+    #[test]
+    fn marks_and_invisible_characters_stay_in_the_previous_run() {
+        let lib = omega_lib();
+        let fallback = crate::fonts::FALLBACK_TEST_CODEPOINT;
+        let s = style(Font::Inter, 10.0);
+        for text in [
+            format!("{fallback}\u{301}"),
+            format!("{fallback}\u{FE0F}"),
+            format!("{fallback}\u{200D}"),
+        ] {
+            let layout = lib.layout(&text, &s);
+            assert_eq!(layout.runs.len(), 1, "{text:?}");
+            assert_eq!(layout.runs[0].font, FontKey::Extra(0), "{text:?}");
+        }
+        // A hidden joiner adds no width.
+        let joined = lib.layout("a\u{200D}b", &s).width();
+        assert!((joined - lib.layout("ab", &s).width()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn repeated_fallback_characters_form_one_run() {
+        let fallback = crate::fonts::FALLBACK_TEST_CODEPOINT;
+        let text = format!("ab{fallback}{fallback}{fallback}cd");
+        let layout = omega_lib().layout(&text, &style(Font::Geist, 10.0));
+        let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
+        let primary = FontKey::Bundled(Font::Geist, Weight::Regular);
+        assert_eq!(fonts, [primary, FontKey::Extra(0), primary]);
+    }
+
+    #[test]
+    fn layout_is_empty_only_without_glyphs() {
+        let lib = FontLibrary::with_fallbacks(vec![]);
+        assert!(lib.layout("", &style(Font::Inter, 10.0)).is_empty());
+        assert!(lib.layout("abc", &style(Font::Inter, 0.0)).is_empty());
+        assert!(!lib.layout("abc", &style(Font::Inter, 10.0)).is_empty());
+        assert!(lib.layout("", &style(Font::Inter, f32::INFINITY)).ascent() == 0.0);
+    }
+
+    /// Depends on the fonts installed on the machine, so it is not run by default:
+    /// `cargo test -p umber-core system_fallback -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "depends on the system fonts"]
+    fn system_fallback_draws_cjk() {
+        let lib = FontLibrary::bundled();
+        let s = style(Font::Inter, 10.0);
+        let name = |key: FontKey| match key {
+            FontKey::System(id) => lib
+                .system
+                .as_ref()
+                .and_then(|system| system.db.get())
+                .and_then(|db| db.face(id))
+                .map_or_else(String::new, |info| info.post_script_name.clone()),
+            other => format!("{other:?}"),
+        };
+        let layout = lib.layout("A数据可视化", &s);
+        let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
+        println!(
+            "runs: {:?}, width {}",
+            fonts.iter().map(|&k| name(k)).collect::<Vec<_>>(),
+            layout.width()
+        );
+        assert!(matches!(
+            fonts.as_slice(),
+            [FontKey::Bundled(..), FontKey::System(_)]
+        ));
+        let path = lib.outline(&layout, Point { x: 0.0, y: 0.0 });
+        let a_only = lib.layout("A", &s).width();
+        assert!(path.bounds().expect("outline").1.x > a_only + 30.0);
+        // The second lookup of the same characters is served from the cache.
+        let start = std::time::Instant::now();
+        let again = lib.layout(&"数据可视化".repeat(2_000), &s);
+        println!("10,000 cached CJK characters: {:?}", start.elapsed());
+        assert!(again.width() > 0.0);
+        // Emoji and Arabic must not panic, whatever the system offers.
+        for text in ["👍🏽", "مرحبا", "e\u{301}", "\u{FE0F}", "a\u{200D}b"] {
+            let l = lib.layout(text, &s);
+            println!(
+                "{text:?}: width {}, runs {:?}",
+                l.width(),
+                l.runs.iter().map(|r| name(r.font)).collect::<Vec<_>>()
+            );
+            assert!(l.width() > 0.0, "{text:?}");
+            let path = lib.outline(&l, Point { x: 0.0, y: 0.0 });
+            println!(
+                "  outline: {} verbs, bounds {:?}",
+                path.verbs().len(),
+                path.bounds()
+            );
+        }
+    }
+}

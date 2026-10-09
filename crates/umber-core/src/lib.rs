@@ -17,16 +17,20 @@ pub mod color;
 pub mod downsample;
 mod error;
 pub mod fonts;
+pub mod geometry;
 pub mod scale;
+pub mod text;
 pub mod ticks;
 
 pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
 pub use fonts::{Font, Weight};
+pub use geometry::{Path, PathVerb, Point};
 pub use scale::{
     CategoryScale, ContinuousScale, LogBase, MAX_MAGNITUDE, MIN_LOG_VALUE, ScaleKind, Transform,
 };
+pub use text::{FontLibrary, TextLayout, TextStyle};
 pub use ticks::Tick;
 
 /// The version of this crate, as written in `Cargo.toml`.

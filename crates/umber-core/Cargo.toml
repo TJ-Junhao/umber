@@ -9,6 +9,8 @@ repository.workspace = true
 include = ["src/**/*", "fonts/**/*", "tests/fixtures/**/*", "Cargo.toml"]
 
 [dependencies]
+fontdb = "0.24.0"
+rustybuzz = "0.20.1"
 thiserror.workspace = true
 ttf-parser = "0.25.1"
 
