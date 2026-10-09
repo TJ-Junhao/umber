@@ -1,0 +1,16 @@
+.superpowers/
+target/
+__pycache__/
+*.so
+*.pyd
+.venv/
+dist/
+.pytest_cache/
+.mypy_cache/
+tests/golden/**/*.diff.png
+.claude/
+.codex/
+.agent/
+CLAUDE.md
+AGENT.md
+AGENTS.md
