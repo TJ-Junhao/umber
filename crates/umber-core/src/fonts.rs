@@ -137,6 +137,21 @@ pub const EXTENDED_CODEPOINTS: &[(u32, u32)] = &[
     (0x2031, 0x2038),
 ];
 
+/// A private-use code point that no bundled font maps.
+///
+/// Tests use it with `tests/fixtures/fallback-only.ttf`, a font whose only glyph is mapped to
+/// this code point. Text containing it can only be drawn by a fallback font, which exercises the
+/// fallback path even though every bundled family is complete enough for ordinary text.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::fonts::FALLBACK_TEST_CODEPOINT;
+///
+/// assert!(('\u{E000}'..='\u{F8FF}').contains(&FALLBACK_TEST_CODEPOINT));
+/// ```
+pub const FALLBACK_TEST_CODEPOINT: char = '\u{E000}';
+
 /// The TrueType bytes of a bundled font.
 ///
 /// # Examples
@@ -242,6 +257,23 @@ mod tests {
                 "no bundled font has U+{cp:04X}"
             );
         }
+    }
+
+    #[test]
+    fn fallback_codepoint_is_in_no_bundled_font_but_in_the_fixture() {
+        for font in Font::ALL {
+            for weight in Weight::ALL {
+                let face = ttf_parser::Face::parse(font_bytes(font, weight), 0)
+                    .unwrap_or_else(|e| panic!("{font:?} {weight:?}: {e}"));
+                assert!(
+                    face.glyph_index(FALLBACK_TEST_CODEPOINT).is_none(),
+                    "{font:?} {weight:?} maps {FALLBACK_TEST_CODEPOINT:?}"
+                );
+            }
+        }
+        let fixture = include_bytes!("../tests/fixtures/fallback-only.ttf");
+        let face = ttf_parser::Face::parse(fixture, 0).expect("fixture parses");
+        assert!(face.glyph_index(FALLBACK_TEST_CODEPOINT).is_some());
     }
 
     #[test]

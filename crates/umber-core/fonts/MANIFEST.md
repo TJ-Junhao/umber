@@ -38,11 +38,11 @@ has them, and each is covered by at least one bundled font.
 - Asset: `geist-font-v1.7.2.zip`, SHA-256 `7fc800d2ac6b92844895196e5041aca55d814c15db70c44f79b3b83ab82b04e2`
 - License: `geist-font/OFL.txt` -> `LICENSES/Geist-OFL.txt`
 - Reserved Font Name: none declared in the header
-- Subset: yes (required and extended code points + U+03A9, features kern/liga/tnum, no hinting)
+- Subset: yes (required and extended code points, features kern/liga/tnum, no hinting)
 - Extended code points this family lacks: U+0114, U+0115, U+012C, U+012D, U+0138, U+013F, U+0140, U+0149, U+014E, U+014F, U+017F, U+2010, U+2011, U+2012, U+2015, U+2016, U+2017, U+201B, U+201F, U+2023, U+2024, U+2025, U+2027, U+2031, U+2034, U+2035, U+2036, U+2037, U+2038
 - Files:
-  - `Geist-Regular.ttf` from `geist-font/Geist/ttf/Geist-Regular.ttf`: 31,012 bytes (original 126,048)
-  - `Geist-SemiBold.ttf` from `geist-font/Geist/ttf/Geist-SemiBold.ttf`: 31,260 bytes (original 127,872)
+  - `Geist-Regular.ttf` from `geist-font/Geist/ttf/Geist-Regular.ttf`: 30,892 bytes (original 126,048)
+  - `Geist-SemiBold.ttf` from `geist-font/Geist/ttf/Geist-SemiBold.ttf`: 31,140 bytes (original 127,872)
 
 ## Inter
 
@@ -50,11 +50,11 @@ has them, and each is covered by at least one bundled font.
 - Asset: `Inter-4.1.zip`, SHA-256 `9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e`
 - License: `LICENSE.txt` -> `LICENSES/Inter-OFL.txt`
 - Reserved Font Name: none declared in the header
-- Subset: yes (required and extended code points + U+03A9, features kern/liga/tnum, no hinting)
+- Subset: yes (required and extended code points, features kern/liga/tnum, no hinting)
 - Extended code points this family lacks: U+0149
 - Files:
-  - `Inter-Regular.ttf` from `extras/ttf/Inter-Regular.ttf`: 41,432 bytes (original 411,640)
-  - `Inter-SemiBold.ttf` from `extras/ttf/Inter-SemiBold.ttf`: 42,276 bytes (original 419,744)
+  - `Inter-Regular.ttf` from `extras/ttf/Inter-Regular.ttf`: 41,152 bytes (original 411,640)
+  - `Inter-SemiBold.ttf` from `extras/ttf/Inter-SemiBold.ttf`: 41,996 bytes (original 419,744)
 
 ## JetBrains Mono
 
@@ -62,15 +62,15 @@ has them, and each is covered by at least one bundled font.
 - Asset: `JetBrainsMono-2.304.zip`, SHA-256 `6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf`
 - License: `OFL.txt` -> `LICENSES/JetBrainsMono-OFL.txt`
 - Reserved Font Name: none declared in the header
-- Subset: yes (required and extended code points + U+03A9, features kern/liga/tnum, no hinting)
+- Subset: yes (required and extended code points, features kern/liga/tnum, no hinting)
 - Extended code points this family lacks: U+0132, U+0133, U+2011, U+2012, U+2015, U+2017, U+2023, U+2025, U+2027, U+2031, U+2035, U+2036, U+2037, U+2038
 - Files:
-  - `JetBrainsMono-Regular.ttf` from `fonts/ttf/JetBrainsMono-Regular.ttf`: 24,616 bytes (original 273,900)
-  - `JetBrainsMono-SemiBold.ttf` from `fonts/ttf/JetBrainsMono-SemiBold.ttf`: 24,636 bytes (original 277,092)
+  - `JetBrainsMono-Regular.ttf` from `fonts/ttf/JetBrainsMono-Regular.ttf`: 24,492 bytes (original 273,900)
+  - `JetBrainsMono-SemiBold.ttf` from `fonts/ttf/JetBrainsMono-SemiBold.ttf`: 24,504 bytes (original 277,092)
 
 ## Test fixture
 
-- `../tests/fixtures/omega-only.ttf`: Inter Regular subset to U+03A9 only, 1,952 bytes (not part of the font budget).
+- `../tests/fixtures/fallback-only.ttf`: one glyph (Inter Regular's U+03A9 Omega outline) mapped only to U+E000, a private-use code point that no bundled font maps (checked by this script and by a Rust test). It exists to exercise the fallback path of text layout. 1,952 bytes, not part of the font budget.
 
 ## Sizes
 
@@ -78,11 +78,11 @@ has them, and each is covered by at least one bundled font.
 - `SourceSerif4-SemiBold.ttf`: 272,088 bytes
 - `IBMPlexSans-Regular.ttf`: 200,500 bytes
 - `IBMPlexSans-SemiBold.ttf`: 202,632 bytes
-- `Geist-Regular.ttf`: 31,012 bytes
-- `Geist-SemiBold.ttf`: 31,260 bytes
-- `Inter-Regular.ttf`: 41,432 bytes
-- `Inter-SemiBold.ttf`: 42,276 bytes
-- `JetBrainsMono-Regular.ttf`: 24,616 bytes
-- `JetBrainsMono-SemiBold.ttf`: 24,636 bytes
+- `Geist-Regular.ttf`: 30,892 bytes
+- `Geist-SemiBold.ttf`: 31,140 bytes
+- `Inter-Regular.ttf`: 41,152 bytes
+- `Inter-SemiBold.ttf`: 41,996 bytes
+- `JetBrainsMono-Regular.ttf`: 24,492 bytes
+- `JetBrainsMono-SemiBold.ttf`: 24,504 bytes
 
-Total: 1,132,320 bytes of 3,145,728 allowed (36.0%).
+Total: 1,131,264 bytes of 3,145,728 allowed (36.0%).

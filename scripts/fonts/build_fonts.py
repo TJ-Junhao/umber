@@ -2,13 +2,16 @@
 
 Run from the repository root:
 
-    uv run --with fonttools python scripts/fonts/build_fonts.py
+    uv run --with fonttools==4.66.1 python scripts/fonts/build_fonts.py
 
 Pinned release assets are downloaded into a temporary directory and checked against the SHA-256
 values below; any mismatch aborts the build. Families whose license header declares a Reserved
 Font Name are copied byte-for-byte (subsetting would create a Modified Version). Other families
-are subset to the required code points. The script also writes the license files, the test
-fixture ``omega-only.ttf`` and ``MANIFEST.md``.
+are subset to the required and extended code points. The script also writes the license files,
+the test fixture ``fallback-only.ttf`` and ``MANIFEST.md``.
+
+The output is reproducible: fonttools is pinned and timestamps are never recalculated, so two
+runs produce byte-identical files.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CORE = ROOT / "crates" / "umber-core"
 FONT_DIR = CORE / "fonts"
 LICENSE_DIR = FONT_DIR / "LICENSES"
-FIXTURE = CORE / "tests" / "fixtures" / "omega-only.ttf"
+FIXTURE = CORE / "tests" / "fixtures" / "fallback-only.ttf"
 
 BUDGET = 3 * 1024 * 1024
 
@@ -62,8 +65,12 @@ EXTENDED_CODEPOINTS = [
     (0x2027, 0x2027),
     (0x2031, 0x2038),
 ]
-# Kept in the subsets so that one Greek letter exists in bundled fonts for future use.
-EXTRA_CODEPOINTS = [0x03A9]
+# The fallback test fixture holds one glyph (Inter's Omega) mapped to the first code point in
+# this private-use range that no bundled font maps. `FALLBACK_TEST_CODEPOINT` in
+# `crates/umber-core/src/fonts.rs` must equal it.
+FALLBACK_SEARCH = (0xE000, 0xF8FF)
+FALLBACK_GLYPH_SOURCE = 0x03A9
+FONTS_RS = CORE / "src" / "fonts.rs"
 
 FEATURES = ["kern", "liga", "tnum"]
 WEIGHTS = ["Regular", "SemiBold"]
@@ -191,7 +198,7 @@ def reserved_font_name_line(license_text: str) -> str | None:
     return None
 
 
-def subset_font(data: bytes, codepoints: list[int], features: list[str]) -> bytes:
+def subset_to_font(data: bytes, codepoints: list[int], features: list[str]) -> TTFont:
     """Subset a font to the code points and layout features, without hinting."""
     options = subset.Options()
     options.layout_features = features
@@ -200,13 +207,56 @@ def subset_font(data: bytes, codepoints: list[int], features: list[str]) -> byte
     options.name_languages = ["*"]
     options.notdef_outline = True
     options.glyph_names = False
-    font = TTFont(io.BytesIO(data))
+    options.recalc_timestamp = False
+    font = TTFont(io.BytesIO(data), recalcTimestamp=False)
     subsetter = subset.Subsetter(options)
     subsetter.populate(unicodes=codepoints)
     subsetter.subset(font)
+    return font
+
+
+def font_bytes(font: TTFont) -> bytes:
+    """Serialize a font."""
     out = io.BytesIO()
     font.save(out)
     return out.getvalue()
+
+
+def subset_font(data: bytes, codepoints: list[int], features: list[str]) -> bytes:
+    """Subset a font and return the serialized result."""
+    return font_bytes(subset_to_font(data, codepoints, features))
+
+
+def fallback_codepoint(fonts: list[bytes]) -> int:
+    """Return the first code point in the search range that none of the fonts maps."""
+    mapped: set[int] = set()
+    for data in fonts:
+        mapped.update(TTFont(io.BytesIO(data), recalcTimestamp=False).getBestCmap())
+    for cp in range(FALLBACK_SEARCH[0], FALLBACK_SEARCH[1] + 1):
+        if cp not in mapped:
+            return cp
+    fail("no free code point for the fallback fixture")
+    return 0
+
+
+def build_fallback_fixture(inter_regular: bytes, codepoint: int) -> bytes:
+    """Build a font with one glyph (Inter's Omega) mapped only to the given code point."""
+    font = subset_to_font(inter_regular, [FALLBACK_GLYPH_SOURCE], [])
+    for table in font["cmap"].tables:
+        glyph = table.cmap.get(FALLBACK_GLYPH_SOURCE)
+        if glyph is None:
+            fail("fallback fixture: Omega missing from Inter Regular")
+        table.cmap = {codepoint: glyph}
+    return font_bytes(font)
+
+
+def declared_fallback_codepoint() -> int:
+    """Read `FALLBACK_TEST_CODEPOINT` from fonts.rs."""
+    text = FONTS_RS.read_text(encoding="utf-8")
+    match = re.search(r"FALLBACK_TEST_CODEPOINT: char = '\\u\{([0-9A-Fa-f]+)\}'", text)
+    if match is None:
+        fail("FALLBACK_TEST_CODEPOINT not found in fonts.rs")
+    return int(match.group(1), 16)
 
 
 def expand(ranges: list[tuple[int, int]]) -> list[int]:
@@ -216,14 +266,14 @@ def expand(ranges: list[tuple[int, int]]) -> list[int]:
 
 def check_static_truetype(label: str, data: bytes) -> None:
     """Exit unless the font is a static (non-variable) TrueType font."""
-    font = TTFont(io.BytesIO(data))
+    font = TTFont(io.BytesIO(data), recalcTimestamp=False)
     if "fvar" in font or "glyf" not in font:
         fail(f"{label}: not a static TrueType font")
 
 
 def lacking(data: bytes, codepoints: list[int]) -> list[int]:
     """Return the code points that the font has no glyph for."""
-    cmap = TTFont(io.BytesIO(data)).getBestCmap()
+    cmap = TTFont(io.BytesIO(data), recalcTimestamp=False).getBestCmap()
     return [cp for cp in codepoints if cp not in cmap]
 
 
@@ -256,7 +306,7 @@ def main() -> None:
 
             rfn = reserved_font_name_line(license_text)
             do_subset = rfn is None
-            codepoints = required + extended + EXTRA_CODEPOINTS
+            codepoints = required + extended
 
             file_lines = []
             lacks_extended: set[int] = set()
@@ -294,7 +344,7 @@ def main() -> None:
                         + (
                             "no, files are byte-for-byte copies of the archive"
                             if not do_subset
-                            else "yes (required and extended code points + U+03A9, features "
+                            else "yes (required and extended code points, features "
                             "kern/liga/tnum, no hinting)"
                         ),
                         "- Extended code points this family lacks: "
@@ -311,6 +361,12 @@ def main() -> None:
         problems.append(f"extended code points in no bundled font: {fmt_cps(uncovered)}")
     if inter_regular is None:
         fail("Inter Regular not found")
+    fallback = fallback_codepoint(list(outputs.values()))
+    if fallback != declared_fallback_codepoint():
+        fail(
+            f"fonts.rs declares a different FALLBACK_TEST_CODEPOINT; the first free code point "
+            f"is U+{fallback:04X}"
+        )
     total = sum(size for _, size in sizes)
     if total > BUDGET:
         problems.append(f"font budget exceeded: {total:,} > {BUDGET:,} bytes")
@@ -325,7 +381,7 @@ def main() -> None:
         (FONT_DIR / name).write_bytes(data)
     for name, text in licenses.items():
         (LICENSE_DIR / name).write_bytes(text)
-    fixture = subset_font(inter_regular, EXTRA_CODEPOINTS, [])
+    fixture = build_fallback_fixture(inter_regular, fallback)
     FIXTURE.write_bytes(fixture)
 
     manifest = [
@@ -342,8 +398,10 @@ def main() -> None:
         *sections,
         "## Test fixture",
         "",
-        f"- `../tests/fixtures/omega-only.ttf`: Inter Regular subset to U+03A9 only,"
-        f" {len(fixture):,} bytes (not part of the font budget).",
+        f"- `../tests/fixtures/fallback-only.ttf`: one glyph (Inter Regular's U+03A9 Omega outline)"
+        f" mapped only to U+{fallback:04X}, a private-use code point that no bundled font maps"
+        f" (checked by this script and by a Rust test). It exists to exercise the fallback path of"
+        f" text layout. {len(fixture):,} bytes, not part of the font budget.",
         "",
         "## Sizes",
         "",
