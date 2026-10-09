@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test -p umber-core
+      - run: cargo test --doc -p umber-core
+
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12", "3.13", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked --group dev
+      - run: uv run maturin develop --uv
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run mypy
+      - run: uv run python -m mypy.stubtest umber._umber
+      - run: uv run pytest -q
+
+  ci-ok:
+    if: always()
+    needs: [rust, python]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every needed job to have succeeded
+        run: |
+          echo "rust=${{ needs.rust.result }} python=${{ needs.python.result }}"
+          test "${{ needs.rust.result }}" = "success"
+          test "${{ needs.python.result }}" = "success"
