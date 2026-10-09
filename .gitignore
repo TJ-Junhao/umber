@@ -14,3 +14,5 @@ tests/golden/**/*.diff.png
 CLAUDE.md
 AGENT.md
 AGENTS.md
+docs/superpowers/
+docs/design/
