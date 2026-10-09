@@ -6,9 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+include = ["src/**/*", "fonts/**/*", "tests/fixtures/**/*", "Cargo.toml"]
 
 [dependencies]
 thiserror.workspace = true
+ttf-parser = "0.25.1"
 
 [dev-dependencies]
 proptest = "1.11"
