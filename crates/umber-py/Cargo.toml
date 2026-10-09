@@ -1,4 +1,19 @@
 [package]
 name = "umber-py"
+description = "PyO3 bindings for umber (internal, not published)."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "_umber"
+crate-type = ["cdylib"]
+
+[dependencies]
+umber-core = { path = "../umber-core" }
+pyo3.workspace = true
+
+[lints]
+workspace = true
