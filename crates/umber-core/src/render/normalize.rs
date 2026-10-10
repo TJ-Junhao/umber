@@ -111,10 +111,10 @@ impl NormalizedPath {
 /// - A subpath with no segment is dropped.
 pub(crate) fn normalize_path(path: &Path) -> Option<NormalizedPath> {
     fn flush(out: &mut Vec<Subpath>, cur: &mut Option<Subpath>) {
-        if let Some(sub) = cur.take() {
-            if !sub.segments.is_empty() {
-                out.push(sub);
-            }
+        if let Some(sub) = cur.take()
+            && !sub.segments.is_empty()
+        {
+            out.push(sub);
         }
     }
     fn begin(p: Point) -> Subpath {

@@ -1,0 +1,19 @@
+Third-party licenses
+
+The umber Python wheel statically links the Rust crates listed below.
+Each crate is available under the license shown, and its copyright
+notice is reproduced here as that license requires.
+
+{{#each licenses}}
+================================================================================
+{{{name}}}
+================================================================================
+
+Used by:
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

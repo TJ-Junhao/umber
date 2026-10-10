@@ -643,26 +643,26 @@ impl ContinuousScale {
     fn log_values_with_ends(&self, base: f64, target: usize) -> Vec<f64> {
         let (lo, hi) = (self.lo, self.hi);
         let mut values = Vec::new();
-        if let (Some(first), Some(last)) = (ceil_exp(lo, base), floor_exp(hi, base)) {
-            if first <= last {
-                let span = last.saturating_sub(first);
-                let count = span.saturating_add(1);
-                let target_i = target.max(2) as i64;
-                if count <= target_i.saturating_mul(2) {
-                    let mut e = first;
-                    while e <= last {
-                        values.push(power(base, e));
-                        match e.checked_add(1) {
-                            Some(next) => e = next,
-                            None => break,
-                        }
+        if let (Some(first), Some(last)) = (ceil_exp(lo, base), floor_exp(hi, base))
+            && first <= last
+        {
+            let span = last.saturating_sub(first);
+            let count = span.saturating_add(1);
+            let target_i = target.max(2) as i64;
+            if count <= target_i.saturating_mul(2) {
+                let mut e = first;
+                while e <= last {
+                    values.push(power(base, e));
+                    match e.checked_add(1) {
+                        Some(next) => e = next,
+                        None => break,
                     }
-                } else {
-                    let steps = (target_i - 1) as f64;
-                    for i in 0..target_i {
-                        let offset = (i as f64 * span as f64 / steps).round() as i64;
-                        values.push(power(base, first.saturating_add(offset)));
-                    }
+                }
+            } else {
+                let steps = (target_i - 1) as f64;
+                for i in 0..target_i {
+                    let offset = (i as f64 * span as f64 / steps).round() as i64;
+                    values.push(power(base, first.saturating_add(offset)));
                 }
             }
         }

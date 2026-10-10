@@ -619,11 +619,11 @@ fn draw_markers(
         if left >= width || top >= height || left + w <= 0 || top + h <= 0 {
             continue;
         }
-        if let Some((il, it, ir, ib)) = interior {
-            if left < il || top < it || left + w > ir || top + h > ib {
-                marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
-                continue;
-            }
+        if let Some((il, it, ir, ib)) = interior
+            && (left < il || top < it || left + w > ir || top + h > ib)
+        {
+            marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
+            continue;
         }
         if let Some(sprite) = sprites.phase(&marker, scale, px, py) {
             blit_over(pixmap, sprite, left, top, mask);
