@@ -82,8 +82,6 @@ base_manifest() {
   printf '%s  scene/plot.txt\n' ppp4
   printf '%s  png/x.dpi72.png.dpi200.png\n' xxx1
   printf '%s  png/x.dpi72.png\n' xxx2
-  printf '%s  scene/chart one.txt\n' sp1
-  printf '%s  scene/chart two.txt\n' sp2
 }
 base_manifest >"$repo/$manifest_rel"
 : >"$repo/$intended_rel"
@@ -137,10 +135,6 @@ expect_extend "one figure name covers scene, svg and png" 0 "3 changed" 's/^aaa[
 expect_extend "png change is compared" 1 "png/fig-a.dpi72.png (UNLISTED)" 's/^aaa3/zzz/' ""
 expect_extend "listed png change passes" 0 "1 changed" 's/^aaa3/zzz/' "fig-a\n"
 
-# Paths with whitespace stay distinct entries.
-expect_extend "change to a path with a space" 1 "scene/chart two.txt (UNLISTED)" 's/^sp2/sp9/' ""
-expect_extend "a space path change leaves its sibling alone" 0 "1 changed" 's/^sp2/sp9/' "chart two\n"
-expect_extend "removal of a path with a space" 1 "removed scene/chart one.txt (UNLISTED)" '/^sp1/d' ""
 expect_extend "duplicate path in the tree manifest" 1 "listed twice in a manifest: scene/fig-b.txt" "$dup_line" ""
 
 # A standalone output and a figure of the same name are different cases.
@@ -159,6 +153,91 @@ expect_extend "figure named plot.txt is not plot" 1 "scene/plot.txt.txt (UNLISTE
 expect_extend "figure plot.txt leaves figure plot alone" 1 "listed but unchanged: plot.txt" 's/^ppp4/zzz/' "plot.txt\n"
 expect_extend "png figure named x.dpi72.png" 0 "1 changed" 's/^xxx1/zzz/' "x.dpi72.png\n"
 expect_extend "png figure x is a different case" 0 "1 changed" 's/^xxx2/zzz/' "x\n"
+
+# Every path of both manifests follows the naming rule: a known kind, one level, and a file name
+# of ASCII letters, digits, '.', '_' and '-'.
+nbsp="$(printf '\302\240')"
+bad_line() {
+  # shellcheck disable=SC2016
+  printf '$a\\\nbad1  %s\n' "$1"
+}
+expect_extend "nested figure path" 1 "scene/errors/api.txt" "$(bad_line 'scene/errors/api.txt')" ""
+expect_extend "unknown kind" 1 "other/a.txt" "$(bad_line 'other/a.txt')" ""
+expect_extend "no kind directory" 1 "a.txt" "$(bad_line 'a.txt')" ""
+expect_extend "hash in a name" 1 "scene/a#b.txt" "$(bad_line 'scene/a#b.txt')" ""
+expect_extend "space in a name" 1 "scene/a b.txt" "$(bad_line 'scene/a b.txt')" ""
+expect_extend "tab in a name" 1 "scene/a" "$(bad_line "$(printf 'scene/a\tb.txt')")" ""
+expect_extend "no-break space in a name" 1 "scene/aM-BM- b.txt" "$(bad_line "scene/a${nbsp}b.txt")" ""
+expect_extend "non-ASCII letter in a name" 1 "scene/M-CM-)" "$(bad_line "scene/$(printf '\303\251').txt")" ""
+expect_extend "leading dot in a name" 1 "scene/.a.txt" "$(bad_line 'scene/.a.txt')" ""
+expect_extend "a valid new name" 0 "1 added" "$(bad_line 'scene/a_b-c.1.txt')" ""
+
+# The base manifest is held to the rule too.
+repo_bad="$(mktemp -d "${TMPDIR:-/tmp}/umber-gate-extend.XXXXXX")"
+trap 'rm -rf "$shims" "$repo" "$repo_bad" "$cshims" "$work"' EXIT
+mkdir -p "$repo_bad/scripts" "$repo_bad/$(dirname "$manifest_rel")"
+cp "$script" "$repo_bad/scripts/check-refactor-output.sh"
+{ base_manifest; printf 'bad1  scene/a#b.txt\n'; } >"$repo_bad/$manifest_rel"
+git -C "$repo_bad" init -q
+git -C "$repo_bad" add -A
+git -C "$repo_bad" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q -m base
+out="$("$repo_bad/scripts/check-refactor-output.sh" extend HEAD 2>&1)"
+status=$?
+if [[ "$status" -ne 1 ]] || ! printf '%s\n' "$out" | grep -q -F "scene/a#b.txt"; then
+  echo "FAIL bad path in the base manifest: exit $status" >&2
+  echo "$out" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   bad path in the base manifest"
+fi
+
+# `manifest` validates the generated files. A stand-in cargo writes the files named in
+# UMBER_TEST_FILES (one per line, relative to the output directory) into the output directory.
+cshims="$(mktemp -d "${TMPDIR:-/tmp}/umber-gate-cargo.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/umber-gate-work.XXXXXX")"
+cat >"$cshims/cargo" <<'SHIM'
+#!/bin/bash
+# The output directory is the last argument.
+for dir in "$@"; do :; done
+while IFS= read -r f; do
+  mkdir -p "$dir/$(dirname "$f")"
+  echo x >"$dir/$f"
+done <"$UMBER_TEST_FILES"
+SHIM
+chmod +x "$cshims/cargo"
+
+# expect_manifest <description> <expected-status> <expected-output-fragment> <file-list>
+expect_manifest() {
+  local what="$1" want="$2" fragment="$3" list="$4" status out
+  printf '%s\n' "$list" >"$work/files"
+  out="$(UMBER_TEST_FILES="$work/files" PATH="$cshims:$PATH" \
+    "$repo/scripts/check-refactor-output.sh" manifest "$work/out.txt" 2>&1)"
+  status=$?
+  if [[ "$status" -ne "$want" ]]; then
+    echo "FAIL $what: expected exit $want, got $status" >&2
+    echo "$out" >&2
+    failures=$((failures + 1))
+  elif ! printf '%s\n' "$out" | grep -q -F -- "$fragment"; then
+    echo "FAIL $what: output lacks '$fragment'" >&2
+    echo "$out" >&2
+    failures=$((failures + 1))
+  else
+    echo "ok   $what"
+  fi
+}
+
+many() {
+  local i
+  for i in $(seq 1 1500); do echo "scene/a-long-and-unremarkable-figure-name-number-$i.txt"; done
+}
+expect_manifest "generated files that follow the rule" 0 "wrote" "$(many)"
+expect_manifest "generated nested path" 1 "scene/errors/api.txt" "scene/errors/api.txt"
+expect_manifest "generated unknown kind" 1 "other/a.txt" "other/a.txt"
+expect_manifest "generated hash in a name" 1 "scene/a#b.txt" "scene/a#b.txt"
+expect_manifest "generated space in a name" 1 "scene/a b.txt" "scene/a b.txt"
+expect_manifest "generated no-break space" 1 "scene/aM-BM- b.txt" "scene/a${nbsp}b.txt"
+expect_manifest "generated space among 1500 files" 1 "scene/a b.txt" "$(printf 'scene/a b.txt\n%s' "$(many)")"
+expect_manifest "generated no-break space among 1500 files" 1 "M-BM-" "$(printf 'scene/a%sb.txt\n%s' "$nbsp" "$(many)")"
 
 # A revision without a manifest is an error, not a pass.
 out="$("$repo/scripts/check-refactor-output.sh" extend no-such-rev 2>&1)"

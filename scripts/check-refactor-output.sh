@@ -60,8 +60,11 @@
 #      that the committed manifest matches the tree.
 #   6. Regenerate golden images only for the images the change declares.
 #
-# Output file names contain no whitespace; the driver refuses to write one, and manifests are
-# read as "<hash> <path>".
+# Naming rule: an output is <kind>/<file> with kind one of scene, svg, png, errors or api and no
+# deeper directories. A file name starts with an ASCII letter or digit and continues with ASCII
+# letters, digits, '.', '_' or '-'; so it has no '/', no whitespace and no '#', and nothing
+# outside ASCII. The driver refuses to write any other name, `manifest` and `extend` fail on
+# one, and intended-changes.txt can therefore name every case.
 #
 # Conditions: the same Rust toolchain, Cargo.lock and bundled font files on both sides; the
 # corpus uses the in-memory fallback font and never reads system fonts. Everything is built
@@ -96,6 +99,20 @@ sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi
 }
 
+# The naming rule of the header, as an extended regular expression.
+path_rule='^(scene|svg|png|errors|api)/[A-Za-z0-9][A-Za-z0-9._-]*$'
+
+# reject_bad_paths <what>: reads paths on stdin and exits 1, naming each one, if any breaks the rule.
+reject_bad_paths() {
+  local bad
+  bad="$(LC_ALL=C awk -v rule="$path_rule" '$0 !~ rule { print }' | LC_ALL=C cat -v)"
+  if [[ -n "$bad" ]]; then
+    echo "error: $1 break the output naming rule (see the script header):" >&2
+    awk '{ print "  " $0 }' <<<"$bad" >&2
+    exit 1
+  fi
+}
+
 # manifest_of <source-tree> <target-dir> <out-file>
 manifest_of() {
   local tree="$1" target="$2" out="$3" dump
@@ -107,10 +124,15 @@ manifest_of() {
     env -u UPDATE_GOLDEN -u INSTA_UPDATE \
       cargo run --release --locked -q -p umber-core --example refactor_outputs -- "$dump" >&2
     cd "$dump"
-    if find . -type f | grep -q '[[:space:]]'; then
-      echo "error: an output file name contains whitespace" >&2
+    # Both checks read the whole listing, so no early exit of a reader can skip them. The first
+    # catches any byte outside the allowed set, including newlines and non-ASCII, in the C locale.
+    bad="$(LC_ALL=C find . -type f -path '*[!A-Za-z0-9._/-]*' | LC_ALL=C cat -v)"
+    if [[ -n "$bad" ]]; then
+      echo "error: an output path has a character outside the naming rule:" >&2
+      awk '{ print "  " $0 }' <<<"$bad" >&2
       exit 1
     fi
+    find . -type f | sed 's|^\./||' | reject_bad_paths "the generated outputs"
     find . -type f | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r file; do
       sha256_of "$file"
     done
@@ -128,7 +150,7 @@ manifest_of() {
 # select <manifest> <with-png: 1|0>: the comparable lines, with the "  " separator normalised.
 select_lines() {
   local file="$1" png="$2"
-  grep -v '^#' "$file" | sed 's/  */ /' | if [[ "$png" == 1 ]]; then cat; else grep -v ' png/'; fi
+  LC_ALL=C grep -v '^#' "$file" | LC_ALL=C sed 's/  */ /' | if [[ "$png" == 1 ]]; then cat; else grep -v ' png/'; fi
 }
 
 compare_manifests() {
@@ -157,6 +179,11 @@ extend_check() {
   if [[ ! -f "$intended_file" ]]; then intended_file=/dev/null; fi
   select_lines "$tmp/base-manifest.txt" 1 >"$tmp/a.sel"
   select_lines "$root/$baseline" 1 >"$tmp/b.sel"
+  local sel
+  for sel in a b; do
+    LC_ALL=C awk '{ path = $0; sub(/^[^ ]+ +/, "", path); if (path == $0) path = ""; print path }' \
+      "$tmp/$sel.sel" | reject_bad_paths "the $([[ $sel == a ]] && echo "manifest at $rev" || echo "committed manifest")"
+  done
   # The awk program is single-quoted on purpose: nothing in it is a shell expansion.
   # shellcheck disable=SC2016
   awk -v intended="$intended_file" '
