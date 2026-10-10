@@ -377,6 +377,84 @@ pub(crate) mod tests {
         }
     }
 
+    /// Asserts every glyph-outline point of every text item lies on the canvas.
+    #[track_caller]
+    fn assert_text_on_canvas(scene: &Scene) {
+        let texts = texts(scene);
+        assert!(!texts.is_empty());
+        for t in texts {
+            for verb in t.outline.verbs() {
+                let points: Vec<Point> = match *verb {
+                    PathVerb::MoveTo(p) | PathVerb::LineTo(p) => vec![p],
+                    PathVerb::QuadTo(c, p) => vec![c, p],
+                    PathVerb::CubicTo(c1, c2, p) => vec![c1, c2, p],
+                    PathVerb::Close => vec![],
+                };
+                for p in points {
+                    assert!(
+                        (0.0..=scene.width).contains(&p.x) && (0.0..=scene.height).contains(&p.y),
+                        "{:?} at {p:?} leaves the {}x{} canvas",
+                        t.text,
+                        scene.width,
+                        scene.height
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn x_end_labels_stay_on_the_canvas() {
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            for (lo, hi) in [(0.0, 100_000.0), (-100_000.0, 100_000.0), (-900_000.0, 0.0)] {
+                let mut f = chrome_figure(theme.clone());
+                f.axes_mut()
+                    .unwrap()
+                    .xlim(lo, hi)
+                    .unwrap()
+                    .ylim(-100_000.0, 100_000.0)
+                    .unwrap();
+                let scene = f.to_scene(FontLibrary::global());
+                assert_text_on_canvas(&scene);
+            }
+
+            // Category labels wider than the padding at both ends.
+            let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+            f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+                .unwrap()
+                .title("Revenue by quarter")
+                .line(
+                    crate::AxisData::Categories(vec![
+                        "First quarter of the year".into(),
+                        "Q2".into(),
+                        "Last quarter of the year".into(),
+                    ]),
+                    &[1.0, 2.0, 3.0],
+                    crate::LineOptions::default(),
+                )
+                .unwrap();
+            assert_text_on_canvas(&f.to_scene(FontLibrary::global()));
+        }
+    }
+
+    #[test]
+    fn above_gridline_inset_grows_only_for_the_first_x_label() {
+        let plot_left = |lo: f64| {
+            let mut f = chrome_figure(Theme::pigment());
+            f.axes_mut().unwrap().xlim(lo, 100_000.0).unwrap();
+            let scene = f.to_scene(FontLibrary::global());
+            let all = strokes(&scene);
+            let (path, _) = all.last().copied().unwrap();
+            match path.verbs().first() {
+                Some(PathVerb::MoveTo(p)) => p.x,
+                _ => panic!("baseline must start with a move"),
+            }
+        };
+        // "0" fits in the padding; "−100000" does not.
+        assert_eq!(plot_left(0.0), 12.0);
+        assert!(plot_left(-100_000.0) > 12.0);
+    }
+
     #[test]
     fn scenes_are_deterministic() {
         let a = chrome_figure(Theme::pigment()).to_scene(FontLibrary::global());

@@ -313,12 +313,20 @@ pub(crate) fn lay_out(
         0.0
     };
     let plot_top = header_bottom + ylabel_band + label_row_rise;
+    // The first and last x labels are centered on their ticks, which can sit on the plot
+    // edges: the plot keeps half of each label's width between its edge and the canvas edge.
+    // A label may use the outer padding, so only the part beyond it shrinks the plot. This is
+    // the one case in which an `AboveGridline` plot is inset by more than the outer padding.
+    let half = |label: Option<&(f64, Label)>| label.map_or(0.0, |(_, l)| l.width() / 2.0);
+    let first_half = half(x_labels.first());
+    let last_half = half(x_labels.last());
     let plot_left = if above || y_labels.is_empty() {
         PADDING
     } else {
         PADDING + y_label_width + Y_LABEL_GAP
-    };
-    let plot_right = width - PADDING;
+    }
+    .max(first_half);
+    let plot_right = width - PADDING.max(last_half);
     let x_band = if x_labels.is_empty() {
         0.0
     } else {

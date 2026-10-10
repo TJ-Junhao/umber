@@ -119,7 +119,8 @@ fn transform_of(kind: ScaleKind) -> Option<Transform> {
     }
 }
 
-/// A continuous axis from explicit limits, or from the data extent widened to nice limits
+/// A continuous axis from explicit limits; without them, the empty-data range (0 to 1, or 1 to
+/// 10 on log) when there is no finite data; otherwise the data extent, widened to nice limits
 /// unless `exact`. Nice axes take the ticks that produced their limits; the others take
 /// `ticks()`.
 fn continuous(
@@ -132,6 +133,10 @@ fn continuous(
     let (scale, ticks) = if let Some((lo, hi)) = limits {
         let scale = ContinuousScale::new(transform, lo, hi, CONTEXT)
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
+        (scale, scale.ticks(target))
+    } else if data.is_none() {
+        // The fallback range is final on every axis: never widened with `nice`.
+        let scale = ContinuousScale::unit(transform);
         (scale, scale.ticks(target))
     } else {
         let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
@@ -370,6 +375,48 @@ mod tests {
         assert_eq!(domains(&f), ((1.0, 10.0), (1.0, 10.0)));
         let r = resolve(f.axes().unwrap(), 5, 4);
         assert_eq!(r.baseline, 0.0);
+
+        // Empty scatter data is empty data too.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .scatter(nums(&[]), &[], ScatterOptions::default())
+            .unwrap();
+        assert_eq!(domains(&f), ((0.0, 1.0), (0.0, 1.0)));
+    }
+
+    #[test]
+    fn empty_log_axes_keep_the_fallback_range() {
+        // The fallback is not widened with `nice`, so both axes agree whatever the base.
+        for base in [2.0, 100.0] {
+            let log = ScaleKind::Log {
+                base: LogBase::new(base).unwrap(),
+            };
+            let f = figure(log, log);
+            assert_eq!(domains(&f), ((1.0, 10.0), (1.0, 10.0)), "base {base}");
+
+            // All-NaN data, on a line and on a scatter.
+            let mut f = figure(log, log);
+            axes(&mut f)
+                .line(nums(&[f64::NAN]), &[f64::NAN], LineOptions::default())
+                .unwrap();
+            assert_eq!(domains(&f), ((1.0, 10.0), (1.0, 10.0)), "base {base}");
+            axes(&mut f)
+                .scatter(
+                    nums(&[f64::NAN, 2.0]),
+                    &[f64::NAN, f64::NAN],
+                    ScatterOptions::default(),
+                )
+                .unwrap();
+            let ((_, _), (y0, y1)) = domains(&f);
+            assert_eq!((y0, y1), (1.0, 10.0), "base {base}");
+
+            // Empty scatter.
+            let mut f = figure(log, log);
+            axes(&mut f)
+                .scatter(nums(&[]), &[], ScatterOptions::default())
+                .unwrap();
+            assert_eq!(domains(&f), ((1.0, 10.0), (1.0, 10.0)), "base {base}");
+        }
     }
 
     #[test]
