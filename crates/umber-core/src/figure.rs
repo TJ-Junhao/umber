@@ -829,8 +829,10 @@ impl Figure {
     }
 
     /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.
-    /// The scene is `width × 72` by `height × 72` pt on the theme background. Without axes it
-    /// holds the background only. The same figure always gives the same scene.
+    /// The scene is `width × 72` by `height × 72` pt on the theme background. It holds the
+    /// axes chrome as one unclipped group, followed by the visible marks, in insertion order,
+    /// as one group clipped to the plot area. Without axes it holds the background only. The
+    /// same figure always gives the same scene.
     ///
     /// # Examples
     ///
@@ -852,8 +854,12 @@ impl Figure {
         let Some(axes) = &self.axes else {
             return scene;
         };
-        let (_resolved, layout) = layout::plan(width, height, &self.theme, axes, library);
+        let (resolved, layout) = layout::plan(width, height, &self.theme, axes, library);
         scene.push(draw::chrome(&self.theme, &layout));
+        let colors = self.resolved_colors();
+        if let Some(marks) = draw::marks(&self.theme, axes, &resolved, &layout, &colors) {
+            scene.push(marks);
+        }
         scene
     }
 
