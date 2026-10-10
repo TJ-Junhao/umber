@@ -22,6 +22,12 @@ fn main() {
     };
     let mut count = 0usize;
     refactor_cases::generate(|output| {
+        // The gate's manifests are read as "<hash> <path>", so names must not contain whitespace.
+        assert!(
+            !output.file.chars().any(char::is_whitespace),
+            "output file name contains whitespace: {:?}",
+            output.file
+        );
         let kind_dir = dir.join(output.kind);
         std::fs::create_dir_all(&kind_dir).unwrap();
         std::fs::write(kind_dir.join(&output.file), &output.bytes).unwrap();
