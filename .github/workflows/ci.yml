@@ -25,6 +25,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p umber-core
       - run: cargo test --doc -p umber-core
+      - run: cargo test -p umber-core --example refactor_outputs --locked
       - run: scripts/test-check-refactor-output.sh
       - run: scripts/check-refactor-output.sh check
       # The packaged crate must compile and pass its own unit tests with only the files it ships.
