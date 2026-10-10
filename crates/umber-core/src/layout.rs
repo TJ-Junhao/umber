@@ -1,5 +1,6 @@
 //! Layout: text measurement, then the rectangles of the header, plot area, tick labels and axis
 //! labels. All lengths are in points, with the origin at the top-left and y pointing down.
+//! Layout also sets how many ticks a plot area of a given size asks for.
 //!
 //! Every derived value is finite: font sizes are clamped, text wider than
 //! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least 1 by 1 pt and
@@ -8,8 +9,8 @@
 //! With figures of at most 200 in a side this keeps every coordinate far below the renderers'
 //! `MAX_COORD`.
 
-use crate::figure::Axes;
-use crate::resolve::{self, AxisTick, Resolved, coincides};
+use crate::model::Axes;
+use crate::resolve::{AxisTick, Resolved, coincides};
 use crate::{FontLibrary, TextLayout, TextStyle, Theme, TickLabelPlacement, Weight};
 
 /// The outer padding on every side.
@@ -249,6 +250,34 @@ fn fit_span(start: f64, end: f64, extent: f64) -> (f64, f64) {
     (start, end - start)
 }
 
+/// The tick targets for a plot area of `plot_w` by `plot_h` points:
+/// x `clamp(round(w / 100) + 1, 3, 8)`, y `clamp(round(h / 45) + 1, 3, 8)`.
+///
+/// These divisors were chosen so a 6 by 4 in figure gets about 5 ticks per axis
+/// (y 0/25/50/75/100, x 0/10/20/30). A y divisor of 60 pt gave too few y ticks.
+/// The y divisor is 45 rather than 50 so that `AboveGridline` layouts, whose label rows leave a
+/// shorter plot area (about 172 pt on a 6 by 4 in PIGMENT figure), still get 5 y ticks.
+pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
+    fn target(size: f64, per_tick: f64, lo: usize, hi: usize) -> usize {
+        let n = (size / per_tick).round() + 1.0;
+        if n.is_nan() {
+            return lo;
+        }
+        // The clamp below keeps the cast within range; NaN was handled above.
+        (n.clamp(lo as f64, hi as f64)) as usize
+    }
+    (target(plot_w, 100.0, 3, 8), target(plot_h, 45.0, 3, 8))
+}
+
+/// The plot size, in points, assumed before any tick label is measured: the figure inside the
+/// outer padding, at least [`MIN_PLOT`] a side.
+pub(crate) fn initial_plot_size(width: f64, height: f64) -> (f64, f64) {
+    (
+        (width - 2.0 * PADDING).max(MIN_PLOT),
+        (height - 2.0 * PADDING).max(MIN_PLOT),
+    )
+}
+
 /// Lays out the axes of a `width` by `height` pt figure for already resolved scales.
 /// `reference_width` is the plot width the x end-label reservation measures tick offsets on.
 pub(crate) fn lay_out(
@@ -443,33 +472,13 @@ pub(crate) fn lay_out(
     }
 }
 
-/// Resolves and lays out the axes in two passes: ticks depend on the plot size, and the plot
-/// size depends on the tick label widths. The first pass assumes the plot fills the figure
-/// inside the padding; the second uses the plot size of the first, and is final.
-pub(crate) fn plan(
-    width: f64,
-    height: f64,
-    theme: &Theme,
-    axes: &Axes,
-    lib: &FontLibrary,
-) -> (Resolved, Layout) {
-    let guess_w = (width - 2.0 * PADDING).max(MIN_PLOT);
-    let guess_h = (height - 2.0 * PADDING).max(MIN_PLOT);
-    let (tx, ty) = resolve::tick_targets(guess_w, guess_h);
-    let first = resolve::resolve(axes, tx, ty);
-    let first = lay_out(width, height, theme, axes, &first, lib, guess_w);
-    let (tx, ty) = resolve::tick_targets(first.plot.width, first.plot.height);
-    let resolved = resolve::resolve(axes, tx, ty);
-    let layout = lay_out(width, height, theme, axes, &resolved, lib, first.plot.width);
-    (resolved, layout)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::figure::{AxisData, LineOptions};
+    use crate::ScaleKind;
+    use crate::model::{AxisData, Figure, LineOptions, ScatterOptions};
+    use crate::pipeline::plan;
     use crate::test_support::scene::assert_scene_bounded;
-    use crate::{Figure, ScaleKind};
 
     fn lib() -> &'static FontLibrary {
         FontLibrary::global()
@@ -660,24 +669,17 @@ mod tests {
 
     #[test]
     fn tick_targets_follow_plot_size() {
-        // The second pass uses the first pass's plot size: a taller figure gets more y ticks.
-        let ticks = |w: f64, h: f64| {
-            let mut f = Figure::new(w, h, Theme::graphite()).unwrap();
-            f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
-                .unwrap()
-                .ylim(0.0, 100.0)
-                .unwrap()
-                .xlim(0.0, 100.0)
-                .unwrap();
-            let (resolved, layout) = plan_of(&f);
-            let targets = resolve::tick_targets(layout.plot.width, layout.plot.height);
-            (resolved.x.ticks.len(), resolved.y.ticks.len(), targets)
-        };
-        let (sx, sy, small) = ticks(2.0, 1.5);
-        let (lx, ly, large) = ticks(12.0, 9.0);
-        assert_eq!(small, (3, 3));
-        assert_eq!(large, (8, 8));
-        assert!(lx > sx && ly > sy, "{sx} {sy} {lx} {ly}");
+        assert_eq!(tick_targets(0.0, 0.0), (3, 3));
+        assert_eq!(tick_targets(1.0, 1.0), (3, 3));
+        // 6 by 4 in plot areas: 408 / 100 + 1 = 5; PIGMENT 172 / 45 + 1 = 5, GRAPHITE 178 / 45 + 1 = 5.
+        assert_eq!(tick_targets(408.0, 172.0), (5, 5));
+        assert_eq!(tick_targets(408.0, 178.0), (5, 5));
+        // Rounding: 3.5 rounds up, just below 3.5 rounds down (3.5 * 45 = 157.5).
+        assert_eq!(tick_targets(350.0, 157.0), (5, 4));
+        assert_eq!(tick_targets(349.0, 158.0), (4, 5));
+        // Upper clamps.
+        assert_eq!(tick_targets(10_000.0, 10_000.0), (8, 8));
+        assert_eq!(tick_targets(f64::NAN, f64::INFINITY), (3, 8));
     }
 
     #[test]
@@ -694,7 +696,7 @@ mod tests {
                 .scatter(
                     AxisData::Numbers(vec![0.0, 15.0, 30.0]),
                     &[3.0, 50.0, 97.0],
-                    crate::ScatterOptions::default(),
+                    ScatterOptions::default(),
                 )
                 .unwrap()
                 .xlim(0.0, 30.0)

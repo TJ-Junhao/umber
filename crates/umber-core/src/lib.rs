@@ -22,6 +22,8 @@ pub mod figure;
 pub mod fonts;
 pub mod geometry;
 mod layout;
+mod model;
+mod pipeline;
 pub mod render;
 mod resolve;
 pub mod scale;
