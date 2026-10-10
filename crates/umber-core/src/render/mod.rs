@@ -11,6 +11,10 @@
 //! assert_eq!(SvgText::default(), SvgText::Outlines);
 //! ```
 
+mod svg;
+
+pub use svg::render_svg;
+
 /// How the SVG backend writes text. `Outlines` is the default.
 ///
 /// # Examples
