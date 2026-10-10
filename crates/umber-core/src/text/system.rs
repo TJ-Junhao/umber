@@ -762,6 +762,10 @@ impl SystemFonts {
 
     /// The index, built on first use. The machine's fonts are indexed once per process and
     /// shared by every library that uses them; in-memory test fonts get an index of their own.
+    ///
+    /// The process-wide index is built with the limits of the first library that needs it.
+    /// Only [`FontLibrary::bundled`](super::FontLibrary::bundled) uses the machine's fonts,
+    /// and it always passes [`Limits::DEFAULT`], so the shared index is built with those.
     pub(crate) fn shared_index(&self) -> &Arc<FaceIndex> {
         self.index.get_or_init(|| match &self.source {
             Source::Os => {

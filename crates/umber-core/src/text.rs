@@ -54,6 +54,7 @@ use read_fonts::{FontRef, TableProvider};
 use skrifa::MetadataProvider;
 use skrifa::charmap::Charmap;
 use skrifa::instance::{LocationRef, Size};
+use skrifa::outline::pen::ControlBoundsPen;
 use skrifa::outline::{DrawSettings, OutlineGlyphCollection, OutlineGlyphFormat, OutlinePen};
 
 use crate::fonts::{Font, Weight, font_bytes};
@@ -231,28 +232,45 @@ impl<'a> Face<'a> {
     }
 
     /// The ink extents of `glyph` in font units, the way HarfRust reads them from a font's own
-    /// outline tables: the bounding box, with the horizontal bearing from `hmtx` for `glyf`
-    /// outlines. An empty glyph has empty extents.
+    /// outline tables.
+    ///
+    /// - A glyph that draws without any path commands, such as an empty mark, has empty
+    ///   extents.
+    /// - A glyph that is missing or cannot be drawn has none.
+    /// - Otherwise: for `glyf` outlines the bounding box the glyph states, with the horizontal
+    ///   bearing from `hmtx`; for other outlines the box of the drawn points.
     fn extents(&self, glyph: GlyphId) -> Option<GlyphExtents> {
-        let metrics = self
-            .font
-            .glyph_metrics(Size::unscaled(), LocationRef::default());
-        let bounds = metrics.bounds(glyph)?;
-        if bounds.x_min == bounds.x_max && bounds.y_min == bounds.y_max {
+        let outline = self.outlines.get(glyph)?;
+        let mut pen = ControlBoundsPen::new();
+        outline.draw(unhinted(), &mut pen).ok()?;
+        let Some(drawn) = pen.bounding_box() else {
             return Some(GlyphExtents::default());
-        }
-        let (left, right) = (
-            bounds.x_min.min(bounds.x_max),
-            bounds.x_min.max(bounds.x_max),
-        );
-        let (bottom, top) = (
-            bounds.y_min.min(bounds.y_max),
-            bounds.y_min.max(bounds.y_max),
-        );
-        let x_bearing = match self.outlines.format() {
-            Some(OutlineGlyphFormat::Glyf) => metrics.left_side_bearing(glyph).unwrap_or(0.0),
-            _ => left,
         };
+        let (bounds, x_bearing) = match self.outlines.format() {
+            Some(OutlineGlyphFormat::Glyf) => {
+                let metrics = self
+                    .font
+                    .glyph_metrics(Size::unscaled(), LocationRef::default());
+                let stated = metrics.bounds(glyph)?;
+                let bearing = metrics.left_side_bearing(glyph).unwrap_or(0.0);
+                let left = stated.x_min.min(stated.x_max);
+                (
+                    (
+                        left,
+                        stated.x_min.max(stated.x_max),
+                        stated.y_min,
+                        stated.y_max,
+                    ),
+                    bearing,
+                )
+            }
+            _ => (
+                (drawn.x_min, drawn.x_max, drawn.y_min, drawn.y_max),
+                drawn.x_min,
+            ),
+        };
+        let (left, right, y_min, y_max) = bounds;
+        let (bottom, top) = (y_min.min(y_max), y_min.max(y_max));
         Some(GlyphExtents {
             x_bearing: x_bearing.round() as i32,
             y_bearing: top.round() as i32,
@@ -375,8 +393,8 @@ struct SystemExtents<'b> {
     cache: RefCell<HashMap<GlyphId, Option<GlyphExtents>>>,
 }
 
-/// The shaper's font callbacks: the same secondary subtables as [`Face::glyph`] when the best
-/// one has no glyph, and for system fonts, glyph bounds from the full font file.
+/// The shaper's font callbacks: the same subtables as [`Face::glyph`] when HarfRust's own
+/// choice has no glyph, and for system fonts, glyph bounds from the full font file.
 struct Funcs<'f, 'a> {
     face: &'f Face<'a>,
     extents: Option<SystemExtents<'f>>,
@@ -402,8 +420,12 @@ impl<'f, 'a> Funcs<'f, 'a> {
 }
 
 impl FontFuncs for Funcs<'_, '_> {
+    /// HarfRust's own lookup, then the lookup of [`Face::glyph`]: skrifa's best subtable and
+    /// the secondary subtables. HarfRust may choose a different best subtable than skrifa, so
+    /// skrifa's is consulted before the secondaries, which leave it out.
     fn nominal_glyph(&self, font: &ShaperFont<'_, '_>, c: u32) -> Option<GlyphId> {
         font.default_nominal_glyph(c)
+            .or_else(|| self.face.charmap.map(c).filter(|g| *g != GlyphId::NOTDEF))
             .or_else(|| self.face.secondary_glyph(c))
     }
 
@@ -957,7 +979,8 @@ impl FontLibrary {
     /// family the face closest to the requested weight wins, upright before italic. Results are
     /// cached per character and weight, up to 65,536 entries; beyond that new results are not
     /// cached. The index holds at most 10,000 faces and skips font files over 256 MiB and faces
-    /// with more than 65,536 coverage ranges. Prefer [`FontLibrary::global`], which shares one
+    /// with more than 65,536 coverage ranges; the shared index is always built with these
+    /// default limits. Prefer [`FontLibrary::global`], which shares one
     /// library and its caches.
     ///
     /// # Examples
@@ -2347,6 +2370,237 @@ mod tests {
                 "{raw} {delta}"
             );
         }
+    }
+
+    /// Lays `text` out with `font` as a fallback font and as a system font, and returns the
+    /// glyph ids of each layout's single run.
+    fn glyphs_as_extra_and_system(font: &[u8], text: &str) -> [Vec<u16>; 2] {
+        let s = style(Font::Inter, 10.0);
+        let extra = FontLibrary::with_fallbacks(vec![font.to_vec()]).layout(text, &s);
+        let system = FontLibrary::with_test_system_fonts(vec![font.to_vec()]).layout(text, &s);
+        assert_eq!(extra.runs.len(), 1);
+        assert_eq!(system.runs.len(), 1);
+        assert_eq!(extra.runs[0].font, FontKey::Extra(0));
+        assert!(matches!(system.runs[0].font, FontKey::System(_)));
+        [extra, system].map(|layout| layout.runs[0].glyphs.iter().map(|g| g.id).collect())
+    }
+
+    #[test]
+    fn shaper_uses_skrifas_best_subtable_over_a_format_10_choice() {
+        // Unicode full repertoire, format 12: U+F0010. Windows full repertoire, format 10:
+        // only U+10000. skrifa prefers the first, HarfRust the second.
+        let mut format10 = Vec::new();
+        format10.extend(10u16.to_be_bytes());
+        format10.extend(0u16.to_be_bytes());
+        for field in [22u32, 0, 0x10000, 1] {
+            format10.extend(field.to_be_bytes());
+        }
+        format10.extend(1u16.to_be_bytes());
+        let cmap = cmap_of(
+            &[format12(&[(0xF0010, 0xF0010, 1)]), format10],
+            &[(0, 6, 0), (3, 10, 1)],
+        );
+        let font = font_with_cmap("Unique Records", 400, false, cmap);
+        assert_eq!(
+            Face::parse(&font, 0).unwrap().glyph('\u{F0010}'),
+            Some(GlyphId::new(1))
+        );
+        assert_eq!(
+            glyphs_as_extra_and_system(&font, "\u{F0010}"),
+            [vec![1], vec![1]]
+        );
+    }
+
+    #[test]
+    fn shaper_uses_skrifas_best_subtable_among_two_full_repertoire_records() {
+        // Two full-repertoire subtables, each mapping one of the characters.
+        let cmap = cmap_of(
+            &[
+                format12(&[(0xF0000, 0xF0000, 1)]),
+                format12(&[(0xF0001, 0xF0001, 1)]),
+            ],
+            &[(3, 10, 0), (0, 4, 1)],
+        );
+        let font = font_with_cmap("Two Records", 400, false, cmap);
+        assert_eq!(
+            glyphs_as_extra_and_system(&font, "\u{F0000}\u{F0001}"),
+            [vec![1, 1], vec![1, 1]]
+        );
+    }
+
+    /// A CFF font with three glyphs: an empty `.notdef`, an empty glyph for U+0300 and a
+    /// square for U+F0010 and U+0301; no GDEF, GSUB or GPOS.
+    fn cff_mark_font() -> Vec<u8> {
+        fn index(items: &[Vec<u8>]) -> Vec<u8> {
+            let mut out = Vec::new();
+            out.extend((items.len() as u16).to_be_bytes());
+            if items.is_empty() {
+                return out;
+            }
+            out.push(4);
+            let mut offset = 1u32;
+            out.extend(offset.to_be_bytes());
+            for item in items {
+                offset += item.len() as u32;
+                out.extend(offset.to_be_bytes());
+            }
+            for item in items {
+                out.extend(item);
+            }
+            out
+        }
+        fn dict_int(value: usize) -> Vec<u8> {
+            let mut out = vec![29];
+            out.extend((value as i32).to_be_bytes());
+            out
+        }
+        fn number(value: i16) -> Vec<u8> {
+            let mut out = vec![28];
+            out.extend(value.to_be_bytes());
+            out
+        }
+        const ENDCHAR: u8 = 14;
+        let mut square = Vec::new();
+        for (args, op) in [
+            (&[100i16, 100][..], 21u8),
+            (&[800], 6),
+            (&[1200], 7),
+            (&[-800], 6),
+        ] {
+            for &arg in args {
+                square.extend(number(arg));
+            }
+            square.push(op);
+        }
+        square.push(ENDCHAR);
+        let charstrings = index(&[vec![ENDCHAR], vec![ENDCHAR], square]);
+        // defaultWidthX 0.
+        let private = vec![139, 20];
+        let header = vec![1, 0, 4, 4];
+        let name = index(&[b"Test".to_vec()]);
+        let top = |charstrings_at: usize, private_at: usize| {
+            let mut dict = dict_int(charstrings_at);
+            dict.push(17);
+            dict.extend(dict_int(private.len()));
+            dict.extend(dict_int(private_at));
+            dict.push(18);
+            index(&[dict])
+        };
+        let empty = index(&[]);
+        let charstrings_at = header.len() + name.len() + top(0, 0).len() + 2 * empty.len();
+        let private_at = charstrings_at + charstrings.len();
+        let mut cff = header;
+        cff.extend(name);
+        cff.extend(top(charstrings_at, private_at));
+        cff.extend(&empty);
+        cff.extend(&empty);
+        cff.extend(charstrings);
+        cff.extend(private);
+
+        let base: &[u8] = include_bytes!("../tests/fixtures/fallback-only.ttf");
+        let mut tables = tables_of(base);
+        tables.retain(|(tag, _)| !matches!(tag, b"glyf" | b"loca" | b"GDEF" | b"GSUB" | b"GPOS"));
+        for (tag, data) in &mut tables {
+            match &*tag {
+                b"maxp" => {
+                    *data = [
+                        0x0000_5000u32.to_be_bytes().to_vec(),
+                        3u16.to_be_bytes().to_vec(),
+                    ]
+                    .concat()
+                }
+                b"hhea" => data[34..36].copy_from_slice(&3u16.to_be_bytes()),
+                b"hmtx" => {
+                    *data = [(1_344u16, 0i16), (0, 0), (1_000, 100)]
+                        .iter()
+                        .flat_map(|(advance, bearing)| {
+                            [advance.to_be_bytes(), bearing.to_be_bytes()]
+                        })
+                        .flatten()
+                        .collect();
+                }
+                b"cmap" => {
+                    *data = cmap_of(
+                        &[format12(&[
+                            (0x300, 0x300, 1),
+                            (0x301, 0x301, 2),
+                            (0xF0010, 0xF0010, 2),
+                        ])],
+                        &[(3, 10, 0)],
+                    );
+                }
+                _ => {}
+            }
+        }
+        tables.push((*b"CFF ", cff));
+        let mut font = assemble(tables);
+        font[0..4].copy_from_slice(b"OTTO");
+        font
+    }
+
+    #[test]
+    fn empty_cff_glyphs_have_empty_extents() {
+        let font = cff_mark_font();
+        let face = Face::parse(&font, 0).unwrap();
+        assert_eq!(face.outlines.format(), Some(OutlineGlyphFormat::Cff));
+        let tuple =
+            |e: Option<GlyphExtents>| e.map(|e| (e.x_bearing, e.y_bearing, e.width, e.height));
+        // Draws, but with no path commands: empty extents, as HarfRust gives.
+        assert_eq!(tuple(face.extents(GlyphId::new(1))), Some((0, 0, 0, 0)));
+        assert_eq!(
+            tuple(face.extents(GlyphId::new(2))),
+            Some((100, 1300, 800, -1200))
+        );
+        // Missing: none.
+        assert_eq!(tuple(face.extents(GlyphId::new(7))), None);
+        let shaping = ShapingFont::new(font.clone(), 0).unwrap();
+        let shaper = ShaperFont::new(&shaping);
+        for glyph in [1, 2] {
+            assert_eq!(
+                tuple(shaper.default_glyph_extents(GlyphId::new(glyph))),
+                tuple(face.extents(GlyphId::new(glyph))),
+                "glyph {glyph}"
+            );
+        }
+
+        // A base, an empty mark and a visible mark, stacked by the shaper from the bounds.
+        let text = "\u{F0010}\u{300}\u{301}";
+        let s = style(Font::Inter, 10.0);
+        let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout(text, &s);
+        let system = FontLibrary::with_test_system_fonts(vec![font]).layout(text, &s);
+        assert_eq!(extra.runs[0].font, FontKey::Extra(0));
+        assert!(matches!(system.runs[0].font, FontKey::System(_)));
+        let visible_mark_y = |layout: &TextLayout| layout.runs[0].glyphs[2].y;
+        assert_eq!(visible_mark_y(&extra), visible_mark_y(&system));
+        assert!((visible_mark_y(&system) + 7.109_375).abs() < 1e-4);
+        assert!(visible_mark_y(&extra) < -6.0, "{}", visible_mark_y(&extra));
+        assert_eq!(
+            extra.outline(Point { x: 0.0, y: 0.0 }),
+            system.outline(Point { x: 0.0, y: 0.0 })
+        );
+    }
+
+    #[test]
+    fn system_extents_per_layout_are_capped() {
+        let bytes = include_bytes!("../tests/fixtures/fallback-only.ttf").to_vec();
+        let face = Face::parse(&bytes, 0).unwrap();
+        let shaping = ShapingFont::new(bytes.clone(), 0).unwrap();
+        let shaper = ShaperFont::new(&shaping);
+        assert!(face.extents(GlyphId::new(0)).is_some());
+        assert!(face.extents(GlyphId::new(1)).is_some());
+        let budget = Cell::new(EXTENTS_PER_LAYOUT);
+        let funcs = Funcs::system(&face, &budget);
+        // 4,095 computations for glyphs the font does not have, then glyph 1: 4,096.
+        for glyph in 2..u32::try_from(EXTENTS_PER_LAYOUT).unwrap() + 1 {
+            assert!(funcs.glyph_extents(&shaper, GlyphId::new(glyph)).is_none());
+        }
+        assert!(funcs.glyph_extents(&shaper, GlyphId::new(1)).is_some());
+        assert_eq!(budget.get(), 0);
+        // The 4,097th computation is refused, although glyph 0 has extents.
+        assert!(funcs.glyph_extents(&shaper, GlyphId::new(0)).is_none());
+        // Glyphs already computed are still answered from the cache.
+        assert!(funcs.glyph_extents(&shaper, GlyphId::new(1)).is_some());
+        assert!(funcs.glyph_extents(&shaper, GlyphId::new(2)).is_none());
     }
 
     // --- Mark attachment. ---
