@@ -359,7 +359,8 @@ impl Writer {
     }
 
     fn text(&mut self, t: &TextItem) {
-        if t.color.a == 0 {
+        // Shared rule: a text item whose origin cannot be drawn is skipped in every mode.
+        if t.color.a == 0 || !valid_point(t.origin) {
             return;
         }
         match self.text {
@@ -373,7 +374,7 @@ impl Writer {
             }
             SvgText::Editable => {
                 let content = escape(&t.text);
-                if content.is_empty() || !valid_point(t.origin) {
+                if content.is_empty() {
                     return;
                 }
                 if !t.style.size.is_finite() || t.style.size <= 0.0 {
@@ -596,6 +597,25 @@ mod tests {
         let svg = render_svg(&snapshot_scene(), SvgText::Outlines);
         parse(&svg);
         insta::assert_snapshot!(svg);
+    }
+
+    #[test]
+    fn text_with_an_invalid_origin_is_skipped_in_every_mode() {
+        for bad in [p(f32::NAN, 5.0), p(5.0, f32::INFINITY), p(2.0e6, 5.0)] {
+            let mut scene = Scene::new(100.0, 40.0, WHITE);
+            scene.push_text(FontLibrary::global(), "Hi", inter(12.0), p(5.0, 20.0), RED);
+            if let Some(Item::Text(t)) = scene.items.first_mut() {
+                t.origin = bad;
+            }
+            for mode in [SvgText::Outlines, SvgText::Editable] {
+                let svg = render_svg(&scene, mode);
+                parse(&svg);
+                assert!(
+                    !svg.contains("<text") && svg.matches("<path").count() == 0,
+                    "{mode:?} {svg}"
+                );
+            }
+        }
     }
 
     #[test]

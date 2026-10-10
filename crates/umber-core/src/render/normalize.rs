@@ -179,9 +179,14 @@ pub(crate) fn normalize_path(path: &Path) -> Option<NormalizedPath> {
 /// The array is solid when it is empty, has a non-finite or negative entry, has a period (the
 /// sum, with an odd-length array repeated once as SVG does) that is non-finite or below 0.1
 /// pt, or would produce more than 100,000 dashes along `path_len_upper_bound` (counted as
-/// `length / period * (entries / 2)`, like tiny-skia). Otherwise the
+/// `length / period * (entries / 2)`, like tiny-skia), or the path has zero length. Otherwise the
 /// array is returned, doubled if its length was odd.
 pub(crate) fn normalize_dash(dash: &[f32], path_len_upper_bound: f32) -> Option<Vec<f32>> {
+    // A zero-length path has nothing to dash: it is stroked solid, so round and square caps
+    // draw a dot or square, as SVG does.
+    if path_len_upper_bound <= 0.0 {
+        return None;
+    }
     if dash.is_empty() || dash.iter().any(|v| !v.is_finite() || *v < 0.0) {
         return None;
     }
@@ -428,6 +433,12 @@ mod tests {
         // Period below 0.1 pt, including values a 3-decimal writer would turn into "0".
         assert_eq!(normalize_dash(&[0.00049, 0.00049], 100.0), None);
         assert_eq!(normalize_dash(&[1.0e-20, 1.0e-20], 100.0), None);
+    }
+
+    #[test]
+    fn zero_length_path_is_solid() {
+        assert_eq!(normalize_dash(&[2.0, 2.0], 0.0), None);
+        assert_eq!(normalize_dash(&[2.0, 2.0], 0.001), Some(vec![2.0, 2.0]));
     }
 
     #[test]

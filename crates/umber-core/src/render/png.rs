@@ -24,8 +24,8 @@ const MAX_SIDE: f64 = 32_767.0;
 const MAX_PIXELS: f64 = 67_108_864.0; // 2^26
 /// A marker sprite larger than this, in pixels per side, is not cached.
 const MAX_SPRITE_SIDE: i32 = 256;
-/// Sub-pixel phases per axis for marker sprites.
-const PHASES: usize = 4;
+/// Sub-pixel phases per axis for marker sprites (8 x 8 = 64 sprites at most per item).
+const PHASES: usize = 8;
 
 /// Renders `scene` to PNG bytes at `dpi` dots per inch.
 ///
@@ -69,13 +69,6 @@ fn rasterize(scene: &Scene, dpi: u32) -> Result<sk::Pixmap> {
         pixmap,
         scale,
         root: sk::Transform::from_scale(scale, scale),
-        // The clip rectangle is intersected with the figure, which keeps mask paths small.
-        figure: ClipRect {
-            left: 0.0,
-            top: 0.0,
-            right: scene.width.max(0.0),
-            bottom: scene.height.max(0.0),
-        },
         mask: None,
     };
     canvas.items(&scene.items, None, 0);
@@ -272,7 +265,8 @@ fn prepare_stroke(
     })
 }
 
-/// A rectangle in scene coordinates, `left < right` and `top < bottom`.
+/// A clip rectangle in device pixels, already intersected with the pixmap bounds, with
+/// `left < right` and `top < bottom`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ClipRect {
     left: f32,
@@ -282,19 +276,25 @@ struct ClipRect {
 }
 
 impl ClipRect {
-    /// `None` when the rectangle is invalid (the SVG rule: finite, positive size).
-    fn from_rect(r: &Rect) -> Option<ClipRect> {
+    /// Converts a scene rectangle to device pixels and intersects it with the pixmap bounds
+    /// `(0, 0, width, height)`. `None` when the rectangle is invalid (the SVG rule: finite,
+    /// positive size) or the intersection is empty.
+    fn from_rect(r: &Rect, scale: f32, width: u32, height: u32) -> Option<ClipRect> {
         let finite = [r.x, r.y, r.width, r.height].iter().all(|v| v.is_finite());
         if !finite || r.width <= 0.0 || r.height <= 0.0 {
             return None;
         }
-        let (right, bottom) = (r.x + r.width, r.y + r.height);
-        (right.is_finite() && bottom.is_finite()).then_some(ClipRect {
-            left: r.x,
-            top: r.y,
-            right,
-            bottom,
-        })
+        let s = f64::from(scale);
+        let (x, y) = (f64::from(r.x), f64::from(r.y));
+        let (right, bottom) = (x + f64::from(r.width), y + f64::from(r.height));
+        let (w, h) = (f64::from(width), f64::from(height));
+        let out = ClipRect {
+            left: (x * s).clamp(0.0, w) as f32,
+            top: (y * s).clamp(0.0, h) as f32,
+            right: (right * s).clamp(0.0, w) as f32,
+            bottom: (bottom * s).clamp(0.0, h) as f32,
+        };
+        (out.left < out.right && out.top < out.bottom).then_some(out)
     }
 
     /// The geometric intersection; `None` when it is empty.
@@ -307,13 +307,38 @@ impl ClipRect {
         };
         (out.left < out.right && out.top < out.bottom).then_some(out)
     }
+
+    /// The whole pixels `(left, top, right, bottom)` (right and bottom exclusive) that are
+    /// certainly fully covered by the mask: the rectangle shrunk by one pixel on every side that
+    /// is not the pixmap edge. Sides on the pixmap edge are unbounded.
+    fn interior(self, width: u32, height: u32) -> (i32, i32, i32, i32) {
+        let lo = |v: f32| {
+            if v <= 0.0 {
+                i32::MIN
+            } else {
+                v.ceil() as i32 + 1
+            }
+        };
+        let hi = |v: f32, max: u32| {
+            if v >= max as f32 {
+                i32::MAX
+            } else {
+                v.floor() as i32 - 1
+            }
+        };
+        (
+            lo(self.left),
+            lo(self.top),
+            hi(self.right, width),
+            hi(self.bottom, height),
+        )
+    }
 }
 
 struct Canvas {
     pixmap: sk::Pixmap,
     scale: f32,
     root: sk::Transform,
-    figure: ClipRect,
     /// The one clip mask that may exist, with the rectangle it was built from.
     mask: Option<(ClipRect, sk::Mask)>,
 }
@@ -339,7 +364,12 @@ impl Canvas {
             return false;
         };
         let path = sk::PathBuilder::from_rect(rect.to_rect());
-        mask.fill_path(&path, sk::FillRule::Winding, true, self.root);
+        mask.fill_path(
+            &path,
+            sk::FillRule::Winding,
+            true,
+            sk::Transform::identity(),
+        );
         self.mask = Some((clip, mask));
         true
     }
@@ -350,7 +380,7 @@ impl Canvas {
                 Item::Group { clip: own, items } => self.group(own.as_ref(), items, clip, depth),
                 leaf => {
                     if self.use_clip(clip) {
-                        self.leaf(leaf, clip.is_some());
+                        self.leaf(leaf, clip);
                     }
                 }
             }
@@ -364,10 +394,12 @@ impl Canvas {
         let effective = match own {
             None => clip,
             Some(rect) => {
-                let Some(rect) = ClipRect::from_rect(rect) else {
-                    return;
-                };
-                let Some(rect) = rect.intersect(self.figure) else {
+                let Some(rect) = ClipRect::from_rect(
+                    rect,
+                    self.scale,
+                    self.pixmap.width(),
+                    self.pixmap.height(),
+                ) else {
                     return;
                 };
                 match clip {
@@ -382,7 +414,7 @@ impl Canvas {
         self.items(items, effective, depth + 1);
     }
 
-    fn leaf(&mut self, item: &Item, clipped: bool) {
+    fn leaf(&mut self, item: &Item, clip: Option<ClipRect>) {
         let Canvas {
             pixmap,
             scale,
@@ -390,7 +422,7 @@ impl Canvas {
             mask,
             ..
         } = self;
-        let mask = if clipped {
+        let mask = if clip.is_some() {
             mask.as_ref().map(|(_, m)| m)
         } else {
             None
@@ -428,7 +460,7 @@ impl Canvas {
                 pixmap,
                 *scale,
                 root,
-                mask,
+                mask.zip(clip),
                 shape,
                 *fill,
                 stroke.as_ref(),
@@ -490,14 +522,23 @@ impl Sprites {
             .stroke
             .as_ref()
             .map_or(0.0, |s| s.reach.max(s.stroke.width));
-        // Two extra pixels for anti-aliasing and the sub-pixel shift.
-        let edge = |v: f32, grow: f32| (v * scale + grow * scale).floor() as i32;
-        let left = edge(bounds.left(), -reach) - 2;
-        let top = edge(bounds.top(), -reach) - 2;
-        let right = edge(bounds.right(), reach) + 3;
-        let bottom = edge(bounds.bottom(), reach) + 3;
-        let (w, h) = (right - left, bottom - top);
-        if w <= 0 || h <= 0 || w > MAX_SPRITE_SIDE || h > MAX_SPRITE_SIDE {
+        // All in f64, and checked before any integer cast: a huge stroke width must fall back
+        // to path rendering, not overflow.
+        let s = f64::from(scale);
+        let reach = f64::from(reach);
+        let edge = |v: f32, grow: f64| (f64::from(v) + grow) * s;
+        let (l, r) = (edge(bounds.left(), -reach), edge(bounds.right(), reach));
+        let (t, b) = (edge(bounds.top(), -reach), edge(bounds.bottom(), reach));
+        // Two extra pixels each side for anti-aliasing and the sub-pixel shift.
+        let (w, h) = (r - l + 6.0, b - t + 6.0);
+        let limit = f64::from(MAX_SPRITE_SIDE);
+        if !(w.is_finite() && h.is_finite() && w <= limit && h <= limit) {
+            return None;
+        }
+        // Bounded by the check above: the extent is at most 256 px around the shape.
+        let (left, top) = (l.floor() as i32 - 2, t.floor() as i32 - 2);
+        let (w, h) = (w.ceil() as i32, h.ceil() as i32);
+        if w <= 0 || h <= 0 {
             return None;
         }
         Some(Sprites {
@@ -523,11 +564,11 @@ impl Sprites {
     }
 }
 
-/// Splits a device coordinate into a whole pixel and the nearest quarter-pixel phase.
+/// Splits a device coordinate into a whole pixel and the nearest 1/8-pixel phase.
 fn split_phase(d: f32) -> (i32, usize) {
-    let quarters = (d * PHASES as f32).round();
-    let whole = (quarters / PHASES as f32).floor();
-    let phase = quarters - whole * PHASES as f32;
+    let steps = (d * PHASES as f32).round();
+    let whole = (steps / PHASES as f32).floor();
+    let phase = steps - whole * PHASES as f32;
     (whole as i32, phase as usize)
 }
 
@@ -536,7 +577,7 @@ fn draw_markers(
     pixmap: &mut sk::Pixmap,
     scale: f32,
     root: sk::Transform,
-    mask: Option<&sk::Mask>,
+    clip: Option<(&sk::Mask, ClipRect)>,
     shape: &crate::geometry::Path,
     fill: Option<Rgba>,
     stroke: Option<&StrokeStyle>,
@@ -562,6 +603,10 @@ fn draw_markers(
         Sprites::new(&marker, scale)
     };
     let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
+    let mask = clip.map(|(m, _)| m);
+    // Pixels certainly fully covered by the clip. A sprite is a composited fill+stroke, which
+    // is only equal to masking fill and stroke separately where the mask is 255.
+    let interior = clip.map(|(_, c)| c.interior(pixmap.width(), pixmap.height()));
     for p in positions.iter().filter(|p| valid_point(**p)) {
         let Some(sprites) = sprites.as_mut() else {
             marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
@@ -573,6 +618,12 @@ fn draw_markers(
         let (w, h) = (sprites.size.0 as i32, sprites.size.1 as i32);
         if left >= width || top >= height || left + w <= 0 || top + h <= 0 {
             continue;
+        }
+        if let Some((il, it, ir, ib)) = interior {
+            if left < il || top < it || left + w > ir || top + h > ib {
+                marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
+                continue;
+            }
         }
         if let Some(sprite) = sprites.phase(&marker, scale, px, py) {
             blit_over(pixmap, sprite, left, top, mask);
@@ -1306,7 +1357,7 @@ mod tests {
     }
 
     /// 50 circle markers with a white outline. With `snap`, positions sit exactly on the
-    /// quarter-pixel grid (at 100 dpi) that the sprite cache quantizes to.
+    /// 1/8-pixel grid (at 100 dpi) that the sprite cache quantizes to.
     fn markers_scene(count: usize, snap: bool) -> Scene {
         let mut state: u32 = 7;
         let mut next = move || {
@@ -1315,7 +1366,7 @@ mod tests {
         };
         let grid = |v: f32| {
             if snap {
-                (v * 100.0 / 72.0 * 4.0).round() / 4.0 * 72.0 / 100.0
+                (v * 100.0 / 72.0 * PHASES as f32).round() / PHASES as f32 * 72.0 / 100.0
             } else {
                 v
             }
@@ -1401,15 +1452,122 @@ mod tests {
     fn marker_sprites_match_path_rendering_at_random_positions() {
         let (fraction, largest) = sprite_vs_path(&markers_scene(50, false));
         eprintln!("random: {:.4}% over 8, largest {largest}", fraction * 100.0);
-        // Snapping to quarter pixels moves edges by up to 1/8 px, so up to 32 levels on edge
-        // pixels. The golden fraction limit (0.5%) cannot hold for this comparison; the largest
-        // delta limit does, and the fraction is bounded by a separate quantization budget.
-        assert!(largest <= 64, "largest channel difference {largest}");
+        // Snapping to 1/8 pixel moves an edge by up to 1/16 px per axis (about 16 levels on a
+        // vertical or horizontal edge, a little more on diagonals), so the golden fraction limit
+        // (0.5%) cannot hold here. Measured: 3.06% over 8, largest 42; limits keep a margin.
+        assert!(largest <= 48, "largest channel difference {largest}");
         assert!(
-            fraction <= 0.10,
+            fraction <= 0.04,
             "{:.2}% of pixels differ by more than 8",
             fraction * 100.0
         );
+    }
+
+    /// Renders `scene` with sprites and with path rendering; returns (largest channel delta,
+    /// sprite image, path image).
+    fn both_ways(scene: &Scene, dpi: u32) -> (u8, Decoded, Decoded) {
+        FORCE_PATHS.with(|f| f.set(true));
+        let paths = raster(scene, dpi);
+        FORCE_PATHS.with(|f| f.set(false));
+        let sprites = raster(scene, dpi);
+        let largest = paths
+            .rgba
+            .iter()
+            .zip(&sprites.rgba)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        (largest, sprites, paths)
+    }
+
+    #[test]
+    fn huge_stroke_width_falls_back_to_paths_instead_of_overflowing() {
+        let mut scene = Scene::new(20.0, 20.0, WHITE);
+        scene.push(Item::Markers {
+            shape: rect_path(-1.0, -1.0, 2.0, 2.0),
+            fill: Some(BLACK),
+            stroke: Some(StrokeStyle {
+                color: BLACK,
+                ..stroke_style(3.0e38, vec![])
+            }),
+            positions: vec![pt(10.0, 10.0)],
+        });
+        let (largest, sprites, paths) = both_ways(&scene, 72);
+        assert_eq!(largest, 0);
+        assert_eq!(sprites.at(10, 10), paths.at(10, 10));
+        assert_eq!(sprites.at(10, 10), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn markers_on_a_fractional_clip_edge_match_path_rendering() {
+        // Half-transparent fill under a half-transparent stroke, straddling a clip edge at
+        // x = 10.5 px: masking the composite is not masking fill and stroke separately.
+        let mut scene = Scene::new(30.0, 20.0, WHITE);
+        let half = |r, g, b| Rgba { r, g, b, a: 128 };
+        scene.push(Item::Group {
+            clip: Some(Rect {
+                x: 10.5,
+                y: 0.0,
+                width: 15.0,
+                height: 20.0,
+            }),
+            items: vec![Item::Markers {
+                shape: rect_path(-4.0, -4.0, 8.0, 8.0),
+                fill: Some(half(0, 0, 0)),
+                stroke: Some(StrokeStyle {
+                    color: half(0, 0, 0),
+                    ..stroke_style(4.0, vec![])
+                }),
+                positions: vec![pt(10.0, 10.0), pt(20.0, 10.0)],
+            }],
+        });
+        let (largest, _, _) = both_ways(&scene, 72);
+        assert!(largest <= 2, "largest channel difference {largest}");
+    }
+
+    #[test]
+    fn clips_use_device_bounds_not_the_logical_figure_size() {
+        // 10.51 pt at 72 dpi is 11 px wide; the last column is only 0.51 pt inside the figure.
+        let mut scene = Scene::new(10.51, 4.0, WHITE);
+        scene.push(Item::Group {
+            clip: Some(Rect {
+                x: -1.0,
+                y: -1.0,
+                width: 30.0,
+                height: 30.0,
+            }),
+            items: vec![fill(rect_path(-1.0, -1.0, 30.0, 30.0), BLACK)],
+        });
+        let image = raster(&scene, 72);
+        assert_eq!(image.width, 11);
+        assert_eq!(image.at(10, 2), [0, 0, 0, 255]);
+        assert_eq!(image.at(0, 0), [0, 0, 0, 255]);
+        assert_eq!(image.at(10, 3), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn zero_length_paths_draw_caps_even_when_dashed() {
+        for dash in [vec![], vec![2.0, 2.0]] {
+            let mut scene = Scene::new(20.0, 20.0, WHITE);
+            scene.push(Item::Stroke {
+                path: path_of(&[('M', &[10.0, 10.0]), ('L', &[10.0, 10.0])]),
+                style: StrokeStyle {
+                    cap: LineCap::Round,
+                    ..stroke_style(4.0, dash.clone())
+                },
+            });
+            let image = raster(&scene, 72);
+            assert!(image.is_ink(10, 10), "no dot for dash {dash:?}");
+            assert!(image.is_ink(11, 10) && image.is_ink(10, 11));
+            assert!(!image.is_ink(13, 10) && !image.is_ink(10, 7));
+        }
+        // Butt caps draw nothing for a zero-length stroke.
+        let mut scene = Scene::new(20.0, 20.0, WHITE);
+        scene.push(Item::Stroke {
+            path: path_of(&[('M', &[10.0, 10.0]), ('L', &[10.0, 10.0])]),
+            style: stroke_style(4.0, vec![]),
+        });
+        assert!(!raster(&scene, 72).is_ink(10, 10));
     }
 
     #[test]
