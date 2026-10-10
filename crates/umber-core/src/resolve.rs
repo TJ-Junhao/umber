@@ -1,10 +1,10 @@
 //! Resolve: data extents to scales to ticks, computed at render time.
 //!
-//! Auto limits follow spec section 7. A continuous axis is widened to nice limits, except the x
-//! axis of an axes whose marks are all lines, which keeps the exact data extent. Explicit
-//! limits replace the auto range as given. A category axis lists the marks' categories in
-//! order of first appearance. On a nice axis the ticks are the tick set that produced the
-//! nice limits, so both ends carry a tick. Tick positions are normalized to `[0, 1]` along the axis, so
+//! Auto limits: a continuous axis is widened to nice limits, except the x axis of an axes whose
+//! marks are all lines, which keeps the exact data extent. Explicit limits replace the auto
+//! range as given. A category axis lists the marks' categories in order of first appearance. On
+//! a nice axis the ticks are the tick set that produced the nice limits, so both ends carry a
+//! tick. Tick positions are normalized to `[0, 1]` along the axis, so
 //! layout and drawing never touch data values again.
 
 use crate::figure::{Axes, AxisData, Mark};
@@ -76,11 +76,10 @@ pub(crate) fn coincides(a: f64, b: f64) -> bool {
 /// The tick targets for a plot area of `plot_w` by `plot_h` points:
 /// x `clamp(round(w / 100) + 1, 3, 8)`, y `clamp(round(h / 45) + 1, 3, 8)`.
 ///
-/// These divisors were calibrated against the approved mocks (about 5 ticks per axis on a
-/// 6 by 4 in figure: y 0/25/50/75/100, x 0/10/20/30). They replace the plan's original 72 and
-/// 60 pt, which gave too few y ticks. The y divisor is 45 rather than 50 so that
-/// `AboveGridline` layouts, whose label rows leave a shorter plot area (about 172 pt on a
-/// 6 by 4 in PIGMENT figure), still get 5 y ticks.
+/// These divisors were chosen so a 6 by 4 in figure gets about 5 ticks per axis
+/// (y 0/25/50/75/100, x 0/10/20/30). A y divisor of 60 pt gave too few y ticks.
+/// The y divisor is 45 rather than 50 so that `AboveGridline` layouts, whose label rows leave a
+/// shorter plot area (about 172 pt on a 6 by 4 in PIGMENT figure), still get 5 y ticks.
 pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
     fn target(size: f64, per_tick: f64, lo: usize, hi: usize) -> usize {
         let n = (size / per_tick).round() + 1.0;

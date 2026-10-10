@@ -1180,7 +1180,7 @@ mod tests {
     }
 
     #[test]
-    fn reviewer_curve_repro_is_skipped() {
+    fn huge_control_points_are_skipped() {
         // Finite but huge control point: used to abort tiny-skia in release.
         let mut scene = Scene::new(40.0, 20.0, WHITE);
         scene.push(Item::Stroke {

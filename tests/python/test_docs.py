@@ -22,7 +22,7 @@ def test_every_enum_member_has_a_docstring() -> None:
     assert undocumented_enum_members(_public_objects()) == []
 
 
-# --- self-tests: the checker must catch what it is meant to catch (Review Focus 3) ---
+# --- self-tests: the checker must catch what it is meant to catch ---
 
 _GOOD_DOC = """A documented object.
 
