@@ -514,7 +514,8 @@ impl Axes {
 
     /// Sets the x limits. `Error::Usage` on a category axis; `Error::Style` unless
     /// `low < high`, both are finite and within the supported magnitudes (and positive on a
-    /// log axis).
+    /// log axis), and the range is wide enough: on a linear axis at least
+    /// `max(1e-10 * max(|low|, |high|), 1e-290)`, on a log axis a factor of `1 + 1e-9`.
     ///
     /// # Examples
     ///
@@ -525,6 +526,7 @@ impl Axes {
     /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// assert!(axes.xlim(0.0, 1.0).is_ok());
     /// assert!(axes.xlim(1.0, 1.0).is_err());
+    /// assert!(axes.xlim(1.0, 1.0 + 1e-12).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Axes> {
