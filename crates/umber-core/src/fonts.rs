@@ -54,6 +54,45 @@ impl Font {
         Font::Inter,
         Font::JetBrainsMono,
     ];
+
+    /// The family name used in SVG `font-family`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::SourceSerif4.family_name(), "Source Serif 4");
+    /// ```
+    #[must_use]
+    pub fn family_name(self) -> &'static str {
+        match self {
+            Font::SourceSerif4 => "Source Serif 4",
+            Font::IbmPlexSans => "IBM Plex Sans",
+            Font::Geist => "Geist",
+            Font::Inter => "Inter",
+            Font::JetBrainsMono => "JetBrains Mono",
+        }
+    }
+
+    /// The CSS generic family to fall back to: `serif` for Source Serif 4, `monospace` for
+    /// JetBrains Mono, and `sans-serif` for the rest.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::JetBrainsMono.generic_family(), "monospace");
+    /// ```
+    #[must_use]
+    pub fn generic_family(self) -> &'static str {
+        match self {
+            Font::SourceSerif4 => "serif",
+            Font::JetBrainsMono => "monospace",
+            Font::IbmPlexSans | Font::Geist | Font::Inter => "sans-serif",
+        }
+    }
 }
 
 /// A bundled font weight.
@@ -278,6 +317,22 @@ mod tests {
         let fixture = include_bytes!("../tests/fixtures/fallback-only.ttf");
         let face = FontRef::new(fixture).expect("fixture parses");
         assert!(face.charmap().map(FALLBACK_TEST_CODEPOINT).is_some());
+    }
+
+    #[test]
+    fn family_names_are_the_published_names() {
+        let expected = [
+            (Font::SourceSerif4, "Source Serif 4", "serif"),
+            (Font::IbmPlexSans, "IBM Plex Sans", "sans-serif"),
+            (Font::Geist, "Geist", "sans-serif"),
+            (Font::Inter, "Inter", "sans-serif"),
+            (Font::JetBrainsMono, "JetBrains Mono", "monospace"),
+        ];
+        assert_eq!(expected.len(), Font::ALL.len());
+        for (font, name, generic) in expected {
+            assert_eq!(font.family_name(), name);
+            assert_eq!(font.generic_family(), generic);
+        }
     }
 
     #[test]
