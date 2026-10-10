@@ -23,11 +23,40 @@
 #       Build the corpus at <git-rev> (a temporary worktree that gets this tree's corpus
 #       files) and at this tree, in the same environment, and compare everything including
 #       PNG. This is the check that holds on any machine and needs no committed baseline.
+#   scripts/check-refactor-output.sh extend <git-rev> [--png]
+#       The check for changes that add behaviour. It compares the committed manifest at
+#       <git-rev> with this tree's committed manifest, and builds nothing. Every entry of the
+#       base must still be present and unchanged, except for the cases named in
+#       crates/umber-core/tests/refactor/intended-changes.txt. Entries that only exist in this
+#       tree are added outputs and are listed. A changed or removed entry whose case is not
+#       named in the file fails, and so does a named case that did not change, so the list
+#       cannot go stale. The case of an output is its file name without the kind directory and
+#       without the .txt, .editable.svg, .outlines.svg or .dpiN.png suffix; errors/api.txt, for
+#       instance, is the case "api". PNG entries are compared only with --png, and only on the
+#       machine that generated the manifest (see `check`); without it a named case counts as
+#       changed when one of its compared entries changed.
 #   scripts/check-refactor-output.sh manifest <file>
 #       Write the manifest of this tree to <file>.
 #   scripts/check-refactor-output.sh update
 #       Overwrite the committed baseline with this tree's manifest. Only do this from a
 #       revision whose output is known to be right, and say so in the commit message.
+#
+# Procedure for a pull request that adds a feature:
+#   1. Do not label it `refactor`: `compare` builds this tree's corpus against the base revision,
+#      and the base cannot compile a corpus that calls APIs it does not have.
+#   2. Put new cases into new output files: new scene, SVG and PNG files, a new
+#      errors/<area>.txt, or a new api/constants-<area>.txt. Never append to errors/api.txt,
+#      api/themes.txt or api/constants.txt, because that changes an existing hash. Each feature
+#      edits only its own module under crates/umber-core/tests/support/corpus/. Recorders may
+#      gain match arms for new marks; existing record formats do not change.
+#   3. Regenerate the manifest with `update` on the platform of the committed baseline (macOS
+#      arm64), so that its PNG lines stay meaningful, and commit it.
+#   4. List the cases whose outputs change on purpose in intended-changes.txt, one name per
+#      line (blank lines and # comments are ignored), and replace the file's contents in every
+#      pull request. Everything else must stay byte-identical.
+#   5. Run `extend <base-rev> --png` locally. CI runs `extend` without --png on every pull
+#      request, and `check` proves that the committed manifest matches the tree.
+#   6. Regenerate golden images only for the images the change declares.
 #
 # Conditions: the same Rust toolchain, Cargo.lock and bundled font files on both sides; the
 # corpus uses the in-memory fallback font and never reads system fonts. Everything is built
@@ -39,9 +68,13 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 baseline="crates/umber-core/tests/refactor/baseline-manifest.txt"
 # UMBER_REFACTOR_BASELINE (an absolute path) replaces the committed baseline in `check`.
 baseline_file="${UMBER_REFACTOR_BASELINE:-$root/$baseline}"
+intended="crates/umber-core/tests/refactor/intended-changes.txt"
 driver_files=(
   crates/umber-core/examples/refactor_outputs.rs
   crates/umber-core/tests/support/refactor_cases.rs
+  crates/umber-core/tests/support/corpus/bars.rs
+  crates/umber-core/tests/support/corpus/hist.rs
+  crates/umber-core/tests/support/corpus/legend.rs
 )
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/umber-refactor-gate.XXXXXX")"
@@ -104,6 +137,71 @@ compare_manifests() {
   fi
 }
 
+# extend_check <git-rev> <with-png: 1|0>: see the header.
+extend_check() {
+  local rev="$1" png="$2" intended_file="$root/$intended"
+  if ! git -C "$root" show "$rev:$baseline" >"$tmp/base-manifest.txt" 2>"$tmp/git.err"; then
+    echo "error: cannot read $baseline at $rev" >&2
+    cat "$tmp/git.err" >&2
+    exit 1
+  fi
+  if [[ ! -f "$intended_file" ]]; then intended_file=/dev/null; fi
+  select_lines "$tmp/base-manifest.txt" "$png" >"$tmp/a.sel"
+  select_lines "$root/$baseline" "$png" >"$tmp/b.sel"
+  awk -v intended="$intended_file" '
+    function casename(path) {
+      sub(/^[^\/]*\//, "", path)
+      sub(/\.(editable|outlines)\.svg$/, "", path)
+      sub(/\.dpi[0-9]+\.png$/, "", path)
+      sub(/\.txt$/, "", path)
+      return path
+    }
+    BEGIN {
+      while ((getline line < intended) > 0) {
+        sub(/#.*/, "", line)
+        sub(/^[ \t]+/, "", line)
+        sub(/[ \t\r]+$/, "", line)
+        if (line != "") listed[line] = 1
+      }
+    }
+    NR == FNR { base[$2] = $1; next }
+    { tree[$2] = $1 }
+    END {
+      for (path in base) {
+        name = casename(path)
+        if (!(path in tree)) kind = "removed"
+        else if (tree[path] != base[path]) kind = "changed"
+        else continue
+        touched[name] = 1
+        print kind "\t" path "\t" (name in listed ? "intended" : "UNLISTED")
+      }
+      for (path in tree) if (!(path in base)) print "added\t" path "\t-"
+      for (name in listed) if (!(name in touched)) print "stale\t" name "\t-"
+    }
+  ' "$tmp/a.sel" "$tmp/b.sel" | LC_ALL=C sort >"$tmp/extend.out"
+  local added changed removed unlisted stale
+  added="$(grep -c '^added	' "$tmp/extend.out" || true)"
+  changed="$(grep -c '^changed	' "$tmp/extend.out" || true)"
+  removed="$(grep -c '^removed	' "$tmp/extend.out" || true)"
+  unlisted="$(grep -c '	UNLISTED$' "$tmp/extend.out" || true)"
+  stale="$(grep -c '^stale	' "$tmp/extend.out" || true)"
+  local kind path note
+  while IFS='	' read -r kind path note; do
+    case "$kind" in
+      added) echo "  added    $path" ;;
+      changed | removed) echo "  $kind $path ($note)" ;;
+      stale) echo "  listed but unchanged: $path" ;;
+    esac
+  done <"$tmp/extend.out"
+  local summary="$added added, $changed changed, $removed removed; png compared: $([[ $png == 1 ]] && echo yes || echo no)"
+  if [[ "$unlisted" -ne 0 || "$stale" -ne 0 ]]; then
+    echo "refactor output gate (extend): FAIL ($summary; $unlisted unlisted, $stale stale)" >&2
+    echo "A changed or removed output needs its case in $intended, and a listed case has to change." >&2
+    exit 1
+  fi
+  echo "refactor output gate (extend): PASS ($summary)"
+}
+
 usage() {
   sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
 }
@@ -162,6 +260,13 @@ case "$cmd" in
     manifest_of "$extra_worktree" "$tmp/target-baseline" "$tmp/baseline.txt"
     manifest_of "$root" "" "$tmp/candidate.txt"
     compare_manifests "$tmp/baseline.txt" "$tmp/candidate.txt" "$png" "$rev" "working tree"
+    ;;
+  extend)
+    if [[ $# -lt 1 || -z "$1" ]]; then usage_error "extend needs a git revision"; fi
+    rev="$1"
+    shift
+    parse_flag --png "$@"
+    extend_check "$rev" "$flag"
     ;;
   manifest)
     if [[ $# -ne 1 || -z "$1" ]]; then usage_error "manifest needs exactly one output path"; fi

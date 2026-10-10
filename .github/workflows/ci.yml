@@ -53,6 +53,20 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: scripts/check-refactor-output.sh compare "$BASE" --png
 
+  # Every existing output must stay unchanged except the cases listed in intended-changes.txt.
+  # The check reads two committed manifests and builds nothing, so it does not need the label.
+  output-extend:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Compare the committed manifest with the base revision's
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: scripts/check-refactor-output.sh extend "$BASE"
+
   licenses:
     runs-on: ubuntu-latest
     steps:
@@ -96,15 +110,17 @@ jobs:
 
   ci-ok:
     if: always()
-    needs: [rust, licenses, msrv, python, refactor-compare]
+    needs: [rust, licenses, msrv, python, refactor-compare, output-extend]
     runs-on: ubuntu-latest
     steps:
       - name: Require every needed job to have succeeded
         run: |
-          echo "rust=${{ needs.rust.result }} licenses=${{ needs.licenses.result }} msrv=${{ needs.msrv.result }} python=${{ needs.python.result }} refactor-compare=${{ needs.refactor-compare.result }}"
+          echo "rust=${{ needs.rust.result }} licenses=${{ needs.licenses.result }} msrv=${{ needs.msrv.result }} python=${{ needs.python.result }} refactor-compare=${{ needs.refactor-compare.result }} output-extend=${{ needs.output-extend.result }}"
           test "${{ needs.licenses.result }}" = "success"
           test "${{ needs.msrv.result }}" = "success"
           test "${{ needs.rust.result }}" = "success"
           test "${{ needs.python.result }}" = "success"
           # Skipped when the pull request has no `refactor` label.
           test "${{ needs.refactor-compare.result }}" = "success" || test "${{ needs.refactor-compare.result }}" = "skipped"
+          # Runs on pull requests only.
+          test "${{ needs.output-extend.result }}" = "success" || test "${{ needs.output-extend.result }}" = "skipped"

@@ -80,6 +80,13 @@ use umber_core::{
     TickLabelPlacement, Transform, Weight,
 };
 
+/// Cases of the newer features, one module each, so that a feature edits only its own file.
+mod corpus {
+    pub mod bars;
+    pub mod hist;
+    pub mod legend;
+}
+
 /// PNG resolutions of every case.
 pub const DPIS: [u32; 2] = [72, 200];
 
@@ -116,6 +123,9 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     text("api", "themes.txt", theme_cases());
     text("api", "constants.txt", constant_cases());
     text("api", "text-layout.txt", text_layout_cases(&lib));
+    corpus::bars::cases(&lib, &mut sink);
+    corpus::hist::cases(&lib, &mut sink);
+    corpus::legend::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
