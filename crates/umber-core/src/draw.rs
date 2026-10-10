@@ -28,8 +28,8 @@ use crate::exact::Dyadic;
 use crate::geometry::{Path, Point};
 use crate::layout::{Area, Label, Layout};
 use crate::m4_indices;
-use crate::model::{Axes, AxisData, Mark};
-use crate::resolve::{AxisScale, Resolved, ResolvedAxis};
+use crate::model::{AxisData, Mark};
+use crate::resolve::{AxisScale, Resolved, ResolvedAxis, ResolvedMark};
 use crate::scale::log_offset;
 use crate::scene::{
     FillRule, GradientStop, Item, LineCap, LineJoin, LinearGradient, Paint, Rect, StrokeStyle,
@@ -932,19 +932,18 @@ fn scatter_item(
     })
 }
 
-/// The marks of `axes` as one group clipped to the plot area, in insertion order, each in its
-/// color from `colors` (as from `resolve::mark_colors`). `None` when nothing is visible.
+/// The `marks` as one group clipped to the plot area, in the given order, each in its resolved
+/// color. `None` when nothing is visible.
 pub(crate) fn marks(
     theme: &Theme,
-    axes: &Axes,
     resolved: &Resolved,
     layout: &Layout,
-    colors: &[Rgba],
+    marks: &[ResolvedMark<'_>],
 ) -> Option<Item> {
     let plot = layout.plot;
     let maps = (AxisMap::x(&resolved.x, plot), AxisMap::y(&resolved.y, plot));
     let mut items = Vec::new();
-    for (mark, &color) in axes.marks().iter().zip(colors) {
+    for &ResolvedMark { mark, color } in marks {
         match mark {
             Mark::Line { x, y, options } => {
                 let mut xs = axis_x(&resolved.x, x);

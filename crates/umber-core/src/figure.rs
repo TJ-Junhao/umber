@@ -1,7 +1,8 @@
 //! The figure model and the calls that render it.
 //!
 //! A [`Figure`] holds one [`Axes`], which holds [`Mark`]s. Every input is validated at the call
-//! that receives it, so a model that exists is always drawable. Marks own copies of their data.
+//! that receives it, so a model that exists is always drawable. Marks hold copies of their data
+//! that never change, so clones of a figure share them.
 //! Colors stay as [`ColorSpec`](crate::ColorSpec)s until [`Figure::resolved_colors`] resolves them against the
 //! theme's palette. [`Figure::to_scene`], [`Figure::to_png`] and [`Figure::to_svg`] run the
 //! render pipeline: resolve scales and ticks, lay out the axes, then draw.
@@ -20,7 +21,9 @@
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
-pub use crate::model::{Axes, AxisData, Figure, LineOptions, Mark, ScatterOptions};
+pub use crate::model::{
+    Axes, AxisData, Figure, LineOptions, Mark, ScatterOptions, XValues, YValues,
+};
 
 use crate::render::{SvgText, render_png, render_svg};
 use crate::scene::Scene;
@@ -47,7 +50,10 @@ impl Figure {
         let Some(axes) = self.axes() else {
             return Vec::new();
         };
-        resolve::mark_colors(axes.marks(), self.theme().palette())
+        resolve::resolve_marks(axes.marks(), self.theme().palette())
+            .into_iter()
+            .map(|resolved| resolved.color)
+            .collect()
     }
 
     /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.

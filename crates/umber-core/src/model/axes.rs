@@ -1,10 +1,10 @@
 //! The axes: scale kinds, texts, explicit limits and marks, with the mutators that validate
 //! every input before storing it.
 
-use super::axis_data::AxisData;
+use super::axis_data::{AxisData, Series};
 use super::mark::{LineOptions, Mark, ScatterOptions};
-use super::validation::{check_limits, check_series};
-use crate::{Result, ScaleKind};
+use super::validation::check_limits;
+use crate::{ContinuousScale, Result, ScaleKind};
 
 /// A plotting area with its scales, texts, limits and marks.
 ///
@@ -29,8 +29,10 @@ pub struct Axes {
     subtitle: String,
     xlabel: String,
     ylabel: String,
-    xlim: Option<(f64, f64)>,
-    ylim: Option<(f64, f64)>,
+    /// The explicit x limits, validated as a scale for the x axis.
+    xlim: Option<ContinuousScale>,
+    /// The explicit y limits, validated as a scale for the y axis.
+    ylim: Option<ContinuousScale>,
     marks: Vec<Mark>,
 }
 
@@ -238,7 +240,7 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn x_limits(&self) -> Option<(f64, f64)> {
-        self.xlim
+        self.xlim.map(|scale| scale.domain())
     }
 
     /// The explicit y limits, if set.
@@ -256,6 +258,16 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn y_limits(&self) -> Option<(f64, f64)> {
+        self.ylim.map(|scale| scale.domain())
+    }
+
+    /// The x scale that the explicit x limits define, if set.
+    pub(crate) fn x_limit_scale(&self) -> Option<ContinuousScale> {
+        self.xlim
+    }
+
+    /// The y scale that the explicit y limits define, if set.
+    pub(crate) fn y_limit_scale(&self) -> Option<ContinuousScale> {
         self.ylim
     }
 
@@ -320,12 +332,8 @@ impl Axes {
     ///
     /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
     pub fn line(&mut self, x: AxisData, y: &[f64], options: LineOptions) -> Result<&mut Axes> {
-        check_series("Axes.line()", self.x, self.y, &x, y)?;
-        self.marks.push(Mark::Line {
-            x,
-            y: y.to_vec(),
-            options,
-        });
+        let series = Series::new("Axes.line()", self.x, self.y, x, y)?;
+        self.marks.push(Mark::line(series, options));
         Ok(self)
     }
 
@@ -349,12 +357,8 @@ impl Axes {
         y: &[f64],
         options: ScatterOptions,
     ) -> Result<&mut Axes> {
-        check_series("Axes.scatter()", self.x, self.y, &x, y)?;
-        self.marks.push(Mark::Scatter {
-            x,
-            y: y.to_vec(),
-            options,
-        });
+        let series = Series::new("Axes.scatter()", self.x, self.y, x, y)?;
+        self.marks.push(Mark::scatter(series, options));
         Ok(self)
     }
 

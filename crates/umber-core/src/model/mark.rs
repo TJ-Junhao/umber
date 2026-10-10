@@ -1,6 +1,6 @@
 //! Marks and their options.
 
-use super::axis_data::AxisData;
+use super::axis_data::{Series, XValues, YValues};
 use crate::{ColorSpec, Dash, Marker};
 
 /// Options of a line mark.
@@ -69,17 +69,28 @@ impl Default for ScatterOptions {
 
 /// One series drawn in an [`Axes`](super::Axes).
 ///
+/// Marks are created by [`Axes::line`](super::Axes::line) and
+/// [`Axes::scatter`](super::Axes::scatter), which validate the data; the stored values
+/// ([`XValues`], [`YValues`]) cannot be built elsewhere. Read a mark by matching on its variant.
+///
 /// # Examples
 ///
 /// ```
 /// use umber_core::figure::{AxisData, LineOptions, Mark};
+/// use umber_core::{Figure, ScaleKind, Theme};
 ///
-/// let mark = Mark::Line {
-///     x: AxisData::Numbers(vec![0.0, 1.0]),
-///     y: vec![2.0, 3.0],
-///     options: LineOptions::default(),
-/// };
-/// assert!(matches!(mark, Mark::Line { .. }));
+/// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// axes.line(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], LineOptions::default())?;
+/// match axes.marks() {
+///     [Mark::Line { x, y, options }] => {
+///         assert_eq!(**x, AxisData::Numbers(vec![0.0, 1.0]));
+///         assert_eq!(&y[..], &[2.0, 3.0]);
+///         assert!(options.label.is_empty());
+///     }
+///     other => panic!("unexpected marks {other:?}"),
+/// }
+/// # Ok::<(), umber_core::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive] // M5b adds the bar and histogram marks
@@ -87,24 +98,36 @@ pub enum Mark {
     /// A polyline through the points; NaN breaks it.
     Line {
         /// The x values.
-        x: AxisData,
+        x: XValues,
         /// The y values, as many as `x`.
-        y: Vec<f64>,
+        y: YValues,
         /// Label, color and dash.
         options: LineOptions,
     },
     /// Individual markers; NaN skips a point.
     Scatter {
         /// The x values.
-        x: AxisData,
+        x: XValues,
         /// The y values, as many as `x`.
-        y: Vec<f64>,
+        y: YValues,
         /// Label, color and marker shape.
         options: ScatterOptions,
     },
 }
 
 impl Mark {
+    /// A line through a validated series.
+    pub(super) fn line(series: Series, options: LineOptions) -> Mark {
+        let Series { x, y } = series;
+        Mark::Line { x, y, options }
+    }
+
+    /// Markers at the points of a validated series.
+    pub(super) fn scatter(series: Series, options: ScatterOptions) -> Mark {
+        let Series { x, y } = series;
+        Mark::Scatter { x, y, options }
+    }
+
     /// The color as given, before it is resolved against a palette.
     pub(crate) fn color(&self) -> ColorSpec {
         match self {
