@@ -69,7 +69,8 @@ fn chrome_snapshot() {
     let scene = chrome_figure(Theme::pigment()).to_scene(FontLibrary::global());
     assert_scene_bounded(&scene);
     // The snapshot file is kept in `src/snapshots`, under the name of this module path.
-    insta::with_settings!({ snapshot_path => "../../snapshots" }, {
+    let snapshot_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/snapshots");
+    insta::with_settings!({ snapshot_path => snapshot_path }, {
         insta::assert_snapshot!(render_svg(&scene, SvgText::Editable));
     });
 }

@@ -9,11 +9,8 @@
 //! with that offset (at most the clip rectangle's size for an accepted crossing), not with the
 //! endpoints' magnitude, even when both endpoints are astronomically far away.
 
-mod expansion;
-
-use crate::exact::Dyadic;
+use crate::exact::{Dyadic, cross_difference, group_scale, two_sum};
 use crate::layout::Area;
-use expansion::{cross_difference, group_scale, two_sum};
 
 /// Crossings whose computed coordinate is outside the clip rectangle by at most this share of
 /// the rectangle's size (about 4e-10 pt on a 400 pt plot) count as on it; their rounding error
