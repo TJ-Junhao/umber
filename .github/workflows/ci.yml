@@ -20,6 +20,13 @@ jobs:
       - run: cargo test -p umber-core
       - run: cargo test --doc -p umber-core
 
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install 1.88 --profile minimal
+      - run: cargo +1.88 check -p umber-core --locked
+
   python:
     strategy:
       fail-fast: false
@@ -44,11 +51,12 @@ jobs:
 
   ci-ok:
     if: always()
-    needs: [rust, python]
+    needs: [rust, msrv, python]
     runs-on: ubuntu-latest
     steps:
       - name: Require every needed job to have succeeded
         run: |
-          echo "rust=${{ needs.rust.result }} python=${{ needs.python.result }}"
+          echo "rust=${{ needs.rust.result }} msrv=${{ needs.msrv.result }} python=${{ needs.python.result }}"
+          test "${{ needs.msrv.result }}" = "success"
           test "${{ needs.rust.result }}" = "success"
           test "${{ needs.python.result }}" = "success"
