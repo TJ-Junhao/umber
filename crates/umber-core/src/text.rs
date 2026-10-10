@@ -17,7 +17,8 @@
 //!
 //! System fonts are memory-mapped by `fontdb` whenever they are read, including when a layout is
 //! outlined. A system font file that changes or disappears between layout and outline yields the
-//! new contents or nothing for those glyphs; the outline never panics.
+//! new contents or nothing for those glyphs; the outline never panics. Shaping copies only the
+//! tables the shaper reads from a system font, never its outlines.
 //!
 //! # Examples
 //!
@@ -40,8 +41,18 @@ use std::ops::Range;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
-use rustybuzz::ttf_parser::{self, GlyphId, OutlineBuilder, Tag};
-use rustybuzz::{BufferFlags, Direction, Feature, Script, ShapePlan, UnicodeBuffer};
+use harfrust::{
+    Buffer, BufferFlags, Direction, Feature, FontFuncs, Script, ShapeOptions, ShapePlan,
+    ShaperFont, Tag,
+};
+use read_fonts::model::Blob;
+use read_fonts::tables::cmap::{Cmap, Cmap2, CmapSubtable, EncodingRecord, PlatformId};
+use read_fonts::types::GlyphId;
+use read_fonts::{FontRef, TableProvider};
+use skrifa::MetadataProvider;
+use skrifa::charmap::Charmap;
+use skrifa::instance::{LocationRef, Size};
+use skrifa::outline::{DrawSettings, OutlineGlyphCollection, OutlinePen};
 
 use crate::fonts::{Font, Weight, font_bytes};
 use crate::geometry::{Path, Point};
@@ -86,8 +97,8 @@ enum FontData {
     Bundled(&'static [u8]),
     /// A font passed to [`FontLibrary::with_fallbacks`].
     Extra(Arc<Vec<u8>>),
-    /// A system font. fontdb memory-maps the file each time it is read; nothing is copied. The
-    /// `Arc` keeps the database alive for as long as a layout refers to it.
+    /// A system font. fontdb memory-maps the file each time it is read, and outlining copies
+    /// nothing. The `Arc` keeps the database alive for as long as a layout refers to it.
     System(Arc<fontdb::Database>, fontdb::ID),
 }
 
@@ -119,6 +130,130 @@ impl FontHandle {
     fn is_bundled(&self) -> bool {
         matches!(self.data, FontData::Bundled(_))
     }
+}
+
+/// A font prepared for shaping.
+pub(crate) type ShapingFont = harfrust::Font;
+
+/// A font parsed for character lookup and outlines.
+pub(crate) struct Face<'a> {
+    /// The best Unicode subtable.
+    charmap: Charmap<'a>,
+    /// Every subtable, for characters that only another Unicode subtable maps.
+    cmap: Option<Cmap<'a>>,
+    outlines: OutlineGlyphCollection<'a>,
+}
+
+impl<'a> Face<'a> {
+    fn parse(data: &'a [u8], index: u32) -> Option<Face<'a>> {
+        let font = FontRef::from_index(data, index).ok()?;
+        Some(Face {
+            charmap: font.charmap(),
+            cmap: font.cmap().ok(),
+            outlines: font.outline_glyphs(),
+        })
+    }
+
+    /// The glyph for `c`, treating a mapping to glyph 0 (`.notdef`) as missing.
+    fn glyph(&self, c: char) -> Option<GlyphId> {
+        self.charmap
+            .map(c)
+            .or_else(|| self.secondary_glyph(u32::from(c)))
+            .filter(|g| *g != GlyphId::NOTDEF)
+    }
+
+    /// The glyph for `cp` from the first Unicode subtable, in table order, that maps it.
+    ///
+    /// The best subtable is tried first, by [`Face::glyph`] and by the shaper. This also reads
+    /// format 2, which neither of them does, and formats 0, 6 and 10, which skrifa's lookup
+    /// does not, so that every subtable the system font index reads can produce the glyph.
+    fn secondary_glyph(&self, cp: u32) -> Option<GlyphId> {
+        let cmap = self.cmap.as_ref()?;
+        cmap.encoding_records()
+            .iter()
+            .filter(|record| is_unicode(record))
+            .find_map(|record| {
+                let glyph = match record.subtable(cmap.offset_data()).ok()? {
+                    CmapSubtable::Format2(sub) => format2_glyph(&sub, cp),
+                    sub => sub.map_codepoint(cp),
+                };
+                glyph.filter(|g| *g != GlyphId::NOTDEF)
+            })
+    }
+
+    /// Whether `glyph` has an outline with at least one segment.
+    fn has_outline(&self, glyph: GlyphId) -> bool {
+        self.outlines.get(glyph).is_some_and(|outline| {
+            let mut pen = SegmentCount(0);
+            outline.draw(unhinted(), &mut pen).is_ok() && pen.0 > 0
+        })
+    }
+
+    /// Whether this face can draw `c`: it has a glyph, and the glyph has an outline unless `c`
+    /// is whitespace. Bitmap-only glyphs and fonts without outline tables do not count.
+    pub(crate) fn draws(&self, c: char) -> bool {
+        self.glyph(c)
+            .is_some_and(|g| c.is_whitespace() || self.has_outline(g))
+    }
+}
+
+/// Whether a `cmap` encoding record holds a Unicode subtable: any Unicode platform encoding,
+/// or Windows Unicode BMP (1) and full repertoire (10).
+pub(crate) fn is_unicode(record: &EncodingRecord) -> bool {
+    match record.platform_id() {
+        PlatformId::Unicode => true,
+        PlatformId::Windows => matches!(record.encoding_id(), 1 | 10),
+        _ => false,
+    }
+}
+
+/// Looks `cp` up in a format 2 (high-byte mapping) subtable.
+///
+/// Codes below 0xFF use sub-header 0, as single bytes; others use the sub-header of their high
+/// byte. Glyph 0 means no glyph.
+fn format2_glyph(sub: &Cmap2<'_>, cp: u32) -> Option<GlyphId> {
+    /// Format, length, language and the 256 sub-header keys.
+    const HEADERS: usize = 6 + 2 * 256;
+    let code = u16::try_from(cp).ok()?;
+    let (high, low) = (code >> 8, code & 0xFF);
+    let key = if code < 0xFF {
+        0
+    } else {
+        sub.sub_header_keys().get(usize::from(high))?.get() / 8
+    };
+    let data = sub.offset_data();
+    let header = HEADERS + 8 * usize::from(key);
+    let first = data.read_at::<u16>(header).ok()?;
+    let count = data.read_at::<u16>(header + 2).ok()?;
+    let delta = data.read_at::<i16>(header + 4).ok()?;
+    let range_offset = data.read_at::<u16>(header + 6).ok()?;
+    if low < first || low >= first.checked_add(count)? {
+        return None;
+    }
+    // The range offset counts bytes from the range offset field itself.
+    let at = header + 6 + usize::from(range_offset) + 2 * usize::from(low - first);
+    let glyph = data.read_at::<u16>(at).ok()?;
+    if glyph == 0 {
+        return None;
+    }
+    let id = u16::try_from((i32::from(glyph) + i32::from(delta)) % 65_536).ok()?;
+    Some(GlyphId::new(u32::from(id)))
+}
+
+/// Lets the shaper use the same secondary subtables as [`Face::glyph`] when the best one has
+/// no glyph.
+struct SecondaryCmap<'f, 'a>(&'f Face<'a>);
+
+impl FontFuncs for SecondaryCmap<'_, '_> {
+    fn nominal_glyph(&self, font: &ShaperFont<'_, '_>, c: u32) -> Option<GlyphId> {
+        font.default_nominal_glyph(c)
+            .or_else(|| self.0.secondary_glyph(c))
+    }
+}
+
+/// Unhinted outlines in font units, at the default location.
+fn unhinted() -> DrawSettings<'static> {
+    DrawSettings::unhinted(Size::unscaled(), LocationRef::default())
 }
 
 impl std::fmt::Debug for FontHandle {
@@ -281,13 +416,13 @@ impl TextLayout {
             };
             let handle = &handle.handle;
             let draw = |data: &[u8], index: u32| {
-                let face = ttf_parser::Face::parse(data, index).ok()?;
+                let outlines = FontRef::from_index(data, index).ok()?.outline_glyphs();
                 let paths: Vec<(usize, Path)> = members
                     .iter()
                     .filter_map(|&i| {
                         let run = self.runs.get(i)?;
                         let mut path = Path::new();
-                        outline_run(&face, run, origin, &mut path);
+                        outline_run(&outlines, run, origin, &mut path);
                         Some((i, path))
                     })
                     .collect();
@@ -333,9 +468,9 @@ const BUNDLED_COUNT: usize = Font::ALL.len() * Weight::ALL.len();
 /// ```
 pub struct FontLibrary {
     /// Indexed by [`bundled_slot`]. `None` if the font failed to parse.
-    bundled: [Option<rustybuzz::Face<'static>>; BUNDLED_COUNT],
+    bundled: [Option<BundledFace>; BUNDLED_COUNT],
     /// Fallback font files that parsed, in the caller's order.
-    extra: Vec<Arc<Vec<u8>>>,
+    extra: Vec<ExtraFont>,
     /// `Some` for [`FontLibrary::bundled`]; `None` disables system lookup.
     system: Option<SystemFonts>,
 }
@@ -347,6 +482,37 @@ impl std::fmt::Debug for FontLibrary {
             .field("system_fallback", &self.system.is_some())
             .finish_non_exhaustive()
     }
+}
+
+/// A bundled font, parsed once per library.
+struct BundledFace {
+    shaping: ShapingFont,
+    face: Face<'static>,
+    units_per_em: u16,
+    /// Ascender and descender in font units, from the font's metrics; descender is negative.
+    ascender: f32,
+    descender: f32,
+}
+
+impl BundledFace {
+    fn new(bytes: &'static [u8]) -> Option<BundledFace> {
+        let font = FontRef::new(bytes).ok()?;
+        let metrics = font.metrics(Size::unscaled(), LocationRef::default());
+        Some(BundledFace {
+            shaping: ShapingFont::new(bytes, 0)?,
+            face: Face::parse(bytes, 0)?,
+            units_per_em: metrics.units_per_em,
+            ascender: metrics.ascent,
+            descender: metrics.descent,
+        })
+    }
+}
+
+/// A font passed to [`FontLibrary::with_fallbacks`]: its bytes, shared with layouts, and the
+/// shaping font built from the same bytes.
+struct ExtraFont {
+    bytes: Arc<Vec<u8>>,
+    shaping: ShapingFont,
 }
 
 fn bundled_slot(font: Font, weight: Weight) -> usize {
@@ -371,24 +537,12 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Runs `f`, which parses or shapes font bytes that did not ship with the crate, and turns a
 /// panic into `None`.
 ///
-/// Malformed fonts can trigger arithmetic-overflow panics inside `rustybuzz` in debug builds.
-/// Such a font is treated as unreadable. The panic hook is left alone, so the default or host
-/// hook may still print a message for the caught panic. With `panic = "abort"` nothing can be
-/// caught.
+/// Malformed fonts could trigger panics inside the font parser or the shaper, for example
+/// arithmetic overflow in debug builds. Such a font is treated as unreadable. The panic hook is
+/// left alone, so the default or host hook may still print a message for the caught panic. With
+/// `panic = "abort"` nothing can be caught.
 fn guarded<T>(f: impl FnOnce() -> T) -> Option<T> {
     catch_unwind(AssertUnwindSafe(f)).ok()
-}
-
-/// The glyph for `c`, treating a mapping to glyph 0 (`.notdef`) as missing.
-fn glyph_for(face: &ttf_parser::Face<'_>, c: char) -> Option<GlyphId> {
-    face.glyph_index(c).filter(|g| g.0 != 0)
-}
-
-/// Whether `face` can draw `c`: it has a glyph, and the glyph has an outline unless `c` is
-/// whitespace. Bitmap-only glyphs and fonts without outline tables do not count.
-fn draws(face: &ttf_parser::Face<'_>, c: char) -> bool {
-    glyph_for(face, c)
-        .is_some_and(|g| c.is_whitespace() || face.outline_glyph(g, &mut NoOutline).is_some())
 }
 
 /// Whether `c` is a nonspacing or enclosing mark (General Category Mn or Me).
@@ -426,15 +580,25 @@ fn attaches_to_previous(c: char) -> bool {
         )
 }
 
-/// An [`OutlineBuilder`] that ignores everything, used to test whether a glyph has an outline.
-struct NoOutline;
+/// An [`OutlinePen`] that counts path commands, used to test whether a glyph has an outline.
+struct SegmentCount(usize);
 
-impl OutlineBuilder for NoOutline {
-    fn move_to(&mut self, _: f32, _: f32) {}
-    fn line_to(&mut self, _: f32, _: f32) {}
-    fn quad_to(&mut self, _: f32, _: f32, _: f32, _: f32) {}
-    fn curve_to(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) {}
-    fn close(&mut self) {}
+impl OutlinePen for SegmentCount {
+    fn move_to(&mut self, _: f32, _: f32) {
+        self.0 += 1;
+    }
+    fn line_to(&mut self, _: f32, _: f32) {
+        self.0 += 1;
+    }
+    fn quad_to(&mut self, _: f32, _: f32, _: f32, _: f32) {
+        self.0 += 1;
+    }
+    fn curve_to(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) {
+        self.0 += 1;
+    }
+    fn close(&mut self) {
+        self.0 += 1;
+    }
 }
 
 /// Maps font units to points: `x * scale + dx`, `-y * scale + dy` (y-down).
@@ -454,7 +618,7 @@ impl PathBuilder {
     }
 }
 
-impl OutlineBuilder for PathBuilder {
+impl OutlinePen for PathBuilder {
     fn move_to(&mut self, x: f32, y: f32) {
         let p = self.point(x, y);
         self.path.move_to(p);
@@ -495,31 +659,35 @@ struct ShapedRun {
     glyphs: Vec<ShapedGlyph>,
 }
 
-/// Shapes several runs of text with one face, reusing shape plans across runs.
-struct Shaper<'f, 'a> {
-    face: &'f rustybuzz::Face<'a>,
+/// Shapes several runs of text with one font, reusing shape plans across runs.
+struct Shaper<'f> {
+    font: &'f ShapingFont,
+    shaper: ShaperFont<'f, 'f>,
     features: &'f [Feature],
     plans: Vec<(Direction, Option<Script>, ShapePlan)>,
 }
 
-impl<'f, 'a> Shaper<'f, 'a> {
-    fn new(face: &'f rustybuzz::Face<'a>, features: &'f [Feature]) -> Self {
+impl<'f> Shaper<'f> {
+    fn new(font: &'f ShapingFont, funcs: &'f dyn FontFuncs, features: &'f [Feature]) -> Self {
         Shaper {
-            face,
+            font,
+            shaper: ShaperFont::new(font).with_font_funcs(Some(funcs)),
             features,
             plans: Vec::new(),
         }
     }
 
-    fn shape(&mut self, text: &str, preserve_ignorables: bool) -> ShapedRun {
-        let mut buffer = UnicodeBuffer::new();
+    /// Shapes `text`; `None` if the shaper refuses the buffer.
+    fn shape(&mut self, text: &str, preserve_ignorables: bool) -> Option<ShapedRun> {
+        let mut buffer = Buffer::new();
         buffer.push_str(text);
         if preserve_ignorables {
             buffer.set_flags(BufferFlags::PRESERVE_DEFAULT_IGNORABLES);
         }
+        // Always sets a direction, left to right when the text has none of its own.
         buffer.guess_segment_properties();
         let direction = buffer.direction();
-        let script = Some(buffer.script()).filter(|s| *s != rustybuzz::script::UNKNOWN);
+        let script = buffer.script();
         let index = match self
             .plans
             .iter()
@@ -527,58 +695,60 @@ impl<'f, 'a> Shaper<'f, 'a> {
         {
             Some(index) => index,
             None => {
-                let plan = ShapePlan::new(self.face, direction, script, None, self.features);
+                let plan = ShapePlan::new(self.font, direction, script, None, self.features);
                 self.plans.push((direction, script, plan));
                 self.plans.len() - 1
             }
         };
-        let glyphs = match self.plans.get(index) {
-            Some((_, _, plan)) => {
-                let output = rustybuzz::shape_with_plan(self.face, plan, buffer);
-                output
-                    .glyph_infos()
-                    .iter()
-                    .zip(output.glyph_positions())
-                    .map(|(info, pos)| ShapedGlyph {
-                        id: u16::try_from(info.glyph_id).unwrap_or(0),
-                        advance: pos.x_advance,
-                        x_offset: pos.x_offset,
-                        y_offset: pos.y_offset,
-                    })
-                    .collect()
-            }
-            None => Vec::new(),
-        };
-        ShapedRun {
-            units_per_em: self.face.units_per_em(),
+        let (_, _, plan) = self.plans.get(index)?;
+        let options = ShapeOptions::new().plan(Some(plan)).features(self.features);
+        harfrust::shape(&self.shaper, &mut buffer, options).ok()?;
+        let glyphs = buffer
+            .glyph_infos()
+            .iter()
+            .zip(buffer.glyph_positions())
+            .map(|(info, pos)| ShapedGlyph {
+                id: u16::try_from(info.glyph_id).unwrap_or(0),
+                advance: pos.x_advance,
+                x_offset: pos.x_offset,
+                y_offset: pos.y_offset,
+            })
+            .collect();
+        Some(ShapedRun {
+            units_per_em: i32::from(self.font.units_per_em()),
             glyphs,
-        }
+        })
     }
 }
 
 /// Fallback faces parsed for the duration of one layout call.
-type ParsedExtras<'a> = Vec<Option<ttf_parser::Face<'a>>>;
+type ParsedExtras<'a> = Vec<Option<Face<'a>>>;
 
 /// A shaped run waiting to be placed: its font and glyphs.
 type ShapedSlot = Option<(FontKey, FontHandle, ShapedRun)>;
 
 impl FontLibrary {
     fn new(extra: Vec<Vec<u8>>, system: Option<SystemFonts>) -> FontLibrary {
-        let mut bundled: [Option<rustybuzz::Face<'static>>; BUNDLED_COUNT] =
-            std::array::from_fn(|_| None);
+        let mut bundled: [Option<BundledFace>; BUNDLED_COUNT] = std::array::from_fn(|_| None);
         for font in Font::ALL {
             for weight in Weight::ALL {
                 if let Some(slot) = bundled.get_mut(bundled_slot(font, weight)) {
-                    *slot = rustybuzz::Face::from_slice(font_bytes(font, weight), 0);
+                    *slot = BundledFace::new(font_bytes(font, weight));
                 }
             }
         }
         let extra = extra
             .into_iter()
-            .filter(|bytes| {
-                guarded(|| rustybuzz::Face::from_slice(bytes, 0).is_some()).unwrap_or(false)
+            .filter_map(|bytes| {
+                let bytes = Arc::new(bytes);
+                let shared: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::clone(&bytes) as _;
+                let shaping = guarded(|| {
+                    FontRef::new(&bytes).ok()?;
+                    ShapingFont::new(Blob::from(shared), 0)
+                })
+                .flatten()?;
+                Some(ExtraFont { bytes, shaping })
             })
-            .map(Arc::new)
             .collect();
         FontLibrary {
             bundled,
@@ -669,7 +839,7 @@ impl FontLibrary {
         GLOBAL.get_or_init(FontLibrary::bundled)
     }
 
-    fn bundled_face(&self, font: Font, weight: Weight) -> Option<&rustybuzz::Face<'static>> {
+    fn bundled_face(&self, font: Font, weight: Weight) -> Option<&BundledFace> {
         self.bundled
             .get(bundled_slot(font, weight))
             .and_then(Option::as_ref)
@@ -679,8 +849,8 @@ impl FontLibrary {
     fn handle(&self, key: FontKey) -> Option<FontHandle> {
         match key {
             FontKey::Bundled(font, weight) => Some(FontHandle::bundled(font, weight)),
-            FontKey::Extra(index) => self.extra.get(index).map(|bytes| FontHandle {
-                data: FontData::Extra(Arc::clone(bytes)),
+            FontKey::Extra(index) => self.extra.get(index).map(|extra| FontHandle {
+                data: FontData::Extra(Arc::clone(&extra.bytes)),
                 index: 0,
             }),
             FontKey::System(face) => self.system.as_ref()?.handle(face),
@@ -717,10 +887,10 @@ impl FontLibrary {
         };
         let primary = self.bundled_face(style.font, style.weight);
         let (ascent, descent) = primary.map_or((0.0, 0.0), |face| {
-            let scale = size / face.units_per_em().max(1) as f32;
+            let scale = size / f32::from(face.units_per_em.max(1));
             (
-                (f32::from(face.ascender()) * scale).max(0.0),
-                (-f32::from(face.descender()) * scale).max(0.0),
+                (face.ascender * scale).max(0.0),
+                (-face.descender * scale).max(0.0),
             )
         });
         let mut layout = TextLayout {
@@ -741,26 +911,41 @@ impl FontLibrary {
             let Some(handle) = self.handle(key) else {
                 continue;
             };
-            let shape_all = |face: &rustybuzz::Face<'_>| {
-                let mut shaper = Shaper::new(face, &features);
+            let shape_all = |font: &ShapingFont, face: &Face<'_>| {
+                let funcs = SecondaryCmap(face);
+                let mut shaper = Shaper::new(font, &funcs, &features);
                 members
                     .iter()
                     .filter_map(|&i| {
                         let run = runs.get(i)?;
                         let run_text = text.get(run.range.clone())?;
-                        Some((i, shaper.shape(run_text, run.preserve_ignorables)))
+                        Some((i, shaper.shape(run_text, run.preserve_ignorables)?))
                     })
                     .collect::<Vec<_>>()
             };
             let results = match key {
-                FontKey::Bundled(font, weight) => self.bundled_face(font, weight).map(shape_all),
+                FontKey::Bundled(font, weight) => self
+                    .bundled_face(font, weight)
+                    .map(|bundled| shape_all(&bundled.shaping, &bundled.face)),
                 // Fonts that did not ship with the crate are parsed and shaped under a guard.
-                FontKey::Extra(_) | FontKey::System(_) => handle
-                    .with_data(|data, index| {
-                        guarded(|| rustybuzz::Face::from_slice(data, index).map(|f| shape_all(&f)))
+                FontKey::Extra(index) => self.extra.get(index).and_then(|extra| {
+                    guarded(|| Face::parse(&extra.bytes, 0).map(|f| shape_all(&extra.shaping, &f)))
+                        .flatten()
+                }),
+                FontKey::System(face) => self.system.as_ref().and_then(|system| {
+                    let shaping = system.shaping_font(face)?;
+                    let results = handle
+                        .with_data(|data, index| {
+                            guarded(|| {
+                                Face::parse(data, index).map(|f| shape_all(&shaping.font, &f))
+                            })
                             .flatten()
-                    })
-                    .flatten(),
+                        })
+                        .flatten()?;
+                    // Only a font that shaped without panicking is kept for later layouts.
+                    system.keep_shaping_font(face, shaping);
+                    Some(results)
+                }),
             };
             for (i, run) in results.unwrap_or_default() {
                 if let Some(slot) = shaped.get_mut(i) {
@@ -773,12 +958,15 @@ impl FontLibrary {
         // disappeared, or a font that panicked while shaping) is replaced by the primary font,
         // so the text keeps a width.
         if let Some(face) = primary {
-            let mut shaper = Shaper::new(face, &features);
+            let funcs = SecondaryCmap(&face.face);
+            let mut shaper = Shaper::new(&face.shaping, &funcs, &features);
             let handle = FontHandle::bundled(style.font, style.weight);
             for (slot, run) in shaped.iter_mut().zip(&runs) {
                 if slot.is_none() {
-                    if let Some(run_text) = text.get(run.range.clone()) {
-                        let glyphs = shaper.shape(run_text, run.preserve_ignorables);
+                    if let Some(glyphs) = text
+                        .get(run.range.clone())
+                        .and_then(|run_text| shaper.shape(run_text, run.preserve_ignorables))
+                    {
                         *slot = Some((primary_key, handle.clone(), glyphs));
                     }
                 }
@@ -833,7 +1021,7 @@ impl FontLibrary {
                 runs.last().map_or((primary_key, true), |run| {
                     (run.font, run.preserve_ignorables)
                 })
-            } else if primary.is_some_and(|face| glyph_for(face, c).is_some()) {
+            } else if primary.is_some_and(|face| face.face.glyph(c).is_some()) {
                 (primary_key, false)
             } else if let Some(key) = chosen.get(&c) {
                 (*key, false)
@@ -874,7 +1062,7 @@ impl FontLibrary {
             }
             if self
                 .bundled_face(font, style.weight)
-                .is_some_and(|face| glyph_for(face, c).is_some())
+                .is_some_and(|face| face.face.glyph(c).is_some())
             {
                 return Some(FontKey::Bundled(font, style.weight));
             }
@@ -882,13 +1070,13 @@ impl FontLibrary {
         let extras = extras.get_or_insert_with(|| {
             self.extra
                 .iter()
-                .map(|bytes| guarded(|| ttf_parser::Face::parse(bytes, 0).ok()).flatten())
+                .map(|extra| guarded(|| Face::parse(&extra.bytes, 0)).flatten())
                 .collect()
         });
         for (index, face) in extras.iter().enumerate() {
             if face
                 .as_ref()
-                .is_some_and(|f| guarded(|| draws(f, c)).unwrap_or(false))
+                .is_some_and(|f| guarded(|| f.draws(c)).unwrap_or(false))
             {
                 return Some(FontKey::Extra(index));
             }
@@ -901,7 +1089,12 @@ impl FontLibrary {
 }
 
 /// Appends the outlines of every glyph of `run` to `path`.
-fn outline_run(face: &ttf_parser::Face<'_>, run: &GlyphRun, origin: Point, path: &mut Path) {
+fn outline_run(
+    outlines: &OutlineGlyphCollection<'_>,
+    run: &GlyphRun,
+    origin: Point,
+    path: &mut Path,
+) {
     for glyph in &run.glyphs {
         let mut builder = PathBuilder {
             path: Path::new(),
@@ -910,10 +1103,10 @@ fn outline_run(face: &ttf_parser::Face<'_>, run: &GlyphRun, origin: Point, path:
             dy: origin.y + glyph.y,
         };
         // A glyph whose outline fails part-way contributes nothing rather than a broken shape.
-        if face
-            .outline_glyph(GlyphId(glyph.id), &mut builder)
-            .is_some()
-        {
+        let drawn = outlines
+            .get(GlyphId::new(u32::from(glyph.id)))
+            .is_some_and(|outline| outline.draw(unhinted(), &mut builder).is_ok());
+        if drawn {
             path.extend(&builder.path);
         }
     }
@@ -941,11 +1134,11 @@ fn group_by_font(keys: impl Iterator<Item = FontKey>) -> Vec<(FontKey, Vec<usize
 /// The OpenType features applied to every run.
 fn features(tabular_figures: bool) -> Vec<Feature> {
     let mut features = vec![
-        Feature::new(Tag::from_bytes(b"kern"), 1, ..),
-        Feature::new(Tag::from_bytes(b"liga"), 1, ..),
+        Feature::new(Tag::new(b"kern"), 1, ..),
+        Feature::new(Tag::new(b"liga"), 1, ..),
     ];
     if tabular_figures {
-        features.push(Feature::new(Tag::from_bytes(b"tnum"), 1, ..));
+        features.push(Feature::new(Tag::new(b"tnum"), 1, ..));
     }
     features
 }
@@ -1139,7 +1332,7 @@ mod tests {
                 .iter()
                 .flat_map(|&(lo, hi)| lo..=hi)
                 .filter_map(char::from_u32)
-                .find(|&c| glyph_for(face, c).is_none() && !attaches_to_previous(c));
+                .find(|&c| face.face.glyph(c).is_none() && !attaches_to_previous(c));
             let Some(c) = missing else { continue };
             let layout = lib.layout(&format!("a{c}"), &style(font, 10.0));
             let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
@@ -1344,7 +1537,7 @@ mod tests {
         let lib = FontLibrary::with_fallbacks(vec![]);
         for c in text.chars() {
             for face in lib.bundled.iter().flatten() {
-                assert!(glyph_for(face, c).is_none(), "a bundled font has {c:?}");
+                assert!(face.face.glyph(c).is_none(), "a bundled font has {c:?}");
             }
         }
     }
@@ -1373,9 +1566,9 @@ mod tests {
     #[test]
     fn fixture_fonts_parse_with_the_requested_properties() {
         let bytes = fixture_font("Test Family", 600, true, &[0xF0000, 0xF0001, 0xF0005]);
-        let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
-        assert!(glyph_for(&face, '\u{F0005}').is_some());
-        assert!(glyph_for(&face, '\u{F0002}').is_none());
+        let face = Face::parse(&bytes, 0).unwrap();
+        assert!(face.glyph('\u{F0005}').is_some());
+        assert!(face.glyph('\u{F0002}').is_none());
         let mut db = fontdb::Database::new();
         db.load_font_data(bytes);
         let info = db.faces().next().unwrap();
@@ -1556,6 +1749,46 @@ mod tests {
         assert_eq!(system.cache_len(), system::CACHE_LIMIT);
     }
 
+    #[test]
+    fn system_shaping_tables_are_kept_within_bounds() {
+        let n = u32::try_from(system::SHAPING_CACHE_FACES).unwrap() + 1;
+        let codepoints: Vec<u32> = (0..n).map(|k| 0xF9000 + k).collect();
+        let text: String = codepoints
+            .iter()
+            .filter_map(|&cp| char::from_u32(cp))
+            .collect();
+        assert_no_bundled_font_has(&text);
+        let lib = FontLibrary::with_test_system_fonts(
+            codepoints
+                .iter()
+                .enumerate()
+                .map(|(k, &cp)| fixture_font(&format!("Face {k:03}"), 400, false, &[cp]))
+                .collect(),
+        );
+        let system = lib.system.as_ref().unwrap();
+        let s = style(Font::Inter, 10.0);
+        let first = lib.layout(&text, &s);
+        // Every character is drawn with its own system face.
+        assert_eq!(first.runs.len(), codepoints.len());
+        assert!(
+            first
+                .runs
+                .iter()
+                .all(|run| matches!(run.font, FontKey::System(_)))
+        );
+        let (faces, bytes) = system.shaping_cache();
+        assert_eq!(faces, system::SHAPING_CACHE_FACES);
+        assert!(bytes > 0 && bytes <= system::SHAPING_CACHE_BYTES, "{bytes}");
+        // Kept faces shape the same as fresh ones, and nothing more is kept.
+        let again = lib.layout(&text, &s);
+        assert_eq!(first.width(), again.width());
+        assert_eq!(
+            first.outline(Point { x: 0.0, y: 0.0 }),
+            again.outline(Point { x: 0.0, y: 0.0 })
+        );
+        assert_eq!(system.shaping_cache(), (faces, bytes));
+    }
+
     // --- Mark attachment. ---
 
     #[test]
@@ -1633,7 +1866,7 @@ mod tests {
         let serif_face = geist
             .bundled_face(Font::SourceSerif4, Weight::Regular)
             .unwrap();
-        assert!(glyph_for(geist_face, c).is_none() && glyph_for(serif_face, c).is_some());
+        assert!(geist_face.face.glyph(c).is_none() && serif_face.face.glyph(c).is_some());
         let serif = font_bytes(Font::SourceSerif4, Weight::Regular).to_vec();
         let lib = FontLibrary::with_fallbacks(vec![serif]);
         let layout = lib.layout(&c.to_string(), &style(Font::Geist, 10.0));
@@ -1644,10 +1877,10 @@ mod tests {
         );
     }
 
-    // --- Malformed fonts that panic inside rustybuzz in debug builds. ---
+    // --- Malformed fonts that can make the parser or shaper panic. ---
 
     /// Inter Regular with the seven bytes changed that a fuzzing seed found: in debug builds
-    /// `rustybuzz::Face::from_slice` panics on it with an arithmetic overflow.
+    /// the previous shaper, rustybuzz, panicked on it with an arithmetic overflow.
     fn bit_flipped_inter() -> Vec<u8> {
         const CHANGES: [(usize, u8); 7] = [
             (959, 11),
@@ -1668,10 +1901,19 @@ mod tests {
     #[test]
     fn malformed_fonts_that_panic_while_parsing_are_skipped() {
         let bytes = bit_flipped_inter();
-        let parsed = guarded(|| rustybuzz::Face::from_slice(&bytes, 0).is_some());
-        if cfg!(debug_assertions) {
-            assert_eq!(parsed, None, "the reproduction panics in debug builds");
-        }
+        // This seed made rustybuzz panic with an arithmetic overflow in debug builds. HarfRust
+        // and skrifa parse it without panicking, so every stage the library guards is run here
+        // under the same guard: whatever they do with these bytes, nothing may escape.
+        let _ = guarded(|| {
+            let face = Face::parse(&bytes, 0)?;
+            let font = ShapingFont::new(bytes.clone(), 0)?;
+            let funcs = SecondaryCmap(&face);
+            let features = features(true);
+            let shaped = Shaper::new(&font, &funcs, &features).shape("Ab 0123 fi AV", false);
+            Some((face.draws('A'), shaped.map(|run| run.glyphs.len())))
+        });
+        // A panic inside a guarded call is turned into "unreadable".
+        assert_eq!(guarded(|| -> bool { panic!("a malformed font") }), None);
         let s = style(Font::Geist, 10.0);
         let fallback = crate::fonts::FALLBACK_TEST_CODEPOINT;
         let text = format!("Ab{fallback}\u{4E00}");
@@ -1817,8 +2059,8 @@ mod tests {
         assert_eq!(read.visited, 256);
 
         let font = font_with_cmap("Format Two", 400, false, cmap);
-        let face = ttf_parser::Face::parse(&font, 0).unwrap();
-        assert!(draws(&face, '\u{E000}'));
+        let face = Face::parse(&font, 0).unwrap();
+        assert!(face.draws('\u{E000}'));
         let s = style(Font::Inter, 10.0);
         let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout("\u{E000}", &s);
         assert_eq!(extra.runs[0].font, FontKey::Extra(0));

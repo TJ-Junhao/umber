@@ -7,8 +7,11 @@
 //! character's script, then a generic list, then every other face sorted by name. Within a
 //! family the face closest to the requested weight wins, upright before italic.
 //!
-//! Font data is never copied: fontdb memory-maps a font file each time it is read, and layouts
-//! keep the database alive through an `Arc`.
+//! Font files are never copied whole: fontdb memory-maps a font file each time it is read, and
+//! layouts keep the database alive through an `Arc`. The shaper needs data it can own, so the
+//! tables it reads (character map, metrics and layout tables, never outlines or bitmaps) are
+//! copied for each chosen face, and kept for later layouts within a fixed budget. A kept face
+//! is shaped from the tables of the file as it was when they were copied.
 //!
 //! Work and memory are bounded:
 //! - the index holds at most [`Limits::max_faces`] faces and [`Limits::max_total_ranges`]
@@ -19,7 +22,9 @@
 //! - one layout performs at most [`LOOKUPS_PER_LAYOUT`] uncached lookups and
 //!   [`CONFIRMATIONS_PER_LAYOUT`] candidate confirmations, and one lookup at most
 //!   [`CONFIRMATIONS_PER_LOOKUP`];
-//! - the lookup cache holds at most [`CACHE_LIMIT`] entries.
+//! - the lookup cache holds at most [`CACHE_LIMIT`] entries;
+//! - shaping tables are kept for at most [`SHAPING_CACHE_FACES`] faces and
+//!   [`SHAPING_CACHE_BYTES`] bytes in total.
 //!
 //! These caps apply after fontdb's own discovery: `load_system_fonts` enumerates every font in
 //! the system font directories and keeps its metadata, bounded only by those directories.
@@ -31,9 +36,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use rustybuzz::ttf_parser;
+use read_fonts::model::Blob;
+use read_fonts::tables::cmap::{Cmap, Cmap2, CmapSubtable};
+use read_fonts::types::Tag;
+use read_fonts::{FontData as RawData, FontRead, FontRef};
 
-use super::{FontData, FontHandle, draws, guarded, lock};
+use super::{Face, FontData, FontHandle, ShapingFont, guarded, is_unicode, lock};
 use crate::fonts::Weight;
 
 /// The most uncached system font lookups one layout call performs. Characters beyond it are
@@ -51,6 +59,51 @@ pub(super) const CONFIRMATIONS_PER_LOOKUP: usize = 16;
 /// The most candidate confirmations one layout call performs. When they are used up the
 /// remaining characters resolve to the primary font's `.notdef`, and are not cached.
 pub(super) const CONFIRMATIONS_PER_LAYOUT: usize = 4096;
+
+/// The most system faces whose shaping tables are kept between layout calls.
+pub(super) const SHAPING_CACHE_FACES: usize = 64;
+
+/// The most bytes of shaping tables kept between layout calls, over all system faces. A face
+/// whose tables do not fit is shaped from a fresh copy in every layout call instead.
+pub(super) const SHAPING_CACHE_BYTES: usize = 64 * 1024 * 1024;
+
+/// The tables that shaping a system font may copy; see [`SystemFonts::shaping_font`].
+///
+/// Without `glyf` or `CFF` the shaper has no glyph bounds, so its fallback mark positioning,
+/// used only for fonts without GPOS mark attachment, does not apply to system fonts.
+const SHAPING_TABLES: [Tag; 18] = [
+    Tag::new(b"cmap"),
+    Tag::new(b"head"),
+    Tag::new(b"hhea"),
+    Tag::new(b"hmtx"),
+    Tag::new(b"maxp"),
+    Tag::new(b"OS/2"),
+    Tag::new(b"GDEF"),
+    Tag::new(b"GSUB"),
+    Tag::new(b"GPOS"),
+    Tag::new(b"kern"),
+    Tag::new(b"morx"),
+    Tag::new(b"mort"),
+    Tag::new(b"kerx"),
+    Tag::new(b"ankr"),
+    Tag::new(b"trak"),
+    Tag::new(b"feat"),
+    Tag::new(b"ltag"),
+    Tag::new(b"vhea"),
+];
+
+/// A shaping font for a system face, with the number of table bytes it has copied so far.
+pub(super) struct SystemShaping {
+    pub(super) font: ShapingFont,
+    copied: Arc<AtomicUsize>,
+}
+
+/// Shaping fonts kept between layout calls.
+#[derive(Default)]
+struct ShapingCache {
+    fonts: HashMap<usize, ShapingFont>,
+    bytes: usize,
+}
 
 /// The system font work one layout call may still do.
 #[derive(Debug)]
@@ -219,18 +272,6 @@ impl IndexedFace {
     }
 }
 
-fn u16_at(data: &[u8], at: usize) -> Option<u16> {
-    let bytes = data.get(at..at.checked_add(2)?)?;
-    Some(u16::from_be_bytes([*bytes.first()?, *bytes.get(1)?]))
-}
-
-fn u32_at(data: &[u8], at: usize) -> Option<u32> {
-    let bytes = data.get(at..at.checked_add(4)?)?;
-    let mut word = [0; 4];
-    word.copy_from_slice(bytes);
-    Some(u32::from_be_bytes(word))
-}
-
 /// Collects ranges while counting every segment or group visited, kept or not.
 struct RangeScan {
     ranges: Vec<(u32, u32)>,
@@ -258,19 +299,15 @@ impl RangeScan {
         self.visit(1, 0)
     }
 
-    /// Reads one subtable. Returns false once the visit budget is exceeded.
-    fn subtable(&mut self, sub: &[u8]) -> bool {
-        match u16_at(sub, 0) {
-            Some(0) => self.visit(0, 255),
-            Some(2) => self.format2(sub),
-            Some(4) => {
-                let segments2 = usize::from(u16_at(sub, 6).unwrap_or(0));
-                for s in 0..segments2 / 2 {
-                    let end = u16_at(sub, 14 + 2 * s);
-                    let start = u16_at(sub, 16 + segments2 + 2 * s);
-                    let (Some(start), Some(end)) = (start, end) else {
-                        break;
-                    };
+    /// Reads one subtable from its segments or groups, never its code points. Returns false
+    /// once the visit budget is exceeded.
+    fn subtable(&mut self, sub: &CmapSubtable<'_>) -> bool {
+        match sub {
+            CmapSubtable::Format0(_) => self.visit(0, 255),
+            CmapSubtable::Format2(sub) => self.format2(sub),
+            CmapSubtable::Format4(sub) => {
+                for (start, end) in sub.start_code().iter().zip(sub.end_code()) {
+                    let (start, end) = (start.get(), end.get());
                     let ok = if start == 0xFFFF && end == 0xFFFF {
                         self.skip()
                     } else {
@@ -282,61 +319,63 @@ impl RangeScan {
                 }
                 true
             }
-            Some(6) => match (u16_at(sub, 6), u16_at(sub, 8)) {
-                (Some(first), Some(count)) if count > 0 => {
+            CmapSubtable::Format6(sub) => match (sub.first_code(), sub.entry_count()) {
+                (first, count) if count > 0 => {
                     let first = u32::from(first);
                     self.visit(first, first + u32::from(count) - 1)
                 }
                 _ => self.skip(),
             },
-            Some(10) => match (u32_at(sub, 12), u32_at(sub, 16)) {
-                (Some(first), Some(count)) if count > 0 => {
-                    self.visit(first, first.saturating_add(count - 1))
-                }
+            CmapSubtable::Format10(sub) => match (sub.start_char_code(), sub.num_chars()) {
+                (first, count) if count > 0 => self.visit(first, first.saturating_add(count - 1)),
                 _ => self.skip(),
             },
-            Some(12 | 13) => {
-                let groups = u32_at(sub, 12).unwrap_or(0);
-                for g in 0..usize::try_from(groups).unwrap_or(0) {
-                    let at = 16 + 12 * g;
-                    let (Some(start), Some(end)) = (u32_at(sub, at), u32_at(sub, at + 4)) else {
-                        break;
-                    };
-                    if !self.visit(start, end) {
+            CmapSubtable::Format12(sub) => {
+                for group in sub.groups() {
+                    if !self.visit(group.start_char_code(), group.end_char_code()) {
                         return false;
                     }
                 }
                 true
             }
-            _ => true,
+            CmapSubtable::Format13(sub) => {
+                for group in sub.groups() {
+                    if !self.visit(group.start_char_code(), group.end_char_code()) {
+                        return false;
+                    }
+                }
+                true
+            }
+            CmapSubtable::Format8(_) | CmapSubtable::Format14(_) => true,
         }
     }
 
     /// Format 2 (high-byte mapping): 256 sub-header keys, one visit each.
-    fn format2(&mut self, sub: &[u8]) -> bool {
+    fn format2(&mut self, sub: &Cmap2<'_>) -> bool {
+        /// Format, length, language and the 256 sub-header keys.
         const HEADERS: usize = 6 + 2 * 256;
-        for high in 0..256u16 {
-            let Some(key) = u16_at(sub, 6 + 2 * usize::from(high)) else {
-                return self.skip();
-            };
-            let header = HEADERS + 8 * usize::from(key / 8);
-            let (Some(first), Some(count)) = (u16_at(sub, header), u16_at(sub, header + 2)) else {
+        let data = sub.offset_data();
+        for (high, key) in (0..=255u32).zip(sub.sub_header_keys()) {
+            let key = key.get() / 8;
+            let header = HEADERS + 8 * usize::from(key);
+            let (Ok(first), Ok(count)) =
+                (data.read_at::<u16>(header), data.read_at::<u16>(header + 2))
+            else {
                 if !self.skip() {
                     return false;
                 }
                 continue;
             };
             let (first, count) = (u32::from(first), u32::from(count));
-            let ok = if key / 8 == 0 {
+            let ok = if key == 0 {
                 // A single-byte code, valid if the sub-header's range contains it.
-                let code = u32::from(high);
-                if first <= code && code < first + count {
-                    self.visit(code, code)
+                if first <= high && high < first + count {
+                    self.visit(high, high)
                 } else {
                     self.skip()
                 }
             } else {
-                let base = (u32::from(high) << 8) + first;
+                let base = (high << 8) + first;
                 if count > 0 && base <= 0xFFFF {
                     self.visit(base, (base + count - 1).min(0xFFFF))
                 } else {
@@ -374,28 +413,22 @@ pub(super) struct CmapRanges {
 /// segment or group visited counts against `max_visits`, including invalid ones. Code points the
 /// font maps to glyph 0 are included; a lookup confirms the glyph before using a face.
 pub(super) fn cmap_ranges(cmap: &[u8], max_visits: usize) -> Result<CmapRanges, CmapError> {
-    let records = u16_at(cmap, 2).ok_or(CmapError::Unreadable)?;
+    let cmap = Cmap::read(RawData::new(cmap)).map_err(|_| CmapError::Unreadable)?;
     let mut scan = RangeScan {
         ranges: Vec::new(),
         visited: 0,
         max_visits,
     };
     let mut seen: HashSet<u32> = HashSet::new();
-    for record in 0..usize::from(records) {
-        let at = 4 + 8 * record;
-        let (Some(platform), Some(encoding), Some(offset)) =
-            (u16_at(cmap, at), u16_at(cmap, at + 2), u32_at(cmap, at + 4))
-        else {
-            break;
-        };
-        let unicode = platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10));
-        if !unicode || !seen.insert(offset) {
+    for record in cmap.encoding_records() {
+        if !is_unicode(record) || !seen.insert(record.subtable_offset().to_u32()) {
             continue;
         }
-        let Some(sub) = usize::try_from(offset).ok().and_then(|o| cmap.get(o..)) else {
+        // A subtable that cannot be read declares nothing.
+        let Ok(sub) = record.subtable(cmap.offset_data()) else {
             continue;
         };
-        if !scan.subtable(sub) {
+        if !scan.subtable(&sub) {
             return Err(CmapError::TooManyVisits);
         }
     }
@@ -425,12 +458,13 @@ fn coverage(data: &[u8], index: u32, max_ranges: usize, max_visits: usize) -> Fa
         ranges: None,
         too_many_visits,
     };
-    let Some(cmap) = ttf_parser::RawFace::parse(data, index)
+    let Some(cmap) = FontRef::from_index(data, index)
         .ok()
-        .and_then(|raw| raw.table(ttf_parser::Tag::from_bytes(b"cmap")))
+        .and_then(|font| font.table_data(Tag::new(b"cmap")))
     else {
         return skipped(0, false);
     };
+    let cmap = cmap.as_bytes();
     let CmapRanges {
         mut ranges,
         visited,
@@ -687,6 +721,7 @@ pub(super) struct SystemFonts {
     lookups: AtomicUsize,
     /// Candidate confirmations performed, for tests.
     confirmations: AtomicUsize,
+    shaping: Mutex<ShapingCache>,
 }
 
 impl SystemFonts {
@@ -698,6 +733,7 @@ impl SystemFonts {
             cache: Mutex::new(HashMap::new()),
             lookups: AtomicUsize::new(0),
             confirmations: AtomicUsize::new(0),
+            shaping: Mutex::new(ShapingCache::default()),
         }
     }
 
@@ -759,8 +795,7 @@ impl SystemFonts {
             .db
             .with_face_data(info.id, |data, i| {
                 data.len() <= self.limits.max_bytes
-                    && guarded(|| ttf_parser::Face::parse(data, i).is_ok_and(|f| draws(&f, c)))
-                        .unwrap_or(false)
+                    && guarded(|| Face::parse(data, i).is_some_and(|f| f.draws(c))).unwrap_or(false)
             })
             .unwrap_or(false)
     }
@@ -773,6 +808,63 @@ impl SystemFonts {
             data: FontData::System(Arc::clone(&index.db), info.id),
             index: info.face_index,
         })
+    }
+
+    /// A shaping font for a face chosen by [`SystemFonts::face_for`].
+    ///
+    /// HarfRust needs font data it can own, and fontdb only lends a system font's bytes for
+    /// the duration of a call. So each table the shaper asks for is copied from the font file
+    /// on first use, and only the tables in [`SHAPING_TABLES`]: never the outline or bitmap
+    /// tables, which make up most of a large font file. A font kept with
+    /// [`SystemFonts::keep_shaping_font`] is reused; otherwise a fresh one is made.
+    pub(super) fn shaping_font(&self, face: usize) -> Option<SystemShaping> {
+        if let Some(font) = lock(&self.shaping).fonts.get(&face) {
+            return Some(SystemShaping {
+                font: font.clone(),
+                copied: Arc::new(AtomicUsize::new(0)),
+            });
+        }
+        let index = self.index.get()?;
+        let info = index.faces.get(face)?;
+        let (db, id) = (Arc::clone(&index.db), info.id);
+        let copied = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&copied);
+        let tables = move |tag: Tag| -> Option<Blob> {
+            if !SHAPING_TABLES.contains(&tag) {
+                return None;
+            }
+            let table = db
+                .with_face_data(id, |data, index| {
+                    let table = FontRef::from_index(data, index).ok()?.table_data(tag)?;
+                    Some(table.as_bytes().to_vec())
+                })
+                .flatten()?;
+            counter.fetch_add(table.len(), Ordering::Relaxed);
+            Some(Blob::from(table))
+        };
+        let tables: Arc<dyn Fn(Tag) -> Option<Blob> + Send + Sync> = Arc::new(tables);
+        Some(SystemShaping {
+            font: ShapingFont::new(tables, info.face_index)?,
+            copied,
+        })
+    }
+
+    /// Keeps a shaping font from [`SystemFonts::shaping_font`] for later layouts, within
+    /// [`SHAPING_CACHE_FACES`] and [`SHAPING_CACHE_BYTES`]. Nothing is evicted.
+    ///
+    /// Shaping reads every table it uses the first time, so the bytes copied by then are what
+    /// the font keeps.
+    pub(super) fn keep_shaping_font(&self, face: usize, shaping: SystemShaping) {
+        let mut cache = lock(&self.shaping);
+        let bytes = shaping.copied.load(Ordering::Relaxed);
+        if cache.fonts.contains_key(&face)
+            || cache.fonts.len() >= SHAPING_CACHE_FACES
+            || cache.bytes.saturating_add(bytes) > SHAPING_CACHE_BYTES
+        {
+            return;
+        }
+        cache.bytes += bytes;
+        cache.fonts.insert(face, shaping.font);
     }
 
     /// An indexed face, for diagnostics.
@@ -789,6 +881,13 @@ impl SystemFonts {
     #[cfg(test)]
     pub(super) fn lookups(&self) -> usize {
         self.lookups.load(Ordering::Relaxed)
+    }
+
+    /// The number of faces whose shaping tables are kept, and the bytes they hold.
+    #[cfg(test)]
+    pub(super) fn shaping_cache(&self) -> (usize, usize) {
+        let cache = lock(&self.shaping);
+        (cache.fonts.len(), cache.bytes)
     }
 
     #[cfg(test)]
