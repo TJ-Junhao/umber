@@ -1037,13 +1037,13 @@ mod tests {
                 );
             }
         }
-        // The case from review: 1 .. 1e13 keeps 1e13.
+        // Regression case: 1 .. 1e13 keeps 1e13.
         let scale =
             ContinuousScale::new(Transform::Log(LogBase::TEN), 3.0, 4.2e12, "test").unwrap();
         let (nice, ticks) = scale.nice_with_ticks(5);
         assert_eq!(nice.domain(), (1.0, 1e13));
         let labels: Vec<&str> = ticks.iter().map(|t| t.label.as_str()).collect();
-        // Scientific form applies to the whole axis (spec section 7).
+        // Scientific form applies to the whole axis.
         // Exponents 13 * i / 4, rounded: 0, 3, 7, 10, 13.
         assert_eq!(labels, ["1e0", "1e3", "1e7", "1e10", "1e13"]);
     }

@@ -1178,7 +1178,7 @@ mod tests {
     }
 
     #[test]
-    fn built_in_tokens_match_spec() {
+    fn built_in_tokens_match_design_values() {
         let p = Theme::pigment();
         assert_eq!(p.background().to_hex(), "#FAF6F0");
         assert_eq!(p.text_color().to_hex(), "#2B211B");

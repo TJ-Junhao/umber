@@ -400,7 +400,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn named_constants_match_spec() {
+    fn named_constants_match_design_values() {
         let expected = [
             (Rgba::BLACK, "#1A1A1A"),
             (Rgba::WHITE, "#FFFFFF"),

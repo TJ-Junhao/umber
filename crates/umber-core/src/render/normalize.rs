@@ -12,8 +12,8 @@ use crate::scene::{GradientStop, LinearGradient};
 /// Largest coordinate magnitude, in points, that a backend will draw.
 ///
 /// A point (control points included) beyond this, or non-finite, makes its segment invalid.
-/// Rasterizers can abort on huge but finite control points; M5 clips data to the plot area
-/// before it builds scenes, so legitimate geometry never gets near this limit.
+/// Rasterizers can abort on huge but finite control points; mark drawing clips data to
+/// the plot area before it builds scenes, so legitimate geometry never gets near this limit.
 pub(crate) const MAX_COORD: f32 = 1.0e6;
 
 /// Gradient vectors shorter than this many points are degenerate.
