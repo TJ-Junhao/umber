@@ -9,6 +9,9 @@
 //! With figures of at most 200 in a side this keeps every coordinate far below the renderers'
 //! `MAX_COORD`.
 
+mod legend;
+mod nudge;
+
 use crate::model::Axes;
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, coincides};
 use crate::{FontLibrary, TextLayout, TextStyle, Theme, TickLabelPlacement, Weight};
@@ -501,7 +504,7 @@ mod tests {
     use super::*;
     use crate::ScaleKind;
     use crate::model::{AxisData, Figure, LineOptions, ScatterOptions};
-    use crate::pipeline::plan;
+    use crate::pipeline::plan_figure;
     use crate::test_support::scene::assert_scene_bounded;
 
     fn lib() -> &'static FontLibrary {
@@ -517,13 +520,7 @@ mod tests {
     }
 
     fn plan_of(figure: &Figure) -> (Resolved, Layout) {
-        plan(
-            figure.width_in() * 72.0,
-            figure.height_in() * 72.0,
-            figure.theme(),
-            figure.axes().unwrap(),
-            lib(),
-        )
+        plan_figure(figure, lib())
     }
 
     #[test]

@@ -20,8 +20,12 @@
 //! clipping of [`clip`], and receive their input as one [`MarkContext`].
 
 mod area;
+mod bar;
+mod bar_shape;
 mod chrome;
 mod clip;
+mod hist;
+pub(crate) mod legend;
 mod line;
 mod mapping;
 mod marker;
@@ -34,7 +38,6 @@ pub(crate) use chrome::chrome;
 
 use crate::Theme;
 use crate::layout::{Area, Layout};
-use crate::model::Mark;
 use crate::resolve::{Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
 use mapping::{AxisMaps, axis_x, axis_y};
@@ -69,9 +72,12 @@ pub(crate) fn marks(
         baseline_y: layout.baseline_y,
     };
     let mut items = Vec::new();
-    for &ResolvedMark { mark, color } in marks {
-        match mark {
-            Mark::Line(line_mark) => {
+    for mark in marks {
+        match *mark {
+            ResolvedMark::Line {
+                mark: line_mark,
+                color,
+            } => {
                 let mut xs = axis_x(&resolved.x, line_mark.x());
                 let mut ys = axis_y(&resolved.y, line_mark.y());
                 if !resolved.x.is_category() {
@@ -86,7 +92,10 @@ pub(crate) fn marks(
                     &mut items,
                 );
             }
-            Mark::Scatter(scatter_mark) => {
+            ResolvedMark::Scatter {
+                mark: scatter_mark,
+                color,
+            } => {
                 let xs = axis_x(&resolved.x, scatter_mark.x());
                 let ys = axis_y(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;

@@ -119,15 +119,9 @@ fn nums(v: &[f64]) -> AxisData {
 }
 
 fn plot_of(figure: &Figure) -> Area {
-    crate::pipeline::plan(
-        figure.width_in() * 72.0,
-        figure.height_in() * 72.0,
-        figure.theme(),
-        figure.axes().unwrap(),
-        FontLibrary::global(),
-    )
-    .1
-    .plot
+    crate::pipeline::plan_figure(figure, FontLibrary::global())
+        .1
+        .plot
 }
 
 fn line_figure(theme: Theme, x: &[f64], y: &[f64], options: LineOptions) -> Figure {
