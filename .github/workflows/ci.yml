@@ -19,6 +19,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p umber-core
       - run: cargo test --doc -p umber-core
+      - run: scripts/check-refactor-output.sh check
 
   python:
     strategy:

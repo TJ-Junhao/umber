@@ -23,36 +23,10 @@ const MAX_DIFFERENT_FRACTION: f64 = 0.005;
 /// No pixel may have a channel differing by more than this.
 const MAX_CHANNEL_DELTA: u8 = 64;
 
-struct Image {
-    width: u32,
-    height: u32,
-    rgba: Vec<u8>,
-}
+#[path = "support/image.rs"]
+mod image;
 
-fn decode(bytes: &[u8]) -> Result<Image, String> {
-    let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
-        .read_info()
-        .map_err(|e| format!("cannot read PNG header: {e}"))?;
-    let size = reader
-        .output_buffer_size()
-        .ok_or("PNG is too large to decode")?;
-    let mut buf = vec![0; size];
-    let info = reader
-        .next_frame(&mut buf)
-        .map_err(|e| format!("cannot decode PNG: {e}"))?;
-    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
-        return Err(format!(
-            "expected 8-bit RGBA, got {:?} {:?}",
-            info.color_type, info.bit_depth
-        ));
-    }
-    buf.truncate(info.buffer_size());
-    Ok(Image {
-        width: info.width,
-        height: info.height,
-        rgba: buf,
-    })
-}
+use image::{DecodedPng as Image, decode_rgba8 as decode};
 
 fn write_png(path: &FsPath, image: &Image) -> Result<(), String> {
     let file = std::fs::File::create(path)
@@ -129,6 +103,7 @@ fn compare_golden(
         width: actual.width,
         height: actual.height,
         rgba: overlay,
+        phys: None,
     };
     write_png(&diff_path, &overlay)?;
     Err(format!(
