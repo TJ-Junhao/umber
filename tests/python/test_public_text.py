@@ -29,10 +29,10 @@ _PATTERNS = [
     r"\bthe\s+" + "plan" + r"\b",
     r"\b" + "plan" + r"'s\b",
     "PR" + r"\s*#\s*\d+",
-    r"\b" + "round" + r"[-\s]?\d+\b",
+    r"\b" + "round" + r"[-\s]*\d+\b",
     "owner" + r"\s+decisions?",
     # Milestone references ("M5 clips ..."); "M4 downsampling" is an algorithm name.
-    r"\bM\d+\s+(?!downsampling\b)[A-Za-z]",
+    r"\bM(?!4\s+(?i:downsampling)\b)\d+\s+[A-Za-z]",
 ]
 # The milestone pattern must stay case-sensitive in its capital M, so it is checked apart.
 _MILESTONE = re.compile(_PATTERNS[-1])
@@ -84,6 +84,9 @@ def scan(root: Path, files: list[str]) -> list[str]:
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
+            # Shipped text must be UTF-8; never skip a file silently. Binary files belong in
+            # _SKIP_SUFFIXES.
+            hits.append(f"{rel}: not valid UTF-8 (add a binary suffix to _SKIP_SUFFIXES?)")
             continue
         for number, line in enumerate(text.splitlines(), start=1):
             if line_hits(line):
@@ -104,6 +107,11 @@ _CASES = [
     "PR  " + "#18",
     "PR" + "#18",
     "round " + "12",
+    "round" + "  12",
+    "round" + "\t\t12",
+    "round" + "__12",
+    "M5 " + "downsampling was added",
+    "M12 " + "downsampling implementation",
     "Round-" + "3 fixes",
     _B.capitalize() + " Focus 3",
     _B + "ers requested this",
@@ -131,6 +139,7 @@ def test_banned_wording_is_caught(line: str) -> None:
         "colour: ColorSpec",
         "Copyright owner: Example",
         "//! M4 downsampling: reduce a long line",
+        "M4 Downsampling reduces a long line",
         '<path d="M10 10 L50 10"/>',
         "A preview of the figure; an explicit limit.",
     ],
@@ -184,3 +193,10 @@ def test_generated_binary_and_docs_are_skipped(rel: str, tmp_path: Path) -> None
     target.write_text("the " + _B + "er\n", encoding="utf-8")
     assert not is_scanned(rel)
     assert scan(tmp_path, [rel]) == []
+
+
+def test_non_utf8_text_is_reported_not_skipped(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_bytes(("# " + _B + "er requested this \xe9\n").encode("latin-1"))
+    hits = scan(tmp_path, ["a.py"])
+    assert len(hits) == 1
+    assert hits[0].startswith("a.py:")
