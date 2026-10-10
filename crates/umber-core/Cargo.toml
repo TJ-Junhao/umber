@@ -11,9 +11,11 @@ include = ["src/**/*", "fonts/**/*", "tests/fixtures/**/*", "Cargo.toml"]
 [dependencies]
 fontdb = "0.24.0"
 harfrust = "0.14.0"
+png = "0.18.1"
 read-fonts = "0.45.0"
 skrifa = "0.48.0"
 thiserror.workspace = true
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
 
 [dev-dependencies]
 insta = "1.49.0"

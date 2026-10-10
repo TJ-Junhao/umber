@@ -33,3 +33,7 @@ pub enum SvgText {
     /// Text is written as `<text>` elements that can be edited in a vector editor.
     Editable,
 }
+
+mod png;
+
+pub use png::render_png;
