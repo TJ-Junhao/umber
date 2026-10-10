@@ -17,6 +17,9 @@
 
 use crate::{Error, Font, Result, Rgba};
 
+/// The largest accepted `font_scale`.
+const MAX_FONT_SCALE: f64 = 10.0;
+
 /// The most colors a palette may hold.
 const MAX_PALETTE: usize = 16;
 
@@ -197,6 +200,8 @@ fn style(context: &'static str, message: String) -> Error {
 enum Bound {
     /// Greater than 0.
     Positive,
+    /// Greater than 0 and at most [`MAX_FONT_SCALE`].
+    FontScale,
     /// At least 0.
     NonNegative,
     /// Within 0.0..=1.0.
@@ -205,15 +210,19 @@ enum Bound {
 
 /// Validate a numeric token and narrow it to `f32`.
 fn check_number(context: &'static str, name: &str, value: f64, bound: Bound) -> Result<f32> {
+    let narrowed = value as f32;
     let (ok, required) = match bound {
-        Bound::Positive => (value > 0.0, "a finite number greater than 0"),
+        Bound::Positive => (narrowed > 0.0, "a finite number greater than 0"),
+        Bound::FontScale => (
+            narrowed > 0.0 && value <= MAX_FONT_SCALE,
+            "a finite number greater than 0 and at most 10",
+        ),
         Bound::NonNegative => (value >= 0.0, "a finite number of at least 0"),
         Bound::Unit => (
             (0.0..=1.0).contains(&value),
             "a finite number from 0.0 to 1.0",
         ),
     };
-    let narrowed = value as f32;
     if ok && value.is_finite() && narrowed.is_finite() {
         Ok(narrowed)
     } else {
@@ -887,7 +896,9 @@ impl Theme {
     ///
     /// # Errors
     ///
-    /// `Error::Style` with context `"Theme.with_font_scale()"` unless the value is finite and greater than 0.
+    /// `Error::Style` with context `"Theme.with_font_scale()"` unless the value is finite, greater than 0
+    /// and at most 10.0 (the cap keeps derived font sizes finite). Values that underflow to 0 when
+    /// narrowed to `f32` are rejected.
     ///
     /// # Examples
     ///
@@ -903,7 +914,7 @@ impl Theme {
             "Theme.with_font_scale()",
             "font_scale",
             value,
-            Bound::Positive,
+            Bound::FontScale,
         )?;
         Ok(Theme {
             font_scale: value,
@@ -1350,11 +1361,28 @@ mod tests {
         assert!(t.with_palette(&[Rgba::RED; 17]).is_err());
 
         // Positive numbers.
-        for v in bad.iter().chain(&[0.0, -1.0, 1e300]) {
+        let tiny = [1e-50, 1e-100, f64::MIN_POSITIVE, f64::from_bits(1)];
+        for v in bad.iter().chain(&[0.0, -1.0, 1e300]).chain(&tiny) {
             assert!(t.with_font_scale(*v).is_err(), "font_scale {v}");
             assert!(t.with_line_width(*v).is_err(), "line_width {v}");
             assert!(t.with_marker_size(*v).is_err(), "marker_size {v}");
         }
+        let smallest = f64::from(f32::from_bits(1));
+        assert_eq!(
+            t.with_font_scale(smallest).unwrap().font_scale(),
+            f32::from_bits(1)
+        );
+        assert_eq!(
+            t.with_line_width(smallest).unwrap().line_width(),
+            f32::from_bits(1)
+        );
+        assert_eq!(
+            t.with_marker_size(smallest).unwrap().marker_size(),
+            f32::from_bits(1)
+        );
+        assert_eq!(t.with_font_scale(10.0).unwrap().font_scale(), 10.0);
+        let err = t.with_font_scale(10.000001).unwrap_err();
+        assert!(err.to_string().contains("at most 10"), "{err}");
         assert_eq!(t.with_font_scale(1.2).unwrap().font_scale(), 1.2);
         assert_eq!(t.with_line_width(2.5).unwrap().line_width(), 2.5);
         assert_eq!(t.with_marker_size(7.0).unwrap().marker_size(), 7.0);
