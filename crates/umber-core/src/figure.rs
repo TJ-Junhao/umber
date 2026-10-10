@@ -107,7 +107,7 @@ mod tests {
         };
         resolve::resolve_marks(axes.marks(), figure.theme().palette())
             .into_iter()
-            .map(|resolved| resolved.color)
+            .map(|resolved| resolved.color())
             .collect()
     }
 

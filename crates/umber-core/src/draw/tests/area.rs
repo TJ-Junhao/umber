@@ -34,13 +34,7 @@ fn area_fill_sits_under_line() {
     assert_eq!(style.color, color);
     let (line_min, _) = line.bounds().unwrap();
     let (area_min, area_max) = area.bounds().unwrap();
-    let (_, layout) = crate::pipeline::plan(
-        432.0,
-        288.0,
-        &theme,
-        f.axes().unwrap(),
-        FontLibrary::global(),
-    );
+    let (_, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
     let baseline = layout.baseline_y as f32;
     assert_eq!(area_min.y, line_min.y);
     assert_eq!(area_max.y, baseline);
