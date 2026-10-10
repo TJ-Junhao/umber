@@ -197,6 +197,63 @@ fn format_2_cmaps_are_indexed() {
     );
 }
 
+/// A `cmap` table with one Windows Unicode BMP record pointing at a format 2 subtable: the
+/// 518-byte header with every sub-header key 0 except `keys` (high byte, sub-header number),
+/// followed by `rest`, the sub-header bytes.
+fn format2_cmap(keys: &[(usize, u16)], rest: &[u8]) -> Vec<u8> {
+    let mut cmap = Vec::new();
+    for word in [0u16, 1, 3, 1] {
+        cmap.extend(word.to_be_bytes());
+    }
+    cmap.extend(12u32.to_be_bytes());
+    let length = u16::try_from(518 + rest.len()).unwrap();
+    for word in [2u16, length, 0] {
+        cmap.extend(word.to_be_bytes());
+    }
+    let mut table = [0u16; 256];
+    for &(high, header) in keys {
+        table[high] = header * 8;
+    }
+    for key in table {
+        cmap.extend(key.to_be_bytes());
+    }
+    cmap.extend(rest);
+    cmap
+}
+
+#[test]
+fn format_2_unreadable_sub_headers_cost_one_visit_each() {
+    let max = Limits::DEFAULT.max_face_visits();
+    // Sub-header 0 maps the single bytes 0x00..=0xFF.
+    let all_bytes: Vec<u8> = [0u16, 256, 0, 0]
+        .iter()
+        .flat_map(|w| w.to_be_bytes())
+        .collect();
+    // (case, keys, sub-header bytes, unreadable sub-headers): every high byte is one visit,
+    // whether its sub-header is read or not.
+    let cases: [(&str, &[(usize, u16)], &[u8], usize); 3] = [
+        ("first field missing", &[], &[], 256),
+        ("count field missing", &[], &[0, 0], 256),
+        ("key out of range", &[(0x41, 100)], &all_bytes, 1),
+    ];
+    for (case, keys, rest, unreadable) in cases {
+        let read = system::cmap_ranges(&format2_cmap(keys, rest), max).unwrap();
+        assert_eq!(read.visited(), 256, "{case}");
+        assert_eq!(read.ranges().len(), 256 - unreadable, "{case}");
+        // The high byte whose sub-header is unreadable maps nothing.
+        assert!(read.ranges().iter().all(|&(lo, _)| lo != 0x41), "{case}");
+    }
+    // A header with no sub-headers: 256 unreadable sub-headers fit a budget of 256, not 255.
+    let empty = format2_cmap(&[], &[]);
+    assert_eq!(empty.len(), 12 + 518);
+    let read = system::cmap_ranges(&empty, 256).unwrap();
+    assert_eq!((read.ranges().len(), read.visited()), (0, 256));
+    assert_eq!(
+        system::cmap_ranges(&empty, 255),
+        Err(system::CmapError::TooManyVisits)
+    );
+}
+
 #[test]
 fn index_keeps_a_bounded_number_of_ranges() {
     let spaced = |base: u32, n: u32| -> Vec<u32> { (0..n).map(|k| base + 2 * k).collect() };
