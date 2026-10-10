@@ -1,11 +1,11 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: b2e02072dedc2c52650da55157a896a41e51925a
+# revision: 742a884cd5325134d3f6dda5b07a3f64a0805be2
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
-a4118a0240d5b80d383648efd9c3647747b1f38fb4a89c26b919ec936d277d2c  api/constants.txt
+3559173b0af8be4cc8f8d204c35af532374def8dff403f7c21f2044d13b013d3  api/constants.txt
 3536acf5506c4d594e4520ef89a61f18df3c74e4d6ffbd924622509c69d9dab4  api/text-layout.txt
 69aad12dad245d2e880093b0036adfd69854badc44d929128ce7d1d39a5c174a  api/themes.txt
-91baaa8b7ab070389106f42199f55f25b209ae28967b466687b4928b11a23cd7  errors/api.txt
+efaad645644311f6f006c198fb968b1330c2758a54905ea2dc4c4ef6424d9094  errors/api.txt
 b710e3e007454e2777da6eec60c934545526878e132b512b1163d3a4fa892a26  png/fig-all-nan.dpi200.png
 9ac2df927f6a41e4d44387230417b4e09b9b0fa6a80f86fed8bc804c920a8c91  png/fig-all-nan.dpi72.png
 006c5d3f7c37643311f7518ad6eaa97f203996803b77840a1bd8b2686980c0ea  png/fig-category-crowded-log.dpi200.png
