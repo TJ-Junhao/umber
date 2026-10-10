@@ -5,6 +5,8 @@ build-backend = "maturin"
 [project]
 name = "umber"
 description = "A plotting library for Python, written in Rust."
+readme = "README.md"
+keywords = ["plotting", "charts", "visualization", "rust"]
 requires-python = ">=3.12"
 license = "MIT OR Apache-2.0"
 license-files = [
@@ -15,8 +17,15 @@ license-files = [
 dependencies = ["numpy>=2.0", "typing_extensions>=4.12"]
 dynamic = ["version"]
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Visualization",
     "Typing :: Typed",
 ]
 
