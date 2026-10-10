@@ -1,0 +1,674 @@
+//! System font fallback, with in-memory fonts standing in for the system fonts: preference
+//! order, lookup and confirmation budgets, caches, shaping tables and index limits.
+
+use std::sync::Arc;
+
+use read_fonts::TableProvider;
+
+use super::fixtures::{
+    assert_no_bundled_font_has, fixture_font, font_with_cmap, format12_cmap, style, with_table,
+    without_outlines,
+};
+use crate::fonts::{Font, Weight};
+use crate::geometry::Point;
+use crate::text::font::{Face, FontKey};
+use crate::text::system::{self, Limits};
+use crate::text::{FontLibrary, TextStyle};
+
+/// The PostScript names of the system faces the runs of `text` were drawn with.
+fn system_picks(lib: &FontLibrary, text: &str, weight: Weight) -> Vec<String> {
+    let s = TextStyle {
+        weight,
+        ..style(Font::Inter, 10.0)
+    };
+    let system = lib.system().unwrap();
+    lib.layout(text, &s)
+        .runs()
+        .iter()
+        .map(|run| match run.font() {
+            FontKey::System(face) => system.face(face).unwrap().post_script_name.clone(),
+            other => format!("{other:?}"),
+        })
+        .collect()
+}
+
+fn lookups(lib: &FontLibrary) -> usize {
+    lib.system().unwrap().lookups()
+}
+
+fn indexed_names(lib: &FontLibrary) -> Vec<String> {
+    let index = lib.system().unwrap().index();
+    let mut names: Vec<String> = index
+        .faces
+        .iter()
+        .map(|f| f.post_script_name.clone())
+        .collect();
+    names.sort();
+    names
+}
+
+/// 32 system fonts that claim `codepoints` but have no outlines.
+fn outline_free_candidates(codepoints: &[u32]) -> FontLibrary {
+    FontLibrary::with_test_system_fonts(
+        (0..32)
+            .map(|k| {
+                without_outlines(fixture_font(
+                    &format!("Claim {k:02}"),
+                    400,
+                    false,
+                    codepoints,
+                ))
+            })
+            .collect(),
+    )
+}
+
+#[test]
+fn system_fallback_prefers_ranked_families_then_sorted_names() {
+    let han = '\u{4E00}';
+    let (generic, unranked) = ('\u{F0010}', '\u{F0020}');
+    assert_no_bundled_font_has(&format!("{han}{generic}{unranked}"));
+    // Database order puts the losing face first every time.
+    let lib = FontLibrary::with_test_system_fonts(vec![
+        fixture_font("Aardvark Sans", 400, false, &[0x4E00, 0xF0010]),
+        fixture_font("Zulu Sans", 400, false, &[0xF0020]),
+        fixture_font("Hiragino Sans", 400, false, &[0x4E00]),
+        fixture_font("PingFang SC", 400, false, &[0x4E00]),
+        fixture_font("DejaVu Sans", 400, false, &[0xF0010]),
+        fixture_font("Noto Sans", 400, false, &[0xF0010]),
+        fixture_font("Bravo Sans", 400, false, &[0xF0020]),
+    ]);
+    // Han: PingFang SC is ranked above Hiragino Sans; Aardvark is unranked.
+    assert_eq!(
+        system_picks(&lib, &han.to_string(), Weight::Regular),
+        ["PingFangSC-400"]
+    );
+    // Generic list: Noto Sans before DejaVu Sans, both before unranked families.
+    assert_eq!(
+        system_picks(&lib, &generic.to_string(), Weight::Regular),
+        ["NotoSans-400"]
+    );
+    // Unranked: by family name, not database order.
+    assert_eq!(
+        system_picks(&lib, &unranked.to_string(), Weight::Regular),
+        ["BravoSans-600".replace("600", "400")]
+    );
+}
+
+#[test]
+fn system_fallback_matches_weight_then_upright_style() {
+    let c = '\u{4E01}';
+    assert_no_bundled_font_has(&c.to_string());
+    let lib = FontLibrary::with_test_system_fonts(vec![
+        fixture_font("PingFang SC", 700, false, &[0x4E01]),
+        fixture_font("PingFang SC", 600, true, &[0x4E01]),
+        fixture_font("PingFang SC", 300, false, &[0x4E01]),
+        fixture_font("PingFang SC", 600, false, &[0x4E01]),
+        fixture_font("PingFang SC", 400, true, &[0x4E01]),
+        fixture_font("PingFang SC", 400, false, &[0x4E01]),
+    ]);
+    let text = c.to_string();
+    assert_eq!(
+        system_picks(&lib, &text, Weight::Regular),
+        ["PingFangSC-400"]
+    );
+    assert_eq!(
+        system_picks(&lib, &text, Weight::SemiBold),
+        ["PingFangSC-600"]
+    );
+    // Unranked families follow the same rule.
+    let lib = FontLibrary::with_test_system_fonts(vec![
+        fixture_font("Other", 400, true, &[0xF0030]),
+        fixture_font("Other", 800, false, &[0xF0030]),
+        fixture_font("Other", 500, false, &[0xF0030]),
+    ]);
+    assert_eq!(
+        system_picks(&lib, "\u{F0030}", Weight::SemiBold),
+        ["Other-500"]
+    );
+    // Weight distance comes before style: 400 italic beats 500 upright for Regular.
+    assert_eq!(
+        system_picks(&lib, "\u{F0030}", Weight::Regular),
+        ["Other-400Italic"]
+    );
+}
+
+#[test]
+fn system_lookups_per_layout_are_capped() {
+    let codepoints: Vec<u32> = (0xF0100..0xF0100 + 1_100).collect();
+    let text: String = codepoints
+        .iter()
+        .filter_map(|&cp| char::from_u32(cp))
+        .collect();
+    assert_no_bundled_font_has(&text);
+    let lib =
+        FontLibrary::with_test_system_fonts(vec![fixture_font("Cover", 400, false, &codepoints)]);
+    let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+    assert_eq!(lookups(&lib), system::LOOKUPS_PER_LAYOUT);
+    // The first 1,024 characters use the system font, the rest the primary font's .notdef.
+    let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
+    assert!(
+        matches!(
+            fonts.as_slice(),
+            [
+                FontKey::System(_),
+                FontKey::Bundled(Font::Inter, Weight::Regular)
+            ]
+        ),
+        "{fonts:?}"
+    );
+    assert_eq!(layout.runs()[0].glyphs().len(), 1_024);
+    assert_eq!(layout.runs()[1].glyphs().len(), 76);
+    // The next call looks up only the 76 characters that were not cached.
+    let again = lib.layout(&text, &style(Font::Inter, 10.0));
+    assert_eq!(lookups(&lib), 1_100);
+    assert_eq!(again.runs().len(), 1);
+}
+
+#[test]
+fn system_lookups_are_cached_across_layouts() {
+    let hit: String = (0xF0200..0xF0200 + 500)
+        .filter_map(char::from_u32)
+        .collect();
+    let miss: String = (0xF0400..0xF0400 + 300)
+        .filter_map(char::from_u32)
+        .collect();
+    let text = format!("{hit}{miss}");
+    assert_no_bundled_font_has(&text);
+    let covered: Vec<u32> = (0xF0200..0xF0200 + 500).collect();
+    let lib =
+        FontLibrary::with_test_system_fonts(vec![fixture_font("Cover", 400, false, &covered)]);
+    let s = style(Font::Inter, 10.0);
+    let layout = lib.layout(&text, &s);
+    assert_eq!(lookups(&lib), 800);
+    let fonts: Vec<(FontKey, usize)> = layout
+        .runs()
+        .iter()
+        .map(|r| (r.font(), r.glyphs().len()))
+        .collect();
+    assert!(
+        matches!(
+            fonts.as_slice(),
+            [(FontKey::System(_), 500), (FontKey::Bundled(..), 300)]
+        ),
+        "{fonts:?}"
+    );
+    let first = layout.outline(Point { x: 0.0, y: 0.0 });
+    // Found and not-found results are both cached.
+    let second = lib.layout(&text, &s).outline(Point { x: 0.0, y: 0.0 });
+    assert_eq!(lookups(&lib), 800);
+    assert_eq!(first, second);
+    // The weight is part of the key.
+    let _ = lib.layout(
+        &hit,
+        &TextStyle {
+            weight: Weight::SemiBold,
+            ..s
+        },
+    );
+    assert_eq!(lookups(&lib), 1_300);
+}
+
+#[test]
+fn system_lookup_cache_is_bounded() {
+    let lib = FontLibrary::with_test_system_fonts(vec![]);
+    let system = lib.system().unwrap();
+    let s = style(Font::Inter, 10.0);
+    let total = system::CACHE_LIMIT + 4_000;
+    let chars: Vec<char> = (0xF0000..).filter_map(char::from_u32).take(total).collect();
+    for chunk in chars.chunks(system::LOOKUPS_PER_LAYOUT) {
+        let text: String = chunk.iter().collect();
+        let _ = lib.layout(&text, &s);
+    }
+    assert_eq!(system.lookups(), total);
+    assert_eq!(system.cache_len(), system::CACHE_LIMIT);
+    // Characters that did not fit are looked up again; cached ones are not.
+    let late: String = chars[total - 10..].iter().collect();
+    let early: String = chars[..10].iter().collect();
+    let _ = lib.layout(&format!("{early}{late}"), &s);
+    assert_eq!(system.lookups(), total + 10);
+    assert_eq!(system.cache_len(), system::CACHE_LIMIT);
+}
+
+#[test]
+fn system_shaping_tables_are_kept_within_bounds() {
+    let n = u32::try_from(system::SHAPING_CACHE_FACES).unwrap() + 1;
+    let codepoints: Vec<u32> = (0..n).map(|k| 0xF9000 + k).collect();
+    let text: String = codepoints
+        .iter()
+        .filter_map(|&cp| char::from_u32(cp))
+        .collect();
+    assert_no_bundled_font_has(&text);
+    let lib = FontLibrary::with_test_system_fonts(
+        codepoints
+            .iter()
+            .enumerate()
+            .map(|(k, &cp)| fixture_font(&format!("Face {k:03}"), 400, false, &[cp]))
+            .collect(),
+    );
+    let system = lib.system().unwrap();
+    let s = style(Font::Inter, 10.0);
+    let first = lib.layout(&text, &s);
+    // Every character is drawn with its own system face.
+    assert_eq!(first.runs().len(), codepoints.len());
+    assert!(
+        first
+            .runs()
+            .iter()
+            .all(|run| matches!(run.font(), FontKey::System(_)))
+    );
+    let (faces, bytes) = system.shaping_cache();
+    assert_eq!(faces, system::SHAPING_CACHE_FACES);
+    assert!(bytes > 0 && bytes <= system::SHAPING_CACHE_BYTES, "{bytes}");
+    // Kept faces shape the same as fresh ones, and nothing more is kept.
+    let again = lib.layout(&text, &s);
+    assert_eq!(first.width(), again.width());
+    assert_eq!(
+        first.outline(Point { x: 0.0, y: 0.0 }),
+        again.outline(Point { x: 0.0, y: 0.0 })
+    );
+    assert_eq!(system.shaping_cache(), (faces, bytes));
+}
+
+#[test]
+fn kept_shaping_fonts_charge_later_table_copies() {
+    let text = "\u{F9100}";
+    assert_no_bundled_font_has(text);
+    let font = fixture_font("Lazy Tables", 400, false, &[0xF9100]);
+    let font = with_table(&font, *b"kern", vec![0; 4_000]);
+    let s = style(Font::Inter, 10.0);
+    let probe = FontLibrary::with_test_system_fonts(vec![font.clone()]);
+    let _ = probe.layout(text, &s);
+    let (_, all) = probe.system().unwrap().shaping_cache();
+    assert!(all > 4_000, "{all}");
+
+    for budget in [all, all - 1, 1_000] {
+        let limits = Limits {
+            shaping_cache_bytes: budget,
+            ..Limits::DEFAULT
+        };
+        let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font.clone()], limits);
+        let system = lib.system().unwrap();
+        assert_eq!(system.index().faces.len(), 1);
+        // Kept before it has copied anything, so every table is copied afterwards.
+        let fresh = system.shaping_font(0).unwrap();
+        system.keep_shaping_font(0, fresh);
+        assert_eq!(system.shaping_cache(), (1, 0));
+        let layout = lib.layout(text, &s);
+        assert_eq!(layout.runs()[0].font(), FontKey::System(0));
+        assert!(layout.width() > 0.0);
+        let (faces, bytes) = system.shaping_cache();
+        assert_eq!(faces, 1);
+        assert!(bytes <= budget, "{bytes} > {budget}");
+        let kern = system.shaping_font(0).unwrap().font.tables().kern().is_ok();
+        if budget == all {
+            assert_eq!((bytes, kern), (all, true));
+        } else {
+            assert!(bytes > 0 && bytes < budget.min(all), "{bytes}");
+        }
+        if budget < 4_000 {
+            assert!(!kern, "`kern` does not fit in {budget} bytes");
+        }
+    }
+}
+
+#[test]
+fn bundled_libraries_share_one_system_index() {
+    let a = FontLibrary::bundled();
+    let b = FontLibrary::bundled();
+    let index = |lib: &FontLibrary| Arc::clone(lib.system().unwrap().shared_index());
+    assert!(Arc::ptr_eq(&index(&a), &index(&b)));
+    assert!(Arc::ptr_eq(&index(&a), &index(FontLibrary::global())));
+    // Libraries with in-memory system fonts keep their own.
+    let c = FontLibrary::with_test_system_fonts(vec![]);
+    let d = FontLibrary::with_test_system_fonts(vec![]);
+    assert!(!Arc::ptr_eq(&index(&c), &index(&d)));
+    assert!(!Arc::ptr_eq(&index(&a), &index(&c)));
+}
+
+#[test]
+fn faces_with_too_many_ranges_are_not_indexed() {
+    let target = 0x30000;
+    let many: Vec<u32> = (0..65_537).map(|k| target + 2 * k).collect();
+    let lib = FontLibrary::with_test_system_fonts(vec![
+        fixture_font("Aaa Many", 400, false, &many),
+        fixture_font("Aaa Limit", 400, false, &many[..65_536]),
+        fixture_font("Zzz Few", 400, false, &[target]),
+    ]);
+    let c = char::from_u32(target).unwrap();
+    assert_no_bundled_font_has(&c.to_string());
+    // "Aaa Many" sorts first and covers the character, but has 65,537 ranges.
+    assert_eq!(
+        system_picks(&lib, &c.to_string(), Weight::Regular),
+        ["AaaLimit-400"]
+    );
+    assert_eq!(indexed_names(&lib), ["AaaLimit-400", "ZzzFew-400"]);
+}
+
+#[test]
+fn oversized_font_files_are_not_indexed() {
+    let target = 0xF0050;
+    let big = fixture_font(
+        "Aaa Big",
+        400,
+        false,
+        &(target..target + 1_000).collect::<Vec<_>>(),
+    );
+    let small = fixture_font("Zzz Small", 400, false, &[target]);
+    let limits = Limits {
+        max_bytes: small.len(),
+        ..Limits::DEFAULT
+    };
+    assert!(big.len() > small.len());
+    let lib = FontLibrary::with_test_system_fonts_and_limits(vec![big, small], limits);
+    let c = char::from_u32(target).unwrap();
+    assert_eq!(
+        system_picks(&lib, &c.to_string(), Weight::Regular),
+        ["ZzzSmall-400"]
+    );
+    assert_eq!(indexed_names(&lib), ["ZzzSmall-400"]);
+}
+
+#[test]
+fn index_keeps_the_first_faces_in_sorted_order() {
+    let target = 0xF0060;
+    let limits = Limits {
+        max_faces: 2,
+        ..Limits::DEFAULT
+    };
+    let lib = FontLibrary::with_test_system_fonts_and_limits(
+        vec![
+            fixture_font("Charlie", 400, false, &[target]),
+            fixture_font("Alpha", 400, false, &[target]),
+            fixture_font("Bravo", 400, false, &[target]),
+        ],
+        limits,
+    );
+    assert_eq!(indexed_names(&lib), ["Alpha-400", "Bravo-400"]);
+}
+
+#[test]
+fn format_2_cmaps_are_indexed() {
+    // A Windows Unicode format 2 subtable mapping U+E000 to the outlined glyph 1.
+    let mut sub = Vec::new();
+    for word in [2u16, 536, 0] {
+        sub.extend(word.to_be_bytes());
+    }
+    for high in 0..256 {
+        sub.extend((if high == 0xE0 { 8u16 } else { 0 }).to_be_bytes());
+    }
+    // Sub-header 0 (empty), sub-header 1 for 0xE0xx: first code 0, one entry, delta 0,
+    // range offset 2 (the glyph array right after it), then the glyph array [1].
+    for word in [0u16, 0, 0, 0, 0, 1, 0, 2, 1] {
+        sub.extend(word.to_be_bytes());
+    }
+    assert_eq!(sub.len(), 536);
+    let mut cmap = Vec::new();
+    for word in [0u16, 1, 3, 1] {
+        cmap.extend(word.to_be_bytes());
+    }
+    cmap.extend(12u32.to_be_bytes());
+    cmap.extend(sub);
+    let read = system::cmap_ranges(&cmap, Limits::DEFAULT.max_face_visits).unwrap();
+    assert_eq!(read.ranges, [(0xE000, 0xE000)]);
+    assert_eq!(read.visited, 256);
+
+    let font = font_with_cmap("Format Two", 400, false, cmap);
+    let face = Face::parse(&font, 0).unwrap();
+    assert!(face.draws('\u{E000}'));
+    let s = style(Font::Inter, 10.0);
+    let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout("\u{E000}", &s);
+    assert_eq!(extra.runs()[0].font(), FontKey::Extra(0));
+    let lib = FontLibrary::with_test_system_fonts(vec![font]);
+    assert_eq!(
+        system_picks(&lib, "\u{E000}", Weight::Regular),
+        ["FormatTwo-400"]
+    );
+}
+
+#[test]
+fn confirmations_per_lookup_are_capped() {
+    let codepoints: Vec<u32> = (0xF3000..0xF3000 + 64).collect();
+    let text: String = codepoints
+        .iter()
+        .filter_map(|&cp| char::from_u32(cp))
+        .collect();
+    assert_no_bundled_font_has(&text);
+    let lib = outline_free_candidates(&codepoints);
+    let system = lib.system().unwrap();
+    let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+    assert_eq!(system.lookups(), 64);
+    assert_eq!(
+        system.confirmations(),
+        64 * system::CONFIRMATIONS_PER_LOOKUP
+    );
+    assert!(system.confirmations() <= system::CONFIRMATIONS_PER_LAYOUT);
+    let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
+    assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
+    // A lookup that used up its own confirmations is cached.
+    let _ = lib.layout(&text, &style(Font::Inter, 10.0));
+    assert_eq!(system.lookups(), 64);
+}
+
+#[test]
+fn confirmations_per_layout_are_capped() {
+    let codepoints: Vec<u32> = (0xF4000..0xF4000 + 300).collect();
+    let text: String = codepoints
+        .iter()
+        .filter_map(|&cp| char::from_u32(cp))
+        .collect();
+    assert_no_bundled_font_has(&text);
+    let lib = outline_free_candidates(&codepoints);
+    let system = lib.system().unwrap();
+    let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+    // 300 characters would need 300 * 16 = 4,800 confirmations.
+    assert_eq!(system.confirmations(), system::CONFIRMATIONS_PER_LAYOUT);
+    assert_eq!(system.lookups(), system::CONFIRMATIONS_PER_LAYOUT / 16);
+    assert!(layout.width() > 0.0);
+    // Characters cut off by the layout budget are not cached; the next call continues.
+    let _ = lib.layout(&text, &style(Font::Inter, 10.0));
+    assert_eq!(system.lookups(), 300);
+    assert_eq!(system.confirmations(), 300 * 16);
+}
+
+#[test]
+fn index_keeps_a_bounded_number_of_ranges() {
+    let spaced = |base: u32, n: u32| -> Vec<u32> { (0..n).map(|k| base + 2 * k).collect() };
+    let limits = Limits {
+        max_total_ranges: 15,
+        ..Limits::DEFAULT
+    };
+    let lib = FontLibrary::with_test_system_fonts_and_limits(
+        vec![
+            fixture_font("Alpha", 400, false, &spaced(0xF5000, 10)),
+            fixture_font("Bravo", 400, false, &spaced(0xF6000, 10)),
+            fixture_font("Charlie", 400, false, &spaced(0xF7000, 3)),
+        ],
+        limits,
+    );
+    // Bravo does not fit after Alpha and is skipped whole; Charlie still fits.
+    assert_eq!(indexed_names(&lib), ["Alpha-400", "Charlie-400"]);
+    assert_eq!(lib.system().unwrap().index().range_count(), 13);
+}
+
+#[test]
+fn cmap_subtables_are_read_once_and_every_visit_counts() {
+    let codepoints: Vec<u32> = (0..1_000).map(|k| 0xF8000 + 2 * k).collect();
+    // 64 encoding records point at one 1,000-group subtable.
+    let cmap = format12_cmap(&codepoints, 64);
+    let read = system::cmap_ranges(&cmap, Limits::DEFAULT.max_face_visits).unwrap();
+    assert_eq!(read.visited, 1_000);
+    assert_eq!(read.ranges.len(), 1_000);
+    // Invalid groups yield nothing but are still counted.
+    let invalid = format12_cmap(&[0xFFFF_FFFF], 64);
+    let read = system::cmap_ranges(&invalid, Limits::DEFAULT.max_face_visits).unwrap();
+    assert_eq!((read.ranges.len(), read.visited), (0, 1));
+    assert_eq!(
+        system::cmap_ranges(&cmap, 999),
+        Err(system::CmapError::TooManyVisits)
+    );
+
+    let font = |name: &str| font_with_cmap(name, 400, false, format12_cmap(&codepoints, 64));
+    // Per face: 1,000 visits are needed.
+    let limits = Limits {
+        max_face_visits: 999,
+        ..Limits::DEFAULT
+    };
+    let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font("Alpha")], limits);
+    assert!(indexed_names(&lib).is_empty());
+    assert_eq!(lib.system().unwrap().index().visited, 1_000);
+    let limits = Limits {
+        max_face_visits: 1_000,
+        ..Limits::DEFAULT
+    };
+    let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font("Alpha")], limits);
+    assert_eq!(indexed_names(&lib), ["Alpha-400"]);
+    // Per build: the third face no longer fits and indexing stops.
+    let limits = Limits {
+        max_build_visits: 2_500,
+        ..Limits::DEFAULT
+    };
+    let lib = FontLibrary::with_test_system_fonts_and_limits(
+        vec![font("Alpha"), font("Bravo"), font("Charlie"), font("Delta")],
+        limits,
+    );
+    assert_eq!(indexed_names(&lib), ["Alpha-400", "Bravo-400"]);
+    assert_eq!(lib.system().unwrap().index().visited, 2_501);
+}
+
+#[test]
+fn cmap_ranges_are_read_without_enumerating_code_points() {
+    // A format 12 group spanning every code point is one range, not 1.1 million.
+    let mut cmap = Vec::new();
+    for field in [0u16, 1, 3, 10] {
+        cmap.extend(field.to_be_bytes());
+    }
+    cmap.extend(12u32.to_be_bytes());
+    cmap.extend(12u16.to_be_bytes());
+    cmap.extend(0u16.to_be_bytes());
+    cmap.extend(28u32.to_be_bytes());
+    cmap.extend(0u32.to_be_bytes());
+    cmap.extend(1u32.to_be_bytes());
+    for field in [0u32, u32::MAX, 1] {
+        cmap.extend(field.to_be_bytes());
+    }
+    let max = Limits::DEFAULT.max_face_visits;
+    let read = system::cmap_ranges(&cmap, max).unwrap();
+    assert_eq!(read.ranges, [(0, 0x10_FFFF)]);
+    assert_eq!(read.visited, 1);
+    // Truncated and empty tables give no ranges and no panic.
+    assert_eq!(system::cmap_ranges(&cmap[..30], max).unwrap().ranges, []);
+    assert_eq!(
+        system::cmap_ranges(&[], max),
+        Err(system::CmapError::Unreadable)
+    );
+}
+
+/// Depends on the fonts installed on the machine, so it is not run by default:
+/// `cargo test -p umber-core system_fallback -- --ignored --nocapture`.
+#[test]
+#[ignore = "depends on the system fonts"]
+fn system_fallback_draws_cjk() {
+    let rss_kib = || {
+        std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|o| o.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    let lib = FontLibrary::bundled();
+    let system = lib.system().expect("system fallback");
+    let before = rss_kib();
+    let start = std::time::Instant::now();
+    let index = system.index();
+    println!(
+        "index: {} faces, {} ranges, ~{} KiB heap, built in {:?}, RSS +{} KiB",
+        index.faces.len(),
+        index.range_count(),
+        index.heap_bytes() / 1024,
+        start.elapsed(),
+        rss_kib().saturating_sub(before)
+    );
+    let s = style(Font::Inter, 10.0);
+    let name = |key: FontKey| match key {
+        FontKey::System(face) => system.face(face).map_or_else(String::new, |f| {
+            format!("{} (weight {})", f.post_script_name, f.weight)
+        }),
+        other => format!("{other:?}"),
+    };
+    let layout = lib.layout("A数据可视化", &s);
+    let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
+    println!(
+        "runs: {:?}, width {}",
+        fonts.iter().map(|&k| name(k)).collect::<Vec<_>>(),
+        layout.width()
+    );
+    assert!(matches!(
+        fonts.as_slice(),
+        [FontKey::Bundled(..), FontKey::System(_)]
+    ));
+    let path = layout.outline(Point { x: 0.0, y: 0.0 });
+    let a_only = lib.layout("A", &s).width();
+    assert!(path.bounds().expect("outline").1.x > a_only + 30.0);
+    let semibold = lib.layout(
+        "数",
+        &TextStyle {
+            weight: Weight::SemiBold,
+            ..s
+        },
+    );
+    println!(
+        "SemiBold: {:?}",
+        semibold
+            .runs()
+            .iter()
+            .map(|r| name(r.font()))
+            .collect::<Vec<_>>()
+    );
+
+    let distinct: String = (0x4E00..0x4E00 + 1024).filter_map(char::from_u32).collect();
+    let lookups = system.lookups();
+    let start = std::time::Instant::now();
+    let cold = lib.layout(&distinct, &s);
+    println!(
+        "1,024 distinct CJK characters, cold: {:?} ({} lookups)",
+        start.elapsed(),
+        system.lookups() - lookups
+    );
+    let start = std::time::Instant::now();
+    let warm = lib.layout(&distinct, &s);
+    println!("same, warm: {:?}", start.elapsed());
+    assert!(cold.width() > 0.0 && (cold.width() - warm.width()).abs() < 1e-3);
+    println!(
+        "RSS after layouts: +{} KiB",
+        rss_kib().saturating_sub(before)
+    );
+
+    // Emoji and Arabic must not panic, whatever the system offers.
+    for text in [
+        "👍🏽",
+        "مرحبا",
+        "שלום",
+        "한국어",
+        "かな",
+        "e\u{301}",
+        "\u{FE0F}",
+        "a\u{200D}b",
+    ] {
+        let l = lib.layout(text, &s);
+        println!(
+            "{text:?}: width {}, runs {:?}",
+            l.width(),
+            l.runs().iter().map(|r| name(r.font())).collect::<Vec<_>>()
+        );
+        assert!(l.width() > 0.0, "{text:?}");
+        let path = l.outline(Point { x: 0.0, y: 0.0 });
+        println!(
+            "  outline: {} verbs, bounds {:?}",
+            path.verbs().len(),
+            path.bounds()
+        );
+    }
+}
