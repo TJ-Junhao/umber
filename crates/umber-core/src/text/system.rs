@@ -1,7 +1,8 @@
 //! System font fallback.
 //!
-//! The system fonts are enumerated and indexed once, the first time a character is missing from
-//! every bundled and explicit fallback font. The index records each face's character coverage as
+//! The system fonts are enumerated and indexed once per process, the first time a character is
+//! missing from every bundled and explicit fallback font; every library that uses them shares
+//! that index, while lookup and shaping caches stay per library. The index records each face's character coverage as
 //! sorted code point ranges, so a lookup never opens a font file except to confirm the chosen
 //! face. Candidates are tried in a fixed preference order: a ranked family list for the
 //! character's script, then a generic list, then every other face sorted by name. Within a
@@ -69,8 +70,8 @@ pub(super) const SHAPING_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
 /// The tables that shaping a system font may copy; see [`SystemFonts::shaping_font`].
 ///
-/// Without `glyf` or `CFF` the shaper has no glyph bounds, so its fallback mark positioning,
-/// used only for fonts without GPOS mark attachment, does not apply to system fonts.
+/// The shaper's copy has no `glyf` or `CFF`; glyph bounds for fallback mark positioning are
+/// read from the full font file instead (see `SystemExtents` in the parent module).
 const SHAPING_TABLES: [Tag; 18] = [
     Tag::new(b"cmap"),
     Tag::new(b"head"),
@@ -727,7 +728,8 @@ enum Verdict {
 pub(super) struct SystemFonts {
     source: Source,
     limits: Limits,
-    index: OnceLock<FaceIndex>,
+    /// For [`Source::Os`], the process-wide index shared by every library.
+    index: OnceLock<Arc<FaceIndex>>,
     /// `(character, weight)` to the chosen face, or `None` when no face qualifies.
     cache: Mutex<HashMap<(char, Weight), Option<usize>>>,
     /// Uncached lookups performed, for tests.
@@ -755,8 +757,20 @@ impl SystemFonts {
     }
 
     pub(super) fn index(&self) -> &FaceIndex {
-        self.index
-            .get_or_init(|| FaceIndex::build(&self.source, self.limits))
+        self.shared_index()
+    }
+
+    /// The index, built on first use. The machine's fonts are indexed once per process and
+    /// shared by every library that uses them; in-memory test fonts get an index of their own.
+    pub(crate) fn shared_index(&self) -> &Arc<FaceIndex> {
+        self.index.get_or_init(|| match &self.source {
+            Source::Os => {
+                static OS: OnceLock<Arc<FaceIndex>> = OnceLock::new();
+                Arc::clone(OS.get_or_init(|| Arc::new(FaceIndex::build(&Source::Os, self.limits))))
+            }
+            #[cfg(test)]
+            Source::Memory(_) => Arc::new(FaceIndex::build(&self.source, self.limits)),
+        })
     }
 
     /// The face to draw `c` with, if any.

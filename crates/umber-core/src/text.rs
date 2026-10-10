@@ -36,6 +36,7 @@
 mod marks;
 mod system;
 
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -43,8 +44,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use harfrust::{
-    Buffer, BufferFlags, Direction, Feature, FontFuncs, Script, ShapeOptions, ShapePlan,
-    ShaperFont, Tag,
+    Buffer, BufferFlags, Direction, Feature, FontFuncs, GlyphExtents, Script, ShapeOptions,
+    ShapePlan, ShaperFont, Tag,
 };
 use read_fonts::model::Blob;
 use read_fonts::tables::cmap::{Cmap, Cmap2, CmapSubtable, EncodingRecord, PlatformId};
@@ -53,7 +54,7 @@ use read_fonts::{FontRef, TableProvider};
 use skrifa::MetadataProvider;
 use skrifa::charmap::Charmap;
 use skrifa::instance::{LocationRef, Size};
-use skrifa::outline::{DrawSettings, OutlineGlyphCollection, OutlinePen};
+use skrifa::outline::{DrawSettings, OutlineGlyphCollection, OutlineGlyphFormat, OutlinePen};
 
 use crate::fonts::{Font, Weight, font_bytes};
 use crate::geometry::{Path, Point};
@@ -144,6 +145,7 @@ const SECONDARY_CACHE_SLOTS: usize = 256;
 
 /// A font parsed for character lookup and outlines.
 pub(crate) struct Face<'a> {
+    font: FontRef<'a>,
     /// The best Unicode subtable.
     charmap: Charmap<'a>,
     /// The other distinct Unicode subtables, in table order; see [`Face::secondary_glyph`].
@@ -168,6 +170,7 @@ impl<'a> Face<'a> {
             SECONDARY_CACHE_SLOTS
         };
         Some(Face {
+            font: font.clone(),
             charmap: font.charmap(),
             secondary,
             secondary_cache: (0..slots).map(|_| AtomicU64::new(0)).collect(),
@@ -224,6 +227,37 @@ impl<'a> Face<'a> {
         self.outlines.get(glyph).is_some_and(|outline| {
             let mut pen = SegmentCount(0);
             outline.draw(unhinted(), &mut pen).is_ok() && pen.0 > 0
+        })
+    }
+
+    /// The ink extents of `glyph` in font units, the way HarfRust reads them from a font's own
+    /// outline tables: the bounding box, with the horizontal bearing from `hmtx` for `glyf`
+    /// outlines. An empty glyph has empty extents.
+    fn extents(&self, glyph: GlyphId) -> Option<GlyphExtents> {
+        let metrics = self
+            .font
+            .glyph_metrics(Size::unscaled(), LocationRef::default());
+        let bounds = metrics.bounds(glyph)?;
+        if bounds.x_min == bounds.x_max && bounds.y_min == bounds.y_max {
+            return Some(GlyphExtents::default());
+        }
+        let (left, right) = (
+            bounds.x_min.min(bounds.x_max),
+            bounds.x_min.max(bounds.x_max),
+        );
+        let (bottom, top) = (
+            bounds.y_min.min(bounds.y_max),
+            bounds.y_min.max(bounds.y_max),
+        );
+        let x_bearing = match self.outlines.format() {
+            Some(OutlineGlyphFormat::Glyf) => metrics.left_side_bearing(glyph).unwrap_or(0.0),
+            _ => left,
+        };
+        Some(GlyphExtents {
+            x_bearing: x_bearing.round() as i32,
+            y_bearing: top.round() as i32,
+            width: (right - left).round() as i32,
+            height: (bottom - top).round() as i32,
         })
     }
 
@@ -321,18 +355,74 @@ fn format2_glyph(sub: &Cmap2<'_>, cp: u32) -> Option<GlyphId> {
     if glyph == 0 {
         return None;
     }
-    let id = u16::try_from((i32::from(glyph) + i32::from(delta)) % 65_536).ok()?;
+    // The delta is added modulo 65,536.
+    let id = glyph.wrapping_add_signed(delta);
     Some(GlyphId::new(u32::from(id)))
 }
 
-/// Lets the shaper use the same secondary subtables as [`Face::glyph`] when the best one has
-/// no glyph.
-struct SecondaryCmap<'f, 'a>(&'f Face<'a>);
+/// The most glyph extents computed from system font files in one layout call; see
+/// [`SystemExtents`].
+const EXTENTS_PER_LAYOUT: usize = 4096;
 
-impl FontFuncs for SecondaryCmap<'_, '_> {
+/// Glyph bounds for a system font, whose shaping copy has no outline tables.
+///
+/// The shaper needs bounds to position marks in fonts without GPOS mark attachment. They are
+/// read from the full font file while it is mapped for shaping, cached per glyph for the
+/// font's runs in one layout call, and at most [`EXTENTS_PER_LAYOUT`] are computed per layout
+/// call over all system fonts; beyond that, glyphs have no bounds.
+struct SystemExtents<'b> {
+    budget: &'b Cell<usize>,
+    cache: RefCell<HashMap<GlyphId, Option<GlyphExtents>>>,
+}
+
+/// The shaper's font callbacks: the same secondary subtables as [`Face::glyph`] when the best
+/// one has no glyph, and for system fonts, glyph bounds from the full font file.
+struct Funcs<'f, 'a> {
+    face: &'f Face<'a>,
+    extents: Option<SystemExtents<'f>>,
+}
+
+impl<'f, 'a> Funcs<'f, 'a> {
+    fn new(face: &'f Face<'a>) -> Self {
+        Funcs {
+            face,
+            extents: None,
+        }
+    }
+
+    fn system(face: &'f Face<'a>, budget: &'f Cell<usize>) -> Self {
+        Funcs {
+            face,
+            extents: Some(SystemExtents {
+                budget,
+                cache: RefCell::new(HashMap::new()),
+            }),
+        }
+    }
+}
+
+impl FontFuncs for Funcs<'_, '_> {
     fn nominal_glyph(&self, font: &ShaperFont<'_, '_>, c: u32) -> Option<GlyphId> {
         font.default_nominal_glyph(c)
-            .or_else(|| self.0.secondary_glyph(c))
+            .or_else(|| self.face.secondary_glyph(c))
+    }
+
+    fn glyph_extents(&self, font: &ShaperFont<'_, '_>, glyph: GlyphId) -> Option<GlyphExtents> {
+        let Some(system) = &self.extents else {
+            // Bundled and fallback fonts own their outline tables; the shaper reads them.
+            return font.default_glyph_extents(glyph);
+        };
+        if let Some(found) = system.cache.borrow().get(&glyph) {
+            return *found;
+        }
+        let left = system.budget.get();
+        if left == 0 {
+            return None;
+        }
+        system.budget.set(left - 1);
+        let found = self.face.extents(glyph);
+        system.cache.borrow_mut().insert(glyph, found);
+        found
     }
 }
 
@@ -861,7 +951,7 @@ impl FontLibrary {
     /// The bundled fonts, falling back to the system fonts for characters none of them has.
     ///
     /// The system fonts are only enumerated and indexed the first time a character is missing
-    /// from every bundled font. A missing character then tries, in order: a ranked family list
+    /// from every bundled font, once per process: every `bundled()` library shares the index. A missing character then tries, in order: a ranked family list
     /// for its script (Han, Kana, Hangul, Arabic, Hebrew), the generic families Noto Sans,
     /// DejaVu Sans and Arial Unicode MS, and every other face sorted by family name. Within a
     /// family the face closest to the requested weight wins, upright before italic. Results are
@@ -1014,12 +1104,17 @@ impl FontLibrary {
         let features = features(style.tabular_figures);
         let primary_key = FontKey::Bundled(style.font, style.weight);
         let mut shaped: Vec<ShapedSlot> = runs.iter().map(|_| None).collect();
+        let extents_budget = Cell::new(EXTENTS_PER_LAYOUT);
         for (key, members) in group_by_font(runs.iter().map(|run| run.font)) {
             let Some(handle) = self.handle(key) else {
                 continue;
             };
             let shape_all = |font: &ShapingFont, face: &Face<'_>| {
-                let funcs = SecondaryCmap(face);
+                let funcs = if matches!(key, FontKey::System(_)) {
+                    Funcs::system(face, &extents_budget)
+                } else {
+                    Funcs::new(face)
+                };
                 let mut shaper = Shaper::new(font, &funcs, &features);
                 members
                     .iter()
@@ -1065,7 +1160,7 @@ impl FontLibrary {
         // disappeared, or a font that panicked while shaping) is replaced by the primary font,
         // so the text keeps a width.
         if let Some(face) = primary {
-            let funcs = SecondaryCmap(&face.face);
+            let funcs = Funcs::new(&face.face);
             let mut shaper = Shaper::new(&face.shaping, &funcs, &features);
             let handle = FontHandle::bundled(style.font, style.weight);
             for (slot, run) in shaped.iter_mut().zip(&runs) {
@@ -2160,6 +2255,100 @@ mod tests {
         assert_eq!(lock(&lib.extra_cache).len(), EXTRA_CACHE_LIMIT);
     }
 
+    #[test]
+    fn bundled_libraries_share_one_system_index() {
+        let a = FontLibrary::bundled();
+        let b = FontLibrary::bundled();
+        let index = |lib: &FontLibrary| Arc::clone(lib.system.as_ref().unwrap().shared_index());
+        assert!(Arc::ptr_eq(&index(&a), &index(&b)));
+        assert!(Arc::ptr_eq(&index(&a), &index(FontLibrary::global())));
+        // Libraries with in-memory system fonts keep their own.
+        let c = FontLibrary::with_test_system_fonts(vec![]);
+        let d = FontLibrary::with_test_system_fonts(vec![]);
+        assert!(!Arc::ptr_eq(&index(&c), &index(&d)));
+        assert!(!Arc::ptr_eq(&index(&a), &index(&c)));
+    }
+
+    #[test]
+    fn system_fonts_position_marks_without_gpos() {
+        // A base and a combining mark, without GDEF, GSUB or GPOS: the shaper positions the
+        // mark from the glyph bounds.
+        let mut font = fixture_font("Mark Font", 400, false, &[0xF0010, 0x0301]);
+        for i in 0..be16(&font, 4) {
+            let at = 12 + 16 * i;
+            if matches!(&font[at..at + 4], b"GDEF" | b"GPOS" | b"GSUB") {
+                font[at + 12..at + 16].copy_from_slice(&0u32.to_be_bytes());
+            }
+        }
+        let text = "\u{F0010}\u{301}";
+        let s = style(Font::Inter, 10.0);
+        let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout(text, &s);
+        let system = FontLibrary::with_test_system_fonts(vec![font]).layout(text, &s);
+        assert_eq!(extra.runs.len(), 1);
+        assert_eq!(system.runs.len(), 1);
+        assert_eq!(extra.runs[0].font, FontKey::Extra(0));
+        assert!(matches!(system.runs[0].font, FontKey::System(_)));
+        let mark_y = |layout: &TextLayout| layout.runs[0].glyphs[1].y;
+        assert!(
+            (mark_y(&extra) + 7.998_047).abs() < 1e-4,
+            "{}",
+            mark_y(&extra)
+        );
+        assert!(
+            (mark_y(&system) + 7.998_047).abs() < 1e-4,
+            "{}",
+            mark_y(&system)
+        );
+        assert_eq!(extra.width(), system.width());
+        assert_eq!(
+            extra.outline(Point { x: 0.0, y: 0.0 }),
+            system.outline(Point { x: 0.0, y: 0.0 })
+        );
+    }
+
+    #[test]
+    fn format_2_deltas_wrap_around() {
+        // A format 2 subtable whose sub-header for 0xE0xx maps U+E000 to `raw` plus `delta`.
+        let cmap = |raw: u16, delta: i16| {
+            let mut sub = Vec::new();
+            for word in [2u16, 536, 0] {
+                sub.extend(word.to_be_bytes());
+            }
+            for high in 0..256 {
+                sub.extend((if high == 0xE0 { 8u16 } else { 0 }).to_be_bytes());
+            }
+            for word in [0u16, 0, 0, 0, 0, 1] {
+                sub.extend(word.to_be_bytes());
+            }
+            sub.extend(delta.to_be_bytes());
+            for word in [2u16, raw] {
+                sub.extend(word.to_be_bytes());
+            }
+            let mut cmap = Vec::new();
+            for word in [0u16, 1, 3, 1] {
+                cmap.extend(word.to_be_bytes());
+            }
+            cmap.extend(12u32.to_be_bytes());
+            cmap.extend(sub);
+            cmap
+        };
+        for (raw, delta, expected) in [
+            (1u16, 0i16, Some(1u32)),
+            (2, -1, Some(1)),
+            (65_535, 2, Some(1)),
+            (1, -3, Some(65_534)),
+            (3, -3, None),
+        ] {
+            let font = font_with_cmap("Cmap Two", 400, false, cmap(raw, delta));
+            let face = Face::parse(&font, 0).unwrap();
+            assert_eq!(
+                face.glyph('\u{E000}').map(GlyphId::to_u32),
+                expected,
+                "{raw} {delta}"
+            );
+        }
+    }
+
     // --- Mark attachment. ---
 
     #[test]
@@ -2278,7 +2467,7 @@ mod tests {
         let _ = guarded(|| {
             let face = Face::parse(&bytes, 0)?;
             let font = ShapingFont::new(bytes.clone(), 0)?;
-            let funcs = SecondaryCmap(&face);
+            let funcs = Funcs::new(&face);
             let features = features(true);
             let shaped = Shaper::new(&font, &funcs, &features).shape("Ab 0123 fi AV", false);
             Some((face.draws('A'), shaped.map(|run| run.glyphs.len())))
