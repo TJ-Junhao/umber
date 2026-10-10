@@ -77,7 +77,7 @@ pub(crate) fn coincides(a: f64, b: f64) -> bool {
 /// x `clamp(round(w / 100) + 1, 3, 8)`, y `clamp(round(h / 45) + 1, 3, 8)`.
 ///
 /// These divisors were chosen so a 6 by 4 in figure gets about 5 ticks per axis
-/// (y 0/25/50/75/100, x 0/10/20/30). Larger divisors of 72 and 60 pt gave too few y ticks.
+/// (y 0/25/50/75/100, x 0/10/20/30). A y divisor of 60 pt gave too few y ticks.
 /// The y divisor is 45 rather than 50 so that `AboveGridline` layouts, whose label rows leave a
 /// shorter plot area (about 172 pt on a 6 by 4 in PIGMENT figure), still get 5 y ticks.
 pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
