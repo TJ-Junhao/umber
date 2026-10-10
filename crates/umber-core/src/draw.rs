@@ -53,7 +53,7 @@ const CROSSING_TOLERANCE: f64 = 1.0e-12;
 const MAX_UNSCALED: f64 = 3.273_390_607_896_142e150; // 2^500
 /// The smallest line clip margin, in points.
 const MIN_LINE_MARGIN: f64 = 2.0;
-/// The nominal device resolution that sets the downsampling column count (spec section 7).
+/// The nominal device resolution that sets the downsampling column count.
 const DOWNSAMPLE_DPI: f64 = 300.0;
 /// The area gradient's opacity at the top of the line, as a share of the line's own opacity.
 const AREA_TOP_ALPHA: f32 = 0.32;
@@ -2019,7 +2019,7 @@ pub(crate) mod tests {
         }
     }
 
-    // ---- Robust clipping, split areas and shape-aware culling (PR #15 review) ----
+    // ---- Robust clipping, split areas and shape-aware culling ----
 
     #[test]
     fn huge_horizontal_lines_keep_their_visible_width() {
@@ -2256,8 +2256,7 @@ pub(crate) mod tests {
 
     #[test]
     fn markers_are_culled_by_their_true_extent() {
-        // The reviewer's repros: the visible top of a triangle and a diamond centered below the
-        // plot area.
+        // The visible top of a triangle, and a diamond, centered just below the plot area.
         let plot = Area {
             x: 10.0,
             y: 20.0,
@@ -2496,7 +2495,7 @@ pub(crate) mod tests {
 
     #[test]
     fn marks_and_gridlines_share_the_log_normalization() {
-        // The reviewer's cases: the narrowest allowed log ratio at 1e299, where `v` is a
+        // Edge cases: the narrowest allowed log ratio at 1e299, where `v` is a
         // resolved tick. The positions are 100-digit references.
         let cases = [
             (
@@ -2532,7 +2531,7 @@ pub(crate) mod tests {
     fn crossings_survive_underflow() {
         let next_up = |v: f64| f64::from_bits(v.to_bits() + 1);
         let next_down = |v: f64| f64::from_bits(v.to_bits() - 1);
-        // The reviewer's underflow counterexamples (now exact on the per-axis-scaled fast path),
+        // Underflow cases (exact on the per-axis-scaled fast path),
         // and a case only the exact path can do: an edge 1e-200 against x data at 1e300.
         let cases = [
             (
