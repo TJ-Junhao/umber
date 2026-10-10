@@ -160,10 +160,9 @@ impl Limits {
 }
 
 /// The smallest and largest finite value, ignoring NaN; `None` when there is none.
-fn extent<'a>(values: impl IntoIterator<Item = &'a f64>) -> Option<(f64, f64)> {
+fn extent(values: impl IntoIterator<Item = f64>) -> Option<(f64, f64)> {
     values
         .into_iter()
-        .copied()
         .filter(|v| v.is_finite())
         .fold(None, |acc, v| match acc {
             None => Some((v, v)),
@@ -230,11 +229,7 @@ fn category_ticks(scale: &CategoryScale) -> Vec<AxisTick> {
 
 /// The x categories of every mark, in mark order, then in data order.
 fn categories(marks: &[ResolvedMark<'_>]) -> CategoryScale {
-    CategoryScale::from_first_appearance(
-        marks
-            .iter()
-            .flat_map(|mark| mark.x_categories().iter().map(String::as_str)),
-    )
+    CategoryScale::from_first_appearance(marks.iter().flat_map(|mark| mark.x_categories()))
 }
 
 /// Resolves both axes from the resolved `marks` and the axes' `limits`, for about `x_target`
@@ -306,7 +301,19 @@ pub(crate) fn resolve(
 /// A mark resolved for drawing: one variant per mark kind, each holding the mark and its color
 /// resolved against the theme's palette. Axes, the legend and drawing read marks through these
 /// records only.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// A record may own data computed from its mark, such as bins or stacks, so the type is not
+/// `Copy`, and its accessors borrow from the record rather than from the mark.
+///
+/// The axis-domain accessors ([`x_numbers`](Self::x_numbers),
+/// [`x_categories`](Self::x_categories) and [`y_values`](Self::y_values)) each yield what the
+/// mark contributes to an axis, in a fixed order, borrowed from the record. A mark with raw data
+/// yields its data in data order. A mark with computed data yields values computed from what
+/// the record owns, such as the ends of its stacked extent or the range of its bin counts, never
+/// a copy of raw data shaped to fit. Non-finite numbers are allowed; the extent ignores them.
+/// Axis resolution scans the marks in order, and each mark's values in the order given, so that
+/// order is part of the output.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ResolvedMark<'a> {
     /// A line mark.
     Line {
@@ -325,28 +332,37 @@ pub(crate) enum ResolvedMark<'a> {
 }
 
 impl<'a> ResolvedMark<'a> {
-    /// The mark's numeric x values; empty when its x values are categories.
-    pub fn x_numbers(&self) -> &'a [f64] {
-        match *self {
+    /// The values the mark contributes to a continuous x domain, in data order; none when its
+    /// x values are categories. See [`ResolvedMark`] for the contract.
+    pub fn x_numbers(&self) -> impl Iterator<Item = f64> + '_ {
+        match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
         }
+        .iter()
+        .copied()
     }
 
-    /// The mark's x categories, in data order; empty when its x values are numbers.
-    pub fn x_categories(&self) -> &'a [String] {
-        match *self {
+    /// The categories the mark contributes to a category x axis, in data order, repeats
+    /// included; none when its x values are numbers. See [`ResolvedMark`] for the contract.
+    pub fn x_categories(&self) -> impl Iterator<Item = &str> + '_ {
+        match self {
             ResolvedMark::Line { mark, .. } => category_names(mark.x()),
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
         }
+        .iter()
+        .map(String::as_str)
     }
 
-    /// The mark's y values.
-    pub fn y_values(&self) -> &'a [f64] {
-        match *self {
+    /// The values the mark contributes to the y domain, in data order. See [`ResolvedMark`]
+    /// for the contract.
+    pub fn y_values(&self) -> impl Iterator<Item = f64> + '_ {
+        match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
         }
+        .iter()
+        .copied()
     }
 
     /// The mark's resolved color.
