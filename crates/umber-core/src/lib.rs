@@ -16,6 +16,7 @@
 pub mod color;
 pub mod downsample;
 mod error;
+pub mod figure;
 pub mod fonts;
 pub mod geometry;
 pub mod render;
@@ -28,6 +29,7 @@ pub mod ticks;
 pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
+pub use figure::{Axes, AxisData, Figure, LineOptions, Mark, ScatterOptions};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use render::SvgText;
