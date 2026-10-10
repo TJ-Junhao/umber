@@ -24,7 +24,7 @@
 //!   [`CONFIRMATIONS_PER_LOOKUP`];
 //! - the lookup cache holds at most [`CACHE_LIMIT`] entries;
 //! - shaping tables are kept for at most [`SHAPING_CACHE_FACES`] faces and
-//!   [`SHAPING_CACHE_BYTES`] bytes in total.
+//!   [`SHAPING_CACHE_BYTES`] bytes in total, counting tables copied after a face was kept.
 //!
 //! These caps apply after fontdb's own discovery: `load_system_fonts` enumerates every font in
 //! the system font directories and keeps its metadata, bounded only by those directories.
@@ -33,7 +33,7 @@
 //! above and cheap.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use read_fonts::model::Blob;
@@ -92,17 +92,27 @@ const SHAPING_TABLES: [Tag; 18] = [
     Tag::new(b"vhea"),
 ];
 
-/// A shaping font for a system face, with the number of table bytes it has copied so far.
+/// A shaping font for a system face, with its table accounting.
 pub(super) struct SystemShaping {
     pub(super) font: ShapingFont,
-    copied: Arc<AtomicUsize>,
+    tables: Arc<TableAccount>,
 }
 
-/// Shaping fonts kept between layout calls.
+/// The table bytes one shaping font has copied, and whether the font is kept.
 #[derive(Default)]
-struct ShapingCache {
-    fonts: HashMap<usize, ShapingFont>,
-    bytes: usize,
+struct TableAccount {
+    copied: AtomicUsize,
+    /// Set once the font is kept: from then on every copy is charged to the cache's bytes.
+    kept: AtomicBool,
+}
+
+/// Charges `bytes` to `total` if the result stays within `cap`.
+fn reserve(total: &AtomicUsize, bytes: usize, cap: usize) -> bool {
+    total
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            used.checked_add(bytes).filter(|&next| next <= cap)
+        })
+        .is_ok()
 }
 
 /// The system font work one layout call may still do.
@@ -137,6 +147,8 @@ pub(super) struct Limits {
     pub(super) max_face_visits: usize,
     /// Once this many segment or group visits have been spent, no further faces are indexed.
     pub(super) max_build_visits: usize,
+    /// The most shaping table bytes kept between layout calls; see [`SHAPING_CACHE_BYTES`].
+    pub(super) shaping_cache_bytes: usize,
 }
 
 impl Limits {
@@ -147,6 +159,7 @@ impl Limits {
         max_total_ranges: 2_097_152,
         max_face_visits: 262_144,
         max_build_visits: 8_388_608,
+        shaping_cache_bytes: SHAPING_CACHE_BYTES,
     };
 }
 
@@ -721,7 +734,10 @@ pub(super) struct SystemFonts {
     lookups: AtomicUsize,
     /// Candidate confirmations performed, for tests.
     confirmations: AtomicUsize,
-    shaping: Mutex<ShapingCache>,
+    /// Shaping fonts kept between layout calls, by face.
+    shaping: Mutex<HashMap<usize, ShapingFont>>,
+    /// Table bytes held by the kept shaping fonts, at most `limits.shaping_cache_bytes`.
+    shaping_bytes: Arc<AtomicUsize>,
 }
 
 impl SystemFonts {
@@ -733,7 +749,8 @@ impl SystemFonts {
             cache: Mutex::new(HashMap::new()),
             lookups: AtomicUsize::new(0),
             confirmations: AtomicUsize::new(0),
-            shaping: Mutex::new(ShapingCache::default()),
+            shaping: Mutex::new(HashMap::new()),
+            shaping_bytes: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -817,18 +834,22 @@ impl SystemFonts {
     /// on first use, and only the tables in [`SHAPING_TABLES`]: never the outline or bitmap
     /// tables, which make up most of a large font file. A font kept with
     /// [`SystemFonts::keep_shaping_font`] is reused; otherwise a fresh one is made.
+    ///
+    /// A kept font charges every table it copies later to the cache's byte budget, and once
+    /// that is used up it copies nothing more: the shaper then sees those tables as missing.
     pub(super) fn shaping_font(&self, face: usize) -> Option<SystemShaping> {
-        if let Some(font) = lock(&self.shaping).fonts.get(&face) {
+        if let Some(font) = lock(&self.shaping).get(&face) {
             return Some(SystemShaping {
                 font: font.clone(),
-                copied: Arc::new(AtomicUsize::new(0)),
+                tables: Arc::new(TableAccount::default()),
             });
         }
         let index = self.index.get()?;
         let info = index.faces.get(face)?;
         let (db, id) = (Arc::clone(&index.db), info.id);
-        let copied = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&copied);
+        let account = Arc::new(TableAccount::default());
+        let (own, total) = (Arc::clone(&account), Arc::clone(&self.shaping_bytes));
+        let cap = self.limits.shaping_cache_bytes;
         let tables = move |tag: Tag| -> Option<Blob> {
             if !SHAPING_TABLES.contains(&tag) {
                 return None;
@@ -836,35 +857,39 @@ impl SystemFonts {
             let table = db
                 .with_face_data(id, |data, index| {
                     let table = FontRef::from_index(data, index).ok()?.table_data(tag)?;
+                    let bytes = table.len();
+                    if own.kept.load(Ordering::Acquire) && !reserve(&total, bytes, cap) {
+                        return None;
+                    }
+                    own.copied.fetch_add(bytes, Ordering::Relaxed);
                     Some(table.as_bytes().to_vec())
                 })
                 .flatten()?;
-            counter.fetch_add(table.len(), Ordering::Relaxed);
             Some(Blob::from(table))
         };
         let tables: Arc<dyn Fn(Tag) -> Option<Blob> + Send + Sync> = Arc::new(tables);
         Some(SystemShaping {
             font: ShapingFont::new(tables, info.face_index)?,
-            copied,
+            tables: account,
         })
     }
 
     /// Keeps a shaping font from [`SystemFonts::shaping_font`] for later layouts, within
-    /// [`SHAPING_CACHE_FACES`] and [`SHAPING_CACHE_BYTES`]. Nothing is evicted.
+    /// [`SHAPING_CACHE_FACES`] faces and the cache's byte budget. Nothing is evicted.
     ///
-    /// Shaping reads every table it uses the first time, so the bytes copied by then are what
-    /// the font keeps.
+    /// The bytes the font has copied so far are charged now, and any table it copies later is
+    /// charged when it is copied, so the kept fonts never hold more than the budget.
     pub(super) fn keep_shaping_font(&self, face: usize, shaping: SystemShaping) {
-        let mut cache = lock(&self.shaping);
-        let bytes = shaping.copied.load(Ordering::Relaxed);
-        if cache.fonts.contains_key(&face)
-            || cache.fonts.len() >= SHAPING_CACHE_FACES
-            || cache.bytes.saturating_add(bytes) > SHAPING_CACHE_BYTES
-        {
+        let mut fonts = lock(&self.shaping);
+        if fonts.contains_key(&face) || fonts.len() >= SHAPING_CACHE_FACES {
             return;
         }
-        cache.bytes += bytes;
-        cache.fonts.insert(face, shaping.font);
+        let bytes = shaping.tables.copied.load(Ordering::Relaxed);
+        if !reserve(&self.shaping_bytes, bytes, self.limits.shaping_cache_bytes) {
+            return;
+        }
+        shaping.tables.kept.store(true, Ordering::Release);
+        fonts.insert(face, shaping.font);
     }
 
     /// An indexed face, for diagnostics.
@@ -886,8 +911,8 @@ impl SystemFonts {
     /// The number of faces whose shaping tables are kept, and the bytes they hold.
     #[cfg(test)]
     pub(super) fn shaping_cache(&self) -> (usize, usize) {
-        let cache = lock(&self.shaping);
-        (cache.fonts.len(), cache.bytes)
+        let faces = lock(&self.shaping).len();
+        (faces, self.shaping_bytes.load(Ordering::Acquire))
     }
 
     #[cfg(test)]

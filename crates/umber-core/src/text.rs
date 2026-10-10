@@ -36,9 +36,10 @@
 mod marks;
 mod system;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use harfrust::{
@@ -135,21 +136,41 @@ impl FontHandle {
 /// A font prepared for shaping.
 pub(crate) type ShapingFont = harfrust::Font;
 
+/// The most secondary Unicode subtables a face consults; see [`Face::secondary_glyph`].
+const SECONDARY_SUBTABLES: usize = 16;
+
+/// Slots in a face's cache of secondary lookups.
+const SECONDARY_CACHE_SLOTS: usize = 256;
+
 /// A font parsed for character lookup and outlines.
 pub(crate) struct Face<'a> {
     /// The best Unicode subtable.
     charmap: Charmap<'a>,
-    /// Every subtable, for characters that only another Unicode subtable maps.
-    cmap: Option<Cmap<'a>>,
+    /// The other distinct Unicode subtables, in table order; see [`Face::secondary_glyph`].
+    secondary: Vec<CmapSubtable<'a>>,
+    /// A direct-mapped cache of secondary lookups, indexed by code point. Each slot holds
+    /// `(cp + 1) << 32 | glyph`, with glyph `u32::MAX` for "no glyph", or 0 when empty.
+    secondary_cache: Box<[AtomicU64]>,
     outlines: OutlineGlyphCollection<'a>,
 }
 
 impl<'a> Face<'a> {
     fn parse(data: &'a [u8], index: u32) -> Option<Face<'a>> {
         let font = FontRef::from_index(data, index).ok()?;
+        let secondary = font
+            .cmap()
+            .ok()
+            .map(|cmap| secondary_subtables(&cmap))
+            .unwrap_or_default();
+        let slots = if secondary.is_empty() {
+            0
+        } else {
+            SECONDARY_CACHE_SLOTS
+        };
         Some(Face {
             charmap: font.charmap(),
-            cmap: font.cmap().ok(),
+            secondary,
+            secondary_cache: (0..slots).map(|_| AtomicU64::new(0)).collect(),
             outlines: font.outline_glyphs(),
         })
     }
@@ -162,23 +183,40 @@ impl<'a> Face<'a> {
             .filter(|g| *g != GlyphId::NOTDEF)
     }
 
-    /// The glyph for `cp` from the first Unicode subtable, in table order, that maps it.
+    /// The glyph for `cp` from the first secondary Unicode subtable, in table order, that
+    /// maps it.
     ///
     /// The best subtable is tried first, by [`Face::glyph`] and by the shaper. This also reads
     /// format 2, which neither of them does, and formats 0, 6 and 10, which skrifa's lookup
     /// does not, so that every subtable the system font index reads can produce the glyph.
+    ///
+    /// The secondary subtables are resolved once per face: distinct subtables only, without
+    /// the best one, and at most [`SECONDARY_SUBTABLES`] of them; later ones are ignored.
+    /// Results are cached per code point, so a lookup costs at most that many subtable
+    /// lookups however many encoding records the font has.
     fn secondary_glyph(&self, cp: u32) -> Option<GlyphId> {
-        let cmap = self.cmap.as_ref()?;
-        cmap.encoding_records()
-            .iter()
-            .filter(|record| is_unicode(record))
-            .find_map(|record| {
-                let glyph = match record.subtable(cmap.offset_data()).ok()? {
-                    CmapSubtable::Format2(sub) => format2_glyph(&sub, cp),
-                    sub => sub.map_codepoint(cp),
-                };
-                glyph.filter(|g| *g != GlyphId::NOTDEF)
-            })
+        if self.secondary.is_empty() {
+            return None;
+        }
+        let key = u64::from(cp) + 1;
+        let slot = self
+            .secondary_cache
+            .get(cp as usize % SECONDARY_CACHE_SLOTS)?;
+        let cached = slot.load(Ordering::Relaxed);
+        if cached >> 32 == key {
+            let glyph = (cached & 0xFFFF_FFFF) as u32;
+            return (glyph != u32::MAX).then(|| GlyphId::new(glyph));
+        }
+        let found = self.secondary.iter().find_map(|sub| {
+            let glyph = match sub {
+                CmapSubtable::Format2(sub) => format2_glyph(sub, cp),
+                sub => sub.map_codepoint(cp),
+            };
+            glyph.filter(|g| *g != GlyphId::NOTDEF)
+        });
+        let value = found.map_or(u32::MAX, GlyphId::to_u32);
+        slot.store(key << 32 | u64::from(value), Ordering::Relaxed);
+        found.filter(|g| g.to_u32() != u32::MAX)
     }
 
     /// Whether `glyph` has an outline with at least one segment.
@@ -195,6 +233,53 @@ impl<'a> Face<'a> {
         self.glyph(c)
             .is_some_and(|g| c.is_whitespace() || self.has_outline(g))
     }
+}
+
+/// The distinct Unicode subtables of `cmap` other than the one skrifa's lookup uses, in table
+/// order, at most [`SECONDARY_SUBTABLES`] of them.
+fn secondary_subtables<'a>(cmap: &Cmap<'a>) -> Vec<CmapSubtable<'a>> {
+    let best = best_subtable_offset(cmap);
+    let mut seen: HashSet<u32> = HashSet::new();
+    let mut found = Vec::new();
+    for record in cmap.encoding_records() {
+        if found.len() == SECONDARY_SUBTABLES {
+            break;
+        }
+        let offset = record.subtable_offset().to_u32();
+        if !is_unicode(record) || Some(offset) == best || !seen.insert(offset) {
+            continue;
+        }
+        if let Ok(sub) = record.subtable(cmap.offset_data()) {
+            found.push(sub);
+        }
+    }
+    found
+}
+
+/// The offset of the subtable skrifa's `Charmap` selects, found the same way: records in
+/// reverse order, symbol before full-repertoire before BMP subtables, formats 4, 12 and 13.
+fn best_subtable_offset(cmap: &Cmap<'_>) -> Option<u32> {
+    let mut best: Option<(u8, u32)> = None;
+    for record in cmap.encoding_records().iter().rev() {
+        let rank = match (record.platform_id(), record.encoding_id()) {
+            (PlatformId::Unicode, 5) => continue,
+            (PlatformId::Windows, 0) => 3,
+            (PlatformId::Windows, 10) | (PlatformId::Unicode, 4 | 6) => 2,
+            (PlatformId::ISO | PlatformId::Unicode, _) | (PlatformId::Windows, 1) => 1,
+            _ => continue,
+        };
+        if best.is_some_and(|(current, _)| rank <= current) {
+            continue;
+        }
+        let supported = matches!(
+            record.subtable(cmap.offset_data()),
+            Ok(CmapSubtable::Format4(_) | CmapSubtable::Format12(_) | CmapSubtable::Format13(_))
+        );
+        if supported {
+            best = Some((rank, record.subtable_offset().to_u32()));
+        }
+    }
+    best.map(|(_, offset)| offset)
 }
 
 /// Whether a `cmap` encoding record holds a Unicode subtable: any Unicode platform encoding,
@@ -449,6 +534,15 @@ impl TextLayout {
     }
 }
 
+/// The most `with_fallbacks` outline confirmations one layout call performs: checks that a
+/// fallback font's glyph for a character has an outline. Beyond it, characters skip those
+/// fonts and continue to the system fonts and the primary font's `.notdef`.
+const EXTRA_CONFIRMATIONS_PER_LAYOUT: usize = 4096;
+
+/// The most entries in the cache of `with_fallbacks` confirmations. When it is full, new
+/// results are not cached; nothing is evicted.
+const EXTRA_CACHE_LIMIT: usize = 65_536;
+
 /// Number of bundled font files: every family in every weight.
 const BUNDLED_COUNT: usize = Font::ALL.len() * Weight::ALL.len();
 
@@ -471,6 +565,11 @@ pub struct FontLibrary {
     bundled: [Option<BundledFace>; BUNDLED_COUNT],
     /// Fallback font files that parsed, in the caller's order.
     extra: Vec<ExtraFont>,
+    /// `(character, weight, extra font)` to whether that font's glyph for the character has an
+    /// outline; at most [`EXTRA_CACHE_LIMIT`] entries.
+    extra_cache: Mutex<HashMap<(char, Weight, usize), bool>>,
+    /// Outline confirmations performed on the fallback fonts, for tests.
+    extra_confirmations: AtomicUsize,
     /// `Some` for [`FontLibrary::bundled`]; `None` disables system lookup.
     system: Option<SystemFonts>,
 }
@@ -753,6 +852,8 @@ impl FontLibrary {
         FontLibrary {
             bundled,
             extra,
+            extra_cache: Mutex::new(HashMap::new()),
+            extra_confirmations: AtomicUsize::new(0),
             system,
         }
     }
@@ -805,7 +906,11 @@ impl FontLibrary {
     ///
     /// Fallbacks are tried in order. Bytes that do not parse as a font are ignored, and a
     /// fallback is only used for a character it can draw with an outline. This gives
-    /// reproducible output regardless of the fonts installed on the machine.
+    /// reproducible output regardless of the fonts installed on the machine. Whether a
+    /// fallback's glyph has an outline is cached per character and weight, up to 65,536
+    /// entries; beyond that new results are not cached. A font's character map is read from
+    /// its best Unicode subtable and at most 16 other distinct Unicode subtables; further
+    /// subtables are ignored.
     ///
     /// Fonts that make the parser or shaper panic (possible in debug builds) are skipped. The
     /// panic is caught, but the process's panic hook still runs, so a message may be printed.
@@ -862,9 +967,11 @@ impl FontLibrary {
     /// Characters missing from `style.font` are drawn with the other bundled families in the
     /// same weight, then with the fallback fonts, and as `.notdef` if no font has them.
     ///
-    /// One call looks up at most 1,024 distinct characters in the system fonts that are not
-    /// already cached, and opens at most 4,096 candidate system fonts to confirm a glyph (at
-    /// most 16 per character). Characters beyond these limits are drawn as `.notdef`. This
+    /// One call checks at most 4,096 uncached glyph outlines in the
+    /// [`with_fallbacks`](FontLibrary::with_fallbacks) fonts; beyond that, characters skip
+    /// those fonts. It looks up at most 1,024 distinct characters in the system fonts that are
+    /// not already cached, and opens at most 4,096 candidate system fonts to confirm a glyph
+    /// (at most 16 per character). Characters beyond these limits are drawn as `.notdef`. This
     /// bounds the work a single string can cause.
     ///
     /// # Examples
@@ -1014,6 +1121,7 @@ impl FontLibrary {
         let mut extras: Option<ParsedExtras<'_>> = None;
         let mut chosen: HashMap<char, FontKey> = HashMap::new();
         let mut budget = Budget::per_layout();
+        let mut extra_budget = EXTRA_CONFIRMATIONS_PER_LAYOUT;
         let mut runs: Vec<TextRun> = Vec::new();
         for (start, c) in text.char_indices() {
             let end = start + c.len_utf8();
@@ -1027,7 +1135,7 @@ impl FontLibrary {
                 (*key, false)
             } else {
                 let key = self
-                    .fallback_for(c, style, &mut extras, &mut budget)
+                    .fallback_for(c, style, &mut extras, &mut extra_budget, &mut budget)
                     .unwrap_or(primary_key);
                 chosen.insert(c, key);
                 (key, false)
@@ -1048,12 +1156,14 @@ impl FontLibrary {
 
     /// The first font after the primary one that can draw `c`: (a) the other bundled families,
     /// (b) the `with_fallbacks` fonts, then the system fonts. Fallback and system fonts must
-    /// have an outline for the glyph. System font lookups spend `budget`.
+    /// have an outline for the glyph. Uncached fallback font confirmations spend
+    /// `extra_budget`, and system font lookups spend `budget`.
     fn fallback_for<'a>(
         &'a self,
         c: char,
         style: &TextStyle,
         extras: &mut Option<ParsedExtras<'a>>,
+        extra_budget: &mut usize,
         budget: &mut Budget,
     ) -> Option<FontKey> {
         for font in Font::ALL {
@@ -1074,10 +1184,30 @@ impl FontLibrary {
                 .collect()
         });
         for (index, face) in extras.iter().enumerate() {
-            if face
-                .as_ref()
-                .is_some_and(|f| guarded(|| f.draws(c)).unwrap_or(false))
-            {
+            // The glyph lookup is cheap and bounded; only the outline check is budgeted.
+            let Some(glyph) = face.as_ref().and_then(|f| guarded(|| f.glyph(c)).flatten()) else {
+                continue;
+            };
+            let key = (c, style.weight, index);
+            let cached = lock(&self.extra_cache).get(&key).copied();
+            let draws = match cached {
+                Some(draws) => draws,
+                // Out of confirmations: skip the remaining fallback fonts.
+                None if *extra_budget == 0 => break,
+                None => {
+                    *extra_budget -= 1;
+                    self.extra_confirmations.fetch_add(1, Ordering::Relaxed);
+                    let draws = face.as_ref().is_some_and(|f| {
+                        guarded(|| c.is_whitespace() || f.has_outline(glyph)).unwrap_or(false)
+                    });
+                    let mut cache = lock(&self.extra_cache);
+                    if cache.len() < EXTRA_CACHE_LIMIT {
+                        cache.insert(key, draws);
+                    }
+                    draws
+                }
+            };
+            if draws {
                 return Some(FontKey::Extra(index));
             }
         }
@@ -1433,17 +1563,67 @@ mod tests {
         font_with_cmap(family, weight, italic, format12_cmap(codepoints, 1))
     }
 
+    /// The tables of a font, in directory order.
+    fn tables_of(font: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
+        (0..be16(font, 4))
+            .map(|i| {
+                let record = 12 + 16 * i;
+                let tag: [u8; 4] = font[record..record + 4].try_into().unwrap();
+                let (offset, length) = (be32(font, record + 8), be32(font, record + 12));
+                (tag, font[offset..offset + length].to_vec())
+            })
+            .collect()
+    }
+
+    /// A TrueType font file holding `tables`.
+    fn assemble(mut tables: Vec<([u8; 4], Vec<u8>)>) -> Vec<u8> {
+        tables.sort_by_key(|(tag, _)| *tag);
+        let count = tables.len();
+        let selector = usize::BITS - 1 - count.leading_zeros();
+        let search_range = (1usize << selector) * 16;
+        let mut font = Vec::new();
+        font.extend(0x0001_0000u32.to_be_bytes());
+        for field in [
+            count,
+            search_range,
+            selector as usize,
+            count * 16 - search_range,
+        ] {
+            font.extend((field as u16).to_be_bytes());
+        }
+        let mut offset = 12 + 16 * count;
+        let mut body = Vec::new();
+        for (tag, data) in &tables {
+            let mut padded = data.clone();
+            padded.resize(data.len().div_ceil(4) * 4, 0);
+            let checksum = padded
+                .chunks(4)
+                .map(|w| u32::from_be_bytes(w.try_into().unwrap()))
+                .fold(0u32, u32::wrapping_add);
+            font.extend(tag);
+            font.extend(checksum.to_be_bytes());
+            font.extend((offset as u32).to_be_bytes());
+            font.extend((data.len() as u32).to_be_bytes());
+            offset += padded.len();
+            body.extend(padded);
+        }
+        font.extend(body);
+        font
+    }
+
+    /// `font` with the table `tag` added or replaced.
+    fn with_table(font: &[u8], tag: [u8; 4], data: Vec<u8>) -> Vec<u8> {
+        let mut tables = tables_of(font);
+        tables.retain(|(t, _)| *t != tag);
+        tables.push((tag, data));
+        assemble(tables)
+    }
+
     /// `fallback-only.ttf` rebuilt with a new name, weight and style, and the given `cmap`.
     fn font_with_cmap(family: &str, weight: u16, italic: bool, cmap: Vec<u8>) -> Vec<u8> {
         let base: &[u8] = include_bytes!("../tests/fixtures/fallback-only.ttf");
-        let mut tables: Vec<([u8; 4], Vec<u8>)> = (0..be16(base, 4))
-            .map(|i| {
-                let record = 12 + 16 * i;
-                let tag: [u8; 4] = base[record..record + 4].try_into().unwrap();
-                let (offset, length) = (be32(base, record + 8), be32(base, record + 12));
-                (tag, base[offset..offset + length].to_vec())
-            })
-            .collect();
+        assert_eq!(be32(base, 0), 0x0001_0000);
+        let mut tables = tables_of(base);
 
         let post_script = format!(
             "{}-{weight}{}",
@@ -1498,39 +1678,7 @@ mod tests {
                 _ => {}
             }
         }
-
-        tables.sort_by_key(|(tag, _)| *tag);
-        let count = tables.len();
-        let selector = usize::BITS - 1 - count.leading_zeros();
-        let search_range = (1usize << selector) * 16;
-        let mut font = Vec::new();
-        font.extend_from_slice(&base[0..4]);
-        for field in [
-            count,
-            search_range,
-            selector as usize,
-            count * 16 - search_range,
-        ] {
-            font.extend((field as u16).to_be_bytes());
-        }
-        let mut offset = 12 + 16 * count;
-        let mut body = Vec::new();
-        for (tag, data) in &tables {
-            let mut padded = data.clone();
-            padded.resize(data.len().div_ceil(4) * 4, 0);
-            let checksum = padded
-                .chunks(4)
-                .map(|w| u32::from_be_bytes(w.try_into().unwrap()))
-                .fold(0u32, u32::wrapping_add);
-            font.extend(tag);
-            font.extend(checksum.to_be_bytes());
-            font.extend((offset as u32).to_be_bytes());
-            font.extend((data.len() as u32).to_be_bytes());
-            offset += padded.len();
-            body.extend(padded);
-        }
-        font.extend(body);
-        font
+        assemble(tables)
     }
 
     fn assert_no_bundled_font_has(text: &str) {
@@ -1787,6 +1935,229 @@ mod tests {
             again.outline(Point { x: 0.0, y: 0.0 })
         );
         assert_eq!(system.shaping_cache(), (faces, bytes));
+    }
+
+    #[test]
+    fn kept_shaping_fonts_charge_later_table_copies() {
+        let text = "\u{F9100}";
+        assert_no_bundled_font_has(text);
+        let font = fixture_font("Lazy Tables", 400, false, &[0xF9100]);
+        let font = with_table(&font, *b"kern", vec![0; 4_000]);
+        let s = style(Font::Inter, 10.0);
+        let probe = FontLibrary::with_test_system_fonts(vec![font.clone()]);
+        let _ = probe.layout(text, &s);
+        let (_, all) = probe.system.as_ref().unwrap().shaping_cache();
+        assert!(all > 4_000, "{all}");
+
+        for budget in [all, all - 1, 1_000] {
+            let limits = Limits {
+                shaping_cache_bytes: budget,
+                ..Limits::DEFAULT
+            };
+            let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font.clone()], limits);
+            let system = lib.system.as_ref().unwrap();
+            assert_eq!(system.index().faces.len(), 1);
+            // Kept before it has copied anything, so every table is copied afterwards.
+            let fresh = system.shaping_font(0).unwrap();
+            system.keep_shaping_font(0, fresh);
+            assert_eq!(system.shaping_cache(), (1, 0));
+            let layout = lib.layout(text, &s);
+            assert_eq!(layout.runs[0].font, FontKey::System(0));
+            assert!(layout.width() > 0.0);
+            let (faces, bytes) = system.shaping_cache();
+            assert_eq!(faces, 1);
+            assert!(bytes <= budget, "{bytes} > {budget}");
+            let kern = system.shaping_font(0).unwrap().font.tables().kern().is_ok();
+            if budget == all {
+                assert_eq!((bytes, kern), (all, true));
+            } else {
+                assert!(bytes > 0 && bytes < budget.min(all), "{bytes}");
+            }
+            if budget < 4_000 {
+                assert!(!kern, "`kern` does not fit in {budget} bytes");
+            }
+        }
+    }
+
+    // --- Fallback font budgets. ---
+
+    /// A format 12 subtable with the given `(first, last, glyph)` groups.
+    fn format12(groups: &[(u32, u32, u32)]) -> Vec<u8> {
+        let mut sub = Vec::new();
+        sub.extend(12u16.to_be_bytes());
+        sub.extend(0u16.to_be_bytes());
+        sub.extend((16 + 12 * groups.len() as u32).to_be_bytes());
+        sub.extend(0u32.to_be_bytes());
+        sub.extend((groups.len() as u32).to_be_bytes());
+        for &(first, last, glyph) in groups {
+            for field in [first, last, glyph] {
+                sub.extend(field.to_be_bytes());
+            }
+        }
+        sub
+    }
+
+    /// A `cmap` table with the given `(platform, encoding, subtable)` records; each subtable
+    /// is stored once, however many records point at it.
+    fn cmap_of(subtables: &[Vec<u8>], records: &[(u16, u16, usize)]) -> Vec<u8> {
+        let mut offsets = Vec::new();
+        let mut offset = 4 + 8 * records.len();
+        for sub in subtables {
+            offsets.push(offset as u32);
+            offset += sub.len();
+        }
+        let mut cmap = Vec::new();
+        cmap.extend(0u16.to_be_bytes());
+        cmap.extend((records.len() as u16).to_be_bytes());
+        for &(platform, encoding, sub) in records {
+            cmap.extend(platform.to_be_bytes());
+            cmap.extend(encoding.to_be_bytes());
+            cmap.extend(offsets[sub].to_be_bytes());
+        }
+        for sub in subtables {
+            cmap.extend(sub);
+        }
+        cmap
+    }
+
+    /// 50,000 characters over 4,096 distinct code points from U+F0000.
+    fn many_secondary_characters() -> String {
+        (0..50_000u32)
+            .filter_map(|i| char::from_u32(0xF0000 + i % 4_096))
+            .collect()
+    }
+
+    /// The groups of a subtable that maps the 4,096 code points from U+F0000 to glyph 1.
+    fn secondary_hits() -> Vec<(u32, u32, u32)> {
+        (0..4_096).map(|k| (0xF0000 + k, 0xF0000 + k, 1)).collect()
+    }
+
+    fn assert_fast(elapsed: std::time::Duration) {
+        let limit = if cfg!(debug_assertions) {
+            std::time::Duration::from_secs(2)
+        } else {
+            std::time::Duration::from_millis(100)
+        };
+        println!("layout: {elapsed:?}");
+        assert!(elapsed < limit, "{elapsed:?}");
+    }
+
+    #[test]
+    fn secondary_subtables_are_read_once_each() {
+        // 8,190 records share one large subtable that maps nothing useful; the record after
+        // them maps the text; the best subtable (Windows, full repertoire) maps none of it.
+        let miss: Vec<(u32, u32, u32)> = (0..16_384)
+            .map(|k| (0x4000_0000 + 2 * k, 0x4000_0000 + 2 * k, 1))
+            .collect();
+        let subtables = [
+            format12(&miss),
+            format12(&secondary_hits()),
+            format12(&[(0x8000_0000, 0x8000_0000, 1)]),
+        ];
+        let mut records = vec![(3, 1, 0); 8_190];
+        records.extend([(3, 1, 1), (3, 10, 2)]);
+        let font = font_with_cmap("Many Records", 400, false, cmap_of(&subtables, &records));
+        let face = Face::parse(&font, 0).unwrap();
+        assert_eq!(face.glyph('\u{F0000}'), Some(GlyphId::new(1)));
+        assert_eq!(face.secondary.len(), 2);
+
+        let text = many_secondary_characters();
+        assert_no_bundled_font_has(&text[..4 * 4_096]);
+        let lib = FontLibrary::with_fallbacks(vec![font]);
+        let start = std::time::Instant::now();
+        let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+        let elapsed = start.elapsed();
+        let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
+        assert_eq!(fonts, [FontKey::Extra(0)]);
+        assert_eq!(layout.runs[0].glyphs.len(), 50_000);
+        assert!(layout.runs[0].glyphs.iter().all(|g| g.id == 1));
+        assert_fast(elapsed);
+    }
+
+    #[test]
+    fn secondary_subtables_are_capped() {
+        // 8,190 distinct subtables that map nothing useful come before the one that maps the
+        // text: it is past the cap, so the font does not have the characters.
+        let mut subtables: Vec<Vec<u8>> = (0..8_190)
+            .map(|k| format12(&[(0x4000_0000 + k, 0x4000_0000 + k, 1)]))
+            .collect();
+        subtables.push(format12(&secondary_hits()));
+        subtables.push(format12(&[(0x8000_0000, 0x8000_0000, 1)]));
+        let mut records: Vec<(u16, u16, usize)> = (0..8_191).map(|k| (3, 1, k)).collect();
+        records.push((3, 10, 8_191));
+        let font = font_with_cmap("Many Subtables", 400, false, cmap_of(&subtables, &records));
+        let face = Face::parse(&font, 0).unwrap();
+        assert_eq!(face.secondary.len(), SECONDARY_SUBTABLES);
+        assert_eq!(face.glyph('\u{F0000}'), None);
+
+        let text = many_secondary_characters();
+        let lib = FontLibrary::with_fallbacks(vec![font]);
+        let start = std::time::Instant::now();
+        let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+        let elapsed = start.elapsed();
+        let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
+        assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
+        assert_fast(elapsed);
+    }
+
+    fn extra_confirmations(lib: &FontLibrary) -> usize {
+        lib.extra_confirmations.load(Ordering::Relaxed)
+    }
+
+    #[test]
+    fn fallback_confirmations_per_layout_are_capped() {
+        let codepoints: Vec<u32> = (0xF4000..0xF4000 + 3_000).collect();
+        let text: String = codepoints
+            .iter()
+            .filter_map(|&cp| char::from_u32(cp))
+            .collect();
+        assert_no_bundled_font_has(&text);
+        // Two fallback fonts that claim every character but have no outlines.
+        let lib = FontLibrary::with_fallbacks(
+            (0..2)
+                .map(|k| {
+                    without_outlines(fixture_font(&format!("Claim {k}"), 400, false, &codepoints))
+                })
+                .collect(),
+        );
+        let s = style(Font::Inter, 10.0);
+        let layout = lib.layout(&text, &s);
+        // 3,000 characters would need 6,000 confirmations.
+        assert_eq!(extra_confirmations(&lib), EXTRA_CONFIRMATIONS_PER_LAYOUT);
+        let fonts: Vec<FontKey> = layout.runs.iter().map(|run| run.font).collect();
+        assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
+        // Results are cached across layouts; the next call confirms only the rest.
+        let _ = lib.layout(&text, &s);
+        assert_eq!(extra_confirmations(&lib), 6_000);
+        let _ = lib.layout(&text, &s);
+        assert_eq!(extra_confirmations(&lib), 6_000);
+        assert_eq!(lock(&lib.extra_cache).len(), 6_000);
+    }
+
+    #[test]
+    fn fallback_confirmation_cache_is_bounded() {
+        let total = EXTRA_CACHE_LIMIT + 4_000;
+        let chars: Vec<char> = (0xF0000..).filter_map(char::from_u32).take(total).collect();
+        let codepoints: Vec<u32> = chars.iter().map(|&c| u32::from(c)).collect();
+        let lib = FontLibrary::with_fallbacks(vec![without_outlines(fixture_font(
+            "Claim",
+            400,
+            false,
+            &codepoints,
+        ))]);
+        let s = style(Font::Inter, 10.0);
+        for chunk in chars.chunks(EXTRA_CONFIRMATIONS_PER_LAYOUT) {
+            let text: String = chunk.iter().collect();
+            let _ = lib.layout(&text, &s);
+        }
+        assert_eq!(extra_confirmations(&lib), total);
+        assert_eq!(lock(&lib.extra_cache).len(), EXTRA_CACHE_LIMIT);
+        // Characters that did not fit are confirmed again; cached ones are not.
+        let late: String = chars[total - 10..].iter().collect();
+        let early: String = chars[..10].iter().collect();
+        let _ = lib.layout(&format!("{early}{late}"), &s);
+        assert_eq!(extra_confirmations(&lib), total + 10);
+        assert_eq!(lock(&lib.extra_cache).len(), EXTRA_CACHE_LIMIT);
     }
 
     // --- Mark attachment. ---
