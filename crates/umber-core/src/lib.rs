@@ -18,7 +18,9 @@ pub mod downsample;
 mod error;
 pub mod fonts;
 pub mod geometry;
+pub mod render;
 pub mod scale;
+pub mod scene;
 pub mod text;
 pub mod ticks;
 
@@ -27,8 +29,13 @@ pub use downsample::m4_indices;
 pub use error::{Error, Result};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
+pub use render::SvgText;
 pub use scale::{
     CategoryScale, ContinuousScale, LogBase, MAX_MAGNITUDE, MIN_LOG_VALUE, ScaleKind, Transform,
+};
+pub use scene::{
+    FillRule, GradientStop, Item, LineCap, LineJoin, LinearGradient, Paint, Rect, Scene,
+    StrokeStyle, TextItem,
 };
 pub use text::{FontLibrary, TextLayout, TextStyle};
 pub use ticks::Tick;
