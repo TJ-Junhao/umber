@@ -16,10 +16,16 @@
 pub mod color;
 pub mod downsample;
 mod error;
+pub mod scale;
+pub mod ticks;
 
 pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
+pub use scale::{
+    CategoryScale, ContinuousScale, LogBase, MAX_MAGNITUDE, MIN_LOG_VALUE, ScaleKind, Transform,
+};
+pub use ticks::Tick;
 
 /// The version of this crate, as written in `Cargo.toml`.
 ///
