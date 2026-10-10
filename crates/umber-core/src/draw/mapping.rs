@@ -1,5 +1,9 @@
 //! Axis maps: mark data to axis space, axis space to plot points, and plot points to scene
 //! points.
+//!
+//! Marks live in two coordinate spaces. [`AxisPoint`] is axis space, where marks are clipped;
+//! [`PlotPoint`] is plot points, where they are emitted. [`AxisMaps::to_plot`] is the one
+//! conversion from the first to the second.
 
 use crate::geometry::Point;
 use crate::layout::Area;
@@ -7,6 +11,41 @@ use crate::model::AxisData;
 use crate::resolve::{AxisScale, ResolvedAxis};
 use crate::scale::log_offset;
 use crate::{ContinuousScale, Transform};
+
+/// A point in axis space: the raw value on a linear axis, `ln(value / lower limit)` on a log
+/// axis, the band center on a category axis. Validated data is finite here, and NaN marks a
+/// gap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct AxisPoint {
+    /// The x axis value.
+    pub(super) x: f64,
+    /// The y axis value.
+    pub(super) y: f64,
+}
+
+impl AxisPoint {
+    /// The point `(x, y)` in axis space.
+    pub(super) fn new(x: f64, y: f64) -> AxisPoint {
+        AxisPoint { x, y }
+    }
+}
+
+/// A point in plot points: the layout's coordinates, with the origin at the canvas top-left
+/// and y pointing down.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct PlotPoint {
+    /// Points from the left edge.
+    pub(super) x: f64,
+    /// Points from the top edge.
+    pub(super) y: f64,
+}
+
+impl PlotPoint {
+    /// The scene point at this position; see [`point`].
+    pub(super) fn to_scene(self) -> Point {
+        point(self.x, self.y)
+    }
+}
 
 /// A scene point from layout coordinates. Layout keeps every value finite and far below the
 /// renderers' `MAX_COORD`, so narrowing to `f32` is safe.
@@ -17,9 +56,32 @@ pub(super) fn point(x: f64, y: f64) -> Point {
     }
 }
 
-/// [`point`] for an `(x, y)` pair.
-pub(super) fn scene_point((x, y): (f64, f64)) -> Point {
-    point(x, y)
+/// The maps of both axes, from axis space to plot points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct AxisMaps {
+    /// The x axis map.
+    pub(super) x: AxisMap,
+    /// The y axis map.
+    pub(super) y: AxisMap,
+}
+
+impl AxisMaps {
+    /// The maps of the resolved axes onto `plot`.
+    pub(super) fn new(x: &ResolvedAxis, y: &ResolvedAxis, plot: Area) -> AxisMaps {
+        AxisMaps {
+            x: AxisMap::x(x, plot),
+            y: AxisMap::y(y, plot),
+        }
+    }
+
+    /// The plot point of axis-space point `p`. For `p` within a few points of the axis
+    /// domain (all callers pass clipped or culled points) this cannot overflow.
+    pub(super) fn to_plot(self, p: AxisPoint) -> PlotPoint {
+        PlotPoint {
+            x: self.x.plot_at(p.x),
+            y: self.y.plot_at(p.y),
+        }
+    }
 }
 
 /// The affine map of one axis from axis space to plot points.
@@ -59,9 +121,8 @@ impl AxisMap {
         }
     }
 
-    /// The plot coordinate of axis-space value `u`. For `u` within a few points of the axis
-    /// domain (all callers pass clipped or culled values) this cannot overflow.
-    pub(super) fn plot_at(&self, u: f64) -> f64 {
+    /// The plot coordinate of axis-space value `u`.
+    fn plot_at(&self, u: f64) -> f64 {
         self.start + (u - self.lo) / (self.hi - self.lo) * self.extent
     }
 

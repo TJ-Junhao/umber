@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use crate::ticks::{self, Tick};
+use crate::ticks::{self, Tick, TickCoverage};
 use crate::{Error, Result};
 
 /// How values along one axis map to positions.
@@ -568,7 +568,7 @@ impl ContinuousScale {
         if is_degenerate(self.lo, self.hi) {
             Vec::new()
         } else {
-            ticks::extended(self.lo, self.hi, target, true)
+            ticks::extended(self.lo, self.hi, target, TickCoverage::Loose)
         }
     }
 
@@ -763,7 +763,7 @@ impl ContinuousScale {
             // On a log scale a tick must be a real positive value inside the domain: snapping
             // one to an endpoint would put a label on the wrong value (a zero candidate next to
             // a tiny `lo` would read "0").
-            let inside: Vec<f64> = ticks::extended(lo, hi, t, false)
+            let inside: Vec<f64> = ticks::extended(lo, hi, t, TickCoverage::Free)
                 .into_iter()
                 .filter(|&v| {
                     if is_log {

@@ -2,8 +2,8 @@
 //! arithmetic on a small big-integer type, so it shares no rounding with the code under
 //! test.
 
-use super::super::clip::{Bounds, Pt, clip_segment};
-use super::super::mapping::AxisMap;
+use super::super::clip::{Bounds, clip_segment};
+use super::super::mapping::{AxisMap, AxisMaps, AxisPoint, PlotPoint};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
@@ -241,10 +241,10 @@ impl Q {
 }
 
 /// The exact visible parameter interval of `a..b` in `bounds`.
-fn exact(a: Pt, b: Pt, bounds: &Bounds) -> Option<(Q, Q)> {
+fn exact(a: AxisPoint, b: AxisPoint, bounds: &Bounds) -> Option<(Q, Q)> {
     let f = Dy::from_f64;
-    let (ax, ay) = (f(a.0), f(a.1));
-    let (dx, dy) = (f(b.0).sub(&ax), f(b.1).sub(&ay));
+    let (ax, ay) = (f(a.x), f(a.y));
+    let (dx, dy) = (f(b.x).sub(&ax), f(b.y).sub(&ay));
     let edges = [
         (dx.neg(), ax.sub(&f(bounds.left))),
         (dx.clone(), f(bounds.right).sub(&ax)),
@@ -298,10 +298,10 @@ fn exact(a: Pt, b: Pt, bounds: &Bounds) -> Option<(Q, Q)> {
 
 /// The error of `got` against the exact point at `t` on `a..b`, in points; `None`
 /// when it exceeds 1e-3.
-fn error(a: Pt, b: Pt, t: &Q, got: Pt) -> Option<f64> {
+fn error(a: AxisPoint, b: AxisPoint, t: &Q, got: AxisPoint) -> Option<f64> {
     let f = Dy::from_f64;
     let mut worst = 0.0_f64;
-    for (a, b, g) in [(a.0, b.0, got.0), (a.1, b.1, got.1)] {
+    for (a, b, g) in [(a.x, b.x, got.x), (a.y, b.y, got.y)] {
         // got - (a + t (b - a)) = (got d - a d - n (b - a)) / d.
         let (a, d) = (f(a), f(b).sub(&f(a)));
         let diff = f(g).mul(&t.d).sub(&a.mul(&t.d)).sub(&t.n.mul(&d)).abs();
@@ -317,17 +317,15 @@ fn error(a: Pt, b: Pt, t: &Q, got: Pt) -> Option<f64> {
 /// coordinates with `maps`: the mapping starts from the exact rational point, so only
 /// the final conversion to `f64` rounds.
 pub(in super::super) fn exact_plot(
-    a: Pt,
-    b: Pt,
+    a: AxisPoint,
+    b: AxisPoint,
     bounds: &Bounds,
-    maps: (AxisMap, AxisMap),
-) -> Option<(Pt, Pt)> {
+    maps: AxisMaps,
+) -> Option<(PlotPoint, PlotPoint)> {
     let (t0, t1) = exact(a, b, bounds)?;
-    let at = |t: &Q| {
-        (
-            position(a.0, b.0, t, &maps.0),
-            position(a.1, b.1, t, &maps.1),
-        )
+    let at = |t: &Q| PlotPoint {
+        x: position(a.x, b.x, t, &maps.x),
+        y: position(a.y, b.y, t, &maps.y),
     };
     Some((at(&t0), at(&t1)))
 }
@@ -370,7 +368,7 @@ pub(super) fn run(n: usize) -> String {
     let (mut max_error, mut touches) = (0.0_f64, 0);
     for i in 0..n {
         let mut u = |lo: f64, hi: f64| lo + (hi - lo) * rng();
-        let (tag, a, b): (&str, Pt, Pt) = match i % 20 {
+        let (tag, a, b): (&str, (f64, f64), (f64, f64)) = match i % 20 {
             0..=3 => (
                 "ordinary",
                 (u(-1000.0, 1000.0), u(-1000.0, 1000.0)),
@@ -444,6 +442,7 @@ pub(super) fn run(n: usize) -> String {
                 )
             }
         };
+        let (a, b) = (AxisPoint::new(a.0, a.1), AxisPoint::new(b.0, b.1));
         let bounds = if tag == "huge_symmetric" {
             Bounds {
                 left: -u(1.0, 400.0),
@@ -464,7 +463,7 @@ pub(super) fn run(n: usize) -> String {
                 entry[1] += 1;
                 for p in [start, end] {
                     assert!(bounds.contains(p), "{tag} {a:?} {b:?}: {p:?} outside");
-                    assert!(p.0.abs() <= 1e6 && p.1.abs() <= 1e6);
+                    assert!(p.x.abs() <= 1e6 && p.y.abs() <= 1e6);
                 }
                 let e0 = error(a, b, &t0, start);
                 let e1 = error(a, b, &t1, end);

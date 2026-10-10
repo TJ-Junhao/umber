@@ -5,6 +5,7 @@ use super::{line_strokes, nums, plot_of, strokes, subpaths};
 use crate::geometry::PathVerb;
 use crate::layout::Area;
 use crate::model::{AxisData, Figure, LineOptions};
+use crate::resolve::NormalizedPos;
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{FontLibrary, GridLines, ScaleKind, Theme};
 
@@ -24,7 +25,10 @@ fn category_lines_map_to_band_centers() {
     let parts = subpaths(line_strokes(&scene)[0].0);
     let xs: Vec<f64> = parts[0].iter().map(|p| f64::from(p.x)).collect();
     for (x, center) in xs.iter().zip([0.125, 0.375, 0.625, 0.875]) {
-        assert!((x - plot.x_at(center)).abs() < 1e-3, "{xs:?}");
+        assert!(
+            (x - plot.x_at(NormalizedPos::new(center))).abs() < 1e-3,
+            "{xs:?}"
+        );
     }
 }
 
@@ -63,7 +67,7 @@ fn too_close_limits_are_rejected_and_too_narrow_data_is_padded() {
         assert_eq!(piece.len(), 2);
         for p in piece {
             assert!(
-                (f64::from(p.x) - plot.x_at(0.5)).abs() < 1e-3,
+                (f64::from(p.x) - plot.x_at(NormalizedPos::new(0.5))).abs() < 1e-3,
                 "{lo}..{hi}: {p:?}"
             );
             assert!(f64::from(p.y) >= plot.y - 1e-3 && f64::from(p.y) <= plot.bottom() + 1e-3);
@@ -127,7 +131,7 @@ fn marks_and_gridlines_share_the_log_normalization() {
             (mark - grid).abs() <= 1e-3,
             "{width_in} in: mark {mark}, grid {grid}"
         );
-        let expected = plot.x_at(reference);
+        let expected = plot.x_at(NormalizedPos::new(reference));
         assert!(
             (mark - expected).abs() <= 1e-3,
             "{width_in} in: mark {mark}, expected {expected}"

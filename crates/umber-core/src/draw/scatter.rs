@@ -2,7 +2,7 @@
 
 use super::MarkContext;
 use super::clip::Bounds;
-use super::mapping::point;
+use super::mapping::AxisPoint;
 use super::marker::{extent, marker_shape, marker_size};
 use crate::geometry::Point;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
@@ -24,18 +24,17 @@ pub(super) fn scatter_item(
     color: Rgba,
     shape: Marker,
 ) -> Option<Item> {
-    let MarkContext {
-        theme,
-        maps: (xm, ym),
-        ..
-    } = *context;
+    let MarkContext { theme, maps, .. } = *context;
     let d = marker_size(theme);
     let shape_path = marker_shape(shape, d);
     // Cull in axis space by the shape's own extent on each axis, plus the outline (whose miter
     // joins reach at most its width beyond the path for these shapes) and the slack.
     let (half_w, half_h) = extent(&shape_path);
     let reach = f64::from(MARKER_OUTLINE) + MARKER_SLACK;
-    let ((left, right), (top, bottom)) = (xm.expanded(half_w + reach), ym.expanded(half_h + reach));
+    let ((left, right), (top, bottom)) = (
+        maps.x.expanded(half_w + reach),
+        maps.y.expanded(half_h + reach),
+    );
     let bounds = Bounds {
         left,
         top,
@@ -45,9 +44,9 @@ pub(super) fn scatter_item(
     let positions: Vec<Point> = xs
         .iter()
         .zip(ys)
-        .map(|(&x, &y)| (x, y))
+        .map(|(&x, &y)| AxisPoint::new(x, y))
         .filter(|&p| bounds.contains(p))
-        .map(|(u, v)| point(xm.plot_at(u), ym.plot_at(v)))
+        .map(|p| maps.to_plot(p).to_scene())
         .collect();
     if positions.is_empty() {
         return None;

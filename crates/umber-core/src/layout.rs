@@ -10,7 +10,7 @@
 //! `MAX_COORD`.
 
 use crate::model::Axes;
-use crate::resolve::{AxisTick, Resolved, coincides};
+use crate::resolve::{AxisTick, NormalizedPos, Resolved, coincides};
 use crate::{FontLibrary, TextLayout, TextStyle, Theme, TickLabelPlacement, Weight};
 
 /// The outer padding on every side.
@@ -67,15 +67,32 @@ impl Area {
         self.y + self.height
     }
 
+    /// The size.
+    pub fn size(&self) -> PlotSize {
+        PlotSize {
+            width: self.width,
+            height: self.height,
+        }
+    }
+
     /// The x coordinate of normalized position `pos` (0 = left).
-    pub fn x_at(&self, pos: f64) -> f64 {
-        self.x + pos * self.width
+    pub fn x_at(&self, pos: NormalizedPos) -> f64 {
+        self.x + pos.get() * self.width
     }
 
     /// The y coordinate of normalized position `pos` (0 = bottom).
-    pub fn y_at(&self, pos: f64) -> f64 {
-        self.bottom() - pos * self.height
+    pub fn y_at(&self, pos: NormalizedPos) -> f64 {
+        self.bottom() - pos.get() * self.height
     }
+}
+
+/// The size of a plot area, in points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PlotSize {
+    /// The width.
+    pub width: f64,
+    /// The height.
+    pub height: f64,
 }
 
 /// Measured text, placed: `x` is the left end of the baseline, `y` the baseline.
@@ -226,8 +243,8 @@ fn measure_ticks(
     lib: &FontLibrary,
     ticks: &[AxisTick],
     style: TextStyle,
-    skip: impl Fn(f64) -> bool,
-) -> Vec<(f64, Label)> {
+    skip: impl Fn(NormalizedPos) -> bool,
+) -> Vec<(NormalizedPos, Label)> {
     ticks
         .iter()
         .filter(|tick| !skip(tick.pos))
@@ -250,14 +267,14 @@ fn fit_span(start: f64, end: f64, extent: f64) -> (f64, f64) {
     (start, end - start)
 }
 
-/// The tick targets for a plot area of `plot_w` by `plot_h` points:
+/// The tick targets for a plot area of `plot`:
 /// x `clamp(round(w / 100) + 1, 3, 8)`, y `clamp(round(h / 45) + 1, 3, 8)`.
 ///
 /// These divisors were chosen so a 6 by 4 in figure gets about 5 ticks per axis
 /// (y 0/25/50/75/100, x 0/10/20/30). A y divisor of 60 pt gave too few y ticks.
 /// The y divisor is 45 rather than 50 so that `AboveGridline` layouts, whose label rows leave a
 /// shorter plot area (about 172 pt on a 6 by 4 in PIGMENT figure), still get 5 y ticks.
-pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
+pub(crate) fn tick_targets(plot: PlotSize) -> (usize, usize) {
     fn target(size: f64, per_tick: f64, lo: usize, hi: usize) -> usize {
         let n = (size / per_tick).round() + 1.0;
         if n.is_nan() {
@@ -266,16 +283,19 @@ pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
         // The clamp below keeps the cast within range; NaN was handled above.
         (n.clamp(lo as f64, hi as f64)) as usize
     }
-    (target(plot_w, 100.0, 3, 8), target(plot_h, 45.0, 3, 8))
+    (
+        target(plot.width, 100.0, 3, 8),
+        target(plot.height, 45.0, 3, 8),
+    )
 }
 
-/// The plot size, in points, assumed before any tick label is measured: the figure inside the
-/// outer padding, at least [`MIN_PLOT`] a side.
-pub(crate) fn initial_plot_size(width: f64, height: f64) -> (f64, f64) {
-    (
-        (width - 2.0 * PADDING).max(MIN_PLOT),
-        (height - 2.0 * PADDING).max(MIN_PLOT),
-    )
+/// The plot size assumed before any tick label is measured: the `width` by `height` pt figure
+/// inside the outer padding, at least [`MIN_PLOT`] a side.
+pub(crate) fn initial_plot_size(width: f64, height: f64) -> PlotSize {
+    PlotSize {
+        width: (width - 2.0 * PADDING).max(MIN_PLOT),
+        height: (height - 2.0 * PADDING).max(MIN_PLOT),
+    }
 }
 
 /// Lays out the axes of a `width` by `height` pt figure for already resolved scales.
@@ -367,9 +387,13 @@ pub(crate) fn lay_out(
     // outer padding.
     let inner = (width - 2.0 * PADDING).max(0.0);
     let cap = END_LABEL_SHARE * inner;
-    let reach = |label: Option<&(f64, Label)>, from_left: bool| {
+    let reach = |label: Option<&(NormalizedPos, Label)>, from_left: bool| {
         label.map_or(0.0, |(pos, l)| {
-            let fraction = if from_left { *pos } else { 1.0 - *pos };
+            let fraction = if from_left {
+                pos.get()
+            } else {
+                1.0 - pos.get()
+            };
             let offset = fraction * reference_width;
             let beyond = l.width() / 2.0 - offset.max(0.0);
             (beyond - PADDING).clamp(0.0, cap)
@@ -575,7 +599,7 @@ mod tests {
             let mut f = figure(theme);
             f.axes_mut().unwrap().ylim(0.0, 100.0).unwrap();
             let (resolved, layout) = plan_of(&f);
-            assert_eq!(resolved.baseline, 0.0);
+            assert_eq!(resolved.baseline.get(), 0.0);
             // The baseline replaces the gridline at 0 in every theme.
             assert!(
                 layout
@@ -669,17 +693,18 @@ mod tests {
 
     #[test]
     fn tick_targets_follow_plot_size() {
-        assert_eq!(tick_targets(0.0, 0.0), (3, 3));
-        assert_eq!(tick_targets(1.0, 1.0), (3, 3));
+        let size = |width: f64, height: f64| PlotSize { width, height };
+        assert_eq!(tick_targets(size(0.0, 0.0)), (3, 3));
+        assert_eq!(tick_targets(size(1.0, 1.0)), (3, 3));
         // 6 by 4 in plot areas: 408 / 100 + 1 = 5; PIGMENT 172 / 45 + 1 = 5, GRAPHITE 178 / 45 + 1 = 5.
-        assert_eq!(tick_targets(408.0, 172.0), (5, 5));
-        assert_eq!(tick_targets(408.0, 178.0), (5, 5));
+        assert_eq!(tick_targets(size(408.0, 172.0)), (5, 5));
+        assert_eq!(tick_targets(size(408.0, 178.0)), (5, 5));
         // Rounding: 3.5 rounds up, just below 3.5 rounds down (3.5 * 45 = 157.5).
-        assert_eq!(tick_targets(350.0, 157.0), (5, 4));
-        assert_eq!(tick_targets(349.0, 158.0), (4, 5));
+        assert_eq!(tick_targets(size(350.0, 157.0)), (5, 4));
+        assert_eq!(tick_targets(size(349.0, 158.0)), (4, 5));
         // Upper clamps.
-        assert_eq!(tick_targets(10_000.0, 10_000.0), (8, 8));
-        assert_eq!(tick_targets(f64::NAN, f64::INFINITY), (3, 8));
+        assert_eq!(tick_targets(size(10_000.0, 10_000.0)), (8, 8));
+        assert_eq!(tick_targets(size(f64::NAN, f64::INFINITY)), (3, 8));
     }
 
     #[test]
@@ -775,8 +800,8 @@ mod tests {
                 let (resolved, layout) = plan_of(&f);
                 let labels = &layout.y_tick_labels;
                 assert!(labels.len() >= 2);
-                assert_eq!(resolved.y.ticks.first().map(|t| t.pos), Some(0.0));
-                assert_eq!(resolved.y.ticks.last().map(|t| t.pos), Some(1.0));
+                assert_eq!(resolved.y.ticks.first().map(|t| t.pos.get()), Some(0.0));
+                assert_eq!(resolved.y.ticks.last().map(|t| t.pos.get()), Some(1.0));
                 for pair in labels.windows(2) {
                     let gap = (pair[0].y - pair[1].y).abs();
                     assert!(
