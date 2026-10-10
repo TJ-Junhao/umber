@@ -42,8 +42,8 @@ pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
     };
     let (resolved, layout) = plan(width, height, theme, axes, library);
     scene.push(draw::chrome(theme, &layout));
-    let colors = resolve::mark_colors(axes.marks(), theme.palette());
-    if let Some(marks) = draw::marks(theme, axes, &resolved, &layout, &colors) {
+    let marks = resolve::resolve_marks(axes.marks(), theme.palette());
+    if let Some(marks) = draw::marks(theme, &resolved, &layout, &marks) {
         scene.push(marks);
     }
     scene

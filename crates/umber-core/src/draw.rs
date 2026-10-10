@@ -28,8 +28,8 @@ use crate::exact::Dyadic;
 use crate::geometry::{Path, Point};
 use crate::layout::{Area, Label, Layout};
 use crate::m4_indices;
-use crate::model::{Axes, AxisData, Mark};
-use crate::resolve::{AxisScale, Resolved, ResolvedAxis};
+use crate::model::{AxisData, Mark};
+use crate::resolve::{AxisScale, Resolved, ResolvedAxis, ResolvedMark};
 use crate::scale::log_offset;
 use crate::scene::{
     FillRule, GradientStop, Item, LineCap, LineJoin, LinearGradient, Paint, Rect, StrokeStyle,
@@ -932,23 +932,22 @@ fn scatter_item(
     })
 }
 
-/// The marks of `axes` as one group clipped to the plot area, in insertion order, each in its
-/// color from `colors` (as from `resolve::mark_colors`). `None` when nothing is visible.
+/// The `marks` as one group clipped to the plot area, in the given order, each in its resolved
+/// color. `None` when nothing is visible.
 pub(crate) fn marks(
     theme: &Theme,
-    axes: &Axes,
     resolved: &Resolved,
     layout: &Layout,
-    colors: &[Rgba],
+    marks: &[ResolvedMark<'_>],
 ) -> Option<Item> {
     let plot = layout.plot;
     let maps = (AxisMap::x(&resolved.x, plot), AxisMap::y(&resolved.y, plot));
     let mut items = Vec::new();
-    for (mark, &color) in axes.marks().iter().zip(colors) {
+    for &ResolvedMark { mark, color } in marks {
         match mark {
-            Mark::Line { x, y, options } => {
-                let mut xs = axis_x(&resolved.x, x);
-                let mut ys = axis_y(&resolved.y, y);
+            Mark::Line(line) => {
+                let mut xs = axis_x(&resolved.x, line.x());
+                let mut ys = axis_y(&resolved.y, line.y());
                 if !resolved.x.is_category() {
                     // Over x in axis space, which maps to plot x monotonically and affinely.
                     let columns = downsample_columns(plot.width);
@@ -967,14 +966,15 @@ pub(crate) fn marks(
                     &xs,
                     &ys,
                     color,
-                    options.dash,
+                    line.options().dash,
                     &mut items,
                 );
             }
-            Mark::Scatter { x, y, options } => {
-                let xs = axis_x(&resolved.x, x);
-                let ys = axis_y(&resolved.y, y);
-                items.extend(scatter_item(theme, maps, &xs, &ys, color, options.marker));
+            Mark::Scatter(scatter) => {
+                let xs = axis_x(&resolved.x, scatter.x());
+                let ys = axis_y(&resolved.y, scatter.y());
+                let marker = scatter.options().marker;
+                items.extend(scatter_item(theme, maps, &xs, &ys, color, marker));
             }
         }
     }

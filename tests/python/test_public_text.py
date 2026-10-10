@@ -3,8 +3,8 @@
 Every tracked text file is scanned except generated files (snapshots, lock files), binaries
 and `docs/`. Underscores count as word separators, so identifiers such as
 `some_reviewer_case` are caught too. Plain "spec" is allowed (OpenType spec, `ColorSpec`);
-milestone references such as "M5 clips" are banned, while the "M4 downsampling" algorithm
-name is allowed.
+milestone references such as "M5 clips" or "M5b" are banned, while the "M4 downsampling"
+algorithm name is allowed.
 """
 
 from __future__ import annotations
@@ -31,8 +31,9 @@ _PATTERNS = [
     "PR" + r"\s*#\s*\d+",
     r"\b" + "round" + r"[-\s]*\d+\b",
     "owner" + r"\s+decisions?",
-    # Milestone references ("M5 clips ..."); "M4 downsampling" is an algorithm name.
-    r"\bM(?!4\s+(?i:downsampling)\b)\d+\s+[A-Za-z]",
+    # Milestone references ("M5 clips ...", "M5b adds ..."); "M4 downsampling" is an
+    # algorithm name, and "M1e-5" is an SVG move to a number in scientific notation.
+    r"\bM(?!4\s+(?i:downsampling)\b)\d+(?![eE][+-]?\d)(?:[a-z]\b|\s+[A-Za-z])",
 ]
 # The milestone pattern must stay case-sensitive in its capital M, so it is checked apart.
 _MILESTONE = re.compile(_PATTERNS[-1])
@@ -117,6 +118,11 @@ _CASES = [
     _B + "ers requested this",
     "the " + "mock data",
     "M5 " + "clips data",
+    "M5b " + "adds the bar and histogram marks",
+    "// M5b" + ": grouped bars",
+    "see M12a" + " for details",
+    "(M5b" + ")",
+    "M4b " + "downsampling",
     "the " + "plan",
     "the   " + "plan's original value",
     "an " + "orchestrator note",
@@ -141,6 +147,11 @@ def test_banned_wording_is_caught(line: str) -> None:
         "//! M4 downsampling: reduce a long line",
         "M4 Downsampling reduces a long line",
         '<path d="M10 10 L50 10"/>',
+        '<path d="M1e-5 10 L50 10"/>',
+        "M1e+5 10",
+        "M2E-3 4",
+        "M1e5 10",
+        "M12e-3 4",
         "A preview of the figure; an explicit limit.",
     ],
 )

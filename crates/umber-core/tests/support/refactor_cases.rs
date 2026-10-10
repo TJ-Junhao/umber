@@ -1637,21 +1637,21 @@ mod record {
 
     fn mark(m: &Mark) -> String {
         match m {
-            Mark::Line { x, y, options } => format!(
+            Mark::Line(line) => format!(
                 "line x={} y={} label={} color={} dash={}",
-                axis_data(x),
-                floats64(y),
-                text(&options.label),
-                color_spec(options.color),
-                dash(options.dash)
+                axis_data(line.x()),
+                floats64(line.y()),
+                text(&line.options().label),
+                color_spec(line.options().color),
+                dash(line.options().dash)
             ),
-            Mark::Scatter { x, y, options } => format!(
+            Mark::Scatter(scatter) => format!(
                 "scatter x={} y={} label={} color={} marker={}",
-                axis_data(x),
-                floats64(y),
-                text(&options.label),
-                color_spec(options.color),
-                marker(options.marker)
+                axis_data(scatter.x()),
+                floats64(scatter.y()),
+                text(&scatter.options().label),
+                color_spec(scatter.options().color),
+                marker(scatter.options().marker)
             ),
             _ => "unknown-mark".into(),
         }

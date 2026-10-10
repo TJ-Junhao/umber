@@ -77,7 +77,8 @@ pub(crate) fn coincides(a: f64, b: f64) -> bool {
 
 fn mark_data(mark: &Mark) -> (&AxisData, &[f64]) {
     match mark {
-        Mark::Line { x, y, .. } | Mark::Scatter { x, y, .. } => (x, y),
+        Mark::Line(line) => (line.x(), line.y()),
+        Mark::Scatter(scatter) => (scatter.x(), scatter.y()),
     }
 }
 
@@ -101,20 +102,18 @@ fn transform_of(kind: ScaleKind) -> Option<Transform> {
     }
 }
 
-/// A continuous axis from explicit limits; without them, the empty-data range (0 to 1, or 1 to
-/// 10 on log) when there is no finite data; otherwise the data extent, widened to nice limits
-/// unless `exact`. Nice axes take the ticks that produced their limits; the others take
-/// `ticks()`.
+/// A continuous axis: the scale of the explicit limits when set; otherwise the empty-data
+/// range (0 to 1, or 1 to 10 on log) when there is no finite data; otherwise the data extent,
+/// widened to nice limits unless `exact`. Nice axes take the ticks that produced their limits;
+/// the others take `ticks()`.
 fn continuous(
     transform: Transform,
-    limits: Option<(f64, f64)>,
+    limits: Option<ContinuousScale>,
     data: Option<(f64, f64)>,
     exact: bool,
     target: usize,
 ) -> ResolvedAxis {
-    let (scale, ticks) = if let Some((lo, hi)) = limits {
-        let scale = ContinuousScale::new(transform, lo, hi, CONTEXT)
-            .unwrap_or_else(|_| ContinuousScale::unit(transform));
+    let (scale, ticks) = if let Some(scale) = limits {
         (scale, scale.ticks(target))
     } else if data.is_none() {
         // The fallback range is final on every axis: never widened with `nice`.
@@ -179,7 +178,7 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
                 AxisData::Categories(_) => &[],
             }));
             let all_lines = marks.iter().all(|mark| matches!(mark, Mark::Line { .. }));
-            continuous(transform, axes.x_limits(), data, all_lines, x_target)
+            continuous(transform, axes.x_limit_scale(), data, all_lines, x_target)
         }
         None => {
             let scale = categories(marks);
@@ -192,7 +191,7 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
     let (y, baseline) = match transform_of(axes.y_scale()) {
         Some(transform) => {
             let data = extent(marks.iter().flat_map(|mark| mark_data(mark).1));
-            let axis = continuous(transform, axes.y_limits(), data, false, y_target);
+            let axis = continuous(transform, axes.y_limit_scale(), data, false, y_target);
             let baseline = match &axis.scale {
                 AxisScale::Continuous(scale) => {
                     let (lo, hi) = scale.domain();
@@ -219,9 +218,18 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
     Resolved { x, y, baseline }
 }
 
-/// Each mark's color, resolved against `palette`, in mark order. `Auto` colors take palette
-/// slots in series order; `Palette` and `Fixed` colors do not consume a slot.
-pub(crate) fn mark_colors(marks: &[Mark], palette: &[Rgba]) -> Vec<Rgba> {
+/// A mark paired with its resolved color.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ResolvedMark<'a> {
+    /// The mark.
+    pub mark: &'a Mark,
+    /// Its color, resolved against the theme's palette.
+    pub color: Rgba,
+}
+
+/// Each mark with its color resolved against `palette`, in mark order. `Auto` colors take
+/// palette slots in series order; `Palette` and `Fixed` colors do not consume a slot.
+pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<ResolvedMark<'a>> {
     let mut next_auto = 0_usize;
     marks
         .iter()
@@ -231,7 +239,7 @@ pub(crate) fn mark_colors(marks: &[Mark], palette: &[Rgba]) -> Vec<Rgba> {
             if matches!(spec, ColorSpec::Auto(_)) {
                 next_auto += 1;
             }
-            color
+            ResolvedMark { mark, color }
         })
         .collect()
 }
@@ -470,6 +478,65 @@ mod tests {
         assert_eq!(labels, ["b", "a", "c", "d"]);
         let pos: Vec<f64> = r.x.ticks.iter().map(|t| t.pos).collect();
         assert_eq!(pos, [0.125, 0.375, 0.625, 0.875]);
+    }
+
+    #[test]
+    fn resolved_marks_pair_each_mark_with_its_color_in_order() {
+        use crate::{Alpha, Rgba};
+        let mut f = figure(LIN, LIN);
+        let palette = f.theme().palette().to_vec();
+        let fixed = Rgba::opaque(9, 8, 7);
+        let half = Alpha::new(0.5).unwrap();
+        let specs = [
+            ColorSpec::Palette {
+                index: 3,
+                alpha: Alpha::OPAQUE,
+            },
+            ColorSpec::AUTO,
+            ColorSpec::Fixed(fixed),
+            ColorSpec::AUTO.with_alpha(half),
+            ColorSpec::Palette {
+                index: 0,
+                alpha: half,
+            },
+            ColorSpec::AUTO,
+        ];
+        let a = axes(&mut f);
+        for (i, color) in specs.into_iter().enumerate() {
+            // Lines and scatters alternate; both take Auto slots from the same sequence.
+            if i % 2 == 0 {
+                let options = ScatterOptions {
+                    color,
+                    ..ScatterOptions::default()
+                };
+                a.scatter(nums(&[i as f64]), &[1.0], options).unwrap();
+            } else {
+                let options = LineOptions {
+                    color,
+                    ..LineOptions::default()
+                };
+                a.line(nums(&[i as f64]), &[1.0], options).unwrap();
+            }
+        }
+        let marks = f.axes().unwrap().marks();
+        let resolved = resolve_marks(marks, &palette);
+        assert_eq!(resolved.len(), marks.len());
+        for (record, mark) in resolved.iter().zip(marks) {
+            assert!(std::ptr::eq(record.mark, mark));
+        }
+        let colors: Vec<Rgba> = resolved.iter().map(|r| r.color).collect();
+        assert_eq!(
+            colors,
+            [
+                palette[3],
+                palette[0],
+                fixed,
+                palette[1].with_alpha(half),
+                palette[0].with_alpha(half),
+                palette[2],
+            ]
+        );
+        assert!(resolve_marks(&[], &palette).is_empty());
     }
 
     #[test]

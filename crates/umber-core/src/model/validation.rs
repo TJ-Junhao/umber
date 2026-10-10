@@ -107,21 +107,21 @@ pub(super) fn check_series(
     check_numbers(context, "y", y, y_kind)
 }
 
-/// Checks explicit limits for an axis of `kind` and returns them unchanged.
+/// Checks explicit limits for an axis of `kind` and returns the scale they define, with the
+/// limits unchanged as its domain.
 pub(super) fn check_limits(
     context: &'static str,
     kind: ScaleKind,
     low: f64,
     high: f64,
-) -> Result<(f64, f64)> {
+) -> Result<ContinuousScale> {
     let Some(transform) = transform_of(kind) else {
         return Err(Error::Usage {
             context,
             message: "this is a category axis; limits apply to linear and log axes only.".into(),
         });
     };
-    ContinuousScale::new(transform, low, high, context)?;
-    Ok((low, high))
+    ContinuousScale::new(transform, low, high, context)
 }
 
 /// Checks the sides of a figure, in inches: each must be finite, above 0 and at most 200.
