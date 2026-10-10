@@ -74,11 +74,13 @@ pub(crate) fn coincides(a: f64, b: f64) -> bool {
 }
 
 /// The tick targets for a plot area of `plot_w` by `plot_h` points:
-/// x `clamp(round(w / 100) + 1, 3, 8)`, y `clamp(round(h / 50) + 1, 3, 8)`.
+/// x `clamp(round(w / 100) + 1, 3, 8)`, y `clamp(round(h / 45) + 1, 3, 8)`.
 ///
 /// These divisors were calibrated against the approved mocks (about 5 ticks per axis on a
 /// 6 by 4 in figure: y 0/25/50/75/100, x 0/10/20/30). They replace the plan's original 72 and
-/// 60 pt, which gave too few y ticks.
+/// 60 pt, which gave too few y ticks. The y divisor is 45 rather than 50 so that
+/// `AboveGridline` layouts, whose label rows leave a shorter plot area (about 172 pt on a
+/// 6 by 4 in PIGMENT figure), still get 5 y ticks.
 pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
     fn target(size: f64, per_tick: f64, lo: usize, hi: usize) -> usize {
         let n = (size / per_tick).round() + 1.0;
@@ -88,7 +90,7 @@ pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
         // The clamp below keeps the cast within range; NaN was handled above.
         (n.clamp(lo as f64, hi as f64)) as usize
     }
-    (target(plot_w, 100.0, 3, 8), target(plot_h, 50.0, 3, 8))
+    (target(plot_w, 100.0, 3, 8), target(plot_h, 45.0, 3, 8))
 }
 
 fn mark_data(mark: &Mark) -> (&AxisData, &[f64]) {
@@ -439,11 +441,12 @@ mod tests {
     fn tick_targets_follow_plot_size() {
         assert_eq!(tick_targets(0.0, 0.0), (3, 3));
         assert_eq!(tick_targets(1.0, 1.0), (3, 3));
-        // A 6 by 4 in figure's plot area: 408 / 100 + 1 = 5, 190 / 50 + 1 = 5.
-        assert_eq!(tick_targets(408.0, 190.0), (5, 5));
-        // Rounding: 3.5 rounds up, just below 3.5 rounds down.
-        assert_eq!(tick_targets(350.0, 174.0), (5, 4));
-        assert_eq!(tick_targets(349.0, 175.0), (4, 5));
+        // 6 by 4 in plot areas: 408 / 100 + 1 = 5; PIGMENT 172 / 45 + 1 = 5, GRAPHITE 178 / 45 + 1 = 5.
+        assert_eq!(tick_targets(408.0, 172.0), (5, 5));
+        assert_eq!(tick_targets(408.0, 178.0), (5, 5));
+        // Rounding: 3.5 rounds up, just below 3.5 rounds down (3.5 * 45 = 157.5).
+        assert_eq!(tick_targets(350.0, 157.0), (5, 4));
+        assert_eq!(tick_targets(349.0, 158.0), (4, 5));
         // Upper clamps.
         assert_eq!(tick_targets(10_000.0, 10_000.0), (8, 8));
         assert_eq!(tick_targets(f64::NAN, f64::INFINITY), (3, 8));

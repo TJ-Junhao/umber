@@ -642,6 +642,34 @@ mod tests {
     }
 
     #[test]
+    fn six_by_four_figures_get_five_ticks_per_axis() {
+        // Calibrated against the mocks: y 0/25/50/75/100 and x 0/10/20/30 in every theme.
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            let mut f = figure(theme);
+            f.axes_mut()
+                .unwrap()
+                .title("Station output")
+                .subtitle("Daily mean, MW")
+                .xlabel("Day")
+                .ylabel("MW")
+                .scatter(
+                    AxisData::Numbers(vec![0.0, 15.0, 30.0]),
+                    &[3.0, 50.0, 97.0],
+                    crate::ScatterOptions::default(),
+                )
+                .unwrap()
+                .xlim(0.0, 30.0)
+                .unwrap();
+            let (resolved, _) = plan_of(&f);
+            let labels = |ticks: &[AxisTick]| -> Vec<String> {
+                ticks.iter().map(|t| t.label.clone()).collect()
+            };
+            assert_eq!(labels(&resolved.y.ticks), ["0", "25", "50", "75", "100"]);
+            assert_eq!(labels(&resolved.x.ticks), ["0", "10", "20", "30"]);
+        }
+    }
+
+    #[test]
     fn labels_sit_around_the_plot() {
         let mut f = figure(Theme::graphite());
         f.axes_mut()
