@@ -42,7 +42,9 @@ use read_fonts::tables::cmap::{Cmap, Cmap2, CmapSubtable};
 use read_fonts::types::Tag;
 use read_fonts::{FontData as RawData, FontRead, FontRef};
 
-use super::{Face, FontData, FontHandle, ShapingFont, guarded, is_unicode, lock};
+use super::cmap::is_unicode;
+use super::font::{Face, FontHandle, ShapingFont};
+use super::guard::{guarded, lock};
 use crate::fonts::Weight;
 
 /// The most uncached system font lookups one layout call performs. Characters beyond it are
@@ -71,7 +73,7 @@ pub(super) const SHAPING_CACHE_BYTES: usize = 64 * 1024 * 1024;
 /// The tables that shaping a system font may copy; see [`SystemFonts::shaping_font`].
 ///
 /// The shaper's copy has no `glyf` or `CFF`; glyph bounds for fallback mark positioning are
-/// read from the full font file instead (see `SystemExtents` in the parent module).
+/// read from the full font file instead (see `SystemExtents` in the shaping module).
 const SHAPING_TABLES: [Tag; 18] = [
     Tag::new(b"cmap"),
     Tag::new(b"head"),
@@ -839,10 +841,11 @@ impl SystemFonts {
     pub(super) fn handle(&self, face: usize) -> Option<FontHandle> {
         let index = self.index.get()?;
         let info = index.faces.get(face)?;
-        Some(FontHandle {
-            data: FontData::System(Arc::clone(&index.db), info.id),
-            index: info.face_index,
-        })
+        Some(FontHandle::system(
+            Arc::clone(&index.db),
+            info.id,
+            info.face_index,
+        ))
     }
 
     /// A shaping font for a face chosen by [`SystemFonts::face_for`].
