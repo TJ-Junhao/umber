@@ -422,6 +422,16 @@ impl ContinuousScale {
         Self::new(transform, lo, hi, context)
     }
 
+    /// The empty-data scale without a `Result`: `(0, 1)` for linear, `(1, 10)` for log. Equal to
+    /// `from_extent(transform, None, _)`, which cannot fail.
+    pub(crate) fn unit(transform: Transform) -> ContinuousScale {
+        let (lo, hi) = match transform {
+            Transform::Linear => (0.0, 1.0),
+            Transform::Log(_) => (1.0, 10.0),
+        };
+        ContinuousScale { transform, lo, hi }
+    }
+
     /// The value transform.
     ///
     /// # Examples
