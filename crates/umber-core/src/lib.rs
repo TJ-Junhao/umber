@@ -75,6 +75,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod binning;
 pub mod color;
 pub mod downsample;
 mod draw;
@@ -84,6 +85,7 @@ pub mod figure;
 pub mod fonts;
 pub mod geometry;
 mod layout;
+mod legend;
 mod model;
 mod pipeline;
 pub mod render;
@@ -91,6 +93,7 @@ mod resolve;
 pub mod scale;
 pub mod scene;
 mod scene_text;
+mod stacking;
 #[cfg(test)]
 mod test_support;
 pub mod text;

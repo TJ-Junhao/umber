@@ -7,10 +7,15 @@
 //! tick. Tick positions are normalized to `[0, 1]` along the axis, so
 //! layout and drawing never touch data values again.
 //!
-//! Mark colors are resolved here too: each mark's [`ColorSpec`] against the theme's palette.
+//! Marks are resolved here too, once per render: each mark becomes a [`ResolvedMark`], a typed
+//! record that carries the mark's data and its [`ColorSpec`] resolved against the theme's
+//! palette. Axes are resolved from these records, once per layout pass, and drawing reads them
+//! instead of the marks.
 
-use crate::model::{Axes, AxisData, Mark};
-use crate::{CategoryScale, ColorSpec, ContinuousScale, Rgba, Tick, Transform};
+use crate::model::{Axes, AxisData, LineMark, Mark, ScatterMark};
+use crate::{
+    CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Tick, Transform,
+};
 
 /// The context of errors that cannot happen here: the model validated every input already.
 const CONTEXT: &str = "Figure.to_scene()";
@@ -107,10 +112,50 @@ enum AutoLimits {
     Nice,
 }
 
-fn mark_data(mark: &Mark) -> (&AxisData, &[f64]) {
-    match mark {
-        Mark::Line(line) => (line.x(), line.y()),
-        Mark::Scatter(scatter) => (scatter.x(), scatter.y()),
+/// What an axis fixes before any data is seen: whether it lists categories, and for a
+/// continuous axis its transform and its explicit limits, if set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum AxisLimits {
+    /// A category axis: its categories come from the marks.
+    Category,
+    /// A linear or log axis.
+    Continuous {
+        /// The transform of the axis.
+        transform: Transform,
+        /// The scale of the explicit limits; `None` to fit the data.
+        explicit: Option<ContinuousScale>,
+    },
+}
+
+impl AxisLimits {
+    /// The limits of an axis of scale `kind` with the explicit limits `explicit`.
+    fn new(kind: ScaleKind, explicit: Option<ContinuousScale>) -> AxisLimits {
+        match kind.transform() {
+            Some(transform) => AxisLimits::Continuous {
+                transform,
+                explicit,
+            },
+            None => AxisLimits::Category,
+        }
+    }
+}
+
+/// The limits of both axes of an [`Axes`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Limits {
+    /// The x axis.
+    pub x: AxisLimits,
+    /// The y axis.
+    pub y: AxisLimits,
+}
+
+impl Limits {
+    /// The scale kinds and explicit limits of `axes`.
+    pub fn of(axes: &Axes) -> Limits {
+        Limits {
+            x: AxisLimits::new(axes.x_scale(), axes.x_limit_scale()),
+            y: AxisLimits::new(axes.y_scale(), axes.y_limit_scale()),
+        }
     }
 }
 
@@ -184,31 +229,39 @@ fn category_ticks(scale: &CategoryScale) -> Vec<AxisTick> {
 }
 
 /// The x categories of every mark, in mark order, then in data order.
-fn categories(marks: &[Mark]) -> CategoryScale {
-    CategoryScale::from_first_appearance(marks.iter().flat_map(|mark| match mark_data(mark).0 {
-        AxisData::Categories(names) => names.iter().map(String::as_str).collect::<Vec<_>>(),
-        AxisData::Numbers(_) => Vec::new(),
-    }))
+fn categories(marks: &[ResolvedMark<'_>]) -> CategoryScale {
+    CategoryScale::from_first_appearance(
+        marks
+            .iter()
+            .flat_map(|mark| mark.x_categories().iter().map(String::as_str)),
+    )
 }
 
-/// Resolves both axes of `axes` for about `x_target` and `y_target` ticks.
-pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved {
-    let marks = axes.marks();
-    let x = match axes.x_scale().transform() {
-        Some(transform) => {
-            let data = extent(marks.iter().flat_map(|mark| match mark_data(mark).0 {
-                AxisData::Numbers(values) => values.as_slice(),
-                AxisData::Categories(_) => &[],
-            }));
-            let all_lines = marks.iter().all(|mark| matches!(mark, Mark::Line { .. }));
+/// Resolves both axes from the resolved `marks` and the axes' `limits`, for about `x_target`
+/// and `y_target` ticks.
+pub(crate) fn resolve(
+    marks: &[ResolvedMark<'_>],
+    limits: &Limits,
+    x_target: usize,
+    y_target: usize,
+) -> Resolved {
+    let x = match limits.x {
+        AxisLimits::Continuous {
+            transform,
+            explicit,
+        } => {
+            let data = extent(marks.iter().flat_map(|mark| mark.x_numbers()));
+            let all_lines = marks
+                .iter()
+                .all(|mark| matches!(mark, ResolvedMark::Line { .. }));
             let auto = if all_lines {
                 AutoLimits::Exact
             } else {
                 AutoLimits::Nice
             };
-            continuous(transform, axes.x_limit_scale(), data, auto, x_target)
+            continuous(transform, explicit, data, auto, x_target)
         }
-        None => {
+        AxisLimits::Category => {
             let scale = categories(marks);
             ResolvedAxis {
                 ticks: category_ticks(&scale),
@@ -216,16 +269,13 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
             }
         }
     };
-    let (y, baseline) = match axes.y_scale().transform() {
-        Some(transform) => {
-            let data = extent(marks.iter().flat_map(|mark| mark_data(mark).1));
-            let axis = continuous(
-                transform,
-                axes.y_limit_scale(),
-                data,
-                AutoLimits::Nice,
-                y_target,
-            );
+    let (y, baseline) = match limits.y {
+        AxisLimits::Continuous {
+            transform,
+            explicit,
+        } => {
+            let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
+            let axis = continuous(transform, explicit, data, AutoLimits::Nice, y_target);
             let baseline = match &axis.scale {
                 AxisScale::Continuous(scale) => {
                     let (lo, hi) = scale.domain();
@@ -240,7 +290,7 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
             let baseline = if baseline.is_finite() { baseline } else { 0.0 };
             (axis, NormalizedPos::new(baseline))
         }
-        None => {
+        AxisLimits::Category => {
             // Marks always hold numeric y, so a category y axis never has categories.
             let scale = CategoryScale::from_first_appearance(std::iter::empty());
             let axis = ResolvedAxis {
@@ -253,17 +303,134 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
     Resolved { x, y, baseline }
 }
 
-/// A mark paired with its resolved color.
+/// A mark resolved for drawing: one variant per mark kind, each holding the mark and its color
+/// resolved against the theme's palette. Axes, the legend and drawing read marks through these
+/// records only.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ResolvedMark<'a> {
-    /// The mark.
-    pub mark: &'a Mark,
-    /// Its color, resolved against the theme's palette.
-    pub color: Rgba,
+pub(crate) enum ResolvedMark<'a> {
+    /// A line mark.
+    Line {
+        /// The mark.
+        mark: &'a LineMark,
+        /// The line color.
+        color: Rgba,
+    },
+    /// A scatter mark.
+    Scatter {
+        /// The mark.
+        mark: &'a ScatterMark,
+        /// The marker color.
+        color: Rgba,
+    },
 }
 
-/// Each mark with its color resolved against `palette`, in mark order. `Auto` colors take
-/// palette slots in series order; `Palette` and `Fixed` colors do not consume a slot.
+impl<'a> ResolvedMark<'a> {
+    /// The mark's numeric x values; empty when its x values are categories.
+    pub fn x_numbers(&self) -> &'a [f64] {
+        match *self {
+            ResolvedMark::Line { mark, .. } => numbers(mark.x()),
+            ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
+        }
+    }
+
+    /// The mark's x categories, in data order; empty when its x values are numbers.
+    pub fn x_categories(&self) -> &'a [String] {
+        match *self {
+            ResolvedMark::Line { mark, .. } => category_names(mark.x()),
+            ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
+        }
+    }
+
+    /// The mark's y values.
+    pub fn y_values(&self) -> &'a [f64] {
+        match *self {
+            ResolvedMark::Line { mark, .. } => mark.y(),
+            ResolvedMark::Scatter { mark, .. } => mark.y(),
+        }
+    }
+
+    /// The mark's resolved color.
+    #[cfg(test)]
+    pub fn color(&self) -> Rgba {
+        match *self {
+            ResolvedMark::Line { color, .. } | ResolvedMark::Scatter { color, .. } => color,
+        }
+    }
+
+    /// The series the mark shows, in order, one key each: what a legend lists for the mark.
+    #[allow(dead_code, reason = "the legend will read it")]
+    pub fn keys(&self) -> Vec<SeriesKey<'a>> {
+        match *self {
+            ResolvedMark::Line { mark, color } => {
+                let options = mark.options();
+                vec![SeriesKey {
+                    label: &options.label,
+                    color,
+                    kind: SeriesKind::Line { dash: options.dash },
+                }]
+            }
+            ResolvedMark::Scatter { mark, color } => {
+                let options = mark.options();
+                vec![SeriesKey {
+                    label: &options.label,
+                    color,
+                    kind: SeriesKind::Points {
+                        marker: options.marker,
+                    },
+                }]
+            }
+        }
+    }
+}
+
+/// The numbers of `data`; empty for categories.
+fn numbers(data: &AxisData) -> &[f64] {
+    match data {
+        AxisData::Numbers(values) => values,
+        AxisData::Categories(_) => &[],
+    }
+}
+
+/// The categories of `data`; empty for numbers.
+fn category_names(data: &AxisData) -> &[String] {
+    match data {
+        AxisData::Categories(names) => names,
+        AxisData::Numbers(_) => &[],
+    }
+}
+
+/// One series as a legend shows it: its label, its resolved color and how it is drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SeriesKey<'a> {
+    /// The label; empty for an unlabelled series.
+    pub label: &'a str,
+    /// The resolved color.
+    pub color: Rgba,
+    /// How the series is drawn.
+    pub kind: SeriesKind,
+}
+
+/// How a series is drawn, as far as its legend swatch needs to know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SeriesKind {
+    /// A line with its dash style.
+    Line {
+        /// The dash style.
+        dash: Dash,
+    },
+    /// Individual markers of one shape.
+    Points {
+        /// The marker shape.
+        marker: Marker,
+    },
+    /// Filled bars.
+    #[allow(dead_code, reason = "bar marks will produce it")]
+    Bar,
+}
+
+/// Each mark resolved for drawing, in mark order, with its color resolved against `palette`.
+/// `Auto` colors take palette slots in series order; `Palette` and `Fixed` colors do not
+/// consume a slot.
 pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<ResolvedMark<'a>> {
     let mut next_auto = 0_usize;
     marks
@@ -274,7 +441,10 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
             if matches!(spec, ColorSpec::Auto(_)) {
                 next_auto += 1;
             }
-            ResolvedMark { mark, color }
+            match mark {
+                Mark::Line(mark) => ResolvedMark::Line { mark, color },
+                Mark::Scatter(mark) => ResolvedMark::Scatter { mark, color },
+            }
         })
         .collect()
 }
@@ -303,8 +473,14 @@ mod tests {
         figure.axes_mut().unwrap()
     }
 
+    /// Both axes of `axes`, resolved from its marks.
+    fn resolve_axes(axes: &Axes, x_target: usize, y_target: usize) -> Resolved {
+        let marks = resolve_marks(axes.marks(), &[]);
+        resolve(&marks, &Limits::of(axes), x_target, y_target)
+    }
+
     fn domains(figure: &Figure) -> ((f64, f64), (f64, f64)) {
-        let r = resolve(figure.axes().unwrap(), 5, 4);
+        let r = resolve_axes(figure.axes().unwrap(), 5, 4);
         (
             r.x.continuous().unwrap().domain(),
             r.y.continuous().unwrap().domain(),
@@ -357,7 +533,7 @@ mod tests {
         assert_eq!((x0, x1), (10.0, 90.0));
         assert_eq!((y0, y1), (0.0, 40.0));
         // Nice limits are the outer ticks on both axes: x is 10, 30, ..., 90, not 25, 50, 75.
-        let r = resolve(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
         for axis in [&r.x, &r.y] {
             assert_eq!(axis.ticks.first().map(|t| t.pos.get()), Some(0.0));
             assert_eq!(axis.ticks.last().map(|t| t.pos.get()), Some(1.0));
@@ -371,7 +547,7 @@ mod tests {
         axes(&mut f)
             .scatter(nums(&[12.0, 88.0]), &[1.0, 2.0], ScatterOptions::default())
             .unwrap();
-        let r = resolve(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(r.x.continuous().unwrap().domain(), (10.0, 100.0));
         let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
         assert_eq!(labels, ["10", "100"]);
@@ -393,7 +569,7 @@ mod tests {
         assert_eq!((x0, x1), (0.5, 9.5));
         assert_eq!((y0, y1), (-1.3, 2.7));
         // Every tick lies inside the explicit limits.
-        let r = resolve(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert!(r.x.ticks.iter().all(|t| (0.0..=1.0).contains(&t.pos.get())));
         assert!(r.y.ticks.iter().all(|t| (0.0..=1.0).contains(&t.pos.get())));
         // 0 is inside -1.3..2.7, so the baseline sits at its normalized position.
@@ -415,7 +591,7 @@ mod tests {
         let log = ScaleKind::Log { base: LogBase::TEN };
         let f = figure(log, log);
         assert_eq!(domains(&f), ((1.0, 10.0), (1.0, 10.0)));
-        let r = resolve(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(r.baseline.get(), 0.0);
 
         // Empty scatter data is empty data too.
@@ -470,7 +646,7 @@ mod tests {
             .unwrap();
         let (_, (y0, y1)) = domains(&f);
         assert_eq!((y0, y1), (1.0, 1e5));
-        let r = resolve(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
         // 0 is never inside a log range: the baseline sits at the bottom.
         assert_eq!(r.baseline.get(), 0.0);
         let labels: Vec<&str> = r.y.ticks.iter().map(|t| t.label.as_str()).collect();
@@ -507,7 +683,7 @@ mod tests {
                 ScatterOptions::default(),
             )
             .unwrap();
-        let r = resolve(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert!(r.x.is_category());
         let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
         assert_eq!(labels, ["b", "a", "c", "d"]);
@@ -557,9 +733,18 @@ mod tests {
         let resolved = resolve_marks(marks, &palette);
         assert_eq!(resolved.len(), marks.len());
         for (record, mark) in resolved.iter().zip(marks) {
-            assert!(std::ptr::eq(record.mark, mark));
+            let same = match (record, mark) {
+                (ResolvedMark::Line { mark: record, .. }, Mark::Line(mark)) => {
+                    std::ptr::eq(*record, mark)
+                }
+                (ResolvedMark::Scatter { mark: record, .. }, Mark::Scatter(mark)) => {
+                    std::ptr::eq(*record, mark)
+                }
+                _ => false,
+            };
+            assert!(same, "{record:?} does not hold {mark:?}");
         }
-        let colors: Vec<Rgba> = resolved.iter().map(|r| r.color).collect();
+        let colors: Vec<Rgba> = resolved.iter().map(ResolvedMark::color).collect();
         assert_eq!(
             colors,
             [
@@ -575,13 +760,59 @@ mod tests {
     }
 
     #[test]
+    fn keys_carry_label_color_and_drawing() {
+        use crate::{Dash, Marker};
+        let mut f = figure(LIN, LIN);
+        let palette = f.theme().palette().to_vec();
+        axes(&mut f)
+            .line(
+                nums(&[0.0]),
+                &[1.0],
+                LineOptions {
+                    label: "trend".to_owned(),
+                    dash: Dash::Dashed,
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap()
+            .scatter(
+                nums(&[0.0]),
+                &[1.0],
+                ScatterOptions {
+                    marker: Marker::Square,
+                    ..ScatterOptions::default()
+                },
+            )
+            .unwrap();
+        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        let keys: Vec<SeriesKey<'_>> = resolved.iter().flat_map(ResolvedMark::keys).collect();
+        assert_eq!(
+            keys,
+            [
+                SeriesKey {
+                    label: "trend",
+                    color: palette[0],
+                    kind: SeriesKind::Line { dash: Dash::Dashed },
+                },
+                SeriesKey {
+                    label: "",
+                    color: palette[1],
+                    kind: SeriesKind::Points {
+                        marker: Marker::Square,
+                    },
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn baseline_sits_at_zero_or_bottom() {
         let mut f = figure(LIN, LIN);
         axes(&mut f).ylim(-10.0, 30.0).unwrap();
-        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline.get(), 0.25);
+        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.25);
         axes(&mut f).ylim(5.0, 30.0).unwrap();
-        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
+        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
         axes(&mut f).ylim(-30.0, -5.0).unwrap();
-        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
+        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
     }
 }
