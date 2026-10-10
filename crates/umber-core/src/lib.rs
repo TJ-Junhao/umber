@@ -26,6 +26,8 @@ pub mod render;
 mod resolve;
 pub mod scale;
 pub mod scene;
+#[cfg(test)]
+mod test_support;
 pub mod text;
 pub mod theme;
 pub mod ticks;

@@ -724,6 +724,7 @@ mod tests {
     use crate::fonts::{Font, Weight};
     use crate::geometry::Path;
     use crate::scene::{GradientStop, LinearGradient};
+    use crate::test_support::image::{DecodedPng as Decoded, decode_rgba8};
     use crate::text::{FontLibrary, TextStyle};
 
     const WHITE: Rgba = Rgba {
@@ -739,44 +740,14 @@ mod tests {
         a: 255,
     };
 
-    struct Decoded {
-        width: u32,
-        height: u32,
-        rgba: Vec<u8>,
-        phys: Option<::png::PixelDimensions>,
-    }
-
     impl Decoded {
-        fn at(&self, x: u32, y: u32) -> [u8; 4] {
-            let i = ((y * self.width + x) * 4) as usize;
-            [
-                self.rgba[i],
-                self.rgba[i + 1],
-                self.rgba[i + 2],
-                self.rgba[i + 3],
-            ]
-        }
-
         fn is_ink(&self, x: u32, y: u32) -> bool {
             self.at(x, y)[0] < 128
         }
     }
 
     fn decode(bytes: &[u8]) -> Decoded {
-        let mut reader = ::png::Decoder::new(std::io::Cursor::new(bytes))
-            .read_info()
-            .unwrap();
-        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut buf).unwrap();
-        assert_eq!(info.color_type, ::png::ColorType::Rgba);
-        assert_eq!(info.bit_depth, ::png::BitDepth::Eight);
-        buf.truncate(info.buffer_size());
-        Decoded {
-            width: info.width,
-            height: info.height,
-            rgba: buf,
-            phys: reader.info().pixel_dims,
-        }
+        decode_rgba8(bytes).unwrap()
     }
 
     fn rect_path(x: f32, y: f32, w: f32, h: f32) -> Path {

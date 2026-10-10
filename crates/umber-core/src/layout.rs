@@ -468,6 +468,7 @@ pub(crate) fn plan(
 mod tests {
     use super::*;
     use crate::figure::{AxisData, LineOptions};
+    use crate::test_support::scene::assert_scene_bounded;
     use crate::{Figure, ScaleKind};
 
     fn lib() -> &'static FontLibrary {
@@ -634,7 +635,7 @@ mod tests {
                     assert!(v.is_finite());
                 }
                 let scene = f.to_scene(lib());
-                crate::draw::tests::assert_scene_bounded(&scene);
+                assert_scene_bounded(&scene);
             }
         }
 
@@ -654,7 +655,7 @@ mod tests {
         let title = layout.title.as_ref().unwrap();
         assert!(title.width() <= MAX_TEXT_WIDTH && title.width() > MAX_TEXT_WIDTH * 0.9);
         assert!(huge.starts_with(&title.text));
-        crate::draw::tests::assert_scene_bounded(&f.to_scene(lib()));
+        assert_scene_bounded(&f.to_scene(lib()));
     }
 
     #[test]
