@@ -7,7 +7,7 @@
 
 use crate::color::Rgba;
 use crate::geometry::{Path, PathVerb, Point};
-use crate::scene::{GradientStop, LinearGradient};
+use crate::scene::{GradientStop, LinearGradient, Rect, StrokeStyle};
 
 /// Largest coordinate magnitude, in points, that a backend will draw.
 ///
@@ -32,6 +32,31 @@ pub(crate) fn valid_point(p: Point) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.x.abs() <= MAX_COORD && p.y.abs() <= MAX_COORD
 }
 
+/// Whether a stroke style paints anything: a visible color and a finite, positive width.
+///
+/// Both backends skip a stroke that fails this, whatever its path or dash.
+pub(crate) fn stroke_is_visible(style: &StrokeStyle) -> bool {
+    style.color.a != 0 && style.width.is_finite() && style.width > 0.0
+}
+
+/// Whether a clip rectangle can clip: finite in every field, with a positive size.
+///
+/// A group whose clip fails this draws nothing in either backend.
+pub(crate) fn clip_is_valid(rect: &Rect) -> bool {
+    [rect.x, rect.y, rect.width, rect.height]
+        .iter()
+        .all(|v| v.is_finite())
+        && rect.width > 0.0
+        && rect.height > 0.0
+}
+
+/// Whether a text item can be drawn: a visible color and an origin within [`MAX_COORD`].
+///
+/// Both backends skip text that fails this, in every SVG text mode.
+pub(crate) fn text_is_visible(color: Rgba, origin: Point) -> bool {
+    color.a != 0 && valid_point(origin)
+}
+
 /// One drawable segment of a subpath.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Segment {
@@ -54,22 +79,40 @@ impl Segment {
 /// A start point followed by at least one segment.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Subpath {
+    start: Point,
+    segments: Vec<Segment>,
+    closed: bool,
+}
+
+impl Subpath {
     /// Where the subpath starts.
-    pub start: Point,
+    pub(crate) fn start(&self) -> Point {
+        self.start
+    }
+
     /// The segments, never empty in a [`NormalizedPath`].
-    pub segments: Vec<Segment>,
+    pub(crate) fn segments(&self) -> &[Segment] {
+        &self.segments
+    }
+
     /// Whether the subpath is closed.
-    pub closed: bool,
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed
+    }
 }
 
 /// A path reduced to what can be drawn: valid subpaths with at least one segment each.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NormalizedPath {
-    /// The subpaths, never empty.
-    pub subpaths: Vec<Subpath>,
+    subpaths: Vec<Subpath>,
 }
 
 impl NormalizedPath {
+    /// The subpaths, never empty.
+    pub(crate) fn subpaths(&self) -> &[Subpath] {
+        &self.subpaths
+    }
+
     /// The length of the control polygon, an upper bound on the path length.
     pub(crate) fn control_length(&self) -> f32 {
         let mut total = 0.0_f64;
@@ -343,10 +386,16 @@ mod tests {
             p(38.0, 10.0),
         ]);
         let n = normalize_path(&path).expect("drawable");
-        assert_eq!(n.subpaths.len(), 2);
-        assert_eq!(n.subpaths[0].segments, vec![Segment::Line(p(9.0, 10.0))]);
-        assert_eq!(n.subpaths[1].start, p(30.0, 10.0));
-        assert_eq!(n.subpaths[1].segments, vec![Segment::Line(p(38.0, 10.0))]);
+        assert_eq!(n.subpaths().len(), 2);
+        assert_eq!(
+            n.subpaths()[0].segments(),
+            vec![Segment::Line(p(9.0, 10.0))]
+        );
+        assert_eq!(n.subpaths()[1].start(), p(30.0, 10.0));
+        assert_eq!(
+            n.subpaths()[1].segments(),
+            vec![Segment::Line(p(38.0, 10.0))]
+        );
     }
 
     #[test]
@@ -362,9 +411,9 @@ mod tests {
         path.line_to(p(5.0, 5.0));
         path.line_to(p(6.0, 6.0));
         let n = normalize_path(&path).expect("line survives");
-        assert_eq!(n.subpaths.len(), 1);
-        assert_eq!(n.subpaths[0].start, p(5.0, 5.0));
-        assert_eq!(n.subpaths[0].segments, vec![Segment::Line(p(6.0, 6.0))]);
+        assert_eq!(n.subpaths().len(), 1);
+        assert_eq!(n.subpaths()[0].start(), p(5.0, 5.0));
+        assert_eq!(n.subpaths()[0].segments(), vec![Segment::Line(p(6.0, 6.0))]);
     }
 
     #[test]
@@ -373,8 +422,8 @@ mod tests {
         path.line_to(p(1.0, 2.0));
         path.line_to(p(3.0, 4.0));
         let n = normalize_path(&path).expect("drawable");
-        assert_eq!(n.subpaths[0].start, p(1.0, 2.0));
-        assert_eq!(n.subpaths[0].segments, vec![Segment::Line(p(3.0, 4.0))]);
+        assert_eq!(n.subpaths()[0].start(), p(1.0, 2.0));
+        assert_eq!(n.subpaths()[0].segments(), vec![Segment::Line(p(3.0, 4.0))]);
     }
 
     #[test]
@@ -389,7 +438,7 @@ mod tests {
         path.line_to(p(5.0, 1.0));
         path.close();
         let n = normalize_path(&path).expect("drawable");
-        assert!(n.subpaths[0].closed);
+        assert!(n.subpaths()[0].is_closed());
     }
 
     #[test]
@@ -400,10 +449,10 @@ mod tests {
         path.close();
         path.line_to(p(9.0, 9.0));
         let n = normalize_path(&path).expect("drawable");
-        assert_eq!(n.subpaths.len(), 2);
-        assert!(n.subpaths[0].closed);
-        assert_eq!(n.subpaths[1].start, p(1.0, 1.0));
-        assert!(!n.subpaths[1].closed);
+        assert_eq!(n.subpaths().len(), 2);
+        assert!(n.subpaths()[0].is_closed());
+        assert_eq!(n.subpaths()[1].start(), p(1.0, 1.0));
+        assert!(!n.subpaths()[1].is_closed());
     }
 
     #[test]
@@ -574,5 +623,204 @@ mod tests {
             normalize_gradient(&apart),
             GradientKind::Linear { .. }
         ));
+    }
+
+    /// Hostile input rendered through both backends: the shared rules must classify it the same
+    /// way in SVG and PNG.
+    mod backends_agree {
+        use super::*;
+        use crate::render::{SvgText, render_png, render_svg};
+        use crate::scene::{FillRule, Item, LineCap, LineJoin, Paint, Scene};
+        use crate::test_support::image::{DecodedPng, decode_rgba8};
+
+        const WHITE: Rgba = Rgba {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        };
+        const BLACK: Rgba = Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+
+        fn render(scene: &Scene) -> (String, DecodedPng) {
+            let svg = render_svg(scene, SvgText::Outlines);
+            let png = decode_rgba8(&render_png(scene, 72).expect("renders")).expect("decodes");
+            (svg, png)
+        }
+
+        fn has_ink(image: &DecodedPng) -> bool {
+            (0..image.height).any(|y| (0..image.width).any(|x| image.at(x, y)[0] < 128))
+        }
+
+        fn style(color: Rgba, width: f32, dash: Vec<f32>) -> StrokeStyle {
+            StrokeStyle {
+                color,
+                width,
+                dash,
+                cap: LineCap::Butt,
+                join: LineJoin::Miter,
+            }
+        }
+
+        fn horizontal() -> Path {
+            lines(&[p(0.0, 10.0), p(40.0, 10.0)])
+        }
+
+        fn stroke_scene(style: StrokeStyle) -> Scene {
+            let mut scene = Scene::new(40.0, 20.0, WHITE);
+            scene.push(Item::Stroke {
+                path: horizontal(),
+                style,
+            });
+            scene
+        }
+
+        #[test]
+        fn stroke_visibility_is_classified_alike() {
+            let transparent = Rgba { a: 0, ..BLACK };
+            let cases = [
+                (BLACK, 2.0, true),
+                (BLACK, 0.0, false),
+                (BLACK, -1.0, false),
+                (BLACK, f32::NAN, false),
+                (BLACK, f32::INFINITY, false),
+                (BLACK, f32::NEG_INFINITY, false),
+                (transparent, 2.0, false),
+            ];
+            for (color, width, visible) in cases {
+                let stroke = style(color, width, Vec::new());
+                assert_eq!(stroke_is_visible(&stroke), visible, "width {width}");
+                let (svg, png) = render(&stroke_scene(stroke));
+                assert_eq!(svg.contains("stroke-width"), visible, "svg, width {width}");
+                assert_eq!(has_ink(&png), visible, "png, width {width}");
+            }
+        }
+
+        #[test]
+        fn clip_validity_is_classified_alike() {
+            let clip = |x: f32, y: f32, width: f32, height: f32| Rect {
+                x,
+                y,
+                width,
+                height,
+            };
+            let cases = [
+                (clip(0.0, 0.0, 40.0, 20.0), true),
+                (clip(-5.0, -5.0, 100.0, 100.0), true),
+                (clip(0.0, 0.0, 0.0, 20.0), false),
+                (clip(0.0, 0.0, 40.0, 0.0), false),
+                (clip(0.0, 0.0, -40.0, 20.0), false),
+                (clip(0.0, 0.0, 40.0, -20.0), false),
+                (clip(f32::NAN, 0.0, 40.0, 20.0), false),
+                (clip(0.0, f32::INFINITY, 40.0, 20.0), false),
+                (clip(0.0, 0.0, f32::NAN, 20.0), false),
+                (clip(0.0, 0.0, 40.0, f32::INFINITY), false),
+            ];
+            for (rect, valid) in cases {
+                assert_eq!(clip_is_valid(&rect), valid, "{rect:?}");
+                let mut scene = Scene::new(40.0, 20.0, WHITE);
+                scene.push(Item::Group {
+                    clip: Some(rect),
+                    items: vec![Item::Fill {
+                        path: lines(&[p(0.0, 0.0), p(40.0, 0.0), p(40.0, 20.0), p(0.0, 20.0)]),
+                        paint: Paint::Solid(BLACK),
+                        rule: FillRule::NonZero,
+                    }],
+                });
+                let (svg, png) = render(&scene);
+                assert_eq!(svg.contains("<path"), valid, "svg, {rect:?}");
+                assert_eq!(has_ink(&png), valid, "png, {rect:?}");
+            }
+        }
+
+        #[test]
+        fn dash_degeneration_is_classified_alike() {
+            let patterns: [(&[f32], bool); 9] = [
+                (&[4.0, 4.0], true),
+                (&[4.0], true),
+                (&[], false),
+                (&[0.0, 0.0], false),
+                (&[-1.0, 1.0], false),
+                (&[f32::NAN, 1.0], false),
+                (&[f32::INFINITY, 1.0], false),
+                (&[0.02, 0.02], false),
+                (&[1.0e-20, 1.0e-20], false),
+            ];
+            for (dash, dashed) in patterns {
+                let stroke = style(BLACK, 4.0, dash.to_vec());
+                assert_eq!(
+                    normalize_dash(dash, 40.0).is_some(),
+                    dashed,
+                    "dash {dash:?}"
+                );
+                let (svg, png) = render(&stroke_scene(stroke));
+                assert_eq!(svg.contains("stroke-dasharray"), dashed, "svg, {dash:?}");
+                // Row 9 lies inside the 4 pt wide stroke: a gap shows up only when dashed.
+                let solid = (1..39).all(|x| png.at(x, 9)[0] < 128);
+                assert_eq!(!solid, dashed, "png, {dash:?}");
+            }
+        }
+
+        #[test]
+        fn text_visibility_is_classified_alike() {
+            use crate::fonts::{Font, Weight};
+            use crate::text::{FontLibrary, TextStyle};
+
+            let style = TextStyle {
+                font: Font::Inter,
+                weight: Weight::Regular,
+                size: 16.0,
+                tabular_figures: false,
+            };
+            let transparent = Rgba { a: 0, ..BLACK };
+            let cases = [
+                (BLACK, p(4.0, 16.0), true),
+                (transparent, p(4.0, 16.0), false),
+                (BLACK, p(f32::NAN, 16.0), false),
+                (BLACK, p(4.0, f32::NAN), false),
+                (BLACK, p(f32::INFINITY, 16.0), false),
+                (BLACK, p(4.0, f32::NEG_INFINITY), false),
+                (BLACK, p(2.0 * MAX_COORD, 16.0), false),
+            ];
+            for (color, origin, visible) in cases {
+                assert_eq!(text_is_visible(color, origin), visible, "{origin:?}");
+                let mut scene = Scene::new(40.0, 20.0, WHITE);
+                scene.push_text(FontLibrary::global(), "Hi", style, origin, color);
+                for mode in [SvgText::Editable, SvgText::Outlines] {
+                    let svg = render_svg(&scene, mode);
+                    let drawn = svg.contains("<text") || svg.contains("<path");
+                    assert_eq!(drawn, visible, "svg {mode:?}, {origin:?}");
+                }
+                let png = decode_rgba8(&render_png(&scene, 72).expect("renders")).expect("decodes");
+                assert_eq!(has_ink(&png), visible, "png, {origin:?}");
+            }
+        }
+
+        #[test]
+        fn alpha_zero_paints_draw_nothing_in_both() {
+            let clear = Rgba { a: 0, ..BLACK };
+            let mut scene = Scene::new(40.0, 20.0, WHITE);
+            scene.push(Item::Fill {
+                path: lines(&[p(0.0, 0.0), p(40.0, 0.0), p(40.0, 20.0), p(0.0, 20.0)]),
+                paint: Paint::Solid(clear),
+                rule: FillRule::NonZero,
+            });
+            scene.push(Item::Fill {
+                path: lines(&[p(0.0, 0.0), p(40.0, 0.0), p(40.0, 20.0), p(0.0, 20.0)]),
+                paint: Paint::Linear(gradient(
+                    vec![stop(0.0, clear), stop(1.0, clear)],
+                    p(0.0, 0.0),
+                    p(40.0, 0.0),
+                )),
+                rule: FillRule::NonZero,
+            });
+            let (svg, png) = render(&scene);
+            assert!(!svg.contains("<path"), "{svg}");
+            assert!(!has_ink(&png));
+        }
     }
 }
