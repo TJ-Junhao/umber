@@ -12,3 +12,8 @@ cargo about generate \
     --config about.toml \
     --output-file THIRD-PARTY-LICENSES.txt \
     about.hbs
+
+# Normalize line endings so the file matches what git stores (LF).
+tmp="$(mktemp)"
+tr -d '\r' < THIRD-PARTY-LICENSES.txt > "$tmp"
+mv "$tmp" THIRD-PARTY-LICENSES.txt
