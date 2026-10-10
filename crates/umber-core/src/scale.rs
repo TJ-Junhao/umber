@@ -589,7 +589,8 @@ impl ContinuousScale {
     /// The ends are normally powers themselves (a nice domain); an end that is not (clamped to
     /// the supported magnitudes) is added as a value of its own. When there are more than
     /// `2 * target` powers, `target` exponents spaced evenly from the first to the last power
-    /// are kept.
+    /// are kept. Interior powers within `0.5 / (target - 1)` of an added end, in normalized
+    /// position, are dropped so that their labels cannot crowd it.
     fn log_values_with_ends(&self, base: f64, target: usize) -> Vec<f64> {
         let (lo, hi) = (self.lo, self.hi);
         let mut values = Vec::new();
@@ -621,13 +622,38 @@ impl ContinuousScale {
             v.is_finite() && v > 0.0 && v >= lo * (1.0 - tol) && v <= hi * (1.0 + tol)
         });
         // Snap the outer powers onto the ends, or add the ends when they are not powers.
-        match values.first_mut() {
-            Some(v) if (*v - lo).abs() <= tol * lo => *v = lo,
-            _ => values.insert(0, lo),
-        }
-        match values.last_mut() {
-            Some(v) if (*v - hi).abs() <= tol * hi => *v = hi,
-            _ => values.push(hi),
+        let inserted_lo = match values.first_mut() {
+            Some(v) if (*v - lo).abs() <= tol * lo => {
+                *v = lo;
+                false
+            }
+            _ => {
+                values.insert(0, lo);
+                true
+            }
+        };
+        let inserted_hi = match values.last_mut() {
+            Some(v) if (*v - hi).abs() <= tol * hi => {
+                *v = hi;
+                false
+            }
+            _ => {
+                values.push(hi);
+                true
+            }
+        };
+        // An inserted end is not a power, so a power may sit right next to it: drop interior
+        // powers within half a nominal tick gap, `0.5 / (n - 1)`, of an inserted end.
+        if inserted_lo || inserted_hi {
+            let gap = 0.5 / (target.max(2) - 1) as f64;
+            let last = values.len().saturating_sub(1);
+            let mut i = 0;
+            values.retain(|&v| {
+                let interior = i != 0 && i != last;
+                i += 1;
+                let pos = self.normalize(v);
+                !(interior && ((inserted_lo && pos < gap) || (inserted_hi && 1.0 - pos < gap)))
+            });
         }
         strictly_increasing(values)
     }
@@ -986,6 +1012,26 @@ mod tests {
             prop_assert_eq!(ticks.first().map(|t| t.value), Some(dlo));
             prop_assert_eq!(ticks.last().map(|t| t.value), Some(dhi));
             prop_assert!(ticks.windows(2).all(|w| w[0].value < w[1].value));
+        }
+    }
+
+    #[test]
+    fn added_log_ends_drop_crowding_powers() {
+        for base in [2.0, std::f64::consts::E, 999.0] {
+            let log = Transform::Log(LogBase::new(base).unwrap());
+            let scale = ContinuousScale::new(log, 1e-300, 1e300, "test").unwrap();
+            for target in [3, 5, 8] {
+                let (nice, ticks) = scale.nice_with_ticks(target);
+                // Both ends are clamped, not powers, and are kept exactly.
+                assert_eq!(nice.domain(), (1e-300, 1e300));
+                assert_eq!(ticks.first().map(|t| t.value), Some(1e-300));
+                assert_eq!(ticks.last().map(|t| t.value), Some(1e300));
+                let gap = 0.5 / (target - 1) as f64;
+                let pos: Vec<f64> = ticks.iter().map(|t| nice.normalize(t.value)).collect();
+                for p in &pos[1..pos.len() - 1] {
+                    assert!(*p >= gap && 1.0 - *p >= gap, "base {base}: {pos:?}");
+                }
+            }
         }
     }
 

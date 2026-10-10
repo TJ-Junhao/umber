@@ -2,7 +2,9 @@
 //! labels. All lengths are in points, with the origin at the top-left and y pointing down.
 //!
 //! Every derived value is finite: font sizes are clamped, text wider than
-//! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least 1 by 1 pt.
+//! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least 1 by 1 pt and
+//! lies on the canvas (unless the canvas itself is narrower than 1 pt). Text that does not fit,
+//! such as a tick label wider than the space reserved for it, is clipped by the canvas.
 //! With figures of at most 200 in a side this keeps every coordinate far below the renderers'
 //! `MAX_COORD`.
 
@@ -32,6 +34,9 @@ const X_LABEL_GAP: f64 = 4.0;
 const AXIS_LABEL_GAP: f64 = 4.0;
 /// The smallest plot side.
 const MIN_PLOT: f64 = 1.0;
+/// The largest share of the inner width (inside the outer padding) that one side's x end-label
+/// reservation may take.
+const END_LABEL_SHARE: f64 = 0.25;
 /// The widest text drawn; longer text is cut to a prefix that fits.
 pub(crate) const MAX_TEXT_WIDTH: f64 = 1.0e5;
 /// The largest font size used, whatever the theme says.
@@ -235,7 +240,17 @@ fn baseline_in_line(top: f64, height: f64, ascent: f64, descent: f64) -> f64 {
     top + (height - ascent - descent) / 2.0 + ascent
 }
 
+/// The span `start..end` kept on a canvas of `extent`: the start is clamped to
+/// `0..=extent - MIN_PLOT`, and the span is at least [`MIN_PLOT`] and ends on the canvas. Only a
+/// canvas narrower than [`MIN_PLOT`] cannot hold it; then the span is `0..MIN_PLOT`.
+fn fit_span(start: f64, end: f64, extent: f64) -> (f64, f64) {
+    let start = start.clamp(0.0, (extent - MIN_PLOT).max(0.0));
+    let end = end.min(extent).max(start + MIN_PLOT);
+    (start, end - start)
+}
+
 /// Lays out the axes of a `width` by `height` pt figure for already resolved scales.
+/// `reference_width` is the plot width the x end-label reservation measures tick offsets on.
 pub(crate) fn lay_out(
     width: f64,
     height: f64,
@@ -243,6 +258,7 @@ pub(crate) fn lay_out(
     axes: &Axes,
     resolved: &Resolved,
     lib: &FontLibrary,
+    reference_width: f64,
 ) -> Layout {
     let styles = Styles::new(theme);
     let placement = theme.tick_label_placement();
@@ -313,20 +329,32 @@ pub(crate) fn lay_out(
         0.0
     };
     let plot_top = header_bottom + ylabel_band + label_row_rise;
-    // The first and last x labels are centered on their ticks, which can sit on the plot
-    // edges: the plot keeps half of each label's width between its edge and the canvas edge.
-    // A label may use the outer padding, so only the part beyond it shrinks the plot. This is
-    // the one case in which an `AboveGridline` plot is inset by more than the outer padding.
-    let half = |label: Option<&(f64, Label)>| label.map_or(0.0, |(_, l)| l.width() / 2.0);
-    let first_half = half(x_labels.first());
-    let last_half = half(x_labels.last());
+    // The first and last x labels are centered on their ticks. Where a label's half width
+    // reaches past the plot edge by more than the outer padding, the plot is inset by the
+    // difference, so the label stays on the canvas. The tick's distance from the plot edge is
+    // measured on `reference_width` (the previous pass's plot width). Each side's reservation
+    // is capped at a quarter of the inner width; labels wider than that are clipped by the
+    // canvas. This is the one case in which an `AboveGridline` plot is inset by more than the
+    // outer padding.
+    let inner = (width - 2.0 * PADDING).max(0.0);
+    let cap = END_LABEL_SHARE * inner;
+    let reach = |label: Option<&(f64, Label)>, from_left: bool| {
+        label.map_or(0.0, |(pos, l)| {
+            let fraction = if from_left { *pos } else { 1.0 - *pos };
+            let offset = fraction * reference_width;
+            let beyond = l.width() / 2.0 - offset.max(0.0);
+            (beyond - PADDING).clamp(0.0, cap)
+        })
+    };
+    let left_reserve = reach(x_labels.first(), true);
+    let right_reserve = reach(x_labels.last(), false);
     let plot_left = if above || y_labels.is_empty() {
         PADDING
     } else {
         PADDING + y_label_width + Y_LABEL_GAP
     }
-    .max(first_half);
-    let plot_right = width - PADDING.max(last_half);
+    .max(PADDING + left_reserve);
+    let plot_right = width - PADDING - right_reserve;
     let x_band = if x_labels.is_empty() {
         0.0
     } else {
@@ -338,11 +366,13 @@ pub(crate) fn lay_out(
         0.0
     };
     let plot_bottom = height - PADDING - x_band - xlabel_band;
+    let (x, plot_width) = fit_span(plot_left, plot_right, width);
+    let (y, plot_height) = fit_span(plot_top, plot_bottom, height);
     let plot = Area {
-        x: plot_left,
-        y: plot_top,
-        width: (plot_right - plot_left).max(MIN_PLOT),
-        height: (plot_bottom - plot_top).max(MIN_PLOT),
+        x,
+        y,
+        width: plot_width,
+        height: plot_height,
     };
 
     // Place everything relative to the final plot area.
@@ -427,10 +457,10 @@ pub(crate) fn plan(
     let guess_h = (height - 2.0 * PADDING).max(MIN_PLOT);
     let (tx, ty) = resolve::tick_targets(guess_w, guess_h);
     let first = resolve::resolve(axes, tx, ty);
-    let first = lay_out(width, height, theme, axes, &first, lib);
+    let first = lay_out(width, height, theme, axes, &first, lib, guess_w);
     let (tx, ty) = resolve::tick_targets(first.plot.width, first.plot.height);
     let resolved = resolve::resolve(axes, tx, ty);
-    let layout = lay_out(width, height, theme, axes, &resolved, lib);
+    let layout = lay_out(width, height, theme, axes, &resolved, lib, first.plot.width);
     (resolved, layout)
 }
 
@@ -674,6 +704,86 @@ mod tests {
             };
             assert_eq!(labels(&resolved.y.ticks), ["0", "25", "50", "75", "100"]);
             assert_eq!(labels(&resolved.x.ticks), ["0", "10", "20", "30"]);
+        }
+    }
+
+    fn category_plot(theme: Theme, names: [&str; 3]) -> Area {
+        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Categories(names.iter().map(|s| (*s).to_owned()).collect()),
+                &[1.0, 2.0, 3.0],
+                LineOptions::default(),
+            )
+            .unwrap();
+        plan_of(&f).1.plot
+    }
+
+    #[test]
+    fn huge_end_labels_keep_the_plot_on_the_canvas() {
+        let (w, h) = (6.0 * 72.0, 4.0 * 72.0);
+        let inner = w - 2.0 * PADDING;
+        let (wide, narrow) = ("W".repeat(500), "V".repeat(500));
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            let plot = category_plot(theme, [&wide, "Q2", &narrow]);
+            assert!(plot.x >= 0.0 && plot.right() <= w, "{plot:?}");
+            assert!(plot.y >= 0.0 && plot.bottom() <= h, "{plot:?}");
+            assert!(plot.width >= 0.5 * inner - 1e-9, "{plot:?}");
+        }
+    }
+
+    #[test]
+    fn end_label_reservation_uses_tick_positions() {
+        // Category end ticks sit at band centers, a sixth of the plot in from each edge, so
+        // these labels need (almost) no reservation.
+        let names = [
+            "First quarter of the year",
+            "Q2",
+            "Last quarter of the year",
+        ];
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            let reserved = category_plot(theme.clone(), names).width;
+            let free = category_plot(theme, ["A", "B", "C"]).width;
+            assert!(reserved >= 0.98 * free, "{reserved} vs {free}");
+        }
+    }
+
+    #[test]
+    fn log_end_ticks_do_not_crowd_their_neighbors() {
+        // The domain ends 1e-300 and 1e300 are not powers of these bases.
+        for base in [2.0, std::f64::consts::E, 999.0] {
+            for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+                let min_gap = 1.2 * f64::from(theme.body_size() * theme.font_scale());
+                let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+                f.add_axes(
+                    ScaleKind::Linear,
+                    ScaleKind::Log {
+                        base: crate::LogBase::new(base).unwrap(),
+                    },
+                )
+                .unwrap()
+                .line(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[1e-300, 1e300],
+                    LineOptions::default(),
+                )
+                .unwrap();
+                let (resolved, layout) = plan_of(&f);
+                let labels = &layout.y_tick_labels;
+                assert!(labels.len() >= 2);
+                assert_eq!(resolved.y.ticks.first().map(|t| t.pos), Some(0.0));
+                assert_eq!(resolved.y.ticks.last().map(|t| t.pos), Some(1.0));
+                for pair in labels.windows(2) {
+                    let gap = (pair[0].y - pair[1].y).abs();
+                    assert!(
+                        gap >= min_gap,
+                        "base {base}: {:?} and {:?} are {gap} pt apart",
+                        pair[0].text,
+                        pair[1].text
+                    );
+                }
+            }
         }
     }
 
