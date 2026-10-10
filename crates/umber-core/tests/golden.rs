@@ -145,7 +145,11 @@ fn assert_golden(name: &str, png_bytes: &[u8]) {
     let dir = golden_dir();
     if std::env::var("UPDATE_GOLDEN").is_ok_and(|v| v == "1") {
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(format!("{name}.png")), png_bytes).unwrap();
+        // Write beside the reference and rename, so an interrupted run never leaves a
+        // truncated reference.
+        let temp = dir.join(format!(".{name}.png.tmp"));
+        std::fs::write(&temp, png_bytes).unwrap();
+        std::fs::rename(&temp, dir.join(format!("{name}.png"))).unwrap();
         return;
     }
     if let Err(message) = compare_golden(name, png_bytes, &dir, &dir) {
