@@ -213,6 +213,8 @@ pub fn license_text(font: Font) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use read_fonts::{FontRef, TableProvider};
+    use skrifa::MetadataProvider;
 
     fn codepoints(ranges: &[(u32, u32)]) -> impl Iterator<Item = u32> + '_ {
         ranges.iter().flat_map(|&(lo, hi)| lo..=hi)
@@ -222,15 +224,16 @@ mod tests {
     fn every_font_parses_and_covers_required_codepoints() {
         for font in Font::ALL {
             for weight in Weight::ALL {
-                let face = ttf_parser::Face::parse(font_bytes(font, weight), 0)
+                let face = FontRef::new(font_bytes(font, weight))
                     .unwrap_or_else(|e| panic!("{font:?} {weight:?}: {e}"));
-                assert!(face.units_per_em() > 0);
+                assert!(face.head().expect("head table").units_per_em() > 0);
+                let charmap = face.charmap();
                 for cp in codepoints(REQUIRED_CODEPOINTS) {
                     let Some(ch) = char::from_u32(cp) else {
                         continue;
                     };
                     assert!(
-                        face.glyph_index(ch).is_some(),
+                        charmap.map(ch).is_some(),
                         "{font:?} {weight:?} lacks U+{cp:04X}"
                     );
                 }
@@ -240,12 +243,13 @@ mod tests {
 
     #[test]
     fn extended_codepoints_are_covered_by_some_bundled_font() {
-        let faces: Vec<_> = Font::ALL
+        let charmaps: Vec<_> = Font::ALL
             .iter()
             .flat_map(|&f| Weight::ALL.iter().map(move |&w| (f, w)))
             .map(|(f, w)| {
-                ttf_parser::Face::parse(font_bytes(f, w), 0)
+                FontRef::new(font_bytes(f, w))
                     .unwrap_or_else(|e| panic!("{f:?} {w:?}: {e}"))
+                    .charmap()
             })
             .collect();
         for cp in codepoints(EXTENDED_CODEPOINTS) {
@@ -253,7 +257,7 @@ mod tests {
                 continue;
             };
             assert!(
-                faces.iter().any(|face| face.glyph_index(ch).is_some()),
+                charmaps.iter().any(|charmap| charmap.map(ch).is_some()),
                 "no bundled font has U+{cp:04X}"
             );
         }
@@ -263,17 +267,17 @@ mod tests {
     fn fallback_codepoint_is_in_no_bundled_font_but_in_the_fixture() {
         for font in Font::ALL {
             for weight in Weight::ALL {
-                let face = ttf_parser::Face::parse(font_bytes(font, weight), 0)
+                let face = FontRef::new(font_bytes(font, weight))
                     .unwrap_or_else(|e| panic!("{font:?} {weight:?}: {e}"));
                 assert!(
-                    face.glyph_index(FALLBACK_TEST_CODEPOINT).is_none(),
+                    face.charmap().map(FALLBACK_TEST_CODEPOINT).is_none(),
                     "{font:?} {weight:?} maps {FALLBACK_TEST_CODEPOINT:?}"
                 );
             }
         }
         let fixture = include_bytes!("../tests/fixtures/fallback-only.ttf");
-        let face = ttf_parser::Face::parse(fixture, 0).expect("fixture parses");
-        assert!(face.glyph_index(FALLBACK_TEST_CODEPOINT).is_some());
+        let face = FontRef::new(fixture).expect("fixture parses");
+        assert!(face.charmap().map(FALLBACK_TEST_CODEPOINT).is_some());
     }
 
     #[test]
