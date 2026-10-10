@@ -22,6 +22,7 @@ pub mod render;
 pub mod scale;
 pub mod scene;
 pub mod text;
+pub mod theme;
 pub mod ticks;
 
 pub use color::{Alpha, ColorSpec, Rgba};
@@ -38,6 +39,7 @@ pub use scene::{
     StrokeStyle, TextItem,
 };
 pub use text::{FontLibrary, TextLayout, TextStyle};
+pub use theme::{AreaFill, Dash, GridLines, LegendStyle, Marker, Theme, TickLabelPlacement};
 pub use ticks::Tick;
 
 /// The version of this crate, as written in `Cargo.toml`.
