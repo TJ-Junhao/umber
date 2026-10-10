@@ -100,7 +100,7 @@ pub(super) struct AxisMap {
 
 impl AxisMap {
     /// The map of the x axis `axis` onto `plot`.
-    pub(super) fn x(axis: &ResolvedAxis, plot: Area) -> AxisMap {
+    fn x(axis: &ResolvedAxis, plot: Area) -> AxisMap {
         let (lo, hi) = axis_domain(axis);
         AxisMap {
             lo,
@@ -111,7 +111,7 @@ impl AxisMap {
     }
 
     /// The map of the y axis `axis` onto `plot`, bottom up.
-    pub(super) fn y(axis: &ResolvedAxis, plot: Area) -> AxisMap {
+    fn y(axis: &ResolvedAxis, plot: Area) -> AxisMap {
         let (lo, hi) = axis_domain(axis);
         AxisMap {
             lo,
@@ -162,7 +162,7 @@ pub(super) fn axis_x(axis: &ResolvedAxis, x: &AxisData) -> Vec<f64> {
             .map(|name| scale.index_of(name).map_or(f64::NAN, |i| scale.center(i)))
             .collect(),
         // The model rejects data of the wrong kind for the axis.
-        (_, data) => vec![f64::NAN; data_len(data)],
+        (_, data) => vec![f64::NAN; data.len()],
     }
 }
 
@@ -188,12 +188,5 @@ fn continuous_values(scale: &ContinuousScale, values: &[f64]) -> Vec<f64> {
                 .map(|&v| if v > 0.0 { log_offset(v, lo) } else { f64::NAN })
                 .collect()
         }
-    }
-}
-
-fn data_len(data: &AxisData) -> usize {
-    match data {
-        AxisData::Numbers(v) => v.len(),
-        AxisData::Categories(v) => v.len(),
     }
 }

@@ -1683,17 +1683,14 @@ mod record {
         out
     }
 
-    /// The observable state of a figure: its size, its theme's palette in order, the resolved
-    /// mark colors and its axes.
+    /// The observable state of a figure: its size, its theme's palette in order and its axes.
     pub fn figure(f: &Figure) -> String {
         let palette: Vec<String> = f.theme().palette().iter().map(|c| rgba(*c)).collect();
-        let colors: Vec<String> = f.resolved_colors().iter().map(|c| rgba(*c)).collect();
         let mut out = format!(
-            "  figure width_in={} height_in={} palette=[{}] resolved_colors=[{}]\n",
+            "  figure width_in={} height_in={} palette=[{}]\n",
             f64(f.width_in()),
             f64(f.height_in()),
-            palette.join(","),
-            colors.join(",")
+            palette.join(",")
         );
         match f.axes() {
             Some(a) => out.push_str(&axes(a)),
@@ -2684,25 +2681,6 @@ fn constant_cases() -> String {
     }
     let weights: Vec<&str> = Weight::ALL.into_iter().map(record::weight).collect();
     let _ = writeln!(out, "Weight::ALL {}", weights.join(","));
-    let ranges = |r: &[(u32, u32)]| {
-        let parts: Vec<String> = r.iter().map(|(a, b)| format!("{a:x}-{b:x}")).collect();
-        parts.join(",")
-    };
-    let _ = writeln!(
-        out,
-        "REQUIRED_CODEPOINTS {}",
-        ranges(umber_core::fonts::REQUIRED_CODEPOINTS)
-    );
-    let _ = writeln!(
-        out,
-        "EXTENDED_CODEPOINTS {}",
-        ranges(umber_core::fonts::EXTENDED_CODEPOINTS)
-    );
-    let _ = writeln!(
-        out,
-        "FALLBACK_TEST_CODEPOINT {:x}",
-        u32::from(umber_core::fonts::FALLBACK_TEST_CODEPOINT)
-    );
     out
 }
 

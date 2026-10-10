@@ -25,7 +25,6 @@ use super::normalize::{
     normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
 use crate::color::Rgba;
-use crate::fonts::Weight;
 use crate::geometry::{Path, Point};
 use crate::scene::{
     FillRule, Item, LineCap, LineJoin, MAX_GROUP_DEPTH, Paint, Rect, Scene, StrokeStyle, TextItem,
@@ -36,7 +35,7 @@ use crate::scene::{
 /// With [`SvgText::Outlines`] text is drawn as filled glyph outlines. With
 /// [`SvgText::Editable`] it is written as `<text>` elements that name the font family.
 /// Everything that cannot be drawn is skipped, so the result always parses as XML. Content of
-/// groups nested deeper than [`MAX_GROUP_DEPTH`](crate::scene::MAX_GROUP_DEPTH) is omitted.
+/// groups nested deeper than [`MAX_GROUP_DEPTH`] is omitted.
 ///
 /// # Examples
 ///
@@ -376,10 +375,7 @@ impl Writer {
                 if !t.style.size.is_finite() || t.style.size <= 0.0 {
                     return;
                 }
-                let weight = match t.style.weight {
-                    Weight::Regular => 400,
-                    Weight::SemiBold => 600,
-                };
+                let weight = t.style.weight.numeric();
                 let mut attrs = String::new();
                 let _ = write!(
                     attrs,
@@ -444,7 +440,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fonts::Font;
+    use crate::fonts::{Font, Weight};
     use crate::scene::{GradientStop, LinearGradient};
     use crate::text::{FontLibrary, TextStyle};
 
@@ -643,6 +639,39 @@ mod tests {
             Some("'Inter', sans-serif")
         );
         assert_eq!(texts[0].attribute("font-weight"), Some("400"));
+    }
+
+    #[test]
+    fn editable_text_names_every_family_and_css_weight() {
+        for font in Font::ALL {
+            for weight in Weight::ALL {
+                let mut scene = Scene::new(100.0, 40.0, WHITE);
+                let style = TextStyle {
+                    font,
+                    weight,
+                    size: 12.0,
+                    tabular_figures: false,
+                };
+                scene.push_text(FontLibrary::global(), "Ab", style, p(5.0, 20.0), RED);
+                let editable = render_svg(&scene, SvgText::Editable);
+                let doc = parse(&editable);
+                let text = doc
+                    .descendants()
+                    .find(|n| n.has_tag_name("text"))
+                    .unwrap_or_else(|| panic!("{font:?} {weight:?}: no text in {editable}"));
+                let family = format!("'{}', {}", font.family_name(), font.generic_family());
+                let css = match weight {
+                    Weight::Regular => "400",
+                    Weight::SemiBold => "600",
+                };
+                assert_eq!(text.attribute("font-family"), Some(family.as_str()));
+                assert_eq!(
+                    text.attribute("font-weight"),
+                    Some(css),
+                    "{font:?} {weight:?}"
+                );
+            }
+        }
     }
 
     #[test]

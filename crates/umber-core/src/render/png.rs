@@ -100,24 +100,24 @@ fn rasterize(scene: &Scene, dpi: u32) -> Result<sk::Pixmap> {
 }
 
 fn too_large(what: &str) -> Error {
-    Error::Style {
-        context: CONTEXT,
-        message: format!("{what}; use a smaller figure size or a lower dpi."),
-    }
+    Error::style(
+        CONTEXT,
+        format!("{what}; use a smaller figure size or a lower dpi."),
+    )
 }
 
 fn pixel_size(scene: &Scene, dpi: u32) -> Result<(u32, u32)> {
     if !(MIN_DPI..=MAX_DPI).contains(&dpi) {
-        return Err(Error::Style {
-            context: CONTEXT,
-            message: format!("dpi {dpi} is out of range; use a value from {MIN_DPI} to {MAX_DPI}."),
-        });
+        return Err(Error::style(
+            CONTEXT,
+            format!("dpi {dpi} is out of range; use a value from {MIN_DPI} to {MAX_DPI}."),
+        ));
     }
     if !scene.width.is_finite() || !scene.height.is_finite() {
-        return Err(Error::Style {
-            context: CONTEXT,
-            message: "the figure size is not finite; use a finite width and height.".into(),
-        });
+        return Err(Error::style(
+            CONTEXT,
+            "the figure size is not finite; use a finite width and height.",
+        ));
     }
     let px = |size: f32| (f64::from(size) / 72.0 * f64::from(dpi)).round().max(1.0);
     let (w, h) = (px(scene.width), px(scene.height));
@@ -727,9 +727,11 @@ fn blit_over(
 fn encode(pixmap: sk::Pixmap, dpi: u32) -> Result<Vec<u8>> {
     let (width, height) = (pixmap.width(), pixmap.height());
     let data = pixmap.take_demultiplied();
-    let fail = |e: ::png::EncodingError| Error::Style {
-        context: CONTEXT,
-        message: format!("the PNG could not be encoded ({e}); try a smaller figure."),
+    let fail = |e: ::png::EncodingError| {
+        Error::style(
+            CONTEXT,
+            format!("the PNG could not be encoded ({e}); try a smaller figure."),
+        )
     };
     let mut out = Vec::new();
     let mut encoder = ::png::Encoder::new(&mut out, width, height);

@@ -3,9 +3,9 @@
 //! A [`Figure`] holds one [`Axes`], which holds [`Mark`]s. Every input is validated at the call
 //! that receives it, so a model that exists is always drawable. Marks hold copies of their data
 //! that never change, so clones of a figure share them.
-//! Colors stay as [`ColorSpec`](crate::ColorSpec)s until [`Figure::resolved_colors`] resolves them against the
+//! Colors stay as [`ColorSpec`](crate::ColorSpec)s until rendering resolves them against the
 //! theme's palette. [`Figure::to_scene`], [`Figure::to_png`] and [`Figure::to_svg`] run the
-//! render pipeline: resolve scales and ticks, lay out the axes, then draw.
+//! render pipeline: resolve scales, ticks and mark colors, lay out the axes, then draw.
 //!
 //! # Examples
 //!
@@ -27,35 +27,9 @@ pub use crate::model::{
 
 use crate::render::{SvgText, render_png, render_svg};
 use crate::scene::Scene;
-use crate::{FontLibrary, Result, Rgba, pipeline, resolve};
+use crate::{FontLibrary, Result, pipeline};
 
 impl Figure {
-    /// Each mark's color, resolved against the theme's palette, in mark order. `Auto` colors
-    /// take palette slots in series order; `Palette` and `Fixed` colors do not consume a slot.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::figure::{AxisData, LineOptions};
-    /// use umber_core::{Figure, ScaleKind, Theme};
-    ///
-    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// axes.line(AxisData::Numbers(vec![0.0]), &[1.0], LineOptions::default())?;
-    /// assert_eq!(figure.resolved_colors(), vec![figure.theme().palette()[0]]);
-    /// # Ok::<(), umber_core::Error>(())
-    /// ```
-    #[must_use]
-    pub fn resolved_colors(&self) -> Vec<Rgba> {
-        let Some(axes) = self.axes() else {
-            return Vec::new();
-        };
-        resolve::resolve_marks(axes.marks(), self.theme().palette())
-            .into_iter()
-            .map(|resolved| resolved.color)
-            .collect()
-    }
-
     /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.
     /// The scene is `width × 72` by `height × 72` pt on the theme background. It holds the
     /// axes chrome as one unclipped group, followed by the visible marks, in insertion order,
@@ -123,7 +97,19 @@ impl Figure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Alpha, ColorSpec, ScaleKind, Theme};
+    use crate::{Alpha, ColorSpec, Rgba, ScaleKind, Theme, resolve};
+
+    /// Each mark's color, resolved against the theme's palette, in mark order. `Auto` colors
+    /// take palette slots in series order; `Palette` and `Fixed` colors do not consume a slot.
+    fn resolved_colors(figure: &Figure) -> Vec<Rgba> {
+        let Some(axes) = figure.axes() else {
+            return Vec::new();
+        };
+        resolve::resolve_marks(axes.marks(), figure.theme().palette())
+            .into_iter()
+            .map(|resolved| resolved.color)
+            .collect()
+    }
 
     fn figure() -> Figure {
         Figure::new(6.0, 4.0, Theme::pigment()).unwrap()
@@ -161,7 +147,7 @@ mod tests {
             .unwrap();
         }
         assert_eq!(
-            f.resolved_colors(),
+            resolved_colors(&f),
             vec![palette[0], fixed, palette[1], palette[5], palette[2]]
         );
     }
@@ -175,8 +161,8 @@ mod tests {
             .unwrap()
             .line(nums(&[0.0]), &[1.0], LineOptions::default())
             .unwrap();
-        assert_eq!(f.resolved_colors(), vec![palette[0], palette[1]]);
-        assert!(figure().resolved_colors().is_empty());
+        assert_eq!(resolved_colors(&f), vec![palette[0], palette[1]]);
+        assert!(resolved_colors(&figure()).is_empty());
     }
 
     #[test]
@@ -194,7 +180,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(f.resolved_colors(), vec![first.with_alpha(alpha)]);
-        assert_eq!(f.resolved_colors()[0].a, alpha.to_u8());
+        assert_eq!(resolved_colors(&f), vec![first.with_alpha(alpha)]);
+        assert_eq!(resolved_colors(&f)[0].a, alpha.to_u8());
     }
 }

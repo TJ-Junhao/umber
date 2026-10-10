@@ -112,11 +112,7 @@ fn bundled_slot(font: Font, weight: Weight) -> usize {
         Font::Inter => 3,
         Font::JetBrainsMono => 4,
     };
-    let weight = match weight {
-        Weight::Regular => 0,
-        Weight::SemiBold => 1,
-    };
-    family * Weight::ALL.len() + weight
+    family * Weight::ALL.len() + weight.slot()
 }
 
 /// Fallback faces parsed for the duration of one layout call.
@@ -514,5 +510,25 @@ mod tests {
         slots.dedup();
         assert_eq!(slots.len(), BUNDLED_COUNT);
         assert!(lib.bundled.iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn bundled_slots_are_family_major_then_weight() {
+        let expected = [
+            (Font::SourceSerif4, Weight::Regular, 0),
+            (Font::SourceSerif4, Weight::SemiBold, 1),
+            (Font::IbmPlexSans, Weight::Regular, 2),
+            (Font::IbmPlexSans, Weight::SemiBold, 3),
+            (Font::Geist, Weight::Regular, 4),
+            (Font::Geist, Weight::SemiBold, 5),
+            (Font::Inter, Weight::Regular, 6),
+            (Font::Inter, Weight::SemiBold, 7),
+            (Font::JetBrainsMono, Weight::Regular, 8),
+            (Font::JetBrainsMono, Weight::SemiBold, 9),
+        ];
+        assert_eq!(expected.len(), BUNDLED_COUNT);
+        for (font, weight, slot) in expected {
+            assert_eq!(bundled_slot(font, weight), slot, "{font:?} {weight:?}");
+        }
     }
 }

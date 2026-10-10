@@ -48,6 +48,32 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
+impl Error {
+    /// An [`Error::Data`] detected in `context`.
+    pub(crate) fn data(context: &'static str, message: impl Into<String>) -> Error {
+        Error::Data {
+            context,
+            message: message.into(),
+        }
+    }
+
+    /// An [`Error::Style`] detected in `context`.
+    pub(crate) fn style(context: &'static str, message: impl Into<String>) -> Error {
+        Error::Style {
+            context,
+            message: message.into(),
+        }
+    }
+
+    /// An [`Error::Usage`] detected in `context`.
+    pub(crate) fn usage(context: &'static str, message: impl Into<String>) -> Error {
+        Error::Usage {
+            context,
+            message: message.into(),
+        }
+    }
+}
+
 /// Shorthand for `std::result::Result<T, umber_core::Error>`.
 ///
 /// # Examples

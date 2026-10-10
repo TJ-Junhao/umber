@@ -6,9 +6,71 @@
 //!
 //! # Examples
 //!
+//! A figure with one axes, a line and a scatter, written as SVG and as PNG:
+//!
 //! ```
-//! assert!(!umber_core::VERSION.is_empty());
+//! use umber_core::{AxisData, ColorSpec, Figure, LineOptions, Rgba, ScaleKind, ScatterOptions};
+//! use umber_core::{SvgText, Theme};
+//!
+//! let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+//! figure
+//!     .add_axes(ScaleKind::Linear, ScaleKind::Linear)?
+//!     .title("Signal")
+//!     .xlabel("time (s)")
+//!     .ylabel("level")
+//!     .line(
+//!         AxisData::Numbers(vec![0.0, 1.0, 2.0, 3.0]),
+//!         &[1.0, 3.0, 2.0, 4.0],
+//!         LineOptions::default(),
+//!     )?
+//!     .scatter(
+//!         AxisData::Numbers(vec![0.5, 1.5, 2.5]),
+//!         &[2.0, 2.5, 3.5],
+//!         ScatterOptions {
+//!             color: ColorSpec::Fixed(Rgba::hex("#3366b8")?),
+//!             ..ScatterOptions::default()
+//!         },
+//!     )?;
+//!
+//! let svg = figure.to_svg(SvgText::Editable);
+//! assert!(svg.starts_with("<svg") && svg.contains(">Signal</text>"));
+//!
+//! let png = figure.to_png(144)?;
+//! assert_eq!(&png[1..4], b"PNG");
+//! # Ok::<(), umber_core::Error>(())
 //! ```
+//!
+//! # API surface
+//!
+//! **Figure API.** The items the Python bindings build on, and the usual entry point from
+//! Rust:
+//!
+//! - the figure model: [`Figure`] (size, theme and axes getters, [`Figure::add_axes`],
+//!   [`Figure::to_png`], [`Figure::to_svg`]), [`Axes`] (text and limit setters, mark methods
+//!   and their getters), [`AxisData`], [`LineOptions`] and [`ScatterOptions`], and the
+//!   read-only [`Mark`], [`LineMark`] and [`ScatterMark`] that [`Axes::marks`] returns;
+//! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
+//!   [`Marker`], [`AreaFill`], [`GridLines`], [`LegendStyle`] and [`TickLabelPlacement`];
+//! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
+//! - scales: [`ScaleKind`] and [`LogBase`];
+//! - output: [`SvgText`];
+//! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
+//!
+//! **Advanced Rust API.** Lower-level building blocks for direct Rust use. They are public and
+//! documented, but the Python package does not expose them:
+//!
+//! - scenes and geometry: [`Scene`], its records ([`Item`], [`TextItem`], [`Paint`],
+//!   [`StrokeStyle`] and the rest of [`scene`]), [`Path`], [`PathVerb`] and [`Point`];
+//! - rendering a scene: [`render_png`](render::render_png) and
+//!   [`render_svg`](render::render_svg), and [`Figure::to_scene`] to get a figure's scene;
+//! - text: [`FontLibrary`], [`TextStyle`], [`TextLayout`] and [`Weight`];
+//! - the bundled fonts: [`fonts::font_bytes`] and [`fonts::license_text`];
+//! - scale and tick algorithms: [`ContinuousScale`], [`CategoryScale`], [`Transform`],
+//!   [`Tick`], the numeric limits [`MAX_MAGNITUDE`] and [`MIN_LOG_VALUE`], and the M4
+//!   downsampling of [`m4_indices`].
+//!
+//! Everything else, such as scale resolution, layout, drawing and mark color resolution, is
+//! internal and may change in any release.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

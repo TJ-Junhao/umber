@@ -27,7 +27,7 @@ pub enum AxisData {
 
 impl AxisData {
     /// The number of values.
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         match self {
             AxisData::Numbers(v) => v.len(),
             AxisData::Categories(v) => v.len(),

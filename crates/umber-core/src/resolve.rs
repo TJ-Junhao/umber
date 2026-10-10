@@ -10,7 +10,7 @@
 //! Mark colors are resolved here too: each mark's [`ColorSpec`] against the theme's palette.
 
 use crate::model::{Axes, AxisData, Mark};
-use crate::{CategoryScale, ColorSpec, ContinuousScale, Rgba, ScaleKind, Tick, Transform};
+use crate::{CategoryScale, ColorSpec, ContinuousScale, Rgba, Tick, Transform};
 
 /// The context of errors that cannot happen here: the model validated every input already.
 const CONTEXT: &str = "Figure.to_scene()";
@@ -34,7 +34,9 @@ impl NormalizedPos {
     /// The low end of the axis.
     pub const LOW: NormalizedPos = NormalizedPos(0.0);
 
-    /// The position `share` of the axis length from the low end.
+    /// The position `share` of the axis length from the low end. `share` is stored as given:
+    /// neither its range nor its finiteness is checked, so positions extrapolated beyond the
+    /// axis ends and NaN pass through unchanged.
     pub fn new(share: f64) -> NormalizedPos {
         NormalizedPos(share)
     }
@@ -124,14 +126,6 @@ fn extent<'a>(values: impl IntoIterator<Item = &'a f64>) -> Option<(f64, f64)> {
         })
 }
 
-fn transform_of(kind: ScaleKind) -> Option<Transform> {
-    match kind {
-        ScaleKind::Linear => Some(Transform::Linear),
-        ScaleKind::Log { base } => Some(Transform::Log(base)),
-        _ => None,
-    }
-}
-
 /// A continuous axis: the scale of the explicit limits when set; otherwise the empty-data
 /// range (0 to 1, or 1 to 10 on log) when there is no finite data; otherwise the data extent,
 /// fitted as `auto` says. Nice axes take the ticks that produced their limits; the others take
@@ -200,7 +194,7 @@ fn categories(marks: &[Mark]) -> CategoryScale {
 /// Resolves both axes of `axes` for about `x_target` and `y_target` ticks.
 pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved {
     let marks = axes.marks();
-    let x = match transform_of(axes.x_scale()) {
+    let x = match axes.x_scale().transform() {
         Some(transform) => {
             let data = extent(marks.iter().flat_map(|mark| match mark_data(mark).0 {
                 AxisData::Numbers(values) => values.as_slice(),
@@ -222,7 +216,7 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
             }
         }
     };
-    let (y, baseline) = match transform_of(axes.y_scale()) {
+    let (y, baseline) = match axes.y_scale().transform() {
         Some(transform) => {
             let data = extent(marks.iter().flat_map(|mark| mark_data(mark).1));
             let axis = continuous(
@@ -289,7 +283,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
 mod tests {
     use super::*;
     use crate::model::{Figure, LineOptions, ScatterOptions};
-    use crate::{LogBase, Theme};
+    use crate::{LogBase, ScaleKind, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
         AxisData::Numbers(v.to_vec())
