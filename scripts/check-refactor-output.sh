@@ -3,11 +3,13 @@
 #
 # The corpus lives in crates/umber-core/tests/support/refactor_cases.rs and is rendered by
 # crates/umber-core/examples/refactor_outputs.rs. For every case the gate hashes
-#   scene/   the Scene debug serialization (shortest round-trip floats, so equal text means
-#            equal bits; NaN payloads are not distinguished)
+#   scene/   the Scene in a fixed-schema serialization with floats as to_bits(), so equal text
+#            means equal bits and NaN payloads are distinguished
 #   svg/     the SVG bytes, in both text modes
 #   png/     the encoded PNG bytes at 72 and 200 dpi, or the error text
-#   errors/  Display and Debug text of errors from public APIs
+#   errors/  category, context, message and Display text of errors from public APIs, plus the
+#            state of the object after a failed call
+#   api/     theme getters, public constants and text-layout metrics
 # and compares the hashes with a baseline. Any difference fails the gate.
 #
 # Usage:
