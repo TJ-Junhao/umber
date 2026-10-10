@@ -3,23 +3,10 @@
 
 use super::axis_data::AxisData;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
-use crate::{ContinuousScale, Error, Result, ScaleKind, Transform};
+use crate::{ContinuousScale, Error, Result, ScaleKind};
 
 /// The largest accepted figure side, in inches.
 const MAX_FIGURE_IN: f64 = 200.0;
-
-/// Which axis a value belongs to, for messages.
-fn transform_of(kind: ScaleKind) -> Option<Transform> {
-    match kind {
-        ScaleKind::Linear => Some(Transform::Linear),
-        ScaleKind::Log { base } => Some(Transform::Log(base)),
-        _ => None,
-    }
-}
-
-fn data_error(context: &'static str, message: String) -> Error {
-    Error::Data { context, message }
-}
 
 /// Checks numeric values of the axis `name` (`"x"` or `"y"`) against its scale kind.
 fn check_numbers(context: &'static str, name: &str, values: &[f64], kind: ScaleKind) -> Result<()> {
@@ -29,26 +16,26 @@ fn check_numbers(context: &'static str, name: &str, values: &[f64], kind: ScaleK
             continue;
         }
         if v.is_infinite() {
-            return Err(data_error(
+            return Err(Error::data(
                 context,
                 format!("{name}[{i}] is {v}; values must be finite (NaN marks a gap)."),
             ));
         }
         if v.abs() > MAX_MAGNITUDE {
-            return Err(data_error(
+            return Err(Error::data(
                 context,
                 format!("{name}[{i}] is {v:e}; magnitudes must not exceed {MAX_MAGNITUDE:e}."),
             ));
         }
         if log {
             if v <= 0.0 {
-                return Err(data_error(
+                return Err(Error::data(
                     context,
                     format!("{name}[{i}] is {v} on a log axis; values must be positive."),
                 ));
             }
             if v < MIN_LOG_VALUE {
-                return Err(data_error(
+                return Err(Error::data(
                     context,
                     format!(
                         "{name}[{i}] is {v:e} on a log axis; values must be at least {MIN_LOG_VALUE:e}."
@@ -70,7 +57,7 @@ pub(super) fn check_series(
     y: &[f64],
 ) -> Result<()> {
     if x.len() != y.len() {
-        return Err(data_error(
+        return Err(Error::data(
             context,
             format!(
                 "x has {} values but y has {}; x and y must have the same length.",
@@ -85,23 +72,22 @@ pub(super) fn check_series(
             check_numbers(context, "x", values, kind)?;
         }
         (AxisData::Numbers(_), _) => {
-            return Err(data_error(
+            return Err(Error::data(
                 context,
-                "x holds numbers but the x axis is a category axis; pass category names.".into(),
+                "x holds numbers but the x axis is a category axis; pass category names.",
             ));
         }
         (AxisData::Categories(_), _) => {
-            return Err(data_error(
+            return Err(Error::data(
                 context,
-                "x holds category names but the x axis is not a category axis; pass numbers."
-                    .into(),
+                "x holds category names but the x axis is not a category axis; pass numbers.",
             ));
         }
     }
     if y_kind == ScaleKind::Category {
-        return Err(data_error(
+        return Err(Error::data(
             context,
-            "y holds numbers but the y axis is a category axis; use a linear or log y axis.".into(),
+            "y holds numbers but the y axis is a category axis; use a linear or log y axis.",
         ));
     }
     check_numbers(context, "y", y, y_kind)
@@ -115,11 +101,11 @@ pub(super) fn check_limits(
     low: f64,
     high: f64,
 ) -> Result<ContinuousScale> {
-    let Some(transform) = transform_of(kind) else {
-        return Err(Error::Usage {
+    let Some(transform) = kind.transform() else {
+        return Err(Error::usage(
             context,
-            message: "this is a category axis; limits apply to linear and log axes only.".into(),
-        });
+            "this is a category axis; limits apply to linear and log axes only.",
+        ));
     };
     ContinuousScale::new(transform, low, high, context)
 }
@@ -128,12 +114,12 @@ pub(super) fn check_limits(
 pub(super) fn check_figure_size(width_in: f64, height_in: f64) -> Result<()> {
     for (name, v) in [("width", width_in), ("height", height_in)] {
         if !(v.is_finite() && v > 0.0 && v <= MAX_FIGURE_IN) {
-            return Err(Error::Style {
-                context: "Figure()",
-                message: format!(
+            return Err(Error::style(
+                "Figure()",
+                format!(
                     "{name} is {v}; it must be finite, above 0 and at most {MAX_FIGURE_IN} inches."
                 ),
-            });
+            ));
         }
     }
     Ok(())

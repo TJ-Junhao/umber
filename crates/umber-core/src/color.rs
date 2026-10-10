@@ -170,9 +170,11 @@ impl Rgba {
     /// assert!(umber_core::Rgba::hex("#c45").is_err());
     /// ```
     pub fn hex(code: &str) -> Result<Rgba> {
-        let bad = || Error::Style {
-            context: "Color.hex()",
-            message: format!("{code:?} is not a hex color; {HEX_HINT}"),
+        let bad = || {
+            Error::style(
+                "Color.hex()",
+                format!("{code:?} is not a hex color; {HEX_HINT}"),
+            )
         };
         let digits = code.strip_prefix('#').ok_or_else(bad)?;
         if !(digits.len() == 6 || digits.len() == 8)
@@ -207,9 +209,11 @@ impl Rgba {
     /// ```
     pub fn from_ints(r: i64, g: i64, b: i64) -> Result<Rgba> {
         let channel = |name: &str, v: i64| -> Result<u8> {
-            u8::try_from(v).map_err(|_| Error::Style {
-                context: "Color.rgb()",
-                message: format!("{name} is {v}; each channel must be between 0 and 255."),
+            u8::try_from(v).map_err(|_| {
+                Error::style(
+                    "Color.rgb()",
+                    format!("{name} is {v}; each channel must be between 0 and 255."),
+                )
             })
         };
         Ok(Rgba::opaque(
@@ -287,10 +291,10 @@ impl Alpha {
         if (0.0..=1.0).contains(&a) {
             Ok(Alpha(a as f32))
         } else {
-            Err(Error::Style {
-                context: "Color.alpha()",
-                message: format!("alpha is {a}; alpha must be between 0.0 and 1.0."),
-            })
+            Err(Error::style(
+                "Color.alpha()",
+                format!("alpha is {a}; alpha must be between 0.0 and 1.0."),
+            ))
         }
     }
 

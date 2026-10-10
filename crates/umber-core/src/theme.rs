@@ -191,10 +191,6 @@ fn palette_of(hexes: [u32; 8]) -> Vec<Rgba> {
     hexes.into_iter().map(rgb).collect()
 }
 
-fn style(context: &'static str, message: String) -> Error {
-    Error::Style { context, message }
-}
-
 /// The range a numeric token must fall in.
 #[derive(Clone, Copy)]
 enum Bound {
@@ -226,7 +222,7 @@ fn check_number(context: &'static str, name: &str, value: f64, bound: Bound) -> 
     if ok && value.is_finite() && narrowed.is_finite() {
         Ok(narrowed)
     } else {
-        Err(style(
+        Err(Error::style(
             context,
             format!("{name} is {value}; {name} must be {required}."),
         ))
@@ -696,7 +692,7 @@ impl Theme {
     /// ```
     pub fn with_palette(&self, colors: &[Rgba]) -> Result<Theme> {
         if colors.is_empty() || colors.len() > MAX_PALETTE {
-            return Err(style(
+            return Err(Error::style(
                 "Theme.with_palette()",
                 format!(
                     "palette has {} colors; a palette needs 1 to {MAX_PALETTE} colors.",

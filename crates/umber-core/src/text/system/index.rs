@@ -89,20 +89,6 @@ fn normalize(name: &str) -> String {
         .collect()
 }
 
-fn target_weight(weight: Weight) -> u16 {
-    match weight {
-        Weight::Regular => 400,
-        Weight::SemiBold => 600,
-    }
-}
-
-fn weight_slot(weight: Weight) -> usize {
-    match weight {
-        Weight::Regular => 0,
-        Weight::SemiBold => 1,
-    }
-}
-
 /// One indexed system font face.
 #[derive(Debug)]
 pub(in crate::text) struct IndexedFace {
@@ -429,8 +415,9 @@ pub(in crate::text) struct FaceIndex {
     faces: Vec<IndexedFace>,
     /// Normalized family name to faces, for the ranked lists.
     by_family: HashMap<String, Vec<usize>>,
-    /// Every face sorted by family, then by [`IndexedFace::rank`]; one order per weight.
-    ordered: [Vec<usize>; 2],
+    /// Every face sorted by family, then by [`IndexedFace::rank`]; one order per weight, at
+    /// [`Weight::slot`].
+    ordered: [Vec<usize>; Weight::ALL.len()],
     /// `cmap` segments and groups visited while building the index.
     #[cfg_attr(not(test), allow(dead_code))]
     visited: usize,
@@ -536,7 +523,7 @@ impl FaceIndex {
             }
         }
         let order = |weight: Weight| {
-            let target = target_weight(weight);
+            let target = weight.numeric();
             let mut order: Vec<usize> = (0..faces.len()).collect();
             order.sort_by(|&a, &b| match (faces.get(a), faces.get(b)) {
                 (Some(fa), Some(fb)) => {
@@ -546,7 +533,7 @@ impl FaceIndex {
             });
             order
         };
-        let ordered = [order(Weight::Regular), order(Weight::SemiBold)];
+        let ordered = Weight::ALL.map(order);
         FaceIndex {
             db: Arc::new(db),
             faces,
@@ -591,7 +578,7 @@ impl FaceIndex {
         mut accept: impl FnMut(usize) -> Verdict,
     ) -> Option<usize> {
         let cp = u32::from(c);
-        let target = target_weight(weight);
+        let target = weight.numeric();
         let covers = |i: &usize| self.faces.get(*i).is_some_and(|f| f.covers(cp));
         let mut tried: HashSet<usize> = HashSet::new();
         for name in script_families(c).iter().chain(GENERIC) {
@@ -613,7 +600,7 @@ impl FaceIndex {
                 }
             }
         }
-        let ordered = self.ordered.get(weight_slot(weight))?;
+        let ordered = self.ordered.get(weight.slot())?;
         for face in ordered.iter().copied().filter(covers) {
             if !tried.contains(&face) {
                 match accept(face) {

@@ -123,22 +123,34 @@ impl Weight {
     /// assert!(Weight::ALL.contains(&Weight::SemiBold));
     /// ```
     pub const ALL: [Weight; 2] = [Weight::Regular, Weight::SemiBold];
+
+    /// The position of this weight in [`Weight::ALL`]: 0 for Regular, 1 for SemiBold. Tables
+    /// with one entry per weight are indexed by it.
+    pub(crate) fn slot(self) -> usize {
+        match self {
+            Weight::Regular => 0,
+            Weight::SemiBold => 1,
+        }
+    }
+
+    /// The numeric weight, as CSS `font-weight` and the OpenType `usWeightClass` use it: 400
+    /// for Regular, 600 for SemiBold.
+    pub(crate) fn numeric(self) -> u16 {
+        match self {
+            Weight::Regular => 400,
+            Weight::SemiBold => 600,
+        }
+    }
 }
 
 /// Code points (inclusive ranges) that every bundled font covers.
 ///
 /// This is Basic Latin and Latin-1 Supplement (without U+00AD, the soft hyphen), the en and em
 /// dashes, curly quotes, bullet, ellipsis, per mille, single guillemets, the euro sign and the
-/// minus sign.
-///
-/// # Examples
-///
-/// ```
-/// use umber_core::fonts::REQUIRED_CODEPOINTS;
-///
-/// assert!(REQUIRED_CODEPOINTS.iter().any(|&(lo, hi)| lo <= 0x2212 && 0x2212 <= hi));
-/// ```
-pub const REQUIRED_CODEPOINTS: &[(u32, u32)] = &[
+/// minus sign. `scripts/fonts/build_fonts.py` subsets with the same ranges, and the tests check
+/// every bundled file against them.
+#[cfg(test)]
+pub(crate) const REQUIRED_CODEPOINTS: &[(u32, u32)] = &[
     (0x0020, 0x007E),
     (0x00A0, 0x00AC),
     (0x00AE, 0x00FF),
@@ -157,15 +169,9 @@ pub const REQUIRED_CODEPOINTS: &[(u32, u32)] = &[
 ///
 /// At least one bundled font covers every code point listed here; text layout falls back to the
 /// other bundled fonts for the rest. This is Latin Extended-A plus less common punctuation.
-///
-/// # Examples
-///
-/// ```
-/// use umber_core::fonts::EXTENDED_CODEPOINTS;
-///
-/// assert!(EXTENDED_CODEPOINTS.iter().any(|&(lo, hi)| lo <= 0x0141 && 0x0141 <= hi));
-/// ```
-pub const EXTENDED_CODEPOINTS: &[(u32, u32)] = &[
+/// `scripts/fonts/build_fonts.py` keeps the same ranges.
+#[cfg(test)]
+pub(crate) const EXTENDED_CODEPOINTS: &[(u32, u32)] = &[
     (0x0100, 0x017F),
     (0x2010, 0x2012),
     (0x2015, 0x2017),
@@ -181,15 +187,10 @@ pub const EXTENDED_CODEPOINTS: &[(u32, u32)] = &[
 /// Tests use it with `tests/fixtures/fallback-only.ttf`, a font whose only glyph is mapped to
 /// this code point. Text containing it can only be drawn by a fallback font, which exercises the
 /// fallback path even though every bundled family is complete enough for ordinary text.
-///
-/// # Examples
-///
-/// ```
-/// use umber_core::fonts::FALLBACK_TEST_CODEPOINT;
-///
-/// assert!(('\u{E000}'..='\u{F8FF}').contains(&FALLBACK_TEST_CODEPOINT));
-/// ```
-pub const FALLBACK_TEST_CODEPOINT: char = '\u{E000}';
+/// `scripts/fonts/build_fonts.py` reads this declaration to build that font, so it keeps this
+/// path and form.
+#[cfg(test)]
+pub(crate) const FALLBACK_TEST_CODEPOINT: char = '\u{E000}';
 
 /// The TrueType bytes of a bundled font.
 ///
@@ -317,6 +318,40 @@ mod tests {
         let fixture = include_bytes!("../tests/fixtures/fallback-only.ttf");
         let face = FontRef::new(fixture).expect("fixture parses");
         assert!(face.charmap().map(FALLBACK_TEST_CODEPOINT).is_some());
+    }
+
+    #[test]
+    fn coverage_constants_hold_their_documented_code_points() {
+        let covers =
+            |ranges: &[(u32, u32)], cp: u32| ranges.iter().any(|&(lo, hi)| lo <= cp && cp <= hi);
+        assert!(covers(REQUIRED_CODEPOINTS, 0x2212));
+        assert!(!covers(REQUIRED_CODEPOINTS, 0x00AD));
+        assert!(covers(EXTENDED_CODEPOINTS, 0x0141));
+        assert!(('\u{E000}'..='\u{F8FF}').contains(&FALLBACK_TEST_CODEPOINT));
+    }
+
+    #[test]
+    fn every_font_and_weight_maps_to_its_slot_and_numeric_weight() {
+        let mut seen = 0;
+        for font in Font::ALL {
+            for (index, weight) in Weight::ALL.into_iter().enumerate() {
+                let (slot, numeric) = match weight {
+                    Weight::Regular => (0, 400),
+                    Weight::SemiBold => (1, 600),
+                };
+                assert_eq!(weight.slot(), slot, "{font:?} {weight:?}");
+                assert_eq!(weight.slot(), index, "{font:?} {weight:?}");
+                assert_eq!(weight.numeric(), numeric, "{font:?} {weight:?}");
+                let class = FontRef::new(font_bytes(font, weight))
+                    .unwrap_or_else(|e| panic!("{font:?} {weight:?}: {e}"))
+                    .os2()
+                    .expect("OS/2 table")
+                    .us_weight_class();
+                assert_eq!(class, numeric, "{font:?} {weight:?}");
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, 10);
     }
 
     #[test]

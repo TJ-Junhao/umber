@@ -47,6 +47,17 @@ pub enum ScaleKind {
     Category,
 }
 
+impl ScaleKind {
+    /// The value transform of a linear or log axis; `None` for a category axis.
+    pub(crate) fn transform(self) -> Option<Transform> {
+        match self {
+            ScaleKind::Linear => Some(Transform::Linear),
+            ScaleKind::Log { base } => Some(Transform::Log(base)),
+            ScaleKind::Category => None,
+        }
+    }
+}
+
 /// A logarithm base, guaranteed finite and > 1.
 ///
 /// # Examples
@@ -91,10 +102,10 @@ impl LogBase {
         if base.is_finite() && base > 1.0 {
             Ok(LogBase(base))
         } else {
-            Err(Error::Style {
-                context: "Scale.log()",
-                message: format!("base is {base}; a log base must be finite and greater than 1."),
-            })
+            Err(Error::style(
+                "Scale.log()",
+                format!("base is {base}; a log base must be finite and greater than 1."),
+            ))
         }
     }
 
@@ -296,56 +307,56 @@ impl ContinuousScale {
     /// ```
     pub fn new(transform: Transform, lo: f64, hi: f64, context: &'static str) -> Result<Self> {
         if !(lo.is_finite() && hi.is_finite() && lo < hi) {
-            return Err(Error::Style {
+            return Err(Error::style(
                 context,
-                message: format!(
+                format!(
                     "the limits are {lo} and {hi}; both must be finite and the lower limit must be below the upper limit."
                 ),
-            });
+            ));
         }
         match transform {
             Transform::Linear => {
                 if lo.abs() > MAX_MAGNITUDE || hi.abs() > MAX_MAGNITUDE {
-                    return Err(Error::Style {
+                    return Err(Error::style(
                         context,
-                        message: format!(
+                        format!(
                             "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}."
                         ),
-                    });
+                    ));
                 }
                 if too_narrow(lo, hi) {
-                    return Err(Error::Style {
+                    return Err(Error::style(
                         context,
-                        message: format!(
+                        format!(
                             "the limits {lo} and {hi} are too close; the range must be at least 1e-10 of their magnitude (and at least 1e-290)."
                         ),
-                    });
+                    ));
                 }
             }
             Transform::Log(_) => {
                 if lo <= 0.0 {
-                    return Err(Error::Style {
+                    return Err(Error::style(
                         context,
-                        message: format!(
+                        format!(
                             "the lower limit is {lo}; a log scale needs a positive lower limit."
                         ),
-                    });
+                    ));
                 }
                 if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
-                    return Err(Error::Style {
+                    return Err(Error::style(
                         context,
-                        message: format!(
+                        format!(
                             "the limits are {lo} and {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
                         ),
-                    });
+                    ));
                 }
                 if hi / lo < MIN_LOG_RATIO {
-                    return Err(Error::Style {
+                    return Err(Error::style(
                         context,
-                        message: format!(
+                        format!(
                             "the limits are {lo} and {hi}; the upper limit must be at least a factor of 1.000000001 above the lower limit."
                         ),
-                    });
+                    ));
                 }
             }
         }
@@ -378,53 +389,49 @@ impl ContinuousScale {
         context: &'static str,
     ) -> Result<Self> {
         let Some((lo, hi)) = extent else {
-            let (lo, hi) = match transform {
-                Transform::Linear => (0.0, 1.0),
-                Transform::Log(_) => (1.0, 10.0),
-            };
-            return Self::new(transform, lo, hi, context);
+            return Ok(Self::unit(transform));
         };
         if !(lo.is_finite() && hi.is_finite()) {
-            return Err(Error::Data {
+            return Err(Error::data(
                 context,
-                message: format!("the data range is {lo} to {hi}; it must be finite."),
-            });
+                format!("the data range is {lo} to {hi}; it must be finite."),
+            ));
         }
         if lo > hi {
-            return Err(Error::Data {
+            return Err(Error::data(
                 context,
-                message: format!(
+                format!(
                     "the data range is {lo} to {hi}; the lower bound must not exceed the upper bound."
                 ),
-            });
+            ));
         }
         match transform {
             Transform::Linear => {
                 if lo.abs() > MAX_MAGNITUDE || hi.abs() > MAX_MAGNITUDE {
-                    return Err(Error::Data {
+                    return Err(Error::data(
                         context,
-                        message: format!(
+                        format!(
                             "the data range is {lo} to {hi}; values must not exceed {MAX_MAGNITUDE:e} in magnitude."
                         ),
-                    });
+                    ));
                 }
             }
             Transform::Log(_) => {
                 if lo <= 0.0 {
-                    return Err(Error::Data {
+                    return Err(Error::data(
                         context,
-                        message: format!(
+                        format!(
                             "the data range starts at {lo}; a log scale can only show positive values."
                         ),
-                    });
+                    ));
                 }
                 if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
-                    return Err(Error::Data {
+                    return Err(Error::data(
                         context,
-                        message: format!(
+                        format!(
                             "the data range is {lo} to {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
                         ),
-                    });
+                    ));
                 }
             }
         }
@@ -470,8 +477,9 @@ impl ContinuousScale {
         Self::new(transform, lo, hi, context)
     }
 
-    /// The empty-data scale without a `Result`: `(0, 1)` for linear, `(1, 10)` for log. Equal to
-    /// `from_extent(transform, None, _)`, which cannot fail.
+    /// The empty-data scale: `(0, 1)` for linear, `(1, 10)` for log. Both domains satisfy
+    /// [`ContinuousScale::new`], so this cannot fail; `from_extent(transform, None, _)` returns
+    /// it.
     pub(crate) fn unit(transform: Transform) -> ContinuousScale {
         let (lo, hi) = match transform {
             Transform::Linear => (0.0, 1.0),
@@ -1234,6 +1242,42 @@ mod tests {
         let s = ContinuousScale::new(Transform::Log(LogBase::TEN), 1.0, 1e4, "t").unwrap();
         let labels: Vec<String> = s.ticks(5).into_iter().map(|t| t.label).collect();
         assert_eq!(labels, ["1", "10", "100", "1000", "10000"]);
+    }
+
+    #[test]
+    fn empty_data_scale_is_a_valid_domain_and_the_from_extent_default() {
+        for transform in [
+            Transform::Linear,
+            Transform::Log(LogBase::TEN),
+            Transform::Log(LogBase::new(2.0).unwrap()),
+        ] {
+            let unit = ContinuousScale::unit(transform);
+            let (lo, hi) = unit.domain();
+            assert_eq!(ContinuousScale::new(transform, lo, hi, "t").unwrap(), unit);
+            assert_eq!(
+                ContinuousScale::from_extent(transform, None, "t").unwrap(),
+                unit
+            );
+        }
+        assert_eq!(
+            ContinuousScale::unit(Transform::Linear).domain(),
+            (0.0, 1.0)
+        );
+        assert_eq!(
+            ContinuousScale::unit(Transform::Log(LogBase::TEN)).domain(),
+            (1.0, 10.0)
+        );
+    }
+
+    #[test]
+    fn scale_kind_transform_maps_linear_and_log_and_rejects_category() {
+        let base = LogBase::new(2.0).unwrap();
+        assert_eq!(ScaleKind::Linear.transform(), Some(Transform::Linear));
+        assert_eq!(
+            ScaleKind::Log { base }.transform(),
+            Some(Transform::Log(base))
+        );
+        assert_eq!(ScaleKind::Category.transform(), None);
     }
 
     #[test]

@@ -60,10 +60,10 @@ impl Figure {
     /// ```
     pub fn add_axes(&mut self, x: ScaleKind, y: ScaleKind) -> Result<&mut Axes> {
         if self.axes.is_some() {
-            return Err(Error::Usage {
-                context: "Figure.add_axes()",
-                message: "the figure already has axes; v0.1 supports one axes per figure.".into(),
-            });
+            return Err(Error::usage(
+                "Figure.add_axes()",
+                "the figure already has axes; v0.1 supports one axes per figure.",
+            ));
         }
         Ok(self.axes.insert(Axes::new(x, y)))
     }
