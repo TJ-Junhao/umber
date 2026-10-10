@@ -32,14 +32,13 @@ fn grid_style(theme: &Theme) -> StrokeStyle {
 
 fn text(label: &Label, color: Rgba) -> Item {
     let origin = point(label.x, label.y);
-    Item::Text(TextItem {
-        text: label.text.clone(),
-        style: label.style,
+    Item::Text(TextItem::from_layout(
+        label.text.clone(),
+        label.style,
         origin,
         color,
-        outline: label.layout.outline(origin),
-        width: label.layout.width(),
-    })
+        &label.layout,
+    ))
 }
 
 /// The axes chrome as one unclipped group: gridlines, baseline, tick labels, header and axis

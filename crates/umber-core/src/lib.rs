@@ -90,6 +90,7 @@ pub mod render;
 mod resolve;
 pub mod scale;
 pub mod scene;
+mod scene_text;
 #[cfg(test)]
 mod test_support;
 pub mod text;
