@@ -26,7 +26,7 @@
 
 use crate::color::Rgba;
 use crate::geometry::{Path, Point};
-use crate::text::{FontLibrary, TextStyle};
+use crate::text::TextStyle;
 
 /// The deepest group nesting the renderers draw. Content of groups nested deeper than this is
 /// omitted, which bounds the renderers' recursion.
@@ -366,42 +366,6 @@ impl Scene {
         self.items.push(item);
     }
 
-    /// Lays out `text` with `library`, outlines it at `origin`, and pushes a [`TextItem`].
-    ///
-    /// `origin` is the left end of the baseline. Empty text still pushes an item, with an empty
-    /// outline and zero width.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::scene::Scene;
-    /// use umber_core::{Font, FontLibrary, Point, Rgba, TextStyle, Weight};
-    ///
-    /// let black = Rgba { r: 0, g: 0, b: 0, a: 255 };
-    /// let style = TextStyle { font: Font::Geist, weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// let mut scene = Scene::new(100.0, 30.0, black);
-    /// scene.push_text(FontLibrary::global(), "Axis", style, Point { x: 2.0, y: 15.0 }, black);
-    /// assert_eq!(scene.leaf_count(), 1);
-    /// ```
-    pub fn push_text(
-        &mut self,
-        library: &FontLibrary,
-        text: &str,
-        style: TextStyle,
-        origin: Point,
-        color: Rgba,
-    ) {
-        let layout = library.layout(text, &style);
-        self.items.push(Item::Text(TextItem {
-            text: text.to_owned(),
-            style,
-            origin,
-            color,
-            outline: layout.outline(origin),
-            width: layout.width(),
-        }));
-    }
-
     /// Number of leaf items (fills, strokes, markers and text), counted through groups.
     ///
     /// # Examples
@@ -432,7 +396,6 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fonts::{Font, Weight};
 
     const BLACK: Rgba = Rgba {
         r: 0,
@@ -440,22 +403,6 @@ mod tests {
         b: 0,
         a: 255,
     };
-
-    fn style() -> TextStyle {
-        TextStyle {
-            font: Font::Inter,
-            weight: Weight::Regular,
-            size: 12.0,
-            tabular_figures: false,
-        }
-    }
-
-    fn text_item(scene: &Scene) -> &TextItem {
-        match scene.items.first() {
-            Some(Item::Text(item)) => item,
-            other => panic!("expected a text item, got {other:?}"),
-        }
-    }
 
     fn leaf() -> Item {
         Item::Stroke {
@@ -468,32 +415,6 @@ mod tests {
                 join: LineJoin::Miter,
             },
         }
-    }
-
-    #[test]
-    fn push_text_places_the_outline_at_the_origin() {
-        let mut scene = Scene::new(200.0, 100.0, BLACK);
-        let origin = Point { x: 40.0, y: 60.0 };
-        scene.push_text(FontLibrary::global(), "Hamburg", style(), origin, BLACK);
-        let item = text_item(&scene);
-        let (min, max) = item.outline.bounds().expect("outline has geometry");
-        assert!(min.x >= origin.x - 1.0, "min.x {}", min.x);
-        assert!(max.x <= origin.x + item.width + 1.0, "max.x {}", max.x);
-        assert_eq!(item.origin, origin);
-    }
-
-    #[test]
-    fn push_text_records_source_and_width() {
-        let mut scene = Scene::new(200.0, 100.0, BLACK);
-        let s = style();
-        scene.push_text(FontLibrary::global(), "Revenue", s, Point::default(), BLACK);
-        let item = text_item(&scene);
-        assert_eq!(item.text, "Revenue");
-        assert_eq!(item.style, s);
-        assert_eq!(
-            item.width,
-            FontLibrary::global().layout("Revenue", &s).width()
-        );
     }
 
     #[test]
@@ -514,15 +435,5 @@ mod tests {
         });
         scene.push(leaf());
         assert_eq!(scene.leaf_count(), 3);
-    }
-
-    #[test]
-    fn empty_text_pushes_an_empty_item() {
-        let mut scene = Scene::new(10.0, 10.0, BLACK);
-        scene.push_text(FontLibrary::global(), "", style(), Point::default(), BLACK);
-        assert_eq!(scene.leaf_count(), 1);
-        let item = text_item(&scene);
-        assert_eq!(item.width, 0.0);
-        assert!(item.outline.is_empty());
     }
 }
