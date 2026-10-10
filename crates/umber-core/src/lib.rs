@@ -17,6 +17,7 @@ pub mod color;
 pub mod downsample;
 mod draw;
 mod error;
+mod exact;
 pub mod figure;
 pub mod fonts;
 pub mod geometry;

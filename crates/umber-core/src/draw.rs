@@ -4,19 +4,27 @@
 //! one unclipped group. The marks follow in a second group, clipped to the plot area, drawn in
 //! insertion order.
 //!
-//! Marks are mapped to plot coordinates in `f64` and clipped there, before anything is
-//! narrowed to `f32`: lines against the plot area expanded by `max(line_width, 2)` pt, scatter
-//! points against the plot area expanded by each marker shape's extent plus its outline and
-//! 1 pt. Every mark coordinate in the scene is therefore within a few points of the plot area.
+//! Marks are clipped in *axis space*, before they are mapped to plot coordinates: the raw value
+//! on a linear axis, `ln(value / lower limit)` on a log axis, the band center (in `0..=1`) on a
+//! category axis.
+//! Validated data is finite there, while mapping it to points first can overflow (data at 1e300
+//! with limits 0 to 1e-10), and saturating an overflowed coordinate would change the line's
+//! direction. Lines are clipped against the axis-space domain expanded by `max(line_width, 2)`
+//! pt, scatter points against the domain expanded by each marker shape's extent plus its
+//! outline and 1 pt (both converted to axis units). Only the clipped or kept points are mapped
+//! to plot coordinates, so every mark coordinate in the scene is within a few points of the
+//! plot area, and nothing is narrowed to `f32` before that.
 //!
 //! Line clipping must stay accurate for any finite `f64` endpoints, including data far outside
 //! narrow limits. Each boundary crossing fixes the crossing coordinate to the boundary value
 //! exactly. The other coordinate is found from a reference value `r` inside the clip range: the
-//! line's implicit equation is evaluated at `r` exactly (error-free expansion arithmetic), and
-//! one division gives the offset from `r` to the crossing. The rounding error therefore scales
+//! line's implicit equation is evaluated at `r` exactly (error-free `f64` expansion arithmetic,
+//! or exact binary fractions when the operands' magnitudes are too far apart for that), and one
+//! division gives the offset from `r` to the crossing. The rounding error therefore scales
 //! with that offset (at most the clip rectangle's size for an accepted crossing), not with the
 //! endpoints' magnitude, even when both endpoints are astronomically far away.
 
+use crate::exact::Dyadic;
 use crate::figure::{Axes, AxisData, Mark};
 use crate::geometry::{Path, Point};
 use crate::layout::{Area, Label, Layout};
@@ -26,17 +34,21 @@ use crate::scene::{
     FillRule, GradientStop, Item, LineCap, LineJoin, LinearGradient, Paint, Rect, StrokeStyle,
     TextItem,
 };
-use crate::{AreaFill, Dash, GridLines, Marker, Rgba, Theme};
+use crate::{AreaFill, ContinuousScale, Dash, GridLines, Marker, Rgba, Theme, Transform};
 
 /// The widest stroke drawn, whatever the theme says.
 const MAX_STROKE_WIDTH: f32 = 1.0e4;
 /// The largest marker diameter drawn, whatever the theme says.
 const MAX_MARKER_SIZE: f32 = 1.0e4;
-/// Crossings whose computed coordinate is at most this far outside the clip rectangle count
-/// as on it; their rounding error is far smaller.
-const CROSSING_TOLERANCE: f64 = 1.0e-9;
-/// Crossing operands are scaled down by a power of two when any exceeds this magnitude, so the
-/// exact products in [`crossing`] cannot overflow.
+/// Crossings whose computed coordinate is outside the clip rectangle by at most this share of
+/// the rectangle's size (about 4e-10 pt on a 400 pt plot) count as on it; their rounding error
+/// is far smaller. A segment that misses a corner by less than this is therefore reported as
+/// touching it (a zero-length visible part). The clip rectangle is the plot area expanded by
+/// the line margin, and that touch point lies outside the plot clip, so nothing visible is
+/// drawn.
+const CROSSING_TOLERANCE: f64 = 1.0e-12;
+/// Crossing operands of one axis are scaled down by a power of two when any exceeds this
+/// magnitude, so the products in [`crossing`] cannot overflow.
 const MAX_UNSCALED: f64 = 3.273_390_607_896_142e150; // 2^500
 /// The smallest line clip margin, in points.
 const MIN_LINE_MARGIN: f64 = 2.0;
@@ -190,35 +202,124 @@ impl Bounds {
     }
 }
 
-/// A mapped coordinate: NaN stays NaN (a gap), and an overflowed `±inf` becomes `±f64::MAX`.
-/// Finite values are kept as they are. Infinity only arises when normalizing overflows `f64`,
-/// where no exact position exists; the clip needs finite operands, since `inf - inf` is NaN.
-fn plot_coord(v: f64) -> f64 {
-    if v.is_nan() {
-        v
-    } else {
-        v.clamp(-f64::MAX, f64::MAX)
+/// The affine map of one axis from axis space to plot points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AxisMap {
+    /// The axis-space value at the low end of the axis (left or bottom).
+    lo: f64,
+    /// The axis-space value at the high end of the axis.
+    hi: f64,
+    /// The plot coordinate of `lo`.
+    start: f64,
+    /// The plot coordinate distance from `lo` to `hi`, at least 1 pt; negative for y, which
+    /// points down.
+    extent: f64,
+}
+
+impl AxisMap {
+    /// The map of the x axis `axis` onto `plot`.
+    fn x(axis: &ResolvedAxis, plot: Area) -> AxisMap {
+        let (lo, hi) = axis_domain(axis);
+        AxisMap {
+            lo,
+            hi,
+            start: plot.x,
+            extent: plot.width,
+        }
+    }
+
+    /// The map of the y axis `axis` onto `plot`, bottom up.
+    fn y(axis: &ResolvedAxis, plot: Area) -> AxisMap {
+        let (lo, hi) = axis_domain(axis);
+        AxisMap {
+            lo,
+            hi,
+            start: plot.bottom(),
+            extent: -plot.height,
+        }
+    }
+
+    /// The plot coordinate of axis-space value `u`. For `u` within a few points of the axis
+    /// domain (all callers pass clipped or culled values) this cannot overflow.
+    fn plot_at(&self, u: f64) -> f64 {
+        self.start + (u - self.lo) / (self.hi - self.lo) * self.extent
+    }
+
+    /// The axis-space range covered by the axis extended by `margin` points at both ends. The
+    /// rounding of `lo - m` and `hi + m` is monotonic, so the range always contains the domain.
+    fn expanded(&self, margin: f64) -> (f64, f64) {
+        let m = margin / self.extent.abs() * (self.hi - self.lo);
+        (self.lo - m, self.hi + m)
     }
 }
 
-/// The plot x coordinates of `x`. Category names map to their band center; names the scale
-/// does not know (impossible after resolve) and NaN map to NaN.
-fn map_x(axis: &ResolvedAxis, plot: Area, x: &AxisData) -> Vec<f64> {
+/// The axis-space domain of `axis`: the limits on a linear axis, `0..ln(hi / lo)` on a log
+/// axis, and `0..1` (the band centers' range) on a category axis.
+fn axis_domain(axis: &ResolvedAxis) -> (f64, f64) {
+    match &axis.scale {
+        AxisScale::Continuous(scale) => {
+            let (lo, hi) = scale.domain();
+            match scale.transform() {
+                Transform::Linear => (lo, hi),
+                Transform::Log(_) => (0.0, log_offset(hi, lo)),
+            }
+        }
+        AxisScale::Category(_) => (0.0, 1.0),
+    }
+}
+
+/// `ln(v / lo)` for positive `v` and `lo`. Measuring from the lower limit keeps narrow log
+/// limits at large magnitudes resolvable: `ln(1e200 * (1 + 1e-8))` and `ln(1e200)` are only
+/// about 175 000 ulps apart, while `ln(v / lo)` near 0 has full precision. When `v / lo` is
+/// not a normal `f64`, the difference of the logarithms is used; such points are hundreds of
+/// natural-log units away, where that rounding is negligible.
+fn log_offset(v: f64, lo: f64) -> f64 {
+    let ratio = v / lo;
+    if ratio.is_normal() {
+        ratio.ln()
+    } else {
+        v.ln() - lo.ln()
+    }
+}
+
+/// The axis-space x values of `x`. Category names map to their band center; NaN, and names the
+/// scale does not know (impossible after resolve), map to NaN.
+fn axis_x(axis: &ResolvedAxis, x: &AxisData) -> Vec<f64> {
     match (&axis.scale, x) {
-        (AxisScale::Continuous(scale), AxisData::Numbers(values)) => values
-            .iter()
-            .map(|&v| plot_coord(plot.x_at(scale.normalize(v))))
-            .collect(),
+        (AxisScale::Continuous(scale), AxisData::Numbers(values)) => {
+            continuous_values(scale, values)
+        }
         (AxisScale::Category(scale), AxisData::Categories(names)) => names
             .iter()
-            .map(|name| {
-                scale
-                    .index_of(name)
-                    .map_or(f64::NAN, |i| plot_coord(plot.x_at(scale.center(i))))
-            })
+            .map(|name| scale.index_of(name).map_or(f64::NAN, |i| scale.center(i)))
             .collect(),
         // The model rejects data of the wrong kind for the axis.
         (_, data) => vec![f64::NAN; data_len(data)],
+    }
+}
+
+/// The axis-space y values of `y`; NaN maps to NaN.
+fn axis_y(axis: &ResolvedAxis, y: &[f64]) -> Vec<f64> {
+    match &axis.scale {
+        AxisScale::Continuous(scale) => continuous_values(scale, y),
+        // Marks hold numeric y, which a category y axis cannot place.
+        AxisScale::Category(_) => vec![f64::NAN; y.len()],
+    }
+}
+
+/// `values` in the axis space of `scale`: the values on a linear axis, `ln(v / lo)` on a log
+/// axis. Log values are positive (validated), so those are finite; anything else maps to NaN,
+/// a gap.
+fn continuous_values(scale: &ContinuousScale, values: &[f64]) -> Vec<f64> {
+    match scale.transform() {
+        Transform::Linear => values.to_vec(),
+        Transform::Log(_) => {
+            let lo = scale.domain().0;
+            values
+                .iter()
+                .map(|&v| if v > 0.0 { log_offset(v, lo) } else { f64::NAN })
+                .collect()
+        }
     }
 }
 
@@ -226,18 +327,6 @@ fn data_len(data: &AxisData) -> usize {
     match data {
         AxisData::Numbers(v) => v.len(),
         AxisData::Categories(v) => v.len(),
-    }
-}
-
-/// The plot y coordinates of `y`; NaN maps to NaN.
-fn map_y(axis: &ResolvedAxis, plot: Area, y: &[f64]) -> Vec<f64> {
-    match &axis.scale {
-        AxisScale::Continuous(scale) => y
-            .iter()
-            .map(|&v| plot_coord(plot.y_at(scale.normalize(v))))
-            .collect(),
-        // Marks hold numeric y, which a category y axis cannot place.
-        AxisScale::Category(_) => vec![f64::NAN; y.len()],
     }
 }
 
@@ -285,8 +374,10 @@ fn clip_segment(a: Pt, b: Pt, bounds: &Bounds) -> Option<(Pt, Pt)> {
     let (lo_x, hi_x, lo_y, hi_y) = (bounds.left, bounds.right, bounds.top, bounds.bottom);
     let mid_x = lo_x / 2.0 + hi_x / 2.0;
     let mid_y = lo_y / 2.0 + hi_y / 2.0;
-    let on =
-        |v: f64, lo: f64, hi: f64| (lo - CROSSING_TOLERANCE..=hi + CROSSING_TOLERANCE).contains(&v);
+    let on = |v: f64, lo: f64, hi: f64| {
+        let tolerance = CROSSING_TOLERANCE * (hi - lo);
+        (lo - tolerance..=hi + tolerance).contains(&v)
+    };
     for edge in [lo_x, hi_x] {
         if let Some(y) = crossing(a, b, edge, mid_y)
             && on(y, lo_y, hi_y)
@@ -302,25 +393,23 @@ fn clip_segment(a: Pt, b: Pt, bounds: &Bounds) -> Option<(Pt, Pt)> {
             candidates.push((x.clamp(lo_x, hi_x), edge));
         }
     }
-    // Order along the segment by its dominant axis, which separates distinct points on it.
+    // Order along the segment. Two candidates are compared on the axis where they are further
+    // apart relative to the clip rectangle's size: in axis space, one axis can be many orders
+    // of magnitude finer than the other, so the axis of the larger coordinate change may not
+    // separate them.
     let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-    let key = |p: &Pt| {
-        if dx.abs() >= dy.abs() {
-            if dx < 0.0 { -p.0 } else { p.0 }
-        } else if dy < 0.0 {
-            -p.1
+    let (width, height) = (hi_x - lo_x, hi_y - lo_y);
+    let along = |p: &Pt, q: &Pt| {
+        let (ex, ey) = (p.0 - q.0, p.1 - q.1);
+        let forward = if ex.abs() / width >= ey.abs() / height {
+            ex * dx.signum()
         } else {
-            p.1
-        }
+            ey * dy.signum()
+        };
+        forward.total_cmp(&0.0)
     };
-    let start = candidates
-        .iter()
-        .copied()
-        .min_by(|p, q| key(p).total_cmp(&key(q)))?;
-    let end = candidates
-        .iter()
-        .copied()
-        .max_by(|p, q| key(p).total_cmp(&key(q)))?;
+    let start = candidates.iter().copied().min_by(along)?;
+    let end = candidates.iter().copied().max_by(along)?;
     Some((start, end))
 }
 
@@ -331,16 +420,29 @@ fn two_sum(a: f64, b: f64) -> (f64, f64) {
     (s, (a - (s - bb)) + (b - bb))
 }
 
-/// `a * b` as an unevaluated sum `(p, e)` with `p + e == a * b` exactly (fused multiply-add).
-fn two_product(a: f64, b: f64) -> (f64, f64) {
+/// `a * b` as an unevaluated sum `(p, e)` with `p + e == a * b` (fused multiply-add), and
+/// whether that is exact. The residual `e` is exact unless it underflows, which needs the
+/// operands' binary exponents to sum below about -970; such products are reported inexact.
+fn two_product(a: f64, b: f64) -> ((f64, f64), bool) {
     let p = a * b;
-    (p, a.mul_add(b, -p))
+    let exact = a == 0.0 || b == 0.0 || binary_exponent(a) + binary_exponent(b) >= -970;
+    ((p, a.mul_add(b, -p)), exact)
 }
 
-/// `p * q - r * s` for exact two-term sums `p`, `q`, `r`, `s`, rounded once: the 16 partial
-/// products are accumulated without error into a nonoverlapping expansion (Shewchuk's
-/// Grow-Expansion), which is then summed from its smallest component up.
-fn cross_difference(p: (f64, f64), q: (f64, f64), r: (f64, f64), s: (f64, f64)) -> f64 {
+/// The unbiased binary exponent of `v` (-1023 for zero and subnormals).
+fn binary_exponent(v: f64) -> i32 {
+    ((v.to_bits() >> 52) & 0x7ff) as i32 - 1023
+}
+
+/// `p * q - r * s` for exact two-term sums `p`, `q`, `r`, `s`: the 16 partial products are
+/// accumulated without error into a nonoverlapping expansion (Shewchuk's Grow-Expansion), which
+/// is then summed from its smallest component up. `None` when a partial product's residual
+/// underflowed (see [`two_product`]), so the expansion would not be exact.
+///
+/// The final `sum()` is faithful (within about 1 ulp of the exact value), not guaranteed to be
+/// correctly rounded; for example `p = (1, 2^-53)`, `q = (1, 2^-107)`, `r = s = 0` gives 1
+/// instead of `1 + 2^-52`. That is far below plot resolution.
+fn cross_difference(p: (f64, f64), q: (f64, f64), r: (f64, f64), s: (f64, f64)) -> Option<f64> {
     let mut expansion: Vec<f64> = Vec::with_capacity(32);
     let mut grow = |v: f64| {
         let mut carry = v;
@@ -360,48 +462,85 @@ fn cross_difference(p: (f64, f64), q: (f64, f64), r: (f64, f64), s: (f64, f64)) 
     for (x, y, sign) in [(p, q, 1.0), (r, s, -1.0)] {
         for u in [x.0, x.1] {
             for v in [y.0, y.1] {
-                let (hi, lo) = two_product(u, v);
+                let ((hi, lo), exact) = two_product(u, v);
+                if !exact {
+                    return None;
+                }
                 grow(sign * hi);
                 grow(sign * lo);
             }
         }
     }
-    expansion.iter().sum()
+    Some(expansion.iter().sum())
+}
+
+/// A power of two that brings `largest` (a finite magnitude) to within `2^-500..=2^500`, or 1
+/// when it already is (or is 0).
+fn group_scale(largest: f64) -> f64 {
+    let e = binary_exponent(largest);
+    let k = if largest > MAX_UNSCALED {
+        e - 499
+    } else if largest != 0.0 && e < -500 {
+        e + 500
+    } else {
+        0
+    };
+    // `k` is within -575..=524, so `2^-k` is a normal `f64`.
+    f64::from_bits(((1023 - k) as u64) << 52)
 }
 
 /// Where the segment `a..b` crosses the vertical line `x = edge`: the y there, or `None` when
 /// the segment does not reach the line or runs along it.
 ///
 /// With `h(y) = (edge - ax)(by - ay) - (y - ay)(bx - ax)`, the crossing is
-/// `y* = r + h(r) / (bx - ax)` for any `r`. `h(r)` is evaluated exactly and rounded once, so
-/// the error is a few ulps of `y* - r`, whatever the magnitude of the endpoints. Operands
-/// above [`MAX_UNSCALED`] are first scaled down by a power of two, which keeps the products
-/// finite.
+/// `y* = r + h(r) / (bx - ax)` for any `r`. `h(r)` is evaluated exactly and rounded about once,
+/// so the error is a few ulps of `y* - r`, whatever the magnitude of the endpoints.
+///
+/// The fast path scales the x operands (`ax`, `bx`, `edge`) and the y operands (`ay`, `by`,
+/// `r`) each by a power of two into `2^-500..=2^500`, which keeps every product finite, and
+/// uses error-free `f64` arithmetic. That is exact unless an operand underflows when scaled or
+/// a product residual underflows; those cases (operands of one axis differing by more than
+/// about `2^1000`, or tiny values of both axes) are detected and computed with exact
+/// binary-fraction arithmetic instead.
 fn crossing(a: Pt, b: Pt, edge: f64, r: f64) -> Option<f64> {
     if a.0 == b.0 || edge < a.0.min(b.0) || edge > a.0.max(b.0) {
         return None;
     }
-    let largest = [a.0, a.1, b.0, b.1, edge, r]
-        .iter()
-        .fold(0.0_f64, |m, v| m.max(v.abs()));
-    // A power of two `2^-k` with `largest * 2^-k <= 2^500`; exact as long as `k <= 1022`.
-    let k = if largest > MAX_UNSCALED {
-        ((largest.to_bits() >> 52) & 0x7ff) as i32 - 1023 - 500 + 1
-    } else {
-        0
+    let offset = crossing_offset_fast(a, b, edge, r).unwrap_or_else(|| {
+        // h(r) and bx - ax exactly; the division rounds once more.
+        let d = Dyadic::from_f64;
+        let (ax, ay, bx, by) = (d(a.0), d(a.1), d(b.0), d(b.1));
+        let dx = bx.sub(&ax);
+        let h = d(edge)
+            .sub(&ax)
+            .mul(&by.sub(&ay))
+            .sub(&d(r).sub(&ay).mul(&dx));
+        h.div_to_f64(&dx).unwrap_or(f64::NAN)
+    });
+    let y = r + offset;
+    y.is_finite().then_some(y)
+}
+
+/// `h(r) / (bx - ax)` from [`crossing`] in scaled error-free `f64` arithmetic, or `None` when
+/// that would not be exact.
+fn crossing_offset_fast(a: Pt, b: Pt, edge: f64, r: f64) -> Option<f64> {
+    let sx = group_scale(a.0.abs().max(b.0.abs()).max(edge.abs()));
+    let sy = group_scale(a.1.abs().max(b.1.abs()).max(r.abs()));
+    // Scaling by a power of two is exact unless the result underflows.
+    let scaled = |v: f64, s: f64| {
+        let t = v * s;
+        (t / s == v).then_some(t)
     };
-    let scale = f64::from_bits(((1023 - k) as u64) << 52);
-    let [ax, ay, bx, by, edge_s, r_s] = [a.0, a.1, b.0, b.1, edge, r].map(|v| v * scale);
+    let (ax, bx, edge_s) = (scaled(a.0, sx)?, scaled(b.0, sx)?, scaled(edge, sx)?);
+    let (ay, by, r_s) = (scaled(a.1, sy)?, scaled(b.1, sy)?, scaled(r, sy)?);
     let h = cross_difference(
         two_sum(edge_s, -ax),
         two_sum(by, -ay),
         two_sum(r_s, -ay),
         two_sum(bx, -ax),
-    );
-    // `h` is scaled by `scale^2` and `bx - ax` by `scale`: undo one factor.
-    let offset = h / (bx - ax) / scale;
-    let y = r + offset;
-    y.is_finite().then_some(y)
+    )?;
+    // `h` carries `sx * sy` and `bx - ax` carries `sx`: undo `sy`.
+    Some(h / (bx - ax) / sy)
 }
 
 /// Splits the polyline through `(xs[i], ys[i])` at NaN and clips it to `bounds`. Each returned
@@ -490,10 +629,17 @@ fn scene_point((x, y): (f64, f64)) -> Point {
     point(x, y)
 }
 
-/// The scene items of one line: the area fill (with `AreaFill::Gradient`), then the stroke.
+/// The scene items of one line, given in axis space: the area fill (with
+/// `AreaFill::Gradient`), then the stroke. The line is clipped in axis space and only the
+/// clipped points are mapped to plot coordinates.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one call site; a struct would add nothing"
+)]
 fn line_items(
     theme: &Theme,
     layout: &Layout,
+    (xm, ym): (AxisMap, AxisMap),
     xs: &[f64],
     ys: &[f64],
     color: Rgba,
@@ -502,7 +648,30 @@ fn line_items(
 ) {
     let plot = layout.plot;
     let margin = f64::from(stroke_width(theme.line_width())).max(MIN_LINE_MARGIN);
-    let subpaths = clip_polyline(xs, ys, &Bounds::around(plot, margin));
+    let ((left, right), (top, bottom)) = (xm.expanded(margin), ym.expanded(margin));
+    let bounds = Bounds {
+        left,
+        top,
+        right,
+        bottom,
+    };
+    // Clipped points are inside `bounds`, so they map to within `margin` of the plot area. The
+    // clamp only guards against rounding in the map.
+    let limit = Bounds::around(plot, margin);
+    let subpaths: Vec<Vec<Pt>> = clip_polyline(xs, ys, &bounds)
+        .into_iter()
+        .map(|subpath| {
+            subpath
+                .into_iter()
+                .map(|(u, v)| {
+                    (
+                        xm.plot_at(u).clamp(limit.left, limit.right),
+                        ym.plot_at(v).clamp(limit.top, limit.bottom),
+                    )
+                })
+                .collect()
+        })
+        .collect();
     if subpaths.is_empty() {
         return;
     }
@@ -722,7 +891,7 @@ fn marker_size(theme: &Theme) -> f32 {
 /// whose marker cannot reach the plot area are dropped.
 fn scatter_item(
     theme: &Theme,
-    plot: Area,
+    (xm, ym): (AxisMap, AxisMap),
     xs: &[f64],
     ys: &[f64],
     color: Rgba,
@@ -730,22 +899,23 @@ fn scatter_item(
 ) -> Option<Item> {
     let d = marker_size(theme);
     let shape_path = marker_shape(shape, d);
-    // Cull by the shape's own extent on each axis, plus the outline (whose miter joins reach
-    // at most its width beyond the path for these shapes) and the slack.
+    // Cull in axis space by the shape's own extent on each axis, plus the outline (whose miter
+    // joins reach at most its width beyond the path for these shapes) and the slack.
     let (half_w, half_h) = extent(&shape_path);
     let reach = f64::from(MARKER_OUTLINE) + MARKER_SLACK;
+    let ((left, right), (top, bottom)) = (xm.expanded(half_w + reach), ym.expanded(half_h + reach));
     let bounds = Bounds {
-        left: plot.x - half_w - reach,
-        top: plot.y - half_h - reach,
-        right: plot.right() + half_w + reach,
-        bottom: plot.bottom() + half_h + reach,
+        left,
+        top,
+        right,
+        bottom,
     };
     let positions: Vec<Point> = xs
         .iter()
         .zip(ys)
         .map(|(&x, &y)| (x, y))
         .filter(|&p| bounds.contains(p))
-        .map(scene_point)
+        .map(|(u, v)| point(xm.plot_at(u), ym.plot_at(v)))
         .collect();
     if positions.is_empty() {
         return None;
@@ -784,15 +954,17 @@ pub(crate) fn marks(
     colors: &[Rgba],
 ) -> Option<Item> {
     let plot = layout.plot;
+    let maps = (AxisMap::x(&resolved.x, plot), AxisMap::y(&resolved.y, plot));
     let mut items = Vec::new();
     for (mark, &color) in axes.marks().iter().zip(colors) {
         match mark {
             Mark::Line { x, y, options } => {
-                let mut xs = map_x(&resolved.x, plot, x);
-                let mut ys = map_y(&resolved.y, plot, y);
+                let mut xs = axis_x(&resolved.x, x);
+                let mut ys = axis_y(&resolved.y, y);
                 if !resolved.x.is_category() {
+                    // Over x in axis space, which maps to plot x monotonically and affinely.
                     let columns = downsample_columns(plot.width);
-                    let kept = m4_indices(&xs, &ys, (plot.x, plot.right()), columns);
+                    let kept = m4_indices(&xs, &ys, (maps.0.lo, maps.0.hi), columns);
                     if kept.len() < xs.len() {
                         let pick = |v: &[f64]| -> Vec<f64> {
                             kept.iter().filter_map(|&i| v.get(i).copied()).collect()
@@ -800,12 +972,21 @@ pub(crate) fn marks(
                         (xs, ys) = (pick(&xs), pick(&ys));
                     }
                 }
-                line_items(theme, layout, &xs, &ys, color, options.dash, &mut items);
+                line_items(
+                    theme,
+                    layout,
+                    maps,
+                    &xs,
+                    &ys,
+                    color,
+                    options.dash,
+                    &mut items,
+                );
             }
             Mark::Scatter { x, y, options } => {
-                let xs = map_x(&resolved.x, plot, x);
-                let ys = map_y(&resolved.y, plot, y);
-                items.extend(scatter_item(theme, plot, &xs, &ys, color, options.marker));
+                let xs = axis_x(&resolved.x, x);
+                let ys = axis_y(&resolved.y, y);
+                items.extend(scatter_item(theme, maps, &xs, &ys, color, options.marker));
             }
         }
     }
@@ -2067,6 +2248,24 @@ pub(crate) mod tests {
         assert_eq!(area_shows(&[1.0, 0.0], &[1.0, 1.0], &[(0.5, 0.5)]), [true]);
     }
 
+    /// Axis maps that leave plot coordinates unchanged, for testing in points.
+    fn identity_maps(plot: Area) -> (AxisMap, AxisMap) {
+        (
+            AxisMap {
+                lo: plot.x,
+                hi: plot.right(),
+                start: plot.x,
+                extent: plot.width,
+            },
+            AxisMap {
+                lo: plot.y,
+                hi: plot.bottom(),
+                start: plot.y,
+                extent: plot.height,
+            },
+        )
+    }
+
     #[test]
     fn markers_are_culled_by_their_true_extent() {
         // The reviewer's repros: the visible top of a triangle and a diamond centered below the
@@ -2085,7 +2284,14 @@ pub(crate) mod tests {
                 y + f64::from(min.y) < plot.bottom(),
                 "{shape:?} reaches the plot"
             );
-            let item = scatter_item(&theme, plot, &[210.0], &[y], Rgba::opaque(255, 0, 0), shape);
+            let item = scatter_item(
+                &theme,
+                identity_maps(plot),
+                &[210.0],
+                &[y],
+                Rgba::opaque(255, 0, 0),
+                shape,
+            );
             assert!(item.is_some(), "{shape:?} was dropped");
         }
 
@@ -2111,7 +2317,8 @@ pub(crate) mod tests {
                 (200.0, plot.bottom() + h + reach + 0.01, false),
             ];
             for (x, y, kept) in cases {
-                let item = scatter_item(&theme, plot, &[x], &[y], Rgba::BLACK, shape);
+                let item =
+                    scatter_item(&theme, identity_maps(plot), &[x], &[y], Rgba::BLACK, shape);
                 assert_eq!(item.is_some(), kept, "{shape:?} at ({x}, {y})");
             }
         }
@@ -2144,6 +2351,280 @@ pub(crate) mod tests {
         assert!(clip_polyline(&[0.0], &[0.0], &bounds).is_empty());
     }
 
+    /// The axis maps and the line clip box (in axis space) of `figure`.
+    fn axis_clip(figure: &Figure) -> ((AxisMap, AxisMap), Bounds) {
+        let (resolved, layout) = crate::layout::plan(
+            figure.width_in() * 72.0,
+            figure.height_in() * 72.0,
+            figure.theme(),
+            figure.axes().unwrap(),
+            FontLibrary::global(),
+        );
+        let maps = (
+            AxisMap::x(&resolved.x, layout.plot),
+            AxisMap::y(&resolved.y, layout.plot),
+        );
+        let margin = f64::from(figure.theme().line_width()).max(2.0);
+        let ((left, right), (top, bottom)) = (maps.0.expanded(margin), maps.1.expanded(margin));
+        let bounds = Bounds {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        // The clip box always contains the axis domain.
+        assert!(left <= maps.0.lo && right >= maps.0.hi);
+        assert!(top <= maps.1.lo && bottom >= maps.1.hi);
+        (maps, bounds)
+    }
+
+    /// The axis-space value of a log or linear datum, on an axis whose lower limit is `lo`.
+    fn axis_value(kind: ScaleKind, v: f64, lo: f64) -> f64 {
+        if matches!(kind, ScaleKind::Log { .. }) {
+            log_offset(v, lo)
+        } else {
+            v
+        }
+    }
+
+    /// Checks the one visible piece of the 2-point line in `figure` against the exact oracle,
+    /// given the line's axis-space endpoints. Returns the largest endpoint error in points when
+    /// it is visible.
+    #[track_caller]
+    fn check_against_oracle(figure: &Figure, a: Pt, b: Pt) -> Option<f64> {
+        let scene = figure.to_scene(FontLibrary::global());
+        assert_scene_bounded(&scene);
+        let (maps, bounds) = axis_clip(figure);
+        let want = oracle::exact_plot(a, b, &bounds, maps);
+        let got: Vec<Vec<Point>> = match scene.items.as_slice() {
+            [_, Item::Group { items, .. }] => items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Stroke { path, .. } => Some(subpaths(path)),
+                    _ => None,
+                })
+                .flatten()
+                .collect(),
+            _ => Vec::new(),
+        };
+        match (want, got.as_slice()) {
+            (None, []) => None,
+            // A rounding-level corner touch of the expanded box: a single point, outside the
+            // plot clip.
+            (None, [piece]) if piece.windows(2).all(|w| w[0] == w[1]) => None,
+            (Some((start, end)), [piece]) => {
+                let [p, q] = piece.as_slice() else {
+                    panic!("expected a 2-point piece, got {piece:?}")
+                };
+                let mut worst = 0.0_f64;
+                for (got, (ex, ey)) in [(p, start), (q, end)] {
+                    let error = (f64::from(got.x) - ex)
+                        .abs()
+                        .max((f64::from(got.y) - ey).abs());
+                    assert!(
+                        error < 1e-3,
+                        "{a:?}..{b:?}: got {got:?}, exact ({ex}, {ey})"
+                    );
+                    worst = worst.max(error);
+                }
+                Some(worst)
+            }
+            (want, got) => panic!("{a:?}..{b:?}: exact {want:?}, got {got:?}"),
+        }
+    }
+
+    #[test]
+    fn crossings_survive_underflow() {
+        let next_up = |v: f64| f64::from_bits(v.to_bits() + 1);
+        let next_down = |v: f64| f64::from_bits(v.to_bits() - 1);
+        // The reviewer's underflow counterexamples (now exact on the per-axis-scaled fast path),
+        // and a case only the exact path can do: an edge 1e-200 against x data at 1e300.
+        let cases = [
+            (
+                (10.0, 100.0),
+                (next_up(next_up(10.0)), 1e308),
+                10.0,
+                140.0,
+                100.0,
+            ),
+            (
+                (next_down(10.0), -1e308),
+                (next_up(10.0), 1e308),
+                10.0,
+                140.0,
+                0.0,
+            ),
+            // Limits 1e-200 wide against data at 1e300.
+            ((-1e300, -1e299), (1e300, 1e299), 1e-200, 0.0, 1e-201),
+        ];
+        for (a, b, edge, r, expected) in cases {
+            let y = crossing(a, b, edge, r).unwrap();
+            assert!(
+                (y - expected).abs() <= 1e-15 * expected.abs().max(1e-300),
+                "{y} vs {expected}"
+            );
+        }
+        let (a, b, edge, r, _) = cases[2];
+        assert!(crossing_offset_fast(a, b, edge, r).is_none());
+        // Ordinary operands take the fast path.
+        assert!(crossing_offset_fast((0.0, 0.0), (10.0, 5.0), 4.0, 1.0).is_some());
+    }
+
+    #[test]
+    fn overflowing_maps_keep_the_true_entry() {
+        // Data at 1e296 to 1e300 with limits 0 to 1e-10: mapping the far end to points
+        // overflows x only (1e296), or x and y (1e300). The line is y = x / 10 far out and
+        // passes (5e-11, 5e-11).
+        for (x0, y0) in [(-1e295, -1e294), (-1e296, -1e295), (-1e300, -1e299)] {
+            let theme = Theme::graphite();
+            let mut f = line_figure(
+                theme.clone(),
+                &[x0, 5e-11],
+                &[y0, 5e-11],
+                LineOptions::default(),
+            );
+            f.axes_mut()
+                .unwrap()
+                .xlim(0.0, 1e-10)
+                .unwrap()
+                .ylim(0.0, 1e-10)
+                .unwrap();
+            assert!(check_against_oracle(&f, (x0, y0), (5e-11, 5e-11)).is_some());
+
+            // The true line shows at normalized (0.1, 0.46) in a 300 dpi render.
+            let plot = plot_of(&f);
+            let pixels = Pixels::decode(&f.to_png(300).unwrap());
+            let at = pixels.at_point((plot.x_at(0.1), plot.y_at(0.46)), 300.0);
+            assert!(near(at, theme.palette()[0], 8), "{x0}: {at:?}");
+        }
+    }
+
+    #[test]
+    fn axis_space_clipping_matches_the_oracle_on_every_axis_combination() {
+        let log = ScaleKind::Log {
+            base: crate::LogBase::TEN,
+        };
+        let mut state = 20_261_011_u64;
+        let mut rng = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        let mut u = move |lo: f64, hi: f64| lo + (hi - lo) * rng();
+        let mut summary = Vec::new();
+        for xkind in [ScaleKind::Linear, log, ScaleKind::Category] {
+            for ykind in [ScaleKind::Linear, log] {
+                let (mut cases, mut visible, mut max_error) = (0, 0, 0.0_f64);
+                for case in 0..250 {
+                    // Limits: linear ones as narrow as 1e-200 (around 0 when that narrow, so
+                    // they are representable), log ones with ratios down to 1 + 1e-8.
+                    let limits = |kind: ScaleKind, u: &mut dyn FnMut(f64, f64) -> f64| {
+                        if matches!(kind, ScaleKind::Log { .. }) {
+                            let lo = 10f64.powf(u(-200.0, 200.0));
+                            (lo, lo * (1.0 + 10f64.powf(u(-8.0, 3.0))))
+                        } else {
+                            let width = 10f64.powf(u(-200.0, 3.0));
+                            let center = if width < 1e-6 { 0.0 } else { u(-1e3, 1e3) };
+                            (center - width * u(0.2, 1.0), center + width * u(0.2, 1.0))
+                        }
+                    };
+                    let xlim = limits(xkind, &mut u);
+                    let ylim = limits(ykind, &mut u);
+                    // A datum inside the limits, and one anywhere in the valid range.
+                    let inside = |kind: ScaleKind, (lo, hi): (f64, f64), t: f64| {
+                        if matches!(kind, ScaleKind::Log { .. }) {
+                            (lo.ln() + t * (hi.ln() - lo.ln())).exp().clamp(lo, hi)
+                        } else {
+                            lo + t * (hi - lo)
+                        }
+                    };
+                    let far = |kind: ScaleKind, u: &mut dyn FnMut(f64, f64) -> f64| {
+                        let magnitude = 10f64.powf(u(-300.0, 300.0));
+                        if matches!(kind, ScaleKind::Log { .. }) {
+                            magnitude
+                        } else if u(0.0, 1.0) < 0.5 {
+                            -magnitude
+                        } else {
+                            magnitude
+                        }
+                    };
+                    let (x, y): ([f64; 2], [f64; 2]) = match case % 3 {
+                        // Inside to far.
+                        0 => (
+                            [inside(xkind, xlim, u(0.0, 1.0)), far(xkind, &mut u)],
+                            [inside(ykind, ylim, u(0.0, 1.0)), far(ykind, &mut u)],
+                        ),
+                        // Both far, anywhere.
+                        1 => (
+                            [far(xkind, &mut u), far(xkind, &mut u)],
+                            [far(ykind, &mut u), far(ykind, &mut u)],
+                        ),
+                        // Far in y only: a steep line across the plot.
+                        _ => (
+                            [
+                                inside(xkind, xlim, u(0.0, 1.0)),
+                                inside(xkind, xlim, u(0.0, 1.0)),
+                            ],
+                            [
+                                -far(ScaleKind::Linear, &mut u).abs().min(1e300),
+                                far(ykind, &mut u).abs(),
+                            ],
+                        ),
+                    };
+                    let y = if matches!(ykind, ScaleKind::Log { .. }) {
+                        y.map(|v| v.abs().clamp(1e-300, 1e300))
+                    } else {
+                        y
+                    };
+                    let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+                    let axes = f.add_axes(xkind, ykind).unwrap();
+                    let (xdata, xa, xb) = if xkind == ScaleKind::Category {
+                        // Two categories: band centers 0.25 and 0.75.
+                        (
+                            AxisData::Categories(vec!["a".into(), "b".into()]),
+                            0.25,
+                            0.75,
+                        )
+                    } else {
+                        let x = if matches!(xkind, ScaleKind::Log { .. }) {
+                            x.map(|v| v.clamp(1e-300, 1e300))
+                        } else {
+                            x
+                        };
+                        (
+                            nums(&x),
+                            axis_value(xkind, x[0], xlim.0),
+                            axis_value(xkind, x[1], xlim.0),
+                        )
+                    };
+                    if axes.line(xdata, &y, LineOptions::default()).is_err()
+                        || (xkind != ScaleKind::Category && axes.xlim(xlim.0, xlim.1).is_err())
+                        || axes.ylim(ylim.0, ylim.1).is_err()
+                    {
+                        continue;
+                    }
+                    let a = (xa, axis_value(ykind, y[0], ylim.0));
+                    let b = (xb, axis_value(ykind, y[1], ylim.0));
+                    cases += 1;
+                    if let Some(error) = check_against_oracle(&f, a, b) {
+                        visible += 1;
+                        max_error = max_error.max(error);
+                    }
+                }
+                assert!(
+                    cases >= 225,
+                    "{xkind:?}/{ykind:?}: only {cases} valid cases"
+                );
+                assert!(visible >= 50, "{xkind:?}/{ykind:?}: only {visible} visible");
+                summary.push(format!(
+                    "{xkind:?}/{ykind:?}: {cases} cases, {visible} visible, max error {max_error:.2e} pt"
+                ));
+            }
+        }
+        println!("{}", summary.join("\n"));
+    }
+
     #[test]
     fn clipping_matches_an_exact_rational_oracle() {
         let stats = oracle::run(10_000);
@@ -2154,7 +2635,7 @@ pub(crate) mod tests {
     /// arithmetic on a small big-integer type, so it shares no rounding with the code under
     /// test.
     mod oracle {
-        use super::super::{Bounds, Pt, clip_segment};
+        use super::super::{AxisMap, Bounds, Pt, clip_segment};
         use std::cmp::Ordering;
         use std::collections::BTreeMap;
 
@@ -2464,6 +2945,42 @@ pub(crate) mod tests {
                 worst = worst.max(diff.ratio(&t.d));
             }
             Some(worst)
+        }
+
+        /// The exact visible part of `a..b` (in axis space) inside `bounds`, mapped to plot
+        /// coordinates with `maps`: the mapping starts from the exact rational point, so only
+        /// the final conversion to `f64` rounds.
+        pub(in super::super) fn exact_plot(
+            a: Pt,
+            b: Pt,
+            bounds: &Bounds,
+            maps: (AxisMap, AxisMap),
+        ) -> Option<(Pt, Pt)> {
+            let (t0, t1) = exact(a, b, bounds)?;
+            let at = |t: &Q| {
+                (
+                    position(a.0, b.0, t, &maps.0),
+                    position(a.1, b.1, t, &maps.1),
+                )
+            };
+            Some((at(&t0), at(&t1)))
+        }
+
+        /// The plot coordinate of `a + t (b - a)` under `map`.
+        fn position(a: f64, b: f64, t: &Q, map: &AxisMap) -> f64 {
+            let f = Dy::from_f64;
+            // (a + t (b - a) - lo) / (hi - lo), with t = n / d.
+            let num = f(a)
+                .mul(&t.d)
+                .add(&t.n.mul(&f(b).sub(&f(a))))
+                .sub(&f(map.lo).mul(&t.d));
+            let den = t.d.mul(&f(map.hi).sub(&f(map.lo)));
+            let pos = if num.signum() < 0 {
+                -num.abs().ratio(&den)
+            } else {
+                num.ratio(&den)
+            };
+            map.start + pos * map.extent
         }
 
         /// Runs `n` seeded random segments through [`clip_segment`] and the oracle; panics on
