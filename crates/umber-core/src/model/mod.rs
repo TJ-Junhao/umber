@@ -1,7 +1,8 @@
 //! The figure model: a [`Figure`] holds one [`Axes`], which holds [`Mark`]s.
 //!
 //! The model is data only. Every input is validated at the call that receives it, so a model
-//! that exists is always drawable, and marks own copies of their data. Colors stay as
+//! that exists is always drawable. Marks hold copies of their data that never change, so clones
+//! of a figure share them. Explicit limits are kept as the scales they define. Colors stay as
 //! [`ColorSpec`](crate::ColorSpec)s; resolving them and drawing are later stages that read the
 //! model.
 
@@ -14,7 +15,7 @@ mod validation;
 pub use axes::Axes;
 pub use axis_data::AxisData;
 pub use figure::Figure;
-pub use mark::{LineOptions, Mark, ScatterOptions};
+pub use mark::{LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 
 #[cfg(test)]
 mod tests {
@@ -313,12 +314,78 @@ mod tests {
         a.line(x.clone(), &y, LineOptions::default()).unwrap();
         y[0] = 99.0;
         match a.marks() {
-            [Mark::Line { x: mx, y: my, .. }] => {
-                assert_eq!(my, &vec![1.0, 2.0]);
-                assert_eq!(mx, &x);
+            [Mark::Line(line)] => {
+                assert_eq!(line.y(), &[1.0, 2.0]);
+                assert_eq!(line.x(), &x);
             }
             other => panic!("unexpected marks {other:?}"),
         }
+    }
+
+    #[test]
+    fn failed_calls_change_nothing() {
+        let mut f = figure();
+        f.add_axes(ScaleKind::Linear, log_kind())
+            .unwrap()
+            .line(nums(&[0.0, 1.0]), &[1.0, 2.0], LineOptions::default())
+            .unwrap()
+            .xlim(-1.0, 2.0)
+            .unwrap()
+            .ylim(0.5, 50.0)
+            .unwrap()
+            .title("kept");
+        let before = f.clone();
+        let a = f.axes_mut().unwrap();
+        assert!(
+            a.line(nums(&[0.0]), &[1.0, 2.0], LineOptions::default())
+                .is_err()
+        );
+        assert!(
+            a.line(nums(&[0.0]), &[0.0], LineOptions::default())
+                .is_err()
+        );
+        assert!(
+            a.scatter(
+                AxisData::Categories(vec!["a".into()]),
+                &[1.0],
+                ScatterOptions::default()
+            )
+            .is_err()
+        );
+        assert!(
+            a.scatter(nums(&[f64::INFINITY]), &[1.0], ScatterOptions::default())
+                .is_err()
+        );
+        assert!(a.xlim(2.0, -1.0).is_err());
+        assert!(a.xlim(f64::NAN, 1.0).is_err());
+        assert!(a.ylim(0.0, 10.0).is_err());
+        assert!(a.ylim(1.0, 1e301).is_err());
+        assert!(f.add_axes(ScaleKind::Linear, ScaleKind::Linear).is_err());
+        assert_eq!(f, before);
+        let a = f.axes().unwrap();
+        assert_eq!(a.x_limits(), Some((-1.0, 2.0)));
+        assert_eq!(a.y_limits(), Some((0.5, 50.0)));
+        assert_eq!(a.marks().len(), 1);
+    }
+
+    #[test]
+    fn explicit_limits_keep_the_scale_they_define() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
+        a.xlim(-0.0, 3.5).unwrap().ylim(2.0, 500.0).unwrap();
+        let x = a.x_limit_scale().unwrap();
+        let y = a.y_limit_scale().unwrap();
+        assert_eq!(x.transform(), crate::Transform::Linear);
+        assert_eq!(y.transform(), crate::Transform::Log(LogBase::TEN));
+        // The getters give back the limits exactly as passed, the sign of zero included.
+        let (lo, hi) = a.x_limits().unwrap();
+        assert_eq!(
+            (lo.to_bits(), hi.to_bits()),
+            ((-0.0_f64).to_bits(), 3.5_f64.to_bits())
+        );
+        assert_eq!(a.y_limits(), Some((2.0, 500.0)));
+        assert_eq!(x.domain(), (-0.0, 3.5));
+        assert_eq!(y.domain(), (2.0, 500.0));
     }
 
     #[test]
