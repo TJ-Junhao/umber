@@ -9,6 +9,7 @@ name is allowed.
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import subprocess
 from pathlib import Path
@@ -41,8 +42,19 @@ _SELF = "tests/python/test_public_text.py"
 _SKIP_SUFFIXES = {".snap", ".lock", ".ttf", ".otf", ".png", ".whl", ".so", ".pyd"}
 
 
+# Verbatim third-party and project license texts are never edited, and legitimately contain
+# wording such as "copyright owner".
+_LICENSE_TEXTS = (
+    "LICENSE-*",
+    "THIRD-PARTY-LICENSES.txt",
+    "crates/*/fonts/LICENSES/*",
+)
+
+
 def is_scanned(rel: str) -> bool:
     path = Path(rel)
+    if any(fnmatch.fnmatchcase(rel, pattern) for pattern in _LICENSE_TEXTS):
+        return False
     return (
         path.parts[0] != "docs"
         and path.suffix not in _SKIP_SUFFIXES
