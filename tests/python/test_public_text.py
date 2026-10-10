@@ -168,6 +168,9 @@ def test_surface_is_scanned_and_reported(rel: str, tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "rel",
     [
+        "LICENSE-MIT",
+        "THIRD-PARTY-LICENSES.txt",
+        "crates/umber-core/fonts/LICENSES/Inter-OFL.txt",
         "docs/notes.md",
         "crates/umber-core/fonts/Inter-Regular.ttf",
         "x/a.png",
