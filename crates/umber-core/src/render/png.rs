@@ -8,7 +8,7 @@ use tiny_skia as sk;
 
 use super::normalize::{
     GradientKind, NormalizedPath, Segment, clip_is_valid, normalize_dash, normalize_gradient,
-    normalize_path, stroke_is_visible, valid_point,
+    normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
 use crate::color::Rgba;
 use crate::error::{Error, Result};
@@ -467,7 +467,7 @@ impl Canvas {
                 positions,
             ),
             Item::Text(text) => {
-                if text.color.a == 0 || !valid_point(text.origin) {
+                if !text_is_visible(text.color, text.origin) {
                     return;
                 }
                 let Some(normalized) = normalize_path(&text.outline) else {

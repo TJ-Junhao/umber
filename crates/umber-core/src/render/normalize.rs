@@ -50,6 +50,13 @@ pub(crate) fn clip_is_valid(rect: &Rect) -> bool {
         && rect.height > 0.0
 }
 
+/// Whether a text item can be drawn: a visible color and an origin within [`MAX_COORD`].
+///
+/// Both backends skip text that fails this, in every SVG text mode.
+pub(crate) fn text_is_visible(color: Rgba, origin: Point) -> bool {
+    color.a != 0 && valid_point(origin)
+}
+
 /// One drawable segment of a subpath.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Segment {
@@ -755,6 +762,41 @@ mod tests {
                 // Row 9 lies inside the 4 pt wide stroke: a gap shows up only when dashed.
                 let solid = (1..39).all(|x| png.at(x, 9)[0] < 128);
                 assert_eq!(!solid, dashed, "png, {dash:?}");
+            }
+        }
+
+        #[test]
+        fn text_visibility_is_classified_alike() {
+            use crate::fonts::{Font, Weight};
+            use crate::text::{FontLibrary, TextStyle};
+
+            let style = TextStyle {
+                font: Font::Inter,
+                weight: Weight::Regular,
+                size: 16.0,
+                tabular_figures: false,
+            };
+            let transparent = Rgba { a: 0, ..BLACK };
+            let cases = [
+                (BLACK, p(4.0, 16.0), true),
+                (transparent, p(4.0, 16.0), false),
+                (BLACK, p(f32::NAN, 16.0), false),
+                (BLACK, p(4.0, f32::NAN), false),
+                (BLACK, p(f32::INFINITY, 16.0), false),
+                (BLACK, p(4.0, f32::NEG_INFINITY), false),
+                (BLACK, p(2.0 * MAX_COORD, 16.0), false),
+            ];
+            for (color, origin, visible) in cases {
+                assert_eq!(text_is_visible(color, origin), visible, "{origin:?}");
+                let mut scene = Scene::new(40.0, 20.0, WHITE);
+                scene.push_text(FontLibrary::global(), "Hi", style, origin, color);
+                for mode in [SvgText::Editable, SvgText::Outlines] {
+                    let svg = render_svg(&scene, mode);
+                    let drawn = svg.contains("<text") || svg.contains("<path");
+                    assert_eq!(drawn, visible, "svg {mode:?}, {origin:?}");
+                }
+                let png = decode_rgba8(&render_png(&scene, 72).expect("renders")).expect("decodes");
+                assert_eq!(has_ink(&png), visible, "png, {origin:?}");
             }
         }
 

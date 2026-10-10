@@ -22,7 +22,7 @@ use std::fmt::Write as _;
 use super::SvgText;
 use super::normalize::{
     GradientKind, NormalizedPath, Segment, clip_is_valid, normalize_dash, normalize_gradient,
-    normalize_path, stroke_is_visible, valid_point,
+    normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
 use crate::color::Rgba;
 use crate::fonts::Weight;
@@ -356,7 +356,7 @@ impl Writer {
 
     fn text(&mut self, t: &TextItem) {
         // Shared rule: a text item whose origin cannot be drawn is skipped in every mode.
-        if t.color.a == 0 || !valid_point(t.origin) {
+        if !text_is_visible(t.color, t.origin) {
             return;
         }
         match self.text {
