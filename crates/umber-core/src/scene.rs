@@ -28,6 +28,16 @@ use crate::color::Rgba;
 use crate::geometry::{Path, Point};
 use crate::text::{FontLibrary, TextStyle};
 
+/// The deepest group nesting the renderers draw. Content of groups nested deeper than this is
+/// omitted, which bounds the renderers' recursion.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(umber_core::scene::MAX_GROUP_DEPTH, 256);
+/// ```
+pub const MAX_GROUP_DEPTH: usize = 256;
+
 /// A rectangle in points.
 ///
 /// # Examples
@@ -304,6 +314,18 @@ pub struct Scene {
     pub background: Rgba,
     /// Top-level items, drawn in order.
     pub items: Vec<Item>,
+}
+
+impl Drop for Scene {
+    /// Drops nested groups without recursion, so a deep chain cannot overflow the stack.
+    fn drop(&mut self) {
+        let mut stack = std::mem::take(&mut self.items);
+        while let Some(item) = stack.pop() {
+            if let Item::Group { items, .. } = item {
+                stack.extend(items);
+            }
+        }
+    }
 }
 
 impl Scene {

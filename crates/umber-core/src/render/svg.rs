@@ -2,9 +2,9 @@
 //!
 //! [`render_svg`] writes a [`Scene`] as an SVG document. The output is hand-written XML with
 //! absolute path coordinates, at most three decimals per number, and ids drawn from a single
-//! counter in document order, so the same scene always gives the same bytes. Values that
-//! cannot be drawn (non-finite coordinates, zero-width strokes, degenerate gradients) are
-//! skipped; the document stays well-formed.
+//! counter in document order, so the same scene always gives the same bytes. Geometry, dashes
+//! and gradients go through the shared normalization in [`super::normalize`]; values that
+//! cannot be drawn are skipped and the document stays well-formed.
 //!
 //! # Examples
 //!
@@ -20,18 +20,23 @@
 use std::fmt::Write as _;
 
 use super::SvgText;
+use super::normalize::{
+    GradientKind, NormalizedPath, Segment, normalize_dash, normalize_gradient, normalize_path,
+    valid_point,
+};
 use crate::color::Rgba;
 use crate::fonts::Weight;
-use crate::geometry::{Path, PathVerb, Point};
+use crate::geometry::{Path, Point};
 use crate::scene::{
-    FillRule, Item, LineCap, LineJoin, LinearGradient, Paint, Rect, Scene, StrokeStyle, TextItem,
+    FillRule, Item, LineCap, LineJoin, MAX_GROUP_DEPTH, Paint, Rect, Scene, StrokeStyle, TextItem,
 };
 
 /// Writes `scene` as an SVG document.
 ///
 /// With [`SvgText::Outlines`] text is drawn as filled glyph outlines. With
 /// [`SvgText::Editable`] it is written as `<text>` elements that name the font family.
-/// Everything that cannot be drawn is skipped, so the result always parses as XML.
+/// Everything that cannot be drawn is skipped, so the result always parses as XML. Content of
+/// groups nested deeper than [`MAX_GROUP_DEPTH`](crate::scene::MAX_GROUP_DEPTH) is omitted.
 ///
 /// # Examples
 ///
@@ -57,7 +62,7 @@ pub fn render_svg(scene: &Scene, text: SvgText) -> String {
         text,
     };
     for item in &scene.items {
-        writer.item(item);
+        writer.item(item, 0);
     }
 
     let mut out = String::new();
@@ -87,9 +92,9 @@ fn size_value(v: f32) -> f32 {
     if v.is_finite() && v > 0.0 { v } else { 0.0 }
 }
 
-/// Formats a finite number with at most three decimals, trimmed, never `-0`.
-fn num(v: f32) -> String {
-    let mut s = format!("{v:.3}");
+/// Formats a finite number with at most `decimals` decimals, trimmed, never `-0`.
+fn num_with(v: f32, decimals: usize) -> String {
+    let mut s = format!("{v:.decimals$}");
     if s.contains('.') {
         while s.ends_with('0') {
             s.pop();
@@ -99,6 +104,11 @@ fn num(v: f32) -> String {
         }
     }
     if s == "-0" { "0".to_string() } else { s }
+}
+
+/// Formats a finite number with at most three decimals.
+fn num(v: f32) -> String {
+    num_with(v, 3)
 }
 
 fn hex(c: Rgba) -> String {
@@ -131,7 +141,7 @@ fn escape(s: &str) -> String {
             '\'' => out.push_str("&apos;"),
             '\t' | '\n' => out.push(c),
             '\r' => out.push_str("&#13;"),
-            c if c.is_control() && (c as u32) < 0x20 => {}
+            c if (c as u32) < 0x20 => {}
             '\u{FFFE}' | '\u{FFFF}' => {}
             c => out.push(c),
         }
@@ -139,93 +149,50 @@ fn escape(s: &str) -> String {
     out
 }
 
-fn finite(p: Point) -> bool {
-    p.x.is_finite() && p.y.is_finite()
-}
-
-/// Builds the `d` string of a path, or `None` if no drawable segment remains.
-///
-/// A segment with a non-finite coordinate is dropped and breaks the contour: what follows
-/// starts a new subpath (a line becomes `M`; a curve with no start point is dropped too).
-fn path_data(path: &Path) -> Option<String> {
+/// Builds the `d` string of a normalized path.
+fn path_d(path: &NormalizedPath) -> String {
+    fn pt(d: &mut String, p: Point) {
+        let _ = write!(d, "{} {}", num(p.x), num(p.y));
+    }
     let mut d = String::new();
-    let mut has_point = false;
-    let mut drawable = false;
-    let mut open = false;
-    let push = |d: &mut String, cmd: char, points: &[Point]| {
+    for sub in &path.subpaths {
         if !d.is_empty() {
             d.push(' ');
         }
-        d.push(cmd);
-        for (i, p) in points.iter().enumerate() {
-            if i > 0 {
-                d.push(' ');
+        d.push('M');
+        pt(&mut d, sub.start);
+        for seg in &sub.segments {
+            match *seg {
+                Segment::Line(p) => {
+                    d.push_str(" L");
+                    pt(&mut d, p);
+                }
+                Segment::Quad(c, p) => {
+                    d.push_str(" Q");
+                    pt(&mut d, c);
+                    d.push(' ');
+                    pt(&mut d, p);
+                }
+                Segment::Cubic(c1, c2, p) => {
+                    d.push_str(" C");
+                    pt(&mut d, c1);
+                    d.push(' ');
+                    pt(&mut d, c2);
+                    d.push(' ');
+                    pt(&mut d, p);
+                }
             }
-            let _ = write!(d, "{} {}", num(p.x), num(p.y));
         }
-    };
-    for verb in path.verbs() {
-        match *verb {
-            PathVerb::MoveTo(p) => {
-                if finite(p) {
-                    push(&mut d, 'M', &[p]);
-                    has_point = true;
-                    open = true;
-                } else {
-                    has_point = false;
-                    open = false;
-                }
-            }
-            PathVerb::LineTo(p) => {
-                if !finite(p) {
-                    has_point = false;
-                    open = false;
-                } else if has_point {
-                    push(&mut d, 'L', &[p]);
-                    drawable = true;
-                    open = true;
-                } else {
-                    push(&mut d, 'M', &[p]);
-                    has_point = true;
-                    open = true;
-                }
-            }
-            PathVerb::QuadTo(c, p) => {
-                if has_point && finite(c) && finite(p) {
-                    push(&mut d, 'Q', &[c, p]);
-                    drawable = true;
-                    open = true;
-                } else {
-                    has_point = false;
-                    open = false;
-                }
-            }
-            PathVerb::CubicTo(c1, c2, p) => {
-                if has_point && finite(c1) && finite(c2) && finite(p) {
-                    push(&mut d, 'C', &[c1, c2, p]);
-                    drawable = true;
-                    open = true;
-                } else {
-                    has_point = false;
-                    open = false;
-                }
-            }
-            PathVerb::Close => {
-                if open {
-                    if !d.is_empty() {
-                        d.push(' ');
-                    }
-                    d.push('Z');
-                    open = false;
-                }
-            }
+        if sub.closed {
+            d.push_str(" Z");
         }
     }
-    drawable.then_some(d)
+    d
 }
 
-/// Writes the stroke attributes and returns whether the stroke is drawable.
-fn write_stroke(out: &mut String, style: &StrokeStyle) -> bool {
+/// Writes the stroke attributes and returns whether the stroke is drawable. `path_len` is an
+/// upper bound on the stroked path's length, used to classify the dash.
+fn write_stroke(out: &mut String, style: &StrokeStyle, path_len: f32) -> bool {
     if style.color.a == 0 || !style.width.is_finite() || style.width <= 0.0 {
         return false;
     }
@@ -241,10 +208,8 @@ fn write_stroke(out: &mut String, style: &StrokeStyle) -> bool {
         LineJoin::Round => out.push_str(r#" stroke-linejoin="round""#),
         LineJoin::Bevel => out.push_str(r#" stroke-linejoin="bevel""#),
     }
-    let dash_ok = style.dash.iter().all(|v| v.is_finite() && *v >= 0.0)
-        && style.dash.iter().sum::<f32>() > 0.0;
-    if dash_ok {
-        let list: Vec<String> = style.dash.iter().map(|v| num(*v)).collect();
+    if let Some(dash) = normalize_dash(&style.dash, path_len) {
+        let list: Vec<String> = dash.iter().map(|v| num_with(*v, 4)).collect();
         let _ = write!(out, r#" stroke-dasharray="{}""#, list.join(" "));
     }
     true
@@ -268,7 +233,8 @@ impl Writer {
         id
     }
 
-    fn item(&mut self, item: &Item) {
+    /// Writes one item. `depth` is the number of groups enclosing it.
+    fn item(&mut self, item: &Item, depth: usize) {
         match item {
             Item::Fill { path, paint, rule } => self.fill(path, paint, *rule),
             Item::Stroke { path, style } => self.stroke(path, style),
@@ -277,14 +243,19 @@ impl Writer {
                 fill,
                 stroke,
                 positions,
-            } => self.markers(shape, *fill, stroke.as_ref(), positions),
+            } => {
+                self.markers(shape, *fill, stroke.as_ref(), positions);
+            }
             Item::Text(t) => self.text(t),
-            Item::Group { clip, items } => self.group(*clip, items),
+            Item::Group { clip, items } => self.group(*clip, items, depth),
         }
     }
 
     fn fill(&mut self, path: &Path, paint: &Paint, rule: FillRule) {
-        let Some(d) = path_data(path) else { return };
+        let Some(normalized) = normalize_path(path) else {
+            return;
+        };
+        let d = path_d(&normalized);
         let mut attrs = String::new();
         match paint {
             Paint::Solid(c) => {
@@ -293,11 +264,34 @@ impl Writer {
                 }
                 write_color(&mut attrs, "fill", "fill-opacity", *c);
             }
-            Paint::Linear(g) => {
-                if !self.gradient_paint(g, &mut attrs) {
-                    return;
+            Paint::Linear(g) => match normalize_gradient(g) {
+                GradientKind::Skip => return,
+                GradientKind::Solid(c) => {
+                    if c.a == 0 {
+                        return;
+                    }
+                    write_color(&mut attrs, "fill", "fill-opacity", c);
                 }
-            }
+                GradientKind::Linear { start, end, stops } => {
+                    let id = self.id();
+                    let _ = writeln!(
+                        self.defs,
+                        r#"<linearGradient id="g{id}" gradientUnits="userSpaceOnUse" x1="{}" y1="{}" x2="{}" y2="{}">"#,
+                        num(start.x),
+                        num(start.y),
+                        num(end.x),
+                        num(end.y)
+                    );
+                    for stop in stops {
+                        let mut line = format!(r#"<stop offset="{}""#, num(stop.offset));
+                        write_color(&mut line, "stop-color", "stop-opacity", stop.color);
+                        line.push_str("/>\n");
+                        self.defs.push_str(&line);
+                    }
+                    self.defs.push_str("</linearGradient>\n");
+                    let _ = write!(attrs, r#" fill="url(#g{id})""#);
+                }
+            },
         }
         if rule == FillRule::EvenOdd {
             attrs.push_str(r#" fill-rule="evenodd""#);
@@ -305,57 +299,15 @@ impl Writer {
         let _ = writeln!(self.body, r#"<path d="{d}"{attrs}/>"#);
     }
 
-    /// Writes the `fill` attribute for a gradient (registering it in the defs when needed).
-    /// Returns false if nothing should be drawn.
-    fn gradient_paint(&mut self, g: &LinearGradient, attrs: &mut String) -> bool {
-        let mut stops: Vec<(f32, Rgba)> = g
-            .stops
-            .iter()
-            .filter(|s| s.offset.is_finite())
-            .map(|s| (s.offset.clamp(0.0, 1.0), s.color))
-            .collect();
-        stops.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let Some(&(_, last)) = stops.last() else {
-            return false;
-        };
-        if !finite(g.start) || !finite(g.end) {
-            return false;
-        }
-        if stops.len() == 1 || g.start == g.end {
-            if last.a == 0 {
-                return false;
-            }
-            write_color(attrs, "fill", "fill-opacity", last);
-            return true;
-        }
-        let id = self.id();
-        let _ = writeln!(
-            self.defs,
-            r#"<linearGradient id="g{id}" gradientUnits="userSpaceOnUse" x1="{}" y1="{}" x2="{}" y2="{}">"#,
-            num(g.start.x),
-            num(g.start.y),
-            num(g.end.x),
-            num(g.end.y)
-        );
-        for (offset, color) in stops {
-            let mut stop = String::new();
-            let _ = write!(stop, r#"<stop offset="{}""#, num(offset));
-            write_color(&mut stop, "stop-color", "stop-opacity", color);
-            stop.push_str("/>\n");
-            self.defs.push_str(&stop);
-        }
-        self.defs.push_str("</linearGradient>\n");
-        let _ = write!(attrs, r#" fill="url(#g{id})""#);
-        true
-    }
-
     fn stroke(&mut self, path: &Path, style: &StrokeStyle) {
-        let Some(d) = path_data(path) else { return };
+        let Some(normalized) = normalize_path(path) else {
+            return;
+        };
         let mut attrs = String::from(r#" fill="none""#);
-        if !write_stroke(&mut attrs, style) {
+        if !write_stroke(&mut attrs, style, normalized.control_length()) {
             return;
         }
-        let _ = writeln!(self.body, r#"<path d="{d}"{attrs}/>"#);
+        let _ = writeln!(self.body, r#"<path d="{}"{attrs}/>"#, path_d(&normalized));
     }
 
     fn markers(
@@ -365,7 +317,9 @@ impl Writer {
         stroke: Option<&StrokeStyle>,
         positions: &[Point],
     ) {
-        let Some(d) = path_data(shape) else { return };
+        let Some(normalized) = normalize_path(shape) else {
+            return;
+        };
         let mut attrs = String::new();
         let fill = fill.filter(|c| c.a > 0);
         match fill {
@@ -373,19 +327,24 @@ impl Writer {
             None => attrs.push_str(r#" fill="none""#),
         }
         let mut stroke_attrs = String::new();
-        let has_stroke = stroke.is_some_and(|s| write_stroke(&mut stroke_attrs, s));
+        let has_stroke =
+            stroke.is_some_and(|s| write_stroke(&mut stroke_attrs, s, normalized.control_length()));
         if has_stroke {
             attrs.push_str(&stroke_attrs);
         }
         if fill.is_none() && !has_stroke {
             return;
         }
-        let uses: Vec<&Point> = positions.iter().filter(|p| finite(**p)).collect();
+        let uses: Vec<&Point> = positions.iter().filter(|p| valid_point(**p)).collect();
         if uses.is_empty() {
             return;
         }
         let id = self.id();
-        let _ = writeln!(self.defs, r#"<path id="m{id}" d="{d}"/>"#);
+        let _ = writeln!(
+            self.defs,
+            r#"<path id="m{id}" d="{}"/>"#,
+            path_d(&normalized)
+        );
         let _ = writeln!(self.body, "<g{attrs}>");
         for p in uses {
             let _ = writeln!(
@@ -404,16 +363,16 @@ impl Writer {
         }
         match self.text {
             SvgText::Outlines => {
-                let Some(d) = path_data(&t.outline) else {
+                let Some(normalized) = normalize_path(&t.outline) else {
                     return;
                 };
                 let mut attrs = String::new();
                 write_color(&mut attrs, "fill", "fill-opacity", t.color);
-                let _ = writeln!(self.body, r#"<path d="{d}"{attrs}/>"#);
+                let _ = writeln!(self.body, r#"<path d="{}"{attrs}/>"#, path_d(&normalized));
             }
             SvgText::Editable => {
                 let content = escape(&t.text);
-                if content.is_empty() || !finite(t.origin) {
+                if content.is_empty() || !valid_point(t.origin) {
                     return;
                 }
                 if !t.style.size.is_finite() || t.style.size <= 0.0 {
@@ -437,12 +396,18 @@ impl Writer {
                     attrs.push_str(r#" font-variant-numeric="tabular-nums""#);
                 }
                 write_color(&mut attrs, "fill", "fill-opacity", t.color);
-                let _ = writeln!(self.body, "<text{attrs}>{content}</text>");
+                let _ = writeln!(
+                    self.body,
+                    r#"<text xml:space="preserve"{attrs}>{content}</text>"#
+                );
             }
         }
     }
 
-    fn group(&mut self, clip: Option<Rect>, items: &[Item]) {
+    fn group(&mut self, clip: Option<Rect>, items: &[Item], depth: usize) {
+        if depth >= MAX_GROUP_DEPTH {
+            return;
+        }
         let mut attrs = String::new();
         let mut clip_def = None;
         if let Some(r) = clip {
@@ -461,9 +426,10 @@ impl Writer {
         }
         let open = format!("<g{attrs}>\n");
         let start = self.body.len();
+        let defs_start = self.defs.len();
         self.body.push_str(&open);
         for item in items {
-            self.item(item);
+            self.item(item, depth + 1);
         }
         if self.body.len() == start + open.len() {
             self.body.truncate(start);
@@ -471,7 +437,8 @@ impl Writer {
         }
         self.body.push_str("</g>\n");
         if let Some(def) = clip_def {
-            self.defs.push_str(&def);
+            // The clip was numbered before its children, so it is defined before them.
+            self.defs.insert_str(defs_start, &def);
         }
     }
 }
@@ -480,7 +447,7 @@ impl Writer {
 mod tests {
     use super::*;
     use crate::fonts::Font;
-    use crate::scene::GradientStop;
+    use crate::scene::{GradientStop, LinearGradient};
     use crate::text::{FontLibrary, TextStyle};
 
     const WHITE: Rgba = Rgba {
@@ -888,7 +855,8 @@ mod tests {
         path.move_to(p(f32::NAN, 0.0));
         path.line_to(p(1.0, 2.0));
         path.line_to(p(3.0, 4.0));
-        assert_eq!(path_data(&path).as_deref(), Some("M1 2 L3 4"));
+        let normalized = normalize_path(&path).expect("drawable");
+        assert_eq!(path_d(&normalized), "M1 2 L3 4");
     }
 
     #[test]
@@ -957,5 +925,160 @@ mod tests {
                 "{svg}"
             );
         }
+    }
+
+    #[test]
+    fn editable_text_preserves_spaces() {
+        let mut scene = Scene::new(200.0, 40.0, WHITE);
+        let source = "  A     B  ";
+        scene.push_text(
+            FontLibrary::global(),
+            source,
+            inter(12.0),
+            p(5.0, 20.0),
+            RED,
+        );
+        let svg = render_svg(&scene, SvgText::Editable);
+        let doc = parse(&svg);
+        let text = doc
+            .descendants()
+            .find(|n| n.has_tag_name("text"))
+            .expect("text element");
+        assert_eq!(
+            text.attribute(("http://www.w3.org/XML/1998/namespace", "space")),
+            Some("preserve")
+        );
+        assert_eq!(text.text(), Some(source));
+    }
+
+    #[test]
+    fn signed_zero_gradient_offsets_keep_input_order() {
+        let green = Rgba {
+            r: 0,
+            g: 255,
+            b: 0,
+            a: 255,
+        };
+        let mut scene = Scene::new(50.0, 50.0, WHITE);
+        scene.push(Item::Fill {
+            path: triangle(),
+            paint: gradient(
+                vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: RED,
+                    },
+                    GradientStop {
+                        offset: -0.0,
+                        color: green,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: WHITE,
+                    },
+                ],
+                p(0.0, 0.0),
+                p(50.0, 0.0),
+            ),
+            rule: FillRule::NonZero,
+        });
+        let svg = render_svg(&scene, SvgText::Outlines);
+        let doc = parse(&svg);
+        let colors: Vec<&str> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("stop"))
+            .filter_map(|n| n.attribute("stop-color"))
+            .collect();
+        assert_eq!(colors, ["#C82814", "#00FF00", "#FFFFFF"]);
+        let offsets: Vec<&str> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("stop"))
+            .filter_map(|n| n.attribute("offset"))
+            .collect();
+        assert_eq!(offsets, ["0", "0", "1"]);
+    }
+
+    #[test]
+    fn clip_is_defined_before_its_children_definitions() {
+        let mut scene = Scene::new(50.0, 50.0, WHITE);
+        scene.push(Item::Group {
+            clip: Some(Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            }),
+            items: vec![Item::Fill {
+                path: triangle(),
+                paint: gradient(two_stops(), p(0.0, 0.0), p(20.0, 0.0)),
+                rule: FillRule::NonZero,
+            }],
+        });
+        let svg = render_svg(&scene, SvgText::Outlines);
+        let clip = svg.find("<clipPath id=\"c0\"").expect("clip");
+        let grad = svg.find("<linearGradient id=\"g1\"").expect("gradient");
+        assert!(clip < grad, "{svg}");
+    }
+
+    #[test]
+    fn dashes_use_four_decimals_and_follow_the_shared_classification() {
+        let mut scene = Scene::new(50.0, 50.0, WHITE);
+        scene.push(Item::Stroke {
+            path: line(),
+            style: stroke_style(1.0, vec![0.0625, 3.0]),
+        });
+        scene.push(Item::Stroke {
+            path: line(),
+            style: stroke_style(1.0, vec![3.0]),
+        });
+        scene.push(Item::Stroke {
+            path: line(),
+            style: stroke_style(1.0, vec![0.00049, 0.00049]),
+        });
+        let svg = render_svg(&scene, SvgText::Outlines);
+        assert!(svg.contains(r#"stroke-dasharray="0.0625 3""#), "{svg}");
+        assert!(svg.contains(r#"stroke-dasharray="3 3""#), "{svg}");
+        assert_eq!(svg.matches("stroke-dasharray").count(), 2, "{svg}");
+    }
+
+    fn deep_chain(levels: usize) -> Scene {
+        let mut item = Item::Fill {
+            path: triangle(),
+            paint: Paint::Solid(RED),
+            rule: FillRule::NonZero,
+        };
+        for _ in 0..levels {
+            item = Item::Group {
+                clip: None,
+                items: vec![item],
+            };
+        }
+        let mut scene = Scene::new(50.0, 50.0, WHITE);
+        scene.push(item);
+        scene
+    }
+
+    #[test]
+    fn group_depth_is_bounded() {
+        use crate::scene::MAX_GROUP_DEPTH;
+        let kept = render_svg(&deep_chain(MAX_GROUP_DEPTH), SvgText::Outlines);
+        assert!(kept.contains("<path d="));
+        assert_eq!(kept.matches("<g>").count(), MAX_GROUP_DEPTH);
+        let omitted = render_svg(&deep_chain(MAX_GROUP_DEPTH + 1), SvgText::Outlines);
+        assert!(!omitted.contains("<path d="));
+        assert!(!omitted.contains("<g"));
+    }
+
+    #[test]
+    fn very_deep_scenes_render_and_drop_without_overflow() {
+        let handle = std::thread::spawn(|| {
+            let scene = deep_chain(100_000);
+            let svg = render_svg(&scene, SvgText::Outlines);
+            drop(scene);
+            svg
+        });
+        let svg = handle.join().expect("no stack overflow");
+        parse(&svg);
+        assert!(!svg.contains("<path d="));
     }
 }
