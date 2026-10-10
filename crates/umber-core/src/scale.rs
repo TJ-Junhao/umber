@@ -500,12 +500,8 @@ impl ContinuousScale {
         let target = ticks::clamp_target(target);
         let widened = match self.transform {
             Transform::Linear => {
-                if is_degenerate(self.lo, self.hi) {
-                    None
-                } else {
-                    let values = ticks::extended(self.lo, self.hi, target, true);
-                    values.first().copied().zip(values.last().copied())
-                }
+                let values = self.loose_values(target);
+                values.first().copied().zip(values.last().copied())
             }
             Transform::Log(base) => {
                 let b = base.get();
@@ -514,6 +510,22 @@ impl ContinuousScale {
                 lo.zip(hi)
             }
         };
+        self.widened(widened)
+    }
+
+    /// The loose Extended Wilkinson tick values that cover a linear domain; empty when the
+    /// domain is degenerate. Their ends are the nice limits.
+    fn loose_values(&self, target: usize) -> Vec<f64> {
+        if is_degenerate(self.lo, self.hi) {
+            Vec::new()
+        } else {
+            ticks::extended(self.lo, self.hi, target, true)
+        }
+    }
+
+    /// This scale widened to `(lo, hi)`, never narrowed and kept within the supported
+    /// magnitudes; unchanged for `None` or an unusable range.
+    fn widened(&self, widened: Option<(f64, f64)>) -> ContinuousScale {
         match widened {
             Some((lo, hi)) => {
                 // Never narrow the domain, whatever rounding did, and stay within the limits.
@@ -537,6 +549,33 @@ impl ContinuousScale {
             }
             None => *self,
         }
+    }
+
+    /// [`nice`](Self::nice) together with ticks that agree with it, so both ends of the nice
+    /// domain carry a tick.
+    ///
+    /// Linear: the loose tick set that produced the nice limits, labelled like
+    /// [`ticks`](Self::ticks). Log: the log ticks of the nice domain. A degenerate domain, or a
+    /// loose set with fewer than two values inside the domain, falls back to `ticks` of the
+    /// nice scale.
+    pub(crate) fn nice_with_ticks(&self, target: usize) -> (ContinuousScale, Vec<Tick>) {
+        let target = ticks::clamp_target(target);
+        let nice = self.nice(target);
+        if matches!(self.transform, Transform::Linear) {
+            let (lo, hi) = nice.domain();
+            let values = strictly_increasing(
+                self.loose_values(target)
+                    .into_iter()
+                    .filter(|v| (lo..=hi).contains(v))
+                    .collect(),
+            );
+            if let (Some(a), Some(b)) = (values.first(), values.get(1)) {
+                let labels = ticks::format_ticks(&values, b - a);
+                return (nice, Self::pair(values, labels));
+            }
+        }
+        let ticks = nice.ticks(target);
+        (nice, ticks)
     }
 
     /// Tick positions and labels for about `target` ticks (at least 2).
@@ -788,6 +827,53 @@ mod tests {
 
     fn lin(lo: f64, hi: f64) -> ContinuousScale {
         ContinuousScale::new(Transform::Linear, lo, hi, "test").unwrap()
+    }
+
+    /// Asserts that `nice_with_ticks` agrees with `nice` and puts a tick on both domain ends.
+    #[track_caller]
+    fn assert_nice_ticks_agree(scale: ContinuousScale, target: usize) -> Vec<Tick> {
+        let (nice, ticks) = scale.nice_with_ticks(target);
+        assert_eq!(nice, scale.nice(target));
+        let (lo, hi) = nice.domain();
+        assert_eq!(ticks.first().map(|t| t.value), Some(lo), "{ticks:?}");
+        assert_eq!(ticks.last().map(|t| t.value), Some(hi), "{ticks:?}");
+        assert!(ticks.windows(2).all(|w| w[0].value < w[1].value));
+        ticks
+    }
+
+    #[test]
+    fn nice_with_ticks_puts_ticks_on_both_ends() {
+        // `ticks(5)` of the nice domain (10, 90) would give 25, 50, 75 only.
+        let scale = lin(12.0, 88.0);
+        assert_eq!(scale.nice(5).domain(), (10.0, 90.0));
+        let ticks = assert_nice_ticks_agree(scale, 5);
+        let labels: Vec<&str> = ticks.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, ["10", "30", "50", "70", "90"]);
+
+        for (lo, hi) in [
+            (3.0, 97.0),
+            (13.0, 77.0),
+            (-3.0, 17.0),
+            (0.5, 3.3),
+            (1e-7, 3e-7),
+        ] {
+            for target in 3..=8 {
+                assert_nice_ticks_agree(lin(lo, hi), target);
+            }
+        }
+
+        let log = ContinuousScale::new(Transform::Log(LogBase::TEN), 3.0, 4.2e4, "test").unwrap();
+        let ticks = assert_nice_ticks_agree(log, 5);
+        assert_eq!(ticks.first().map(|t| t.label.as_str()), Some("1"));
+        assert_eq!(ticks.len(), 6);
+    }
+
+    #[test]
+    fn nice_with_ticks_falls_back_on_degenerate_domains() {
+        let scale = lin(1.0, 1.0 + 1e-14);
+        let (nice, ticks) = scale.nice_with_ticks(5);
+        assert_eq!(nice, scale);
+        assert_eq!(ticks, scale.ticks(5));
     }
 
     #[test]

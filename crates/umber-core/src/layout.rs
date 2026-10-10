@@ -637,7 +637,7 @@ mod tests {
         let (sx, sy, small) = ticks(2.0, 1.5);
         let (lx, ly, large) = ticks(12.0, 9.0);
         assert_eq!(small, (3, 3));
-        assert_eq!(large, (8, 7));
+        assert_eq!(large, (8, 8));
         assert!(lx > sx && ly > sy, "{sx} {sy} {lx} {ly}");
     }
 

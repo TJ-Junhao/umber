@@ -12,10 +12,9 @@ expression: "render_svg(&scene, SvgText::Editable)"
 <text xml:space="preserve" x="12" y="157.025" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0.5</text>
 <text xml:space="preserve" x="12" y="71.15" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">1.0</text>
 <text xml:space="preserve" x="9.45" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0</text>
-<text xml:space="preserve" x="88.5" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">20</text>
-<text xml:space="preserve" x="170.1" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">40</text>
-<text xml:space="preserve" x="251.7" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">60</text>
-<text xml:space="preserve" x="333.3" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">80</text>
+<text xml:space="preserve" x="108.9" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">25</text>
+<text xml:space="preserve" x="210.9" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">50</text>
+<text xml:space="preserve" x="312.9" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">75</text>
 <text xml:space="preserve" x="412.35" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">100</text>
 <text xml:space="preserve" x="12" y="24.681" font-family="'Source Serif 4', serif" font-size="13" font-weight="600" fill="#2B211B">Station output</text>
 <text xml:space="preserve" x="12" y="39.175" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" fill="#8C8076">Daily mean, MW</text>

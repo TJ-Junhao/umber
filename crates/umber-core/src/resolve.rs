@@ -3,11 +3,12 @@
 //! Auto limits follow spec section 7. A continuous axis is widened to nice limits, except the x
 //! axis of an axes whose marks are all lines, which keeps the exact data extent. Explicit
 //! limits replace the auto range as given. A category axis lists the marks' categories in
-//! order of first appearance. Tick positions are normalized to `[0, 1]` along the axis, so
+//! order of first appearance. On a nice axis the ticks are the tick set that produced the
+//! nice limits, so both ends carry a tick. Tick positions are normalized to `[0, 1]` along the axis, so
 //! layout and drawing never touch data values again.
 
 use crate::figure::{Axes, AxisData, Mark};
-use crate::{CategoryScale, ContinuousScale, ScaleKind, Transform};
+use crate::{CategoryScale, ContinuousScale, ScaleKind, Tick, Transform};
 
 /// The context of errors that cannot happen here: the model validated every input already.
 const CONTEXT: &str = "Figure.to_scene()";
@@ -73,7 +74,11 @@ pub(crate) fn coincides(a: f64, b: f64) -> bool {
 }
 
 /// The tick targets for a plot area of `plot_w` by `plot_h` points:
-/// x `clamp(round(w / 72) + 1, 3, 8)`, y `clamp(round(h / 60) + 1, 3, 7)`.
+/// x `clamp(round(w / 100) + 1, 3, 8)`, y `clamp(round(h / 50) + 1, 3, 8)`.
+///
+/// These divisors were calibrated against the approved mocks (about 5 ticks per axis on a
+/// 6 by 4 in figure: y 0/25/50/75/100, x 0/10/20/30). They replace the plan's original 72 and
+/// 60 pt, which gave too few y ticks.
 pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
     fn target(size: f64, per_tick: f64, lo: usize, hi: usize) -> usize {
         let n = (size / per_tick).round() + 1.0;
@@ -83,7 +88,7 @@ pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
         // The clamp below keeps the cast within range; NaN was handled above.
         (n.clamp(lo as f64, hi as f64)) as usize
     }
-    (target(plot_w, 72.0, 3, 8), target(plot_h, 60.0, 3, 7))
+    (target(plot_w, 100.0, 3, 8), target(plot_h, 50.0, 3, 8))
 }
 
 fn mark_data(mark: &Mark) -> (&AxisData, &[f64]) {
@@ -112,27 +117,38 @@ fn transform_of(kind: ScaleKind) -> Option<Transform> {
     }
 }
 
-/// A continuous scale from explicit limits, or from the data extent, widened with `nice`
-/// unless `exact`.
+/// A continuous axis from explicit limits, or from the data extent widened to nice limits
+/// unless `exact`. Nice axes take the ticks that produced their limits; the others take
+/// `ticks()`.
 fn continuous(
     transform: Transform,
     limits: Option<(f64, f64)>,
     data: Option<(f64, f64)>,
     exact: bool,
     target: usize,
-) -> ContinuousScale {
-    if let Some((lo, hi)) = limits {
-        return ContinuousScale::new(transform, lo, hi, CONTEXT)
+) -> ResolvedAxis {
+    let (scale, ticks) = if let Some((lo, hi)) = limits {
+        let scale = ContinuousScale::new(transform, lo, hi, CONTEXT)
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
+        (scale, scale.ticks(target))
+    } else {
+        let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
+            .unwrap_or_else(|_| ContinuousScale::unit(transform));
+        if exact {
+            (scale, scale.ticks(target))
+        } else {
+            scale.nice_with_ticks(target)
+        }
+    };
+    ResolvedAxis {
+        ticks: positioned(&scale, ticks),
+        scale: AxisScale::Continuous(scale),
     }
-    let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
-        .unwrap_or_else(|_| ContinuousScale::unit(transform));
-    if exact { scale } else { scale.nice(target) }
 }
 
-fn continuous_ticks(scale: &ContinuousScale, target: usize) -> Vec<AxisTick> {
-    scale
-        .ticks(target)
+/// Ticks with their positions along `scale`; ticks that do not map are dropped.
+fn positioned(scale: &ContinuousScale, ticks: Vec<Tick>) -> Vec<AxisTick> {
+    ticks
         .into_iter()
         .filter_map(|tick| {
             let pos = scale.normalize(tick.value);
@@ -174,11 +190,7 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
                 AxisData::Categories(_) => &[],
             }));
             let all_lines = marks.iter().all(|mark| matches!(mark, Mark::Line { .. }));
-            let scale = continuous(transform, axes.x_limits(), data, all_lines, x_target);
-            ResolvedAxis {
-                ticks: continuous_ticks(&scale, x_target),
-                scale: AxisScale::Continuous(scale),
-            }
+            continuous(transform, axes.x_limits(), data, all_lines, x_target)
         }
         None => {
             let scale = categories(marks);
@@ -191,16 +203,17 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
     let (y, baseline) = match transform_of(axes.y_scale()) {
         Some(transform) => {
             let data = extent(marks.iter().flat_map(|mark| mark_data(mark).1));
-            let scale = continuous(transform, axes.y_limits(), data, false, y_target);
-            let (lo, hi) = scale.domain();
-            let baseline = if transform == Transform::Linear && lo <= 0.0 && 0.0 <= hi {
-                scale.normalize(0.0)
-            } else {
-                0.0
-            };
-            let axis = ResolvedAxis {
-                ticks: continuous_ticks(&scale, y_target),
-                scale: AxisScale::Continuous(scale),
+            let axis = continuous(transform, axes.y_limits(), data, false, y_target);
+            let baseline = match &axis.scale {
+                AxisScale::Continuous(scale) => {
+                    let (lo, hi) = scale.domain();
+                    if transform == Transform::Linear && lo <= 0.0 && 0.0 <= hi {
+                        scale.normalize(0.0)
+                    } else {
+                        0.0
+                    }
+                }
+                AxisScale::Category(_) => 0.0,
             };
             (axis, if baseline.is_finite() { baseline } else { 0.0 })
         }
@@ -294,10 +307,27 @@ mod tests {
         let ((x0, x1), (y0, y1)) = domains(&f);
         assert_eq!((x0, x1), (10.0, 90.0));
         assert_eq!((y0, y1), (0.0, 40.0));
-        // Here the nice y limits are also the outer y ticks.
+        // Nice limits are the outer ticks on both axes: x is 10, 30, ..., 90, not 25, 50, 75.
         let r = resolve(f.axes().unwrap(), 5, 4);
-        assert_eq!(r.y.ticks.first().map(|t| t.pos), Some(0.0));
-        assert_eq!(r.y.ticks.last().map(|t| t.pos), Some(1.0));
+        for axis in [&r.x, &r.y] {
+            assert_eq!(axis.ticks.first().map(|t| t.pos), Some(0.0));
+            assert_eq!(axis.ticks.last().map(|t| t.pos), Some(1.0));
+        }
+        let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, ["10", "30", "50", "70", "90"]);
+
+        // The same on a log axis.
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let mut f = figure(log, LIN);
+        axes(&mut f)
+            .scatter(nums(&[12.0, 88.0]), &[1.0, 2.0], ScatterOptions::default())
+            .unwrap();
+        let r = resolve(f.axes().unwrap(), 5, 4);
+        assert_eq!(r.x.continuous().unwrap().domain(), (10.0, 100.0));
+        let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, ["10", "100"]);
+        assert_eq!(r.x.ticks.first().map(|t| t.pos), Some(0.0));
+        assert_eq!(r.x.ticks.last().map(|t| t.pos), Some(1.0));
     }
 
     #[test]
@@ -409,13 +439,13 @@ mod tests {
     fn tick_targets_follow_plot_size() {
         assert_eq!(tick_targets(0.0, 0.0), (3, 3));
         assert_eq!(tick_targets(1.0, 1.0), (3, 3));
-        // 288 / 72 + 1 = 5, 180 / 60 + 1 = 4.
-        assert_eq!(tick_targets(288.0, 180.0), (5, 4));
-        // Rounding: 3.5 rounds up, 3.49 down.
-        assert_eq!(tick_targets(252.0, 209.0), (5, 4));
-        assert_eq!(tick_targets(251.0, 210.0), (4, 5));
+        // A 6 by 4 in figure's plot area: 408 / 100 + 1 = 5, 190 / 50 + 1 = 5.
+        assert_eq!(tick_targets(408.0, 190.0), (5, 5));
+        // Rounding: 3.5 rounds up, just below 3.5 rounds down.
+        assert_eq!(tick_targets(350.0, 174.0), (5, 4));
+        assert_eq!(tick_targets(349.0, 175.0), (4, 5));
         // Upper clamps.
-        assert_eq!(tick_targets(10_000.0, 10_000.0), (8, 7));
-        assert_eq!(tick_targets(f64::NAN, f64::INFINITY), (3, 7));
+        assert_eq!(tick_targets(10_000.0, 10_000.0), (8, 8));
+        assert_eq!(tick_targets(f64::NAN, f64::INFINITY), (3, 8));
     }
 }
