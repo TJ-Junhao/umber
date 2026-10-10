@@ -1,12 +1,22 @@
 [package]
 name = "umber-core"
-description = "Rendering core of umber, a plotting library for Python written in Rust."
+description = "Rendering core of umber, a plotting library written in Rust."
+keywords = ["plotting", "charts", "visualization", "svg", "png"]
+categories = ["visualization", "graphics", "rendering"]
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-repository.workspace = true
-include = ["src/**/*", "fonts/**/*", "tests/fixtures/**/*", "Cargo.toml"]
+include = [
+    "src/**/*",
+    "fonts/**/*",
+    "tests/fixtures/**/*",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
 
 [dependencies]
 fontdb = "0.24.0"

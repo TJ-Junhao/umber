@@ -53,6 +53,22 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: scripts/check-refactor-output.sh compare "$BASE" --png
 
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install --locked cargo-about@0.9.2 --features cli
+      - run: scripts/licenses/generate.sh
+      - run: git diff --exit-code THIRD-PARTY-LICENSES.txt
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install 1.88 --profile minimal
+      - run: cargo +1.88 check -p umber-core --locked
+
   python:
     strategy:
       fail-fast: false
@@ -74,15 +90,20 @@ jobs:
       - run: uv run mypy
       - run: uv run python -m mypy.stubtest umber._umber
       - run: uv run pytest -q
+      - name: Build release dists without local paths
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: scripts/release/build-dists.sh
 
   ci-ok:
     if: always()
-    needs: [rust, python, refactor-compare]
+    needs: [rust, licenses, msrv, python, refactor-compare]
     runs-on: ubuntu-latest
     steps:
       - name: Require every needed job to have succeeded
         run: |
-          echo "rust=${{ needs.rust.result }} python=${{ needs.python.result }} refactor-compare=${{ needs.refactor-compare.result }}"
+          echo "rust=${{ needs.rust.result }} licenses=${{ needs.licenses.result }} msrv=${{ needs.msrv.result }} python=${{ needs.python.result }} refactor-compare=${{ needs.refactor-compare.result }}"
+          test "${{ needs.licenses.result }}" = "success"
+          test "${{ needs.msrv.result }}" = "success"
           test "${{ needs.rust.result }}" = "success"
           test "${{ needs.python.result }}" = "success"
           # Skipped when the pull request has no `refactor` label.
