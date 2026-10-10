@@ -514,7 +514,8 @@ impl Axes {
 
     /// Sets the x limits. `Error::Usage` on a category axis; `Error::Style` unless
     /// `low < high`, both are finite and within the supported magnitudes (and positive on a
-    /// log axis).
+    /// log axis), and the range is wide enough: on a linear axis at least
+    /// `max(1e-10 * max(|low|, |high|), 1e-290)`, on a log axis a factor of `1 + 1e-9`.
     ///
     /// # Examples
     ///
@@ -525,6 +526,7 @@ impl Axes {
     /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// assert!(axes.xlim(0.0, 1.0).is_ok());
     /// assert!(axes.xlim(1.0, 1.0).is_err());
+    /// assert!(axes.xlim(1.0, 1.0 + 1e-12).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Axes> {
@@ -829,8 +831,10 @@ impl Figure {
     }
 
     /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.
-    /// The scene is `width × 72` by `height × 72` pt on the theme background. Without axes it
-    /// holds the background only. The same figure always gives the same scene.
+    /// The scene is `width × 72` by `height × 72` pt on the theme background. It holds the
+    /// axes chrome as one unclipped group, followed by the visible marks, in insertion order,
+    /// as one group clipped to the plot area. Without axes it holds the background only. The
+    /// same figure always gives the same scene.
     ///
     /// # Examples
     ///
@@ -852,8 +856,12 @@ impl Figure {
         let Some(axes) = &self.axes else {
             return scene;
         };
-        let (_resolved, layout) = layout::plan(width, height, &self.theme, axes, library);
+        let (resolved, layout) = layout::plan(width, height, &self.theme, axes, library);
         scene.push(draw::chrome(&self.theme, &layout));
+        let colors = self.resolved_colors();
+        if let Some(marks) = draw::marks(&self.theme, axes, &resolved, &layout, &colors) {
+            scene.push(marks);
+        }
         scene
     }
 

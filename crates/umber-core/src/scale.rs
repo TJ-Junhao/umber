@@ -157,6 +157,39 @@ pub const MIN_LOG_VALUE: f64 = 1e-300;
 /// A log domain must span at least this ratio, or `ln(hi) - ln(lo)` loses all precision.
 const MIN_LOG_RATIO: f64 = 1.0 + 1e-9;
 
+/// A linear domain must be at least this share of its larger limit's magnitude wide. One `f64`
+/// ulp is then at most about `2.2e-16 / 1e-10`, or 2.2e-6, of the domain, so positions are
+/// resolvable to about 1.1e-6 of the plot extent (4.4e-4 pt on a 400 pt plot).
+const MIN_LINEAR_RELATIVE_WIDTH: f64 = 1e-10;
+
+/// A linear domain must also be at least this wide, which keeps the same resolution near 0
+/// (where the relative bound alone would allow a range of a few subnormals).
+const MIN_LINEAR_WIDTH: f64 = 1e-290;
+
+/// Whether `lo..hi` (with `lo < hi`, both finite) is too narrow for a linear domain.
+fn too_narrow(lo: f64, hi: f64) -> bool {
+    let magnitude = lo.abs().max(hi.abs());
+    hi - lo < (MIN_LINEAR_RELATIVE_WIDTH * magnitude).max(MIN_LINEAR_WIDTH)
+}
+
+/// `ln(v / lo)` for positive `v` and `lo`: the log-axis position of `v` measured from the
+/// lower limit, in natural-log units. Measuring from `lo` keeps narrow log domains at large
+/// magnitudes resolvable: `ln(1e200 * (1 + 1e-8))` and `ln(1e200)` are only about 175 000 ulps
+/// apart. Within a factor of 2 of `lo`, `v - lo` is exact, so `ln_1p((v - lo) / lo)` has full
+/// relative precision even when `v / lo` is within a few ulps of 1. Further out `ln(v / lo)`
+/// is used, and when `v / lo` is not a normal `f64` (beyond about `1e±308`) the difference of
+/// the logarithms; such values are far from `lo`, where that rounding is negligible.
+pub(crate) fn log_offset(v: f64, lo: f64) -> f64 {
+    let ratio = v / lo;
+    if (0.5..=2.0).contains(&ratio) {
+        ((v - lo) / lo).ln_1p()
+    } else if ratio.is_normal() {
+        ratio.ln()
+    } else {
+        v.ln() - lo.ln()
+    }
+}
+
 /// A numeric axis: a transform plus a domain `[lo, hi]` that maps onto `[0, 1]`.
 ///
 /// # Examples
@@ -245,8 +278,10 @@ impl ContinuousScale {
     /// Creates a scale over `[lo, hi]`.
     ///
     /// Returns `Error::Style` (with the caller's `context`) unless both limits are finite and
-    /// `lo < hi`. Linear limits must not exceed [`MAX_MAGNITUDE`] in magnitude. Log limits must lie
-    /// in `[MIN_LOG_VALUE, MAX_MAGNITUDE]` with `hi / lo >= 1 + 1e-9`.
+    /// `lo < hi`. Linear limits must not exceed [`MAX_MAGNITUDE`] in magnitude, and the range
+    /// must be at least `max(1e-10 * max(|lo|, |hi|), 1e-290)` wide, which keeps positions
+    /// resolvable to about 1.1e-6 of the plot extent (4.4e-4 pt on a 400 pt plot). Log limits
+    /// must lie in `[MIN_LOG_VALUE, MAX_MAGNITUDE]` with `hi / lo >= 1 + 1e-9`.
     ///
     /// # Examples
     ///
@@ -256,6 +291,7 @@ impl ContinuousScale {
     /// let scale = ContinuousScale::new(Transform::Linear, 0.0, 1.0, "Axes.xlim()").unwrap();
     /// assert_eq!(scale.domain(), (0.0, 1.0));
     /// assert!(ContinuousScale::new(Transform::Linear, 2.0, 1.0, "Axes.xlim()").is_err());
+    /// assert!(ContinuousScale::new(Transform::Linear, 1.0, 1.0 + 1e-12, "Axes.xlim()").is_err());
     /// assert!(ContinuousScale::new(Transform::Log(LogBase::TEN), 0.0, 10.0, "Axes.ylim()").is_err());
     /// ```
     pub fn new(transform: Transform, lo: f64, hi: f64, context: &'static str) -> Result<Self> {
@@ -274,6 +310,14 @@ impl ContinuousScale {
                         context,
                         message: format!(
                             "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}."
+                        ),
+                    });
+                }
+                if too_narrow(lo, hi) {
+                    return Err(Error::Style {
+                        context,
+                        message: format!(
+                            "the limits {lo} and {hi} are too close; the range must be at least 1e-10 of their magnitude (and at least 1e-290)."
                         ),
                     });
                 }
@@ -311,9 +355,10 @@ impl ContinuousScale {
     /// Creates a scale that fits a data `extent` (`None` when there is no data).
     ///
     /// `None` gives `(0, 1)` for linear and `(1, 10)` for log. A single-valued extent is padded:
-    /// `v +- 0.5` when `v == 0`, otherwise `v +- max(5%, 1e-300)` for linear, and
-    /// `(v / f, v * f)` with `f = max(base, 1.1)` for log, both kept within the supported magnitudes. A log extent
-    /// narrower than a factor of `1 + 1e-9` counts as a single value. Returns `Error::Data` for
+    /// `v +- 0.5` when `v == 0`, otherwise `v +- max(5%, 1e-290)` for linear, and
+    /// `(v / f, v * f)` with `f = max(base, 1.1)` for log, both kept within the supported magnitudes. A
+    /// linear extent narrower than [`ContinuousScale::new`] allows counts as a single value at
+    /// its midpoint, and a log extent narrower than a factor of `1 + 1e-9` as a single value. Returns `Error::Data` for
     /// non-finite bounds, for bounds beyond [`MAX_MAGNITUDE`], and for a log transform when the
     /// extent starts below [`MIN_LOG_VALUE`].
     ///
@@ -384,7 +429,7 @@ impl ContinuousScale {
             }
         }
         let singleton = match transform {
-            Transform::Linear => lo == hi,
+            Transform::Linear => lo == hi || too_narrow(lo, hi),
             Transform::Log(_) => hi / lo < MIN_LOG_RATIO,
         };
         if !singleton {
@@ -392,14 +437,17 @@ impl ContinuousScale {
         }
         let (mut lo, mut hi) = match transform {
             Transform::Linear => {
-                let pad = if lo == 0.0 {
+                // Centered on the extent's midpoint. The pad is at least half of any extent that
+                // counts as a single value, so the data stays inside.
+                let mid = lo / 2.0 + hi / 2.0;
+                let pad = if mid == 0.0 {
                     0.5
                 } else {
-                    (lo.abs() * 0.05).max(MIN_LOG_VALUE)
+                    (mid.abs() * 0.05).max(MIN_LINEAR_WIDTH)
                 };
                 (
-                    (lo - pad).max(-MAX_MAGNITUDE),
-                    (lo + pad).min(MAX_MAGNITUDE),
+                    (mid - pad).max(-MAX_MAGNITUDE),
+                    (mid + pad).min(MAX_MAGNITUDE),
                 )
             }
             Transform::Log(base) => {
@@ -479,7 +527,8 @@ impl ContinuousScale {
                 if v <= 0.0 {
                     f64::NAN
                 } else {
-                    (v.ln() - self.lo.ln()) / (self.hi.ln() - self.lo.ln())
+                    // Measured from `lo` (see `log_offset`), which marks share.
+                    log_offset(v, self.lo) / log_offset(self.hi, self.lo)
                 }
             }
         }
@@ -909,6 +958,16 @@ mod tests {
         ContinuousScale::new(Transform::Linear, lo, hi, "test").unwrap()
     }
 
+    /// A linear scale without validation: domains narrower than `new` allows, which the tick
+    /// and nice code must still handle.
+    fn raw(lo: f64, hi: f64) -> ContinuousScale {
+        ContinuousScale {
+            transform: Transform::Linear,
+            lo,
+            hi,
+        }
+    }
+
     /// Asserts that `nice_with_ticks` agrees with `nice` and puts a tick on both domain ends.
     #[track_caller]
     fn assert_nice_ticks_agree(scale: ContinuousScale, target: usize) -> Vec<Tick> {
@@ -1036,8 +1095,69 @@ mod tests {
     }
 
     #[test]
+    fn linear_limits_must_not_be_too_close() {
+        let next_up = |v: f64| f64::from_bits(v.to_bits() + 1);
+        for (lo, hi) in [
+            (1.0, next_up(1.0)),
+            (0.0, 5e-324),
+            (1e200, next_up(1e200)),
+            (1.0, 1.0 + 1e-11),
+            (-3e9, -3e9 + 0.1),
+            (0.0, 1e-291),
+        ] {
+            match ContinuousScale::new(Transform::Linear, lo, hi, "Axes.xlim()") {
+                Err(Error::Style { context, message }) => {
+                    assert_eq!(context, "Axes.xlim()");
+                    assert!(
+                        message.contains("are too close") && message.contains("1e-10"),
+                        "{message}"
+                    );
+                }
+                other => panic!("{lo}..{hi}: {other:?}"),
+            }
+            // As a data extent it is a single value at its midpoint, padded.
+            let s = ContinuousScale::from_extent(Transform::Linear, Some((lo, hi)), "t").unwrap();
+            let (dlo, dhi) = s.domain();
+            assert!(dlo < lo && dhi > hi, "{lo}..{hi}: {dlo}..{dhi}");
+            assert!(!too_narrow(dlo, dhi));
+        }
+        // The bounds themselves are allowed.
+        for (lo, hi) in [
+            (1.0, 1.0 + 1e-10),
+            (0.0, 1e-290),
+            (-1e-290, 1e-290),
+            (1e200, 1e200 * (1.0 + 2e-10)),
+            (-3e9, -3e9 + 0.3),
+        ] {
+            assert!(
+                ContinuousScale::new(Transform::Linear, lo, hi, "t").is_ok(),
+                "{lo}..{hi}"
+            );
+        }
+        // Log limits keep their own ratio rule.
+        let log = Transform::Log(LogBase::TEN);
+        assert!(ContinuousScale::new(log, 1e200, 1e200 * (1.0 + 2e-9), "t").is_ok());
+        assert!(ContinuousScale::new(log, 1e200, next_up(1e200), "t").is_err());
+    }
+
+    #[test]
+    fn log_normalization_is_measured_from_the_lower_limit() {
+        let log = Transform::Log(LogBase::TEN);
+        // The narrowest allowed ratio at 1e299; the reference is a 100-digit computation.
+        let s = ContinuousScale::new(log, 1.385e299, 1.385_000_001_385_000_2e299, "t").unwrap();
+        let pos = s.normalize(1.385_000_000_989_286e299);
+        assert!((pos - 0.714_285_829_422_576_1).abs() < 1e-9, "{pos}");
+        // Both ends exactly, and a ratio beyond the f64 range.
+        assert_eq!(s.normalize(1.385e299), 0.0);
+        assert_eq!(s.normalize(1.385_000_001_385_000_2e299), 1.0);
+        let wide = ContinuousScale::new(log, 1e-300, 1e300, "t").unwrap();
+        assert!((wide.normalize(1.0) - 0.5).abs() < 1e-15);
+        assert!((wide.normalize(1e300) - 1.0).abs() < 1e-15);
+    }
+
+    #[test]
     fn nice_with_ticks_falls_back_on_degenerate_domains() {
-        let scale = lin(1.0, 1.0 + 1e-14);
+        let scale = raw(1.0, 1.0 + 1e-14);
         let (nice, ticks) = scale.nice_with_ticks(5);
         assert_eq!(nice, scale);
         assert_eq!(ticks, scale.ticks(5));
@@ -1153,7 +1273,7 @@ mod tests {
             (5.0, 5.000000001),
             (0.0, 1e-320),
         ] {
-            let s = lin(lo, hi);
+            let s = raw(lo, hi);
             let ticks = s.ticks(5);
             assert!(!ticks.is_empty(), "{lo}..{hi}");
             assert!(
@@ -1299,7 +1419,7 @@ mod tests {
 
     #[test]
     fn ticks_have_strictly_increasing_positions() {
-        let s = lin(1.0, 1.0 + f64::EPSILON);
+        let s = raw(1.0, 1.0 + f64::EPSILON);
         let ticks = s.ticks(5);
         assert_eq!(ticks.len(), 2);
         assert_eq!(ticks[0].value, 1.0);
@@ -1311,7 +1431,7 @@ mod tests {
             (0.0, 1.0),
             (-7.0, 1e300),
         ] {
-            let v: Vec<f64> = lin(lo, hi).ticks(8).iter().map(|t| t.value).collect();
+            let v: Vec<f64> = raw(lo, hi).ticks(8).iter().map(|t| t.value).collect();
             assert!(v.len() >= 2, "{lo}..{hi}");
             assert!(v.windows(2).all(|w| w[1] > w[0]), "{lo}..{hi}: {v:?}");
         }
@@ -1342,7 +1462,7 @@ mod tests {
     }
 
     fn assert_distinct_labels(lo: f64, hi: f64) {
-        let ticks = lin(lo, hi).ticks(5);
+        let ticks = raw(lo, hi).ticks(5);
         assert!(ticks.len() >= 2, "{lo}..{hi}: {ticks:?}");
         assert!(
             ticks.windows(2).all(|w| w[1].value > w[0].value),
