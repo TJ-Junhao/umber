@@ -7,17 +7,31 @@ set -u
 script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-refactor-output.sh"
 failures=0
 
+# Stand-ins for cargo and git that leave a marker, so a case that starts a build or creates a
+# worktree is caught even when it would also exit 2.
+shims="$(mktemp -d "${TMPDIR:-/tmp}/umber-gate-cli.XXXXXX")"
+trap 'rm -rf "$shims"' EXIT
+marker="$shims/ran"
+for tool in cargo git; do
+  printf '#!/bin/sh\necho "%s $*" >>"%s"\nexit 99\n' "$tool" "$marker" >"$shims/$tool"
+  chmod +x "$shims/$tool"
+done
+
 # expect_usage_error <description> <args...>
 expect_usage_error() {
   local what="$1" status
   shift
-  "$script" "$@" >/dev/null 2>&1
+  rm -f "$marker"
+  PATH="$shims:$PATH" "$script" "$@" >/dev/null 2>&1
   status=$?
-  if [[ "$status" -eq 2 ]]; then
-    echo "ok   $what"
-  else
+  if [[ "$status" -ne 2 ]]; then
     echo "FAIL $what: expected exit 2, got $status" >&2
     failures=$((failures + 1))
+  elif [[ -e "$marker" ]]; then
+    echo "FAIL $what: ran $(tr '\n' ';' <"$marker")" >&2
+    failures=$((failures + 1))
+  else
+    echo "ok   $what"
   fi
 }
 
@@ -26,8 +40,10 @@ expect_usage_error "unknown command" frobnicate
 expect_usage_error "check with a misspelled flag" check --pgn
 expect_usage_error "check with an extra argument" check --png extra
 expect_usage_error "check with --no-png" check --no-png
+expect_usage_error "check with an empty flag" check ""
 expect_usage_error "compare without a revision" compare
 expect_usage_error "compare with an empty revision" compare ""
+expect_usage_error "compare with an empty flag" compare HEAD ""
 expect_usage_error "compare with a misspelled flag" compare HEAD --nopng
 expect_usage_error "compare with an extra argument" compare HEAD --no-png extra
 expect_usage_error "compare with both flags" compare HEAD --png --no-png

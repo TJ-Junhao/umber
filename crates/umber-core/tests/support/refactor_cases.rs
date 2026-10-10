@@ -32,13 +32,20 @@
 //!   fill rules, groups nested at and beyond `MAX_GROUP_DEPTH`, and non-finite, huge and
 //!   degenerate geometry, text and sizes.
 //! - Every getter of `Theme::pigment()`, `Theme::graphite()`, `Theme::midnight()` and
-//!   `Theme::default()`, and the public constants.
+//!   `Theme::default()`, and every public constant except `VERSION`, which changes with each
+//!   release.
 //! - Every reachable error branch of `Figure::new`, `Figure::add_axes`, `Axes::xlim`,
 //!   `Axes::ylim`, `Axes::line`, `Axes::scatter`, `Rgba::hex`, `Rgba::from_ints`, `Alpha::new`,
 //!   `LogBase::new`, `ContinuousScale::new`, `ContinuousScale::from_extent`, every validating
 //!   `Theme::with_*` setter and `render_png`, including which fault is reported when an input
-//!   has several. After every call on a figure, the scales, labels, limits, marks and resolved
-//!   colors are recorded, so a call that fails must also leave the figure unchanged.
+//!   has several. A setter or constructor that succeeds is recorded by its full returned value
+//!   (a whole `Theme`, for instance). After every call on a figure, the scales, labels, limits,
+//!   marks with the bits of every stored value, palette and resolved colors are recorded, so a
+//!   call that fails must also leave the figure unchanged. Series include NaN gaps with
+//!   non-canonical payloads of both signs, which storage must keep bit for bit.
+//! - `Figure::clone`: a figure with labels, limits and marks is recorded with its clone, and
+//!   again after the clone is changed, so the clone must be equal to and independent of its
+//!   source.
 //!
 //! Not covered:
 //!
@@ -52,6 +59,8 @@
 //! - Scale, tick, category and downsampling helpers (`ContinuousScale::nice`, `ticks` and
 //!   `normalize`, `CategoryScale`, `m4_indices`), path helpers such as `Path::bounds`, and
 //!   `ColorSpec::resolve` are observed only through the figures and scenes that use them.
+//! - Whether clones share or copy their series data internally; only the observable
+//!   independence of a clone is recorded here.
 //! - The font files and license texts returned by `fonts::font_bytes` and
 //!   `fonts::license_text`, beyond what shaping reads from them.
 
@@ -1674,14 +1683,16 @@ mod record {
         out
     }
 
-    /// The observable state of a figure: its size, its theme's palette and its axes.
+    /// The observable state of a figure: its size, its theme's palette in order, the resolved
+    /// mark colors and its axes.
     pub fn figure(f: &Figure) -> String {
+        let palette: Vec<String> = f.theme().palette().iter().map(|c| rgba(*c)).collect();
         let colors: Vec<String> = f.resolved_colors().iter().map(|c| rgba(*c)).collect();
         let mut out = format!(
-            "  figure width_in={} height_in={} palette={} resolved_colors=[{}]\n",
+            "  figure width_in={} height_in={} palette=[{}] resolved_colors=[{}]\n",
             f64(f.width_in()),
             f64(f.height_in()),
-            f.theme().palette().len(),
+            palette.join(","),
             colors.join(",")
         );
         match f.axes() {
@@ -1950,7 +1961,13 @@ fn figure_errors(rec: &mut Log) {
         rec.result(
             &format!("Figure::new({}, {})", num(w), num(h)),
             Figure::new(w, h, Theme::pigment()),
-            |f| format!("\n{}", record::figure(&f).trim_end()),
+            |f| {
+                format!(
+                    "\n{}{}",
+                    record::figure(&f),
+                    record::theme(f.theme()).trim_end()
+                )
+            },
         );
     }
 
@@ -2047,6 +2064,62 @@ fn figure_errors(rec: &mut Log) {
         a.title("").subtitle("").xlabel("").ylabel("");
         Ok(())
     });
+
+    figure_clone(rec);
+}
+
+/// A clone is equal to its source and independent of it.
+fn figure_clone(rec: &mut Log) {
+    rec.section("Figure::clone");
+    let theme = Theme::midnight()
+        .with_palette(&[rgb(9, 8, 7), rgb(6, 5, 4), rgb(3, 2, 1)])
+        .unwrap()
+        .with_hist_gap(0.75)
+        .unwrap();
+    let mut source = Figure::new(5.0, 3.0, theme).unwrap();
+    source
+        .add_axes(linear(), log(10.0))
+        .unwrap()
+        .title("Source")
+        .subtitle("Sub")
+        .xlabel("X")
+        .ylabel("Y")
+        .xlim(-2.0, 8.0)
+        .unwrap()
+        .ylim(0.5, 500.0)
+        .unwrap()
+        .line(
+            numbers(vec![0.0, f64::from_bits(0x7ff8_0000_0000_0003), 2.0]),
+            &[1.0, 10.0, f64::from_bits(0xfff8_0000_0000_0009)],
+            LineOptions {
+                label: "first".into(),
+                color: ColorSpec::Palette {
+                    index: 2,
+                    alpha: Alpha::new(0.5).unwrap(),
+                },
+                dash: Dash::Dashed,
+            },
+        )
+        .unwrap()
+        .scatter(numbers(vec![1.0, 3.0]), &[2.0, 200.0], scatter())
+        .unwrap();
+    let mut copy = source.clone();
+    let both = |rec: &mut Log, when: &str, source: &Figure, copy: &Figure| {
+        for (name, f) in [("source", source), ("clone", copy)] {
+            rec.raw(&format!("{when}, {name}\n"));
+            rec.raw(&record::figure(f));
+            rec.raw(&record::theme(f.theme()));
+        }
+    };
+    both(rec, "after clone", &source, &copy);
+    // A clone without axes is recorded, not a panic, so the gate reports the difference.
+    if let Some(a) = copy.axes_mut() {
+        a.title("Changed clone").xlim(1.0, 2.0).unwrap();
+        a.line(numbers(vec![5.0]), &[50.0], line()).unwrap();
+    } else {
+        rec.raw("the clone has no axes to change\n");
+    }
+    both(rec, "after changing the clone", &source, &copy);
 }
 
 fn series_errors(rec: &mut Log) {
@@ -2108,6 +2181,34 @@ fn series_errors(rec: &mut Log) {
             a.scatter(x, &y, scatter()).map(drop)
         });
     }
+    // Gaps with non-canonical NaN payloads, both signs, quiet and signalling patterns: storage
+    // must keep every bit.
+    let payloads = [
+        f64::from_bits(0x7ff8_0000_0000_0001),
+        f64::from_bits(0xfff8_0000_0000_0000),
+        f64::from_bits(0x7ff0_0000_0000_0001),
+        f64::from_bits(0x7ff4_0000_0000_0000),
+        f64::from_bits(0xfff0_0000_dead_beef),
+        f64::from_bits(0xffff_ffff_ffff_ffff),
+    ];
+    let [p0, p1, p2, p3, p4, p5] = payloads;
+    rec.on_axes(&mut f, "line and scatter with NaN payloads", |a| {
+        a.line(
+            nums(&[0.0, p0, 2.0, p1, 4.0, p2, -0.0]),
+            &[p3, 1.0, p4, 3.0, p5, 5.0, 0.0],
+            line(),
+        )?;
+        a.scatter(
+            nums(&[p5, 1.0, p4, 3.0, p3]),
+            &[p2, 7.0, p1, -0.0, p0],
+            scatter(),
+        )
+        .map(drop)
+    });
+    rec.on_axes(&mut f, "line with NaN payloads before a fault", |a| {
+        a.line(nums(&[p0, p1, 2.0]), &[p2, p3, inf], line())
+            .map(drop)
+    });
     rec.on_axes(&mut f, "line all NaN and empty", |a| {
         a.line(nums(&[nan, 1.0]), &[2.0, nan], line())?;
         a.scatter(nums(&[]), &[], scatter()).map(drop)
@@ -2149,6 +2250,7 @@ fn series_errors(rec: &mut Log) {
         ("huge y", cats(&["a"]), vec![1.0e301]),
         ("smallest y", cats(&["a"]), vec![1.0e-300]),
         ("NaN y", cats(&["a", "b"]), vec![nan, 3.0]),
+        ("NaN payload y", cats(&["a", "b", "c"]), vec![p1, 3.0, p4]),
     ] {
         rec.on_axes(&mut f, &format!("line {name}"), |a| {
             a.line(x.clone(), &y, line()).map(drop)
@@ -2402,7 +2504,7 @@ fn theme_errors(rec: &mut Log) {
         rec.section(&format!("Theme::{name}"));
         for value in SETTER_VALUES {
             rec.result(&format!("{name}({})", num(value)), set(&base, value), |t| {
-                record::f32(get(&t))
+                format!("{}\n{}", record::f32(get(&t)), record::theme(&t).trim_end())
             });
         }
     }
@@ -2413,7 +2515,7 @@ fn theme_errors(rec: &mut Log) {
         rec.result(
             &format!("with_palette({n} colors)"),
             base.with_palette(&colors),
-            |t| format!("{}", t.palette().len()),
+            |t| format!("\n{}", record::theme(&t).trim_end()),
         );
     }
 

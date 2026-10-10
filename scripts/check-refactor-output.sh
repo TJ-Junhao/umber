@@ -143,12 +143,15 @@ case "$cmd" in
     shift
     # PNG is compared unless --no-png is given; --png states the default explicitly.
     png=1
+    # An absent flag is told from an empty argument by the argument count.
     if [[ $# -gt 1 ]]; then usage_error "too many arguments"; fi
-    case "${1:-}" in
-      "" | --png) ;;
-      --no-png) png=0 ;;
-      *) usage_error "unknown argument: $1" ;;
-    esac
+    if [[ $# -eq 1 ]]; then
+      case "$1" in
+        --png) ;;
+        --no-png) png=0 ;;
+        *) usage_error "unknown argument: '$1'" ;;
+      esac
+    fi
     extra_worktree="$tmp/baseline-tree"
     git -C "$root" worktree add --detach "$extra_worktree" "$rev" >&2
     for f in "${driver_files[@]}"; do
