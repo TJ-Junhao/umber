@@ -1,4 +1,4 @@
-"""Checks that enforce the documentation rules of spec section 10."""
+"""Checks that enforce the documentation rules for the public API."""
 
 import ast
 import doctest

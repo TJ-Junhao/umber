@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn six_by_four_figures_get_five_ticks_per_axis() {
-        // Calibrated against the mocks: y 0/25/50/75/100 and x 0/10/20/30 in every theme.
+        // Chosen so a 6 by 4 in figure gets about five ticks per axis: y 0/25/50/75/100 and x 0/10/20/30 in every theme.
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
             let mut f = figure(theme);
             f.axes_mut()
