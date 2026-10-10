@@ -82,8 +82,6 @@ pub(super) fn subtable_glyph(sub: &CmapSubtable<'_>, cp: u32) -> Option<GlyphId>
 /// Codes below 0xFF use sub-header 0, as single bytes; others use the sub-header of their high
 /// byte. Glyph 0 means no glyph.
 fn format2_glyph(sub: &Cmap2<'_>, cp: u32) -> Option<GlyphId> {
-    /// Format, length, language and the 256 sub-header keys.
-    const HEADERS: usize = 6 + 2 * 256;
     let code = u16::try_from(cp).ok()?;
     let (high, low) = (code >> 8, code & 0xFF);
     let key = if code < 0xFF {
@@ -92,9 +90,8 @@ fn format2_glyph(sub: &Cmap2<'_>, cp: u32) -> Option<GlyphId> {
         sub.sub_header_keys().get(usize::from(high))?.get() / 8
     };
     let data = sub.offset_data();
-    let header = HEADERS + 8 * usize::from(key);
-    let first = data.read_at::<u16>(header).ok()?;
-    let count = data.read_at::<u16>(header + 2).ok()?;
+    let header = format2_header(key);
+    let (first, count) = format2_range(sub, key)?;
     let delta = data.read_at::<i16>(header + 4).ok()?;
     let range_offset = data.read_at::<u16>(header + 6).ok()?;
     if low < first || low >= first.checked_add(count)? {
@@ -109,4 +106,21 @@ fn format2_glyph(sub: &Cmap2<'_>, cp: u32) -> Option<GlyphId> {
     // The delta is added modulo 65,536.
     let id = glyph.wrapping_add_signed(delta);
     Some(GlyphId::new(u32::from(id)))
+}
+
+/// The byte offset of format 2 sub-header `key` (a sub-header key divided by 8) within the
+/// subtable: after the format, length, language and the 256 sub-header keys.
+fn format2_header(key: u16) -> usize {
+    const HEADERS: usize = 6 + 2 * 256;
+    HEADERS + 8 * usize::from(key)
+}
+
+/// The first low byte and the number of low bytes that format 2 sub-header `key` (a sub-header
+/// key divided by 8) maps; `None` if either cannot be read.
+pub(super) fn format2_range(sub: &Cmap2<'_>, key: u16) -> Option<(u16, u16)> {
+    let data = sub.offset_data();
+    let header = format2_header(key);
+    let first = data.read_at::<u16>(header).ok()?;
+    let count = data.read_at::<u16>(header + 2).ok()?;
+    Some((first, count))
 }

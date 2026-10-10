@@ -1,22 +1,22 @@
 //! System font fallback, with in-memory fonts standing in for the system fonts: preference
-//! order, lookup and confirmation budgets, caches, shaping tables and index limits.
+//! order, lookup and confirmation budgets, caches, shaping tables and index sharing. The index
+//! itself is tested in [`system_index`](super::system_index).
 
 use std::sync::Arc;
 
 use read_fonts::TableProvider;
 
 use super::fixtures::{
-    assert_no_bundled_font_has, fixture_font, font_with_cmap, format12_cmap, style, with_table,
-    without_outlines,
+    assert_no_bundled_font_has, fixture_font, style, with_table, without_outlines,
 };
 use crate::fonts::{Font, Weight};
 use crate::geometry::Point;
-use crate::text::font::{Face, FontKey};
+use crate::text::font::FontKey;
 use crate::text::system::{self, Limits};
 use crate::text::{FontLibrary, TextStyle};
 
 /// The PostScript names of the system faces the runs of `text` were drawn with.
-fn system_picks(lib: &FontLibrary, text: &str, weight: Weight) -> Vec<String> {
+pub(super) fn system_picks(lib: &FontLibrary, text: &str, weight: Weight) -> Vec<String> {
     let s = TextStyle {
         weight,
         ..style(Font::Inter, 10.0)
@@ -26,7 +26,7 @@ fn system_picks(lib: &FontLibrary, text: &str, weight: Weight) -> Vec<String> {
         .runs()
         .iter()
         .map(|run| match run.font() {
-            FontKey::System(face) => system.face(face).unwrap().post_script_name.clone(),
+            FontKey::System(face) => system.face(face).unwrap().post_script_name().to_string(),
             other => format!("{other:?}"),
         })
         .collect()
@@ -36,12 +36,13 @@ fn lookups(lib: &FontLibrary) -> usize {
     lib.system().unwrap().lookups()
 }
 
-fn indexed_names(lib: &FontLibrary) -> Vec<String> {
+/// The sorted PostScript names of the indexed system faces.
+pub(super) fn indexed_names(lib: &FontLibrary) -> Vec<String> {
     let index = lib.system().unwrap().index();
     let mut names: Vec<String> = index
-        .faces
+        .faces()
         .iter()
-        .map(|f| f.post_script_name.clone())
+        .map(|f| f.post_script_name().to_string())
         .collect();
     names.sort();
     names
@@ -283,13 +284,10 @@ fn kept_shaping_fonts_charge_later_table_copies() {
     assert!(all > 4_000, "{all}");
 
     for budget in [all, all - 1, 1_000] {
-        let limits = Limits {
-            shaping_cache_bytes: budget,
-            ..Limits::DEFAULT
-        };
+        let limits = Limits::DEFAULT.with_shaping_cache_bytes(budget);
         let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font.clone()], limits);
         let system = lib.system().unwrap();
-        assert_eq!(system.index().faces.len(), 1);
+        assert_eq!(system.index().faces().len(), 1);
         // Kept before it has copied anything, so every table is copied afterwards.
         let fresh = system.shaping_font(0).unwrap();
         system.keep_shaping_font(0, fresh);
@@ -324,106 +322,6 @@ fn bundled_libraries_share_one_system_index() {
     let d = FontLibrary::with_test_system_fonts(vec![]);
     assert!(!Arc::ptr_eq(&index(&c), &index(&d)));
     assert!(!Arc::ptr_eq(&index(&a), &index(&c)));
-}
-
-#[test]
-fn faces_with_too_many_ranges_are_not_indexed() {
-    let target = 0x30000;
-    let many: Vec<u32> = (0..65_537).map(|k| target + 2 * k).collect();
-    let lib = FontLibrary::with_test_system_fonts(vec![
-        fixture_font("Aaa Many", 400, false, &many),
-        fixture_font("Aaa Limit", 400, false, &many[..65_536]),
-        fixture_font("Zzz Few", 400, false, &[target]),
-    ]);
-    let c = char::from_u32(target).unwrap();
-    assert_no_bundled_font_has(&c.to_string());
-    // "Aaa Many" sorts first and covers the character, but has 65,537 ranges.
-    assert_eq!(
-        system_picks(&lib, &c.to_string(), Weight::Regular),
-        ["AaaLimit-400"]
-    );
-    assert_eq!(indexed_names(&lib), ["AaaLimit-400", "ZzzFew-400"]);
-}
-
-#[test]
-fn oversized_font_files_are_not_indexed() {
-    let target = 0xF0050;
-    let big = fixture_font(
-        "Aaa Big",
-        400,
-        false,
-        &(target..target + 1_000).collect::<Vec<_>>(),
-    );
-    let small = fixture_font("Zzz Small", 400, false, &[target]);
-    let limits = Limits {
-        max_bytes: small.len(),
-        ..Limits::DEFAULT
-    };
-    assert!(big.len() > small.len());
-    let lib = FontLibrary::with_test_system_fonts_and_limits(vec![big, small], limits);
-    let c = char::from_u32(target).unwrap();
-    assert_eq!(
-        system_picks(&lib, &c.to_string(), Weight::Regular),
-        ["ZzzSmall-400"]
-    );
-    assert_eq!(indexed_names(&lib), ["ZzzSmall-400"]);
-}
-
-#[test]
-fn index_keeps_the_first_faces_in_sorted_order() {
-    let target = 0xF0060;
-    let limits = Limits {
-        max_faces: 2,
-        ..Limits::DEFAULT
-    };
-    let lib = FontLibrary::with_test_system_fonts_and_limits(
-        vec![
-            fixture_font("Charlie", 400, false, &[target]),
-            fixture_font("Alpha", 400, false, &[target]),
-            fixture_font("Bravo", 400, false, &[target]),
-        ],
-        limits,
-    );
-    assert_eq!(indexed_names(&lib), ["Alpha-400", "Bravo-400"]);
-}
-
-#[test]
-fn format_2_cmaps_are_indexed() {
-    // A Windows Unicode format 2 subtable mapping U+E000 to the outlined glyph 1.
-    let mut sub = Vec::new();
-    for word in [2u16, 536, 0] {
-        sub.extend(word.to_be_bytes());
-    }
-    for high in 0..256 {
-        sub.extend((if high == 0xE0 { 8u16 } else { 0 }).to_be_bytes());
-    }
-    // Sub-header 0 (empty), sub-header 1 for 0xE0xx: first code 0, one entry, delta 0,
-    // range offset 2 (the glyph array right after it), then the glyph array [1].
-    for word in [0u16, 0, 0, 0, 0, 1, 0, 2, 1] {
-        sub.extend(word.to_be_bytes());
-    }
-    assert_eq!(sub.len(), 536);
-    let mut cmap = Vec::new();
-    for word in [0u16, 1, 3, 1] {
-        cmap.extend(word.to_be_bytes());
-    }
-    cmap.extend(12u32.to_be_bytes());
-    cmap.extend(sub);
-    let read = system::cmap_ranges(&cmap, Limits::DEFAULT.max_face_visits).unwrap();
-    assert_eq!(read.ranges, [(0xE000, 0xE000)]);
-    assert_eq!(read.visited, 256);
-
-    let font = font_with_cmap("Format Two", 400, false, cmap);
-    let face = Face::parse(&font, 0).unwrap();
-    assert!(face.draws('\u{E000}'));
-    let s = style(Font::Inter, 10.0);
-    let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout("\u{E000}", &s);
-    assert_eq!(extra.runs()[0].font(), FontKey::Extra(0));
-    let lib = FontLibrary::with_test_system_fonts(vec![font]);
-    assert_eq!(
-        system_picks(&lib, "\u{E000}", Weight::Regular),
-        ["FormatTwo-400"]
-    );
 }
 
 #[test]
@@ -471,99 +369,6 @@ fn confirmations_per_layout_are_capped() {
     assert_eq!(system.confirmations(), 300 * 16);
 }
 
-#[test]
-fn index_keeps_a_bounded_number_of_ranges() {
-    let spaced = |base: u32, n: u32| -> Vec<u32> { (0..n).map(|k| base + 2 * k).collect() };
-    let limits = Limits {
-        max_total_ranges: 15,
-        ..Limits::DEFAULT
-    };
-    let lib = FontLibrary::with_test_system_fonts_and_limits(
-        vec![
-            fixture_font("Alpha", 400, false, &spaced(0xF5000, 10)),
-            fixture_font("Bravo", 400, false, &spaced(0xF6000, 10)),
-            fixture_font("Charlie", 400, false, &spaced(0xF7000, 3)),
-        ],
-        limits,
-    );
-    // Bravo does not fit after Alpha and is skipped whole; Charlie still fits.
-    assert_eq!(indexed_names(&lib), ["Alpha-400", "Charlie-400"]);
-    assert_eq!(lib.system().unwrap().index().range_count(), 13);
-}
-
-#[test]
-fn cmap_subtables_are_read_once_and_every_visit_counts() {
-    let codepoints: Vec<u32> = (0..1_000).map(|k| 0xF8000 + 2 * k).collect();
-    // 64 encoding records point at one 1,000-group subtable.
-    let cmap = format12_cmap(&codepoints, 64);
-    let read = system::cmap_ranges(&cmap, Limits::DEFAULT.max_face_visits).unwrap();
-    assert_eq!(read.visited, 1_000);
-    assert_eq!(read.ranges.len(), 1_000);
-    // Invalid groups yield nothing but are still counted.
-    let invalid = format12_cmap(&[0xFFFF_FFFF], 64);
-    let read = system::cmap_ranges(&invalid, Limits::DEFAULT.max_face_visits).unwrap();
-    assert_eq!((read.ranges.len(), read.visited), (0, 1));
-    assert_eq!(
-        system::cmap_ranges(&cmap, 999),
-        Err(system::CmapError::TooManyVisits)
-    );
-
-    let font = |name: &str| font_with_cmap(name, 400, false, format12_cmap(&codepoints, 64));
-    // Per face: 1,000 visits are needed.
-    let limits = Limits {
-        max_face_visits: 999,
-        ..Limits::DEFAULT
-    };
-    let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font("Alpha")], limits);
-    assert!(indexed_names(&lib).is_empty());
-    assert_eq!(lib.system().unwrap().index().visited, 1_000);
-    let limits = Limits {
-        max_face_visits: 1_000,
-        ..Limits::DEFAULT
-    };
-    let lib = FontLibrary::with_test_system_fonts_and_limits(vec![font("Alpha")], limits);
-    assert_eq!(indexed_names(&lib), ["Alpha-400"]);
-    // Per build: the third face no longer fits and indexing stops.
-    let limits = Limits {
-        max_build_visits: 2_500,
-        ..Limits::DEFAULT
-    };
-    let lib = FontLibrary::with_test_system_fonts_and_limits(
-        vec![font("Alpha"), font("Bravo"), font("Charlie"), font("Delta")],
-        limits,
-    );
-    assert_eq!(indexed_names(&lib), ["Alpha-400", "Bravo-400"]);
-    assert_eq!(lib.system().unwrap().index().visited, 2_501);
-}
-
-#[test]
-fn cmap_ranges_are_read_without_enumerating_code_points() {
-    // A format 12 group spanning every code point is one range, not 1.1 million.
-    let mut cmap = Vec::new();
-    for field in [0u16, 1, 3, 10] {
-        cmap.extend(field.to_be_bytes());
-    }
-    cmap.extend(12u32.to_be_bytes());
-    cmap.extend(12u16.to_be_bytes());
-    cmap.extend(0u16.to_be_bytes());
-    cmap.extend(28u32.to_be_bytes());
-    cmap.extend(0u32.to_be_bytes());
-    cmap.extend(1u32.to_be_bytes());
-    for field in [0u32, u32::MAX, 1] {
-        cmap.extend(field.to_be_bytes());
-    }
-    let max = Limits::DEFAULT.max_face_visits;
-    let read = system::cmap_ranges(&cmap, max).unwrap();
-    assert_eq!(read.ranges, [(0, 0x10_FFFF)]);
-    assert_eq!(read.visited, 1);
-    // Truncated and empty tables give no ranges and no panic.
-    assert_eq!(system::cmap_ranges(&cmap[..30], max).unwrap().ranges, []);
-    assert_eq!(
-        system::cmap_ranges(&[], max),
-        Err(system::CmapError::Unreadable)
-    );
-}
-
 /// Depends on the fonts installed on the machine, so it is not run by default:
 /// `cargo test -p umber-core system_fallback -- --ignored --nocapture`.
 #[test]
@@ -585,7 +390,7 @@ fn system_fallback_draws_cjk() {
     let index = system.index();
     println!(
         "index: {} faces, {} ranges, ~{} KiB heap, built in {:?}, RSS +{} KiB",
-        index.faces.len(),
+        index.faces().len(),
         index.range_count(),
         index.heap_bytes() / 1024,
         start.elapsed(),
@@ -594,7 +399,7 @@ fn system_fallback_draws_cjk() {
     let s = style(Font::Inter, 10.0);
     let name = |key: FontKey| match key {
         FontKey::System(face) => system.face(face).map_or_else(String::new, |f| {
-            format!("{} (weight {})", f.post_script_name, f.weight)
+            format!("{} (weight {})", f.post_script_name(), f.weight())
         }),
         other => format!("{other:?}"),
     };
