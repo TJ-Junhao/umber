@@ -1,7 +1,7 @@
 //! PNG decoding and pixel sampling shared by the unit tests and the integration tests.
 //!
-//! This file is included with `#[path]` from `src/test_support/mod.rs` and from the integration
-//! tests, so it may only use the `png` crate and `std`.
+//! This file is a module of the crate's test support and is also included with `#[path]` from the
+//! integration tests, so it may only use the `png` crate and `std`.
 
 // Each includer uses a different part of this module.
 #![allow(dead_code)]

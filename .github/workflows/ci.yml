@@ -2,8 +2,14 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Git revision to compare this ref's refactor output against
+        required: true
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,7 +25,33 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p umber-core
       - run: cargo test --doc -p umber-core
+      - run: scripts/test-check-refactor-output.sh
       - run: scripts/check-refactor-output.sh check
+      # The packaged crate must compile and pass its own unit tests with only the files it ships.
+      - name: Test the packaged crate
+        run: |
+          cargo package -p umber-core --allow-dirty --no-verify
+          # --no-verify leaves only the .crate archive, so unpack it before testing.
+          tar -xzf target/package/umber-core-*.crate -C target/package
+          cd target/package/umber-core-*/
+          cargo test --lib
+
+  # Same-machine, byte-exact comparison including PNG output. Refactor pull requests carry the
+  # label `refactor`; pull requests without it skip this job, and ci-ok accepts a skipped job.
+  refactor-compare:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'refactor'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@v2
+      - name: Compare outputs with the base revision, PNG included
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+        run: scripts/check-refactor-output.sh compare "$BASE" --png
 
   python:
     strategy:
@@ -45,11 +77,13 @@ jobs:
 
   ci-ok:
     if: always()
-    needs: [rust, python]
+    needs: [rust, python, refactor-compare]
     runs-on: ubuntu-latest
     steps:
       - name: Require every needed job to have succeeded
         run: |
-          echo "rust=${{ needs.rust.result }} python=${{ needs.python.result }}"
+          echo "rust=${{ needs.rust.result }} python=${{ needs.python.result }} refactor-compare=${{ needs.refactor-compare.result }}"
           test "${{ needs.rust.result }}" = "success"
           test "${{ needs.python.result }}" = "success"
+          # Skipped when the pull request has no `refactor` label.
+          test "${{ needs.refactor-compare.result }}" = "success" || test "${{ needs.refactor-compare.result }}" = "skipped"

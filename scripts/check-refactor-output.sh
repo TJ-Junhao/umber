@@ -17,7 +17,7 @@
 #       Scene, SVG and error hashes are compared by default. PNG hashes depend on the machine's
 #       floating-point and SIMD behaviour, so --png is only meaningful on the machine that
 #       generated the baseline (a macOS arm64 laptop for the committed one).
-#   scripts/check-refactor-output.sh compare <git-rev> [--no-png]
+#   scripts/check-refactor-output.sh compare <git-rev> [--png|--no-png]
 #       Build the corpus at <git-rev> (a temporary worktree that gets this tree's corpus
 #       files) and at this tree, in the same environment, and compare everything including
 #       PNG. This is the check that holds on any machine and needs no committed baseline.
@@ -102,18 +102,51 @@ compare_manifests() {
   fi
 }
 
+usage() {
+  sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+}
+
+# usage_error <message>: every malformed command line ends here with exit status 2.
+usage_error() {
+  echo "error: $1" >&2
+  usage
+  exit 2
+}
+
+# parse_flag <allowed-flag> <args...>: set `flag` to 1 when the only argument is the allowed flag.
+# Any other argument, or more than one, is a usage error.
+flag=0
+parse_flag() {
+  local allowed="$1"
+  shift
+  flag=0
+  if [[ $# -gt 1 ]]; then usage_error "too many arguments"; fi
+  if [[ $# -eq 1 ]]; then
+    if [[ "$1" == "$allowed" ]]; then flag=1; else usage_error "unknown argument: $1"; fi
+  fi
+}
+
 cmd="${1:-}"
+if [[ $# -gt 0 ]]; then shift; fi
 case "$cmd" in
   check)
-    png=0
-    [[ "${2:-}" == "--png" ]] && png=1
+    parse_flag --png "$@"
+    png=$flag
     manifest_of "$root" "" "$tmp/candidate.txt"
     compare_manifests "$baseline_file" "$tmp/candidate.txt" "$png" "baseline" "candidate"
     ;;
   compare)
-    rev="${2:?usage: compare <git-rev> [--no-png]}"
+    if [[ $# -lt 1 || -z "$1" ]]; then usage_error "compare needs a git revision"; fi
+    rev="$1"
+    shift
+    # PNG is compared unless --no-png is given; --png states the default explicitly.
     png=1
-    [[ "${3:-}" == "--no-png" ]] && png=0
+    if [[ $# -gt 1 ]]; then usage_error "too many arguments"; fi
+    case "${1:-}" in
+      "" | --png) ;;
+      --no-png) png=0 ;;
+      *) usage_error "unknown argument: $1" ;;
+    esac
     extra_worktree="$tmp/baseline-tree"
     git -C "$root" worktree add --detach "$extra_worktree" "$rev" >&2
     for f in "${driver_files[@]}"; do
@@ -126,19 +159,20 @@ case "$cmd" in
     compare_manifests "$tmp/baseline.txt" "$tmp/candidate.txt" "$png" "$rev" "working tree"
     ;;
   manifest)
-    out="${2:?usage: manifest <file>}"
+    if [[ $# -ne 1 || -z "$1" ]]; then usage_error "manifest needs exactly one output path"; fi
+    out="$1"
     manifest_of "$root" "" "$tmp/m.txt"
     cp "$tmp/m.txt" "$out"
     echo "wrote $out"
     ;;
   update)
+    if [[ $# -ne 0 ]]; then usage_error "update takes no arguments"; fi
     manifest_of "$root" "" "$tmp/m.txt"
     mkdir -p "$(dirname "$root/$baseline")"
     cp "$tmp/m.txt" "$root/$baseline"
     echo "wrote $baseline"
     ;;
   *)
-    sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
-    exit 2
+    usage_error "unknown or missing command: ${cmd:-<none>}"
     ;;
 esac

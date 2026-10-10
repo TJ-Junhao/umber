@@ -23,7 +23,7 @@ const MAX_DIFFERENT_FRACTION: f64 = 0.005;
 /// No pixel may have a channel differing by more than this.
 const MAX_CHANNEL_DELTA: u8 = 64;
 
-#[path = "support/image.rs"]
+#[path = "../src/test_support/image.rs"]
 mod image;
 
 use image::{DecodedPng as Image, decode_rgba8 as decode};

@@ -2,6 +2,5 @@
 
 pub(crate) mod scene;
 
-// The same decoder is used by the integration tests, so it lives under `tests/support`.
-#[path = "../../tests/support/image.rs"]
+// The integration tests include this file by path, so it only uses `std` and the `png` crate.
 pub(crate) mod image;
