@@ -15,11 +15,14 @@
 
 pub mod color;
 pub mod downsample;
+mod draw;
 mod error;
 pub mod figure;
 pub mod fonts;
 pub mod geometry;
+mod layout;
 pub mod render;
+mod resolve;
 pub mod scale;
 pub mod scene;
 pub mod text;

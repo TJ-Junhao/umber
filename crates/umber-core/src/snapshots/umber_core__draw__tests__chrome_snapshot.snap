@@ -1,0 +1,28 @@
+---
+source: crates/umber-core/src/draw.rs
+assertion_line: 246
+expression: "render_svg(&scene, SvgText::Editable)"
+---
+<svg xmlns="http://www.w3.org/2000/svg" width="432pt" height="288pt" viewBox="0 0 432 288">
+<rect width="432" height="288" fill="#FAF6F0"/>
+<g>
+<path d="M12 202.962 L420 202.962" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
+<path d="M12 160.025 L420 160.025" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
+<path d="M12 117.088 L420 117.088" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
+<path d="M12 74.15 L420 74.15" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
+<path d="M12 245.9 L420 245.9" fill="none" stroke="#2B211B" stroke-width="1.3"/>
+<text xml:space="preserve" x="12" y="199.962" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0.25</text>
+<text xml:space="preserve" x="12" y="157.025" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0.50</text>
+<text xml:space="preserve" x="12" y="114.088" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0.75</text>
+<text xml:space="preserve" x="12" y="71.15" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">1.00</text>
+<text xml:space="preserve" x="9.45" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0</text>
+<text xml:space="preserve" x="108.9" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">25</text>
+<text xml:space="preserve" x="210.9" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">50</text>
+<text xml:space="preserve" x="312.9" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">75</text>
+<text xml:space="preserve" x="412.35" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">100</text>
+<text xml:space="preserve" x="12" y="24.681" font-family="'Source Serif 4', serif" font-size="13" font-weight="600" fill="#2B211B">Station output</text>
+<text xml:space="preserve" x="12" y="39.175" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" fill="#8C8076">Daily mean, MW</text>
+<text xml:space="preserve" x="12" y="58.438" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" fill="#2B211B">MW</text>
+<text xml:space="preserve" x="208.779" y="273.663" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" fill="#2B211B">Day</text>
+</g>
+</svg>

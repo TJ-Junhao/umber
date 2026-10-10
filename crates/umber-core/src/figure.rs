@@ -18,9 +18,12 @@
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
+use crate::render::{SvgText, render_png, render_svg};
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
+use crate::scene::Scene;
 use crate::{
-    ColorSpec, ContinuousScale, Dash, Error, Marker, Result, Rgba, ScaleKind, Theme, Transform,
+    ColorSpec, ContinuousScale, Dash, Error, FontLibrary, Marker, Result, Rgba, ScaleKind, Theme,
+    Transform, draw, layout,
 };
 
 /// The largest accepted figure side, in inches.
@@ -823,6 +826,74 @@ impl Figure {
                 color
             })
             .collect()
+    }
+
+    /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.
+    /// The scene is `width × 72` by `height × 72` pt on the theme background. Without axes it
+    /// holds the background only. The same figure always gives the same scene.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, FontLibrary, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// assert!(figure.to_scene(FontLibrary::global()).items.is_empty());
+    /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Growth");
+    /// let scene = figure.to_scene(FontLibrary::global());
+    /// assert_eq!((scene.width, scene.height), (432.0, 288.0));
+    /// assert!(scene.leaf_count() > 0);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn to_scene(&self, library: &FontLibrary) -> Scene {
+        let (width, height) = (self.width_in * 72.0, self.height_in * 72.0);
+        let mut scene = Scene::new(width as f32, height as f32, self.theme.background());
+        let Some(axes) = &self.axes else {
+            return scene;
+        };
+        let (_resolved, layout) = layout::plan(width, height, &self.theme, axes, library);
+        scene.push(draw::chrome(&self.theme, &layout));
+        scene
+    }
+
+    /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`]. Errors as
+    /// [`render_png`] does: `Error::Style` when `dpi` is outside `10..=2400` or the image would
+    /// be too large.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(2.0, 1.0, Theme::graphite())?;
+    /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let png = figure.to_png(72)?;
+    /// assert_eq!(&png[1..4], b"PNG");
+    /// assert!(figure.to_png(1).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn to_png(&self, dpi: u32) -> Result<Vec<u8>> {
+        render_png(&self.to_scene(FontLibrary::global()), dpi)
+    }
+
+    /// Renders the figure as an SVG document, with the global [`FontLibrary`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SvgText, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Signal");
+    /// let svg = figure.to_svg(SvgText::Editable);
+    /// assert!(svg.contains(r#"width="432pt" height="288pt""#));
+    /// assert!(svg.contains(">Signal</text>"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn to_svg(&self, text: SvgText) -> String {
+        render_svg(&self.to_scene(FontLibrary::global()), text)
     }
 }
 

@@ -422,6 +422,16 @@ impl ContinuousScale {
         Self::new(transform, lo, hi, context)
     }
 
+    /// The empty-data scale without a `Result`: `(0, 1)` for linear, `(1, 10)` for log. Equal to
+    /// `from_extent(transform, None, _)`, which cannot fail.
+    pub(crate) fn unit(transform: Transform) -> ContinuousScale {
+        let (lo, hi) = match transform {
+            Transform::Linear => (0.0, 1.0),
+            Transform::Log(_) => (1.0, 10.0),
+        };
+        ContinuousScale { transform, lo, hi }
+    }
+
     /// The value transform.
     ///
     /// # Examples
@@ -490,12 +500,8 @@ impl ContinuousScale {
         let target = ticks::clamp_target(target);
         let widened = match self.transform {
             Transform::Linear => {
-                if is_degenerate(self.lo, self.hi) {
-                    None
-                } else {
-                    let values = ticks::extended(self.lo, self.hi, target, true);
-                    values.first().copied().zip(values.last().copied())
-                }
+                let values = self.loose_values(target);
+                values.first().copied().zip(values.last().copied())
             }
             Transform::Log(base) => {
                 let b = base.get();
@@ -504,6 +510,22 @@ impl ContinuousScale {
                 lo.zip(hi)
             }
         };
+        self.widened(widened)
+    }
+
+    /// The loose Extended Wilkinson tick values that cover a linear domain; empty when the
+    /// domain is degenerate. Their ends are the nice limits.
+    fn loose_values(&self, target: usize) -> Vec<f64> {
+        if is_degenerate(self.lo, self.hi) {
+            Vec::new()
+        } else {
+            ticks::extended(self.lo, self.hi, target, true)
+        }
+    }
+
+    /// This scale widened to `(lo, hi)`, never narrowed and kept within the supported
+    /// magnitudes; unchanged for `None` or an unusable range.
+    fn widened(&self, widened: Option<(f64, f64)>) -> ContinuousScale {
         match widened {
             Some((lo, hi)) => {
                 // Never narrow the domain, whatever rounding did, and stay within the limits.
@@ -527,6 +549,113 @@ impl ContinuousScale {
             }
             None => *self,
         }
+    }
+
+    /// [`nice`](Self::nice) together with ticks that agree with it, so both ends of the nice
+    /// domain carry a tick.
+    ///
+    /// Linear: the loose tick set that produced the nice limits, labelled like
+    /// [`ticks`](Self::ticks). Log: the powers of the base in the nice domain, always including
+    /// both domain ends; more than `2 * target` powers are thinned to `target` evenly spaced
+    /// exponents that keep the first and the last. Log labels use the value policy. A degenerate
+    /// domain, or a loose set with fewer than two values inside the domain, falls back to
+    /// `ticks` of the nice scale.
+    pub(crate) fn nice_with_ticks(&self, target: usize) -> (ContinuousScale, Vec<Tick>) {
+        let target = ticks::clamp_target(target);
+        let nice = self.nice(target);
+        let (lo, hi) = nice.domain();
+        let values = match self.transform {
+            Transform::Linear => strictly_increasing(
+                self.loose_values(target)
+                    .into_iter()
+                    .filter(|v| (lo..=hi).contains(v))
+                    .collect(),
+            ),
+            Transform::Log(base) => nice.log_values_with_ends(base.get(), target),
+        };
+        if let (Some(a), Some(b)) = (values.first(), values.get(1)) {
+            let labels = match self.transform {
+                Transform::Linear => ticks::format_ticks(&values, b - a),
+                Transform::Log(_) => ticks::format_values(&values),
+            };
+            return (nice, Self::pair(values, labels));
+        }
+        let ticks = nice.ticks(target);
+        (nice, ticks)
+    }
+
+    /// Powers of `base` inside a log domain, with the domain ends always first and last.
+    ///
+    /// The ends are normally powers themselves (a nice domain); an end that is not (clamped to
+    /// the supported magnitudes) is added as a value of its own. When there are more than
+    /// `2 * target` powers, `target` exponents spaced evenly from the first to the last power
+    /// are kept. Interior powers within `0.5 / (target - 1)` of an added end, in normalized
+    /// position, are dropped so that their labels cannot crowd it.
+    fn log_values_with_ends(&self, base: f64, target: usize) -> Vec<f64> {
+        let (lo, hi) = (self.lo, self.hi);
+        let mut values = Vec::new();
+        if let (Some(first), Some(last)) = (ceil_exp(lo, base), floor_exp(hi, base)) {
+            if first <= last {
+                let span = last.saturating_sub(first);
+                let count = span.saturating_add(1);
+                let target_i = target.max(2) as i64;
+                if count <= target_i.saturating_mul(2) {
+                    let mut e = first;
+                    while e <= last {
+                        values.push(power(base, e));
+                        match e.checked_add(1) {
+                            Some(next) => e = next,
+                            None => break,
+                        }
+                    }
+                } else {
+                    let steps = (target_i - 1) as f64;
+                    for i in 0..target_i {
+                        let offset = (i as f64 * span as f64 / steps).round() as i64;
+                        values.push(power(base, first.saturating_add(offset)));
+                    }
+                }
+            }
+        }
+        let tol = 1e-9;
+        values.retain(|&v| {
+            v.is_finite() && v > 0.0 && v >= lo * (1.0 - tol) && v <= hi * (1.0 + tol)
+        });
+        // Snap the outer powers onto the ends, or add the ends when they are not powers.
+        let inserted_lo = match values.first_mut() {
+            Some(v) if (*v - lo).abs() <= tol * lo => {
+                *v = lo;
+                false
+            }
+            _ => {
+                values.insert(0, lo);
+                true
+            }
+        };
+        let inserted_hi = match values.last_mut() {
+            Some(v) if (*v - hi).abs() <= tol * hi => {
+                *v = hi;
+                false
+            }
+            _ => {
+                values.push(hi);
+                true
+            }
+        };
+        // An inserted end is not a power, so a power may sit right next to it: drop interior
+        // powers within half a nominal tick gap, `0.5 / (n - 1)`, of an inserted end.
+        if inserted_lo || inserted_hi {
+            let gap = 0.5 / (target.max(2) - 1) as f64;
+            let last = values.len().saturating_sub(1);
+            let mut i = 0;
+            values.retain(|&v| {
+                let interior = i != 0 && i != last;
+                i += 1;
+                let pos = self.normalize(v);
+                !(interior && ((inserted_lo && pos < gap) || (inserted_hi && 1.0 - pos < gap)))
+            });
+        }
+        strictly_increasing(values)
     }
 
     /// Tick positions and labels for about `target` ticks (at least 2).
@@ -778,6 +907,140 @@ mod tests {
 
     fn lin(lo: f64, hi: f64) -> ContinuousScale {
         ContinuousScale::new(Transform::Linear, lo, hi, "test").unwrap()
+    }
+
+    /// Asserts that `nice_with_ticks` agrees with `nice` and puts a tick on both domain ends.
+    #[track_caller]
+    fn assert_nice_ticks_agree(scale: ContinuousScale, target: usize) -> Vec<Tick> {
+        let (nice, ticks) = scale.nice_with_ticks(target);
+        assert_eq!(nice, scale.nice(target));
+        let (lo, hi) = nice.domain();
+        assert_eq!(ticks.first().map(|t| t.value), Some(lo), "{ticks:?}");
+        assert_eq!(ticks.last().map(|t| t.value), Some(hi), "{ticks:?}");
+        assert!(ticks.windows(2).all(|w| w[0].value < w[1].value));
+        ticks
+    }
+
+    #[test]
+    fn nice_with_ticks_puts_ticks_on_both_ends() {
+        // `ticks(5)` of the nice domain (10, 90) would give 25, 50, 75 only.
+        let scale = lin(12.0, 88.0);
+        assert_eq!(scale.nice(5).domain(), (10.0, 90.0));
+        let ticks = assert_nice_ticks_agree(scale, 5);
+        let labels: Vec<&str> = ticks.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, ["10", "30", "50", "70", "90"]);
+
+        for (lo, hi) in [
+            (3.0, 97.0),
+            (13.0, 77.0),
+            (-3.0, 17.0),
+            (0.5, 3.3),
+            (1e-7, 3e-7),
+        ] {
+            for target in 3..=8 {
+                assert_nice_ticks_agree(lin(lo, hi), target);
+            }
+        }
+
+        let log = ContinuousScale::new(Transform::Log(LogBase::TEN), 3.0, 4.2e4, "test").unwrap();
+        let ticks = assert_nice_ticks_agree(log, 5);
+        assert_eq!(ticks.first().map(|t| t.label.as_str()), Some("1"));
+        assert_eq!(ticks.len(), 6);
+    }
+
+    #[test]
+    fn nice_log_ticks_keep_both_ends_when_thinning() {
+        let e = std::f64::consts::E;
+        // (base, lo, hi) spanning few to very many powers.
+        let cases = [
+            (10.0, 3.0, 4.2e12),
+            (10.0, 3.0, 4.2e4),
+            (10.0, 1e-200, 1e250),
+            (10.0, 0.5, 2.0),
+            (2.0, 3.0, 5000.0),
+            (2.0, 1e-30, 1e40),
+            (2.0, 1e-300, 1e300),
+            (e, 0.2, 9000.0),
+            (e, 1e-100, 1e120),
+        ];
+        for (base, lo, hi) in cases {
+            let scale =
+                ContinuousScale::new(Transform::Log(LogBase::new(base).unwrap()), lo, hi, "test")
+                    .unwrap();
+            for target in [2, 3, 5, 8] {
+                let ticks = assert_nice_ticks_agree(scale, target);
+                let labels: Vec<&String> = ticks.iter().map(|t| &t.label).collect();
+                let unique: std::collections::HashSet<&String> = labels.iter().copied().collect();
+                assert_eq!(unique.len(), labels.len(), "{labels:?}");
+                assert!(
+                    ticks.len() <= (2 * target).max(2) + 2,
+                    "{base} {lo} {hi} {target}: {labels:?}"
+                );
+            }
+        }
+        // The case from review: 1 .. 1e13 keeps 1e13.
+        let scale =
+            ContinuousScale::new(Transform::Log(LogBase::TEN), 3.0, 4.2e12, "test").unwrap();
+        let (nice, ticks) = scale.nice_with_ticks(5);
+        assert_eq!(nice.domain(), (1.0, 1e13));
+        let labels: Vec<&str> = ticks.iter().map(|t| t.label.as_str()).collect();
+        // Scientific form applies to the whole axis (spec section 7).
+        // Exponents 13 * i / 4, rounded: 0, 3, 7, 10, 13.
+        assert_eq!(labels, ["1e0", "1e3", "1e7", "1e10", "1e13"]);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
+
+        #[test]
+        fn nice_log_ticks_start_and_end_on_the_domain(
+            base in prop_oneof![Just(2.0), Just(std::f64::consts::E), Just(10.0), 1.05_f64..1000.0],
+            lo_exp in -300.0_f64..300.0,
+            span in 1e-6_f64..600.0,
+            target in 0_usize..20,
+        ) {
+            let lo = 10_f64.powf(lo_exp);
+            let hi = (lo * 10_f64.powf(span)).min(MAX_MAGNITUDE);
+            let Ok(scale) = ContinuousScale::new(
+                Transform::Log(LogBase::new(base).unwrap()), lo, hi, "test",
+            ) else {
+                return Ok(());
+            };
+            let (nice, ticks) = scale.nice_with_ticks(target);
+            prop_assert_eq!(nice, scale.nice(target));
+            let (dlo, dhi) = nice.domain();
+            prop_assert_eq!(ticks.first().map(|t| t.value), Some(dlo));
+            prop_assert_eq!(ticks.last().map(|t| t.value), Some(dhi));
+            prop_assert!(ticks.windows(2).all(|w| w[0].value < w[1].value));
+        }
+    }
+
+    #[test]
+    fn added_log_ends_drop_crowding_powers() {
+        for base in [2.0, std::f64::consts::E, 999.0] {
+            let log = Transform::Log(LogBase::new(base).unwrap());
+            let scale = ContinuousScale::new(log, 1e-300, 1e300, "test").unwrap();
+            for target in [3, 5, 8] {
+                let (nice, ticks) = scale.nice_with_ticks(target);
+                // Both ends are clamped, not powers, and are kept exactly.
+                assert_eq!(nice.domain(), (1e-300, 1e300));
+                assert_eq!(ticks.first().map(|t| t.value), Some(1e-300));
+                assert_eq!(ticks.last().map(|t| t.value), Some(1e300));
+                let gap = 0.5 / (target - 1) as f64;
+                let pos: Vec<f64> = ticks.iter().map(|t| nice.normalize(t.value)).collect();
+                for p in &pos[1..pos.len() - 1] {
+                    assert!(*p >= gap && 1.0 - *p >= gap, "base {base}: {pos:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nice_with_ticks_falls_back_on_degenerate_domains() {
+        let scale = lin(1.0, 1.0 + 1e-14);
+        let (nice, ticks) = scale.nice_with_ticks(5);
+        assert_eq!(nice, scale);
+        assert_eq!(ticks, scale.ticks(5));
     }
 
     #[test]
