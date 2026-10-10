@@ -10,5 +10,8 @@ repository.workspace = true
 [dependencies]
 thiserror.workspace = true
 
+[dev-dependencies]
+proptest = "1.11"
+
 [lints]
 workspace = true

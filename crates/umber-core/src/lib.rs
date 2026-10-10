@@ -13,8 +13,10 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+pub mod downsample;
 mod error;
 
+pub use downsample::m4_indices;
 pub use error::{Error, Result};
 
 /// The version of this crate, as written in `Cargo.toml`.
