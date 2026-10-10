@@ -229,15 +229,19 @@ fn format_2_unreadable_sub_headers_cost_one_visit_each() {
         .iter()
         .flat_map(|w| w.to_be_bytes())
         .collect();
-    // (case, keys, sub-header bytes, unreadable sub-headers): every high byte is one visit,
-    // whether its sub-header is read or not.
-    let cases: [(&str, &[(usize, u16)], &[u8], usize); 3] = [
-        ("first field missing", &[], &[], 256),
-        ("count field missing", &[], &[0, 0], 256),
-        ("key out of range", &[(0x41, 100)], &all_bytes, 1),
+    // (case, table, unreadable sub-headers): every high byte is one visit, whether its
+    // sub-header is read or not.
+    let cases = [
+        ("first field missing", format2_cmap(&[], &[]), 256),
+        ("count field missing", format2_cmap(&[], &[0, 0]), 256),
+        (
+            "key out of range",
+            format2_cmap(&[(0x41, 100)], &all_bytes),
+            1,
+        ),
     ];
-    for (case, keys, rest, unreadable) in cases {
-        let read = system::cmap_ranges(&format2_cmap(keys, rest), max).unwrap();
+    for (case, cmap, unreadable) in cases {
+        let read = system::cmap_ranges(&cmap, max).unwrap();
         assert_eq!(read.visited(), 256, "{case}");
         assert_eq!(read.ranges().len(), 256 - unreadable, "{case}");
         // The high byte whose sub-header is unreadable maps nothing.
