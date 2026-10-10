@@ -1,8 +1,7 @@
 //! The values of a series: [`AxisData`] as given by the caller, and the validated, shared
-//! [`XValues`] and [`YValues`] that a mark stores.
+//! series that a mark stores.
 
 use std::fmt;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use super::validation::check_series;
@@ -36,83 +35,13 @@ impl AxisData {
     }
 }
 
-/// The x values of a stored mark, validated against the axes they were added to. They read as
-/// an [`AxisData`] and never change, so clones of a figure share them.
-///
-/// Only [`Axes::line`](super::Axes::line) and [`Axes::scatter`](super::Axes::scatter) create
-/// them.
-///
-/// # Examples
-///
-/// ```
-/// use umber_core::figure::{AxisData, LineOptions, Mark};
-/// use umber_core::{Figure, ScaleKind, Theme};
-///
-/// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-/// axes.line(AxisData::Categories(vec!["a".into()]), &[1.0], LineOptions::default())?;
-/// let Some(Mark::Line { x, .. }) = axes.marks().first() else { unreachable!() };
-/// assert_eq!(**x, AxisData::Categories(vec!["a".into()]));
-/// # Ok::<(), umber_core::Error>(())
-/// ```
+/// One validated series: x and y of equal length, each compatible with its axis. The pair is
+/// stored together and never changes, so clones share both arrays and an x is never paired
+/// with the y of another series.
 #[derive(Clone, PartialEq)]
-pub struct XValues(Arc<AxisData>);
-
-impl Deref for XValues {
-    type Target = AxisData;
-
-    fn deref(&self) -> &AxisData {
-        &self.0
-    }
-}
-
-impl fmt::Debug for XValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-/// The y values of a stored mark, validated against the axes they were added to. They read as
-/// a slice and never change, so clones of a figure share them.
-///
-/// Only [`Axes::line`](super::Axes::line) and [`Axes::scatter`](super::Axes::scatter) create
-/// them.
-///
-/// # Examples
-///
-/// ```
-/// use umber_core::figure::{AxisData, Mark, ScatterOptions};
-/// use umber_core::{Figure, ScaleKind, Theme};
-///
-/// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-/// axes.scatter(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], ScatterOptions::default())?;
-/// let Some(Mark::Scatter { y, .. }) = axes.marks().first() else { unreachable!() };
-/// assert_eq!(&y[..], &[2.0, 3.0]);
-/// # Ok::<(), umber_core::Error>(())
-/// ```
-#[derive(Clone, PartialEq)]
-pub struct YValues(Arc<[f64]>);
-
-impl Deref for YValues {
-    type Target = [f64];
-
-    fn deref(&self) -> &[f64] {
-        &self.0
-    }
-}
-
-impl fmt::Debug for YValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-/// One validated series: x and y of equal length, each compatible with its axis.
-#[derive(Debug, Clone, PartialEq)]
 pub(super) struct Series {
-    pub(super) x: XValues,
-    pub(super) y: YValues,
+    x: Arc<AxisData>,
+    y: Arc<[f64]>,
 }
 
 impl Series {
@@ -129,9 +58,28 @@ impl Series {
     ) -> Result<Series> {
         check_series(context, x_kind, y_kind, &x, y)?;
         Ok(Series {
-            x: XValues(Arc::new(x)),
-            y: YValues(Arc::from(y)),
+            x: Arc::new(x),
+            y: Arc::from(y),
         })
+    }
+
+    /// The x values.
+    pub(super) fn x(&self) -> &AxisData {
+        &self.x
+    }
+
+    /// The y values, as many as the x values.
+    pub(super) fn y(&self) -> &[f64] {
+        &self.y
+    }
+}
+
+impl fmt::Debug for Series {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Series")
+            .field("x", &self.x)
+            .field("y", &self.y)
+            .finish()
     }
 }
 
@@ -147,9 +95,10 @@ mod tests {
         values.iter().map(|v| v.to_bits()).collect()
     }
 
-    fn series_of(mark: &Mark) -> (&XValues, &YValues) {
+    fn series_of(mark: &Mark) -> &Series {
         match mark {
-            Mark::Line { x, y, .. } | Mark::Scatter { x, y, .. } => (x, y),
+            Mark::Line(line) => line.series(),
+            Mark::Scatter(scatter) => scatter.series(),
         }
     }
 
@@ -165,16 +114,16 @@ mod tests {
         let x = vec![3.0, gaps[0], -0.0, gaps[1], 1.0];
         let y = [gaps[2], 0.0, 2.0, -0.0, gaps[3]];
         let series = Series::new("t", LIN, LIN, AxisData::Numbers(x.clone()), &y).unwrap();
-        match &*series.x {
+        match series.x() {
             AxisData::Numbers(stored) => assert_eq!(bits(stored), bits(&x)),
             other => panic!("unexpected x {other:?}"),
         }
-        assert_eq!(bits(&series.y), bits(&y));
+        assert_eq!(bits(series.y()), bits(&y));
 
         let names: Vec<String> = ["b", "a", "b"].iter().map(|s| (*s).to_owned()).collect();
         let cats = AxisData::Categories(names.clone());
         let series = Series::new("t", ScaleKind::Category, LIN, cats, &[1.0, 2.0, 3.0]).unwrap();
-        assert_eq!(*series.x, AxisData::Categories(names));
+        assert_eq!(series.x(), &AxisData::Categories(names));
     }
 
     #[test]
@@ -227,10 +176,10 @@ mod tests {
         let mut copy = source.clone();
 
         // The clone reads the same arrays, not copies of them.
-        let (sx, sy) = series_of(&source.axes().unwrap().marks()[0]);
-        let (cx, cy) = series_of(&copy.axes().unwrap().marks()[0]);
-        assert!(Arc::ptr_eq(&sx.0, &cx.0));
-        assert!(Arc::ptr_eq(&sy.0, &cy.0));
+        let original = series_of(&source.axes().unwrap().marks()[0]);
+        let cloned = series_of(&copy.axes().unwrap().marks()[0]);
+        assert!(Arc::ptr_eq(&original.x, &cloned.x));
+        assert!(Arc::ptr_eq(&original.y, &cloned.y));
 
         // Changing the clone leaves the source as it was.
         copy.axes_mut()

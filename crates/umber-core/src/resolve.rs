@@ -77,7 +77,8 @@ pub(crate) fn coincides(a: f64, b: f64) -> bool {
 
 fn mark_data(mark: &Mark) -> (&AxisData, &[f64]) {
     match mark {
-        Mark::Line { x, y, .. } | Mark::Scatter { x, y, .. } => (x, y),
+        Mark::Line(line) => (line.x(), line.y()),
+        Mark::Scatter(scatter) => (scatter.x(), scatter.y()),
     }
 }
 

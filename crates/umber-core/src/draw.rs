@@ -945,9 +945,9 @@ pub(crate) fn marks(
     let mut items = Vec::new();
     for &ResolvedMark { mark, color } in marks {
         match mark {
-            Mark::Line { x, y, options } => {
-                let mut xs = axis_x(&resolved.x, x);
-                let mut ys = axis_y(&resolved.y, y);
+            Mark::Line(line) => {
+                let mut xs = axis_x(&resolved.x, line.x());
+                let mut ys = axis_y(&resolved.y, line.y());
                 if !resolved.x.is_category() {
                     // Over x in axis space, which maps to plot x monotonically and affinely.
                     let columns = downsample_columns(plot.width);
@@ -966,14 +966,15 @@ pub(crate) fn marks(
                     &xs,
                     &ys,
                     color,
-                    options.dash,
+                    line.options().dash,
                     &mut items,
                 );
             }
-            Mark::Scatter { x, y, options } => {
-                let xs = axis_x(&resolved.x, x);
-                let ys = axis_y(&resolved.y, y);
-                items.extend(scatter_item(theme, maps, &xs, &ys, color, options.marker));
+            Mark::Scatter(scatter) => {
+                let xs = axis_x(&resolved.x, scatter.x());
+                let ys = axis_y(&resolved.y, scatter.y());
+                let marker = scatter.options().marker;
+                items.extend(scatter_item(theme, maps, &xs, &ys, color, marker));
             }
         }
     }

@@ -22,7 +22,7 @@
 //! ```
 
 pub use crate::model::{
-    Axes, AxisData, Figure, LineOptions, Mark, ScatterOptions, XValues, YValues,
+    Axes, AxisData, Figure, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
 };
 
 use crate::render::{SvgText, render_png, render_svg};

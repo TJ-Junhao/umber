@@ -13,9 +13,9 @@ mod mark;
 mod validation;
 
 pub use axes::Axes;
-pub use axis_data::{AxisData, XValues, YValues};
+pub use axis_data::AxisData;
 pub use figure::Figure;
-pub use mark::{LineOptions, Mark, ScatterOptions};
+pub use mark::{LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 
 #[cfg(test)]
 mod tests {
@@ -314,9 +314,9 @@ mod tests {
         a.line(x.clone(), &y, LineOptions::default()).unwrap();
         y[0] = 99.0;
         match a.marks() {
-            [Mark::Line { x: mx, y: my, .. }] => {
-                assert_eq!(&my[..], &[1.0, 2.0]);
-                assert_eq!(&**mx, &x);
+            [Mark::Line(line)] => {
+                assert_eq!(line.y(), &[1.0, 2.0]);
+                assert_eq!(line.x(), &x);
             }
             other => panic!("unexpected marks {other:?}"),
         }

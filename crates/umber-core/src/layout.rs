@@ -106,10 +106,10 @@ pub(crate) struct Layout {
     /// The plot area.
     pub plot: Area,
     /// Where the header ends, gap included; [`PADDING`] when the header is empty.
-    #[allow(dead_code, reason = "read by tests now and by the M5b legend row")]
+    #[allow(dead_code, reason = "read by tests; a legend row will read it")]
     pub header_bottom: f64,
-    /// Height reserved under the subtitle for a legend row (M5b); 0 in M5a.
-    #[allow(dead_code, reason = "the M5b legend row sets and reads it")]
+    /// Height reserved under the subtitle for a legend row; 0 while there is no legend.
+    #[allow(dead_code, reason = "a legend row will set and read it")]
     pub header_extra_height: f64,
     /// The title, if not empty.
     pub title: Option<Label>,
