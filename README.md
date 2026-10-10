@@ -16,4 +16,4 @@ Prebuilt wheels are currently provided for macOS on Apple silicon (arm64) only. 
 
 ## License
 
-Licensed under either of MIT or Apache-2.0, at your option (`MIT OR Apache-2.0`). Bundled fonts are under the SIL Open Font License 1.1; see `crates/umber-core/fonts/LICENSES` and `crates/umber-core/fonts/MANIFEST.md`.
+Licensed under either of MIT or Apache-2.0, at your option (`MIT OR Apache-2.0`). Bundled fonts are under the SIL Open Font License 1.1; see `crates/umber-core/fonts/LICENSES` and `crates/umber-core/fonts/MANIFEST.md`. Wheels include statically linked Rust dependencies; their licenses are listed in `THIRD-PARTY-LICENSES.txt`.

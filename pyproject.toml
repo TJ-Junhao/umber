@@ -12,6 +12,7 @@ license = "MIT OR Apache-2.0"
 license-files = [
     "LICENSE-MIT",
     "LICENSE-APACHE",
+    "THIRD-PARTY-LICENSES.txt",
     "crates/umber-core/fonts/LICENSES/*-OFL.txt",
 ]
 dependencies = ["numpy>=2.0", "typing_extensions>=4.12"]
@@ -40,7 +41,10 @@ dev = [
 manifest-path = "crates/umber-py/Cargo.toml"
 python-source = "python"
 module-name = "umber._umber"
-include = [{ path = "README-ZH.md", format = "sdist" }]
+include = [
+    { path = "README-ZH.md", format = "sdist" },
+    { path = "THIRD-PARTY-LICENSES.txt", format = "sdist" },
+]
 
 [tool.maturin.sbom]
 rust = false
