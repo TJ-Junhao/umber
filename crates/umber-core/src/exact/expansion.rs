@@ -1,12 +1,12 @@
-//! Error-free `f64` expansion arithmetic for the crossing computation: two-term sums and
-//! products, and an exact `p * q - r * s` of two-term operands.
+//! Error-free `f64` expansion arithmetic: two-term sums and products, and an exact
+//! `p * q - r * s` of two-term operands.
 
-/// Crossing operands of one axis are scaled down by a power of two when any exceeds this
-/// magnitude, so the products in [`crossing`](super::crossing) cannot overflow.
+/// A group of operands is scaled down by a power of two when any exceeds this magnitude (see
+/// [`group_scale`]), so products of scaled operands, or of their differences, stay finite.
 const MAX_UNSCALED: f64 = 3.273_390_607_896_142e150; // 2^500
 
 /// `a + b` as an unevaluated sum `(s, e)` with `s + e == a + b` exactly (Knuth's TwoSum).
-pub(super) fn two_sum(a: f64, b: f64) -> (f64, f64) {
+pub(crate) fn two_sum(a: f64, b: f64) -> (f64, f64) {
     let s = a + b;
     let bb = s - a;
     (s, (a - (s - bb)) + (b - bb))
@@ -34,7 +34,7 @@ fn binary_exponent(v: f64) -> i32 {
 /// The final `sum()` is faithful (within about 1 ulp of the exact value), not guaranteed to be
 /// correctly rounded; for example `p = (1, 2^-53)`, `q = (1, 2^-107)`, `r = s = 0` gives 1
 /// instead of `1 + 2^-52`. That is far below plot resolution.
-pub(super) fn cross_difference(
+pub(crate) fn cross_difference(
     p: (f64, f64),
     q: (f64, f64),
     r: (f64, f64),
@@ -73,7 +73,7 @@ pub(super) fn cross_difference(
 
 /// A power of two that brings `largest` (a finite magnitude) to within `2^-500..=2^500`, or 1
 /// when it already is (or is 0).
-pub(super) fn group_scale(largest: f64) -> f64 {
+pub(crate) fn group_scale(largest: f64) -> f64 {
     let e = binary_exponent(largest);
     let k = if largest > MAX_UNSCALED {
         e - 499
