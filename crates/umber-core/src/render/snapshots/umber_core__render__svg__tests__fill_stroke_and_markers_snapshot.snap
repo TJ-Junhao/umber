@@ -1,0 +1,27 @@
+---
+source: crates/umber-core/src/render/svg.rs
+assertion_line: 630
+expression: svg
+---
+<svg xmlns="http://www.w3.org/2000/svg" width="120pt" height="80pt" viewBox="0 0 120 80">
+<rect width="120" height="80" fill="#FFFFFF"/>
+<defs>
+<linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="60" y1="0" x2="120" y2="0">
+<stop offset="0" stop-color="#C82814"/>
+<stop offset="1" stop-color="#143CC8" stop-opacity="0.502"/>
+</linearGradient>
+<path id="m1" d="M-2 0 L2 0 L0 3 Z"/>
+<clipPath id="c2"><rect x="70" y="50" width="40" height="20"/></clipPath>
+</defs>
+<path d="M10 10 L50 10 L30 40 Z" fill="#C82814"/>
+<path d="M0 0 L100 20" fill="none" stroke="#143CC8" stroke-opacity="0.502" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel" stroke-dasharray="4 2"/>
+<path d="M70 10 L110 10 L90 40 Z" fill="url(#g0)" fill-rule="evenodd"/>
+<g fill="#C82814" stroke="#C82814" stroke-width="0.5">
+<use href="#m1" x="20" y="60"/>
+<use href="#m1" x="40" y="62.5"/>
+<use href="#m1" x="60" y="58.25"/>
+</g>
+<g clip-path="url(#c2)">
+<path d="M70 40 L110 40 L90 70 Z" fill="#143CC8" fill-opacity="0.502"/>
+</g>
+</svg>

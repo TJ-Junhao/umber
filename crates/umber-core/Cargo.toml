@@ -16,7 +16,9 @@ skrifa = "0.48.0"
 thiserror.workspace = true
 
 [dev-dependencies]
+insta = "1.49.0"
 proptest = "1.11"
+roxmltree = "0.20"
 
 [lints]
 workspace = true
