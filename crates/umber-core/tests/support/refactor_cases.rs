@@ -1,14 +1,63 @@
 //! The corpus behind the refactor output gate.
 //!
-//! Every case is a figure or a hand-built scene. For each one the gate records the Scene debug
-//! serialization, the SVG bytes in both text modes, and the PNG bytes at two DPIs; see
-//! `scripts/check-refactor-output.sh`. The corpus uses only public APIs and the in-memory
-//! fallback font fixture, never system fonts, so one revision gives the same bytes on every
-//! run. Cases only ever grow: change an existing case and every baseline has to be regenerated.
+//! Every case is a figure, a hand-built scene, or a list of public API calls. The gate records,
+//! for each scene, a fixed-schema text record of the Scene (every float written as its bit
+//! pattern), the SVG bytes in both text modes and the PNG bytes at two DPIs; and, for the API
+//! calls, the returned values, every error by category, context, message and display text, and
+//! the observable state after each call. See `scripts/check-refactor-output.sh`. The corpus uses
+//! only public APIs and the in-memory fallback font fixture, never system fonts, so one revision
+//! gives the same bytes on every run. The records never use the `Debug` output of umber types,
+//! so a change to a `Debug` implementation does not change them. Changing an existing case
+//! changes its outputs, so every baseline has to be regenerated afterwards.
 //!
 //! This file is included with `#[path]` by `examples/refactor_outputs.rs`.
+//!
+//! # Coverage
+//!
+//! Covered:
+//!
+//! - Figures in the three built-in themes, and in themes changed through every `Theme::with_*`
+//!   setter that affects line and scatter figures.
+//! - Line and scatter marks: every dash and marker, every color spec, palette wrap-around, NaN
+//!   gaps, all-NaN, single-point and constant data, and series of 200 000 points.
+//! - Linear, base-2 and base-10 log, and category scales; limits that are narrow, tiny, huge or
+//!   far from the data; data far outside the limits.
+//! - Headers and axis labels: all four labels, none, and the x label, the y label and the
+//!   subtitle each on its own. `font_scale` at its maximum of 10 and at 1e-30. Labels wider than
+//!   the layout's text width limit, which are cut to a prefix on a character boundary.
+//! - Text: every bundled font in both weights, with and without tabular figures, as scene text
+//!   and as layout metrics; characters drawn only by the in-memory fallback font; characters no
+//!   font draws.
+//! - Hand-built scenes: every item kind, stroke caps, joins and dashes, gradient edge cases,
+//!   fill rules, groups nested at and beyond `MAX_GROUP_DEPTH`, and non-finite, huge and
+//!   degenerate geometry, text and sizes.
+//! - Every getter of `Theme::pigment()`, `Theme::graphite()`, `Theme::midnight()` and
+//!   `Theme::default()`, and the public constants.
+//! - Every reachable error branch of `Figure::new`, `Figure::add_axes`, `Axes::xlim`,
+//!   `Axes::ylim`, `Axes::line`, `Axes::scatter`, `Rgba::hex`, `Rgba::from_ints`, `Alpha::new`,
+//!   `LogBase::new`, `ContinuousScale::new`, `ContinuousScale::from_extent`, every validating
+//!   `Theme::with_*` setter and `render_png`, including which fault is reported when an input
+//!   has several. After every call on a figure, the scales, labels, limits, marks and resolved
+//!   colors are recorded, so a call that fails must also leave the figure unchanged.
+//!
+//! Not covered:
+//!
+//! - System fonts. The system-font index, its lookup budgets and the font caches are verified
+//!   by dedicated in-memory unit tests, not by this gate.
+//! - `Figure::to_png` and `Figure::to_svg`, which lay text out with `FontLibrary::global()` and
+//!   so may read system fonts. The corpus calls `Figure::to_scene` with its own library and
+//!   then the renderers, which is what these two methods do.
+//! - The pixmap allocation and PNG encoding failures of `render_png`; inputs that pass its size
+//!   checks do not reach them. `Error::Io`, which no public function returns.
+//! - Scale, tick, category and downsampling helpers (`ContinuousScale::nice`, `ticks` and
+//!   `normalize`, `CategoryScale`, `m4_indices`), path helpers such as `Path::bounds`, and
+//!   `ColorSpec::resolve` are observed only through the figures and scenes that use them.
+//! - The font files and license texts returned by `fonts::font_bytes` and
+//!   `fonts::license_text`, beyond what shaping reads from them.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use std::fmt::Write as _;
 
 use umber_core::figure::{AxisData, LineOptions, ScatterOptions};
 use umber_core::render::{SvgText, render_png, render_svg};
@@ -17,8 +66,9 @@ use umber_core::scene::{
     Scene, StrokeStyle,
 };
 use umber_core::{
-    Alpha, AreaFill, ColorSpec, Dash, Figure, Font, FontLibrary, GridLines, LegendStyle, LogBase,
-    Marker, Path, Point, Rgba, ScaleKind, TextStyle, Theme, TickLabelPlacement, Weight,
+    Alpha, AreaFill, ColorSpec, ContinuousScale, Dash, Figure, Font, FontLibrary, GridLines,
+    LegendStyle, LogBase, Marker, Path, Point, Rgba, ScaleKind, TextStyle, Theme,
+    TickLabelPlacement, Transform, Weight,
 };
 
 /// PNG resolutions of every case.
@@ -26,7 +76,7 @@ pub const DPIS: [u32; 2] = [72, 200];
 
 /// One generated file.
 pub struct Output {
-    /// `scene`, `svg`, `png` or `errors`; also the directory the driver writes it to.
+    /// `scene`, `svg`, `png`, `errors` or `api`; also the directory the driver writes it to.
     pub kind: &'static str,
     /// File name inside the kind directory.
     pub file: String,
@@ -46,18 +96,24 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     for (name, scene) in scene_cases(&lib) {
         emit_scene(&name, &scene, &mut sink);
     }
-    sink(Output {
-        kind: "errors",
-        file: "api.txt".into(),
-        bytes: error_cases().into_bytes(),
-    });
+    let mut text = |kind: &'static str, file: &str, body: String| {
+        sink(Output {
+            kind,
+            file: file.into(),
+            bytes: body.into_bytes(),
+        });
+    };
+    text("errors", "api.txt", error_cases(&lib));
+    text("api", "themes.txt", theme_cases());
+    text("api", "constants.txt", constant_cases());
+    text("api", "text-layout.txt", text_layout_cases(&lib));
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
     sink(Output {
         kind: "scene",
         file: format!("{name}.txt"),
-        bytes: format!("{scene:?}\n").into_bytes(),
+        bytes: record::scene(scene).into_bytes(),
     });
     for (mode, suffix) in [
         (SvgText::Editable, "editable"),
@@ -70,10 +126,10 @@ fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
         });
     }
     for dpi in DPIS {
-        // A scene the PNG backend refuses is recorded by its error text.
+        // A scene the PNG backend refuses is recorded by its error.
         let bytes = match render_png(scene, dpi) {
             Ok(bytes) => bytes,
-            Err(e) => format!("error: {e}\n").into_bytes(),
+            Err(e) => format!("{}\n", record::error(&e)).into_bytes(),
         };
         sink(Output {
             kind: "png",
@@ -328,7 +384,7 @@ fn scene_cases(lib: &FontLibrary) -> Vec<(String, Scene)> {
                 numbers(x),
                 &y,
                 ScatterOptions {
-                    label: format!("{marker:?}"),
+                    label: record::marker(marker).into(),
                     color: if k == 4 {
                         ColorSpec::Fixed(rgb(220, 80, 20))
                     } else {
@@ -595,6 +651,8 @@ fn scene_cases(lib: &FontLibrary) -> Vec<(String, Scene)> {
     add("scene-markers", markers_scene());
     add("scene-hostile", hostile_scene());
     add("scene-hostile-text", hostile_text_scene(lib));
+    add("scene-font-weights", font_weights_scene(lib));
+    label_cases(lib, &mut add);
     cases
 }
 
@@ -1248,162 +1306,1338 @@ fn hostile_text_scene(lib: &FontLibrary) -> Scene {
     scene
 }
 
-/// Error messages of public APIs, one per line. A refactor must not change a category, a
-/// context or a message.
-fn error_cases() -> String {
-    fn show<T>(out: &mut String, label: &str, result: umber_core::Result<T>) {
-        match result {
-            Ok(_) => out.push_str(&format!("{label}: ok\n")),
-            Err(e) => out.push_str(&format!("{label}: {e:?} | {e}\n")),
+/// Figures that exercise header and axis label combinations, font scales and long labels.
+fn label_cases(lib: &FontLibrary, add: &mut impl FnMut(&str, Scene)) {
+    type Labeller = fn(&mut umber_core::Axes);
+    let only: [(&str, Labeller); 3] = [
+        ("fig-xlabel-only", |a| {
+            a.xlabel("Horizontal only");
+        }),
+        ("fig-ylabel-only", |a| {
+            a.ylabel("Vertical only");
+        }),
+        ("fig-subtitle-only", |a| {
+            a.subtitle("Subtitle only");
+        }),
+    ];
+    for (name, label) in only {
+        let mut f = figure(5.0, 3.5, Theme::pigment(), linear(), linear());
+        label(axes(&mut f));
+        let (x, y) = wobble(20, 17);
+        axes(&mut f).line(numbers(x), &y, line()).unwrap();
+        add(name, to_scene(&f, lib));
+    }
+
+    for (name, scale) in [
+        ("fig-font-scale-max", 10.0),
+        ("fig-font-scale-tiny", 1.0e-30),
+    ] {
+        let theme = Theme::graphite().with_font_scale(scale).unwrap();
+        let mut f = figure(6.0, 4.0, theme, linear(), log(10.0));
+        labelled(&mut f, "Font scale");
+        axes(&mut f)
+            .line(
+                numbers(vec![0.0, 1.0, 2.0, 3.0]),
+                &[1.0, 30.0, 5.0, 900.0],
+                line(),
+            )
+            .unwrap();
+        add(name, to_scene(&f, lib));
+    }
+
+    // Labels far wider than any figure are cut to the longest prefix that fits, on a character
+    // boundary: ASCII, two-byte characters, and characters drawn by the fallback font.
+    let theme = Theme::pigment().with_font_scale(10.0).unwrap();
+    let mut f = figure(2.0, 2.0, theme, ScaleKind::Category, linear());
+    axes(&mut f)
+        .title(&"W".repeat(20_000))
+        .subtitle(&"\u{fc}".repeat(6_000))
+        .xlabel(&"\u{E000}".repeat(6_000))
+        .ylabel(&"y\u{2212}".repeat(4_000));
+    axes(&mut f)
+        .line(
+            AxisData::Categories(vec!["M".repeat(20_000), "short".into()]),
+            &[1.0, 2.0],
+            line(),
+        )
+        .unwrap();
+    add("fig-text-truncated", to_scene(&f, lib));
+}
+
+/// Text in every bundled font and weight, with and without tabular figures.
+fn font_weights_scene(lib: &FontLibrary) -> Scene {
+    let mut scene = Scene::new(420.0, 330.0, rgb(255, 255, 255));
+    let mut row = 0.0;
+    for font in Font::ALL {
+        for weight in Weight::ALL {
+            for tabular in [false, true] {
+                scene.push_text(
+                    lib,
+                    "Revenue \u{2212}12.5% 0123456789 AV To fi \u{E000}",
+                    style(font, weight, 11.0, tabular),
+                    pt(10.0, 16.0 + 15.0 * row),
+                    rgb(20, 20, 20),
+                );
+                row += 1.0;
+            }
         }
     }
-    let mut out = String::new();
+    scene
+}
+
+/// Text form of public values, independent of the `Debug` implementations of umber types.
+///
+/// Floats are written as the hexadecimal bit pattern of their own width, so every NaN payload
+/// and the sign of zero are kept. Strings are quoted with every character outside printable
+/// ASCII, and the quote and backslash, escaped as `\u{..}`.
+mod record {
+    use std::fmt::Write as _;
+
+    use umber_core::figure::{AxisData, Mark};
+    use umber_core::scene::{
+        FillRule, Item, LineCap, LineJoin, Paint, Rect, Scene, StrokeStyle, TextItem,
+    };
+    use umber_core::{
+        Alpha, AreaFill, Axes, ColorSpec, Dash, Error, Figure, Font, GridLines, LegendStyle,
+        Marker, Path, PathVerb, Point, Rgba, ScaleKind, TextStyle, Theme, TickLabelPlacement,
+        Transform, Weight,
+    };
+
+    pub fn f32(v: f32) -> String {
+        format!("{:08x}", v.to_bits())
+    }
+
+    pub fn f64(v: f64) -> String {
+        format!("{:016x}", v.to_bits())
+    }
+
+    pub fn floats32(values: &[f32]) -> String {
+        let parts: Vec<String> = values.iter().map(|v| f32(*v)).collect();
+        format!("[{}]", parts.join(","))
+    }
+
+    pub fn floats64(values: &[f64]) -> String {
+        let parts: Vec<String> = values.iter().map(|v| f64(*v)).collect();
+        format!("[{}]", parts.join(","))
+    }
+
+    pub fn text(s: &str) -> String {
+        let mut out = String::with_capacity(s.len() + 2);
+        out.push('"');
+        for c in s.chars() {
+            if matches!(c, ' '..='~') && c != '"' && c != '\\' {
+                out.push(c);
+            } else {
+                let _ = write!(out, "\\u{{{:x}}}", u32::from(c));
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    pub fn rgba(c: Rgba) -> String {
+        format!("rgba({},{},{},{})", c.r, c.g, c.b, c.a)
+    }
+
+    pub fn point(p: Point) -> String {
+        format!("{} {}", f32(p.x), f32(p.y))
+    }
+
+    pub fn rect(r: Rect) -> String {
+        format!(
+            "rect({} {} {} {})",
+            f32(r.x),
+            f32(r.y),
+            f32(r.width),
+            f32(r.height)
+        )
+    }
+
+    pub fn font(f: Font) -> &'static str {
+        match f {
+            Font::SourceSerif4 => "source-serif-4",
+            Font::IbmPlexSans => "ibm-plex-sans",
+            Font::Geist => "geist",
+            Font::Inter => "inter",
+            Font::JetBrainsMono => "jetbrains-mono",
+        }
+    }
+
+    pub fn weight(w: Weight) -> &'static str {
+        match w {
+            Weight::Regular => "regular",
+            Weight::SemiBold => "semibold",
+        }
+    }
+
+    pub fn dash(d: Dash) -> &'static str {
+        match d {
+            Dash::Solid => "solid",
+            Dash::Dashed => "dashed",
+            Dash::Dotted => "dotted",
+        }
+    }
+
+    /// The marker's name as written in labels.
+    pub fn marker(m: Marker) -> &'static str {
+        match m {
+            Marker::Circle => "Circle",
+            Marker::Square => "Square",
+            Marker::Triangle => "Triangle",
+            Marker::Diamond => "Diamond",
+            Marker::Cross => "Cross",
+        }
+    }
+
+    pub fn grid_lines(g: GridLines) -> &'static str {
+        match g {
+            GridLines::Horizontal => "horizontal",
+            GridLines::Vertical => "vertical",
+            GridLines::Both => "both",
+            GridLines::None => "none",
+        }
+    }
+
+    pub fn placement(p: TickLabelPlacement) -> &'static str {
+        match p {
+            TickLabelPlacement::AboveGridline => "above-gridline",
+            TickLabelPlacement::Outside => "outside",
+        }
+    }
+
+    pub fn legend(l: LegendStyle) -> &'static str {
+        match l {
+            LegendStyle::Header => "header",
+            LegendStyle::Direct => "direct",
+            LegendStyle::Chips => "chips",
+        }
+    }
+
+    pub fn area_fill(a: AreaFill) -> &'static str {
+        match a {
+            AreaFill::None => "none",
+            AreaFill::Gradient => "gradient",
+        }
+    }
+
+    pub fn alpha(a: Alpha) -> String {
+        format!("alpha({} u8={})", f32(a.get()), a.to_u8())
+    }
+
+    pub fn color_spec(c: ColorSpec) -> String {
+        match c {
+            ColorSpec::Auto(a) => format!("auto({})", alpha(a)),
+            ColorSpec::Palette { index, alpha: a } => format!("palette({index} {})", alpha(a)),
+            ColorSpec::Fixed(c) => format!("fixed({})", rgba(c)),
+        }
+    }
+
+    pub fn scale_kind(k: ScaleKind) -> String {
+        match k {
+            ScaleKind::Linear => "linear".into(),
+            ScaleKind::Log { base } => format!("log({})", f64(base.get())),
+            ScaleKind::Category => "category".into(),
+            _ => "unknown-scale".into(),
+        }
+    }
+
+    pub fn transform(t: Transform) -> String {
+        match t {
+            Transform::Linear => "linear".into(),
+            Transform::Log(base) => format!("log({})", f64(base.get())),
+        }
+    }
+
+    pub fn text_style(s: &TextStyle) -> String {
+        format!(
+            "font={} weight={} size={} tabular={}",
+            font(s.font),
+            weight(s.weight),
+            f32(s.size),
+            s.tabular_figures
+        )
+    }
+
+    pub fn error(e: &Error) -> String {
+        let fields = |category: &str, context: &str, message: &str| {
+            format!(
+                "error category={category} context={} message={}",
+                text(context),
+                text(message)
+            )
+        };
+        let head = match e {
+            Error::Data { context, message } => fields("data", context, message),
+            Error::Style { context, message } => fields("style", context, message),
+            Error::Usage { context, message } => fields("usage", context, message),
+            Error::Io(io) => format!("error category=io message={}", text(&io.to_string())),
+            _ => "error category=unknown".into(),
+        };
+        format!("{head} display={}", text(&e.to_string()))
+    }
+
+    pub fn theme(t: &Theme) -> String {
+        let colors: Vec<String> = t.palette().iter().map(|c| rgba(*c)).collect();
+        let rows = [
+            (
+                "palette",
+                format!("{} [{}]", colors.len(), colors.join(",")),
+            ),
+            ("background", rgba(t.background())),
+            ("text_color", rgba(t.text_color())),
+            ("muted_color", rgba(t.muted_color())),
+            ("grid_color", rgba(t.grid_color())),
+            ("grid_lines", grid_lines(t.grid_lines()).into()),
+            ("grid_dash", dash(t.grid_dash()).into()),
+            ("grid_width", f32(t.grid_width())),
+            ("baseline_color", rgba(t.baseline_color())),
+            ("baseline_width", f32(t.baseline_width())),
+            ("title_font", font(t.title_font()).into()),
+            ("body_font", font(t.body_font()).into()),
+            ("title_size", f32(t.title_size())),
+            ("body_size", f32(t.body_size())),
+            ("font_scale", f32(t.font_scale())),
+            (
+                "tick_label_placement",
+                placement(t.tick_label_placement()).into(),
+            ),
+            ("legend_style", legend(t.legend_style()).into()),
+            ("area_fill", area_fill(t.area_fill()).into()),
+            ("line_width", f32(t.line_width())),
+            ("marker_size", f32(t.marker_size())),
+            ("marker_alpha", f32(t.marker_alpha())),
+            ("bar_corner_radius", f32(t.bar_corner_radius())),
+            ("hist_gap", f32(t.hist_gap())),
+        ];
+        let mut out = String::new();
+        for (name, value) in rows {
+            let _ = writeln!(out, "  {name} {value}");
+        }
+        out
+    }
+
+    fn axis_data(d: &AxisData) -> String {
+        match d {
+            AxisData::Numbers(v) => format!("numbers{}", floats64(v)),
+            AxisData::Categories(v) => {
+                let names: Vec<String> = v.iter().map(|s| text(s)).collect();
+                format!("categories[{}]", names.join(","))
+            }
+        }
+    }
+
+    fn mark(m: &Mark) -> String {
+        match m {
+            Mark::Line { x, y, options } => format!(
+                "line x={} y={} label={} color={} dash={}",
+                axis_data(x),
+                floats64(y),
+                text(&options.label),
+                color_spec(options.color),
+                dash(options.dash)
+            ),
+            Mark::Scatter { x, y, options } => format!(
+                "scatter x={} y={} label={} color={} marker={}",
+                axis_data(x),
+                floats64(y),
+                text(&options.label),
+                color_spec(options.color),
+                marker(options.marker)
+            ),
+            _ => "unknown-mark".into(),
+        }
+    }
+
+    fn limits(l: Option<(f64, f64)>) -> String {
+        l.map_or_else(
+            || "none".into(),
+            |(lo, hi)| format!("{} {}", f64(lo), f64(hi)),
+        )
+    }
+
+    fn axes(a: &Axes) -> String {
+        let mut out = format!(
+            "  axes x={} y={} title={} subtitle={} xlabel={} ylabel={} xlim={} ylim={} marks={}\n",
+            scale_kind(a.x_scale()),
+            scale_kind(a.y_scale()),
+            text(a.title_text()),
+            text(a.subtitle_text()),
+            text(a.xlabel_text()),
+            text(a.ylabel_text()),
+            limits(a.x_limits()),
+            limits(a.y_limits()),
+            a.marks().len()
+        );
+        for m in a.marks() {
+            let _ = writeln!(out, "    {}", mark(m));
+        }
+        out
+    }
+
+    /// The observable state of a figure: its size, its theme's palette and its axes.
+    pub fn figure(f: &Figure) -> String {
+        let colors: Vec<String> = f.resolved_colors().iter().map(|c| rgba(*c)).collect();
+        let mut out = format!(
+            "  figure width_in={} height_in={} palette={} resolved_colors=[{}]\n",
+            f64(f.width_in()),
+            f64(f.height_in()),
+            f.theme().palette().len(),
+            colors.join(",")
+        );
+        match f.axes() {
+            Some(a) => out.push_str(&axes(a)),
+            None => out.push_str("  axes none\n"),
+        }
+        out
+    }
+
+    /// A line-oriented record of a scene. Each line is indented by its group depth.
+    pub fn scene(s: &Scene) -> String {
+        let mut w = Writer::default();
+        w.line(&format!(
+            "scene width={} height={} background={} items={}",
+            f32(s.width),
+            f32(s.height),
+            rgba(s.background),
+            s.items.len()
+        ));
+        w.items(&s.items);
+        w.out
+    }
+
+    #[derive(Default)]
+    struct Writer {
+        out: String,
+        depth: usize,
+    }
+
+    impl Writer {
+        fn line(&mut self, s: &str) {
+            for _ in 0..self.depth {
+                self.out.push(' ');
+            }
+            self.out.push_str(s);
+            self.out.push('\n');
+        }
+
+        fn items(&mut self, items: &[Item]) {
+            self.depth += 1;
+            for item in items {
+                self.item(item);
+            }
+            self.depth -= 1;
+        }
+
+        fn item(&mut self, item: &Item) {
+            match item {
+                Item::Fill { path, paint, rule } => {
+                    let rule = match rule {
+                        FillRule::NonZero => "nonzero",
+                        FillRule::EvenOdd => "evenodd",
+                    };
+                    self.line(&format!("fill rule={rule}"));
+                    self.paint(paint);
+                    self.path(path);
+                }
+                Item::Stroke { path, style } => {
+                    self.line(&format!("stroke {}", stroke_style(style)));
+                    self.path(path);
+                }
+                Item::Markers {
+                    shape,
+                    fill,
+                    stroke,
+                    positions,
+                } => {
+                    let fill = fill.map_or_else(|| "none".into(), rgba);
+                    let stroke = stroke
+                        .as_ref()
+                        .map_or_else(|| "none".into(), |s| format!("({})", stroke_style(s)));
+                    self.line(&format!(
+                        "markers fill={fill} stroke={stroke} positions={}",
+                        positions.len()
+                    ));
+                    for p in positions {
+                        self.line(&format!(" at {}", point(*p)));
+                    }
+                    self.path(shape);
+                }
+                Item::Text(t) => self.text_item(t),
+                Item::Group { clip, items } => {
+                    let clip = clip.map_or_else(|| "none".into(), rect);
+                    self.line(&format!("group clip={clip} items={}", items.len()));
+                    self.items(items);
+                    self.line("end group");
+                }
+            }
+        }
+
+        fn text_item(&mut self, t: &TextItem) {
+            self.line(&format!(
+                "text {} {} origin={} color={} width={}",
+                text(&t.text),
+                text_style(&t.style),
+                point(t.origin),
+                rgba(t.color),
+                f32(t.width)
+            ));
+            self.path(&t.outline);
+        }
+
+        fn paint(&mut self, paint: &Paint) {
+            match paint {
+                Paint::Solid(c) => self.line(&format!(" paint solid {}", rgba(*c))),
+                Paint::Linear(g) => {
+                    self.line(&format!(
+                        " paint linear start={} end={} stops={}",
+                        point(g.start),
+                        point(g.end),
+                        g.stops.len()
+                    ));
+                    for s in &g.stops {
+                        self.line(&format!("  stop {} {}", f32(s.offset), rgba(s.color)));
+                    }
+                }
+            }
+        }
+
+        fn path(&mut self, path: &Path) {
+            self.line(&format!(" path verbs={}", path.verbs().len()));
+            for verb in path.verbs() {
+                let s = match *verb {
+                    PathVerb::MoveTo(p) => format!("  M {}", point(p)),
+                    PathVerb::LineTo(p) => format!("  L {}", point(p)),
+                    PathVerb::QuadTo(c, p) => format!("  Q {} {}", point(c), point(p)),
+                    PathVerb::CubicTo(c1, c2, p) => {
+                        format!("  C {} {} {}", point(c1), point(c2), point(p))
+                    }
+                    PathVerb::Close => "  Z".into(),
+                };
+                self.line(&s);
+            }
+        }
+    }
+
+    fn stroke_style(s: &StrokeStyle) -> String {
+        let cap = match s.cap {
+            LineCap::Butt => "butt",
+            LineCap::Round => "round",
+            LineCap::Square => "square",
+        };
+        let join = match s.join {
+            LineJoin::Miter => "miter",
+            LineJoin::Round => "round",
+            LineJoin::Bevel => "bevel",
+        };
+        format!(
+            "color={} width={} dash={} cap={cap} join={join}",
+            rgba(s.color),
+            f32(s.width),
+            floats32(&s.dash)
+        )
+    }
+}
+
+/// Collects the results of public API calls, one per line.
+#[derive(Default)]
+struct Log {
+    out: String,
+}
+
+impl Log {
+    fn section(&mut self, title: &str) {
+        let _ = writeln!(self.out, "## {title}");
+    }
+
+    fn result<T>(
+        &mut self,
+        label: &str,
+        result: umber_core::Result<T>,
+        ok: impl FnOnce(T) -> String,
+    ) {
+        let value = match result {
+            Ok(v) => {
+                let value = ok(v);
+                if value.is_empty() || value.starts_with('\n') {
+                    format!("ok{value}")
+                } else {
+                    format!("ok {value}")
+                }
+            }
+            Err(e) => record::error(&e),
+        };
+        let _ = writeln!(self.out, "{label}: {value}");
+    }
+
+    fn raw(&mut self, s: &str) {
+        self.out.push_str(s);
+    }
+
+    /// Runs `op` on the figure's axes, then records its result and the figure's state.
+    fn on_axes(
+        &mut self,
+        figure: &mut Figure,
+        label: &str,
+        op: impl FnOnce(&mut umber_core::Axes) -> umber_core::Result<()>,
+    ) {
+        let result = op(figure.axes_mut().unwrap());
+        self.result(label, result, |()| String::new());
+        self.raw(&record::figure(figure));
+    }
+
+    /// Creates a figure with axes, recording both calls.
+    fn new_figure(&mut self, label: &str, x: ScaleKind, y: ScaleKind) -> Figure {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let result = f.add_axes(x, y).map(|_| ());
+        self.result(label, result, |()| String::new());
+        self.raw(&record::figure(&f));
+        f
+    }
+}
+
+/// Values for the numeric setters: below, at and above each bound, values that change when
+/// narrowed to `f32`, and non-finite values.
+const SETTER_VALUES: [f64; 17] = [
+    -1.0,
+    -0.0,
+    0.0,
+    1.0e-50,
+    1.0e-30,
+    0.5,
+    1.0,
+    1.000_000_1,
+    10.0,
+    10.000_001,
+    1.0e9,
+    3.4e38,
+    1.0e39,
+    f64::NAN,
+    f64::INFINITY,
+    f64::NEG_INFINITY,
+    -1.0e-9,
+];
+
+/// Errors, return values and state of public API calls. A refactor must not change a category,
+/// a context, a message, which fault an input with several is reported for, or what a failed
+/// call leaves behind.
+fn error_cases(lib: &FontLibrary) -> String {
+    let mut rec = Log::default();
+    figure_errors(&mut rec);
+    series_errors(&mut rec);
+    color_errors(&mut rec);
+    scale_errors(&mut rec);
+    theme_errors(&mut rec);
+    png_errors(&mut rec, lib);
+    rec.out
+}
+
+fn figure_errors(rec: &mut Log) {
+    rec.section("Figure::new");
     for (w, h) in [
         (0.0, 1.0),
         (1.0, -1.0),
         (f64::NAN, 1.0),
         (1.0, f64::INFINITY),
         (1.0e9, 1.0),
+        (200.0, 200.0),
+        (200.000_000_1, 1.0),
+        (1.0, 200.000_000_1),
+        (-1.0, f64::NAN),
+        (f64::MIN_POSITIVE, 1.0),
+        (-0.0, 1.0),
+        (f64::NEG_INFINITY, f64::NEG_INFINITY),
     ] {
-        show(
-            &mut out,
-            &format!("Figure::new({w}, {h})"),
+        rec.result(
+            &format!("Figure::new({}, {})", num(w), num(h)),
             Figure::new(w, h, Theme::pigment()),
+            |f| format!("\n{}", record::figure(&f).trim_end()),
         );
     }
-    let mut both_category = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    show(
-        &mut out,
-        "add_axes category/category",
-        both_category
-            .add_axes(ScaleKind::Category, ScaleKind::Category)
-            .map(|_| ()),
-    );
-    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    show(
-        &mut out,
-        "add_axes linear/linear",
-        f.add_axes(linear(), linear()).map(|_| ()),
-    );
-    show(
-        &mut out,
-        "add_axes twice",
-        f.add_axes(linear(), linear()).map(|_| ()),
-    );
-    let a = f.axes_mut().unwrap();
+
+    rec.section("Figure::add_axes");
+    for (name, x, y) in [
+        ("linear/linear", linear(), linear()),
+        (
+            "category/category",
+            ScaleKind::Category,
+            ScaleKind::Category,
+        ),
+        ("log/category", log(2.0), ScaleKind::Category),
+    ] {
+        let mut f = rec.new_figure(&format!("add_axes {name}"), x, y);
+        let result = f.add_axes(log(10.0), log(10.0)).map(|_| ());
+        rec.result(&format!("add_axes {name} then log/log"), result, |()| {
+            String::new()
+        });
+        rec.raw(&record::figure(&f));
+    }
+
+    rec.section("Axes limits, linear");
+    let mut f = rec.new_figure("linear/linear", linear(), linear());
+    rec.on_axes(&mut f, "xlim(0, 10)", |a| a.xlim(0.0, 10.0).map(drop));
+    rec.on_axes(&mut f, "ylim(-1, 1)", |a| a.ylim(-1.0, 1.0).map(drop));
     for (lo, hi) in [
         (1.0, 1.0),
         (2.0, 1.0),
         (f64::NAN, 1.0),
+        (1.0, f64::NAN),
         (0.0, f64::INFINITY),
+        (f64::NEG_INFINITY, 0.0),
         (1.0, 1.0 + 1.0e-12),
+        (0.0, 1.0e-291),
         (-1.0e301, 1.0),
+        (1.0, 1.0e301),
+        (1.0e301, 1.0e302),
+        (f64::NAN, f64::NEG_INFINITY),
+        (5.0, -1.0e301),
+        (-1.0e300, 1.0e300),
+        (1.0, 1.0 + 1.0e-9),
     ] {
-        show(
-            &mut out,
-            &format!("xlim({lo}, {hi})"),
-            a.xlim(lo, hi).map(|_| ()),
+        rec.on_axes(&mut f, &format!("xlim({}, {})", num(lo), num(hi)), |a| {
+            a.xlim(lo, hi).map(drop)
+        });
+        rec.on_axes(&mut f, &format!("ylim({}, {})", num(lo), num(hi)), |a| {
+            a.ylim(lo, hi).map(drop)
+        });
+    }
+
+    rec.section("Axes limits, log");
+    let mut f = rec.new_figure("log10/log2", log(10.0), log(2.0));
+    for (lo, hi) in [
+        (0.0, 10.0),
+        (-5.0, 10.0),
+        (1.0e-301, 10.0),
+        (1.0, 1.0e301),
+        (1.0, 1.000_000_000_1),
+        (1.0, 1.000_000_01),
+        (1.0e-300, 1.0e300),
+        (10.0, 1.0),
+        (0.0, f64::NAN),
+        (-1.0, 1.0e301),
+    ] {
+        rec.on_axes(&mut f, &format!("xlim({}, {})", num(lo), num(hi)), |a| {
+            a.xlim(lo, hi).map(drop)
+        });
+        rec.on_axes(&mut f, &format!("ylim({}, {})", num(lo), num(hi)), |a| {
+            a.ylim(lo, hi).map(drop)
+        });
+    }
+
+    rec.section("Axes limits, category");
+    let mut f = rec.new_figure(
+        "category/category",
+        ScaleKind::Category,
+        ScaleKind::Category,
+    );
+    rec.on_axes(&mut f, "xlim(1, 2)", |a| a.xlim(1.0, 2.0).map(drop));
+    rec.on_axes(&mut f, "ylim(1, 2)", |a| a.ylim(1.0, 2.0).map(drop));
+    rec.on_axes(&mut f, "xlim(NaN, NaN)", |a| {
+        a.xlim(f64::NAN, f64::NAN).map(drop)
+    });
+
+    rec.section("Axes labels");
+    rec.on_axes(&mut f, "labels", |a| {
+        a.title("T \u{E000}")
+            .subtitle("S")
+            .xlabel("X \"q\"")
+            .ylabel("Y\\");
+        Ok(())
+    });
+    rec.on_axes(&mut f, "labels cleared", |a| {
+        a.title("").subtitle("").xlabel("").ylabel("");
+        Ok(())
+    });
+}
+
+fn series_errors(rec: &mut Log) {
+    let inf = f64::INFINITY;
+    let nan = f64::NAN;
+    let nums = |v: &[f64]| AxisData::Numbers(v.to_vec());
+    let cats = |v: &[&str]| AxisData::Categories(v.iter().map(|s| (*s).to_owned()).collect());
+
+    rec.section("Axes.line and Axes.scatter, linear/linear");
+    let mut f = rec.new_figure("linear/linear", linear(), linear());
+    rec.on_axes(&mut f, "line ok", |a| {
+        a.line(nums(&[0.0, 1.0]), &[1.0, 2.0], line()).map(drop)
+    });
+    let cases: Vec<(&str, AxisData, Vec<f64>)> = vec![
+        ("length mismatch", nums(&[0.0]), vec![1.0, 2.0]),
+        (
+            "length mismatch and infinite y",
+            nums(&[inf]),
+            vec![inf, 2.0],
+        ),
+        ("empty x, one y", nums(&[]), vec![1.0]),
+        ("infinite y", nums(&[0.0]), vec![inf]),
+        ("negative infinite x", nums(&[f64::NEG_INFINITY]), vec![1.0]),
+        ("huge x", nums(&[1.0e301]), vec![1.0]),
+        ("huge negative y", nums(&[0.0]), vec![-1.0e301]),
+        ("infinite x and infinite y", nums(&[inf]), vec![inf]),
+        (
+            "huge y[1] before infinite y[2]",
+            nums(&[0.0, 1.0, 2.0]),
+            vec![nan, 1.0e301, inf],
+        ),
+        (
+            "infinite y[1] before huge y[2]",
+            nums(&[0.0, 1.0, 2.0]),
+            vec![nan, inf, 1.0e301],
+        ),
+        (
+            "huge x[2], infinite y[0]",
+            nums(&[0.0, 1.0, 1.0e301]),
+            vec![inf, 1.0, 1.0],
+        ),
+        ("categories on number axis", cats(&["a"]), vec![1.0]),
+        (
+            "categories on number axis, length mismatch",
+            cats(&["a", "b"]),
+            vec![1.0],
+        ),
+        (
+            "categories on number axis, infinite y",
+            cats(&["a"]),
+            vec![inf],
+        ),
+    ];
+    for (name, x, y) in cases {
+        rec.on_axes(&mut f, &format!("line {name}"), |a| {
+            a.line(x.clone(), &y, line()).map(drop)
+        });
+        rec.on_axes(&mut f, &format!("scatter {name}"), |a| {
+            a.scatter(x, &y, scatter()).map(drop)
+        });
+    }
+    rec.on_axes(&mut f, "line all NaN and empty", |a| {
+        a.line(nums(&[nan, 1.0]), &[2.0, nan], line())?;
+        a.scatter(nums(&[]), &[], scatter()).map(drop)
+    });
+    rec.on_axes(&mut f, "line with options", |a| {
+        a.line(
+            nums(&[umber_core::MAX_MAGNITUDE, -umber_core::MAX_MAGNITUDE]),
+            &[-0.0, 0.0],
+            LineOptions {
+                label: "edge".into(),
+                color: ColorSpec::Palette {
+                    index: 21,
+                    alpha: Alpha::new(0.25).unwrap(),
+                },
+                dash: Dash::Dotted,
+            },
+        )?;
+        a.scatter(
+            nums(&[1.0]),
+            &[1.0],
+            ScatterOptions {
+                label: "fixed".into(),
+                color: ColorSpec::Fixed(rgb(1, 2, 3)).with_alpha(Alpha::new(0.5).unwrap()),
+                marker: Marker::Diamond,
+            },
+        )
+        .map(drop)
+    });
+
+    rec.section("Axes.line and Axes.scatter, category/log10");
+    let mut f = rec.new_figure("category/log10", ScaleKind::Category, log(10.0));
+    for (name, x, y) in [
+        ("numbers on category axis", nums(&[1.0]), vec![1.0]),
+        ("numbers on category axis, bad y", nums(&[1.0]), vec![-1.0]),
+        ("zero y", cats(&["a"]), vec![0.0]),
+        ("negative y", cats(&["a", "b"]), vec![5.0, -1.0]),
+        ("tiny y", cats(&["a"]), vec![1.0e-301]),
+        ("negative infinite y", cats(&["a"]), vec![f64::NEG_INFINITY]),
+        ("huge y", cats(&["a"]), vec![1.0e301]),
+        ("smallest y", cats(&["a"]), vec![1.0e-300]),
+        ("NaN y", cats(&["a", "b"]), vec![nan, 3.0]),
+    ] {
+        rec.on_axes(&mut f, &format!("line {name}"), |a| {
+            a.line(x.clone(), &y, line()).map(drop)
+        });
+        rec.on_axes(&mut f, &format!("scatter {name}"), |a| {
+            a.scatter(x, &y, scatter()).map(drop)
+        });
+    }
+
+    rec.section("Axes.line and Axes.scatter, category y");
+    for (label, x_kind) in [
+        ("category/category", ScaleKind::Category),
+        ("linear/category", linear()),
+    ] {
+        let mut f = rec.new_figure(label, x_kind, ScaleKind::Category);
+        for (name, x, y) in [
+            ("numbers", nums(&[1.0]), vec![1.0]),
+            ("categories", cats(&["a"]), vec![1.0]),
+            ("categories, length mismatch", cats(&["a"]), vec![]),
+            ("numbers, infinite x", nums(&[inf]), vec![1.0]),
+        ] {
+            rec.on_axes(&mut f, &format!("line {name}"), |a| {
+                a.line(x.clone(), &y, line()).map(drop)
+            });
+            rec.on_axes(&mut f, &format!("scatter {name}"), |a| {
+                a.scatter(x, &y, scatter()).map(drop)
+            });
+        }
+    }
+
+    rec.section("Axes.line and Axes.scatter, log2/linear");
+    let mut f = rec.new_figure("log2/linear", log(2.0), linear());
+    for (name, x, y) in [
+        ("zero x", nums(&[0.0]), vec![1.0]),
+        ("negative x", nums(&[2.0, -1.0]), vec![1.0, 1.0]),
+        ("tiny x", nums(&[1.0e-301]), vec![1.0]),
+        ("negative x, infinite y", nums(&[-1.0]), vec![inf]),
+        ("negative y is fine", nums(&[1.0]), vec![-1.0]),
+    ] {
+        rec.on_axes(&mut f, &format!("line {name}"), |a| {
+            a.line(x.clone(), &y, line()).map(drop)
+        });
+        rec.on_axes(&mut f, &format!("scatter {name}"), |a| {
+            a.scatter(x, &y, scatter()).map(drop)
+        });
+    }
+}
+
+fn color_errors(rec: &mut Log) {
+    rec.section("Rgba::hex");
+    for code in [
+        "#1A2B3C",
+        "#1a2b3c80",
+        "#FFFFFF00",
+        "1A2B3C",
+        "abc",
+        "",
+        "#",
+        "#12345",
+        "#1234567",
+        "#123456789",
+        "#GG0000",
+        "#12 456",
+        "#+1A2B3",
+        "#\u{ff21}\u{ff22}",
+        "#\u{e9}\u{e9}\u{e9}",
+        "##123456",
+        " #123456",
+    ] {
+        rec.result(
+            &format!("Rgba::hex({})", record::text(code)),
+            Rgba::hex(code),
+            |c| format!("{} {}", record::rgba(c), c.to_hex()),
         );
     }
-    show(
-        &mut out,
-        "line length mismatch",
-        a.line(numbers(vec![0.0]), &[1.0, 2.0], line()).map(|_| ()),
+
+    rec.section("Rgba::from_ints");
+    for (r, g, b) in [
+        (0, 0, 0),
+        (255, 255, 255),
+        (256, 0, -1),
+        (0, 300, -1),
+        (0, 0, -1),
+        (-1, 256, 256),
+        (i64::MIN, 0, 0),
+        (0, i64::MAX, 0),
+        (0, 0, 256),
+    ] {
+        rec.result(
+            &format!("Rgba::from_ints({r}, {g}, {b})"),
+            Rgba::from_ints(r, g, b),
+            |c| format!("{} {}", record::rgba(c), c.to_hex()),
+        );
+    }
+
+    rec.section("Alpha::new");
+    for a in [
+        0.0,
+        -0.0,
+        0.5,
+        0.001,
+        0.998,
+        1.0,
+        1.000_000_1,
+        -1.0e-9,
+        2.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        rec.result(&format!("Alpha::new({})", num(a)), Alpha::new(a), |alpha| {
+            format!(
+                "{} {}",
+                record::alpha(alpha),
+                record::rgba(rgb(10, 20, 30).with_alpha(alpha))
+            )
+        });
+    }
+}
+
+fn scale_errors(rec: &mut Log) {
+    rec.section("LogBase::new");
+    for base in [
+        1.0,
+        0.5,
+        0.0,
+        -2.0,
+        f64::NAN,
+        f64::INFINITY,
+        1.000_000_1,
+        2.0,
+        std::f64::consts::E,
+        10.0,
+        1.0e300,
+    ] {
+        rec.result(
+            &format!("LogBase::new({})", num(base)),
+            LogBase::new(base),
+            |b| record::f64(b.get()),
+        );
+    }
+
+    let transforms = [
+        Transform::Linear,
+        Transform::Log(LogBase::TEN),
+        Transform::Log(LogBase::new(2.0).unwrap()),
+    ];
+    let domain = |s: ContinuousScale| {
+        let (lo, hi) = s.domain();
+        format!(
+            "{} {} {}",
+            record::transform(s.transform()),
+            record::f64(lo),
+            record::f64(hi)
+        )
+    };
+    rec.section("ContinuousScale::new");
+    for t in transforms {
+        for (lo, hi) in [
+            (0.0, 1.0),
+            (1.0, 1.0),
+            (f64::NAN, 1.0),
+            (0.0, f64::INFINITY),
+            (-1.0e301, 1.0),
+            (1.0, 1.0 + 1.0e-12),
+            (0.0, 1.0e-291),
+            (0.0, 10.0),
+            (1.0e-301, 10.0),
+            (1.0, 1.000_000_000_1),
+            (1.0e-300, 1.0e300),
+        ] {
+            rec.result(
+                &format!(
+                    "ContinuousScale::new({}, {}, {})",
+                    record::transform(t),
+                    num(lo),
+                    num(hi)
+                ),
+                ContinuousScale::new(t, lo, hi, "Scale fixture"),
+                domain,
+            );
+        }
+    }
+    rec.section("ContinuousScale::from_extent");
+    for t in transforms {
+        for extent in [
+            None,
+            Some((20.0, 20.0)),
+            Some((0.0, 0.0)),
+            Some((-3.0, 4.0)),
+            Some((f64::NAN, 1.0)),
+            Some((1.0, f64::INFINITY)),
+            Some((2.0, 1.0)),
+            Some((-1.0e301, 0.0)),
+            Some((0.0, 1.0)),
+            Some((-1.0, 1.0)),
+            Some((1.0e-301, 1.0)),
+            Some((1.0, 1.0e301)),
+            Some((5.0, 5.0)),
+            Some((1.0e300, 1.0e300)),
+            Some((-1.0e300, -1.0e300)),
+            Some((1.0e-300, 1.0e-300)),
+            Some((1.0, 1.0 + 1.0e-12)),
+        ] {
+            let label = extent.map_or_else(
+                || "None".to_owned(),
+                |(lo, hi): (f64, f64)| format!("{}, {}", num(lo), num(hi)),
+            );
+            rec.result(
+                &format!(
+                    "ContinuousScale::from_extent({}, {label})",
+                    record::transform(t)
+                ),
+                ContinuousScale::from_extent(t, extent, "Extent fixture"),
+                domain,
+            );
+        }
+    }
+}
+
+fn theme_errors(rec: &mut Log) {
+    type Setter = fn(&Theme, f64) -> umber_core::Result<Theme>;
+    type Getter = fn(&Theme) -> f32;
+    let numeric: [(&str, Setter, Getter); 7] = [
+        ("with_font_scale", Theme::with_font_scale, Theme::font_scale),
+        ("with_line_width", Theme::with_line_width, Theme::line_width),
+        (
+            "with_marker_size",
+            Theme::with_marker_size,
+            Theme::marker_size,
+        ),
+        (
+            "with_marker_alpha",
+            Theme::with_marker_alpha,
+            Theme::marker_alpha,
+        ),
+        (
+            "with_baseline_width",
+            Theme::with_baseline_width,
+            Theme::baseline_width,
+        ),
+        (
+            "with_bar_corner_radius",
+            Theme::with_bar_corner_radius,
+            Theme::bar_corner_radius,
+        ),
+        ("with_hist_gap", Theme::with_hist_gap, Theme::hist_gap),
+    ];
+    let base = Theme::graphite();
+    for (name, set, get) in numeric {
+        rec.section(&format!("Theme::{name}"));
+        for value in SETTER_VALUES {
+            rec.result(&format!("{name}({})", num(value)), set(&base, value), |t| {
+                record::f32(get(&t))
+            });
+        }
+    }
+
+    rec.section("Theme::with_palette");
+    for n in [0, 1, 8, 16, 17, 100] {
+        let colors: Vec<Rgba> = (0..n).map(|i| rgb(i as u8, 2, 3)).collect();
+        rec.result(
+            &format!("with_palette({n} colors)"),
+            base.with_palette(&colors),
+            |t| format!("{}", t.palette().len()),
+        );
+    }
+
+    rec.section("Theme setters without validation");
+    let c = Rgba {
+        r: 1,
+        g: 2,
+        b: 3,
+        a: 4,
+    };
+    let rows: [(&str, umber_core::Result<Theme>); 11] = [
+        ("with_background", base.with_background(c)),
+        ("with_text_color", base.with_text_color(c)),
+        ("with_muted_color", base.with_muted_color(c)),
+        ("with_grid_color", base.with_grid_color(c)),
+        ("with_baseline_color", base.with_baseline_color(c)),
+        (
+            "with_grid_lines",
+            base.with_grid_lines(GridLines::Horizontal),
+        ),
+        ("with_grid_dash", base.with_grid_dash(Dash::Dashed)),
+        ("with_title_font", base.with_title_font(Font::JetBrainsMono)),
+        ("with_body_font", base.with_body_font(Font::IbmPlexSans)),
+        (
+            "with_tick_label_placement",
+            base.with_tick_label_placement(TickLabelPlacement::AboveGridline),
+        ),
+        (
+            "with_legend_style",
+            base.with_legend_style(LegendStyle::Header),
+        ),
+    ];
+    for (name, result) in rows {
+        rec.result(name, result, |t| {
+            format!("\n{}", record::theme(&t).trim_end())
+        });
+    }
+    rec.result(
+        "with_area_fill",
+        base.with_area_fill(AreaFill::Gradient),
+        |t| format!("\n{}", record::theme(&t).trim_end()),
     );
-    show(
-        &mut out,
-        "line infinite y",
-        a.line(numbers(vec![0.0]), &[f64::INFINITY], line())
-            .map(|_| ()),
-    );
-    show(
-        &mut out,
-        "line huge x",
-        a.line(numbers(vec![1.0e301]), &[1.0], line()).map(|_| ()),
-    );
-    show(
-        &mut out,
-        "line categories on number axis",
-        a.line(AxisData::Categories(vec!["a".into()]), &[1.0], line())
-            .map(|_| ()),
-    );
-    show(&mut out, "marks after errors", Ok(a.marks().len()));
-    let mut g = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    let a = g.add_axes(ScaleKind::Category, log(10.0)).unwrap();
-    show(&mut out, "category xlim", a.xlim(1.0, 2.0).map(|_| ()));
-    show(
-        &mut out,
-        "category x with numbers",
-        a.line(numbers(vec![1.0]), &[1.0], line()).map(|_| ()),
-    );
-    let mut g = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    let a = g.add_axes(log(10.0), log(2.0)).unwrap();
-    show(
-        &mut out,
-        "log x of zero",
-        a.line(numbers(vec![0.0]), &[1.0], line()).map(|_| ()),
-    );
-    show(
-        &mut out,
-        "log y negative",
-        a.scatter(numbers(vec![1.0]), &[-1.0], scatter())
-            .map(|_| ()),
-    );
-    show(
-        &mut out,
-        "log xlim non-positive",
-        a.xlim(0.0, 10.0).map(|_| ()),
-    );
-    show(&mut out, "LogBase 1", LogBase::new(1.0));
-    show(&mut out, "LogBase NaN", LogBase::new(f64::NAN));
-    show(&mut out, "Alpha 2", Alpha::new(2.0));
-    show(&mut out, "Alpha NaN", Alpha::new(f64::NAN));
-    show(&mut out, "Rgba::from_ints", Rgba::from_ints(256, 0, -1));
-    let t = Theme::graphite();
-    show(&mut out, "with_line_width(-1)", t.with_line_width(-1.0));
-    show(
-        &mut out,
-        "with_line_width(NaN)",
-        t.with_line_width(f64::NAN),
-    );
-    show(&mut out, "with_font_scale(0)", t.with_font_scale(0.0));
-    show(&mut out, "with_font_scale(100)", t.with_font_scale(100.0));
-    show(&mut out, "with_marker_alpha(2)", t.with_marker_alpha(2.0));
-    show(&mut out, "with_marker_size(1e9)", t.with_marker_size(1.0e9));
-    show(&mut out, "with_palette(empty)", t.with_palette(&[]));
-    show(
-        &mut out,
-        "with_palette(100 colors)",
-        t.with_palette(&vec![rgb(1, 2, 3); 100]),
-    );
-    show(&mut out, "with_hist_gap(2)", t.with_hist_gap(2.0));
-    show(
-        &mut out,
-        "with_bar_corner_radius(-1)",
-        t.with_bar_corner_radius(-1.0),
-    );
-    show(
-        &mut out,
-        "with_baseline_width(1e9)",
-        t.with_baseline_width(1.0e9),
-    );
+    rec.raw("unchanged base theme\n");
+    rec.raw(&record::theme(&base));
+}
+
+fn png_errors(rec: &mut Log, lib: &FontLibrary) {
+    rec.section("render_png");
+    let digest = |bytes: Vec<u8>| format!("bytes={} fnv1a={:016x}", bytes.len(), fnv1a(&bytes));
     let scene = Scene::new(10.0, 10.0, rgb(0, 0, 0));
-    for dpi in [0, 9, 10, 2400, 2401, u32::MAX] {
-        show(
-            &mut out,
+    for dpi in [0, 9, 10, 72, 2400, 2401, u32::MAX] {
+        rec.result(
             &format!("render_png dpi {dpi}"),
-            render_png(&scene, dpi).map(|b| b.len()),
+            render_png(&scene, dpi),
+            digest,
         );
     }
-    show(
-        &mut out,
-        "render_png too large",
-        render_png(&Scene::new(1.0e6, 1.0e6, rgb(0, 0, 0)), 2400).map(|b| b.len()),
+    let black = rgb(0, 0, 0);
+    for (label, w, h, dpi) in [
+        ("too large", 1.0e6, 1.0e6, 2400),
+        ("tiny dpi, large scene", 5.0e5, 5.0e5, 10),
+        ("widest side", 32_767.0, 1.0, 72),
+        ("one pixel too wide", 32_768.0, 1.0, 72),
+        ("one pixel too tall", 1.0, 32_768.0, 72),
+        ("too many pixels", 8_193.0, 8_192.0, 72),
+        ("NaN width", f32::NAN, 10.0, 72),
+        ("infinite height", 10.0, f32::INFINITY, 72),
+        ("NaN width and bad dpi", f32::NAN, 10.0, 0),
+        ("zero size", 0.0, 0.0, 72),
+        ("negative size", -10.0, -10.0, 72),
+        ("sub-pixel size", 0.1, 0.1, 10),
+    ] {
+        rec.result(
+            &format!(
+                "render_png {label} ({} x {} at {dpi})",
+                num(f64::from(w)),
+                num(f64::from(h))
+            ),
+            render_png(&Scene::new(w, h, black), dpi),
+            digest,
+        );
+    }
+    // The renderers take any figure scene; record one through the public figure path.
+    let mut f = Figure::new(2.0, 1.5, Theme::midnight()).unwrap();
+    f.add_axes(linear(), linear()).unwrap();
+    rec.result(
+        "render_png figure scene",
+        render_png(&f.to_scene(lib), 30),
+        digest,
     );
-    show(
-        &mut out,
-        "render_png tiny dpi large scene",
-        render_png(&Scene::new(5.0e5, 5.0e5, rgb(0, 0, 0)), 10).map(|b| b.len()),
+}
+
+/// A short label for a number: plain notation for moderate magnitudes, exponent notation
+/// otherwise.
+fn num(v: f64) -> String {
+    if v == 0.0 || !v.is_finite() || (1.0e-4..1.0e9).contains(&v.abs()) {
+        format!("{v}")
+    } else {
+        format!("{v:e}")
+    }
+}
+
+/// FNV-1a over `bytes`: a stable digest that needs no dependency.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, b| {
+        (hash ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// Every getter of the built-in themes.
+fn theme_cases() -> String {
+    let mut out = String::new();
+    for (name, theme) in themes().into_iter().chain([("default", Theme::default())]) {
+        let _ = writeln!(out, "theme {name}");
+        out.push_str(&record::theme(&theme));
+    }
+    out
+}
+
+/// Public constants and fixed lookups.
+fn constant_cases() -> String {
+    let mut out = String::new();
+    for (name, c) in [
+        ("BLACK", Rgba::BLACK),
+        ("WHITE", Rgba::WHITE),
+        ("GRAY", Rgba::GRAY),
+        ("RED", Rgba::RED),
+        ("ORANGE", Rgba::ORANGE),
+        ("YELLOW", Rgba::YELLOW),
+        ("GREEN", Rgba::GREEN),
+        ("TEAL", Rgba::TEAL),
+        ("BLUE", Rgba::BLUE),
+        ("PURPLE", Rgba::PURPLE),
+        ("PINK", Rgba::PINK),
+        ("BROWN", Rgba::BROWN),
+    ] {
+        let _ = writeln!(out, "Rgba::{name} {} {}", record::rgba(c), c.to_hex());
+    }
+    let _ = writeln!(out, "Alpha::OPAQUE {}", record::alpha(Alpha::OPAQUE));
+    let _ = writeln!(
+        out,
+        "ColorSpec::AUTO {}",
+        record::color_spec(ColorSpec::AUTO)
     );
+    let _ = writeln!(out, "LogBase::TEN {}", record::f64(LogBase::TEN.get()));
+    let _ = writeln!(
+        out,
+        "MAX_MAGNITUDE {}",
+        record::f64(umber_core::MAX_MAGNITUDE)
+    );
+    let _ = writeln!(
+        out,
+        "MIN_LOG_VALUE {}",
+        record::f64(umber_core::MIN_LOG_VALUE)
+    );
+    let _ = writeln!(out, "MAX_GROUP_DEPTH {MAX_GROUP_DEPTH}");
+    let _ = writeln!(out, "DPIS {DPIS:?}");
+    for font in Font::ALL {
+        let _ = writeln!(
+            out,
+            "Font {} family={} generic={}",
+            record::font(font),
+            record::text(font.family_name()),
+            record::text(font.generic_family())
+        );
+    }
+    let weights: Vec<&str> = Weight::ALL.into_iter().map(record::weight).collect();
+    let _ = writeln!(out, "Weight::ALL {}", weights.join(","));
+    let ranges = |r: &[(u32, u32)]| {
+        let parts: Vec<String> = r.iter().map(|(a, b)| format!("{a:x}-{b:x}")).collect();
+        parts.join(",")
+    };
+    let _ = writeln!(
+        out,
+        "REQUIRED_CODEPOINTS {}",
+        ranges(umber_core::fonts::REQUIRED_CODEPOINTS)
+    );
+    let _ = writeln!(
+        out,
+        "EXTENDED_CODEPOINTS {}",
+        ranges(umber_core::fonts::EXTENDED_CODEPOINTS)
+    );
+    let _ = writeln!(
+        out,
+        "FALLBACK_TEST_CODEPOINT {:x}",
+        u32::from(umber_core::fonts::FALLBACK_TEST_CODEPOINT)
+    );
+    out
+}
+
+/// Layout metrics of every bundled font and weight, through the corpus library.
+fn text_layout_cases(lib: &FontLibrary) -> String {
+    let mut out = String::new();
+    let samples = [
+        "",
+        "Revenue \u{2212}12.5%",
+        "0123456789",
+        "AV To fi ffl",
+        "\u{E000}\u{E000}",
+        "caf\u{e9} \u{65e5}",
+    ];
+    for font in Font::ALL {
+        for weight in Weight::ALL {
+            for tabular in [false, true] {
+                for size in [11.0, 0.0, -1.0, f32::NAN, 1.0e4] {
+                    for sample in samples {
+                        let s = style(font, weight, size, tabular);
+                        let layout = lib.layout(sample, &s);
+                        let outline = layout.outline(pt(0.0, 0.0));
+                        let _ = writeln!(
+                            out,
+                            "{} {} width={} ascent={} descent={} empty={} verbs={}",
+                            record::text_style(&s),
+                            record::text(sample),
+                            record::f32(layout.width()),
+                            record::f32(layout.ascent()),
+                            record::f32(layout.descent()),
+                            layout.is_empty(),
+                            outline.verbs().len()
+                        );
+                    }
+                }
+            }
+        }
+    }
     out
 }

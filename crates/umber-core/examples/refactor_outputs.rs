@@ -4,8 +4,8 @@
 //! cargo run --release --locked -p umber-core --example refactor_outputs -- <output-dir>
 //! ```
 //!
-//! The directory gets `scene/`, `svg/`, `png/` and `errors/` subdirectories, one file per
-//! output. `scripts/check-refactor-output.sh` hashes them and compares manifests; run it
+//! The directory gets `scene/`, `svg/`, `png/`, `errors/` and `api/` subdirectories, one file
+//! per output. `scripts/check-refactor-output.sh` hashes them and compares manifests; run it
 //! instead of this example directly.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
