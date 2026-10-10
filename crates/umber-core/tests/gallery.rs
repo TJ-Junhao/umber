@@ -27,6 +27,7 @@ use golden_compare::{assert_golden, golden_dir};
 
 const DPI: u32 = 150;
 const TITLE: &str = "Station output";
+const SUBTITLE: &str = "Daily mean, MW";
 const YLABEL: &str = "Daily mean, MW";
 
 /// `(name, caption)` of every gallery image, in contact-sheet order.
@@ -71,7 +72,7 @@ fn line_figure(theme_name: &str) -> Figure {
     let axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
-    axes.title(TITLE).ylabel(YLABEL).xlabel("Day");
+    axes.title(TITLE).subtitle(SUBTITLE).xlabel("Day");
     let x: Vec<f64> = (0..60).map(f64::from).collect();
     for (i, label) in ["North", "Central", "South"].into_iter().enumerate() {
         let k = i as f64;
@@ -119,7 +120,9 @@ fn scatter_figure(theme_name: &str) -> Figure {
     let axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
-    axes.title(TITLE).ylabel(YLABEL).xlabel("Temperature, C");
+    axes.title(TITLE)
+        .subtitle("Each dot is one sampled plant")
+        .xlabel("Temperature, C");
     let mut rng = Lcg(2024);
     let centers = [(20.0, 30.0), (35.0, 55.0), (50.0, 35.0)];
     for (i, (cx, cy)) in centers.into_iter().enumerate() {
