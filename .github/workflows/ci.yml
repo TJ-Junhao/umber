@@ -57,6 +57,9 @@ jobs:
       - run: uv run mypy
       - run: uv run python -m mypy.stubtest umber._umber
       - run: uv run pytest -q
+      - name: Build release dists without local paths
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: scripts/release/build-dists.sh
 
   ci-ok:
     if: always()
