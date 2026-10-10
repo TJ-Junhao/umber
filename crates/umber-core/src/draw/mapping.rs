@@ -1,0 +1,138 @@
+//! Axis maps: mark data to axis space, axis space to plot points, and plot points to scene
+//! points.
+
+use crate::geometry::Point;
+use crate::layout::Area;
+use crate::model::AxisData;
+use crate::resolve::{AxisScale, ResolvedAxis};
+use crate::scale::log_offset;
+use crate::{ContinuousScale, Transform};
+
+/// A scene point from layout coordinates. Layout keeps every value finite and far below the
+/// renderers' `MAX_COORD`, so narrowing to `f32` is safe.
+pub(super) fn point(x: f64, y: f64) -> Point {
+    Point {
+        x: x as f32,
+        y: y as f32,
+    }
+}
+
+/// [`point`] for an `(x, y)` pair.
+pub(super) fn scene_point((x, y): (f64, f64)) -> Point {
+    point(x, y)
+}
+
+/// The affine map of one axis from axis space to plot points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct AxisMap {
+    /// The axis-space value at the low end of the axis (left or bottom).
+    pub(super) lo: f64,
+    /// The axis-space value at the high end of the axis.
+    pub(super) hi: f64,
+    /// The plot coordinate of `lo`.
+    pub(super) start: f64,
+    /// The plot coordinate distance from `lo` to `hi`, at least 1 pt; negative for y, which
+    /// points down.
+    pub(super) extent: f64,
+}
+
+impl AxisMap {
+    /// The map of the x axis `axis` onto `plot`.
+    pub(super) fn x(axis: &ResolvedAxis, plot: Area) -> AxisMap {
+        let (lo, hi) = axis_domain(axis);
+        AxisMap {
+            lo,
+            hi,
+            start: plot.x,
+            extent: plot.width,
+        }
+    }
+
+    /// The map of the y axis `axis` onto `plot`, bottom up.
+    pub(super) fn y(axis: &ResolvedAxis, plot: Area) -> AxisMap {
+        let (lo, hi) = axis_domain(axis);
+        AxisMap {
+            lo,
+            hi,
+            start: plot.bottom(),
+            extent: -plot.height,
+        }
+    }
+
+    /// The plot coordinate of axis-space value `u`. For `u` within a few points of the axis
+    /// domain (all callers pass clipped or culled values) this cannot overflow.
+    pub(super) fn plot_at(&self, u: f64) -> f64 {
+        self.start + (u - self.lo) / (self.hi - self.lo) * self.extent
+    }
+
+    /// The axis-space range covered by the axis extended by `margin` points at both ends. The
+    /// rounding of `lo - m` and `hi + m` is monotonic, so the range always contains the domain.
+    pub(super) fn expanded(&self, margin: f64) -> (f64, f64) {
+        let m = margin / self.extent.abs() * (self.hi - self.lo);
+        (self.lo - m, self.hi + m)
+    }
+}
+
+/// The axis-space domain of `axis`: the limits on a linear axis, `0..ln(hi / lo)` on a log
+/// axis (with [`log_offset`], exactly as `ContinuousScale::normalize` measures, so marks and
+/// gridlines agree), and `0..1` (the band centers' range) on a category axis.
+fn axis_domain(axis: &ResolvedAxis) -> (f64, f64) {
+    match &axis.scale {
+        AxisScale::Continuous(scale) => {
+            let (lo, hi) = scale.domain();
+            match scale.transform() {
+                Transform::Linear => (lo, hi),
+                Transform::Log(_) => (0.0, log_offset(hi, lo)),
+            }
+        }
+        AxisScale::Category(_) => (0.0, 1.0),
+    }
+}
+
+/// The axis-space x values of `x`. Category names map to their band center; NaN, and names the
+/// scale does not know (impossible after resolve), map to NaN.
+pub(super) fn axis_x(axis: &ResolvedAxis, x: &AxisData) -> Vec<f64> {
+    match (&axis.scale, x) {
+        (AxisScale::Continuous(scale), AxisData::Numbers(values)) => {
+            continuous_values(scale, values)
+        }
+        (AxisScale::Category(scale), AxisData::Categories(names)) => names
+            .iter()
+            .map(|name| scale.index_of(name).map_or(f64::NAN, |i| scale.center(i)))
+            .collect(),
+        // The model rejects data of the wrong kind for the axis.
+        (_, data) => vec![f64::NAN; data_len(data)],
+    }
+}
+
+/// The axis-space y values of `y`; NaN maps to NaN.
+pub(super) fn axis_y(axis: &ResolvedAxis, y: &[f64]) -> Vec<f64> {
+    match &axis.scale {
+        AxisScale::Continuous(scale) => continuous_values(scale, y),
+        // Marks hold numeric y, which a category y axis cannot place.
+        AxisScale::Category(_) => vec![f64::NAN; y.len()],
+    }
+}
+
+/// `values` in the axis space of `scale`: the values on a linear axis, `ln(v / lo)` on a log
+/// axis. Log values are positive (validated), so those are finite; anything else maps to NaN,
+/// a gap.
+fn continuous_values(scale: &ContinuousScale, values: &[f64]) -> Vec<f64> {
+    match scale.transform() {
+        Transform::Linear => values.to_vec(),
+        Transform::Log(_) => {
+            let lo = scale.domain().0;
+            values
+                .iter()
+                .map(|&v| if v > 0.0 { log_offset(v, lo) } else { f64::NAN })
+                .collect()
+        }
+    }
+}
+
+fn data_len(data: &AxisData) -> usize {
+    match data {
+        AxisData::Numbers(v) => v.len(),
+        AxisData::Categories(v) => v.len(),
+    }
+}
