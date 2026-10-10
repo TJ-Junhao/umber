@@ -92,9 +92,9 @@ fn size_value(v: f32) -> f32 {
     if v.is_finite() && v > 0.0 { v } else { 0.0 }
 }
 
-/// Formats a finite number with at most `decimals` decimals, trimmed, never `-0`.
-fn num_with(v: f32, decimals: usize) -> String {
-    let mut s = format!("{v:.decimals$}");
+/// Formats a finite number with at most three decimals, trimmed, never `-0`.
+fn num(v: f32) -> String {
+    let mut s = format!("{v:.3}");
     if s.contains('.') {
         while s.ends_with('0') {
             s.pop();
@@ -106,9 +106,10 @@ fn num_with(v: f32, decimals: usize) -> String {
     if s == "-0" { "0".to_string() } else { s }
 }
 
-/// Formats a finite number with at most three decimals.
-fn num(v: f32) -> String {
-    num_with(v, 3)
+/// Formats a dash entry with Rust's shortest round-trip form, so a nonzero entry never turns
+/// into 0. `Display` for floats never uses an exponent.
+fn dash_entry(v: f32) -> String {
+    format!("{v}")
 }
 
 fn hex(c: Rgba) -> String {
@@ -209,7 +210,7 @@ fn write_stroke(out: &mut String, style: &StrokeStyle, path_len: f32) -> bool {
         LineJoin::Bevel => out.push_str(r#" stroke-linejoin="bevel""#),
     }
     if let Some(dash) = normalize_dash(&style.dash, path_len) {
-        let list: Vec<String> = dash.iter().map(|v| num_with(*v, 4)).collect();
+        let list: Vec<String> = dash.iter().map(|v| dash_entry(*v)).collect();
         let _ = write!(out, r#" stroke-dasharray="{}""#, list.join(" "));
     }
     true
@@ -1021,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn dashes_use_four_decimals_and_follow_the_shared_classification() {
+    fn dashes_round_trip_and_follow_the_shared_classification() {
         let mut scene = Scene::new(50.0, 50.0, WHITE);
         scene.push(Item::Stroke {
             path: line(),
@@ -1037,6 +1038,13 @@ mod tests {
         });
         let svg = render_svg(&scene, SvgText::Outlines);
         assert!(svg.contains(r#"stroke-dasharray="0.0625 3""#), "{svg}");
+        assert_eq!(dash_entry(0.1), "0.1");
+        assert_eq!(dash_entry(0.00004), "0.00004");
+        for v in [1.0e-20_f32, 3.0e38, f32::MIN_POSITIVE, 123456.79] {
+            let text = dash_entry(v);
+            assert!(!text.contains(['e', 'E']), "{text}");
+            assert_eq!(text.parse::<f32>().ok(), Some(v));
+        }
         assert!(svg.contains(r#"stroke-dasharray="3 3""#), "{svg}");
         assert_eq!(svg.matches("stroke-dasharray").count(), 2, "{svg}");
     }

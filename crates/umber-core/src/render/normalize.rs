@@ -16,11 +16,16 @@ use crate::scene::{GradientStop, LinearGradient};
 /// before it builds scenes, so legitimate geometry never gets near this limit.
 pub(crate) const MAX_COORD: f32 = 1.0e6;
 
-/// Dash periods below this many points, and gradient vectors shorter than this, are degenerate.
+/// Gradient vectors shorter than this many points are degenerate.
 const MIN_EXTENT: f64 = 0.01;
 
-/// A dash pattern denser than this many periods along the path is drawn solid.
-const MAX_DASH_PERIODS: f64 = 100_000.0;
+/// Dash periods below this many points are sub-resolution at every allowed DPI (0.1 pt is 3.3
+/// px at 2400 dpi), so such a pattern is drawn solid.
+const MIN_DASH_PERIOD: f64 = 0.1;
+
+/// A pattern that would produce more dashes than this along the path is drawn solid. The
+/// count is estimated the way tiny-skia does, which has a looser budget of 1,000,000.
+const MAX_DASH_COUNT: f64 = 100_000.0;
 
 /// Whether a point can be drawn: finite and within [`MAX_COORD`].
 pub(crate) fn valid_point(p: Point) -> bool {
@@ -172,8 +177,9 @@ pub(crate) fn normalize_path(path: &Path) -> Option<NormalizedPath> {
 /// Validates a dash array. `None` means the stroke is solid.
 ///
 /// The array is solid when it is empty, has a non-finite or negative entry, has a period (the
-/// sum, with an odd-length array repeated once as SVG does) that is non-finite or below 0.01
-/// pt, or would put more than 100,000 periods along `path_len_upper_bound`. Otherwise the
+/// sum, with an odd-length array repeated once as SVG does) that is non-finite or below 0.1
+/// pt, or would produce more than 100,000 dashes along `path_len_upper_bound` (counted as
+/// `length / period * (entries / 2)`, like tiny-skia). Otherwise the
 /// array is returned, doubled if its length was odd.
 pub(crate) fn normalize_dash(dash: &[f32], path_len_upper_bound: f32) -> Option<Vec<f32>> {
     if dash.is_empty() || dash.iter().any(|v| !v.is_finite() || *v < 0.0) {
@@ -184,10 +190,11 @@ pub(crate) fn normalize_dash(dash: &[f32], path_len_upper_bound: f32) -> Option<
         pattern.extend_from_slice(dash);
     }
     let period: f32 = pattern.iter().sum();
-    if !period.is_finite() || f64::from(period) < MIN_EXTENT {
+    if !period.is_finite() || f64::from(period) < MIN_DASH_PERIOD {
         return None;
     }
-    if f64::from(path_len_upper_bound) / f64::from(period) > MAX_DASH_PERIODS {
+    let dashes = f64::from(path_len_upper_bound) / f64::from(period) * (pattern.len() / 2) as f64;
+    if dashes > MAX_DASH_COUNT {
         return None;
     }
     Some(pattern)
@@ -418,7 +425,7 @@ mod tests {
         assert_eq!(normalize_dash(&[f32::INFINITY, 1.0], 100.0), None);
         // Period overflows f32.
         assert_eq!(normalize_dash(&[0.0, 2.0e38, 2.0e38, 0.0], 100.0), None);
-        // Period below 0.01 pt, including values a 3-decimal writer would turn into "0".
+        // Period below 0.1 pt, including values a 3-decimal writer would turn into "0".
         assert_eq!(normalize_dash(&[0.00049, 0.00049], 100.0), None);
         assert_eq!(normalize_dash(&[1.0e-20, 1.0e-20], 100.0), None);
     }
@@ -428,6 +435,24 @@ mod tests {
         assert_eq!(normalize_dash(&[1.0, 1.0], 200_000.0), Some(vec![1.0, 1.0]));
         assert_eq!(normalize_dash(&[1.0, 1.0], 200_002.0), None);
         assert_eq!(normalize_dash(&[1.0, 1.0], 100_000.0 * 2.0 + 1.0), None);
+    }
+
+    #[test]
+    fn dash_period_boundary() {
+        assert_eq!(normalize_dash(&[0.05, 0.05], 10.0), Some(vec![0.05, 0.05]));
+        assert_eq!(normalize_dash(&[0.0499, 0.0500], 10.0), None);
+        // Many tiny entries whose total period is still below the minimum.
+        assert_eq!(normalize_dash(&vec![0.00004; 1000], 36.0), None);
+    }
+
+    #[test]
+    fn dash_budget_counts_dashes_like_tiny_skia() {
+        // Period 2.4, 24 entries: 230,000 / 2.4 * 12 is about 1.15 million dashes.
+        assert_eq!(normalize_dash(&[0.1; 24], 230_000.0), None);
+        // 12 entries of 1: period 12, 6 dashes per period; 100,000 dashes is the cap.
+        let pattern = vec![1.0; 12];
+        assert!(normalize_dash(&pattern, 200_000.0).is_some());
+        assert_eq!(normalize_dash(&pattern, 200_002.0), None);
     }
 
     #[test]
