@@ -2,6 +2,7 @@
 
 use super::{Pixels, line_figure, mark_group, plot_of, subpaths};
 use crate::model::{Figure, LineOptions};
+use crate::resolve::NormalizedPos;
 use crate::scene::{FillRule, Item, LinearGradient, Paint};
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{AreaFill, FontLibrary, GridLines, Theme};
@@ -84,7 +85,13 @@ fn area_fill_sits_under_line() {
 /// The PNG pixel at data position `(x, y)` of a figure with limits 0..1 by -2..2.
 fn data_pixel(f: &Figure, png: &[u8], x: f64, y: f64) -> [u8; 3] {
     let plot = plot_of(f);
-    Pixels::decode(png).at_point((plot.x_at(x), plot.y_at((y + 2.0) / 4.0)), 300.0)
+    Pixels::decode(png).at_point(
+        (
+            plot.x_at(NormalizedPos::new(x)),
+            plot.y_at(NormalizedPos::new((y + 2.0) / 4.0)),
+        ),
+        300.0,
+    )
 }
 
 fn area_figure(theme: &Theme, x: &[f64], y: &[f64]) -> Figure {
@@ -136,7 +143,7 @@ fn areas_crossing_the_baseline_fill_both_sides() {
     let scene = f.to_scene(FontLibrary::global());
     assert_scene_bounded(&scene);
     let plot = plot_of(&f);
-    let baseline = plot.y_at(0.5) as f32;
+    let baseline = plot.y_at(NormalizedPos::new(0.5)) as f32;
     let gradients: Vec<&LinearGradient> = mark_group(&scene)
         .1
         .iter()
@@ -151,8 +158,8 @@ fn areas_crossing_the_baseline_fill_both_sides() {
     let [above, below] = gradients.as_slice() else {
         panic!("expected two area fills, got {gradients:?}")
     };
-    assert!((above.start.y - plot.y_at(0.75) as f32).abs() < 1e-3);
-    assert!((below.start.y - plot.y_at(0.25) as f32).abs() < 1e-3);
+    assert!((above.start.y - plot.y_at(NormalizedPos::new(0.75)) as f32).abs() < 1e-3);
+    assert!((below.start.y - plot.y_at(NormalizedPos::new(0.25)) as f32).abs() < 1e-3);
     for g in [above, below] {
         assert_eq!(g.end.y, baseline);
         assert_eq!((g.stops[0].color.a, g.stops[1].color.a), (82, 0));

@@ -37,7 +37,7 @@ use crate::layout::{Area, Layout};
 use crate::model::Mark;
 use crate::resolve::{Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
-use mapping::{AxisMap, axis_x, axis_y};
+use mapping::{AxisMaps, axis_x, axis_y};
 
 /// What every mark implementation draws with: the theme, the axis maps and the plot geometry.
 /// The mark's own data and resolved color are passed alongside.
@@ -46,7 +46,7 @@ struct MarkContext<'a> {
     /// The theme.
     theme: &'a Theme,
     /// The x and y axis maps, from axis space to plot points.
-    maps: (AxisMap, AxisMap),
+    maps: AxisMaps,
     /// The plot area.
     plot: Area,
     /// The y of the baseline, where area fills end.
@@ -64,7 +64,7 @@ pub(crate) fn marks(
     let plot = layout.plot;
     let context = MarkContext {
         theme,
-        maps: (AxisMap::x(&resolved.x, plot), AxisMap::y(&resolved.y, plot)),
+        maps: AxisMaps::new(&resolved.x, &resolved.y, plot),
         plot,
         baseline_y: layout.baseline_y,
     };

@@ -1,11 +1,12 @@
 //! Clipping in axis space: bounded output on every axis combination, subpath splitting,
 //! crossings at extreme magnitudes, and agreement with the exact oracle.
 
-use super::super::clip::{Bounds, Pt, clip_polyline, crossing, crossing_offset_fast};
-use super::super::mapping::AxisMap;
+use super::super::clip::{Bounds, clip_polyline, crossing, crossing_offset_fast};
+use super::super::mapping::{AxisMaps, AxisPoint};
 use super::{Pixels, line_figure, near, nums, oracle, plot_of, subpaths};
 use crate::geometry::Point;
 use crate::model::{AxisData, Figure, LineOptions, ScatterOptions};
+use crate::resolve::NormalizedPos;
 use crate::scale::log_offset;
 use crate::scene::Item;
 use crate::test_support::scene::assert_scene_bounded;
@@ -83,20 +84,21 @@ fn subpath_splitting_edge_cases() {
         &[20.0, 20.0, 0.0, 100.0, 100.0, 200.0],
         &bounds,
     );
+    let p = AxisPoint::new;
     assert_eq!(parts.len(), 3);
-    assert_eq!(parts[0], [(10.0, 20.0), (10.0, 20.0)]);
-    assert_eq!(parts[1], [(30.0, 100.0), (410.0, 100.0)]);
-    assert_eq!(parts[2].first().map(|p| p.0), Some(410.0));
-    assert_eq!(parts[2].last(), Some(&(30.0, 200.0)));
+    assert_eq!(parts[0], [p(10.0, 20.0), p(10.0, 20.0)]);
+    assert_eq!(parts[1], [p(30.0, 100.0), p(410.0, 100.0)]);
+    assert_eq!(parts[2].first().map(|p| p.x), Some(410.0));
+    assert_eq!(parts[2].last(), Some(&p(30.0, 200.0)));
     // NaN in either coordinate breaks the run; a lone inside point survives.
     let parts = clip_polyline(&[10.0, f64::NAN, 10.0], &[f64::NAN, 30.0, 20.0], &bounds);
-    assert_eq!(parts, [vec![(10.0, 20.0)]]);
+    assert_eq!(parts, [vec![p(10.0, 20.0)]]);
     // A lone point outside is dropped.
     assert!(clip_polyline(&[0.0], &[0.0], &bounds).is_empty());
 }
 
 /// The axis maps and the line clip box (in axis space) of `figure`.
-fn axis_clip(figure: &Figure) -> ((AxisMap, AxisMap), Bounds) {
+fn axis_clip(figure: &Figure) -> (AxisMaps, Bounds) {
     let (resolved, layout) = crate::pipeline::plan(
         figure.width_in() * 72.0,
         figure.height_in() * 72.0,
@@ -104,12 +106,9 @@ fn axis_clip(figure: &Figure) -> ((AxisMap, AxisMap), Bounds) {
         figure.axes().unwrap(),
         FontLibrary::global(),
     );
-    let maps = (
-        AxisMap::x(&resolved.x, layout.plot),
-        AxisMap::y(&resolved.y, layout.plot),
-    );
+    let maps = AxisMaps::new(&resolved.x, &resolved.y, layout.plot);
     let margin = f64::from(figure.theme().line_width()).max(2.0);
-    let ((left, right), (top, bottom)) = (maps.0.expanded(margin), maps.1.expanded(margin));
+    let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
     let bounds = Bounds {
         left,
         top,
@@ -117,8 +116,8 @@ fn axis_clip(figure: &Figure) -> ((AxisMap, AxisMap), Bounds) {
         bottom,
     };
     // The clip box always contains the axis domain.
-    assert!(left <= maps.0.lo && right >= maps.0.hi);
-    assert!(top <= maps.1.lo && bottom >= maps.1.hi);
+    assert!(left <= maps.x.lo && right >= maps.x.hi);
+    assert!(top <= maps.y.lo && bottom >= maps.y.hi);
     (maps, bounds)
 }
 
@@ -135,7 +134,7 @@ fn axis_value(kind: ScaleKind, v: f64, lo: f64) -> f64 {
 /// given the line's axis-space endpoints. Returns the largest endpoint error in points when
 /// it is visible.
 #[track_caller]
-fn check_against_oracle(figure: &Figure, a: Pt, b: Pt) -> Option<f64> {
+fn check_against_oracle(figure: &Figure, a: AxisPoint, b: AxisPoint) -> Option<f64> {
     let scene = figure.to_scene(FontLibrary::global());
     assert_scene_bounded(&scene);
     let (maps, bounds) = axis_clip(figure);
@@ -161,7 +160,8 @@ fn check_against_oracle(figure: &Figure, a: Pt, b: Pt) -> Option<f64> {
                 panic!("expected a 2-point piece, got {piece:?}")
             };
             let mut worst = 0.0_f64;
-            for (got, (ex, ey)) in [(p, start), (q, end)] {
+            for (got, exact) in [(p, start), (q, end)] {
+                let (ex, ey) = (exact.x, exact.y);
                 let error = (f64::from(got.x) - ex)
                     .abs()
                     .max((f64::from(got.y) - ey).abs());
@@ -233,12 +233,21 @@ fn overflowing_maps_keep_the_true_entry() {
             .unwrap()
             .ylim(0.0, 1e-10)
             .unwrap();
-        assert!(check_against_oracle(&f, (x0, y0), (5e-11, 5e-11)).is_some());
+        assert!(
+            check_against_oracle(&f, AxisPoint::new(x0, y0), AxisPoint::new(5e-11, 5e-11))
+                .is_some()
+        );
 
         // The true line shows at normalized (0.1, 0.46) in a 300 dpi render.
         let plot = plot_of(&f);
         let pixels = Pixels::decode(&f.to_png(300).unwrap());
-        let at = pixels.at_point((plot.x_at(0.1), plot.y_at(0.46)), 300.0);
+        let at = pixels.at_point(
+            (
+                plot.x_at(NormalizedPos::new(0.1)),
+                plot.y_at(NormalizedPos::new(0.46)),
+            ),
+            300.0,
+        );
         assert!(near(at, theme.palette()[0], 8), "{x0}: {at:?}");
     }
 }
@@ -355,8 +364,8 @@ fn axis_space_clipping_matches_the_oracle_on_every_axis_combination() {
                 {
                     continue;
                 }
-                let a = (xa, axis_value(ykind, y[0], ylim.0));
-                let b = (xb, axis_value(ykind, y[1], ylim.0));
+                let a = AxisPoint::new(xa, axis_value(ykind, y[0], ylim.0));
+                let b = AxisPoint::new(xb, axis_value(ykind, y[1], ylim.0));
                 cases += 1;
                 if let Some(error) = check_against_oracle(&f, a, b) {
                     visible += 1;

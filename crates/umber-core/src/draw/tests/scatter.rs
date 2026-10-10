@@ -1,12 +1,13 @@
 //! Scatter marks: culling, fill alpha and the background-colored outline.
 
 use super::super::MarkContext;
-use super::super::mapping::AxisMap;
+use super::super::mapping::{AxisMap, AxisMaps};
 use super::super::marker::{extent, marker_shape};
 use super::super::scatter::scatter_item;
 use super::{Pixels, mark_group, near, nums, plot_of, scatter_figure};
 use crate::layout::Area;
 use crate::model::{Figure, ScatterOptions};
+use crate::resolve::NormalizedPos;
 use crate::scene::Item;
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{FontLibrary, Marker, Rgba, ScaleKind, Theme};
@@ -42,8 +43,8 @@ fn scatter_drops_points_far_outside() {
         panic!("expected one marker batch, got {items:?}")
     };
     assert_eq!(positions.len(), 2, "{positions:?}");
-    assert!((f64::from(positions[0].x) - plot.x_at(0.5)).abs() < 1e-3);
-    assert!((f64::from(positions[1].x) - plot.x_at(inside)).abs() < 1e-3);
+    assert!((f64::from(positions[0].x) - plot.x_at(NormalizedPos::new(0.5))).abs() < 1e-3);
+    assert!((f64::from(positions[1].x) - plot.x_at(NormalizedPos::new(inside))).abs() < 1e-3);
     // Fill at the theme's marker alpha, outline 0.8 pt in the background color.
     let color = theme.palette()[0];
     assert_eq!(fill.a, (0.9_f32 * 255.0).round() as u8);
@@ -99,7 +100,10 @@ fn scatter_outline_uses_background() {
         let f = scatter_figure(theme.clone(), &[0.5, 0.5 + dx], &[0.5, 0.5], Marker::Circle);
         let dpi = 300.0;
         let pixels = Pixels::decode(&f.to_png(dpi as u32).unwrap());
-        let (cx, cy) = (plot.x_at(0.5 + dx), plot.y_at(0.5));
+        let (cx, cy) = (
+            plot.x_at(NormalizedPos::new(0.5 + dx)),
+            plot.y_at(NormalizedPos::new(0.5)),
+        );
         let color = theme.palette()[0];
         // The second marker's left edge, 20 pt left of its center, inside the first marker.
         let edge = pixels.at_point((cx - 20.0, cy), dpi);
@@ -111,21 +115,21 @@ fn scatter_outline_uses_background() {
 }
 
 /// Axis maps that leave plot coordinates unchanged, for testing in points.
-fn identity_maps(plot: Area) -> (AxisMap, AxisMap) {
-    (
-        AxisMap {
+fn identity_maps(plot: Area) -> AxisMaps {
+    AxisMaps {
+        x: AxisMap {
             lo: plot.x,
             hi: plot.right(),
             start: plot.x,
             extent: plot.width,
         },
-        AxisMap {
+        y: AxisMap {
             lo: plot.y,
             hi: plot.bottom(),
             start: plot.y,
             extent: plot.height,
         },
-    )
+    }
 }
 
 /// The mark context of `theme` with [`identity_maps`] onto `plot`.

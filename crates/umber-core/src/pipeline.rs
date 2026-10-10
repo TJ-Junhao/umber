@@ -20,11 +20,11 @@ pub(crate) fn plan(
     axes: &Axes,
     lib: &FontLibrary,
 ) -> (Resolved, Layout) {
-    let (guess_w, guess_h) = layout::initial_plot_size(width, height);
-    let (tx, ty) = layout::tick_targets(guess_w, guess_h);
+    let guess = layout::initial_plot_size(width, height);
+    let (tx, ty) = layout::tick_targets(guess);
     let first = resolve::resolve(axes, tx, ty);
-    let first = layout::lay_out(width, height, theme, axes, &first, lib, guess_w);
-    let (tx, ty) = layout::tick_targets(first.plot.width, first.plot.height);
+    let first = layout::lay_out(width, height, theme, axes, &first, lib, guess.width);
+    let (tx, ty) = layout::tick_targets(first.plot.size());
     let resolved = resolve::resolve(axes, tx, ty);
     let layout = layout::lay_out(width, height, theme, axes, &resolved, lib, first.plot.width);
     (resolved, layout)
@@ -72,7 +72,7 @@ mod tests {
                 f.axes().unwrap(),
                 FontLibrary::global(),
             );
-            let targets = layout::tick_targets(layout.plot.width, layout.plot.height);
+            let targets = layout::tick_targets(layout.plot.size());
             (resolved.x.ticks.len(), resolved.y.ticks.len(), targets)
         };
         let (sx, sy, small) = ticks(2.0, 1.5);

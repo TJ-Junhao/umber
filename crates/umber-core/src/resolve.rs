@@ -24,11 +24,32 @@ pub(crate) enum AxisScale {
     Category(CategoryScale),
 }
 
+/// A position along an axis as a share of its length: 0 is the low end (left or bottom), 1 the
+/// high end. Ticks and the baseline lie in `[0, 1]`; the type does not enforce that, so a
+/// position can also describe a point outside the axis.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub(crate) struct NormalizedPos(f64);
+
+impl NormalizedPos {
+    /// The low end of the axis.
+    pub const LOW: NormalizedPos = NormalizedPos(0.0);
+
+    /// The position `share` of the axis length from the low end.
+    pub fn new(share: f64) -> NormalizedPos {
+        NormalizedPos(share)
+    }
+
+    /// The share of the axis length from the low end.
+    pub fn get(self) -> f64 {
+        self.0
+    }
+}
+
 /// One tick: where it sits along the axis, in `[0, 1]`, and its label.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AxisTick {
-    /// Position along the axis; 0 is the low end (left or bottom).
-    pub pos: f64,
+    /// Position along the axis.
+    pub pos: NormalizedPos,
     /// The label text.
     pub label: String,
 }
@@ -67,12 +88,21 @@ pub(crate) struct Resolved {
     pub y: ResolvedAxis,
     /// Where the baseline sits along the y axis, in `[0, 1]`: at y = 0 when 0 is inside the y
     /// range, otherwise at the bottom (0).
-    pub baseline: f64,
+    pub baseline: NormalizedPos,
 }
 
 /// Whether two normalized positions are the same, for matching ticks to the baseline.
-pub(crate) fn coincides(a: f64, b: f64) -> bool {
-    (a - b).abs() <= 1e-9
+pub(crate) fn coincides(a: NormalizedPos, b: NormalizedPos) -> bool {
+    (a.0 - b.0).abs() <= 1e-9
+}
+
+/// How a continuous axis without explicit limits fits its data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoLimits {
+    /// The limits are the data extent.
+    Exact,
+    /// The data extent is widened to nice limits, which carry a tick at both ends.
+    Nice,
 }
 
 fn mark_data(mark: &Mark) -> (&AxisData, &[f64]) {
@@ -104,13 +134,13 @@ fn transform_of(kind: ScaleKind) -> Option<Transform> {
 
 /// A continuous axis: the scale of the explicit limits when set; otherwise the empty-data
 /// range (0 to 1, or 1 to 10 on log) when there is no finite data; otherwise the data extent,
-/// widened to nice limits unless `exact`. Nice axes take the ticks that produced their limits;
-/// the others take `ticks()`.
+/// fitted as `auto` says. Nice axes take the ticks that produced their limits; the others take
+/// `ticks()`.
 fn continuous(
     transform: Transform,
     limits: Option<ContinuousScale>,
     data: Option<(f64, f64)>,
-    exact: bool,
+    auto: AutoLimits,
     target: usize,
 ) -> ResolvedAxis {
     let (scale, ticks) = if let Some(scale) = limits {
@@ -122,10 +152,9 @@ fn continuous(
     } else {
         let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
-        if exact {
-            (scale, scale.ticks(target))
-        } else {
-            scale.nice_with_ticks(target)
+        match auto {
+            AutoLimits::Exact => (scale, scale.ticks(target)),
+            AutoLimits::Nice => scale.nice_with_ticks(target),
         }
     };
     ResolvedAxis {
@@ -141,7 +170,7 @@ fn positioned(scale: &ContinuousScale, ticks: Vec<Tick>) -> Vec<AxisTick> {
         .filter_map(|tick| {
             let pos = scale.normalize(tick.value);
             pos.is_finite().then_some(AxisTick {
-                pos,
+                pos: NormalizedPos::new(pos),
                 label: tick.label,
             })
         })
@@ -154,7 +183,7 @@ fn category_ticks(scale: &CategoryScale) -> Vec<AxisTick> {
         .iter()
         .enumerate()
         .map(|(i, name)| AxisTick {
-            pos: scale.center(i),
+            pos: NormalizedPos::new(scale.center(i)),
             label: name.clone(),
         })
         .collect()
@@ -178,7 +207,12 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
                 AxisData::Categories(_) => &[],
             }));
             let all_lines = marks.iter().all(|mark| matches!(mark, Mark::Line { .. }));
-            continuous(transform, axes.x_limit_scale(), data, all_lines, x_target)
+            let auto = if all_lines {
+                AutoLimits::Exact
+            } else {
+                AutoLimits::Nice
+            };
+            continuous(transform, axes.x_limit_scale(), data, auto, x_target)
         }
         None => {
             let scale = categories(marks);
@@ -191,7 +225,13 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
     let (y, baseline) = match transform_of(axes.y_scale()) {
         Some(transform) => {
             let data = extent(marks.iter().flat_map(|mark| mark_data(mark).1));
-            let axis = continuous(transform, axes.y_limit_scale(), data, false, y_target);
+            let axis = continuous(
+                transform,
+                axes.y_limit_scale(),
+                data,
+                AutoLimits::Nice,
+                y_target,
+            );
             let baseline = match &axis.scale {
                 AxisScale::Continuous(scale) => {
                     let (lo, hi) = scale.domain();
@@ -203,7 +243,8 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
                 }
                 AxisScale::Category(_) => 0.0,
             };
-            (axis, if baseline.is_finite() { baseline } else { 0.0 })
+            let baseline = if baseline.is_finite() { baseline } else { 0.0 };
+            (axis, NormalizedPos::new(baseline))
         }
         None => {
             // Marks always hold numeric y, so a category y axis never has categories.
@@ -212,7 +253,7 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
                 ticks: category_ticks(&scale),
                 scale: AxisScale::Category(scale),
             };
-            (axis, 0.0)
+            (axis, NormalizedPos::LOW)
         }
     };
     Resolved { x, y, baseline }
@@ -324,8 +365,8 @@ mod tests {
         // Nice limits are the outer ticks on both axes: x is 10, 30, ..., 90, not 25, 50, 75.
         let r = resolve(f.axes().unwrap(), 5, 4);
         for axis in [&r.x, &r.y] {
-            assert_eq!(axis.ticks.first().map(|t| t.pos), Some(0.0));
-            assert_eq!(axis.ticks.last().map(|t| t.pos), Some(1.0));
+            assert_eq!(axis.ticks.first().map(|t| t.pos.get()), Some(0.0));
+            assert_eq!(axis.ticks.last().map(|t| t.pos.get()), Some(1.0));
         }
         let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
         assert_eq!(labels, ["10", "30", "50", "70", "90"]);
@@ -340,8 +381,8 @@ mod tests {
         assert_eq!(r.x.continuous().unwrap().domain(), (10.0, 100.0));
         let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
         assert_eq!(labels, ["10", "100"]);
-        assert_eq!(r.x.ticks.first().map(|t| t.pos), Some(0.0));
-        assert_eq!(r.x.ticks.last().map(|t| t.pos), Some(1.0));
+        assert_eq!(r.x.ticks.first().map(|t| t.pos.get()), Some(0.0));
+        assert_eq!(r.x.ticks.last().map(|t| t.pos.get()), Some(1.0));
     }
 
     #[test]
@@ -359,10 +400,10 @@ mod tests {
         assert_eq!((y0, y1), (-1.3, 2.7));
         // Every tick lies inside the explicit limits.
         let r = resolve(f.axes().unwrap(), 5, 4);
-        assert!(r.x.ticks.iter().all(|t| (0.0..=1.0).contains(&t.pos)));
-        assert!(r.y.ticks.iter().all(|t| (0.0..=1.0).contains(&t.pos)));
+        assert!(r.x.ticks.iter().all(|t| (0.0..=1.0).contains(&t.pos.get())));
+        assert!(r.y.ticks.iter().all(|t| (0.0..=1.0).contains(&t.pos.get())));
         // 0 is inside -1.3..2.7, so the baseline sits at its normalized position.
-        assert!((r.baseline - 1.3 / 4.0).abs() < 1e-12);
+        assert!((r.baseline.get() - 1.3 / 4.0).abs() < 1e-12);
     }
 
     #[test]
@@ -381,7 +422,7 @@ mod tests {
         let f = figure(log, log);
         assert_eq!(domains(&f), ((1.0, 10.0), (1.0, 10.0)));
         let r = resolve(f.axes().unwrap(), 5, 4);
-        assert_eq!(r.baseline, 0.0);
+        assert_eq!(r.baseline.get(), 0.0);
 
         // Empty scatter data is empty data too.
         let mut f = figure(LIN, LIN);
@@ -437,7 +478,7 @@ mod tests {
         assert_eq!((y0, y1), (1.0, 1e5));
         let r = resolve(f.axes().unwrap(), 5, 4);
         // 0 is never inside a log range: the baseline sits at the bottom.
-        assert_eq!(r.baseline, 0.0);
+        assert_eq!(r.baseline.get(), 0.0);
         let labels: Vec<&str> = r.y.ticks.iter().map(|t| t.label.as_str()).collect();
         assert_eq!(labels.first(), Some(&"1"));
         assert!(r.y.ticks.windows(2).all(|w| w[0].pos < w[1].pos));
@@ -476,7 +517,7 @@ mod tests {
         assert!(r.x.is_category());
         let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
         assert_eq!(labels, ["b", "a", "c", "d"]);
-        let pos: Vec<f64> = r.x.ticks.iter().map(|t| t.pos).collect();
+        let pos: Vec<f64> = r.x.ticks.iter().map(|t| t.pos.get()).collect();
         assert_eq!(pos, [0.125, 0.375, 0.625, 0.875]);
     }
 
@@ -543,10 +584,10 @@ mod tests {
     fn baseline_sits_at_zero_or_bottom() {
         let mut f = figure(LIN, LIN);
         axes(&mut f).ylim(-10.0, 30.0).unwrap();
-        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline, 0.25);
+        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline.get(), 0.25);
         axes(&mut f).ylim(5.0, 30.0).unwrap();
-        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline, 0.0);
+        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
         axes(&mut f).ylim(-30.0, -5.0).unwrap();
-        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline, 0.0);
+        assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
     }
 }

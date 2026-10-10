@@ -117,12 +117,27 @@ pub(crate) fn evenly_spaced(lo: f64, hi: f64, n: usize) -> Vec<f64> {
         .collect()
 }
 
+/// Which tick sets [`extended`] may choose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TickCoverage {
+    /// Loose labeling: the ticks cover the range, so the first is `<= dmin` and the last is
+    /// `>= dmax`.
+    Loose,
+    /// Any tick set, which may stop short of either end of the range.
+    Free,
+}
+
 /// Extended Wilkinson tick positions for `[dmin, dmax]` (Talbot, Lin & Hanrahan, 2010).
 ///
-/// With `loose` the first tick is `<= dmin` and the last is `>= dmax`. Values are computed as
+/// `tick_coverage` says whether the ticks must cover the range. Values are computed as
 /// `start * step`, never by accumulation. Invalid input (non-finite or `dmin >= dmax`) and the
 /// case where no candidate is found yield `max(target, 2)` evenly spaced values instead.
-pub(crate) fn extended(dmin: f64, dmax: f64, target: usize, loose: bool) -> Vec<f64> {
+pub(crate) fn extended(
+    dmin: f64,
+    dmax: f64,
+    target: usize,
+    tick_coverage: TickCoverage,
+) -> Vec<f64> {
     let target = clamp_target(target);
     if !(dmin.is_finite() && dmax.is_finite() && dmin < dmax) {
         return evenly_spaced(dmin, dmax, target);
@@ -173,7 +188,8 @@ pub(crate) fn extended(dmin: f64, dmax: f64, target: usize, loose: bool) -> Vec<
                                     let g = density(kf, m, dmin, dmax, lmin, lmax);
                                     let score = W[0] * s + W[1] * c + W[2] * g + W[3];
                                     if score > best_score
-                                        && (!loose || (lmin <= dmin && lmax >= dmax))
+                                        && (tick_coverage == TickCoverage::Free
+                                            || (lmin <= dmin && lmax >= dmax))
                                     {
                                         best_score = score;
                                         best = Some((lmin, lmax, step, k));
@@ -364,56 +380,57 @@ mod tests {
 
     #[test]
     fn matches_reference_port() {
-        // (dmin, dmax, target, loose) -> expected, produced by the verified Python port.
-        let cases: &[(f64, f64, usize, bool, &[f64])] = &[
-            (0.0, 100.0, 5, false, &[0.0, 25.0, 50.0, 75.0, 100.0]),
-            (0.0, 100.0, 4, false, &[0.0, 50.0, 100.0]),
-            (-1.5, 1.5, 4, false, &[-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5]),
-            (0.0, 30.0, 5, false, &[0.0, 10.0, 20.0, 30.0]),
-            (0.0, 25.0, 4, false, &[0.0, 5.0, 10.0, 15.0, 20.0, 25.0]),
-            (0.5, 9.5, 5, false, &[0.0, 2.5, 5.0, 7.5, 10.0]),
-            (3.2, 7.9, 5, false, &[3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
-            (0.0, 1.0, 5, false, &[0.0, 0.25, 0.5, 0.75, 1.0]),
-            (-37.0, 112.0, 5, false, &[-40.0, 0.0, 40.0, 80.0, 120.0]),
-            (0.001, 0.0027, 5, false, &[0.001, 0.0015, 0.002, 0.0025]),
+        use TickCoverage::{Free, Loose};
+        // (dmin, dmax, target, coverage) -> expected, produced by the verified Python port.
+        let cases: &[(f64, f64, usize, TickCoverage, &[f64])] = &[
+            (0.0, 100.0, 5, Free, &[0.0, 25.0, 50.0, 75.0, 100.0]),
+            (0.0, 100.0, 4, Free, &[0.0, 50.0, 100.0]),
+            (-1.5, 1.5, 4, Free, &[-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5]),
+            (0.0, 30.0, 5, Free, &[0.0, 10.0, 20.0, 30.0]),
+            (0.0, 25.0, 4, Free, &[0.0, 5.0, 10.0, 15.0, 20.0, 25.0]),
+            (0.5, 9.5, 5, Free, &[0.0, 2.5, 5.0, 7.5, 10.0]),
+            (3.2, 7.9, 5, Free, &[3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            (0.0, 1.0, 5, Free, &[0.0, 0.25, 0.5, 0.75, 1.0]),
+            (-37.0, 112.0, 5, Free, &[-40.0, 0.0, 40.0, 80.0, 120.0]),
+            (0.001, 0.0027, 5, Free, &[0.001, 0.0015, 0.002, 0.0025]),
             (
                 0.001,
                 0.0027,
                 5,
-                true,
+                Loose,
                 &[0.001, 0.0015, 0.002, 0.0025, 0.003],
             ),
-            (1200.0, 98000.0, 4, false, &[0.0, 50000.0, 100000.0]),
-            (0.0, 8.0, 4, false, &[0.0, 2.5, 5.0, 7.5]),
-            (0.0, 8.0, 4, true, &[0.0, 2.0, 4.0, 6.0, 8.0]),
+            (1200.0, 98000.0, 4, Free, &[0.0, 50000.0, 100000.0]),
+            (0.0, 8.0, 4, Free, &[0.0, 2.5, 5.0, 7.5]),
+            (0.0, 8.0, 4, Loose, &[0.0, 2.0, 4.0, 6.0, 8.0]),
             // Random ranges where `powi(10, z)` diverged from the Python reference.
             (
                 -2.6178863563145905e68,
                 2.301814660011723e68,
                 2,
-                true,
+                Loose,
                 &[-3e68, 3e68],
             ),
             (
                 -5.219454767136544e37,
                 4.908864837878777e37,
                 6,
-                true,
+                Loose,
                 &[-6e37, -3e37, 0.0, 3e37, 6e37],
             ),
             (
                 -1.161350009461411e101,
                 2.0915500407958136e100,
                 8,
-                false,
+                Free,
                 &[-1.25e101, -1e101, -7.5e100, -5e100, -2.5e100, 0.0, 2.5e100],
             ),
         ];
-        for &(lo, hi, m, loose, want) in cases {
-            let got = extended(lo, hi, m, loose);
+        for &(lo, hi, m, coverage, want) in cases {
+            let got = extended(lo, hi, m, coverage);
             assert!(
                 close(&got, want),
-                "extended({lo}, {hi}, {m}, {loose}) = {got:?}, want {want:?}"
+                "extended({lo}, {hi}, {m}, {coverage:?}) = {got:?}, want {want:?}"
             );
         }
     }

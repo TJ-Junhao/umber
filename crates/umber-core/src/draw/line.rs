@@ -3,10 +3,11 @@
 
 use super::MarkContext;
 use super::area::area_fills;
-use super::clip::{Bounds, Pt, clip_polyline};
-use super::mapping::scene_point;
+use super::clip::{Bounds, clip_polyline};
+use super::mapping::PlotPoint;
 use super::stroke::stroke_width;
 use crate::geometry::Path;
+use crate::layout::Area;
 use crate::m4_indices;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
 use crate::{AreaFill, Dash, Rgba, Theme};
@@ -36,7 +37,7 @@ pub(super) fn downsample(
     ys: Vec<f64>,
 ) -> (Vec<f64>, Vec<f64>) {
     let columns = downsample_columns(context.plot.width);
-    let xm = context.maps.0;
+    let xm = context.maps.x;
     let kept = m4_indices(&xs, &ys, (xm.lo, xm.hi), columns);
     if kept.len() < xs.len() {
         let pick =
@@ -44,6 +45,35 @@ pub(super) fn downsample(
         (pick(&xs), pick(&ys))
     } else {
         (xs, ys)
+    }
+}
+
+/// A rectangle in plot points that mapped line points are clamped into.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PlotLimit {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+impl PlotLimit {
+    /// `area` expanded by `margin` on every side.
+    fn around(area: Area, margin: f64) -> PlotLimit {
+        PlotLimit {
+            left: area.x - margin,
+            top: area.y - margin,
+            right: area.right() + margin,
+            bottom: area.bottom() + margin,
+        }
+    }
+
+    /// `p` clamped into this rectangle.
+    fn clamp(&self, p: PlotPoint) -> PlotPoint {
+        PlotPoint {
+            x: p.x.clamp(self.left, self.right),
+            y: p.y.clamp(self.top, self.bottom),
+        }
     }
 }
 
@@ -77,12 +107,12 @@ pub(super) fn line_items(
 ) {
     let MarkContext {
         theme,
-        maps: (xm, ym),
+        maps,
         plot,
         baseline_y,
     } = *context;
     let margin = f64::from(stroke_width(theme.line_width())).max(MIN_LINE_MARGIN);
-    let ((left, right), (top, bottom)) = (xm.expanded(margin), ym.expanded(margin));
+    let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
     let bounds = Bounds {
         left,
         top,
@@ -91,18 +121,13 @@ pub(super) fn line_items(
     };
     // Clipped points are inside `bounds`, so they map to within `margin` of the plot area. The
     // clamp only guards against rounding in the map.
-    let limit = Bounds::around(plot, margin);
-    let subpaths: Vec<Vec<Pt>> = clip_polyline(xs, ys, &bounds)
+    let limit = PlotLimit::around(plot, margin);
+    let subpaths: Vec<Vec<PlotPoint>> = clip_polyline(xs, ys, &bounds)
         .into_iter()
         .map(|subpath| {
             subpath
                 .into_iter()
-                .map(|(u, v)| {
-                    (
-                        xm.plot_at(u).clamp(limit.left, limit.right),
-                        ym.plot_at(v).clamp(limit.top, limit.bottom),
-                    )
-                })
+                .map(|p| limit.clamp(maps.to_plot(p)))
                 .collect()
         })
         .collect();
@@ -118,7 +143,7 @@ pub(super) fn line_items(
 
     let mut path = Path::new();
     for subpath in &subpaths {
-        let mut points = subpath.iter().copied().map(scene_point);
+        let mut points = subpath.iter().map(|p| p.to_scene());
         let Some(first) = points.next() else {
             continue;
         };

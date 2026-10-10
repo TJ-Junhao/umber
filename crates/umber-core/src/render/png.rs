@@ -58,17 +58,41 @@ pub fn render_png(scene: &Scene, dpi: u32) -> Result<Vec<u8>> {
     encode(pixmap, dpi)
 }
 
+/// Device pixels per scene point, `dpi / 72`: the scale from scene coordinates to the pixmap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DeviceScale(f32);
+
+impl DeviceScale {
+    fn new(dpi: u32) -> DeviceScale {
+        DeviceScale(dpi as f32 / 72.0)
+    }
+
+    /// Device pixels per point.
+    fn get(self) -> f32 {
+        self.0
+    }
+
+    /// The scene coordinate `points` in device pixels.
+    fn to_device(self, points: f32) -> DevicePixels {
+        DevicePixels(points * self.0)
+    }
+}
+
+/// A coordinate in device pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DevicePixels(f32);
+
 fn rasterize(scene: &Scene, dpi: u32) -> Result<sk::Pixmap> {
     let (width, height) = pixel_size(scene, dpi)?;
     let Some(mut pixmap) = sk::Pixmap::new(width, height) else {
         return Err(too_large("the image cannot be allocated"));
     };
     pixmap.fill(color(scene.background));
-    let scale = dpi as f32 / 72.0;
+    let scale = DeviceScale::new(dpi);
     let mut canvas = Canvas {
         pixmap,
         scale,
-        root: sk::Transform::from_scale(scale, scale),
+        root: sk::Transform::from_scale(scale.get(), scale.get()),
         mask: None,
     };
     canvas.items(&scene.items, None, 0);
@@ -280,11 +304,11 @@ impl ClipRect {
     /// Converts a scene rectangle to device pixels and intersects it with the pixmap bounds
     /// `(0, 0, width, height)`. `None` when the rectangle is invalid (the SVG rule: finite,
     /// positive size) or the intersection is empty.
-    fn from_rect(r: &Rect, scale: f32, width: u32, height: u32) -> Option<ClipRect> {
+    fn from_rect(r: &Rect, scale: DeviceScale, width: u32, height: u32) -> Option<ClipRect> {
         if !clip_is_valid(r) {
             return None;
         }
-        let s = f64::from(scale);
+        let s = f64::from(scale.get());
         let (x, y) = (f64::from(r.x), f64::from(r.y));
         let (right, bottom) = (x + f64::from(r.width), y + f64::from(r.height));
         let (w, h) = (f64::from(width), f64::from(height));
@@ -337,7 +361,7 @@ impl ClipRect {
 
 struct Canvas {
     pixmap: sk::Pixmap,
-    scale: f32,
+    scale: DeviceScale,
     root: sk::Transform,
     /// The one clip mask that may exist, with the rectangle it was built from.
     mask: Option<(ClipRect, sk::Mask)>,
@@ -516,7 +540,7 @@ struct Sprites {
 
 impl Sprites {
     /// `None` when the sprite would be larger than [`MAX_SPRITE_SIDE`] pixels per side.
-    fn new(marker: &Marker, scale: f32) -> Option<Sprites> {
+    fn new(marker: &Marker, scale: DeviceScale) -> Option<Sprites> {
         let bounds = marker.path.bounds();
         let reach = marker
             .stroke
@@ -524,7 +548,7 @@ impl Sprites {
             .map_or(0.0, |s| s.reach.max(s.stroke.width));
         // All in f64, and checked before any integer cast: a huge stroke width must fall back
         // to path rendering, not overflow.
-        let s = f64::from(scale);
+        let s = f64::from(scale.get());
         let reach = f64::from(reach);
         let edge = |v: f32, grow: f64| (f64::from(v) + grow) * s;
         let (l, r) = (edge(bounds.left(), -reach), edge(bounds.right(), reach));
@@ -548,12 +572,18 @@ impl Sprites {
         })
     }
 
-    fn phase(&mut self, marker: &Marker, scale: f32, px: usize, py: usize) -> Option<&sk::Pixmap> {
+    fn phase(
+        &mut self,
+        marker: &Marker,
+        scale: DeviceScale,
+        px: usize,
+        py: usize,
+    ) -> Option<&sk::Pixmap> {
         let slot = self.phases.get_mut(py * PHASES + px)?;
         if slot.is_none() {
             let mut sprite = sk::Pixmap::new(self.size.0, self.size.1)?;
             let step = 1.0 / PHASES as f32;
-            let at = sk::Transform::from_scale(scale, scale).post_translate(
+            let at = sk::Transform::from_scale(scale.get(), scale.get()).post_translate(
                 self.origin.0 as f32 + px as f32 * step,
                 self.origin.1 as f32 + py as f32 * step,
             );
@@ -565,8 +595,8 @@ impl Sprites {
 }
 
 /// Splits a device coordinate into a whole pixel and the nearest 1/8-pixel phase.
-fn split_phase(d: f32) -> (i32, usize) {
-    let steps = (d * PHASES as f32).round();
+fn split_phase(d: DevicePixels) -> (i32, usize) {
+    let steps = (d.0 * PHASES as f32).round();
     let whole = (steps / PHASES as f32).floor();
     let phase = steps - whole * PHASES as f32;
     (whole as i32, phase as usize)
@@ -575,7 +605,7 @@ fn split_phase(d: f32) -> (i32, usize) {
 #[allow(clippy::too_many_arguments)]
 fn draw_markers(
     pixmap: &mut sk::Pixmap,
-    scale: f32,
+    scale: DeviceScale,
     root: sk::Transform,
     clip: Option<(&sk::Mask, ClipRect)>,
     shape: &crate::geometry::Path,
@@ -612,8 +642,8 @@ fn draw_markers(
             marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
             continue;
         };
-        let (x, px) = split_phase(p.x * scale);
-        let (y, py) = split_phase(p.y * scale);
+        let (x, px) = split_phase(scale.to_device(p.x));
+        let (y, py) = split_phase(scale.to_device(p.y));
         let (left, top) = (x - sprites.origin.0, y - sprites.origin.1);
         let (w, h) = (sprites.size.0 as i32, sprites.size.1 as i32);
         if left >= width || top >= height || left + w <= 0 || top + h <= 0 {

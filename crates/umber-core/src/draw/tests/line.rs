@@ -4,6 +4,7 @@ use super::super::line::downsample_columns;
 use super::super::mapping::point;
 use super::{Pixels, line_figure, line_strokes, near, plot_of, subpaths};
 use crate::model::LineOptions;
+use crate::resolve::NormalizedPos;
 use crate::scene::{LineCap, LineJoin};
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{Dash, FontLibrary, Theme};
@@ -207,14 +208,20 @@ fn line_color_appears_in_plot() {
         let dpi = 144.0;
         let pixels = Pixels::decode(&f.to_png(dpi as u32).unwrap());
         let color = theme.palette()[0];
-        let on_line = (plot.x_at(0.5), plot.y_at(0.7));
+        let on_line = (
+            plot.x_at(NormalizedPos::new(0.5)),
+            plot.y_at(NormalizedPos::new(0.7)),
+        );
         assert!(
             near(pixels.at_point(on_line, dpi), color, 2),
             "{:?} vs {color:?}",
             pixels.at_point(on_line, dpi)
         );
         // Above the line there is no line color.
-        let above = (plot.x_at(0.5), plot.y_at(0.7) - 6.0);
+        let above = (
+            plot.x_at(NormalizedPos::new(0.5)),
+            plot.y_at(NormalizedPos::new(0.7)) - 6.0,
+        );
         assert!(!near(pixels.at_point(above, dpi), color, 40));
     }
 }
@@ -246,7 +253,10 @@ fn huge_horizontal_lines_keep_their_visible_width() {
         assert!((f64::from(a.x) - (plot.x - m)).abs() < 1e-3, "{a:?}");
         assert!((f64::from(b.x) - (plot.right() + m)).abs() < 1e-3, "{b:?}");
         for p in [a, b] {
-            assert!((f64::from(p.y) - plot.y_at(0.5)).abs() < 1e-3, "{p:?}");
+            assert!(
+                (f64::from(p.y) - plot.y_at(NormalizedPos::new(0.5))).abs() < 1e-3,
+                "{p:?}"
+            );
         }
     }
 }
