@@ -25,10 +25,10 @@
 //! endpoints' magnitude, even when both endpoints are astronomically far away.
 
 use crate::exact::Dyadic;
-use crate::figure::{Axes, AxisData, Mark};
 use crate::geometry::{Path, Point};
 use crate::layout::{Area, Label, Layout};
 use crate::m4_indices;
+use crate::model::{Axes, AxisData, Mark};
 use crate::resolve::{AxisScale, Resolved, ResolvedAxis};
 use crate::scale::log_offset;
 use crate::scene::{
@@ -933,7 +933,7 @@ fn scatter_item(
 }
 
 /// The marks of `axes` as one group clipped to the plot area, in insertion order, each in its
-/// color from `colors` (as from `Figure::resolved_colors`). `None` when nothing is visible.
+/// color from `colors` (as from `resolve::mark_colors`). `None` when nothing is visible.
 pub(crate) fn marks(
     theme: &Theme,
     axes: &Axes,
@@ -996,11 +996,12 @@ pub(crate) fn marks(
 mod tests {
     use super::*;
     use crate::geometry::PathVerb;
+    use crate::model::Figure;
     use crate::render::{SvgText, render_svg};
     use crate::scene::Scene;
     use crate::test_support::image::decode_rgba8;
     use crate::test_support::scene::assert_scene_bounded;
-    use crate::{Figure, FontLibrary, ScaleKind};
+    use crate::{FontLibrary, ScaleKind};
 
     fn chrome_items(scene: &Scene) -> &[Item] {
         match scene.items.as_slice() {
@@ -1144,9 +1145,9 @@ mod tests {
         f.add_axes(ScaleKind::Category, ScaleKind::Linear)
             .unwrap()
             .line(
-                crate::AxisData::Categories(vec!["Q1".into(), "Q2".into(), "Q3".into()]),
+                AxisData::Categories(vec!["Q1".into(), "Q2".into(), "Q3".into()]),
                 &[1.0, 2.0, 3.0],
-                crate::LineOptions::default(),
+                LineOptions::default(),
             )
             .unwrap();
         let scene = f.to_scene(FontLibrary::global());
@@ -1230,13 +1231,13 @@ mod tests {
                 .unwrap()
                 .title("Revenue by quarter")
                 .line(
-                    crate::AxisData::Categories(vec![
+                    AxisData::Categories(vec![
                         "First quarter of the year".into(),
                         "Q2".into(),
                         "Last quarter of the year".into(),
                     ]),
                     &[1.0, 2.0, 3.0],
-                    crate::LineOptions::default(),
+                    LineOptions::default(),
                 )
                 .unwrap();
             assert_text_on_canvas(&f.to_scene(FontLibrary::global()));
@@ -1270,7 +1271,7 @@ mod tests {
 
     // ---- Marks (Task 4) ----
 
-    use crate::{AxisData, LineOptions, ScatterOptions};
+    use crate::model::{AxisData, LineOptions, ScatterOptions};
 
     /// The marks group of `scene`: its clip and items.
     fn mark_group(scene: &Scene) -> (Rect, &[Item]) {
@@ -1316,7 +1317,7 @@ mod tests {
     }
 
     fn plot_of(figure: &Figure) -> Area {
-        crate::layout::plan(
+        crate::pipeline::plan(
             figure.width_in() * 72.0,
             figure.height_in() * 72.0,
             figure.theme(),
@@ -1604,7 +1605,7 @@ mod tests {
         assert_eq!(style.color, color);
         let (line_min, _) = line.bounds().unwrap();
         let (area_min, area_max) = area.bounds().unwrap();
-        let (_, layout) = crate::layout::plan(
+        let (_, layout) = crate::pipeline::plan(
             432.0,
             288.0,
             &theme,
@@ -2269,7 +2270,7 @@ mod tests {
 
     /// The axis maps and the line clip box (in axis space) of `figure`.
     fn axis_clip(figure: &Figure) -> ((AxisMap, AxisMap), Bounds) {
-        let (resolved, layout) = crate::layout::plan(
+        let (resolved, layout) = crate::pipeline::plan(
             figure.width_in() * 72.0,
             figure.height_in() * 72.0,
             figure.theme(),

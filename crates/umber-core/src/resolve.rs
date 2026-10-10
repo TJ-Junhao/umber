@@ -6,9 +6,11 @@
 //! a nice axis the ticks are the tick set that produced the nice limits, so both ends carry a
 //! tick. Tick positions are normalized to `[0, 1]` along the axis, so
 //! layout and drawing never touch data values again.
+//!
+//! Mark colors are resolved here too: each mark's [`ColorSpec`] against the theme's palette.
 
-use crate::figure::{Axes, AxisData, Mark};
-use crate::{CategoryScale, ContinuousScale, ScaleKind, Tick, Transform};
+use crate::model::{Axes, AxisData, Mark};
+use crate::{CategoryScale, ColorSpec, ContinuousScale, Rgba, ScaleKind, Tick, Transform};
 
 /// The context of errors that cannot happen here: the model validated every input already.
 const CONTEXT: &str = "Figure.to_scene()";
@@ -71,25 +73,6 @@ pub(crate) struct Resolved {
 /// Whether two normalized positions are the same, for matching ticks to the baseline.
 pub(crate) fn coincides(a: f64, b: f64) -> bool {
     (a - b).abs() <= 1e-9
-}
-
-/// The tick targets for a plot area of `plot_w` by `plot_h` points:
-/// x `clamp(round(w / 100) + 1, 3, 8)`, y `clamp(round(h / 45) + 1, 3, 8)`.
-///
-/// These divisors were chosen so a 6 by 4 in figure gets about 5 ticks per axis
-/// (y 0/25/50/75/100, x 0/10/20/30). A y divisor of 60 pt gave too few y ticks.
-/// The y divisor is 45 rather than 50 so that `AboveGridline` layouts, whose label rows leave a
-/// shorter plot area (about 172 pt on a 6 by 4 in PIGMENT figure), still get 5 y ticks.
-pub(crate) fn tick_targets(plot_w: f64, plot_h: f64) -> (usize, usize) {
-    fn target(size: f64, per_tick: f64, lo: usize, hi: usize) -> usize {
-        let n = (size / per_tick).round() + 1.0;
-        if n.is_nan() {
-            return lo;
-        }
-        // The clamp below keeps the cast within range; NaN was handled above.
-        (n.clamp(lo as f64, hi as f64)) as usize
-    }
-    (target(plot_w, 100.0, 3, 8), target(plot_h, 45.0, 3, 8))
 }
 
 fn mark_data(mark: &Mark) -> (&AxisData, &[f64]) {
@@ -236,11 +219,28 @@ pub(crate) fn resolve(axes: &Axes, x_target: usize, y_target: usize) -> Resolved
     Resolved { x, y, baseline }
 }
 
+/// Each mark's color, resolved against `palette`, in mark order. `Auto` colors take palette
+/// slots in series order; `Palette` and `Fixed` colors do not consume a slot.
+pub(crate) fn mark_colors(marks: &[Mark], palette: &[Rgba]) -> Vec<Rgba> {
+    let mut next_auto = 0_usize;
+    marks
+        .iter()
+        .map(|mark| {
+            let spec = mark.color();
+            let color = spec.resolve(palette, next_auto);
+            if matches!(spec, ColorSpec::Auto(_)) {
+                next_auto += 1;
+            }
+            color
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::figure::{LineOptions, ScatterOptions};
-    use crate::{Figure, LogBase, Theme};
+    use crate::model::{Figure, LineOptions, ScatterOptions};
+    use crate::{LogBase, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
         AxisData::Numbers(v.to_vec())
@@ -481,20 +481,5 @@ mod tests {
         assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline, 0.0);
         axes(&mut f).ylim(-30.0, -5.0).unwrap();
         assert_eq!(resolve(f.axes().unwrap(), 5, 4).baseline, 0.0);
-    }
-
-    #[test]
-    fn tick_targets_follow_plot_size() {
-        assert_eq!(tick_targets(0.0, 0.0), (3, 3));
-        assert_eq!(tick_targets(1.0, 1.0), (3, 3));
-        // 6 by 4 in plot areas: 408 / 100 + 1 = 5; PIGMENT 172 / 45 + 1 = 5, GRAPHITE 178 / 45 + 1 = 5.
-        assert_eq!(tick_targets(408.0, 172.0), (5, 5));
-        assert_eq!(tick_targets(408.0, 178.0), (5, 5));
-        // Rounding: 3.5 rounds up, just below 3.5 rounds down (3.5 * 45 = 157.5).
-        assert_eq!(tick_targets(350.0, 157.0), (5, 4));
-        assert_eq!(tick_targets(349.0, 158.0), (4, 5));
-        // Upper clamps.
-        assert_eq!(tick_targets(10_000.0, 10_000.0), (8, 8));
-        assert_eq!(tick_targets(f64::NAN, f64::INFINITY), (3, 8));
     }
 }
