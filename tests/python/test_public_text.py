@@ -45,7 +45,7 @@ def scan(root: Path) -> list[str]:
             text = path.read_text(encoding="utf-8", errors="replace")
             for number, line in enumerate(text.splitlines(), start=1):
                 if BANNED.search(line):
-                    hits.append(f"{path.relative_to(root)}:{number}: {line.strip()}")
+                    hits.append(f"{path.relative_to(root).as_posix()}:{number}: {line.strip()}")
     return hits
 
 
