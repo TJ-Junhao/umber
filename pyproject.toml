@@ -7,7 +7,11 @@ name = "umber"
 description = "A plotting library for Python, written in Rust."
 requires-python = ">=3.12"
 license = "MIT OR Apache-2.0"
-license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+license-files = [
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "crates/umber-core/fonts/LICENSES/*-OFL.txt",
+]
 dependencies = ["numpy>=2.0", "typing_extensions>=4.12"]
 dynamic = ["version"]
 classifiers = [
