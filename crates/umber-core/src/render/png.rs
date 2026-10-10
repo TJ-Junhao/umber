@@ -7,8 +7,8 @@
 use tiny_skia as sk;
 
 use super::normalize::{
-    GradientKind, NormalizedPath, Segment, normalize_dash, normalize_gradient, normalize_path,
-    valid_point,
+    GradientKind, NormalizedPath, Segment, clip_is_valid, normalize_dash, normalize_gradient,
+    normalize_path, stroke_is_visible, valid_point,
 };
 use crate::color::Rgba;
 use crate::error::{Error, Result};
@@ -150,16 +150,17 @@ fn sprites_disabled() -> bool {
 /// Converts normalized geometry to a `tiny-skia` path. `None` means there is nothing to draw.
 fn convert_path(path: &NormalizedPath) -> Option<sk::Path> {
     let mut builder = sk::PathBuilder::new();
-    for sub in &path.subpaths {
-        builder.move_to(sub.start.x, sub.start.y);
-        for seg in &sub.segments {
+    for sub in path.subpaths() {
+        let start = sub.start();
+        builder.move_to(start.x, start.y);
+        for seg in sub.segments() {
             match *seg {
                 Segment::Line(p) => builder.line_to(p.x, p.y),
                 Segment::Quad(c, p) => builder.quad_to(c.x, c.y, p.x, p.y),
                 Segment::Cubic(c1, c2, p) => builder.cubic_to(c1.x, c1.y, c2.x, c2.y, p.x, p.y),
             }
         }
-        if sub.closed {
+        if sub.is_closed() {
             builder.close();
         }
     }
@@ -221,7 +222,7 @@ fn prepare_stroke(
     style: &StrokeStyle,
     root: sk::Transform,
 ) -> Option<PreparedStroke> {
-    if style.color.a == 0 || !style.width.is_finite() || style.width <= 0.0 {
+    if !stroke_is_visible(style) {
         return None;
     }
     let mut path = path.clone();
@@ -280,8 +281,7 @@ impl ClipRect {
     /// `(0, 0, width, height)`. `None` when the rectangle is invalid (the SVG rule: finite,
     /// positive size) or the intersection is empty.
     fn from_rect(r: &Rect, scale: f32, width: u32, height: u32) -> Option<ClipRect> {
-        let finite = [r.x, r.y, r.width, r.height].iter().all(|v| v.is_finite());
-        if !finite || r.width <= 0.0 || r.height <= 0.0 {
+        if !clip_is_valid(r) {
             return None;
         }
         let s = f64::from(scale);

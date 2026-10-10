@@ -21,8 +21,8 @@ use std::fmt::Write as _;
 
 use super::SvgText;
 use super::normalize::{
-    GradientKind, NormalizedPath, Segment, normalize_dash, normalize_gradient, normalize_path,
-    valid_point,
+    GradientKind, NormalizedPath, Segment, clip_is_valid, normalize_dash, normalize_gradient,
+    normalize_path, stroke_is_visible, valid_point,
 };
 use crate::color::Rgba;
 use crate::fonts::Weight;
@@ -156,13 +156,13 @@ fn path_d(path: &NormalizedPath) -> String {
         let _ = write!(d, "{} {}", num(p.x), num(p.y));
     }
     let mut d = String::new();
-    for sub in &path.subpaths {
+    for sub in path.subpaths() {
         if !d.is_empty() {
             d.push(' ');
         }
         d.push('M');
-        pt(&mut d, sub.start);
-        for seg in &sub.segments {
+        pt(&mut d, sub.start());
+        for seg in sub.segments() {
             match *seg {
                 Segment::Line(p) => {
                     d.push_str(" L");
@@ -184,7 +184,7 @@ fn path_d(path: &NormalizedPath) -> String {
                 }
             }
         }
-        if sub.closed {
+        if sub.is_closed() {
             d.push_str(" Z");
         }
     }
@@ -194,7 +194,7 @@ fn path_d(path: &NormalizedPath) -> String {
 /// Writes the stroke attributes and returns whether the stroke is drawable. `path_len` is an
 /// upper bound on the stroked path's length, used to classify the dash.
 fn write_stroke(out: &mut String, style: &StrokeStyle, path_len: f32) -> bool {
-    if style.color.a == 0 || !style.width.is_finite() || style.width <= 0.0 {
+    if !stroke_is_visible(style) {
         return false;
     }
     write_color(out, "stroke", "stroke-opacity", style.color);
@@ -214,10 +214,6 @@ fn write_stroke(out: &mut String, style: &StrokeStyle, path_len: f32) -> bool {
         let _ = write!(out, r#" stroke-dasharray="{}""#, list.join(" "));
     }
     true
-}
-
-fn rect_is_valid(r: Rect) -> bool {
-    [r.x, r.y, r.width, r.height].iter().all(|v| v.is_finite()) && r.width > 0.0 && r.height > 0.0
 }
 
 struct Writer {
@@ -413,7 +409,7 @@ impl Writer {
         let mut attrs = String::new();
         let mut clip_def = None;
         if let Some(r) = clip {
-            if !rect_is_valid(r) {
+            if !clip_is_valid(&r) {
                 return;
             }
             let id = self.id();
