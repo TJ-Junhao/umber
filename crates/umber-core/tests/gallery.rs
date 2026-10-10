@@ -244,7 +244,7 @@ fn midnight_empty() {
     check("midnight_empty", &figure);
 }
 
-/// Writes every gallery image and the design mocks, when present, with an `index.html`, to
+/// Writes every gallery image and the local design reference images, when present, with an `index.html`, to
 /// `target/umber-gallery/`. Run with `--ignored`.
 #[test]
 #[ignore = "writes the contact sheet; run explicitly"]
@@ -257,7 +257,7 @@ fn write_contact_sheet() {
     std::fs::create_dir_all(&out).unwrap();
 
     let mut cards = String::new();
-    // The approved mocks are local design files, in `docs/design` or in the directory named by
+    // The design reference images are local files, in `docs/design` or in the directory named by
     // `UMBER_DESIGN_DIR`; they are skipped where absent (CI).
     let design = std::env::var_os("UMBER_DESIGN_DIR").map_or_else(
         || {
@@ -270,8 +270,8 @@ fn write_contact_sheet() {
         PathBuf::from,
     );
     for (file, caption) in [
-        ("theme-directions.png", "Approved mock: theme directions"),
-        ("graphite-navy.png", "Approved mock: graphite navy"),
+        ("theme-directions.png", "Reference: theme directions"),
+        ("graphite-navy.png", "Reference: graphite navy"),
     ] {
         let source = design.join(file);
         if source.is_file() {
