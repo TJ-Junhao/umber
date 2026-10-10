@@ -1187,13 +1187,12 @@ impl FontLibrary {
             let mut shaper = Shaper::new(&face.shaping, &funcs, &features);
             let handle = FontHandle::bundled(style.font, style.weight);
             for (slot, run) in shaped.iter_mut().zip(&runs) {
-                if slot.is_none() {
-                    if let Some(glyphs) = text
+                if slot.is_none()
+                    && let Some(glyphs) = text
                         .get(run.range.clone())
                         .and_then(|run_text| shaper.shape(run_text, run.preserve_ignorables))
-                    {
-                        *slot = Some((primary_key, handle.clone(), glyphs));
-                    }
+                {
+                    *slot = Some((primary_key, handle.clone(), glyphs));
                 }
             }
         }
