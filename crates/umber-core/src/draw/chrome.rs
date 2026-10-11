@@ -1,4 +1,5 @@
-//! The axes chrome: gridlines, the baseline, tick labels, the header and the axis labels.
+//! The axes chrome: gridlines, tick labels, the header and the axis labels, and the baseline,
+//! which is drawn on its own over the marks.
 
 use super::mapping::point;
 use super::stroke::stroke_width;
@@ -41,8 +42,8 @@ fn text(label: &Label, color: Rgba) -> Item {
     ))
 }
 
-/// The axes chrome as one unclipped group: gridlines, baseline, tick labels, header and axis
-/// labels, in that order.
+/// The axes chrome as one unclipped group: gridlines, tick labels, header and axis labels, in
+/// that order. The baseline is not part of it; see [`baseline`].
 pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
     let plot = layout.plot;
     let mut items = Vec::new();
@@ -66,20 +67,6 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
         }
     }
 
-    items.push(Item::Stroke {
-        path: segment(
-            point(plot.x, layout.baseline_y),
-            point(plot.right(), layout.baseline_y),
-        ),
-        style: StrokeStyle {
-            color: theme.baseline_color(),
-            width: stroke_width(theme.baseline_width()),
-            dash: Vec::new(),
-            cap: LineCap::Butt,
-            join: LineJoin::Miter,
-        },
-    });
-
     let muted = theme.muted_color();
     for label in layout.y_tick_labels.iter().chain(&layout.x_tick_labels) {
         items.push(text(label, muted));
@@ -95,4 +82,28 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
     }
 
     Item::Group { clip: None, items }
+}
+
+/// The baseline as its own unclipped group, drawn after the marks so that it stays visible
+/// where marks reach it: a solid line across the plot area at the layout's baseline, in the
+/// theme's baseline color and width.
+pub(crate) fn baseline(theme: &Theme, layout: &Layout) -> Item {
+    let plot = layout.plot;
+    let stroke = Item::Stroke {
+        path: segment(
+            point(plot.x, layout.baseline_y),
+            point(plot.right(), layout.baseline_y),
+        ),
+        style: StrokeStyle {
+            color: theme.baseline_color(),
+            width: stroke_width(theme.baseline_width()),
+            dash: Vec::new(),
+            cap: LineCap::Butt,
+            join: LineJoin::Miter,
+        },
+    };
+    Item::Group {
+        clip: None,
+        items: vec![stroke],
+    }
 }

@@ -9,9 +9,12 @@
 //! With figures of at most 200 in a side this keeps every coordinate far below the renderers'
 //! `MAX_COORD`.
 
+mod legend;
+mod nudge;
+
 use crate::model::Axes;
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, coincides};
-use crate::{FontLibrary, TextLayout, TextStyle, Theme, TickLabelPlacement, Weight};
+use crate::{FontLibrary, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
 pub(crate) const PADDING: f64 = 12.0;
@@ -23,12 +26,10 @@ const SUBTITLE_LINE: f64 = 1.35;
 const TITLE_GAP: f64 = 2.0;
 /// The gap below a non-empty header.
 const HEADER_GAP: f64 = 8.0;
-/// `Outside`: the gap between the y tick labels and the plot area.
+/// The gap between the y tick labels and the plot area.
 const Y_LABEL_GAP: f64 = 6.0;
-/// `Outside`: a y label's baseline sits this many sizes below its tick.
+/// A y tick label's baseline sits this many sizes below its tick.
 const Y_LABEL_CENTER: f64 = 0.35;
-/// `AboveGridline`: a y label's baseline sits this far above its gridline.
-const ABOVE_GRIDLINE_GAP: f64 = 3.0;
 /// The gap between the plot bottom and the top of the x tick labels.
 const X_LABEL_GAP: f64 = 4.0;
 /// The gap between the tick labels and an axis label.
@@ -138,7 +139,7 @@ pub(crate) struct Layout {
     pub ylabel: Option<Label>,
     /// The x tick labels.
     pub x_tick_labels: Vec<Label>,
-    /// The y tick labels; the baseline's label is left out for `AboveGridline`.
+    /// The y tick labels, to the left of the plot area.
     pub y_tick_labels: Vec<Label>,
     /// The y coordinates of horizontal gridlines, without the baseline's.
     pub y_grid: Vec<f64>,
@@ -146,6 +147,26 @@ pub(crate) struct Layout {
     pub x_grid: Vec<f64>,
     /// The y coordinate of the baseline.
     pub baseline_y: f64,
+    /// The canvas width.
+    pub canvas_width: f64,
+}
+
+impl Layout {
+    /// The free room left of the plot area: up to the right edge of the furthest-reaching y
+    /// tick label, or to the canvas left edge when there are no y tick labels. Never negative.
+    pub fn room_left(&self) -> f64 {
+        let edge = self
+            .y_tick_labels
+            .iter()
+            .map(|label| label.x + label.width())
+            .fold(0.0, f64::max);
+        (self.plot.x - edge).max(0.0)
+    }
+
+    /// The free room right of the plot area, up to the canvas right edge. Never negative.
+    pub fn room_right(&self) -> f64 {
+        (self.canvas_width - self.plot.right()).max(0.0)
+    }
 }
 
 /// `size * scale`, finite and within `0..=MAX_FONT_SIZE`.
@@ -243,11 +264,9 @@ fn measure_ticks(
     lib: &FontLibrary,
     ticks: &[AxisTick],
     style: TextStyle,
-    skip: impl Fn(NormalizedPos) -> bool,
 ) -> Vec<(NormalizedPos, Label)> {
     ticks
         .iter()
-        .filter(|tick| !skip(tick.pos))
         .map(|tick| (tick.pos, measure(lib, &tick.label, style)))
         .collect()
 }
@@ -272,8 +291,8 @@ fn fit_span(start: f64, end: f64, extent: f64) -> (f64, f64) {
 ///
 /// These divisors were chosen so a 6 by 4 in figure gets about 5 ticks per axis
 /// (y 0/25/50/75/100, x 0/10/20/30). A y divisor of 60 pt gave too few y ticks.
-/// The y divisor is 45 rather than 50 so that `AboveGridline` layouts, whose label rows leave a
-/// shorter plot area (about 172 pt on a 6 by 4 in PIGMENT figure), still get 5 y ticks.
+/// The y divisor is 45 rather than 50 so that plot areas shortened by a header and axis labels
+/// still get 5 y ticks down to a height of 157.5 pt (50 would need 175 pt).
 pub(crate) fn tick_targets(plot: PlotSize) -> (usize, usize) {
     fn target(size: f64, per_tick: f64, lo: usize, hi: usize) -> usize {
         let n = (size / per_tick).round() + 1.0;
@@ -310,7 +329,6 @@ pub(crate) fn lay_out(
     reference_width: f64,
 ) -> Layout {
     let styles = Styles::new(theme);
-    let placement = theme.tick_label_placement();
     let header_extra_height = 0.0;
 
     // Header, top down.
@@ -342,15 +360,12 @@ pub(crate) fn lay_out(
     }
     let header_bottom = y;
 
-    // Tick labels. For `AboveGridline`, the label of the gridline at the baseline is omitted.
+    // Tick labels.
     let (tick_ascent, tick_descent) = metrics(lib, &styles.tick);
     let tick_size = f64::from(styles.tick.size);
-    let above = placement == TickLabelPlacement::AboveGridline;
     let baseline = resolved.baseline;
-    let mut y_labels = measure_ticks(lib, &resolved.y.ticks, styles.tick, |pos| {
-        above && coincides(pos, baseline)
-    });
-    let mut x_labels = measure_ticks(lib, &resolved.x.ticks, styles.tick, |_| false);
+    let mut y_labels = measure_ticks(lib, &resolved.y.ticks, styles.tick);
+    let mut x_labels = measure_ticks(lib, &resolved.x.ticks, styles.tick);
     let y_label_width = y_labels
         .iter()
         .map(|(_, label)| label.width())
@@ -359,8 +374,6 @@ pub(crate) fn lay_out(
     // How far the y tick label of a tick at the plot top reaches above it.
     let label_row_rise = if y_labels.is_empty() {
         0.0
-    } else if above {
-        ABOVE_GRIDLINE_GAP + tick_ascent
     } else {
         (tick_ascent - Y_LABEL_CENTER * tick_size).max(0.0)
     };
@@ -383,8 +396,7 @@ pub(crate) fn lay_out(
     // difference, so the label stays on the canvas. The tick's distance from the plot edge is
     // measured on `reference_width` (the previous pass's plot width). Each side's reservation
     // is capped at a quarter of the inner width; labels wider than that are clipped by the
-    // canvas. This is the one case in which an `AboveGridline` plot is inset by more than the
-    // outer padding.
+    // canvas.
     let inner = (width - 2.0 * PADDING).max(0.0);
     let cap = END_LABEL_SHARE * inner;
     let reach = |label: Option<&(NormalizedPos, Label)>, from_left: bool| {
@@ -401,7 +413,7 @@ pub(crate) fn lay_out(
     };
     let left_reserve = reach(x_labels.first(), true);
     let right_reserve = reach(x_labels.last(), false);
-    let plot_left = if above || y_labels.is_empty() {
+    let plot_left = if y_labels.is_empty() {
         PADDING
     } else {
         PADDING + y_label_width + Y_LABEL_GAP
@@ -430,14 +442,8 @@ pub(crate) fn lay_out(
 
     // Place everything relative to the final plot area.
     for (pos, label) in &mut y_labels {
-        let tick_y = plot.y_at(*pos);
-        if above {
-            label.x = plot.x;
-            label.y = tick_y - ABOVE_GRIDLINE_GAP;
-        } else {
-            label.x = plot.x - Y_LABEL_GAP - label.width();
-            label.y = tick_y + Y_LABEL_CENTER * tick_size;
-        }
+        label.x = plot.x - Y_LABEL_GAP - label.width();
+        label.y = plot.y_at(*pos) + Y_LABEL_CENTER * tick_size;
     }
     for (pos, label) in &mut x_labels {
         label.x = plot.x_at(*pos) - label.width() / 2.0;
@@ -449,7 +455,7 @@ pub(crate) fn lay_out(
     }
     if let Some(label) = &mut ylabel {
         // Left-aligned with the left edge of the y tick label column.
-        label.x = if above || y_labels.is_empty() {
+        label.x = if y_labels.is_empty() {
             plot.x
         } else {
             plot.x - Y_LABEL_GAP - y_label_width
@@ -493,6 +499,7 @@ pub(crate) fn lay_out(
         y_grid,
         x_grid,
         baseline_y,
+        canvas_width: width,
     }
 }
 
@@ -501,7 +508,7 @@ mod tests {
     use super::*;
     use crate::ScaleKind;
     use crate::model::{AxisData, Figure, LineOptions, ScatterOptions};
-    use crate::pipeline::plan;
+    use crate::pipeline::plan_figure;
     use crate::test_support::scene::assert_scene_bounded;
 
     fn lib() -> &'static FontLibrary {
@@ -517,13 +524,7 @@ mod tests {
     }
 
     fn plan_of(figure: &Figure) -> (Resolved, Layout) {
-        plan(
-            figure.width_in() * 72.0,
-            figure.height_in() * 72.0,
-            figure.theme(),
-            figure.axes().unwrap(),
-            lib(),
-        )
+        plan_figure(figure, lib())
     }
 
     #[test]
@@ -582,25 +583,16 @@ mod tests {
         }
         let widest = b.y_tick_labels.iter().map(Label::width).fold(0.0, f64::max);
         assert!((b.plot.x - (PADDING + widest + 6.0)).abs() < 1e-9);
-
-        // AboveGridline insets only by the padding, whatever the labels.
-        let mut pigment = figure(Theme::pigment());
-        pigment
-            .axes_mut()
-            .unwrap()
-            .ylim(100_000.0, 900_000.0)
-            .unwrap();
-        assert_eq!(plan_of(&pigment).1.plot.x, PADDING);
     }
 
     #[test]
-    fn above_gridline_omits_the_baseline_label() {
-        let labels = |theme: Theme| {
+    fn y_labels_sit_left_of_the_plot_in_every_theme() {
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
             let mut f = figure(theme);
             f.axes_mut().unwrap().ylim(0.0, 100.0).unwrap();
             let (resolved, layout) = plan_of(&f);
             assert_eq!(resolved.baseline.get(), 0.0);
-            // The baseline replaces the gridline at 0 in every theme.
+            // The baseline replaces the gridline at 0.
             assert!(
                 layout
                     .y_grid
@@ -608,31 +600,26 @@ mod tests {
                     .all(|&y| (y - layout.baseline_y).abs() > 1e-6)
             );
             assert_eq!(layout.y_grid.len() + 1, resolved.y.ticks.len());
-            (
-                layout
-                    .y_tick_labels
-                    .iter()
-                    .map(|l| l.text.clone())
-                    .collect::<Vec<_>>(),
-                layout,
-            )
-        };
-        let (pigment, layout) = labels(Theme::pigment());
-        assert!(!pigment.contains(&"0".to_owned()), "{pigment:?}");
-        assert!(pigment.contains(&"100".to_owned()), "{pigment:?}");
-        // Labels sit left-aligned, 3 pt above their gridline.
-        for label in &layout.y_tick_labels {
-            assert_eq!(label.x, layout.plot.x);
-            assert!(
-                layout
-                    .y_grid
-                    .iter()
-                    .any(|&y| (y - 3.0 - label.y).abs() < 1e-9)
-            );
+            // Every tick has a label, the baseline's included, right-aligned 6 pt left of the
+            // plot area.
+            let labels: Vec<&str> = layout
+                .y_tick_labels
+                .iter()
+                .map(|l| l.text.as_str())
+                .collect();
+            assert_eq!(labels.len(), resolved.y.ticks.len());
+            assert_eq!(labels.first(), Some(&"0"));
+            assert_eq!(labels.last(), Some(&"100"));
+            for label in &layout.y_tick_labels {
+                assert!((label.x + label.width() - (layout.plot.x - 6.0)).abs() < 1e-6);
+            }
+            let widest = layout
+                .y_tick_labels
+                .iter()
+                .map(Label::width)
+                .fold(0.0, f64::max);
+            assert!((layout.plot.x - (PADDING + widest + 6.0)).abs() < 1e-9);
         }
-        let (graphite, _) = labels(Theme::graphite());
-        assert_eq!(graphite.first().map(String::as_str), Some("0"));
-        assert_eq!(graphite.len(), pigment.len() + 1);
     }
 
     #[test]
@@ -696,7 +683,8 @@ mod tests {
         let size = |width: f64, height: f64| PlotSize { width, height };
         assert_eq!(tick_targets(size(0.0, 0.0)), (3, 3));
         assert_eq!(tick_targets(size(1.0, 1.0)), (3, 3));
-        // 6 by 4 in plot areas: 408 / 100 + 1 = 5; PIGMENT 172 / 45 + 1 = 5, GRAPHITE 178 / 45 + 1 = 5.
+        // 6 by 4 in plot areas: 408 / 100 + 1 = 5; 172 / 45 + 1 = 5 and 178 / 45 + 1 = 5 (a plot
+        // under a title, a subtitle and axis labels is about 178 pt tall in every theme).
         assert_eq!(tick_targets(size(408.0, 172.0)), (5, 5));
         assert_eq!(tick_targets(size(408.0, 178.0)), (5, 5));
         // Rounding: 3.5 rounds up, just below 3.5 rounds down (3.5 * 45 = 157.5).

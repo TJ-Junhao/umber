@@ -54,7 +54,7 @@ fn scatter_drops_points_far_outside() {
 
     // Every point outside: no marks group at all.
     let f = scatter_figure(theme, &[5.0, -5.0], &[0.5, 0.5], Marker::Circle);
-    assert_eq!(f.to_scene(FontLibrary::global()).items.len(), 1);
+    assert_eq!(f.to_scene(FontLibrary::global()).items.len(), 2);
 }
 
 #[test]

@@ -59,7 +59,7 @@ fn narrow_limits_stay_bounded_on_every_axis_combination() {
                 }
                 let scene = f.to_scene(FontLibrary::global());
                 assert_scene_bounded(&scene);
-                if scene.items.len() == 2 {
+                if scene.items.len() == 3 {
                     visible += 1;
                 }
             }
@@ -99,13 +99,7 @@ fn subpath_splitting_edge_cases() {
 
 /// The axis maps and the line clip box (in axis space) of `figure`.
 fn axis_clip(figure: &Figure) -> (AxisMaps, Bounds) {
-    let (resolved, layout) = crate::pipeline::plan(
-        figure.width_in() * 72.0,
-        figure.height_in() * 72.0,
-        figure.theme(),
-        figure.axes().unwrap(),
-        FontLibrary::global(),
-    );
+    let (resolved, layout) = crate::pipeline::plan_figure(figure, FontLibrary::global());
     let maps = AxisMaps::new(&resolved.x, &resolved.y, layout.plot);
     let margin = f64::from(figure.theme().line_width()).max(2.0);
     let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
@@ -140,7 +134,7 @@ fn check_against_oracle(figure: &Figure, a: AxisPoint, b: AxisPoint) -> Option<f
     let (maps, bounds) = axis_clip(figure);
     let want = oracle::exact_plot(a, b, &bounds, maps);
     let got: Vec<Vec<Point>> = match scene.items.as_slice() {
-        [_, Item::Group { items, .. }] => items
+        [_, Item::Group { items, .. }, _] => items
             .iter()
             .filter_map(|item| match item {
                 Item::Stroke { path, .. } => Some(subpaths(path)),

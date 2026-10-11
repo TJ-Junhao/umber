@@ -21,16 +21,27 @@ use crate::test_support::image::decode_rgba8;
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{FontLibrary, Marker, Rgba, ScaleKind, Theme};
 
+/// The chrome group of `scene`: the first of its groups.
 fn chrome_items(scene: &Scene) -> &[Item] {
     match scene.items.as_slice() {
-        [Item::Group { clip: None, items }] | [Item::Group { clip: None, items }, _] => items,
-        other => panic!("expected one unclipped group, got {other:?}"),
+        [Item::Group { clip: None, items }, _] | [Item::Group { clip: None, items }, _, _] => items,
+        other => panic!("expected the chrome, the marks and the baseline groups, got {other:?}"),
     }
 }
 
+/// The baseline group of `scene`: the last of its groups.
+fn baseline_items(scene: &Scene) -> &[Item] {
+    match scene.items.as_slice() {
+        [_, Item::Group { clip: None, items }] | [_, _, Item::Group { clip: None, items }] => items,
+        other => panic!("expected the chrome, the marks and the baseline groups, got {other:?}"),
+    }
+}
+
+/// The chrome strokes of `scene`, followed by the baseline.
 fn strokes(scene: &Scene) -> Vec<(&Path, &StrokeStyle)> {
     chrome_items(scene)
         .iter()
+        .chain(baseline_items(scene))
         .filter_map(|item| match item {
             Item::Stroke { path, style } => Some((path, style)),
             _ => None,
@@ -84,8 +95,9 @@ fn mark_group(scene: &Scene) -> (Rect, &[Item]) {
                 clip: Some(clip),
                 items,
             },
+            Item::Group { clip: None, .. },
         ] => (*clip, items),
-        other => panic!("expected chrome and a clipped marks group, got {other:?}"),
+        other => panic!("expected chrome, a clipped marks group and the baseline, got {other:?}"),
     }
 }
 
@@ -119,15 +131,9 @@ fn nums(v: &[f64]) -> AxisData {
 }
 
 fn plot_of(figure: &Figure) -> Area {
-    crate::pipeline::plan(
-        figure.width_in() * 72.0,
-        figure.height_in() * 72.0,
-        figure.theme(),
-        figure.axes().unwrap(),
-        FontLibrary::global(),
-    )
-    .1
-    .plot
+    crate::pipeline::plan_figure(figure, FontLibrary::global())
+        .1
+        .plot
 }
 
 fn line_figure(theme: Theme, x: &[f64], y: &[f64], options: LineOptions) -> Figure {

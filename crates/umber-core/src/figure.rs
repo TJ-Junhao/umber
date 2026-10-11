@@ -32,9 +32,12 @@ use crate::{FontLibrary, Result, pipeline};
 impl Figure {
     /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.
     /// The scene is `width × 72` by `height × 72` pt on the theme background. It holds the
-    /// axes chrome as one unclipped group, followed by the visible marks, in insertion order,
-    /// as one group clipped to the plot area. Without axes it holds the background only. The
-    /// same figure always gives the same scene.
+    /// axes chrome (gridlines, tick labels, header and axis labels) as one unclipped group,
+    /// followed by the visible marks, in insertion order, as one group clipped to the plot area
+    /// (widened horizontally by half of the widest line stroke when the axes hold lines, as far
+    /// as the room beside the plot allows, so line ends stay whole), and last the baseline as
+    /// an unclipped group of its own, so marks never cover it. Without axes it holds the
+    /// background only. The same figure always gives the same scene.
     ///
     /// # Examples
     ///
@@ -107,7 +110,7 @@ mod tests {
         };
         resolve::resolve_marks(axes.marks(), figure.theme().palette())
             .into_iter()
-            .map(|resolved| resolved.color)
+            .map(|resolved| resolved.color())
             .collect()
     }
 

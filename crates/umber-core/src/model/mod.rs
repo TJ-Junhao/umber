@@ -8,7 +8,9 @@
 
 mod axes;
 mod axis_data;
+mod bar;
 mod figure;
+mod hist;
 mod mark;
 mod validation;
 
