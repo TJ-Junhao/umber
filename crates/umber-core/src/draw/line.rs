@@ -139,7 +139,9 @@ pub(super) fn plot_subpaths(
 }
 
 /// The axis-space clip of a line stroked `width` pt wide, the domain expanded by
-/// `max(width, 2)` pt, with the map of clipped pieces to plot points.
+/// `max(width, widest line width, 2)` pt, with the map of clipped pieces to plot points. The
+/// widest line width of the axes ([`MarkContext::widest_line`]) widens the marks clip, so a thin
+/// line next to a thick one still reaches past that clip and is cut by it alone.
 pub(super) struct LineClip {
     /// The clip rectangle in axis space.
     pub(super) bounds: Bounds,
@@ -152,8 +154,13 @@ pub(super) struct LineClip {
 impl LineClip {
     /// The clip in `context` of a line stroked `width` pt wide.
     pub(super) fn of(context: &MarkContext<'_>, width: f32) -> LineClip {
-        let MarkContext { maps, plot, .. } = *context;
-        let margin = f64::from(width).max(MIN_LINE_MARGIN);
+        let MarkContext {
+            maps,
+            plot,
+            widest_line,
+            ..
+        } = *context;
+        let margin = f64::from(width.max(widest_line)).max(MIN_LINE_MARGIN);
         let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
         LineClip {
             bounds: Bounds {

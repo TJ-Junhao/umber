@@ -142,6 +142,61 @@ fn clip_widening_follows_the_widest_drawn_line_of_any_width() {
 }
 
 #[test]
+fn thin_lines_and_areas_next_to_a_thick_line_reach_the_widened_clip() {
+    // A thin line or area running far past both x limits, next to a 24 pt line: the marks clip
+    // reaches 12 pt past the plot on the right (and to the y tick labels on the left), and the
+    // thin series must reach past it on both sides, so the clip edge is its only cut.
+    for area in [false, true] {
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        let thin = LineOptions {
+            width: SizeSpec::pt(0.5).unwrap(),
+            ..LineOptions::default()
+        };
+        let thick = LineOptions {
+            width: SizeSpec::pt(24.0).unwrap(),
+            ..LineOptions::default()
+        };
+        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        a.xlim(0.0, 1.0).unwrap().ylim(0.0, 1.0).unwrap();
+        if area {
+            a.area(nums(&[-1.0, 2.0]), &[0.25, 0.25], thin).unwrap();
+        } else {
+            a.line(nums(&[-1.0, 2.0]), &[0.25, 0.25], thin).unwrap();
+        }
+        a.line(nums(&[0.0, 1.0]), &[0.75, 0.75], thick).unwrap();
+        let scene = f.to_scene(FontLibrary::global());
+        assert_scene_bounded(&scene);
+        let plot = plot_of(&f);
+        let (clip, items) = mark_group(&scene);
+        let (left, right) = (clip.x, clip.x + clip.width);
+        assert!(f64::from(right) > plot.right() + 11.9, "{clip:?}");
+        // Every item of the thin series: the area's fill and stroke, or the line's stroke.
+        let thin_items = &items[..items.len() - 1];
+        assert!(!thin_items.is_empty());
+        for item in thin_items {
+            let path = match item {
+                Item::Stroke { path, style } => {
+                    assert_eq!(style.width, 0.5);
+                    path
+                }
+                Item::Fill { path, .. } => path,
+                other => panic!("unexpected item {other:?}"),
+            };
+            let (min, max) = path.bounds().unwrap();
+            assert!(
+                min.x <= left && max.x >= right,
+                "area {area}: {min:?} {max:?} {clip:?}"
+            );
+        }
+        // The thick line keeps its own stroke.
+        let Some(Item::Stroke { style, .. }) = items.last() else {
+            panic!("the thick line comes last");
+        };
+        assert_eq!(style.width, 24.0);
+    }
+}
+
+#[test]
 fn clip_widening_stops_at_the_y_labels_and_the_canvas() {
     for width in [20.0, 30.0] {
         let theme = Theme::graphite().with_line_width(width).unwrap();

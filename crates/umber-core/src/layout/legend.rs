@@ -102,7 +102,8 @@ impl LegendRow {
     ///
     /// A plain entry is its swatch, a 4 pt gap and its label, and entries are 12 pt apart.
     /// Swatches are sized as their series are drawn: a line as tall as the series' drawn line
-    /// width (at most `0.8 ×` the label size, the side of a square swatch), a dot of the
+    /// width (at most `0.8 ×` the label size, the side of a square swatch, and at most the
+    /// swatch's length), a dot of the
     /// series' drawn marker diameter, a square of `0.8 ×` the label size. A
     /// line swatch is always `10 ×` the theme's drawn line width long, so every line swatch has
     /// the same length and only its thickness follows the series; a thick dashed line shows
@@ -461,8 +462,9 @@ fn entry_extent(
 /// exactly what the drawing fills or strokes; the drawn sizes are finite and capped, and so is
 /// the label size. A line swatch is `10 ×` the theme's drawn line width long, whatever the
 /// series' width (see [`LegendRow::measure`]), and stroked at the series' width up to the side
-/// of a square swatch (`0.8 ×` the label size): a thicker line shows as a bar of that height,
-/// so its stroke never spills out of its box onto the label. A chips row always draws a dot of
+/// of a square swatch (`0.8 ×` the label size) and up to its own length: a thicker line shows
+/// as a bar of that height, and its round caps fit the box, so its stroke never spills out of
+/// its box onto the label. A chips row always draws a dot of
 /// `0.6 ×` the label size, whatever the series.
 fn swatch_size(
     theme: &Theme,
@@ -476,13 +478,13 @@ fn swatch_size(
             (Swatch::Dot { diameter: d as f32 }, d, d)
         }
         (RowStyle::Plain, Swatch::Line { dash, width }) => {
-            let theme_width = f64::from(theme.drawn_line_width(SizeSpec::Auto));
-            let thickness = f64::from(width).min(SQUARE_SWATCH_SIDE * size);
+            let length = LINE_SWATCH_LENGTH * f64::from(theme.drawn_line_width(SizeSpec::Auto));
+            let thickness = f64::from(width).min(SQUARE_SWATCH_SIDE * size).min(length);
             let capped = Swatch::Line {
                 dash,
                 width: thickness as f32,
             };
-            (capped, LINE_SWATCH_LENGTH * theme_width, thickness)
+            (capped, length, thickness)
         }
         (RowStyle::Plain, Swatch::Dot { diameter }) => {
             let d = f64::from(diameter);
@@ -876,11 +878,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_line_thicker_than_a_square_swatch_stays_inside_its_box() {
+    /// For a 24 pt line in each dash under `theme` with a header legend: asserts that the line
+    /// swatch's stroke, caps included, stays inside its box and the label starts after it, that
+    /// the stroke is as thick as the box is tall, and that the mark keeps its 24 pt stroke.
+    /// Returns the swatch box of the solid line.
+    fn wide_line_swatch(theme: &Theme) -> SwatchBox {
         use crate::{Dash, SizeSpec};
+        let mut boxes = Vec::new();
         for dash in [Dash::Solid, Dash::Dashed, Dash::Dotted] {
-            let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+            let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
             f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
                 .unwrap()
                 .line(
@@ -896,21 +902,20 @@ mod tests {
                 .unwrap()
                 .legend(crate::LegendStyle::Header);
             let (b, marks, legend) = swatch_and_items(&f);
-            let theme = f.theme();
-            let side = SQUARE_SWATCH_SIDE * f64::from(theme.body_size() * theme.font_scale());
-            assert!(side < 24.0, "{side}");
-            // As long as every line swatch, as tall as a square swatch.
-            assert_eq!((b.width, b.height), (10.0 * f64::from(1.8_f32), side));
             let Item::Stroke { style, .. } = &legend[0] else {
                 panic!("a line swatch is a stroke");
             };
-            assert_eq!(f64::from(style.width), f64::from(side as f32));
+            assert_eq!(
+                f64::from(style.width),
+                f64::from(b.height as f32),
+                "{dash:?}"
+            );
             // The mark itself keeps its full width.
             let mark_width = marks.iter().find_map(|item| match item {
                 Item::Stroke { style, .. } => Some(style.width),
                 _ => None,
             });
-            assert_eq!(mark_width, Some(24.0));
+            assert_eq!(mark_width, Some(24.0), "{dash:?}");
             // The stroke, caps included, stays inside the box, and the label starts after it.
             let (x0, y0, x1, y1) = bounds(&legend[0]);
             let half = f64::from(style.width) / 2.0;
@@ -918,17 +923,45 @@ mod tests {
                 crate::scene::LineCap::Butt => 0.0,
                 crate::scene::LineCap::Round | crate::scene::LineCap::Square => half,
             };
-            assert!(
-                x0 - cap >= b.x - 1e-3 && x1 + cap <= b.x + b.width + 1e-3,
-                "{dash:?}"
-            );
-            assert!(y0 - half >= b.center_y - b.height / 2.0 - 1e-3, "{dash:?}");
-            assert!(y1 + half <= b.center_y + b.height / 2.0 + 1e-3, "{dash:?}");
+            let eps = 1e-3;
+            assert!(x0 - cap >= b.x - eps, "{dash:?}: {x0} {b:?}");
+            assert!(x1 + cap <= b.x + b.width + eps, "{dash:?}: {x1} {b:?}");
+            assert!(y0 - half >= b.center_y - b.height / 2.0 - eps, "{dash:?}");
+            assert!(y1 + half <= b.center_y + b.height / 2.0 + eps, "{dash:?}");
             let Item::Text(label) = &legend[1] else {
                 panic!("the label follows the swatch");
             };
-            assert!(f64::from(label.origin.x) >= b.x + b.width + SWATCH_GAP - 1e-3);
+            assert!(f64::from(label.origin.x) >= b.x + b.width + SWATCH_GAP - eps);
+            boxes.push(b);
         }
+        boxes[0]
+    }
+
+    #[test]
+    fn a_line_thicker_than_a_square_swatch_stays_inside_its_box() {
+        // Graphite: a 1.8 pt theme line gives an 18 pt swatch; the 24 pt line shows as a bar as
+        // tall as a square swatch.
+        let theme = Theme::graphite();
+        let side = SQUARE_SWATCH_SIDE * f64::from(theme.body_size() * theme.font_scale());
+        assert!(side < 24.0, "{side}");
+        let b = wide_line_swatch(&theme);
+        assert_eq!((b.width, b.height), (10.0 * f64::from(1.8_f32), side));
+    }
+
+    #[test]
+    fn a_line_thicker_than_a_short_swatch_stays_inside_its_box() {
+        // A 0.01 pt theme line gives a 0.1 pt swatch, far shorter than a square swatch at twice
+        // the font size: the 24 pt line's swatch is no thicker than it is long.
+        let theme = Theme::graphite()
+            .with_line_width(0.01)
+            .unwrap()
+            .with_font_scale(2.0)
+            .unwrap();
+        let length = 10.0 * f64::from(theme.drawn_line_width(SizeSpec::Auto));
+        let side = SQUARE_SWATCH_SIDE * f64::from(theme.body_size() * theme.font_scale());
+        assert!(length < side, "{length} {side}");
+        let b = wide_line_swatch(&theme);
+        assert_eq!((b.width, b.height), (length, length));
     }
 
     #[test]

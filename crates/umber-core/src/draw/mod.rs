@@ -15,10 +15,11 @@
 //! category axis.
 //! Validated data is finite there, while mapping it to points first can overflow (data at 1e300
 //! with limits 0 to 1e-10), and saturating an overflowed coordinate would change the line's
-//! direction. Lines are clipped against the axis-space domain expanded by `max(width, 2)` pt for
-//! their own drawn width, scatter points against the domain expanded by each marker shape's extent
-//! (at the scatter's own drawn size) plus its
-//! outline and 1 pt, bars against the y domain expanded by `max(corner radius, 2)` pt, and
+//! direction. Lines and the lines of areas are clipped against the axis-space domain expanded by
+//! `max(own width, widest width, 2)` pt, where the widest width is that of the widest line among
+//! the axes' marks, so every line reaches past the widened marks clip and that clip is its only
+//! visible cut; scatter points against the domain expanded by each marker shape's extent (at the
+//! scatter's own drawn size) plus its outline and 1 pt, bars against the y domain expanded by `max(corner radius, 2)` pt, and
 //! histogram bins against both domains expanded by 2 pt (all converted to axis units). Only the
 //! clipped or kept points are mapped to plot coordinates, so every mark coordinate in the scene
 //! is within a few points of the plot area, and nothing is narrowed to `f32` before that.
@@ -65,6 +66,10 @@ struct MarkContext<'a> {
     baseline: NormalizedPos,
     /// The plot y of the baseline, as laid out; area fills end there.
     baseline_y: f64,
+    /// The drawn stroke width of the widest line among the marks, areas included, in points; 0
+    /// without one (see [`widest_line_width`]). Every line is clipped in axis space at least
+    /// this far past the plot, since the marks clip is widened by half of it.
+    widest_line: f32,
 }
 
 /// The `marks` as one group clipped to [`marks_clip`], in the given order, each in its resolved
@@ -82,6 +87,7 @@ pub(crate) fn marks(
         plot,
         baseline: resolved.baseline,
         baseline_y: layout.baseline_y,
+        widest_line: widest_line_width(marks),
     };
     let mut items = Vec::new();
     for mark in marks {
@@ -194,17 +200,12 @@ pub(crate) fn marks(
 /// room for the caps, so a line wide enough for half its stroke to exceed the gap between the
 /// plot and the y tick labels, or the outer padding on the right, still has its cap cut there.
 ///
-/// Lines are clipped in axis space against a margin of at least their full stroke width (see
-/// the module documentation), so they always reach past this rectangle and its edge is the
-/// only cut.
+/// Every line is clipped in axis space against a margin of at least the widest stroke width
+/// and its own (see the module documentation), so each line, thin ones next to a thick one
+/// included, reaches past this rectangle and its edge is the only cut.
 pub(super) fn marks_clip(layout: &Layout, marks: &[ResolvedMark<'_>]) -> Rect {
     let plot = layout.plot;
-    let widest = marks
-        .iter()
-        .filter_map(ResolvedMark::line_width)
-        .map(f64::from)
-        .fold(0.0, f64::max);
-    let half = widest / 2.0;
+    let half = f64::from(widest_line_width(marks)) / 2.0;
     let (left, right) = (half.min(layout.room_left()), half.min(layout.room_right()));
     Rect {
         x: (plot.x - left) as f32,
@@ -212,4 +213,14 @@ pub(super) fn marks_clip(layout: &Layout, marks: &[ResolvedMark<'_>]) -> Rect {
         width: (plot.width + (left + right)) as f32,
         height: plot.height as f32,
     }
+}
+
+/// The drawn stroke width of the widest of the `marks` drawn along a line
+/// ([`ResolvedMark::line_width`]), in points; 0 when there is no such mark. It widens the
+/// marks clip ([`marks_clip`]) and sets the smallest axis-space clip margin of every line.
+fn widest_line_width(marks: &[ResolvedMark<'_>]) -> f32 {
+    marks
+        .iter()
+        .filter_map(ResolvedMark::line_width)
+        .fold(0.0, f32::max)
 }
