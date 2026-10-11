@@ -41,7 +41,11 @@ def color_enabled() -> bool:
 
 
 def _stderr_is_terminal() -> bool:
-    """Return whether ``sys.stderr`` is attached to a terminal."""
+    """Return whether ``sys.stderr`` is attached to a terminal.
+
+    ``sys.stderr`` may be any object the program installed, and this runs while an error is
+    being reported, so a stream that cannot answer counts as no terminal instead of raising.
+    """
     stderr = sys.stderr
     if not hasattr(stderr, "fileno"):
         return False
@@ -50,12 +54,14 @@ def _stderr_is_terminal() -> bool:
     except io.UnsupportedOperation:
         # A stream without a real descriptor, such as a captured stream, decides itself.
         pass
-    except (OSError, ValueError):
-        # A closed or detached stream.
+    except Exception:
+        # A closed or detached stream, or a replacement whose fileno() fails otherwise.
+        return False
+    if not hasattr(stderr, "isatty"):
         return False
     try:
-        return stderr.isatty()
-    except (OSError, ValueError):
+        return bool(stderr.isatty())
+    except Exception:
         return False
 
 

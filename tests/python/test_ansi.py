@@ -139,6 +139,35 @@ def test_stderr_without_a_descriptor_answers_itself(env: pytest.MonkeyPatch, tty
     assert _ansi.color_enabled() is tty
 
 
+class _NoDescriptorNoIsatty:
+    def fileno(self) -> int:
+        raise io.UnsupportedOperation("fileno")
+
+
+class _Failing:
+    def fileno(self) -> int:
+        raise RuntimeError("no descriptor")
+
+    def isatty(self) -> bool:
+        raise RuntimeError("no terminal")
+
+
+class _FailingIsatty:
+    def fileno(self) -> int:
+        raise io.UnsupportedOperation("fileno")
+
+    def isatty(self) -> bool:
+        raise RuntimeError("no terminal")
+
+
+@pytest.mark.parametrize("stream", [_NoDescriptorNoIsatty(), _Failing(), _FailingIsatty()])
+def test_stderr_that_cannot_answer_is_not_a_terminal(
+    env: pytest.MonkeyPatch, stream: object
+) -> None:
+    _stderr(env, stream)
+    assert _ansi.color_enabled() is False
+
+
 def test_closed_stderr_is_not_a_terminal(env: pytest.MonkeyPatch) -> None:
     _stderr(env, _Closed())
     assert _ansi.color_enabled() is False

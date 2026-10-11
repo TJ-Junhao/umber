@@ -1,4 +1,6 @@
+import functools
 import importlib.util
+import io
 import os
 import subprocess
 import sys
@@ -188,16 +190,33 @@ def test_traceback_holds_every_user_frame_and_no_package_frame(facade: Facade) -
     ]
 
 
-def test_method_call_and_chained_call(facade: Facade) -> None:
+def test_method_call(facade: Facade) -> None:
+    ax = facade.Axes()
+    t, y = 1, -1
+    with pytest.raises(ub.DataError) as info:
+        ax.line(t, y)
+    assert _notes(info.value) == ["  ax.line(t, y)\n             ^", "hint: pass a y of 0 or more."]
+    assert _frames(info.value) == ["test_method_call"]
+
+
+def test_chained_call_on_a_call_result_gets_only_the_hint(facade: Facade) -> None:
+    # The receiver of the failing call is the result of another call, so the call target
+    # cannot be proven without running code, and the highlight is left out.
     ax = facade.Axes()
     t, y = 1, -1
     with pytest.raises(ub.DataError) as info:
         ax.line(t, t).line(t, y)
-    assert _notes(info.value) == [
-        "  ax.line(t, t).line(t, y)\n                        ^",
-        "hint: pass a y of 0 or more.",
-    ]
-    assert _frames(info.value) == ["test_method_call_and_chained_call"]
+    assert _notes(info.value) == ["hint: pass a y of 0 or more."]
+    assert _frames(info.value) == ["test_chained_call_on_a_call_result_gets_only_the_hint"]
+
+
+def test_partial_with_the_same_name_gets_only_the_hint(facade: Facade) -> None:
+    line = functools.partial(facade.line, -1)
+    y = 2
+    with pytest.raises(ub.DataError) as info:
+        line(y)
+    assert str(info.value) == "Axes.line(): x is -1; x must be 0 or greater."
+    assert _notes(info.value) == ["hint: pass a x of 0 or more."]
 
 
 def test_constructor_call(facade: Facade) -> None:
@@ -229,7 +248,26 @@ def test_error_already_reported_gets_no_second_notes(facade: Facade) -> None:
         "  facade.apply(lambda: facade.f(a, b))\n                                   ^",
         "hint: pass a b of 0 or more.",
     ]
-    assert _frames(info.value) == ["test_error_already_reported_gets_no_second_notes"]
+    # The user's callback stays in the traceback; the package frames around it do not.
+    assert _frames(info.value) == ["test_error_already_reported_gets_no_second_notes", "<lambda>"]
+
+
+def test_user_callback_frame_is_kept_when_the_error_passes_the_package_again(
+    facade: Facade,
+) -> None:
+    def user_callback() -> None:
+        facade.line(1, -1)
+
+    with pytest.raises(ub.DataError) as info:
+        facade.apply(user_callback)
+    assert _frames(info.value) == [
+        "test_user_callback_frame_is_kept_when_the_error_passes_the_package_again",
+        "user_callback",
+    ]
+    assert _notes(info.value) == [
+        "  facade.line(1, -1)\n                 ^^",
+        "hint: pass a y of 0 or more.",
+    ]
 
 
 def test_error_without_parameter_gets_only_the_hint(facade: Facade) -> None:
@@ -302,15 +340,66 @@ def test_color_is_decided_when_the_error_is_raised(
 
 
 def test_call_from_inside_the_package_is_not_reported(
-    facade: Facade, monkeypatch: pytest.MonkeyPatch
+    facade: Facade, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Pretending the calling test file is part of the package makes every call a nested one.
-    monkeypatch.setattr(_report, "_PACKAGE_DIR", Path(__file__).resolve().parent)
+    # A module in the package directory that calls the public function without api_call of
+    # its own: the call is a nested one, so nothing reports it.
+    (tmp_path / "facade_pkg" / "inside.py").write_text(
+        "import facade\ndef run():\n    facade.f(1, -1)\n", encoding="utf-8"
+    )
+    spec = importlib.util.spec_from_file_location("inside", tmp_path / "facade_pkg" / "inside.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "inside", module)
+    spec.loader.exec_module(module)
+    run: Callable[[], None] = module.__dict__["run"]
     with pytest.raises(ub.DataError) as info:
-        facade.f(1, -1)
+        run()
     assert _notes(info.value) == []
     assert not hasattr(info.value, "_umber_located")
-    assert _frames(info.value) == ["test_call_from_inside_the_package_is_not_reported"]
+    assert _frames(info.value) == ["test_call_from_inside_the_package_is_not_reported", "run"]
+
+
+class _StreamWithoutIsatty:
+    """A replacement stderr whose fileno() has no descriptor and which has no isatty()."""
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    def fileno(self) -> int:
+        raise io.UnsupportedOperation("fileno")
+
+
+class _FailingStream:
+    """A replacement stderr whose every query fails."""
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+    def fileno(self) -> int:
+        raise RuntimeError("no descriptor")
+
+    def isatty(self) -> bool:
+        raise RuntimeError("no terminal")
+
+
+@pytest.mark.parametrize("stream", [_StreamWithoutIsatty(), _FailingStream()])
+def test_unusual_stderr_never_replaces_the_error(
+    facade: Facade, monkeypatch: pytest.MonkeyPatch, stream: object
+) -> None:
+    monkeypatch.delenv("NO_COLOR")
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setattr(sys, "stderr", stream)
+    a, b = 1, -1
+    with pytest.raises(ub.DataError) as info:
+        facade.f(a, b)
+    assert _notes(info.value) == [
+        "  facade.f(a, b)\n              ^",
+        "hint: pass a b of 0 or more.",
+    ]
 
 
 def test_the_package_directory_is_umber() -> None:

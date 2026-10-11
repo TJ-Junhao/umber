@@ -1,21 +1,45 @@
 """Finding the offending argument in the caller's source, and rendering the caret note.
 
-The call site comes from the caller frame's instruction position (``co_positions``), the
-argument from parsing that call with ``ast``. Whenever the source or the positions are not
-available, or the call cannot be matched, no highlight is produced; the message alone stays
-complete.
+The call site comes from the caller frame's instruction position (``co_positions``): the
+call node with exactly that position is looked up in the parsed source of the caller.
+Arguments are mapped to parameters only when the call provably invokes the function that
+reports the error: the callee expression is resolved through the caller's variables and
+``inspect.getattr_static``, which runs no code, and must lead to that function's code
+object, called with the usual binding of ``self``. A call through ``functools.partial``,
+another wrapper or an expression that cannot be resolved this way gets no highlight.
+
+Whenever the source or the positions are unavailable, the call cannot be matched, or the
+line cannot be measured in display columns, no highlight is produced; the message alone
+stays complete.
 """
 
 import ast
+import inspect
 import linecache
 import unicodedata
 from dataclasses import dataclass
 from itertools import islice
-from types import FrameType
+from types import CodeType, FrameType, FunctionType, MethodType, ModuleType
+from typing import cast
 
 from umber._ansi import bold, bold_red
 
 _INDENT = "  "
+_MISSING = object()
+
+# Code points whose display width depends on the characters around them (joiners, emoji
+# presentation and modifiers, flags, conjoining jamo, tags). A line holding any of them gets
+# no highlight, because carets under it could land in the wrong column.
+_UNMEASURABLE = (
+    (0x1160, 0x11FF),  # Hangul jamo vowels and final consonants
+    (0x200D, 0x200D),  # zero width joiner
+    (0xD7B0, 0xD7FF),  # Hangul jamo extended-B
+    (0xFE00, 0xFE0F),  # variation selectors
+    (0x1F1E6, 0x1F1FF),  # regional indicators
+    (0x1F3FB, 0x1F3FF),  # emoji modifiers
+    (0xE0000, 0xE007F),  # tags
+    (0xE0100, 0xE01EF),  # variation selectors supplement
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,13 +58,15 @@ class Highlight:
 
 
 def find(
-    frame: FrameType, callee: str, positional: tuple[str, ...], parameter: str
+    frame: FrameType, callee: str, target: CodeType, positional: tuple[str, ...], parameter: str
 ) -> Highlight | None:
     """Locate ``parameter`` in the call ``frame`` is executing.
 
     Args:
         frame: The caller's frame, suspended in the call to the API.
         callee: The name the call must end in, such as ``"line"`` for ``ax.line(...)``.
+        target: The code of the API function that reports the error; the call must be
+            provably a direct call of it.
         positional: The parameters that may be passed by position, in order, without
             ``self``.
         parameter: The parameter to highlight.
@@ -48,30 +74,20 @@ def find(
     Returns:
         The highlight, or ``None`` when the call or the argument cannot be located.
     """
-    span = _call_span(frame)
-    if span is None:
+    found = _call_node(frame)
+    if found is None:
         return None
-    first_line, first_col, source = span
-    try:
-        tree = ast.parse("(" + source + ")", mode="eval")
-    except (SyntaxError, ValueError, RecursionError):
-        return None
-    call = tree.body
-    if not (isinstance(call, ast.Call) and _callee_name(call.func) == callee):
+    call, lines = found
+    if _callee_name(call.func) != callee or not _calls(call.func, frame, target):
         return None
     argument = _argument(call, positional, parameter)
     if argument is None:
         return None
-    # The parsed text's first line is "(" followed by the source from first_col; its later
-    # lines are whole source lines. Columns are UTF-8 byte offsets throughout.
-    shift = first_col - 1 if argument.lineno == 1 else 0
+    # Columns are UTF-8 byte offsets, as in the source the interpreter compiled.
     end: int | None = None  # None: the argument continues past this line.
     if argument.end_lineno == argument.lineno and argument.end_col_offset is not None:
-        end = argument.end_col_offset + shift
-    raw = _source_line(frame, first_line + argument.lineno - 1)
-    if raw is None:
-        return None
-    return _shown(raw, argument.col_offset + shift, end)
+        end = argument.end_col_offset
+    return _shown(lines[argument.lineno - 1], argument.col_offset, end)
 
 
 def render(h: Highlight, *, color: bool) -> str:
@@ -95,8 +111,8 @@ def render(h: Highlight, *, color: bool) -> str:
     return f"{_INDENT}{line}\n{_INDENT}{' ' * h.start}{carets}"
 
 
-def _call_span(frame: FrameType) -> tuple[int, int, str] | None:
-    """Return the first line, first byte column and source text of the call in ``frame``."""
+def _call_node(frame: FrameType) -> tuple[ast.Call, list[str]] | None:
+    """Return the call ``frame`` is executing, as a node of its parsed source, and the lines."""
     code = frame.f_code
     position = next(islice(code.co_positions(), frame.f_lasti // 2, None), None)
     if position is None:
@@ -104,28 +120,38 @@ def _call_span(frame: FrameType) -> tuple[int, int, str] | None:
     first_line, last_line, first_col, last_col = position
     if first_line is None or last_line is None or first_col is None or last_col is None:
         return None
-    lines: list[bytes] = []
-    for number in range(first_line, last_line + 1):
-        line = _source_line(frame, number)
-        if line is None:
-            return None
-        lines.append(line.encode("utf-8"))
-    if first_line == last_line:
-        text = lines[0][first_col:last_col]
-    else:
-        text = lines[0][first_col:] + b"".join(lines[1:-1]) + lines[-1][:last_col]
     try:
-        return first_line, first_col, text.decode("utf-8")
-    except UnicodeDecodeError:
+        lines = linecache.getlines(code.co_filename, frame.f_globals)
+    except Exception:
+        # linecache asks the module's loader for its source, which may fail in any way.
         return None
-
-
-def _source_line(frame: FrameType, number: int) -> str | None:
-    """Return line ``number`` (1-based) of the frame's source file, or ``None``."""
-    lines = linecache.getlines(frame.f_code.co_filename, frame.f_globals)
-    if not 1 <= number <= len(lines):
+    if last_line > len(lines):
         return None
-    return lines[number - 1]
+    try:
+        tree = ast.parse("".join(lines))
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        # Also covers a file that changed after it was compiled and no longer parses.
+        return None
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and node.end_lineno == last_line
+            and node.end_col_offset == last_col
+        ):
+            continue
+        if node.lineno == first_line and node.col_offset == first_col:
+            return node, lines
+        # For a method whose name is on a later line than the start of the call, the
+        # interpreter starts the position at the name, counting its length in code points.
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.end_lineno == first_line
+            and func.end_col_offset is not None
+            and func.end_col_offset - len(func.attr) == first_col
+        ):
+            return node, lines
+    return None
 
 
 def _callee_name(func: ast.expr) -> str | None:
@@ -135,6 +161,81 @@ def _callee_name(func: ast.expr) -> str | None:
     if isinstance(func, ast.Attribute):
         return func.attr
     return None
+
+
+def _calls(func: ast.expr, frame: FrameType, target: CodeType) -> bool:
+    """Return whether calling ``func`` in ``frame`` provably calls ``target`` directly.
+
+    Direct means that the arguments in the source are the arguments ``target`` receives,
+    after ``self`` or ``cls`` where the call binds one. Nothing is evaluated: names are read
+    from the frame and attributes are looked up with ``inspect.getattr_static``.
+    """
+    if isinstance(func, ast.Name):
+        value = _variable(frame, func.id)
+        # A plain function reached by name is called unbound, so it must not be a method.
+        return _is_target(value, target, bound=False)
+    if not isinstance(func, ast.Attribute):
+        return False
+    owner = _resolve(func.value, frame)
+    if owner is _MISSING:
+        return False
+    member = _static_attribute(owner, func.attr)
+    if isinstance(owner, ModuleType | type):
+        # Through a module or a class, a plain function is called unbound.
+        return _is_target(member, target, bound=False)
+    # Through an instance, the member must come from its class (an instance attribute could
+    # be a wrapper), and a plain function is then bound to the instance.
+    if member is not _static_attribute(type(owner), func.attr):
+        return False
+    return _is_target(member, target, bound=True)
+
+
+def _is_target(value: object, target: CodeType, *, bound: bool) -> bool:
+    """Return whether calling ``value`` runs ``target`` with the source's arguments."""
+    if isinstance(value, type):
+        init = _static_attribute(value, "__init__")
+        return isinstance(init, FunctionType) and init.__code__ is target
+    if isinstance(value, classmethod | staticmethod | MethodType):
+        # A bound method, class method or static method passes the source's arguments on
+        # after the object it binds, if any.
+        wrapper = cast(
+            "classmethod[object, ..., object] | staticmethod[..., object] | MethodType", value
+        )
+        function: object = wrapper.__func__
+        return isinstance(function, FunctionType) and function.__code__ is target
+    if isinstance(value, FunctionType) and value.__code__ is target:
+        # A module-level function has a qualified name without a dot; a method's has one.
+        is_method = target.co_qualname != target.co_name
+        return is_method == bound
+    return False
+
+
+def _resolve(node: ast.expr, frame: FrameType) -> object:
+    """Return the value of a dotted name such as ``ub.Color`` without running code."""
+    if isinstance(node, ast.Name):
+        return _variable(frame, node.id)
+    if isinstance(node, ast.Attribute):
+        owner = _resolve(node.value, frame)
+        return _MISSING if owner is _MISSING else _static_attribute(owner, node.attr)
+    return _MISSING
+
+
+def _variable(frame: FrameType, name: str) -> object:
+    """Return the value ``name`` has in ``frame``: local, enclosing, global or builtin."""
+    for namespace in (frame.f_locals, frame.f_globals, frame.f_builtins):
+        if name in namespace:
+            return namespace[name]
+    return _MISSING
+
+
+def _static_attribute(owner: object, name: str) -> object:
+    """Return ``owner.name`` as stored, without calling descriptors or ``__getattr__``."""
+    if owner is _MISSING:
+        return _MISSING
+    try:
+        return inspect.getattr_static(owner, name)
+    except AttributeError:
+        return _MISSING
 
 
 def _argument(
@@ -156,33 +257,58 @@ def _argument(
 
 def _shown(raw: str, start: int, end: int | None) -> Highlight | None:
     """Build the highlight of byte columns ``start..end`` of ``raw`` (``end=None``: line end)."""
-    data = raw.rstrip("\r\n").encode("utf-8")
     try:
+        data = raw.rstrip("\r\n").encode("utf-8")
         head = data[:start].decode("utf-8")
         body = (data[start:] if end is None else data[start:end]).decode("utf-8")
-    except UnicodeDecodeError:
+    except UnicodeError:
         return None
-    text = data.decode("utf-8")
+    text = raw.rstrip("\r\n")
     if end is None:
         body = body.rstrip()
     indent = len(text) - len(text.lstrip(" \t\f"))
     if len(head) < indent or not body:
         return None
     line = text[indent:].rstrip().replace("\t", " ")
+    if not _measurable(line):
+        return None
     first = _width(head[indent:].replace("\t", " "))
     return Highlight(line=line, start=first, end=first + _width(body.replace("\t", " ")))
 
 
+def _measurable(text: str) -> bool:
+    """Return whether every character of ``text`` has a width independent of its neighbours."""
+    for ch in text:
+        point = ord(ch)
+        if unicodedata.category(ch) == "Cc":
+            return False
+        if any(low <= point <= high for low, high in _UNMEASURABLE):
+            return False
+    return True
+
+
+def _char_width(ch: str) -> int:
+    """Return the display width of one character: 0, 1, or 2 for wide and fullwidth ones."""
+    if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Me", "Cf"):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
 def _width(text: str) -> int:
-    """Return the display width of ``text``: wide and fullwidth characters take two columns."""
-    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+    """Return the display width of ``text``."""
+    return sum(_char_width(ch) for ch in text)
 
 
 def _index_at_column(text: str, column: int) -> int:
-    """Return the index of the character of ``text`` at display ``column``."""
+    """Return the index of the first visible character of ``text`` at display ``column``.
+
+    Zero-width characters belong to the character before them, so they stay on its side of
+    the split.
+    """
     width = 0
     for index, ch in enumerate(text):
-        if width >= column:
+        char_width = _char_width(ch)
+        if width >= column and char_width > 0:
             return index
-        width += _width(ch)
+        width += char_width
     return len(text)
