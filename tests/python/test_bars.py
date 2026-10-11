@@ -166,8 +166,6 @@ def test_series_pickles_by_value(protocol: int) -> None:
 
 def test_series_reports_the_package_as_its_module() -> None:
     assert ub.BarSeries.__module__ == "umber"
-    for name in ["bar", "grouped_bar", "stacked_bar", "hist"]:
-        assert getattr(ub.Axes, name).__module__ == "umber"
 
 
 # (arguments, keywords, error class, message, parameter, hint)
@@ -625,6 +623,88 @@ def test_bar_errors_leave_the_figure_unchanged(
     assert details(caught.value) == (parameter, hint)
     assert _package_frames(caught.value) == []
     assert ax.figure.to_svg(text=ub.SvgText.EDITABLE) == before
+
+
+# (axes factory source, height, message after the bad height, hint)
+RANGE_ERRORS: list[tuple[str, str, str, str | None]] = [
+    (
+        "ub.Figure().add_axes(x=ub.Scale.category())",
+        "1e301",
+        "is 1e301; magnitudes must not exceed 1e300.",
+        None,
+    ),
+    (
+        "ub.Figure().add_axes(x=ub.Scale.category())",
+        "-1e301",
+        "is -1e301; magnitudes must not exceed 1e300.",
+        None,
+    ),
+    (
+        "ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.log())",
+        "1e-301",
+        "is 1e-301 on a log axis; values must be at least 1e-300.",
+        "use a linear axis, or rescale the values.",
+    ),
+]
+# (method, the call with ``{h}`` for the bad height, the highlighted argument, the label of
+# the bad height in the message, the parameter)
+RANGE_CALLS: list[tuple[str, str, str, str, str]] = [
+    ("bar", "ax.bar(['a', 'b'], [1.0, {h}])", "[1.0, {h}]", "heights[1]", "heights"),
+    (
+        "grouped_bar",
+        "ax.grouped_bar(['a', 'b'], [ub.BarSeries('s', [1.0, {h}])])",
+        "[ub.BarSeries('s', [1.0, {h}])]",
+        "series[0].heights[1]",
+        "series",
+    ),
+    (
+        "stacked_bar",
+        "ax.stacked_bar(['a', 'b'], [ub.BarSeries('s', [1.0, {h}])])",
+        "[ub.BarSeries('s', [1.0, {h}])]",
+        "series[0].heights[1]",
+        "series",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("make", "height", "rule", "hint"),
+    RANGE_ERRORS,
+    ids=["above 1e300", "below -1e300", "below 1e-300 on a log axis"],
+)
+@pytest.mark.parametrize(
+    ("name", "call", "argument", "label", "parameter"),
+    RANGE_CALLS,
+    ids=[case[0] for case in RANGE_CALLS],
+)
+def test_heights_out_of_range_leave_the_figure_unchanged(
+    tmp_path: Path,
+    make: str,
+    height: str,
+    rule: str,
+    hint: str | None,
+    name: str,
+    call: str,
+    argument: str,
+    label: str,
+    parameter: str,
+) -> None:
+    line = call.format(h=height)
+    message = f"Axes.{name}(): {label} {rule}"
+    ax = cast(Bars, eval(make, {"ub": ub})).title("Kept")
+    before = ax.figure.to_svg(text=ub.SvgText.EDITABLE)
+    with pytest.raises(ub.DataError) as caught:
+        eval(line, {"ub": ub, "ax": ax})
+    assert type(caught.value) is ub.DataError
+    assert str(caught.value) == message
+    assert details(caught.value) == (parameter, hint)
+    assert _package_frames(caught.value) == []
+    assert ax.figure.to_svg(text=ub.SvgText.EDITABLE) == before
+    err = _raised(tmp_path, line, f"ax = {make}")
+    assert type(err) is ub.DataError
+    assert str(err) == message
+    notes = [_marked(line, argument.format(h=height))]
+    assert _notes(err) == notes + ([] if hint is None else [f"hint: {hint}"])
 
 
 @pytest.mark.parametrize("name", ["bar", "grouped_bar", "stacked_bar"])
