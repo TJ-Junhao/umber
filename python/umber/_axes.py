@@ -2,11 +2,15 @@
 
 from enum import Enum
 from operator import attrgetter
-from typing import TYPE_CHECKING, Any, Final, Generic, Never, Self, cast, final
+from typing import Any, Final, Generic, Never, Self, cast, final
 
 import numpy as np
 from typing_extensions import TypeVar
 
+# The package, for the forward references to ``umber.Figure``: ``_figure`` imports this module,
+# so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
+# ``umber.Figure`` through the package once it has loaded.
+import umber
 from umber import _args, _color, _umber
 from umber._args import instance, real
 from umber._color import Color
@@ -16,9 +20,6 @@ from umber._report import api_call
 from umber._scale import Scale
 from umber._types import Values
 from umber._values import FloatArray, axis_values, floats
-
-if TYPE_CHECKING:
-    from umber._figure import Figure
 
 # Old-style, invariant type variables with defaults: ``Figure().add_axes()`` is
 # ``Axes[float, float]`` without annotations, and ``Axes[str, float]`` is not assignable to
@@ -61,7 +62,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
     # The native figure is the one the axes' figure owns; it holds every mark and text.
     __slots__ = ("_figure", "_native", "_x", "_y")
-    _figure: "Figure"
+    _figure: "umber.Figure"
     _native: _umber.Figure
     _x: Scale[X]
     _y: Scale[float]
@@ -78,7 +79,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             )
 
     @property
-    def figure(self) -> "Figure":
+    def figure(self) -> "umber.Figure":
         """The figure these axes belong to; use it to render or save the chart.
 
         Example:
@@ -385,7 +386,9 @@ def _color_argument(context: str, value: object) -> tuple[int, int, float]:
 _SCALES: Final = attrgetter("_x", "_y")
 
 
-def attach(figure: "Figure", native: _umber.Figure, x: Scale[X], y: Scale[float]) -> Axes[X, float]:
+def attach(
+    figure: "umber.Figure", native: _umber.Figure, x: Scale[X], y: Scale[float]
+) -> Axes[X, float]:
     """Return new axes of ``figure`` with the scales ``x`` and ``y``.
 
     The native figure must already hold axes with these scales; this builds the Python side

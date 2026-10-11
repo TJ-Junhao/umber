@@ -4,6 +4,7 @@ import os
 import pickle
 import struct
 import traceback
+import typing
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -117,7 +118,7 @@ def test_theme_must_be_a_theme(theme: object) -> None:
     with pytest.raises(TypeError) as caught:
         ub.Figure(theme=cast(ub.Theme, theme))
     shown = "None" if theme is None else type(theme).__name__
-    assert str(caught.value) == f"Figure(): theme is {shown}; theme must be a Theme."
+    assert str(caught.value) == f"Figure(): theme is {shown}; theme must be of type Theme."
     assert details(caught.value) == ("theme", THEME_HINT)
 
 
@@ -206,9 +207,71 @@ def test_scales_must_be_scales(name: str, value: object, hint: str) -> None:
     with pytest.raises(TypeError) as caught:
         fig.add_axes(**{name: cast(ub.Scale[float], value)})
     shown = "None" if value is None else type(value).__name__
-    assert str(caught.value) == f"Figure.add_axes(): {name} is {shown}; {name} must be a Scale."
+    assert (
+        str(caught.value) == f"Figure.add_axes(): {name} is {shown}; {name} must be of type Scale."
+    )
     assert details(caught.value) == (name, hint)
     assert fig._axes is None
+
+
+# The axes property
+
+NO_AXES = "Figure.axes: the figure has no axes; call add_axes() first."
+NO_AXES_HINT = "call fig.add_axes() before drawing."
+
+
+def test_axes_property_returns_the_axes() -> None:
+    fig = ub.Figure()
+    ax = fig.add_axes(x=ub.Scale.category())
+    assert fig.axes is ax
+    assert fig.axes.figure is fig
+
+
+def test_axes_property_without_axes_is_a_usage_error() -> None:
+    with pytest.raises(ub.UsageError) as caught:
+        _ = ub.Figure().axes
+    assert str(caught.value) == NO_AXES
+    assert details(caught.value) == (None, NO_AXES_HINT)
+    assert _notes(caught.value) == [f"hint: {NO_AXES_HINT}"]
+    assert _frames(caught.value) == ["test_axes_property_without_axes_is_a_usage_error"]
+
+
+def test_axes_property_error_from_user_code(tmp_path: Path) -> None:
+    err = _raised(tmp_path, "ub.Figure().axes.title('T')")
+    assert isinstance(err, ub.UsageError)
+    assert _notes(err) == [f"hint: {NO_AXES_HINT}"]
+
+
+def test_axes_property_is_read_only() -> None:
+    fig = ub.Figure()
+    ax = fig.add_axes()
+    with pytest.raises(AttributeError):
+        fig.axes = ax  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue]
+    with pytest.raises(AttributeError):
+        del fig.axes  # pyright: ignore[reportAttributeAccessIssue]
+    assert fig.axes is ax
+
+
+def test_axes_of_a_copy_draw_on_the_copy_only() -> None:
+    fig = ub.Figure(3, 2)
+    fig.add_axes().line([0, 1, 2], [1, 3, 2])
+    before = fig.to_svg()
+    variant = copy.copy(fig)
+    variant.axes.line([0, 1, 2], [2, 1, 3], color=ub.Color.RED)
+    assert variant.axes is not fig.axes
+    assert variant.axes.figure is variant
+    assert fig.to_svg() == before
+    assert variant.to_svg() != before
+    deep = copy.deepcopy(fig)
+    deep.axes.title("Deep")
+    assert fig.to_svg() == before
+
+
+def test_axes_property_type_hints_resolve() -> None:
+    getter = cast(property, vars(ub.Figure)["axes"]).fget
+    assert getter is not None
+    assert getter.__module__ == "umber"
+    assert typing.get_type_hints(getter)["return"] == ub.Axes[typing.Any, typing.Any]
 
 
 # Rendering
@@ -260,7 +323,7 @@ def test_svg_text_must_be_an_svg_text(text: object) -> None:
     with pytest.raises(TypeError) as caught:
         ub.Figure().to_svg(text=cast(ub.SvgText, text))
     assert str(caught.value) == (
-        f"Figure.to_svg(): text is {type(text).__name__}; text must be a SvgText."
+        f"Figure.to_svg(): text is {type(text).__name__}; text must be of type SvgText."
     )
     assert details(caught.value) == ("text", SVG_TEXT_HINT)
 

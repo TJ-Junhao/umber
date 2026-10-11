@@ -5,6 +5,7 @@ import pickle
 import subprocess
 import sys
 import traceback
+import typing
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -103,6 +104,18 @@ def test_figure_property() -> None:
     assert ax.figure is fig
     with pytest.raises(AttributeError):
         ax.figure = ub.Figure()  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_figure_property_type_hints_resolve() -> None:
+    getter = cast(property, vars(ub.Axes)["figure"]).fget
+    assert getter is not None
+    assert typing.get_type_hints(getter) == {"return": ub.Figure}
+
+
+def test_attach_type_hints_resolve() -> None:
+    from umber._axes import attach
+
+    assert typing.get_type_hints(attach)["figure"] is ub.Figure
 
 
 def test_axes_have_no_instance_dictionary() -> None:
@@ -273,7 +286,7 @@ def test_legend_style_must_be_a_legend_style(style: object) -> None:
     with pytest.raises(TypeError) as caught:
         _axes().legend(cast(ub.LegendStyle, style))
     assert str(caught.value) == (
-        f"Axes.legend(): style is {_type_name(style)}; style must be a LegendStyle."
+        f"Axes.legend(): style is {_type_name(style)}; style must be of type LegendStyle."
     )
     assert details(caught.value) == ("style", LEGEND_HINT)
 
@@ -335,12 +348,12 @@ def test_style_arguments_reach_the_figure() -> None:
 # (method, keyword, a wrong value, the expected type in the message, hint)
 STYLE_TYPE_ERRORS: list[tuple[str, str, object, str, str]] = [
     ("line", "label", 3, "a str", TEXT_HINT),
-    ("line", "color", "red", "a Color", COLOR_HINT),
-    ("line", "dash", "--", "a Dash", DASH_HINT),
-    ("line", "dash", ub.Marker.CIRCLE, "a Dash", DASH_HINT),
+    ("line", "color", "red", "of type Color", COLOR_HINT),
+    ("line", "dash", "--", "of type Dash", DASH_HINT),
+    ("line", "dash", ub.Marker.CIRCLE, "of type Dash", DASH_HINT),
     ("scatter", "label", None, "a str", TEXT_HINT),
-    ("scatter", "color", (1, 0, 0), "a Color", COLOR_HINT),
-    ("scatter", "marker", "o", "a Marker", MARKER_HINT),
+    ("scatter", "color", (1, 0, 0), "of type Color", COLOR_HINT),
+    ("scatter", "marker", "o", "of type Marker", MARKER_HINT),
 ]
 
 

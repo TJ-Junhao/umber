@@ -29,7 +29,8 @@ class Figure:
     ``save_svg()``. A figure without axes renders its background only.
 
     ``copy.copy()`` and ``copy.deepcopy()`` return an independent figure with the same size,
-    theme, axes and marks; changing one leaves the other unchanged. Figures cannot be pickled.
+    theme, axes and marks; changing one leaves the other unchanged. The ``axes`` property
+    reaches a figure's axes, including those of a copy. Figures cannot be pickled.
 
     Example:
         >>> import umber as ub
@@ -68,6 +69,35 @@ class Figure:
             instance("Figure()", "theme", theme, Theme, _THEME_HINT)
             self._native = _umber.Figure(inches_wide, inches_high, _theme.native(theme))
             self._axes = None
+
+    @property
+    def axes(self) -> Axes[Any, Any]:
+        """The axes added with ``add_axes()``; use it to keep drawing on a copied figure.
+
+        Raises:
+            UsageError: If the figure has no axes yet.
+
+        Example:
+            >>> import copy
+            >>> import umber as ub
+            >>> fig = ub.Figure()
+            >>> ax = fig.add_axes().line([0, 1], [1, 2])
+            >>> fig.axes is ax
+            True
+            >>> variant = copy.copy(fig)
+            >>> variant.axes.title("Variant").figure is variant
+            True
+        """
+        with api_call():
+            if self._axes is None:
+                raise new_error(
+                    UsageError,
+                    "Figure.axes",
+                    "the figure has no axes; call add_axes() first.",
+                    parameter=None,
+                    hint="call fig.add_axes() before drawing.",
+                )
+            return self._axes
 
     def add_axes(
         self,
