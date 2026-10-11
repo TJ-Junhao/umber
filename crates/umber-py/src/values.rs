@@ -22,10 +22,6 @@ use crate::errors::internal_type;
 /// `np.require(values, dtype="=f8", requirements=["A"]).view(np.float64)`: `np.require` makes the
 /// data aligned float64 in native order, and the view drops an explicit byte order that NumPy
 /// keeps for arrays made from such buffers, without copying.
-#[allow(
-    dead_code,
-    reason = "the figure methods convert data arguments through it"
-)]
 pub(crate) fn floats(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     let unexpected = || {
         internal_type(format!(
@@ -44,10 +40,6 @@ pub(crate) fn floats(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
 
 /// Copies a `list` of `str` into a vector. A bare `str`, a tuple or a list holding anything but
 /// strings is refused.
-#[allow(
-    dead_code,
-    reason = "the figure methods convert name arguments through it"
-)]
 pub(crate) fn names(obj: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     let list = obj
         .cast::<PyList>()
@@ -70,10 +62,6 @@ pub(crate) fn names(obj: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
 
 /// Converts x values: a `list` becomes [`AxisData::Categories`], anything else is read as a
 /// float64 buffer and becomes [`AxisData::Numbers`].
-#[allow(
-    dead_code,
-    reason = "the figure methods convert x arguments through it"
-)]
 pub(crate) fn axis_data(obj: &Bound<'_, PyAny>) -> PyResult<AxisData> {
     if obj.is_instance_of::<PyList>() {
         names(obj).map(AxisData::Categories)

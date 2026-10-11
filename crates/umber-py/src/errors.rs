@@ -94,6 +94,12 @@ pub(crate) fn internal_value(message: impl Into<String>) -> PyErr {
     PyValueError::new_err(format!("internal error: {}", message.into()))
 }
 
+/// An internal `RuntimeError`: the Python layer made a call that the object's state does not
+/// allow, such as adding a mark to a figure without axes. It carries no detail attributes.
+pub(crate) fn internal_state(message: impl Into<String>) -> PyErr {
+    PyRuntimeError::new_err(format!("internal error: {}", message.into()))
+}
+
 #[cfg(test)]
 mod tests {
     use pyo3::exceptions::PyFileNotFoundError;
