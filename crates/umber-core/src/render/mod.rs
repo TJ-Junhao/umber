@@ -36,4 +36,5 @@ pub enum SvgText {
 
 mod png;
 
+pub(crate) use png::check_dpi;
 pub use png::render_png;

@@ -16,8 +16,9 @@ use crate::scale::{MAX_MAGNITUDE, too_narrow};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
 /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-/// assert!(axes.hist(&[1.0], HistOptions { bins: MAX_BINS, ..HistOptions::default() }).is_ok());
-/// assert!(axes.hist(&[1.0], HistOptions { bins: MAX_BINS + 1, ..HistOptions::default() }).is_err());
+/// let max = MAX_BINS as i64;
+/// assert!(axes.hist(&[1.0], HistOptions { bins: max, ..HistOptions::default() }).is_ok());
+/// assert!(axes.hist(&[1.0], HistOptions { bins: max + 1, ..HistOptions::default() }).is_err());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 pub const MAX_BINS: usize = 10_000;
@@ -34,11 +35,9 @@ const RELATIVE_HALF_RANGE: f64 = 1e-9;
 pub(crate) struct BinCount(NonZeroUsize);
 
 impl BinCount {
-    /// The count `n`, or `None` when `n` is 0 or above [`MAX_BINS`].
-    pub(crate) fn new(n: usize) -> Option<BinCount> {
-        if n > MAX_BINS {
-            return None;
-        }
+    /// The count `n`, or `None` when `n` is below 1 or above [`MAX_BINS`].
+    pub(crate) fn new(n: i64) -> Option<BinCount> {
+        let n = usize::try_from(n).ok().filter(|&n| n <= MAX_BINS)?;
         NonZeroUsize::new(n).map(BinCount)
     }
 
@@ -160,15 +159,19 @@ mod tests {
     use proptest::prelude::*;
 
     fn bins(n: usize) -> BinCount {
-        BinCount::new(n).unwrap()
+        BinCount::new(i64::try_from(n).unwrap()).unwrap()
     }
 
     #[test]
     fn bin_count_is_bounded() {
+        let max = i64::try_from(MAX_BINS).unwrap();
+        assert!(BinCount::new(i64::MIN).is_none());
+        assert!(BinCount::new(-1).is_none());
         assert!(BinCount::new(0).is_none());
         assert_eq!(BinCount::new(1).map(BinCount::get), Some(1));
-        assert_eq!(BinCount::new(MAX_BINS).map(BinCount::get), Some(MAX_BINS));
-        assert!(BinCount::new(MAX_BINS + 1).is_none());
+        assert_eq!(BinCount::new(max).map(BinCount::get), Some(MAX_BINS));
+        assert!(BinCount::new(max + 1).is_none());
+        assert!(BinCount::new(i64::MAX).is_none());
     }
 
     #[test]
