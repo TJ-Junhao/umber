@@ -85,6 +85,7 @@ mod corpus {
     pub mod area;
     pub mod bars;
     pub mod hist;
+    pub mod inputs;
     pub mod legend;
 }
 
@@ -127,6 +128,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::area::cases(&lib, &mut sink);
     corpus::bars::cases(&lib, &mut sink);
     corpus::hist::cases(&lib, &mut sink);
+    corpus::inputs::cases(&lib, &mut sink);
     corpus::legend::cases(&lib, &mut sink);
 }
 

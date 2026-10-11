@@ -262,7 +262,7 @@ fn errors_carry_their_parameter_and_hint() {
                 .map(|_| ())
             }),
             Some("bins"),
-            None,
+            Some("use at least one bin."),
         ),
         (
             "hist, infinite value",

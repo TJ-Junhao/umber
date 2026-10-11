@@ -138,6 +138,33 @@ impl Error {
         self
     }
 
+    /// Reports the error under another API call, for a caller that detects a problem on behalf of
+    /// it, such as a method that saves what `Figure.to_png()` renders. The message, parameter and
+    /// hint are kept. [`Error::Io`] is returned unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let err = figure.to_png(1).unwrap_err().with_context("Figure.save_png()");
+    /// assert!(err.to_string().starts_with("Figure.save_png(): dpi 1 is out of range"));
+    /// assert_eq!(err.parameter(), Some("dpi"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn with_context(mut self, new_context: &'static str) -> Error {
+        if let Error::Data { context, .. }
+        | Error::Style { context, .. }
+        | Error::Usage { context, .. } = &mut self
+        {
+            *context = new_context;
+        }
+        self
+    }
+
     /// The Python parameter the error is about, or `None` when no single parameter is at fault
     /// and for [`Error::Io`].
     ///
@@ -258,6 +285,22 @@ mod tests {
             assert_eq!(err.hint(), Some("use NaN."), "{kind}");
             assert_eq!(err.to_string(), display, "{kind}");
         }
+    }
+
+    #[test]
+    fn with_context_keeps_parameter_and_hint() {
+        for kind in ["data", "style", "usage"] {
+            let err = sample(kind)
+                .with_parameter("y")
+                .with_hint("use NaN.")
+                .with_context("Figure.save_png()");
+            assert!(err.to_string().starts_with("Figure.save_png(): "), "{kind}");
+            assert_eq!(err.parameter(), Some("y"), "{kind}");
+            assert_eq!(err.hint(), Some("use NaN."), "{kind}");
+        }
+        let io = Error::from(std::io::Error::other("full")).with_context("Figure.save_png()");
+        assert!(matches!(io, Error::Io(_)));
+        assert_eq!(io.to_string(), "full");
     }
 
     #[test]

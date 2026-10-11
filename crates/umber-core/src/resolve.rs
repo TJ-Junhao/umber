@@ -1939,7 +1939,7 @@ mod tests {
     }
 
     /// Linear axes holding one histogram of `values` in `bins` bins, on a y axis of `y`.
-    fn hist_figure(y: ScaleKind, values: &[f64], bins: usize) -> Figure {
+    fn hist_figure(y: ScaleKind, values: &[f64], bins: i64) -> Figure {
         let mut f = figure(LIN, y);
         let options = HistOptions {
             bins,

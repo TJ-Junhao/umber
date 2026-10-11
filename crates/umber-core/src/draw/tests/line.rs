@@ -206,7 +206,7 @@ fn line_color_appears_in_plot() {
         f.axes_mut().unwrap().ylim(0.0, 1.0).unwrap();
         let plot = plot_of(&f);
         let dpi = 144.0;
-        let pixels = Pixels::decode(&f.to_png(dpi as u32).unwrap());
+        let pixels = Pixels::decode(&f.to_png(dpi as i64).unwrap());
         let color = theme.palette()[0];
         let on_line = (
             plot.x_at(NormalizedPos::new(0.5)),
