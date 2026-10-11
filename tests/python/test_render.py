@@ -11,6 +11,7 @@ from umber import _umber
 LINEAR, LOG, CATEGORY = 0, 1, 2
 OUTLINES, EDITABLE = 0, 1
 AUTO = (0, 0, 1.0)
+NO_SIZE = (0, 0.0)
 
 
 def floats(*values: float) -> npt.NDArray[np.float64]:
@@ -56,10 +57,10 @@ def native_figure() -> _umber.Figure:
     fig.subtitle("Two regions")
     fig.xlabel("Year")
     fig.ylabel("Revenue")
-    fig.line(floats(2020, 2021, 2022, 2023), floats(1, 2, 4, 8), "North", AUTO, 0)
+    fig.line(floats(2020, 2021, 2022, 2023), floats(1, 2, 4, 8), "North", AUTO, 0, NO_SIZE)
     teal = (2, 0x2E8B8BCC, 1.0)
-    fig.line(floats(2020, 2021, 2022, 2023), floats(3, 3.5, np.nan, 6), "South", teal, 1)
-    fig.scatter(floats(2020.5, 2022.5), floats(2, 5), "Events", (1, 3, 1.0), 3)
+    fig.line(floats(2020, 2021, 2022, 2023), floats(3, 3.5, np.nan, 6), "South", teal, 1, NO_SIZE)
+    fig.scatter(floats(2020.5, 2022.5), floats(2, 5), "Events", (1, 3, 1.0), 3, NO_SIZE)
     fig.xlim(2019.5, 2023.5)
     fig.ylim(0.5, 16.0)
     fig.legend(2)
@@ -73,8 +74,8 @@ def category_figures() -> tuple[ub.Figure, _umber.Figure]:
     )
     native = _umber.Figure(4.0, 3.0, _umber.Theme.midnight())
     native.add_axes(CATEGORY, 10.0, LINEAR, 10.0)
-    native.line(["Q1", "Q2", "Q3"], floats(3, 1, 2), "Sales", AUTO, 0)
-    native.scatter(["Q2", "Q4"], floats(2, 4), "", AUTO, 0)
+    native.line(["Q1", "Q2", "Q3"], floats(3, 1, 2), "Sales", AUTO, 0, NO_SIZE)
+    native.scatter(["Q2", "Q4"], floats(2, 4), "", AUTO, 0, NO_SIZE)
     return fig, native
 
 

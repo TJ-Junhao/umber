@@ -18,6 +18,7 @@ from umber._figure import Figure
 from umber._quick import bar, hist, line, scatter
 from umber._scale import Scale
 from umber._series import BarSeries
+from umber._size import Size
 from umber._theme import Theme
 from umber._types import SupportsArray, Values
 from umber._umber import MAX_BINS as _MAX_BINS
@@ -45,6 +46,7 @@ __all__ = [
     "LegendStyle",
     "Marker",
     "Scale",
+    "Size",
     "StyleError",
     "SupportsArray",
     "SvgText",
@@ -85,6 +87,7 @@ _report_package_as_module(
     LegendStyle,
     Marker,
     Scale,
+    Size,
     SupportsArray,
     SvgText,
     Theme,
