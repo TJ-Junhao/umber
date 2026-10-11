@@ -19,8 +19,8 @@ use std::path::PathBuf;
 
 use umber_core::render::render_png;
 use umber_core::{
-    AxisData, ColorSpec, Figure, FontLibrary, LineOptions, LogBase, Marker, ScaleKind,
-    ScatterOptions, Theme,
+    AreaFill, AxisData, BarOptions, BarSeries, ColorSpec, Figure, FontLibrary, HistOptions,
+    LegendStyle, LineOptions, LogBase, Marker, ScaleKind, ScatterOptions, Theme,
 };
 
 use golden_compare::{assert_golden, golden_dir};
@@ -31,7 +31,7 @@ const SUBTITLE: &str = "Daily mean, MW";
 const YLABEL: &str = "Daily mean, MW";
 
 /// `(name, caption)` of every gallery image, in contact-sheet order.
-const IMAGES: [(&str, &str); 10] = [
+const IMAGES: [(&str, &str); 24] = [
     ("pigment_line", "Pigment: three sine series"),
     ("graphite_line", "Graphite: three sine series"),
     ("midnight_line", "Midnight: three sine series"),
@@ -42,7 +42,67 @@ const IMAGES: [(&str, &str); 10] = [
     ("pigment_nan_gaps", "Pigment: line with NaN gaps"),
     ("graphite_category_line", "Graphite: six categories on x"),
     ("midnight_empty", "Midnight: title only"),
+    (
+        "pigment_grouped_bar",
+        "Pigment: grouped bars, header legend",
+    ),
+    (
+        "graphite_grouped_bar",
+        "Graphite: grouped bars, direct fallback to a row",
+    ),
+    (
+        "midnight_grouped_bar",
+        "Midnight: grouped bars, chips, rounded tops",
+    ),
+    ("pigment_hist", "Pigment: histogram, no gap"),
+    ("graphite_hist", "Graphite: histogram, 1.2 pt gap"),
+    (
+        "midnight_hist",
+        "Midnight: histogram, gradient with top edges",
+    ),
+    ("pigment_stacked_bar", "Pigment: stacked bars, mixed signs"),
+    (
+        "graphite_bar_negative",
+        "Graphite: bars with negative heights",
+    ),
+    (
+        "midnight_hist_area_off",
+        "Midnight: histogram without the fill gradient",
+    ),
+    (
+        "pigment_legend_wrap",
+        "Pigment: nine labelled lines, wrapping header row",
+    ),
+    (
+        "graphite_direct_crowded",
+        "Graphite: six lines ending close together",
+    ),
+    (
+        "graphite_direct_xlim",
+        "Graphite: direct labels with line ends cut by xlim",
+    ),
+    (
+        "midnight_chips_long_labels",
+        "Midnight: chips with long labels",
+    ),
+    ("pigment_legend_none", "Pigment: labelled lines, legend off"),
 ];
+
+/// The four panels per theme: `(image kind, caption)`.
+const GRID_KINDS: [(&str, &str); 4] = [
+    ("line", "line"),
+    ("scatter", "scatter"),
+    ("grouped_bar", "grouped bar"),
+    ("hist", "histogram"),
+];
+
+/// The three theme blocks of the reference image `theme-directions.png`: `(theme, top, height)` in pixels.
+const REFERENCE_BLOCKS: [(&str, u32, u32); 3] = [
+    ("pigment", 119, 650),
+    ("graphite", 894, 646),
+    ("midnight", 1669, 643),
+];
+const REFERENCE_SIZE: (u32, u32) = (940, 2500);
 
 /// Renders with the bundled fonts only: no system fallback, so output is machine independent.
 fn render(figure: &Figure) -> Vec<u8> {
@@ -247,6 +307,223 @@ fn midnight_empty() {
     check("midnight_empty", &figure);
 }
 
+const QUARTERS: [&str; 4] = ["Q1", "Q2", "Q3", "Q4"];
+
+fn quarters() -> Vec<String> {
+    QUARTERS.map(str::to_owned).to_vec()
+}
+
+fn revenue_series() -> Vec<BarSeries> {
+    [
+        ("2024", [12.0, 18.0, 15.0, 22.0]),
+        ("2025", [9.0, 14.0, 19.0, 17.0]),
+        ("2026", [5.0, 8.0, 11.0, 14.0]),
+    ]
+    .map(|(label, heights)| BarSeries {
+        label: label.to_owned(),
+        heights: heights.to_vec(),
+        color: ColorSpec::AUTO,
+    })
+    .to_vec()
+}
+
+fn grouped_bar_figure(theme_name: &str) -> Figure {
+    let mut figure = Figure::new(6.0, 4.0, theme(theme_name)).unwrap();
+    let axes = figure
+        .add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap();
+    axes.title("Revenue by quarter").subtitle("USD, millions");
+    axes.grouped_bar(quarters(), revenue_series()).unwrap();
+    figure
+}
+
+/// Log-normal values from a seeded generator, so the histogram is the same on every machine.
+fn response_times() -> Vec<f64> {
+    let mut rng = Lcg(1400);
+    (0..1400)
+        .map(|_| (3.0 + 0.45 * rng.normal()).exp())
+        .collect()
+}
+
+fn hist_figure(theme: Theme) -> Figure {
+    let mut figure = Figure::new(6.0, 4.0, theme).unwrap();
+    let axes = figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap();
+    axes.title("Response time").subtitle("1,400 requests, ms");
+    axes.hist(&response_times(), HistOptions::default())
+        .unwrap();
+    figure
+}
+
+/// A 6 x 4 in figure in `theme` with a title and `count` labelled wobbling lines.
+fn many_lines(theme: Theme, title: &str, labels: &[String]) -> Figure {
+    let mut figure = Figure::new(6.0, 4.0, theme).unwrap();
+    let axes = figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap();
+    axes.title(title).xlabel("Day");
+    let x: Vec<f64> = (0..30).map(f64::from).collect();
+    for (i, label) in labels.iter().enumerate() {
+        let k = i as f64;
+        let y: Vec<f64> = x
+            .iter()
+            .map(|t| 20.0 + 3.0 * k + 5.0 * (t / 4.0 + k).sin())
+            .collect();
+        axes.line(
+            numbers(x.clone()),
+            &y,
+            LineOptions {
+                label: label.clone(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    figure
+}
+
+#[test]
+fn pigment_grouped_bar() {
+    check("pigment_grouped_bar", &grouped_bar_figure("pigment"));
+}
+
+#[test]
+fn graphite_grouped_bar() {
+    check("graphite_grouped_bar", &grouped_bar_figure("graphite"));
+}
+
+#[test]
+fn midnight_grouped_bar() {
+    check("midnight_grouped_bar", &grouped_bar_figure("midnight"));
+}
+
+#[test]
+fn pigment_hist() {
+    check("pigment_hist", &hist_figure(Theme::pigment()));
+}
+
+#[test]
+fn graphite_hist() {
+    check("graphite_hist", &hist_figure(Theme::graphite()));
+}
+
+#[test]
+fn midnight_hist() {
+    check("midnight_hist", &hist_figure(Theme::midnight()));
+}
+
+#[test]
+fn pigment_stacked_bar() {
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let axes = figure
+        .add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap();
+    axes.title("Cash flow by quarter").subtitle("USD, millions");
+    let series = [
+        ("Sales", [14.0, 18.0, 12.0, 20.0]),
+        ("Services", [6.0, -4.0, 9.0, 7.0]),
+        ("Costs", [-8.0, -10.0, -6.0, -12.0]),
+    ]
+    .map(|(label, heights)| BarSeries {
+        label: label.to_owned(),
+        heights: heights.to_vec(),
+        color: ColorSpec::AUTO,
+    })
+    .to_vec();
+    axes.stacked_bar(quarters(), series).unwrap();
+    check("pigment_stacked_bar", &figure);
+}
+
+#[test]
+fn graphite_bar_negative() {
+    let mut figure = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+    let axes = figure
+        .add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap();
+    axes.title("Net change by quarter")
+        .subtitle("USD, millions");
+    axes.bar(quarters(), &[8.0, -5.0, 12.0, -9.0], BarOptions::default())
+        .unwrap();
+    check("graphite_bar_negative", &figure);
+}
+
+#[test]
+fn midnight_hist_area_off() {
+    let theme = Theme::midnight().with_area_fill(AreaFill::None).unwrap();
+    check("midnight_hist_area_off", &hist_figure(theme));
+}
+
+#[test]
+fn pigment_legend_wrap() {
+    let labels: Vec<String> = (1..=9).map(|i| format!("Station {i}")).collect();
+    check(
+        "pigment_legend_wrap",
+        &many_lines(Theme::pigment(), "Nine stations", &labels),
+    );
+}
+
+#[test]
+fn graphite_direct_crowded() {
+    let mut figure = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+    let axes = figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap();
+    axes.title("Six lines, close ends").xlabel("Day");
+    let x: Vec<f64> = (0..=20).map(f64::from).collect();
+    for k in 0..6 {
+        let k = f64::from(k);
+        let end = 50.0 + 1.5 * k;
+        let start = 20.0 + 12.0 * ((k * 7.0) % 6.0);
+        let y: Vec<f64> = x
+            .iter()
+            .map(|t| start + (end - start) * t / 20.0 + 2.0 * (t / 3.0 + k).sin())
+            .collect();
+        axes.line(
+            numbers(x.clone()),
+            &y,
+            LineOptions {
+                label: format!("Region {}", k + 1.0),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    check("graphite_direct_crowded", &figure);
+}
+
+#[test]
+fn graphite_direct_xlim() {
+    let labels: Vec<String> = ["North", "Central", "South"].map(str::to_owned).to_vec();
+    let mut figure = many_lines(Theme::graphite(), "Cut by an explicit limit", &labels);
+    figure.axes_mut().unwrap().xlim(0.0, 20.5).unwrap();
+    check("graphite_direct_xlim", &figure);
+}
+
+#[test]
+fn midnight_chips_long_labels() {
+    let labels: Vec<String> = [
+        "Northern coastal stations, hourly mean",
+        "Inland valley stations, hourly mean",
+        "Mountain ridge stations, hourly mean",
+        "Offshore platforms",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    check(
+        "midnight_chips_long_labels",
+        &many_lines(Theme::midnight(), "Long labels", &labels),
+    );
+}
+
+#[test]
+fn pigment_legend_none() {
+    let labels: Vec<String> = ["North", "Central", "South"].map(str::to_owned).to_vec();
+    let mut figure = many_lines(Theme::pigment(), "Legend off", &labels);
+    figure.axes_mut().unwrap().legend(LegendStyle::None);
+    check("pigment_legend_none", &figure);
+}
+
 /// Writes every gallery image and the local design reference images, when present, with an `index.html`, to
 /// `target/umber-gallery/`. Run with `--ignored`.
 #[test]
@@ -279,28 +556,84 @@ fn write_contact_sheet() {
         let source = design.join(file);
         if source.is_file() {
             std::fs::copy(&source, out.join(file)).unwrap();
-            let _ = writeln!(
-                cards,
-                "<figure><img src=\"{file}\"><figcaption>{caption}</figcaption></figure>"
-            );
+            // The reference image itself is shown as crops beside the theme grids below.
+            if file != "theme-directions.png" {
+                let _ = writeln!(
+                    cards,
+                    "<figure><img src=\"{file}\"><figcaption>{caption}</figcaption></figure>"
+                );
+            }
         }
     }
-    for (name, caption) in IMAGES {
+    let caption_of = |name: &str| {
+        IMAGES
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map_or("", |(_, c)| *c)
+    };
+    let copy_image = |name: &str| -> String {
         let file = format!("gallery_{name}.png");
         std::fs::copy(golden_dir().join(&file), out.join(&file)).unwrap();
+        file
+    };
+
+    // The reference layout: per theme, line, scatter, grouped bar and histogram in a 2 x 2 grid,
+    // next to the matching crop of the design reference image.
+    let reference = design.join("theme-directions.png");
+    let mut grid_names = Vec::new();
+    for (theme_name, top, height) in REFERENCE_BLOCKS {
+        let mut panels = String::new();
+        for (kind, caption) in GRID_KINDS {
+            let name = format!("{theme_name}_{kind}");
+            let file = copy_image(&name);
+            let _ = writeln!(
+                panels,
+                "<figure><img src=\"{file}\"><figcaption>{name}: {caption}</figcaption></figure>"
+            );
+            grid_names.push(name);
+        }
+        let mut reference_crop = String::new();
+        if reference.is_file() {
+            // A percentage background offset places the crop at `top` of the sheet.
+            let y = f64::from(top) / f64::from(REFERENCE_SIZE.1 - height) * 100.0;
+            let _ = write!(
+                reference_crop,
+                "<div class=\"crop\" style=\"aspect-ratio:{w}/{height};\
+                 background-position:0 {y:.3}%\"></div>",
+                w = REFERENCE_SIZE.0
+            );
+        }
         let _ = writeln!(
             cards,
-            "<figure><img src=\"{file}\"><figcaption>{name}: {caption}</figcaption></figure>"
+            "<section class=\"pair\"><div class=\"grid\">{panels}</div>{reference_crop}</section>"
         );
     }
+    let mut rest = String::new();
+    for (name, _) in IMAGES {
+        if grid_names.iter().any(|n| n == name) {
+            continue;
+        }
+        let file = copy_image(name);
+        let _ = writeln!(
+            rest,
+            "<figure><img src=\"{file}\"><figcaption>{name}: {}</figcaption></figure>",
+            caption_of(name)
+        );
+    }
+    let _ = writeln!(cards, "<h2>Edge cases</h2><main>\n{rest}</main>");
     let html = format!(
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n\
          <title>umber gallery</title>\n\
          <style>body{{font-family:sans-serif;margin:24px;background:#eee}}\
-         main{{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:20px}}\
+         main,.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:20px}}\
+         .grid{{grid-template-columns:repeat(2,1fr)}}\
+         .pair{{display:grid;grid-template-columns:3fr 2fr;gap:20px;align-items:start;\
+         margin-bottom:28px}}\
+         .crop{{width:100%;background:url(theme-directions.png) no-repeat;\
+         background-size:100% auto;border:1px solid #bbb}}\
          figure{{margin:0}}img{{width:100%;border:1px solid #bbb}}\
          figcaption{{font-size:13px;padding-top:4px}}</style></head>\n\
-         <body><h1>umber gallery</h1><main>\n{cards}</main></body></html>\n"
+         <body><h1>umber gallery</h1>\n{cards}</body></html>\n"
     );
     std::fs::write(out.join("index.html"), html).unwrap();
 }
