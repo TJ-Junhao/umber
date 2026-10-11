@@ -127,7 +127,7 @@ def test_axes_have_no_instance_dictionary() -> None:
 
 def test_axes_report_the_package_as_their_module() -> None:
     assert ub.Axes.__module__ == "umber"
-    marks = ["line", "scatter", "bar", "grouped_bar", "stacked_bar", "hist"]
+    marks = ["line", "area", "scatter", "bar", "grouped_bar", "stacked_bar", "hist"]
     for name in [*TEXTS, "xlim", "ylim", "legend", *marks]:
         assert getattr(ub.Axes, name).__module__ == "umber"
     figure = cast(property, vars(ub.Axes)["figure"])

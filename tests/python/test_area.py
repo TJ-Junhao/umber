@@ -22,6 +22,7 @@ SIZE_HINT = (
 )
 AREA_GAP = "use NaN to leave a gap in the area."
 X_SCALE_HINT = "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."
+RESCALE_HINT = "use a linear axis, or rescale the values."
 CATEGORY_X_HINT = "pass x=Scale.category() to Figure.add_axes()."
 LINEAR, CATEGORY = 0, 2
 OUTLINES = 0
@@ -256,6 +257,42 @@ DATA_ERRORS: list[tuple[Any, object, object, type, str, object, object]] = [
     ),
     (
         _axes,
+        [0, 1e301],
+        [1.0, 2.0],
+        ub.DataError,
+        "Axes.area(): x[1] is 1e301; magnitudes must not exceed 1e300.",
+        "x",
+        None,
+    ),
+    (
+        _axes,
+        [0, 1],
+        [1.0, -1e301],
+        ub.DataError,
+        "Axes.area(): y[1] is -1e301; magnitudes must not exceed 1e300.",
+        "y",
+        None,
+    ),
+    (
+        lambda: _axes(ub.Scale.log()),
+        [1.0, 1e-310],
+        [1.0, 2.0],
+        ub.DataError,
+        "Axes.area(): x[1] is 1e-310 on a log axis; values must be at least 1e-300.",
+        "x",
+        RESCALE_HINT,
+    ),
+    (
+        lambda: ub.Figure(3, 2).add_axes(y=ub.Scale.log()),
+        [1.0, 2.0],
+        [1.0, 1e-310],
+        ub.DataError,
+        "Axes.area(): y[1] is 1e-310 on a log axis; values must be at least 1e-300.",
+        "y",
+        RESCALE_HINT,
+    ),
+    (
+        _axes,
         "abc",
         [1.0],
         TypeError,
@@ -302,6 +339,9 @@ def test_a_y_that_is_not_positive_on_a_log_y_axis_is_a_data_error() -> None:
         ("ax.area(x=t, y=y)", "y=y"),
         ("ax.area(t, t, color='red')", "color='red'"),
         ("ax.area(t, t, width=2.0)", "width=2.0"),
+        ("ax.area([0.0, 1e301], [1.0, 2.0])", "[0.0, 1e301]"),
+        ("ax.area([0.0, 1.0], [1.0, -1e301])", "[1.0, -1e301]"),
+        ("ub.Figure().add_axes(x=ub.Scale.log()).area([1.0, 1e-310], [1.0, 2.0])", "[1.0, 1e-310]"),
         ("ax.title('T').area(t,\n    y)", "y"),
     ],
 )

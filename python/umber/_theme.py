@@ -366,6 +366,10 @@ class Theme:
     def with_fill_style(self, value: FillStyle) -> "Theme":
         """Return this theme with the fill style of areas and histogram bins set to ``value``.
 
+        ``FillStyle.SOLID`` paints a flat translucent fill. ``FillStyle.GRADIENT`` paints a fill
+        that fades out toward the baseline. The style applies to areas and histograms; lines are
+        never filled, so it does not change them.
+
         Args:
             value: The FillStyle to use.
 
