@@ -33,7 +33,9 @@ array, or a pandas or polars Series. Integer and ``float16``/``float32`` data is
 to ``float64``; integers are exact up to 2**53 in magnitude and rounded to the nearest
 ``float64`` beyond that. Data of dtype bool, datetime, timedelta or complex, masked arrays,
 and text or ``None`` among the numbers raise ``DataError``; nothing else is converted. Use
-NaN for missing values.
+NaN for missing values. Nullable pandas and polars Series need no conversion: they turn
+``NA`` and null in numeric data into NaN themselves, and NaN marks a missing point. A
+``pd.NA`` inside an object Series is not a number and raises ``DataError``.
 
 ``Values[str]`` takes names: a sequence of ``str``, or an array or Series of strings.
 
@@ -47,4 +49,6 @@ Example:
     array([1., 2., 3.])
     >>> floats("Axes.line()", "y", pd.Series([0.5, float("nan"), 2.0]))
     array([0.5, nan, 2. ])
+    >>> floats("Axes.line()", "y", pd.Series([1, None, 3], dtype="Int64"))
+    array([ 1., nan,  3.])
 """

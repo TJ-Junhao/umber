@@ -8,11 +8,11 @@ Range checks on the values themselves belong to the core library, not to these f
 """
 
 import math
-import numbers
 import operator
 import os
 import re
-from typing import Final, cast
+import reprlib
+from typing import Final, SupportsFloat, SupportsIndex, cast, override
 
 from umber._errors import DataError, StyleError, new_error
 
@@ -30,6 +30,9 @@ Example:
 _I64_MIN: Final = -(2**63)
 _I64_MAX: Final = 2**63 - 1
 _REPR_LENGTH: Final = 40
+# Ints with more bits than this are shown by their size: their decimal form is cut anyway, and
+# Python refuses to format ints of more than 4300 digits.
+_REPR_INT_BITS: Final = 128
 _SURROGATE: Final = re.compile(r"[\ud800-\udfff]")
 
 _TEXT_HINT: Final = "pass a str; convert other values with str()."
@@ -60,8 +63,54 @@ def type_name(value: object) -> str:
     return "None" if value is None else type(value).__qualname__
 
 
+class _BoundedRepr(reprlib.Repr):
+    """Show at most a few items and levels of a container, without formatting huge ints."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            maxlevel=2,
+            maxtuple=4,
+            maxlist=4,
+            maxarray=4,
+            maxdict=4,
+            maxset=4,
+            maxfrozenset=4,
+            maxdeque=4,
+            maxstring=_REPR_LENGTH,
+            maxlong=_REPR_LENGTH,
+            maxother=_REPR_LENGTH,
+        )
+
+    @override
+    def repr_int(self, x: int, level: int) -> str:
+        return _int_repr(x)
+
+    @override
+    def repr_instance(self, x: object, level: int) -> str:
+        try:
+            text = repr(x)
+        except Exception:
+            return type_name(x)
+        return text if len(text) <= _REPR_LENGTH else text[: _REPR_LENGTH - 1] + "…"
+
+
+def _int_repr(value: int) -> str:
+    """The decimal form of an int, or its size when it has more than 128 bits."""
+    bits = int.bit_length(value)
+    if bits > _REPR_INT_BITS:
+        return f"{type_name(value)} ({bits:,} bits)"
+    return repr(value)
+
+
+_CONTAINER_REPR: Final = _BoundedRepr()
+
+
 def short_repr(value: object) -> str:
     """Return ``repr(value)`` cut to at most 40 characters, ending with "…" when cut.
+
+    The work is bounded: long text is cut before it is formatted, containers show only their
+    first items, and an int of more than 128 bits is shown by its size. When ``repr`` raises,
+    the type name is shown instead. This function never raises.
 
     Args:
         value: Any object.
@@ -76,9 +125,48 @@ def short_repr(value: object) -> str:
         >>> cut = short_repr("x" * 50)
         >>> len(cut), cut[-1]
         (40, '…')
+        >>> short_repr(10**100)
+        'int (333 bits)'
     """
-    text = repr(value)
+    # Types are tested with ``issubclass`` so that ``value`` keeps its declared type.
+    kind = type(value)
+    try:
+        if issubclass(kind, int) and not issubclass(kind, bool):
+            text = _int_repr(cast(int, value))
+        elif issubclass(kind, str | bytes | bytearray):
+            # One character more than fits, so that a longer value is still cut.
+            text = repr(cast(str | bytes | bytearray, value)[: _REPR_LENGTH + 1])
+        elif issubclass(kind, list | tuple | dict | set | frozenset):
+            text = _CONTAINER_REPR.repr(value)
+        else:
+            text = repr(value)
+    except Exception:
+        return type_name(value)
     return text if len(text) <= _REPR_LENGTH else text[: _REPR_LENGTH - 1] + "…"
+
+
+def _number_kind(value: object) -> str | None:
+    """Return ``"int"`` or ``"float"`` for an accepted number type, else ``None``.
+
+    Accepted are ``int`` (not ``bool``), ``float``, and the NumPy integer and floating scalars
+    except ``timedelta64``. NumPy types are recognised by their class hierarchy, so this
+    module does not import NumPy.
+    """
+    kind = type(value)
+    if issubclass(kind, bool):
+        return None
+    if issubclass(kind, int):
+        return "int"
+    if issubclass(kind, float):
+        return "float"
+    numpy_bases = {base.__name__ for base in kind.__mro__ if base.__module__ == "numpy"}
+    if "timedelta64" in numpy_bases:
+        return None
+    if "integer" in numpy_bases:
+        return "int"
+    if "floating" in numpy_bases:
+        return "float"
+    return None
 
 
 def _wrong_type(context: str, name: str, value: object, expected: str, hint: str) -> TypeError:
@@ -117,20 +205,22 @@ def checked_text(
         >>> checked_text("Axes.bar()", "categories", "categories[0]", "North", DataError)
         'North'
     """
-    if len(value) > MAX_TEXT_LENGTH:
+    # The checks run on the plain ``str`` that is passed on, so a subclass that overrides
+    # ``__len__`` or ``__str__`` cannot change what they see.
+    plain = str.__str__(value)
+    if len(plain) > MAX_TEXT_LENGTH:
         message = (
-            f"{label} has {len(value):,} characters; "
+            f"{label} has {len(plain):,} characters; "
             f"text must be at most {MAX_TEXT_LENGTH:,} characters."
         )
         raise new_error(StyleError, context, message, parameter=name, hint=_TOO_LONG_HINT)
-    found = _SURROGATE.search(value)
+    found = _SURROGATE.search(plain)
     if found is not None:
         message = (
             f"{label} has a lone surrogate at index {found.start()}; text must be valid Unicode."
         )
         raise new_error(unencodable, context, message, parameter=name, hint=_SURROGATE_HINT)
-    # ``str.__str__`` returns a plain ``str`` even for subclasses that override ``__str__``.
-    return str.__str__(value)
+    return plain
 
 
 def text(context: str, name: str, value: object) -> str:
@@ -167,8 +257,9 @@ def text(context: str, name: str, value: object) -> str:
 def real(context: str, name: str, value: object) -> float:
     """Check a number argument and return it as a ``float``.
 
-    Ints, floats and the NumPy integer and floating scalars are accepted; ``bool`` is not.
-    An int too large for a float becomes infinity, which the core library then rejects.
+    Ints, floats and the NumPy integer and floating scalars are accepted. ``bool``, NumPy
+    ``bool`` and ``timedelta64``, ``Fraction`` and ``Decimal`` are not. An int too large for a
+    float becomes infinity, which the core library then rejects.
 
     Args:
         context: The API call, such as ``"Axes.xlim()"``.
@@ -179,18 +270,21 @@ def real(context: str, name: str, value: object) -> float:
         The value as a ``float``.
 
     Raises:
-        TypeError: The value is not a real number, or it is a ``bool``.
+        TypeError: The value is not one of the accepted number types.
 
     Example:
         >>> from umber._args import real
         >>> real("Axes.xlim()", "low", 3)
         3.0
     """
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+    if isinstance(value, float):
+        return float.__float__(value)
+    kind = _number_kind(value)
+    if kind == "float":
+        return float(cast(SupportsFloat, value))
+    if kind != "int":
         raise _wrong_type(context, name, value, "a float", _REAL_HINT)
-    if not isinstance(value, numbers.Integral):
-        return float(value)
-    number = operator.index(value)
+    number = operator.index(cast(SupportsIndex, value))
     try:
         return float(number)
     except OverflowError:
@@ -200,7 +294,8 @@ def real(context: str, name: str, value: object) -> float:
 def integer(context: str, name: str, value: object) -> int:
     """Check a whole-number argument and return it clamped to the 64-bit signed range.
 
-    Ints and NumPy integer scalars are accepted; ``bool`` is not. Every valid range lies far
+    Ints and NumPy integer scalars are accepted; ``bool``, NumPy ``bool`` and ``timedelta64``
+    are not. Every valid range lies far
     inside the 64-bit range, so a clamped value fails the core library's check as the
     original would.
 
@@ -213,16 +308,16 @@ def integer(context: str, name: str, value: object) -> int:
         The value as an ``int`` between -2**63 and 2**63 - 1.
 
     Raises:
-        TypeError: The value is not an integer, or it is a ``bool``.
+        TypeError: The value is not an int or a NumPy integer scalar.
 
     Example:
         >>> from umber._args import integer
         >>> integer("Axes.hist()", "bins", 2**70)
         9223372036854775807
     """
-    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+    if _number_kind(value) != "int":
         raise _wrong_type(context, name, value, "an int", _INTEGER_HINT)
-    return min(max(operator.index(value), _I64_MIN), _I64_MAX)
+    return min(max(operator.index(cast(SupportsIndex, value)), _I64_MIN), _I64_MAX)
 
 
 def instance[T](context: str, name: str, value: object, cls: type[T], hint: str) -> T:

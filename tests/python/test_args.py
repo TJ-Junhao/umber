@@ -6,6 +6,7 @@ import os
 from collections.abc import Callable
 from decimal import Decimal
 from enum import Enum
+from fractions import Fraction
 from pathlib import Path, PurePosixPath
 
 import numpy as np
@@ -165,6 +166,10 @@ def test_real_turns_ints_beyond_the_float_range_into_infinity() -> None:
         ("1.5", "str"),
         (None, "None"),
         (Decimal("1.5"), "Decimal"),
+        (Fraction(1, 3), "Fraction"),
+        (Fraction(10**400, 3), "Fraction"),
+        (np.timedelta64(2, "s"), "timedelta64"),
+        (np.complex128(1), "complex128"),
         (1j, "complex"),
         ([1.0], "list"),
     ],
@@ -204,6 +209,9 @@ def test_integer_clamps_to_the_i64_range() -> None:
         (np.False_, "bool"),
         (3.0, "float"),
         (np.float64(3.0), "float64"),
+        (np.timedelta64(2, "s"), "timedelta64"),
+        (Fraction(3, 1), "Fraction"),
+        (Decimal(3), "Decimal"),
         ("3", "str"),
         (None, "None"),
     ],
@@ -334,3 +342,52 @@ def test_max_text_length_example_runs() -> None:
     runner = doctest.DocTestRunner()
     runner.run(test)
     assert runner.summarize(verbose=False).failed == 0
+
+
+def test_real_accepts_wide_numpy_floats() -> None:
+    assert real("Axes.xlim()", "low", np.longdouble(1.5)) == 1.5
+
+
+class FakeLength(str):
+    def __len__(self) -> int:
+        return 1
+
+
+@pytest.mark.parametrize(("context", "name"), [("Axes.title()", "text"), ("Axes.line()", "label")])
+def test_text_cap_ignores_an_overridden_length(context: str, name: str) -> None:
+    value = FakeLength("x" * 1001)
+    assert error(ub.StyleError, lambda: text(context, name, value)) == (
+        f"{context}: {name} has 1,001 characters; text must be at most 1,000 characters.",
+        name,
+        TOO_LONG_HINT,
+    )
+
+
+class BrokenRepr:
+    def __repr__(self) -> str:
+        raise RuntimeError("no repr")
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        (Fraction(10**5000, 3), "Fraction"),
+        ({"a": 10**5000}, f"{{'a': int ({(10**5000).bit_length():,} bits)}}"),
+        ([Fraction(10**5000, 3), BrokenRepr()], "[Fraction, BrokenRepr]"),
+        (BrokenRepr(), "BrokenRepr"),
+        (10**5000, f"int ({(10**5000).bit_length():,} bits)"),
+        (-(2**200), "int (201 bits)"),
+        (2**128 - 1, repr(2**128 - 1)),
+        (2**128, "int (129 bits)"),
+    ],
+    ids=["fraction", "dict", "list", "broken", "huge", "negative", "128-bits", "129-bits"],
+)
+def test_short_repr_never_raises(value: object, shown: str) -> None:
+    assert short_repr(value) == shown
+
+
+def test_short_repr_bounds_text_and_containers() -> None:
+    assert short_repr("x" * 10**7) == "'" + "x" * 38 + "…"
+    assert short_repr(b"y" * 10**7) == "b'" + "y" * 37 + "…"
+    assert short_repr(list(range(10**6))) == "[0, 1, 2, 3, ...]"
+    assert short_repr({"a": [[1, [2]]]}) == "{'a': [[...]]}"

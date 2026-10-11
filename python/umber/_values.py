@@ -11,7 +11,7 @@ raises ``DataError``, naming the first offending element where there is one. Int
 import datetime
 import math
 import numbers
-from collections.abc import Iterator, Mapping, Sequence, Set
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
 from typing import Any, Final, cast
 
 import numpy as np
@@ -116,26 +116,60 @@ def _is_missing(value: object) -> bool:
     return kind.__module__.startswith("pandas") and kind.__name__ in ("NAType", "NaTType")
 
 
+def _is_float64_or_narrower(dtype: np.dtype[Any]) -> bool:
+    """Whether data of this dtype converts to ``float64`` exactly."""
+    return dtype.kind in "iu" or (dtype.kind == "f" and dtype.itemsize <= 8)
+
+
 def _is_number(value: object) -> bool:
-    """Whether a value converts to ``float64`` without changing its meaning."""
+    """Whether a value converts to ``float64`` without changing its meaning.
+
+    Accepted are ints (not ``bool``), floats, and the NumPy integer and floating scalars and
+    unmasked zero-dimensional arrays whose type is ``float64`` or narrower (not
+    ``timedelta64``). Masked values never are.
+    """
     if type(value) is float or type(value) is int:
         return True
-    return (
-        isinstance(value, int | float | np.integer | np.floating)
-        and not isinstance(value, _BOOLS)
-        and not isinstance(value, np.timedelta64)
-    )
+    kind = type(value)
+    if issubclass(kind, np.ma.MaskedArray | np.timedelta64 | bool):
+        return False
+    if issubclass(kind, np.generic | np.ndarray):
+        array = cast("np.generic[Any] | npt.NDArray[Any]", value)
+        return array.ndim == 0 and _is_float64_or_narrower(array.dtype)
+    return issubclass(kind, int | float)
 
 
-def _first_non_number(items: Sequence[object]) -> int | None:
-    return next((i for i, value in enumerate(items) if not _is_number(value)), None)
+def _is_nested(value: object) -> bool:
+    """Whether a value is a sequence or an array of at least one dimension (not masked)."""
+    if isinstance(value, np.ndarray):
+        return value.ndim > 0 and not isinstance(value, np.ma.MaskedArray)
+    return isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray)
+
+
+_CHUNK: Final = 256
+
+
+def _elements(array: npt.NDArray[Any]) -> Iterator[object]:
+    """Yield the elements of a one-dimensional array as Python objects, a few at a time.
+
+    Converting in chunks keeps memory bounded and lets a scan stop at the first bad element.
+    """
+    for start in range(0, len(array), _CHUNK):
+        yield from cast(list[object], array[start : start + _CHUNK].tolist())
+
+
+def _first_non_number(items: Iterable[object]) -> tuple[int, object] | None:
+    return next(((i, value) for i, value in enumerate(items) if not _is_number(value)), None)
 
 
 def _element_error(context: str, name: str, index: int, value: object, *, mixed: bool) -> DataError:
     """The error for an element of numeric data that is not an int or a float."""
+    value = _scalar(value)
     label = f"{name}[{index}]"
     shown = short_repr(value)
-    if mixed and isinstance(value, str):
+    if _is_masked(value):
+        message, hint = f"{label} is masked; masked values cannot be plotted.", _MASKED_HINT
+    elif mixed and isinstance(value, str):
         message, hint = f"{label} is {shown}; {name} mixes names and numbers.", _MIXED_HINT
     elif _is_missing(value):
         message, hint = f"{label} is {shown}; values must be numbers.", _MISSING_HINT
@@ -147,13 +181,29 @@ def _element_error(context: str, name: str, index: int, value: object, *, mixed:
         message, hint = f"{label} is {shown}; values must be numbers.", _TIME_HINT
     elif isinstance(value, complex | np.complexfloating):
         message, hint = f"{label} is {shown}; values must be real numbers.", _COMPLEX_HINT
-    elif isinstance(value, Sequence | np.ndarray):
+    elif isinstance(value, np.floating):
+        message = f"{label} is {shown}; values must be float64 or narrower."
+        hint = _WIDE_FLOAT_HINT
+    elif _is_nested(value):
         message, hint = f"{label} is a sequence; values must be numbers.", _NESTED_HINT
     elif isinstance(value, numbers.Number):
         message, hint = f"{label} is {shown}; values must be int or float.", _NUMBER_HINT
     else:
         message, hint = f"{label} is {shown}; values must be numbers.", _NUMBER_HINT
     return _data_error(context, name, message, hint)
+
+
+def _is_masked(value: object) -> bool:
+    return issubclass(type(value), np.ma.MaskedArray)
+
+
+def _scalar(value: object) -> object:
+    """The scalar an unmasked zero-dimensional array holds, so that messages show it."""
+    if issubclass(type(value), np.ndarray) and not _is_masked(value):
+        array = cast(npt.NDArray[Any], value)
+        if array.ndim == 0:
+            return cast(object, array[()])
+    return value
 
 
 def _dtype_error(context: str, name: str, array: npt.NDArray[Any]) -> DataError:
@@ -190,46 +240,57 @@ def _native(array: npt.NDArray[Any]) -> FloatArray:
     return np.require(array, dtype="=f8", requirements=["A"]).view(np.float64)
 
 
+def _sequence_array(
+    context: str, name: str, items: Sequence[object], *, mixed: bool
+) -> npt.NDArray[Any]:
+    """Check each element of a sequence of numbers, then convert it with ``np.asarray``.
+
+    Elements are checked before NumPy sees them, because NumPy would silently turn a masked
+    element into NaN and a bool among numbers into 0 or 1. Nested sequences are left to
+    ``np.asarray``, which gives them a shape; the shape check then reports them.
+    """
+    if isinstance(items, range):
+        return np.asarray(items)
+    nested: int | None = None
+    for index, value in enumerate(items):
+        if _is_number(value):
+            continue
+        if not _is_nested(value):
+            raise _element_error(context, name, index, value, mixed=mixed)
+        if nested is None:
+            nested = index
+    try:
+        return np.asarray(items)
+    except ValueError:
+        # Raised for nested sequences of different lengths; report the first one.
+        if nested is None:
+            raise
+        raise _element_error(context, name, nested, items[nested], mixed=mixed) from None
+
+
 def _floats(context: str, name: str, data: _Data, *, mixed: bool) -> FloatArray:
     if isinstance(data, np.ndarray):
-        array, items = data, None
+        array = data
     else:
-        items = data
-        try:
-            array = np.asarray(items)
-        except ValueError:
-            # Raised for nested sequences of different lengths; report the first one.
-            index = _first_non_number(items)
-            if index is None:
-                raise
-            raise _element_error(context, name, index, items[index], mixed=mixed) from None
+        array = _sequence_array(context, name, data, mixed=mixed)
     _check_one_dimensional(context, name, array)
     if array.size == 0:
         return np.empty(0, dtype=np.float64)
     kind = array.dtype.kind
-    if kind in "iu" or (kind == "f" and array.dtype.itemsize <= 8):
-        if items is not None and not isinstance(items, range):
-            # A bool among numbers is promoted silently by NumPy; refuse it as a bool array is.
-            for index, value in enumerate(items):
-                if isinstance(value, _BOOLS):
-                    raise _element_error(context, name, index, items[index], mixed=mixed)
+    if _is_float64_or_narrower(array.dtype):
         return _native(array)
     if kind == "O":
-        elements = cast(list[object], array.tolist())
-        index = _first_non_number(elements)
-        if index is not None:
-            raise _element_error(context, name, index, elements[index], mixed=mixed)
+        found = _first_non_number(_elements(array))
+        if found is not None:
+            raise _element_error(context, name, found[0], found[1], mixed=mixed)
         try:
             return array.astype(np.float64)
         except OverflowError:
-            return np.array([_to_float(value) for value in elements], dtype=np.float64)
+            converted = (_to_float(value) for value in _elements(array))
+            return np.fromiter(converted, dtype=np.float64, count=len(array))
     if kind in "SUT":
-        index = 0
-        if items is not None:
-            found = (i for i, value in enumerate(items) if isinstance(value, str | bytes))
-            index = next(found, 0)
-        value = cast(list[object], array[index : index + 1].tolist())[0]
-        raise _element_error(context, name, index, value, mixed=mixed)
+        first = next(_elements(array[:1]))
+        raise _element_error(context, name, 0, first, mixed=mixed)
     raise _dtype_error(context, name, array)
 
 
@@ -237,7 +298,9 @@ def _name_error(context: str, name: str, index: int, value: object, *, mixed: bo
     """The error for an element of names that is not a ``str``."""
     label = f"{name}[{index}]"
     shown = short_repr(value)
-    if _is_missing(value):
+    if _is_masked(value):
+        message, hint = f"{label} is masked; masked values cannot be plotted.", _MASKED_NAMES_HINT
+    elif _is_missing(value):
         message, hint = f"{label} is {shown}; categories must be strings.", _MISSING_NAME_HINT
     elif mixed and _is_number(value):
         message, hint = f"{label} is {shown}; {name} mixes names and numbers.", _MIXED_HINT
@@ -254,7 +317,7 @@ def _names(context: str, name: str, data: _Data, *, mixed: bool) -> list[str]:
         if data.dtype.kind not in "UTOS":
             message = f"{name} has dtype {data.dtype}; categories must be strings."
             raise _data_error(context, name, message, _NAME_DTYPE_HINT)
-        items: Sequence[object] = cast(list[object], data.tolist())
+        items: Iterable[object] = _elements(data)
     else:
         items = data
     result: list[str] = []

@@ -4,6 +4,7 @@ import ast
 import ctypes
 import datetime
 import doctest
+import tracemalloc
 from collections.abc import Callable, Iterator, Sequence
 from decimal import Decimal
 from fractions import Fraction
@@ -19,6 +20,7 @@ import pytest
 
 import umber as ub
 from umber import _types, _values
+from umber._args import short_repr
 from umber._errors import details
 from umber._values import FloatArray, axis_values, floats, names
 
@@ -347,7 +349,7 @@ def test_ragged_sequences_name_the_first_nested_element(values: object, index: i
 
 @pytest.mark.parametrize(
     "values",
-    [np.array([True, False]), [True, False], pd.Series([True]), pl.Series([True, False])],
+    [np.array([True, False]), pd.Series([True]), pl.Series([True, False])],
 )
 def test_bool_data_is_refused(values: object) -> None:
     assert y_error(ub.DataError, values) == (
@@ -359,7 +361,13 @@ def test_bool_data_is_refused(values: object) -> None:
 
 @pytest.mark.parametrize(
     ("values", "index", "shown"),
-    [([1.0, True], 1, "True"), ((np.False_, 2), 0, "np.False_"), ([0, 1, False], 2, "False")],
+    [
+        ([1.0, True], 1, "True"),
+        ((np.False_, 2), 0, "np.False_"),
+        ([0, 1, False], 2, "False"),
+        ([True, False], 0, "True"),
+        ([1.0, np.array(True)], 1, "np.True_"),
+    ],
 )
 def test_a_bool_among_numbers_is_refused(values: object, index: int, shown: str) -> None:
     assert y_error(ub.DataError, values) == (
@@ -376,7 +384,6 @@ def test_a_bool_among_numbers_is_refused(values: object, index: int, shown: str)
         (np.array([1, 2], dtype="timedelta64[s]"), "timedelta64[s]"),
         (pd.Series(pd.to_datetime(["2020-01-01"])), str(pd.to_datetime(["2020-01-01"]).dtype)),
         (pd.Series(pd.to_timedelta([1, 2], unit="s")), str(pd.to_timedelta([1], unit="s").dtype)),
-        ([np.datetime64("2020-01-01", "D")], "datetime64[D]"),
     ],
 )
 def test_datetime_and_timedelta_data_is_refused(values: object, dtype: str) -> None:
@@ -391,6 +398,7 @@ def test_datetime_and_timedelta_data_is_refused(values: object, dtype: str) -> N
     ("values", "index", "shown"),
     [
         ([1.0, datetime.datetime(2020, 1, 2)], 1, "datetime.datetime(2020, 1, 2, 0, 0)"),
+        ([np.datetime64("2020-01-01", "D")], 0, "np.datetime64('2020-01-01')"),
         ([datetime.date(2020, 1, 2)], 0, "datetime.date(2020, 1, 2)"),
         ([1.0, datetime.timedelta(seconds=3)], 1, "datetime.timedelta(seconds=3)"),
         ([1, np.datetime64("2020-01-01")], 1, "np.datetime64('2020-01-01')"),
@@ -414,7 +422,6 @@ def test_datetime_elements_are_refused(values: object, index: int, shown: str) -
     ("values", "dtype"),
     [
         (np.array([1 + 2j]), "complex128"),
-        ([1.0, 2j], "complex128"),
         (np.array([1j], "c8"), "complex64"),
     ],
 )
@@ -426,8 +433,8 @@ def test_complex_data_is_refused(values: object, dtype: str) -> None:
     )
 
 
-def test_complex_elements_are_refused() -> None:
-    values = np.array([1.0, 2j], dtype=object)
+@pytest.mark.parametrize("values", [np.array([1.0, 2j], dtype=object), [1.0, 2j], (1, 2j)])
+def test_complex_elements_are_refused(values: object) -> None:
     assert y_error(ub.DataError, values) == (
         "Axes.line(): y[1] is 2j; values must be real numbers.",
         "y",
@@ -790,3 +797,123 @@ def test_alias_examples_run(module: ModuleType, name: str) -> None:
     runner = doctest.DocTestRunner()
     runner.run(test)
     assert runner.summarize(verbose=False).failed == 0
+
+
+# --- masked elements, bounded messages and wide floats inside sequences ---
+
+
+@pytest.mark.parametrize(
+    ("values", "index"),
+    [
+        ([1.0, np.ma.masked, 3.0], 1),
+        ((np.ma.masked,), 0),
+        ([1.0, np.ma.array([1.0, 2.0], mask=[False, True])[1]], 1),
+        ([np.ma.array(2.0)], 0),
+        ([1.0, np.ma.array(2.0, mask=True)], 1),
+        (np.array([1.0, np.ma.masked], dtype=object), 1),
+    ],
+    ids=["list", "tuple", "masked-scalar", "zero-dim", "zero-dim-masked", "object-array"],
+)
+def test_masked_elements_are_refused(values: object, index: int) -> None:
+    assert y_error(ub.DataError, values) == (
+        f"Axes.line(): y[{index}] is masked; masked values cannot be plotted.",
+        "y",
+        MASKED_HINT,
+    )
+    assert x_error(ub.DataError, values) == (
+        f"Axes.line(): x[{index}] is masked; masked values cannot be plotted.",
+        "x",
+        MASKED_HINT,
+    )
+
+
+def test_masked_names_are_refused() -> None:
+    assert category_error(ub.DataError, ["a", np.ma.masked]) == (
+        "Axes.bar(): categories[1] is masked; masked values cannot be plotted.",
+        "categories",
+        MASKED_NAMES_HINT,
+    )
+
+
+def test_unmasked_zero_dimensional_arrays_are_numbers() -> None:
+    assert_native(floats("Axes.line()", "y", [np.array(1.5), np.array(2, dtype=np.int8)]), [1.5, 2])
+
+
+class FakeLength(str):
+    def __len__(self) -> int:
+        return 1
+
+
+def test_name_cap_ignores_an_overridden_length() -> None:
+    assert category_error(ub.StyleError, ["a", FakeLength("b" * 1001)]) == (
+        "Axes.bar(): categories[1] has 1,001 characters; text must be at most 1,000 characters.",
+        "categories",
+        TOO_LONG_HINT,
+    )
+
+
+def test_messages_do_not_format_huge_values() -> None:
+    assert y_error(ub.DataError, [Fraction(10**5000, 3)]) == (
+        "Axes.line(): y[0] is Fraction; values must be int or float.",
+        "y",
+        NUMBER_HINT,
+    )
+    bits = (10**5000).bit_length()
+    assert y_error(ub.DataError, [{"a": 10**5000}]) == (
+        f"Axes.line(): y[0] is {{'a': int ({bits:,} bits)}}; values must be numbers.",
+        "y",
+        NUMBER_HINT,
+    )
+    assert category_error(ub.DataError, [10**5000]) == (
+        f"Axes.bar(): categories[0] is int ({bits:,} bits); categories must be strings.",
+        "categories",
+        NAME_HINT,
+    )
+
+
+def object_array(items: list[object]) -> npt.NDArray[np.object_]:
+    return np.array(items, dtype=object)
+
+
+@pytest.mark.skipif(np.dtype(np.longdouble).itemsize <= 8, reason="long double is float64 here")
+@pytest.mark.parametrize("make", [list, object_array])
+def test_wide_float_elements_are_refused(make: Callable[[list[object]], object]) -> None:
+    wide = np.longdouble(2)
+    assert y_error(ub.DataError, make([1.0, wide])) == (
+        f"Axes.line(): y[1] is {short_repr(wide)}; values must be float64 or narrower.",
+        "y",
+        WIDE_FLOAT_HINT,
+    )
+
+
+@pytest.mark.skipif(np.dtype(np.longdouble).itemsize > 8, reason="long double is wider here")
+@pytest.mark.parametrize("make", [list, object_array])
+def test_long_double_elements_that_are_float64_are_accepted(
+    make: Callable[[list[object]], object],
+) -> None:
+    assert_native(floats("Axes.line()", "y", make([1.0, np.longdouble(2)])), [1.0, 2.0])
+
+
+def test_names_stop_at_the_first_invalid_element_without_converting_the_rest() -> None:
+    values = np.broadcast_to(np.array(["x" * 1001]), (20_000,))
+    tracemalloc.start()
+    try:
+        message, _, _ = category_error(ub.StyleError, values)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert message.startswith("Axes.bar(): categories[0] has 1,001 characters;")
+    assert peak < 4_000_000
+
+
+def test_nullable_missing_values_arrive_as_nan() -> None:
+    # pandas and polars turn NA and null in numeric data into NaN themselves; NaN is a gap.
+    for values in (
+        pd.Series([1, None, 3], dtype="Int64"),
+        pd.Series([1.5, None], dtype="Float64"),
+        pl.Series([1, None, 3]),
+        pl.Series([1.5, None]),
+    ):
+        result = floats("Axes.line()", "y", values)
+        assert np.isnan(result[1])
+        assert_native(result, np.asarray(values, dtype=np.float64).tolist())
