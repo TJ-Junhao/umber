@@ -16,7 +16,10 @@ assert_type(ub.bar(["A", "B"], [3, 5]), ub.Axes[str, float])
 assert_type(ub.hist(t, bins=5), ub.Axes[float, float])
 assert_type(ub.line(t, t, theme=ub.Theme.GRAPHITE).title("Signal"), ub.Axes[float, float])
 assert_type(ub.line(t, t).figure, ub.Figure)
-assert_type(ub.bar(["A"], [1]).title("Sales").ylim(0, 4), ub.Axes[str, float])
+quick_bar = ub.bar(["A"], [1])
+titled = quick_bar.title("Sales")
+assert_type(titled, ub.Axes[str, float])
+assert_type(titled.ylim(0, 4), ub.Axes[str, float])
 
 # Negative: invariance of the returned axes.
 as_numeric: ub.Axes[float, float] = ub.bar(["A"], [1])  # type: ignore[assignment]  # pyright: ignore[reportAssignmentType]

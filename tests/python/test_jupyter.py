@@ -21,7 +21,10 @@ ESCAPE = "\x1b"
 
 
 @pytest.fixture
-def shell() -> Iterator[InteractiveShell]:
+def shell(monkeypatch: pytest.MonkeyPatch) -> Iterator[InteractiveShell]:
+    # Each test sets exactly the colour variables it needs.
+    for name in ("PYTHON_COLORS", "NO_COLOR", "FORCE_COLOR"):
+        monkeypatch.delenv(name, raising=False)
     InteractiveShell.clear_instance()
     instance = InteractiveShell.instance()
     instance.colors = "nocolor"
@@ -72,18 +75,17 @@ def test_force_color_reaches_the_notes_in_ipython(
     shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # IPython prints the notes as they are, so FORCE_COLOR styles them (hint and carets).
-    monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("FORCE_COLOR", "1")
     out, _ = _run(shell)
     assert "\x1b[1mhint:\x1b[0m use NaN to leave a gap in the line." in out
     assert "\x1b[1;31m^^^^^^^^^^^^^^^^^^^\x1b[0m" in out
 
 
+@pytest.mark.parametrize("no_color", [True, False])
 def test_no_escape_codes_without_force_color(
-    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, no_color: bool
 ) -> None:
-    monkeypatch.delenv("FORCE_COLOR", raising=False)
-    monkeypatch.delenv("PYTHON_COLORS", raising=False)
-    monkeypatch.setenv("NO_COLOR", "1")
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "1")
     out, err = _run(shell)
     assert ESCAPE not in out + err

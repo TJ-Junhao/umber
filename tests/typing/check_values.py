@@ -38,6 +38,7 @@ cats.bar([1, 2], [3, 5])  # type: ignore[list-item]  # pyright: ignore[reportArg
 ax.line([1, 2], 3.0)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 ax.hist(3.0)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
-# A plain ``str`` is a ``Sequence[str]``, so ``BarSeries("a", "abc")`` is not an error for the
-# type checkers. It is rejected at runtime with a ``TypeError`` (see ``test_bars.py``).
+# A plain ``str`` is not accepted as ``heights``: ``str`` is a ``Sequence[str]``, not a
+# ``Sequence[float]``, so both checkers reject it (and it fails at runtime with a ``TypeError``,
+# see ``test_bars.py``).
 ub.BarSeries("a", "abc")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
