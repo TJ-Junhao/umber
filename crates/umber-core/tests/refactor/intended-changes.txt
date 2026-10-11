@@ -1,1 +1,2 @@
-# Cases whose committed outputs change on purpose in this change; none.
+fig-graphite-line-scatter
+fig-scatter-markers

@@ -10,10 +10,17 @@
 //! A plain entry is its swatch and its label. A chip is a pill as tall as the row, holding a dot
 //! and the label inside a horizontal padding. Both styles wrap the same way: an entry box is
 //! the swatch, the label and the padding around them, and only the gap between boxes differs.
+//!
+//! Direct labels sit right of the point each labels, its anchor, after the end dot drawn there.
+//! The plot area gives up room on its right for them (see [`DirectLabels::reserve`]), and
+//! labels that would come too close vertically are moved apart (see [`super::nudge`]). Their
+//! anchors move with the axes, so they are placed in every layout pass.
 
+use super::nudge::separate;
 use super::{Area, BODY_LINE, Label, PADDING, Styles, baseline_in_line, measure, metrics};
 use crate::legend::{Legend, RowStyle, Swatch};
-use crate::{FontLibrary, Rgba, Theme};
+use crate::resolve::{Anchor, AnchorX, AxisScale, NormalizedPos, Resolved, ResolvedAxis};
+use crate::{FontLibrary, Rgba, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
 const SWATCH_GAP: f64 = 4.0;
@@ -35,6 +42,11 @@ pub(super) const ROW_TOP_GAP: f64 = 6.0;
 const LINE_SWATCH_LENGTH: f64 = 10.0;
 /// The side of a square swatch, as a share of the label size.
 const SQUARE_SWATCH_SIDE: f64 = 0.8;
+/// The gap between a line's end dot and its direct label.
+const DIRECT_GAP: f64 = 6.0;
+/// The smallest distance between the centers of two direct labels, as a multiple of the label
+/// size.
+const DIRECT_SPACING: f64 = 1.2;
 /// The top of row `row` (counted from 0) of rows `row_height` tall, relative to the first
 /// row's top.
 fn row_top(row: usize, row_height: f64) -> f64 {
@@ -98,7 +110,7 @@ impl LegendRow {
     ///
     /// Rows are 4 pt apart in both styles, and swatches and labels are centered in them.
     pub fn measure(width: f64, theme: &Theme, legend: &Legend, lib: &FontLibrary) -> LegendRow {
-        if legend.is_empty() {
+        if legend.row().is_empty() {
             return LegendRow::default();
         }
         let style = Styles::new(theme).body;
@@ -209,6 +221,206 @@ impl LegendRow {
     }
 }
 
+/// The legend of one axes measured for one canvas width: its row and its direct labels. It is
+/// measured once, and each layout pass places it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MeasuredLegend<'a> {
+    /// The legend row, with its first row's top at 0.
+    pub row: LegendRow,
+    /// The direct labels, not yet placed.
+    pub direct: DirectLabels<'a>,
+}
+
+impl<'a> MeasuredLegend<'a> {
+    /// The row and the direct labels of `legend`, measured for a `width` pt canvas; see
+    /// [`LegendRow::measure`] and [`DirectLabels::measure`].
+    pub fn measure(
+        width: f64,
+        theme: &Theme,
+        legend: &Legend<'a>,
+        lib: &FontLibrary,
+    ) -> MeasuredLegend<'a> {
+        if legend.is_empty() {
+            return MeasuredLegend::default();
+        }
+        MeasuredLegend {
+            row: LegendRow::measure(width, theme, legend, lib),
+            direct: DirectLabels::measure(theme, legend, lib),
+        }
+    }
+}
+
+/// One direct label, measured: its text, its line color and its anchor.
+#[derive(Debug, Clone)]
+struct MeasuredDirect<'a> {
+    label: Label,
+    color: Rgba,
+    anchor: Anchor<'a>,
+}
+
+/// The direct labels of a legend, measured but not placed, in series order, with the sizes
+/// that placing them needs. Empty when the legend has no direct labels.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DirectLabels<'a> {
+    entries: Vec<MeasuredDirect<'a>>,
+    /// The label size.
+    size: f64,
+    /// The ascent of the label style's primary font.
+    ascent: f64,
+    /// The descent of the label style's primary font.
+    descent: f64,
+    /// The diameter of the end dots: the drawn marker diameter.
+    dot: f64,
+}
+
+impl<'a> DirectLabels<'a> {
+    /// The direct labels of `legend`, measured in the body font at `SemiBold` weight and the
+    /// body size, with end dots of the drawn marker diameter.
+    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &FontLibrary) -> DirectLabels<'a> {
+        if legend.direct().is_empty() {
+            return DirectLabels::default();
+        }
+        let style = TextStyle {
+            weight: Weight::SemiBold,
+            ..Styles::new(theme).body
+        };
+        let (ascent, descent) = metrics(lib, &style);
+        let entries = legend
+            .direct()
+            .iter()
+            .map(|entry| MeasuredDirect {
+                label: measure(lib, entry.label(), style),
+                color: entry.color(),
+                anchor: entry.anchor(),
+            })
+            .collect();
+        DirectLabels {
+            entries,
+            size: f64::from(style.size),
+            ascent,
+            descent,
+            dot: f64::from(theme.drawn_marker_size()),
+        }
+    }
+
+    /// The room the labels need right of the plot area, for a label whose anchor is on the
+    /// plot's right edge: half the end dot, the 6 pt gap and the widest label, but at most
+    /// `cap`. 0 without labels. A label wider than the room it gets is clipped by the canvas.
+    pub(super) fn reserve(&self, cap: f64) -> f64 {
+        let widest = self
+            .entries
+            .iter()
+            .map(|e| e.label.width())
+            .reduce(f64::max);
+        widest.map_or(0.0, |w| (self.dot / 2.0 + DIRECT_GAP + w).min(cap))
+    }
+
+    /// The labels placed for the axes `resolved` on the plot area `plot` of a canvas
+    /// `canvas_height` pt tall, in series order.
+    ///
+    /// Each anchor is placed on the plot, its x clamped to the plot's horizontal range. Its end
+    /// dot is centered on it when it lies inside the plot's vertical range; a dot outside would
+    /// mark a point the plot does not show, so there is none. The label starts half a dot and
+    /// 6 pt right of the anchor, and is vertically centered on the anchor's y, clamped to the
+    /// plot's vertical range and then moved apart from its neighbours by [`separate`], so that
+    /// label centers are at least `1.2 ×` the label size apart. Labels that would not fit
+    /// between the plot's top and bottom are stacked around their mean target instead; a label
+    /// whose line of text then lies wholly off the canvas is left out, and its dot is kept. An
+    /// entry with neither a dot nor a label is left out.
+    pub(super) fn placed(
+        &self,
+        resolved: &Resolved,
+        plot: Area,
+        canvas_height: f64,
+    ) -> Vec<DirectLabel> {
+        // Only an anchor that the axes cannot place (impossible after resolve) has a NaN
+        // position; its label is left out.
+        let anchors: Vec<(&MeasuredDirect<'a>, f64, f64)> = self
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let x = x_position(&resolved.x, entry.anchor.x);
+                let y = y_position(&resolved.y, entry.anchor.y);
+                (!x.is_nan() && !y.is_nan()).then_some((entry, x.clamp(0.0, 1.0), y))
+            })
+            .collect();
+        let at = |y: f64| plot.y_at(NormalizedPos::new(y.clamp(0.0, 1.0)));
+        let targets: Vec<f64> = anchors.iter().map(|&(_, _, y)| at(y)).collect();
+        let min_gap = DIRECT_SPACING * self.size;
+        let centers = separate(&targets, min_gap, plot.y, plot.bottom());
+        let line = BODY_LINE * self.size;
+        anchors
+            .into_iter()
+            .zip(centers)
+            .filter_map(|((entry, x, y), center)| {
+                let anchor_x = plot.x_at(NormalizedPos::new(x));
+                let on_canvas = center + line / 2.0 > 0.0 && center - line / 2.0 < canvas_height;
+                let label = on_canvas.then(|| {
+                    let mut label = entry.label.clone();
+                    label.x = anchor_x + self.dot / 2.0 + DIRECT_GAP;
+                    label.y =
+                        baseline_in_line(center - line / 2.0, line, self.ascent, self.descent);
+                    label
+                });
+                let dot = (0.0..=1.0).contains(&y).then(|| EndDot {
+                    x: anchor_x,
+                    y: at(y),
+                    diameter: self.dot,
+                });
+                (label.is_some() || dot.is_some()).then_some(DirectLabel {
+                    label,
+                    color: entry.color,
+                    dot,
+                })
+            })
+            .collect()
+    }
+}
+
+/// The normalized x position of an anchor at `x` on `axis`; NaN when the axis cannot place it.
+fn x_position(axis: &ResolvedAxis, x: AnchorX<'_>) -> f64 {
+    match (&axis.scale, x) {
+        (AxisScale::Continuous(scale), AnchorX::Number(v)) => scale.normalize(v),
+        (AxisScale::Category(scale), AnchorX::Category(name)) => {
+            scale.index_of(name).map_or(f64::NAN, |i| scale.center(i))
+        }
+        (AxisScale::Continuous(_), AnchorX::Category(_))
+        | (AxisScale::Category(_), AnchorX::Number(_)) => f64::NAN,
+    }
+}
+
+/// The normalized y position of an anchor at `y` on `axis`; NaN when the axis cannot place it.
+fn y_position(axis: &ResolvedAxis, y: f64) -> f64 {
+    match &axis.scale {
+        AxisScale::Continuous(scale) => scale.normalize(y),
+        AxisScale::Category(_) => f64::NAN,
+    }
+}
+
+/// A direct label, placed: its label in its line color, and the end dot at its anchor. At
+/// least one of the two is present.
+#[derive(Debug, Clone)]
+pub(crate) struct DirectLabel {
+    /// The label, right of the anchor, vertically centered on its nudged position; `None` when
+    /// it would lie wholly off the canvas.
+    pub label: Option<Label>,
+    /// The line color, alpha included, for the label and the dot.
+    pub color: Rgba,
+    /// The end dot; `None` when the anchor lies above or below the plot area.
+    pub dot: Option<EndDot>,
+}
+
+/// A filled dot at the end of a directly labelled line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EndDot {
+    /// The center's x.
+    pub x: f64,
+    /// The center's y.
+    pub y: f64,
+    /// The diameter.
+    pub diameter: f64,
+}
+
 /// The horizontal inset of `entry`'s swatch from the left edge of its box, and the width of
 /// that box, in a row of `row_style` whose rows are `row_height` tall and whose boxes have
 /// `padding_x` at each end.
@@ -270,6 +482,7 @@ mod tests {
     use super::*;
     use crate::model::{AxisData, Figure, LineOptions};
     use crate::pipeline::plan_figure;
+    use crate::resolve::{AxisScale, ResolvedAxis};
     use crate::scene::Item;
     use crate::test_support::scene::assert_scene_bounded;
     use crate::{ScaleKind, Theme};
@@ -650,5 +863,294 @@ mod tests {
                 assert!(b.x < width && top < height, "{token}: {b:?}");
             }
         }
+    }
+
+    /// A 6 by 4 in figure in `theme` with a title, a subtitle and a y label, and one labelled
+    /// line per `(label, x, y)`.
+    fn line_figure(theme: Theme, lines: &[(&str, Vec<f64>, Vec<f64>)]) -> Figure {
+        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        axes.title("Station output")
+            .subtitle("Daily mean, MW")
+            .ylabel("MW");
+        for (label, x, y) in lines {
+            axes.line(
+                AxisData::Numbers(x.clone()),
+                y,
+                LineOptions {
+                    label: (*label).to_owned(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+        f
+    }
+
+    /// The label of `d`, which must have one.
+    fn text_of(d: &DirectLabel) -> &Label {
+        d.label.as_ref().expect("a label on the canvas")
+    }
+
+    /// The vertical center of the line of text whose baseline is `label.y`.
+    fn center_of(label: &Label) -> f64 {
+        let (ascent, descent) = (
+            f64::from(label.layout.ascent()),
+            f64::from(label.layout.descent()),
+        );
+        label.y - (ascent - descent) / 2.0
+    }
+
+    #[test]
+    fn direct_labels_sit_right_of_their_line_ends() {
+        let theme = Theme::graphite();
+        assert_eq!(theme.legend_style(), crate::LegendStyle::Direct);
+        let x = vec![0.0, 1.0, 2.0];
+        let f = line_figure(
+            theme.clone(),
+            &[
+                ("North", x.clone(), vec![1.0, 2.0, 9.0]),
+                ("South", x.clone(), vec![5.0, 4.0, 1.0]),
+                // Ends early, in the middle of the plot.
+                ("West", vec![0.0, 1.0], vec![5.0, 5.0]),
+            ],
+        );
+        let (resolved, layout) = plan_figure(&f, FontLibrary::global());
+        assert!(layout.legend.is_empty());
+        let direct = &layout.direct;
+        assert_eq!(direct.len(), 3);
+        let plot = layout.plot;
+        let size = f64::from(theme.body_size() * theme.font_scale());
+        let dot = f64::from(theme.drawn_marker_size());
+        let palette = theme.palette();
+        for (k, (label, (text, x, y))) in direct
+            .iter()
+            .zip([("North", 2.0, 9.0), ("South", 2.0, 1.0), ("West", 1.0, 5.0)])
+            .enumerate()
+        {
+            assert_eq!(text_of(label).text, text);
+            assert_eq!(label.color, palette[k]);
+            assert_eq!(text_of(label).style.weight, Weight::SemiBold);
+            assert_eq!(f64::from(text_of(label).style.size), size);
+            // The dot sits on the anchor, the label half a dot and 6 pt to its right, centered
+            // on it: these ends are far apart, so nothing is nudged.
+            let continuous = |axis: &ResolvedAxis, v: f64| match &axis.scale {
+                AxisScale::Continuous(scale) => scale.normalize(v),
+                AxisScale::Category(_) => panic!("a continuous axis"),
+            };
+            let anchor_x = plot.x_at(NormalizedPos::new(continuous(&resolved.x, x)));
+            let anchor_y = plot.y_at(NormalizedPos::new(continuous(&resolved.y, y)));
+            let end = label.dot.unwrap();
+            assert_eq!((end.x, end.y, end.diameter), (anchor_x, anchor_y, dot));
+            assert!((text_of(label).x - (anchor_x + dot / 2.0 + DIRECT_GAP)).abs() < 1e-9);
+            assert!((center_of(text_of(label)) - anchor_y).abs() < 1e-3);
+        }
+        // The plot gives up the room of the widest label on its right.
+        let widest = direct
+            .iter()
+            .map(|d| text_of(d).width())
+            .fold(0.0, f64::max);
+        let reserve = dot / 2.0 + DIRECT_GAP + widest;
+        assert!((plot.right() - (6.0 * 72.0 - PADDING - reserve)).abs() < 1e-9);
+        // The widest label of a line ending on the plot's right edge ends on the inner edge.
+        let end = direct[..2]
+            .iter()
+            .map(|d| text_of(d).x + text_of(d).width())
+            .fold(0.0, f64::max);
+        let widest_at_edge = direct[..2]
+            .iter()
+            .map(|d| text_of(d).width())
+            .fold(0.0, f64::max);
+        assert_eq!(widest_at_edge, widest);
+        assert!((end - (6.0 * 72.0 - PADDING)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn reservation_is_capped() {
+        let width = 6.0 * 72.0;
+        let cap = 0.25 * (width - 2.0 * PADDING);
+        let long: String = "Long direct label ".repeat(17).chars().take(300).collect();
+        let x = vec![0.0, 1.0];
+        let f = line_figure(
+            Theme::graphite(),
+            &[
+                (&long, x.clone(), vec![1.0, 2.0]),
+                ("Short", x, vec![2.0, 1.0]),
+            ],
+        );
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        assert!((layout.plot.right() - (width - PADDING - cap)).abs() < 1e-9);
+        // The long label runs past the canvas, which clips it.
+        let long = text_of(&layout.direct[0]);
+        assert!(long.x + long.width() > width);
+        assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+
+        // A reservation below the cap is the room the labels need, and none is made without
+        // direct labels.
+        let measured = |labels: &[&str]| {
+            let lines: Vec<(&str, Vec<f64>, Vec<f64>)> = labels
+                .iter()
+                .map(|&l| (l, vec![0.0, 1.0], vec![1.0, 2.0]))
+                .collect();
+            let f = line_figure(Theme::graphite(), &lines);
+            let axes = f.axes().unwrap();
+            let marks = crate::resolve::resolve_marks(axes.marks(), f.theme().palette());
+            let limits = crate::resolve::Limits::of(axes);
+            let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits.x);
+            DirectLabels::measure(f.theme(), &legend, FontLibrary::global()).reserve(cap)
+        };
+        let short = measured(&["Short"]);
+        assert!(short > DIRECT_GAP && short < cap);
+        assert_eq!(measured(&[""]), 0.0);
+        assert_eq!(measured(&[&"W".repeat(300)]), cap);
+    }
+
+    #[test]
+    fn crossing_lines_are_nudged_apart_in_order() {
+        let theme = Theme::graphite();
+        let size = f64::from(theme.body_size() * theme.font_scale());
+        let x = vec![0.0, 1.0];
+        // Three lines crossing into the same end point, and a fourth just above it.
+        let f = line_figure(
+            theme,
+            &[
+                ("A", x.clone(), vec![0.0, 5.0]),
+                ("B", x.clone(), vec![10.0, 5.0]),
+                ("C", x.clone(), vec![3.0, 5.0]),
+                ("D", x, vec![7.0, 5.1]),
+            ],
+        );
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let centers: Vec<f64> = layout
+            .direct
+            .iter()
+            .map(|d| center_of(text_of(d)))
+            .collect();
+        // Equal ends keep series order top down (y grows downwards); the higher end stays
+        // above them.
+        assert!(centers[3] < centers[0] && centers[0] < centers[1] && centers[1] < centers[2]);
+        let mut sorted = centers.clone();
+        sorted.sort_by(f64::total_cmp);
+        for pair in sorted.windows(2) {
+            assert!(pair[1] - pair[0] >= 1.2 * size - 1e-3, "{centers:?}");
+        }
+        for c in &centers {
+            assert!(*c >= layout.plot.y - 1e-9 && *c <= layout.plot.bottom() + 1e-9);
+        }
+        // Dots stay on the line ends; only labels move.
+        let dots: Vec<f64> = layout.direct.iter().map(|d| d.dot.unwrap().y).collect();
+        assert_eq!(dots[0], dots[1]);
+        assert_eq!(dots[1], dots[2]);
+    }
+
+    #[test]
+    fn anchors_outside_the_y_limits_get_no_dot() {
+        let x = vec![0.0, 1.0];
+        let mut f = line_figure(
+            Theme::graphite(),
+            &[
+                ("High", x.clone(), vec![0.5, 50.0]),
+                ("Low", x.clone(), vec![0.5, -50.0]),
+                ("Inside", x, vec![0.0, 0.5]),
+            ],
+        );
+        f.axes_mut().unwrap().ylim(0.0, 1.0).unwrap();
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let plot = layout.plot;
+        let [high, low, inside] = layout.direct.as_slice() else {
+            panic!("three direct labels");
+        };
+        assert!(high.dot.is_none() && low.dot.is_none());
+        assert!(inside.dot.is_some());
+        // Their labels are clamped to the plot's vertical range.
+        assert!((center_of(text_of(high)) - plot.y).abs() < 1e-3);
+        assert!((center_of(text_of(low)) - plot.bottom()).abs() < 1e-3);
+        assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+    }
+
+    #[test]
+    fn many_direct_labels_stay_bounded() {
+        for theme in [
+            Theme::graphite(),
+            Theme::graphite().with_font_scale(10.0).unwrap(),
+        ] {
+            for (w, h, n) in [(1.0, 1.0, 50), (6.0, 4.0, 400)] {
+                let mut f = Figure::new(w, h, theme.clone()).unwrap();
+                let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                axes.title("Crowded");
+                for k in 0..n {
+                    axes.line(
+                        AxisData::Numbers(vec![0.0, 1.0]),
+                        &[0.0, (k % 7) as f64],
+                        LineOptions {
+                            label: format!("Line {k}"),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                let layout = plan_figure(&f, FontLibrary::global()).1;
+                assert!(layout.plot.width >= 1.0 && layout.plot.height >= 1.0);
+                // Labels whose line of text is off the canvas are left out; every end dot stays.
+                assert_eq!(layout.direct.len(), n);
+                assert!(layout.direct.iter().all(|d| d.dot.is_some()));
+                for d in layout.direct.iter().filter_map(|d| d.label.as_ref()) {
+                    let c = center_of(d);
+                    assert!(c.is_finite() && c > -100.0 * 72.0 && c < 2.0 * h * 72.0 + 1e5);
+                }
+                assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+            }
+        }
+    }
+
+    #[test]
+    fn off_canvas_labels_keep_their_end_dots() {
+        // Thirty lines ending inside the plot need far more height than the plot has, so the
+        // stack of labels runs off the canvas at both ends.
+        let theme = Theme::graphite();
+        let size = f64::from(theme.body_size() * theme.font_scale());
+        let lines: Vec<(String, Vec<f64>, Vec<f64>)> = (0..30)
+            .map(|k| {
+                (
+                    format!("Series {k}"),
+                    vec![0.0, 1.0],
+                    vec![f64::from(k), 5.0],
+                )
+            })
+            .collect();
+        let refs: Vec<(&str, Vec<f64>, Vec<f64>)> = lines
+            .iter()
+            .map(|(l, x, y)| (l.as_str(), x.clone(), y.clone()))
+            .collect();
+        let f = line_figure(theme, &refs);
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let height = 4.0 * 72.0;
+        let direct = &layout.direct;
+        assert_eq!(direct.len(), 30);
+        // Some labels are left out ...
+        let shown = direct.iter().filter(|d| d.label.is_some()).count();
+        assert!(shown < 30, "{shown} labels shown");
+        // ... but every line ending inside the plot keeps its dot.
+        for d in direct {
+            let dot = d.dot.expect("the anchor is inside the plot");
+            assert!(dot.y >= layout.plot.y && dot.y <= layout.plot.bottom());
+            // A label is shown only when its line of text reaches onto the canvas.
+            if let Some(label) = &d.label {
+                let (c, half) = (center_of(label), BODY_LINE * size / 2.0);
+                assert!(c + half > 0.0 && c - half < height, "{c}");
+            }
+        }
+        // Drawing follows: one dot per line, one label per shown label.
+        let scene = f.to_scene(FontLibrary::global());
+        assert_scene_bounded(&scene);
+        let Some(Item::Group { items, .. }) = scene.items.get(2) else {
+            panic!("a legend group");
+        };
+        let dots = items
+            .iter()
+            .filter(|i| matches!(i, Item::Fill { .. }))
+            .count();
+        let texts = items.iter().filter(|i| matches!(i, Item::Text(_))).count();
+        assert_eq!((dots, texts), (30, shown));
     }
 }
