@@ -3,7 +3,7 @@
 use std::fmt;
 
 use super::axis_data::{AxisData, Series};
-use super::bar::BarMark;
+use super::bar::{BarGroupMark, BarMark};
 use crate::{ColorSpec, Dash, Marker};
 
 /// Options of a line mark.
@@ -73,10 +73,12 @@ impl Default for ScatterOptions {
 /// One series drawn in an [`Axes`](super::Axes).
 ///
 /// Marks are created by [`Axes::line`](super::Axes::line),
-/// [`Axes::scatter`](super::Axes::scatter) and [`Axes::bar`](super::Axes::bar), which validate
-/// the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`BarMark`]) that
-/// keeps the validated values together and exposes them read-only; it has no public
-/// constructor. Read a mark by matching on its variant.
+/// [`Axes::scatter`](super::Axes::scatter), [`Axes::bar`](super::Axes::bar),
+/// [`Axes::grouped_bar`](super::Axes::grouped_bar) and
+/// [`Axes::stacked_bar`](super::Axes::stacked_bar), which validate the data. Each variant holds
+/// a payload ([`LineMark`], [`ScatterMark`], [`BarMark`], [`BarGroupMark`]) that keeps the
+/// validated values together and exposes them read-only; it has no public constructor. Read a
+/// mark by matching on its variant.
 ///
 /// # Examples
 ///
@@ -121,7 +123,7 @@ impl Default for ScatterOptions {
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive] // further mark kinds, such as grouped bars and histograms, are added as variants
+#[non_exhaustive] // further mark kinds, such as histograms, are added as variants
 pub enum Mark {
     /// A polyline through the points; NaN breaks it.
     Line(LineMark),
@@ -129,6 +131,12 @@ pub enum Mark {
     Scatter(ScatterMark),
     /// One bar per category, from the baseline to its height; NaN draws no bar.
     Bar(BarMark),
+    /// One bar per series in each category, side by side within the category's band; NaN draws
+    /// no bar.
+    GroupedBar(BarGroupMark),
+    /// One stack per category, its series stacked in order, positive heights upward and
+    /// negative ones downward from the baseline; NaN and 0 add no segment.
+    StackedBar(BarGroupMark),
 }
 
 impl Mark {
@@ -140,15 +148,6 @@ impl Mark {
     /// Markers at the points of a validated series.
     pub(super) fn scatter(series: Series, options: ScatterOptions) -> Mark {
         Mark::Scatter(ScatterMark { series, options })
-    }
-
-    /// The color as given, before it is resolved against a palette.
-    pub(crate) fn color(&self) -> ColorSpec {
-        match self {
-            Mark::Line(line) => line.options.color,
-            Mark::Scatter(scatter) => scatter.options.color,
-            Mark::Bar(bar) => bar.options().color,
-        }
     }
 }
 

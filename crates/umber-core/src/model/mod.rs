@@ -16,7 +16,7 @@ mod validation;
 
 pub use axes::Axes;
 pub use axis_data::AxisData;
-pub use bar::{BarMark, BarOptions};
+pub use bar::{BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView};
 pub use figure::Figure;
 pub use mark::{LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 
@@ -538,6 +538,234 @@ mod tests {
         assert!(bars(a, &["a"], &[]).is_err());
         assert!(bars(a, &["a", "a"], &[1.0, 1.0]).is_err());
         assert!(bars(a, &["b"], &[f64::INFINITY]).is_err());
+        assert_eq!(f, before);
+    }
+
+    fn series(heights: &[f64]) -> BarSeries {
+        BarSeries {
+            heights: heights.to_vec(),
+            ..BarSeries::default()
+        }
+    }
+
+    fn grouped(a: &mut Axes, categories: &[&str], heights: &[&[f64]]) -> Result<()> {
+        let list = heights.iter().map(|h| series(h)).collect();
+        a.grouped_bar(names(categories), list).map(|_| ())
+    }
+
+    fn stacked(a: &mut Axes, categories: &[&str], heights: &[&[f64]]) -> Result<()> {
+        let list = heights.iter().map(|h| series(h)).collect();
+        a.stacked_bar(names(categories), list).map(|_| ())
+    }
+
+    const GROUPED: &str = "Axes.grouped_bar()";
+    const STACKED: &str = "Axes.stacked_bar()";
+
+    #[test]
+    fn an_empty_series_list_is_a_data_error() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        // Before anything else, even with no categories.
+        assert_data(
+            grouped(a, &["a", "a"], &[]),
+            GROUPED,
+            "series is empty; pass at least one series.",
+        );
+        assert_data(stacked(a, &[], &[]), STACKED, "series is empty");
+        assert!(a.marks().is_empty());
+    }
+
+    #[test]
+    fn a_series_length_mismatch_names_the_series() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        for (context, call) in [
+            (
+                GROUPED,
+                grouped as fn(&mut Axes, &[&str], &[&[f64]]) -> Result<()>,
+            ),
+            (STACKED, stacked),
+        ] {
+            assert_data(
+                call(
+                    a,
+                    &["a", "b"],
+                    &[&[1.0, 2.0], &[1.0, 2.0], &[f64::INFINITY]],
+                ),
+                context,
+                "categories has 2 values but series[2].heights has 1; each series must have one height per category.",
+            );
+            // The first mismatched series, before duplicates and bad heights.
+            assert_data(
+                call(a, &["a", "a"], &[&[f64::INFINITY], &[1.0, 2.0, 3.0]]),
+                context,
+                "series[0].heights has 1",
+            );
+        }
+        assert!(a.marks().is_empty());
+    }
+
+    #[test]
+    fn grouped_and_stacked_checks_run_in_order() {
+        for (context, call) in [
+            (
+                GROUPED,
+                grouped as fn(&mut Axes, &[&str], &[&[f64]]) -> Result<()>,
+            ),
+            (STACKED, stacked),
+        ] {
+            // The x axis kind before duplicates.
+            let mut f = figure();
+            let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+            assert_data(
+                call(a, &["a", "a"], &[&[1.0, 2.0]]),
+                context,
+                "categories holds names but the x axis is not a category axis; use a category x axis.",
+            );
+
+            let mut f = figure();
+            let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+            // Duplicates before heights.
+            assert_data(
+                call(a, &["a", "b", "a"], &[&[f64::INFINITY; 3]]),
+                context,
+                "categories[2] repeats \"a\" from categories[0]; each category must appear once.",
+            );
+            // Heights in series order; the message names the series and the height.
+            assert_data(
+                call(
+                    a,
+                    &["a", "b"],
+                    &[&[1.0, f64::NAN], &[2.0, 1e301], &[f64::INFINITY, 0.0]],
+                ),
+                context,
+                "series[1].heights[1] is 1e301; magnitudes must not exceed 1e300.",
+            );
+            assert!(a.marks().is_empty());
+
+            // Heights before the y axis kind.
+            let mut f = figure();
+            let a = f
+                .add_axes(ScaleKind::Category, ScaleKind::Category)
+                .unwrap();
+            assert_data(
+                call(a, &["a"], &[&[f64::NEG_INFINITY]]),
+                context,
+                "series[0].heights[0] is -inf",
+            );
+            assert_data(
+                call(a, &["a"], &[&[1.0]]),
+                context,
+                "the series hold numbers but the y axis is a category axis; use a linear or log y axis.",
+            );
+            assert!(a.marks().is_empty());
+
+            // A log y axis needs positive heights.
+            let mut f = figure();
+            let a = f.add_axes(ScaleKind::Category, log_kind()).unwrap();
+            assert_data(
+                call(a, &["a", "b"], &[&[1.0, 2.0], &[3.0, -1.0]]),
+                context,
+                "series[1].heights[1] is -1 on a log axis; values must be positive.",
+            );
+            call(a, &["a", "b"], &[&[1.0, f64::NAN], &[1e300, 2.0]]).unwrap();
+            assert_eq!(a.marks().len(), 1);
+        }
+    }
+
+    #[test]
+    fn stacked_total_beyond_limit_is_a_data_error() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        // Totals at the bound are fine, on both sides.
+        stacked(
+            a,
+            &["a", "b"],
+            &[&[6e299, -6e299], &[f64::NAN, -4e299], &[4e299, 0.0]],
+        )
+        .unwrap();
+        // The positive side of the second category.
+        assert_data(
+            stacked(a, &["a", "b"], &[&[1.0, 6e299], &[-1e300, 5e299]]),
+            STACKED,
+            "the heights of categories[1] (\"b\") stack to 1.1e300; each stack must stay within 1e300 on both sides of 0.",
+        );
+        // The negative side; a positive height does not offset it.
+        assert_data(
+            stacked(a, &["a"], &[&[-1e300], &[5.0], &[-1e300]]),
+            STACKED,
+            "the heights of categories[0] (\"a\") stack to -2e300",
+        );
+        // Totals are checked before the y axis kind.
+        let mut g = figure();
+        let b = g
+            .add_axes(ScaleKind::Category, ScaleKind::Category)
+            .unwrap();
+        assert_data(
+            stacked(b, &["a"], &[&[1e300], &[1e300]]),
+            STACKED,
+            "stack to 2e300",
+        );
+        // Grouped bars do not add up, so they have no such limit.
+        let mut h = figure();
+        let c = h.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        grouped(c, &["a"], &[&[1e300], &[1e300]]).unwrap();
+        assert_eq!(a.marks().len(), 1);
+        assert_eq!(c.marks().len(), 1);
+    }
+
+    #[test]
+    fn bar_groups_store_their_input_and_share_it_with_clones() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let fixed = crate::ColorSpec::Fixed(crate::Rgba::opaque(1, 2, 3));
+        let gap = f64::from_bits(0xfff8_0000_0000_0001);
+        let input = vec![
+            BarSeries {
+                label: "first".into(),
+                heights: vec![-0.0, gap],
+                color: fixed,
+            },
+            series(&[2.0, -1.0]),
+        ];
+        a.grouped_bar(names(&["b", "a"]), input.clone())
+            .unwrap()
+            .stacked_bar(names(&["c"]), vec![series(&[1.0])])
+            .unwrap();
+        let copy = f.clone();
+        let (
+            Some([Mark::GroupedBar(group), Mark::StackedBar(stack)]),
+            Some([Mark::GroupedBar(cloned), _]),
+        ) = (f.axes().map(Axes::marks), copy.axes().map(Axes::marks))
+        else {
+            panic!("expected a grouped and a stacked mark");
+        };
+        assert_eq!(group.categories(), names(&["b", "a"]));
+        assert_eq!(group.series().len(), 2);
+        let bits = |v: &[f64]| v.iter().map(|h| h.to_bits()).collect::<Vec<_>>();
+        for (view, given) in group.series().zip(&input) {
+            assert_eq!(view.label(), given.label);
+            assert_eq!(bits(view.heights()), bits(&given.heights));
+            assert_eq!(view.color(), given.color);
+        }
+        assert_eq!(stack.categories(), names(&["c"]));
+        assert!(group.shares_data_with(cloned));
+    }
+
+    #[test]
+    fn failed_bar_group_calls_change_nothing() {
+        let mut f = figure();
+        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .grouped_bar(names(&["a"]), vec![series(&[1.0])])
+            .unwrap();
+        let before = f.clone();
+        let a = f.axes_mut().unwrap();
+        assert!(grouped(a, &["a"], &[]).is_err());
+        assert!(grouped(a, &["a"], &[&[1.0], &[]]).is_err());
+        assert!(stacked(a, &["a", "a"], &[&[1.0, 1.0]]).is_err());
+        assert!(stacked(a, &["a"], &[&[1e300], &[1e300]]).is_err());
+        assert!(grouped(a, &["b"], &[&[f64::INFINITY]]).is_err());
         assert_eq!(f, before);
     }
 }
