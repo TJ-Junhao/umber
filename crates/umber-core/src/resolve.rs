@@ -474,8 +474,9 @@ impl<'a> ResolvedMark<'a> {
         }
     }
 
-    /// The series the mark shows, in order, one key each: what a legend lists for the mark.
-    pub fn keys(&self) -> Vec<SeriesKey<'a>> {
+    /// The series the mark shows, in order, one key each: what a legend lists for the mark, on
+    /// an axes whose x axis has the limits `x`.
+    pub fn keys(&self, x: &AxisLimits) -> Vec<SeriesKey<'a>> {
         match self {
             &ResolvedMark::Line { mark, color } => {
                 let options = mark.options();
@@ -483,6 +484,7 @@ impl<'a> ResolvedMark<'a> {
                     label: &options.label,
                     color,
                     kind: SeriesKind::Line { dash: options.dash },
+                    anchor: Anchor::of_line(mark, x),
                 }]
             }
             &ResolvedMark::Scatter { mark, color } => {
@@ -493,12 +495,14 @@ impl<'a> ResolvedMark<'a> {
                     kind: SeriesKind::Points {
                         marker: options.marker,
                     },
+                    anchor: None,
                 }]
             }
             &ResolvedMark::Bar { mark, color } => vec![SeriesKey {
                 label: &mark.options().label,
                 color,
                 kind: SeriesKind::Bar,
+                anchor: None,
             }],
             ResolvedMark::Grouped { series, .. } | ResolvedMark::Stacked { series, .. } => series
                 .iter()
@@ -506,12 +510,14 @@ impl<'a> ResolvedMark<'a> {
                     label: view.label(),
                     color,
                     kind: SeriesKind::Bar,
+                    anchor: None,
                 })
                 .collect(),
             &ResolvedMark::Hist { mark, color, .. } => vec![SeriesKey {
                 label: mark.label(),
                 color,
                 kind: SeriesKind::Bar,
+                anchor: None,
             }],
         }
     }
@@ -533,7 +539,8 @@ fn category_names(data: &AxisData) -> &[String] {
     }
 }
 
-/// One series as a legend shows it: its label, its resolved color and how it is drawn.
+/// One series as a legend shows it: its label, its resolved color, how it is drawn, and the
+/// point a direct label would be attached to.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SeriesKey<'a> {
     /// The label; empty for an unlabelled series.
@@ -542,6 +549,71 @@ pub(crate) struct SeriesKey<'a> {
     pub color: Rgba,
     /// How the series is drawn.
     pub kind: SeriesKind,
+    /// The anchor of a line series; `None` for a line without one and for every other series.
+    pub anchor: Option<Anchor<'a>>,
+}
+
+/// The x value of a line's point, as the line holds it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum AnchorX<'a> {
+    /// A number on a linear or log axis; finite.
+    Number(f64),
+    /// A category name.
+    Category(&'a str),
+}
+
+/// The point of a line that its direct label is attached to: the last point whose x and y are
+/// finite and whose x lies inside the x domain.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Anchor<'a> {
+    /// The x value.
+    pub x: AnchorX<'a>,
+    /// The y value; finite.
+    pub y: f64,
+}
+
+impl<'a> Anchor<'a> {
+    /// The anchor of `line` on an x axis with the limits `x`: its last point, in data order,
+    /// with finite x and y whose x lies inside the x domain (both ends included). `None` when
+    /// the line has no such point.
+    ///
+    /// Only explicit limits can leave a finite point outside the x domain: auto limits always
+    /// contain every finite x value, and a category axis holds every category of its marks. So
+    /// the limits decide the anchor before any layout pass, and it is the same in all of them.
+    fn of_line(line: &'a LineMark, x: &AxisLimits) -> Option<Anchor<'a>> {
+        let range = match x {
+            AxisLimits::Continuous {
+                explicit: Some(scale),
+                ..
+            } => Some(scale.domain()),
+            AxisLimits::Continuous { explicit: None, .. } | AxisLimits::Category => None,
+        };
+        let y = line.y();
+        match line.x() {
+            AxisData::Numbers(xs) => xs
+                .iter()
+                .zip(y)
+                .rev()
+                .find(|&(&x, &y)| {
+                    x.is_finite()
+                        && y.is_finite()
+                        && range.is_none_or(|(lo, hi)| lo <= x && x <= hi)
+                })
+                .map(|(&x, &y)| Anchor {
+                    x: AnchorX::Number(x),
+                    y,
+                }),
+            AxisData::Categories(names) => names
+                .iter()
+                .zip(y)
+                .rev()
+                .find(|&(_, &y)| y.is_finite())
+                .map(|(name, &y)| Anchor {
+                    x: AnchorX::Category(name),
+                    y,
+                }),
+        }
+    }
 }
 
 /// How a series is drawn, as far as its legend swatch needs to know.
@@ -641,13 +713,18 @@ mod tests {
         figure.axes_mut().unwrap()
     }
 
-    /// The resolved color of every series of `resolved`, in order.
+    /// The resolved color of every series of `resolved`, in order. Colors do not depend on the
+    /// axis limits.
     fn series_colors(resolved: &[ResolvedMark<'_>]) -> Vec<Rgba> {
-        resolved
+        series_keys(resolved, &AxisLimits::Category)
             .iter()
-            .flat_map(ResolvedMark::keys)
             .map(|key| key.color)
             .collect()
+    }
+
+    /// The key of every series of `resolved`, in order, on an x axis with the limits `x`.
+    fn series_keys<'a>(resolved: &[ResolvedMark<'a>], x: &AxisLimits) -> Vec<SeriesKey<'a>> {
+        resolved.iter().flat_map(|mark| mark.keys(x)).collect()
     }
 
     /// Both axes of `axes`, resolved from its marks.
@@ -993,7 +1070,7 @@ mod tests {
             )
             .unwrap();
         let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
-        let keys: Vec<SeriesKey<'_>> = resolved.iter().flat_map(ResolvedMark::keys).collect();
+        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()).x);
         assert_eq!(
             keys,
             [
@@ -1001,6 +1078,10 @@ mod tests {
                     label: "trend",
                     color: palette[0],
                     kind: SeriesKind::Line { dash: Dash::Dashed },
+                    anchor: Some(Anchor {
+                        x: AnchorX::Number(0.0),
+                        y: 1.0,
+                    }),
                 },
                 SeriesKey {
                     label: "",
@@ -1008,6 +1089,7 @@ mod tests {
                     kind: SeriesKind::Points {
                         marker: Marker::Square,
                     },
+                    anchor: None,
                 },
             ]
         );
@@ -1304,13 +1386,14 @@ mod tests {
             colors,
             [palette[0], palette[1], fixed, palette[6], palette[2]]
         );
-        let keys: Vec<SeriesKey<'_>> = resolved.iter().flat_map(ResolvedMark::keys).collect();
+        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()).x);
         assert_eq!(
             keys[1],
             SeriesKey {
                 label: "first",
                 color: palette[1],
                 kind: SeriesKind::Bar,
+                anchor: None,
             }
         );
         assert_eq!(keys[4].label, "last");
@@ -1461,7 +1544,7 @@ mod tests {
             ]
         );
         // Every grouped or stacked series is a legend key of its own, drawn as a bar.
-        let keys: Vec<SeriesKey<'_>> = resolved.iter().flat_map(ResolvedMark::keys).collect();
+        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()).x);
         assert_eq!(keys.len(), 9);
         assert!(keys[1..5].iter().all(|key| key.kind == SeriesKind::Bar));
     }
@@ -1594,12 +1677,90 @@ mod tests {
         };
         assert_eq!(histogram.counts(), &[1, 3]);
         assert_eq!(
-            resolved[1].keys(),
+            resolved[1].keys(&Limits::of(f.axes().unwrap()).x),
             [SeriesKey {
                 label: "sizes",
                 color: palette[1],
                 kind: SeriesKind::Bar,
+                anchor: None,
             }]
         );
+    }
+
+    #[test]
+    fn anchor_is_last_visible_finite_point() {
+        let nan = f64::NAN;
+        let check = |x: AxisData, y: &[f64], xlim: Option<(f64, f64)>, expected| {
+            let kind = match x {
+                AxisData::Numbers(_) => LIN,
+                AxisData::Categories(_) => ScaleKind::Category,
+            };
+            let mut f = figure(kind, LIN);
+            let options = LineOptions {
+                label: "Line".to_owned(),
+                ..LineOptions::default()
+            };
+            axes(&mut f).line(x, y, options).unwrap();
+            if let Some((lo, hi)) = xlim {
+                axes(&mut f).xlim(lo, hi).unwrap();
+            }
+            let axes = f.axes().unwrap();
+            let resolved = resolve_marks(axes.marks(), &[]);
+            let keys = series_keys(&resolved, &Limits::of(axes).x);
+            let expected: Option<Anchor<'static>> = expected;
+            assert_eq!(keys[0].anchor, expected);
+        };
+        let at = |x: f64, y: f64| {
+            Some(Anchor {
+                x: AnchorX::Number(x),
+                y,
+            })
+        };
+        // The last point.
+        check(nums(&[0.0, 1.0, 2.0]), &[5.0, 6.0, 7.0], None, at(2.0, 7.0));
+        // A NaN tail in y, and a NaN x, are skipped.
+        let (x, y) = (nums(&[0.0, 1.0, 2.0, nan]), [5.0, 6.0, nan, 8.0]);
+        check(x, &y, None, at(1.0, 6.0));
+        // Unsorted x: the last point in data order, not the largest x.
+        check(nums(&[3.0, 1.0]), &[5.0, 6.0], None, at(1.0, 6.0));
+        // Explicit limits cut the end: the last point inside them, ends included.
+        let (x, y) = (nums(&[0.0, 1.0, 2.0, 3.0]), [5.0, 6.0, 7.0, 8.0]);
+        check(x.clone(), &y, Some((0.0, 2.0)), at(2.0, 7.0));
+        check(x.clone(), &y, Some((0.5, 1.5)), at(1.0, 6.0));
+        // No point to label: all NaN, no finite x, or wholly outside the limits.
+        check(x, &y, Some((5.0, 6.0)), None);
+        check(nums(&[0.0, 1.0]), &[nan, nan], None, None);
+        check(nums(&[nan, nan]), &[1.0, 2.0], None, None);
+        // A category line: the last category with a finite y.
+        let feb = Anchor {
+            x: AnchorX::Category("Feb"),
+            y: 2.0,
+        };
+        check(
+            cats(&["Jan", "Feb", "Mar"]),
+            &[1.0, 2.0, nan],
+            None,
+            Some(feb),
+        );
+    }
+
+    #[test]
+    fn only_line_keys_carry_an_anchor() {
+        let mut f = figure(LIN, LIN);
+        let x = || nums(&[0.0, 1.0]);
+        axes(&mut f)
+            .line(x(), &[1.0, 2.0], LineOptions::default())
+            .unwrap()
+            .scatter(x(), &[1.0, 2.0], ScatterOptions::default())
+            .unwrap()
+            .hist(&[1.0, 2.0], HistOptions::default())
+            .unwrap();
+        let axes = f.axes().unwrap();
+        let resolved = resolve_marks(axes.marks(), &[]);
+        let anchors: Vec<bool> = series_keys(&resolved, &Limits::of(axes).x)
+            .iter()
+            .map(|key| key.anchor.is_some())
+            .collect();
+        assert_eq!(anchors, [true, false, false]);
     }
 }

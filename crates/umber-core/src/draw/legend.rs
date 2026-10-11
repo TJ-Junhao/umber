@@ -1,14 +1,15 @@
 //! Legend drawing: swatches, chips, labels and the end dots of direct labels.
 //!
-//! Everything the legend draws is one unclipped group: the legend sits outside the plot area,
-//! in the header.
+//! Everything the legend draws is one unclipped group: the legend row sits in the header, and
+//! direct labels sit right of the ends of their lines, mostly outside the plot area, so neither
+//! is cut by the plot clip.
 
 use super::bar_shape::rounded_rect;
 use super::chrome::{segment, text};
 use super::line::line_style;
 use super::mapping::point;
 use super::marker::{marker_shape, polygon};
-use crate::layout::{Area, Layout, RowEntry};
+use crate::layout::{Area, EndDot, Layout, RowEntry};
 use crate::legend::Swatch;
 use crate::scene::{FillRule, Item, LineCap, Paint};
 use crate::{Marker, Rgba, Theme};
@@ -17,14 +18,15 @@ use crate::{Marker, Rgba, Theme};
 const CHIP_TINT: f32 = 0.14;
 
 /// The legend of `layout` as one unclipped group: for each row entry in order, its chip when it
-/// has one, its swatch, and then its label in the theme's text color. `None` when the legend has
-/// no entries, so a figure without a legend gets no group.
+/// has one, its swatch, and then its label in the theme's text color; then for each direct
+/// label in order, its end dot and its label when it has them, both in the line color. `None`
+/// when the legend has neither, so a figure without a legend gets no group.
 pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
-    let entries = layout.legend.entries();
-    if entries.is_empty() {
+    let (entries, direct) = (layout.legend.entries(), &layout.direct);
+    if entries.is_empty() && direct.is_empty() {
         return None;
     }
-    let mut items = Vec::with_capacity(3 * entries.len());
+    let mut items = Vec::with_capacity(3 * entries.len() + 2 * direct.len());
     for entry in entries {
         if let Some(pill) = entry.chip {
             items.push(chip(pill, entry.swatch.color));
@@ -32,7 +34,26 @@ pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
         items.push(swatch(theme, entry));
         items.push(text(&entry.label, theme.text_color()));
     }
+    for label in direct {
+        items.extend(label.dot.map(|d| end_dot(d, label.color)));
+        items.extend(label.label.as_ref().map(|l| text(l, label.color)));
+    }
     Some(Item::Group { clip: None, items })
+}
+
+/// The end dot `d` of a directly labelled line: a filled circle in the line `color`.
+fn end_dot(d: EndDot, color: Rgba) -> Item {
+    dot(d.x, d.y, d.diameter, color)
+}
+
+/// A filled circle of `diameter` centered on `(x, y)`, in `color`.
+fn dot(x: f64, y: f64, diameter: f64, color: Rgba) -> Item {
+    let center = point(x, y);
+    Item::Fill {
+        path: marker_shape(Marker::Circle, diameter as f32).translated(center.x, center.y),
+        paint: Paint::Solid(color),
+        rule: FillRule::NonZero,
+    }
 }
 
 /// The pill of a chip, filling the box `pill`: a rounded rectangle whose radius is half its height,
@@ -73,14 +94,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 style,
             }
         }
-        Swatch::Dot => {
-            let center = point(b.x + b.width / 2.0, b.center_y);
-            Item::Fill {
-                path: marker_shape(Marker::Circle, b.width as f32).translated(center.x, center.y),
-                paint: Paint::Solid(b.color),
-                rule: FillRule::NonZero,
-            }
-        }
+        Swatch::Dot => dot(b.x + b.width / 2.0, b.center_y, b.width, b.color),
         Swatch::Square => {
             let (top_left, bottom_right) = (
                 point(b.x, b.center_y - b.height / 2.0),
@@ -344,5 +358,61 @@ mod tests {
             .unwrap();
         let (theme, layout) = layout(theme);
         assert!(legend(&theme, &layout).is_none());
+    }
+
+    #[test]
+    fn each_direct_label_draws_its_dot_then_its_label_in_the_line_color() {
+        // Graphite labels lines directly; the scatter falls back to the row.
+        let (theme, layout) = layout(Theme::graphite());
+        let Some(Item::Group { clip: None, items }) = legend(&theme, &layout) else {
+            panic!("an unclipped legend group");
+        };
+        let row = layout.legend.entries();
+        assert_eq!(row.len(), 1);
+        assert_eq!(row[0].swatch.kind, Swatch::Dot);
+        let direct = &layout.direct;
+        assert_eq!(direct.len(), 2);
+        // The row comes first, as in a header row, then a dot and a label per line.
+        assert_eq!(items.len(), 2 + 2 * direct.len());
+        for (pair, label) in items[2..].chunks(2).zip(direct) {
+            let end = label.dot.expect("the line ends inside the plot");
+            assert!(
+                matches!(&pair[0], Item::Fill { paint: Paint::Solid(c), .. } if *c == label.color)
+            );
+            let (x0, y0, x1, y1) = bounds(&pair[0]);
+            assert!((f64::from(x1 - x0) - end.diameter).abs() < 1e-3);
+            assert!((f64::from(x0 + x1) / 2.0 - end.x).abs() < 1e-3);
+            assert!((f64::from(y0 + y1) / 2.0 - end.y).abs() < 1e-3);
+            let Item::Text(text) = &pair[1] else {
+                panic!("a label after each dot");
+            };
+            assert_eq!(Some(&text.text), label.label.as_ref().map(|l| &l.text));
+            assert_eq!(text.color, label.color);
+            assert_ne!(text.color, theme.text_color());
+        }
+    }
+
+    #[test]
+    fn a_direct_label_without_a_dot_draws_its_label_only() {
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[0.5, 50.0],
+                LineOptions {
+                    label: "High".to_owned(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap()
+            .ylim(0.0, 1.0)
+            .unwrap();
+        let layout = crate::pipeline::plan_figure(&f, FontLibrary::global()).1;
+        let theme = Theme::graphite();
+        let Some(Item::Group { items, .. }) = legend(&theme, &layout) else {
+            panic!("a legend group");
+        };
+        assert!(matches!(items.as_slice(), [Item::Text(text)] if text.text == "High"));
     }
 }

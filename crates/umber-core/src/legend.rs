@@ -2,9 +2,10 @@
 //! style which entries go to the legend row and which become direct labels.
 //!
 //! The model reads series through [`SeriesKey`], never through the marks themselves, so a new
-//! mark kind reaches the legend through its keys alone.
+//! mark kind reaches the legend through its keys alone. A key's anchor, the point a direct
+//! label is attached to, is found by resolve as well.
 
-use crate::resolve::{ResolvedMark, SeriesKey, SeriesKind};
+use crate::resolve::{Anchor, AxisLimits, ResolvedMark, SeriesKey, SeriesKind};
 use crate::{Dash, LegendStyle, Rgba};
 
 /// The small figure drawn before a legend label, showing how its series is drawn.
@@ -66,6 +67,31 @@ impl LegendEntry {
     }
 }
 
+/// One direct label: a non-empty label, in its line's color, attached to an anchor of the line.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DirectEntry<'a> {
+    label: String,
+    color: Rgba,
+    anchor: Anchor<'a>,
+}
+
+impl<'a> DirectEntry<'a> {
+    /// The label; never empty.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// The resolved line color, alpha included.
+    pub fn color(&self) -> Rgba {
+        self.color
+    }
+
+    /// The point of the line the label is attached to.
+    pub fn anchor(&self) -> Anchor<'a> {
+        self.anchor
+    }
+}
+
 /// How the entries of a legend row are drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RowStyle {
@@ -75,37 +101,56 @@ pub(crate) enum RowStyle {
     Chips,
 }
 
-/// The legend of one axes: the entries of its legend row, in series order, and how the row
-/// draws them.
+/// The legend of one axes: the entries of its legend row, in series order, how the row draws
+/// them, and the direct labels, in series order.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Legend {
+pub(crate) struct Legend<'a> {
     row: Vec<LegendEntry>,
     row_style: RowStyle,
+    direct: Vec<DirectEntry<'a>>,
 }
 
-impl Legend {
+impl<'a> Legend<'a> {
     /// The legend of `marks` in the effective `style`: the style set on the axes, else the
-    /// theme's.
+    /// theme's. `x` is the x axis's limits, which decide which points of a line can carry its
+    /// direct label.
     ///
     /// - `Header` gives one row entry per labelled series, in series order, drawn
     ///   [`RowStyle::Plain`]. Unlabelled series are skipped; duplicate labels are kept.
     /// - `Chips` gives the same entries, drawn [`RowStyle::Chips`].
+    /// - `Direct` gives a direct label to every labelled series whose key has an [`Anchor`] (a
+    ///   line with a point to label), and puts every other labelled series, lines without an
+    ///   anchor included, into a row drawn [`RowStyle::Plain`], exactly as `Header` would show
+    ///   them. So every labelled series is labelled somewhere.
     /// - `None` gives nothing.
-    /// - `Direct` gives nothing yet; this style does not draw entries.
-    pub fn new(style: LegendStyle, marks: &[ResolvedMark<'_>]) -> Legend {
-        let entries = || {
-            marks
-                .iter()
-                .flat_map(ResolvedMark::keys)
-                .filter_map(|key| LegendEntry::of(&key))
-                .collect()
+    pub fn new(style: LegendStyle, marks: &[ResolvedMark<'a>], x: &AxisLimits) -> Legend<'a> {
+        let keys = marks.iter().flat_map(|mark| mark.keys(x));
+        let (mut row, mut direct) = (Vec::new(), Vec::new());
+        let row_style = match style {
+            LegendStyle::Header | LegendStyle::Direct | LegendStyle::None => RowStyle::Plain,
+            LegendStyle::Chips => RowStyle::Chips,
         };
-        let (row, row_style) = match style {
-            LegendStyle::Header => (entries(), RowStyle::Plain),
-            LegendStyle::Chips => (entries(), RowStyle::Chips),
-            LegendStyle::Direct | LegendStyle::None => (Vec::new(), RowStyle::Plain),
-        };
-        Legend { row, row_style }
+        for key in keys {
+            let Some(entry) = LegendEntry::of(&key) else {
+                continue;
+            };
+            match (style, key.anchor) {
+                (LegendStyle::None, _) => {}
+                (LegendStyle::Direct, Some(anchor)) => direct.push(DirectEntry {
+                    label: entry.label,
+                    color: entry.color,
+                    anchor,
+                }),
+                (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
+                    row.push(entry);
+                }
+            }
+        }
+        Legend {
+            row,
+            row_style,
+            direct,
+        }
     }
 
     /// The entries of the legend row, in series order.
@@ -118,9 +163,14 @@ impl Legend {
         self.row_style
     }
 
-    /// Whether the legend shows nothing.
+    /// The direct labels, in series order.
+    pub fn direct(&self) -> &[DirectEntry<'a>] {
+        &self.direct
+    }
+
+    /// Whether the legend shows nothing: no row entry and no direct label.
     pub fn is_empty(&self) -> bool {
-        self.row.is_empty()
+        self.row.is_empty() && self.direct.is_empty()
     }
 }
 
@@ -128,7 +178,7 @@ impl Legend {
 mod tests {
     use super::*;
     use crate::model::{AxisData, Figure, LineOptions, ScatterOptions};
-    use crate::resolve::resolve_marks;
+    use crate::resolve::{Limits, resolve_marks};
     use crate::{ColorSpec, Marker, ScaleKind, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
@@ -168,9 +218,10 @@ mod tests {
         f
     }
 
-    fn legend_of(f: &Figure, style: LegendStyle) -> Legend {
-        let marks = resolve_marks(f.axes().unwrap().marks(), f.theme().palette());
-        Legend::new(style, &marks)
+    fn legend_of(f: &Figure, style: LegendStyle) -> Legend<'_> {
+        let axes = f.axes().unwrap();
+        let marks = resolve_marks(axes.marks(), f.theme().palette());
+        Legend::new(style, &marks, &Limits::of(axes).x)
     }
 
     #[test]
@@ -189,7 +240,8 @@ mod tests {
 
     #[test]
     fn swatch_follows_series_kind() {
-        let legend = legend_of(&figure(), LegendStyle::Header);
+        let f = figure();
+        let legend = legend_of(&f, LegendStyle::Header);
         let swatches: Vec<Swatch> = legend.row().iter().map(LegendEntry::swatch).collect();
         assert_eq!(
             swatches,
@@ -267,11 +319,11 @@ mod tests {
     }
 
     #[test]
-    fn other_styles_have_no_row_entries() {
+    fn none_shows_nothing() {
         let f = figure();
-        for style in [LegendStyle::None, LegendStyle::Direct] {
-            assert!(legend_of(&f, style).is_empty(), "{style:?}");
-        }
+        let legend = legend_of(&f, LegendStyle::None);
+        assert!(legend.is_empty());
+        assert!(legend.row().is_empty() && legend.direct().is_empty());
     }
 
     #[test]
@@ -288,6 +340,99 @@ mod tests {
     }
 
     #[test]
+    fn direct_falls_back_for_non_lines() {
+        let f = figure();
+        let palette = f.theme().palette();
+        let legend = legend_of(&f, LegendStyle::Direct);
+        // The labelled lines are labelled directly, in series order, in their line colors.
+        let direct: Vec<(&str, Rgba)> = legend
+            .direct()
+            .iter()
+            .map(|e| (e.label(), e.color()))
+            .collect();
+        assert_eq!(direct, [("North", palette[0]), ("North", palette[3])]);
+        // The scatter goes to a row exactly as the header row shows it.
+        let header = legend_of(&f, LegendStyle::Header);
+        assert_eq!(legend.row_style(), RowStyle::Plain);
+        assert_eq!(legend.row(), &header.row()[1..2]);
+        assert_eq!(legend.row()[0].swatch(), Swatch::Dot);
+        assert!(!legend.is_empty());
+
+        // Bars go to the row too, with their square swatches, between the direct lines.
+        use crate::model::{BarOptions, BarSeries};
+        let categories = || vec!["A".to_owned(), "B".to_owned()];
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Categories(categories()),
+                &[1.0, 2.0],
+                line("Target", Dash::Dashed),
+            )
+            .unwrap()
+            .bar(
+                categories(),
+                &[3.0, 4.0],
+                BarOptions {
+                    label: "Revenue".to_owned(),
+                    ..BarOptions::default()
+                },
+            )
+            .unwrap()
+            .grouped_bar(
+                categories(),
+                vec![BarSeries {
+                    label: "North".to_owned(),
+                    heights: vec![1.0, 2.0],
+                    color: ColorSpec::AUTO,
+                }],
+            )
+            .unwrap();
+        let legend = legend_of(&f, LegendStyle::Direct);
+        let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
+        assert_eq!(labels, ["Revenue", "North"]);
+        assert!(legend.row().iter().all(|e| e.swatch() == Swatch::Square));
+        let [target] = legend.direct() else {
+            panic!("one direct label");
+        };
+        assert_eq!(target.label(), "Target");
+        assert_eq!(target.anchor().x, crate::resolve::AnchorX::Category("B"));
+    }
+
+    /// A figure with one labelled line with `x` and `y`, on an x axis limited to `xlim`.
+    fn line_figure(x: AxisData, y: &[f64], xlim: Option<(f64, f64)>) -> Figure {
+        let kind = match x {
+            AxisData::Numbers(_) => ScaleKind::Linear,
+            AxisData::Categories(_) => ScaleKind::Category,
+        };
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        let axes = f.add_axes(kind, ScaleKind::Linear).unwrap();
+        axes.line(x, y, line("Line", Dash::Solid)).unwrap();
+        if let Some((lo, hi)) = xlim {
+            axes.xlim(lo, hi).unwrap();
+        }
+        f
+    }
+
+    #[test]
+    fn lines_without_an_anchor_fall_back_to_the_row() {
+        let nan = f64::NAN;
+        let xs = |v: &[f64]| AxisData::Numbers(v.to_vec());
+        // An all-NaN line, a line without a finite x, and a line outside the explicit limits.
+        for f in [
+            line_figure(xs(&[0.0, 1.0]), &[nan, nan], None),
+            line_figure(xs(&[nan, nan]), &[1.0, 2.0], None),
+            line_figure(xs(&[0.0, 1.0]), &[1.0, 2.0], Some((5.0, 6.0))),
+        ] {
+            let legend = legend_of(&f, LegendStyle::Direct);
+            assert!(legend.direct().is_empty());
+            let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
+            assert_eq!(labels, ["Line"]);
+            assert_eq!(legend.row()[0].swatch(), Swatch::Line { dash: Dash::Solid });
+        }
+    }
+
+    #[test]
     fn unlabelled_marks_give_an_empty_legend() {
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
@@ -296,6 +441,10 @@ mod tests {
             .unwrap();
         assert!(legend_of(&f, LegendStyle::Header).is_empty());
         assert!(legend_of(&f, LegendStyle::Chips).is_empty());
-        assert!(Legend::new(LegendStyle::Header, &[]).is_empty());
+        assert!(legend_of(&f, LegendStyle::Direct).is_empty());
+        let limits = Limits::of(f.axes().unwrap());
+        for style in [LegendStyle::Header, LegendStyle::Direct] {
+            assert!(Legend::new(style, &[], &limits.x).is_empty());
+        }
     }
 }

@@ -15,6 +15,14 @@
 //! a faded series color, lines, points and bars (every chip holds a dot), the largest font
 //! scale and a 1 by 1 in figure with 50 entries, on the dark Midnight background and on the
 //! light Pigment and Graphite backgrounds.
+//!
+//! Direct labels: 2, 8 and 30 lines crossing into nearby ends (nudging), lines ending early,
+//! lines with NaN tails, an all-NaN line and a line without a finite x (both fall back to the
+//! row), explicit x limits cutting the line ends and leaving one line wholly outside, y limits
+//! leaving ends above and below the plot (no end dot), lines on a category x axis, lines next
+//! to a scatter and bars (the header row fallback), a long label hitting the reservation cap,
+//! a faded line color, the largest font scale, a 1 by 1 in figure with 50 lines, and direct
+//! labels set on the axes under a header theme.
 
 use std::fmt::Write as _;
 
@@ -252,6 +260,7 @@ fn figures() -> Vec<(&'static str, Figure)> {
     out.push(("fig-legend-stacked-bar", stacked));
 
     out.extend(chips_figures());
+    out.extend(direct_figures());
     out
 }
 
@@ -347,6 +356,231 @@ fn chips_figures() -> Vec<(&'static str, Figure)> {
         .grouped_bar(["Q1", "Q2", "Q3"].map(String::from).to_vec(), series)
         .unwrap();
     out.push(("fig-legend-chips-grouped-bar", grouped));
+
+    out
+}
+
+/// A 6 by 4 in Graphite figure with a title, subtitle and axis labels, and one line per
+/// `(label, x, y)`.
+fn direct_lines(title: &str, lines: Vec<(String, Vec<f64>, Vec<f64>)>) -> Figure {
+    let mut f = figure(6.0, 4.0, Theme::graphite(), linear(), linear());
+    labelled(&mut f, title);
+    for (label, x, y) in lines {
+        axes(&mut f)
+            .line(numbers(x), &y, labelled_line(&label, Dash::Solid))
+            .unwrap();
+    }
+    f
+}
+
+/// `n` lines over 0 to 10 that cross on the way and end within a narrow band around 5.
+fn crossing(n: usize) -> Vec<(String, Vec<f64>, Vec<f64>)> {
+    (0..n)
+        .map(|k| {
+            let x: Vec<f64> = (0..=10).map(f64::from).collect();
+            let start = (k * 37 % n) as f64 * 10.0 / n as f64;
+            let end = 5.0 + (k as f64 - n as f64 / 2.0) * 0.05;
+            let y = x
+                .iter()
+                .map(|t| start + (end - start) * t / 10.0 + 0.3 * (t + k as f64).sin())
+                .collect();
+            (format!("Series {}", k + 1), x, y)
+        })
+        .collect()
+}
+
+/// The direct label figures, by name, in a fixed order.
+fn direct_figures() -> Vec<(&'static str, Figure)> {
+    let mut out = Vec::new();
+    let nan = f64::NAN;
+    let ramp = |n: usize| -> Vec<f64> { (0..n).map(|i| i as f64).collect() };
+
+    out.push((
+        "fig-direct-crossing-2",
+        direct_lines("Two lines", crossing(2)),
+    ));
+    out.push((
+        "fig-direct-crossing-8",
+        direct_lines("Eight lines", crossing(8)),
+    ));
+    out.push((
+        "fig-direct-crossing-30",
+        direct_lines("Thirty lines", crossing(30)),
+    ));
+
+    // Lines that end at different x: each label follows its own line's end.
+    let early: Vec<(String, Vec<f64>, Vec<f64>)> = [(20, 3.0), (14, 1.0), (8, -1.0)]
+        .into_iter()
+        .enumerate()
+        .map(|(k, (n, level))| {
+            let (_, wobbled) = wobble(n, 500 + k as u32);
+            let y = wobbled.iter().map(|v| v + level).collect();
+            (format!("Ends at {}", n - 1), ramp(n), y)
+        })
+        .collect();
+    out.push((
+        "fig-direct-lines-ending-early",
+        direct_lines("Ending early", early),
+    ));
+
+    // NaN tails: the label sits at the last finite point, before the gap.
+    let (x, y) = wobble(20, 510);
+    let mut tail = y.clone();
+    tail[14..].fill(nan);
+    let mut gaps = y.iter().map(|v| v + 2.0).collect::<Vec<f64>>();
+    gaps[17..].fill(nan);
+    gaps[8..11].fill(nan);
+    out.push((
+        "fig-direct-nan-tails",
+        direct_lines(
+            "NaN tails",
+            vec![
+                ("Tail".into(), x.clone(), tail),
+                ("Gaps and tail".into(), x.clone(), gaps),
+                ("Whole".into(), x, y.iter().map(|v| v - 2.0).collect()),
+            ],
+        ),
+    ));
+
+    // An all-NaN line and a line without a finite x go to the row; the others stay direct.
+    let (x, y) = wobble(20, 520);
+    out.push((
+        "fig-direct-all-nan",
+        direct_lines(
+            "No point to label",
+            vec![
+                ("Labelled".into(), x.clone(), y),
+                ("All NaN".into(), x.clone(), vec![nan; 20]),
+                ("No finite x".into(), vec![nan; 20], ramp(20)),
+            ],
+        ),
+    ));
+
+    // Explicit x limits cut the line ends; one line lies wholly outside them.
+    let mut cut = direct_lines(
+        "Cut by limits",
+        (0..3)
+            .map(|k| {
+                let (x, y) = wobble(30, 530 + k);
+                let y = y.iter().map(|v| v + f64::from(k) * 2.0).collect();
+                (format!("Cut {}", k + 1), x, y)
+            })
+            .chain(std::iter::once((
+                "Outside".into(),
+                vec![25.0, 29.0],
+                vec![1.0, 2.0],
+            )))
+            .collect(),
+    );
+    axes(&mut cut).xlim(2.0, 20.5).unwrap();
+    out.push(("fig-direct-xlim-cuts-ends", cut));
+
+    // Y limits leave two ends above and below the plot: labels at the edges, no dots.
+    let mut clipped = direct_lines(
+        "Ends off the plot",
+        vec![
+            ("Above".into(), ramp(3), vec![0.5, 0.8, 40.0]),
+            ("Below".into(), ramp(3), vec![0.5, 0.2, -40.0]),
+            ("Inside".into(), ramp(3), vec![0.1, 0.9, 0.5]),
+        ],
+    );
+    axes(&mut clipped).ylim(0.0, 1.0).unwrap();
+    out.push(("fig-direct-ylim-ends-off-plot", clipped));
+
+    // A category x axis, with one line missing its last category.
+    let mut category = figure(6.0, 4.0, Theme::graphite(), ScaleKind::Category, linear());
+    labelled(&mut category, "Categories");
+    let months = ["Jan", "Feb", "Mar", "Apr"].map(String::from).to_vec();
+    for (label, y) in [
+        ("Wind", vec![1.0, 3.0, 2.0, 4.0]),
+        ("Solar", vec![2.0, 1.0, 3.0, nan]),
+        ("Hydro", vec![3.0, 2.5, 2.0, 1.5]),
+    ] {
+        axes(&mut category)
+            .line(
+                AxisData::Categories(months.clone()),
+                &y,
+                labelled_line(label, Dash::Solid),
+            )
+            .unwrap();
+    }
+    out.push(("fig-direct-category", category));
+
+    // Non-line marks fall back to the header row: a scatter, and bars beside a line.
+    let (x, y) = wobble(20, 540);
+    let mut mixed = direct_lines("Line and scatter", vec![("Trend".into(), x, y)]);
+    let (x, y) = wobble(20, 541);
+    axes(&mut mixed)
+        .scatter(numbers(x), &y, labelled_scatter("Samples"))
+        .unwrap();
+    out.push(("fig-direct-line-and-scatter", mixed));
+    let quarters: Vec<String> = ["Q1", "Q2", "Q3", "Q4"].map(String::from).to_vec();
+    let mut bars = figure(6.0, 4.0, Theme::graphite(), ScaleKind::Category, linear());
+    labelled(&mut bars, "Bars and a line");
+    axes(&mut bars)
+        .bar(
+            quarters.clone(),
+            &[12.0, 18.0, 15.0, 22.0],
+            BarOptions {
+                label: "Revenue".into(),
+                ..BarOptions::default()
+            },
+        )
+        .unwrap()
+        .line(
+            AxisData::Categories(quarters),
+            &[10.0, 14.0, 16.0, 19.0],
+            labelled_line("Target", Dash::Dashed),
+        )
+        .unwrap();
+    out.push(("fig-direct-bar-and-line", bars));
+
+    // A label far wider than the reservation cap: the plot gives up a quarter of the inner
+    // width and the canvas clips the rest.
+    let long: String = "Long direct label ".repeat(17).chars().take(300).collect();
+    let (x, y) = wobble(20, 550);
+    let (x2, y2) = wobble(20, 551);
+    out.push((
+        "fig-direct-long-label",
+        direct_lines("Long label", vec![(long, x, y), ("Short".into(), x2, y2)]),
+    ));
+
+    // A faded line color: the dot and the label keep the alpha.
+    let (x, y) = wobble(20, 560);
+    let mut faded = direct_lines("Faded", Vec::new());
+    axes(&mut faded)
+        .line(
+            numbers(x),
+            &y,
+            LineOptions {
+                label: "Faded".into(),
+                color: ColorSpec::Auto(umber_core::Alpha::new(0.5).unwrap()),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    out.push(("fig-direct-faded", faded));
+
+    let mut scaled = figure(
+        6.0,
+        4.0,
+        Theme::graphite().with_font_scale(10.0).unwrap(),
+        linear(),
+        linear(),
+    );
+    labelled(&mut scaled, "Scaled");
+    add_lines(&mut scaled, &names("Series", 3));
+    out.push(("fig-direct-font-scale-max", scaled));
+
+    let mut tiny = figure(1.0, 1.0, Theme::graphite(), linear(), linear());
+    labelled(&mut tiny, "Tiny");
+    add_lines(&mut tiny, &names("Line", 50));
+    out.push(("fig-direct-tiny-50-lines", tiny));
+
+    // Direct labels set on the axes under a header theme.
+    let mut on_axes = lines(Theme::pigment(), "Direct on the axes", &names("Series", 3));
+    axes(&mut on_axes).legend(LegendStyle::Direct);
+    out.push(("fig-direct-axes-override", on_axes));
 
     out
 }
