@@ -1,2 +1,1 @@
-fig-line-dashes-and-palette-wrap
-fig-pigment-line-scatter
+fig-midnight-line-scatter

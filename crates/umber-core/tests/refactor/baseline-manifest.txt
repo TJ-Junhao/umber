@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 6cd4679fbab7ee19859cd28ea8095c96716192d6
+# revision: c9964c3ba818764c6b417ba9b1fe182fed8443ff
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 3559173b0af8be4cc8f8d204c35af532374def8dff403f7c21f2044d13b013d3  api/constants.txt
@@ -83,6 +83,28 @@ c32fab46b03a4f4b9ee072625a945de50ae0f9b8dfe3c41e83e8a01501de1a8c  png/fig-huge-d
 423eacf8fcd92348bb41d744c662d8e6992f1efedffe24b053f3c8500619299e  png/fig-legend-bar-and-line.dpi72.png
 df650e34fc17c539dac7a77738313bb538e33c7ca0d130843f1f912f18c82e9a  png/fig-legend-category.dpi200.png
 10116952f54d023d52257977ffcf1a7a80218c48507a53792102896725f1ad79  png/fig-legend-category.dpi72.png
+c67e21bf34f15b8efe0f03249901c6ee8730dfd83344c96bd462bbe9681264a3  png/fig-legend-chips-20-wrapping-light.dpi200.png
+202b5ebea5dd0319a4b3db8b06be8ca4dcc85819ee14daac64fc0efaa0dc797e  png/fig-legend-chips-20-wrapping-light.dpi72.png
+a24810b17ad02ae7e172f8e3503d8499854f331c57f4b1e2b947ac7e1e17f6f5  png/fig-legend-chips-20-wrapping.dpi200.png
+22df019dc80e8d10247977ca0f36d12a18b3be5c121db111bf9306db2eb68a26  png/fig-legend-chips-20-wrapping.dpi72.png
+92abc927c0a1bb9dd13c28973288f4133144c6e982abd45d6ef3b7ffd19e12ee  png/fig-legend-chips-font-scale-max.dpi200.png
+a58ae5fef89d27cecdc3fa388db3c6759c93798b038a8f2319d3c7a003110ec9  png/fig-legend-chips-font-scale-max.dpi72.png
+3c844fad4a15fca2d325ffc882dcdd27ce99518fcea73b2566122691acac8e04  png/fig-legend-chips-graphite.dpi200.png
+94d1a0e1e80f9c7b57a44005751b1455b6b8d7c3f5421ada9802a0a6c4c70364  png/fig-legend-chips-graphite.dpi72.png
+f89cb3c638834bdbfe4755740928767309ee18702010d3d60de1e73f939008d9  png/fig-legend-chips-grouped-bar.dpi200.png
+57396f6f28148d0421b1c97aecdb2f2870cc354a4fcdcef6412044629cffb31d  png/fig-legend-chips-grouped-bar.dpi72.png
+7a2172e030d87d432470fd4da672979b4b88f589a44d3b0772991cee4cd0e8bc  png/fig-legend-chips-long-label.dpi200.png
+599a284e4d02ed9d39e5fec36301eb84ccbb8b000527537afccda53bf32713a9  png/fig-legend-chips-long-label.dpi72.png
+87f071c898377a433f2d37f33f0857a04b2812eab2895ab57f9de52791b4ec5b  png/fig-legend-chips-midnight.dpi200.png
+b94bb70fd1f8fb66353619700242427fff055c39f80fa55a7ced398b30f243c6  png/fig-legend-chips-midnight.dpi72.png
+c8c3bffc9fda8e8bb1347ed2c7175d35d1b97d31bf516372adb1fbeb2fcff137  png/fig-legend-chips-pigment.dpi200.png
+e0465aca5024641344177ba258f6dc099240fb5f978ce21e1d3c61aeb33fdcb2  png/fig-legend-chips-pigment.dpi72.png
+a737aee19e0a1b6ca564c0183e7937c5de41c601698145fbcec6edefb5c3d672  png/fig-legend-chips-text-fallback-light.dpi200.png
+64777872b6cbefcc6354440bdbb9c2e1b8af7c52930e2b4042a981de1572b76c  png/fig-legend-chips-text-fallback-light.dpi72.png
+be70cb6d9360cf60838b6cfd09d559a624221367513a87585bb5b74292dc1210  png/fig-legend-chips-text-fallback.dpi200.png
+0ede929c8dd9b0d599017f581d7f9376a761a3e84750ab5e55bb853b8e3cc60e  png/fig-legend-chips-text-fallback.dpi72.png
+77d30056fe9b7637f41faebe988c59c29980a9cff3b683230b7a9377f848e40d  png/fig-legend-chips-tiny-50-entries.dpi200.png
+ecb2f4b311bc7fa7cf35f5fa442bd6889a72cdb1f535d5b7f2b2cd661349c069  png/fig-legend-chips-tiny-50-entries.dpi72.png
 4bf76696451c1e05d834da434b8978e43b9ffb4a95a7805bc9d8deeedf301261  png/fig-legend-font-scale-max.dpi200.png
 7c73a1f87fb1a15409d7d8a6155b6c21cee41daa0d53f98c47c0f1843b826171  png/fig-legend-font-scale-max.dpi72.png
 443f6abadd660a43f81aaa65a3633c2b1e0e8bf6205882aa369be7929bd5aaa5  png/fig-legend-graphite-header.dpi200.png
@@ -123,8 +145,8 @@ c7e9c5680c9d589ffa6e2173aba51f71bad6c1e3b57b712913ae6ef5f019564b  png/fig-log-ex
 33ea69629aa431ec590bd84ca70631aca467a5a41382ecadd3cc1755387e7486  png/fig-log-y.dpi72.png
 1f1590a6c9c38118314b420cbc947e7eb1a1e7c0901ce0a55adb2c3a63f05ca1  png/fig-midnight-empty-axes.dpi200.png
 60482564e260fe6a2db81627bc12a177dccfe6fa5785bda1828cced0c56faf74  png/fig-midnight-empty-axes.dpi72.png
-060e242e8a0c66cc7b5c5132d636fbda4d677ebc5f7ae799ba02499bb06e54f7  png/fig-midnight-line-scatter.dpi200.png
-376219cce2e9229e45c9cc186faeccc406015dceddca550daa038d9fd9ed993a  png/fig-midnight-line-scatter.dpi72.png
+f2aa41b11fd4d6a1c7295ec9ce47f63f2a2e34abedc12b64a040704a9eac611e  png/fig-midnight-line-scatter.dpi200.png
+912df2c99b19a3bea88b31976c426fb6b664ee968d9b61302404de84dad2f7d4  png/fig-midnight-line-scatter.dpi72.png
 a50a8a9034a66197440eea4e52bb484c75950e35619eedcc3ec1345bb3e7fdd6  png/fig-nan-gaps.dpi200.png
 de0cf0893a94dc375515b5b3004fc1f93df01e870c9d526014f69bdcf7f1cb70  png/fig-nan-gaps.dpi72.png
 5050c897651cb8abaaeeb8ecb8dc7645cc5e9e74e77453b987b3e51661b39054  png/fig-narrow-limits-huge.dpi200.png
@@ -248,6 +270,17 @@ c547ab45f7775324f8ae8e71ee289b0fe1059dcbcc9dd2ccf7b6a8b7b072c033  scene/fig-grou
 71a47e471f12dd2873f84d1bcbb206b35171b9ddb1d73c30aafa9f339efba232  scene/fig-legend-axes-none.txt
 d05181ea31eeefa43e8f17af4d67d7abd404f9354697c9e233b9db2724c15b6d  scene/fig-legend-bar-and-line.txt
 d3d6b0b8669e03a2b7fe9db0db765d55da682eca8d2524f28e21db2cce4079a8  scene/fig-legend-category.txt
+751b2e013388bf000d17f4e4a5cba29c330d51cc3c16bb98327ecb181be7bdcc  scene/fig-legend-chips-20-wrapping-light.txt
+5db36061f7822fca38a350fe240d6793ca2045c7dcd2434747cfd86af2589441  scene/fig-legend-chips-20-wrapping.txt
+884af8536541ba117891530fac2918df71518ca8201294286d9c0e12cc3b0dfd  scene/fig-legend-chips-font-scale-max.txt
+b229b35f925bcce522f43cc03bb4d32710dcebe2f5023b890b62fc96624b0476  scene/fig-legend-chips-graphite.txt
+067405dbe12c5930265944c8822d8374c736eb546106d998efb36717d41adc78  scene/fig-legend-chips-grouped-bar.txt
+87fa886c2888589d18afaa2ac5b93956be88a7f5d8a83f804ce8d9ec294c0f3d  scene/fig-legend-chips-long-label.txt
+c48c0ab516af45cceb8da504b778a426d302e795eedfec0cea5502baa8d6ef6f  scene/fig-legend-chips-midnight.txt
+5d76c0ec22614f5121b6779d410954b0d5a5cfc3d11b31486f2b243c210ab6c7  scene/fig-legend-chips-pigment.txt
+df3d533b6c447e9c6900c38257395cf87deecac5f4a74ecac72c029b0f7fe71c  scene/fig-legend-chips-text-fallback-light.txt
+c864e08dc55cd3508ffa06133c9cbafbf054b0bc509c52563220c0617c83d00e  scene/fig-legend-chips-text-fallback.txt
+69e4729841f9583d02a417fc6a59a9295c18371c4fe006640fcf3a248bb1e77d  scene/fig-legend-chips-tiny-50-entries.txt
 3bc4dd7ca892ee1163ae8cd3759382dd57d576f21b3b65e5ddf55add4984157e  scene/fig-legend-font-scale-max.txt
 0413cbc498fede70e42715c7f39dcdaedc130ae6e689c12d64c683591ded5e62  scene/fig-legend-graphite-header.txt
 fd316c5170c2d75c20cf887912416e48e859058f1d71a125156fb12d4f20f1f9  scene/fig-legend-header-1.txt
@@ -268,7 +301,7 @@ c9b699283b5dae59d20062ee9386b0cf22cafd4a64ac155f8b22d9d962ff6051  scene/fig-log-
 65e2c5690cf7ea2f85b2b04c38f21ef8d04c86a24d710d19a4a57bfba6822104  scene/fig-log-extreme-limits.txt
 a2674c50e591bd03f46004f11e16555dd86d52da93e65ba29490fc82438e0acf  scene/fig-log-y.txt
 4415abb52932906106574dae46e1b67c7776f7dd0a654ec080de62404da0741f  scene/fig-midnight-empty-axes.txt
-feef5bc7809a143b75aefd19222a3fad984e0004572a12df07b9ec48dffc8865  scene/fig-midnight-line-scatter.txt
+0f6d049ef28c4e49c68eb8e91f4e498ddff71ee83e0e4258e9c9a0e9ec715059  scene/fig-midnight-line-scatter.txt
 5366a394f47e2e1634869ff02a4bffa4473fefc8952d446ec7df48ec82adf3bf  scene/fig-nan-gaps.txt
 85a9f97b4131d5fc1621f51c027852ed3323d77336d62ba5614e837957a871a0  scene/fig-narrow-limits-huge.txt
 80576cddf4c57a81b432c7204e14317c91765d7296a1263790c5ffdec0155eaf  scene/fig-narrow-limits-offset.txt
@@ -386,6 +419,28 @@ e914ab330875ef4150708b0c2f9438808bdc80ee55c5e4bd5b725de689b88f68  svg/fig-legend
 92bd3da486d7b33fa1f3d32914ece0cd5809c00f2e09167f3e008999dc274f18  svg/fig-legend-bar-and-line.outlines.svg
 acc551db3a3b9f52da6137817e3fc21e1fa700c822f42a32eb9c19329b0e0146  svg/fig-legend-category.editable.svg
 c814544e4574184e1e8ff5de56ffcecf0476ad9222e72b6ce57fc125062caabf  svg/fig-legend-category.outlines.svg
+a8f6c0536510c0d7f2774661985af2a5d431207f17fd8a406ee3b68af124204f  svg/fig-legend-chips-20-wrapping-light.editable.svg
+aed0e7918abebed79c4fbe532adf93810f9eaf1eeb6505731b05fb272422353c  svg/fig-legend-chips-20-wrapping-light.outlines.svg
+9cc325ec71ccd8e99f469f3521f7e8fbd85f20f59d8db53cbb9fe19f80c5a635  svg/fig-legend-chips-20-wrapping.editable.svg
+dafdde70e1307c933db51c19f857cef4dac41727112b2809f757fbe80bc54c59  svg/fig-legend-chips-20-wrapping.outlines.svg
+a9a0027444d5b9e525de82976bf19ecb4c49b8c896a46aca7ed45f29191e2868  svg/fig-legend-chips-font-scale-max.editable.svg
+dcfb3b79702fed4a927b8960607bdba57e75bb8e150e0f9f0e8beb21da5f5271  svg/fig-legend-chips-font-scale-max.outlines.svg
+9ad5a77fe84aeffb64d251bac9ca752366e1518cce0aa8e11ef39928c9b13538  svg/fig-legend-chips-graphite.editable.svg
+d144eaf0a42a8c47611403c5edc4e5829b96793af7c06feefe0421eda9eab3a4  svg/fig-legend-chips-graphite.outlines.svg
+d92a806b996f3220644dc94a6cdcc4c41fe13e3af3943e9af9e1aafe8efe6392  svg/fig-legend-chips-grouped-bar.editable.svg
+3da8f4f9f4a2d806e3a6b2f9c4b870e785222a58abc0dadb5fc6076c11002384  svg/fig-legend-chips-grouped-bar.outlines.svg
+c60e506c19656ade062d4922ddb95d38f9244eb44159642c8a370bb6e015d33c  svg/fig-legend-chips-long-label.editable.svg
+c9403ceb53dd01ee9c06910ed391fdb66d569aa635123a40016c105c3804e8ad  svg/fig-legend-chips-long-label.outlines.svg
+e9f2e79cf64472fb6720a52836ad2250d6ae0a778ac32e70c675ff354b22bb6d  svg/fig-legend-chips-midnight.editable.svg
+463fed9e3073745a6fcc8a3114667838d08cfea874e5a93713369abe296a1ec9  svg/fig-legend-chips-midnight.outlines.svg
+c631882b1b23200a0ff646d87f6adfcc9bfafe9ff31902bc63f6978dde20f42b  svg/fig-legend-chips-pigment.editable.svg
+ef4f5eb8d50f068fe18f937d2eeac8be46f0e5164cb25475d056f59ea57ae18e  svg/fig-legend-chips-pigment.outlines.svg
+48e8736daf3187f9318202541d4cba41c2be0e14dc7b7126ef22c7e381178f06  svg/fig-legend-chips-text-fallback-light.editable.svg
+85bf5abdd2ba4d98ed72e2056290be723d5f6e20e455cc29252bcb6feec3825b  svg/fig-legend-chips-text-fallback-light.outlines.svg
+c880e84c4e64ba9adb937355d405b6d7da2b783edb8dc17ff49ece659f0431a8  svg/fig-legend-chips-text-fallback.editable.svg
+38fdbde7f5aa22a12b5dedc854104ab3bb97976d24bf655d75cac344152d6074  svg/fig-legend-chips-text-fallback.outlines.svg
+e74dce3cda4bc7a8c7380831778fd30cfabe1b6a90bf246030317fb20adc24f1  svg/fig-legend-chips-tiny-50-entries.editable.svg
+21adcdf1c35ea4b8f88f4ce67da76441087c966f5b24d807901688cd566c41de  svg/fig-legend-chips-tiny-50-entries.outlines.svg
 2177c9b7733f5af12f991edc0401c2933dae104c73399be182ed145ee81705c8  svg/fig-legend-font-scale-max.editable.svg
 62caf46578492fa42598e459aeecf24e06a15b3f6c45feaff6bac2037693ef11  svg/fig-legend-font-scale-max.outlines.svg
 39649ebcc1a6132faf32b0d3e232dda8342b51a30aa9de3dbe039c08d2340da3  svg/fig-legend-graphite-header.editable.svg
@@ -426,8 +481,8 @@ de7db81d8a2bec833e1bcb330a017a13c68a927493a89200d4cef613d8286c04  svg/fig-log-y.
 4758a5bb29072fea4910b08930a98e83584a0e6236e575001f161a3d798ee7a0  svg/fig-log-y.outlines.svg
 b4e1bdb1cc096779944bb794f82414c118f61f1157d8e3fefe76ff4e3ab7d289  svg/fig-midnight-empty-axes.editable.svg
 8c998e0565fca37a2f00f5f8ea437d5ebbbd1f83d50daeee65d35e891232664a  svg/fig-midnight-empty-axes.outlines.svg
-e5f462868cb0baf66fa2623c37bba1fab32414653e3e004b1173961c2265c7ea  svg/fig-midnight-line-scatter.editable.svg
-0fd62eb0fbfc2393daeefa7f0729852ce53141c7e8baacfa6a821ff9c86ac187  svg/fig-midnight-line-scatter.outlines.svg
+3c86870fc38a8c0607252433ee05a0d6e8f16ca5f3695c4b6c263ea88698953f  svg/fig-midnight-line-scatter.editable.svg
+54e425d81fb027a3dd1cecebe0c379661ef65162aea2d413e90e85fe7d86d150  svg/fig-midnight-line-scatter.outlines.svg
 df50d75b407272bd3b08a7a148ed92a5436a46fab8035657896c910b6e3a6155  svg/fig-nan-gaps.editable.svg
 0a7bce73da6814d87cfa0b70baacb7ccb8f11f09fd23102289364f0aae63b768  svg/fig-nan-gaps.outlines.svg
 c53821e650f40ccd1e83609c73ce7b7b8a6b786ab41590c62cf48ff60487b469  svg/fig-narrow-limits-huge.editable.svg
