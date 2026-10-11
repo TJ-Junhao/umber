@@ -3,7 +3,8 @@
 import math
 import numbers
 from collections.abc import Callable
-from typing import Generic, Self, TypeVar, cast, final
+from operator import attrgetter
+from typing import Final, Generic, Self, TypeVar, cast, final
 
 from umber import _umber
 from umber._errors import new_error
@@ -116,10 +117,6 @@ class Scale(Generic[T]):  # noqa: UP046
         with api_call():
             return cast(Scale[str], _new(_CATEGORY, 10.0))
 
-    def _kind_and_base(self) -> tuple[int, float]:
-        """Return the native scale argument: ``(kind, base)``; the base matters for logs only."""
-        return self._kind, self._base
-
     def _key(self) -> tuple[int, float | None]:
         return self._kind, self._base if self._kind == _LOG else None
 
@@ -152,6 +149,28 @@ class Scale(Generic[T]):  # noqa: UP046
 
     def __delattr__(self, name: str) -> None:
         raise AttributeError("a Scale is immutable")
+
+
+_NATIVE: Final = attrgetter("_kind", "_base")
+
+
+def native[V](scale: Scale[V]) -> tuple[int, float]:
+    """Return the native scale argument of ``scale``: ``(kind, base)``.
+
+    Args:
+        scale: The scale.
+
+    Returns:
+        The kind (0 for linear, 1 for log, 2 for category) and the base, which matters for
+        logarithmic scales only.
+
+    Example:
+        >>> import umber as ub
+        >>> from umber._scale import native
+        >>> native(ub.Scale.log(2))
+        (1, 2.0)
+    """
+    return cast(tuple[int, float], _NATIVE(scale))
 
 
 def _new(kind: int, base: float) -> Scale[object]:
