@@ -1,4 +1,57 @@
-"""Exception hierarchy raised by umber."""
+"""Exception hierarchy raised by umber, and the details attached to each raised error.
+
+Every exception umber raises on purpose carries two private attributes: the name of the
+parameter the error is about, and a hint that suggests a fix. Either may be ``None``. Their
+presence marks the exception as raised by umber; the notes shown under the message are built
+from them (see ``umber._report``).
+"""
+
+_PARAMETER = "_umber_parameter"
+_HINT = "_umber_hint"
+_UNSET = object()
+
+
+def new_error[E: BaseException](
+    cls: type[E], context: str, message: str, *, parameter: str | None, hint: str | None
+) -> E:
+    """Build an exception of ``cls`` with the message ``"<context>: <message>"`` and its details.
+
+    Args:
+        cls: The exception class; an umber error class or a built-in such as ``TypeError``.
+        context: The API call that reports the error, such as ``"Axes.line()"``.
+        message: What is wrong and what is required, such as ``"y[3] is inf; values must be
+            finite."``.
+        parameter: The name of the parameter the error is about, or ``None``.
+        hint: A suggested fix, or ``None``.
+
+    Returns:
+        The exception, ready to be raised.
+    """
+    err = cls(f"{context}: {message}")
+    setattr(err, _PARAMETER, parameter)
+    setattr(err, _HINT, hint)
+    return err
+
+
+def details(err: BaseException) -> tuple[str | None, str | None] | None:
+    """Return the ``(parameter, hint)`` of an exception umber raised, or ``None`` for any other.
+
+    Args:
+        err: Any exception.
+
+    Returns:
+        The parameter name and hint, either of which may be ``None``; or ``None`` when the
+        exception carries no umber details.
+    """
+    parameter: object = getattr(err, _PARAMETER, _UNSET)
+    hint: object = getattr(err, _HINT, None)
+    if parameter is _UNSET:
+        return None
+    if not (parameter is None or isinstance(parameter, str)):
+        return None
+    if not (hint is None or isinstance(hint, str)):
+        return None
+    return parameter, hint
 
 
 class UmberError(Exception):
