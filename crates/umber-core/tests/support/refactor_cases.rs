@@ -1577,13 +1577,24 @@ mod record {
             )
         };
         let head = match e {
-            Error::Data { context, message } => fields("data", context, message),
-            Error::Style { context, message } => fields("style", context, message),
-            Error::Usage { context, message } => fields("usage", context, message),
+            Error::Data {
+                context, message, ..
+            } => fields("data", context, message),
+            Error::Style {
+                context, message, ..
+            } => fields("style", context, message),
+            Error::Usage {
+                context, message, ..
+            } => fields("usage", context, message),
             Error::Io(io) => format!("error category=io message={}", text(&io.to_string())),
             _ => "error category=unknown".into(),
         };
-        format!("{head} display={}", text(&e.to_string()))
+        format!(
+            "{head} display={} parameter={} hint={}",
+            text(&e.to_string()),
+            e.parameter().unwrap_or("-"),
+            e.hint().map_or_else(|| "-".to_owned(), text)
+        )
     }
 
     pub fn theme(t: &Theme) -> String {

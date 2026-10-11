@@ -111,7 +111,8 @@ fn pixel_size(scene: &Scene, dpi: u32) -> Result<(u32, u32)> {
         return Err(Error::style(
             CONTEXT,
             format!("dpi {dpi} is out of range; use a value from {MIN_DPI} to {MAX_DPI}."),
-        ));
+        )
+        .with_parameter("dpi"));
     }
     if !scene.width.is_finite() || !scene.height.is_finite() {
         return Err(Error::style(

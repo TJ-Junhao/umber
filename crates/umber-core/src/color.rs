@@ -175,6 +175,7 @@ impl Rgba {
                 "Color.hex()",
                 format!("{code:?} is not a hex color; {HEX_HINT}"),
             )
+            .with_parameter("code")
         };
         let digits = code.strip_prefix('#').ok_or_else(bad)?;
         if !(digits.len() == 6 || digits.len() == 8)
@@ -208,12 +209,13 @@ impl Rgba {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn from_ints(r: i64, g: i64, b: i64) -> Result<Rgba> {
-        let channel = |name: &str, v: i64| -> Result<u8> {
+        let channel = |name: &'static str, v: i64| -> Result<u8> {
             u8::try_from(v).map_err(|_| {
                 Error::style(
                     "Color.rgb()",
                     format!("{name} is {v}; each channel must be between 0 and 255."),
                 )
+                .with_parameter(name)
             })
         };
         Ok(Rgba::opaque(
@@ -303,7 +305,8 @@ impl Alpha {
             Err(Error::style(
                 "Color.alpha()",
                 format!("alpha is {a}; alpha must be between 0.0 and 1.0."),
-            ))
+            )
+            .with_parameter("a"))
         }
     }
 

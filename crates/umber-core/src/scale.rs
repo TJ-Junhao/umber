@@ -105,7 +105,8 @@ impl LogBase {
             Err(Error::style(
                 "Scale.log()",
                 format!("base is {base}; a log base must be finite and greater than 1."),
-            ))
+            )
+            .with_parameter("base"))
         }
     }
 
@@ -366,7 +367,9 @@ impl ContinuousScale {
                         format!(
                             "the lower limit is {lo}; a log scale needs a positive lower limit."
                         ),
-                    ));
+                    )
+                    .with_parameter("low")
+                    .with_hint("use a linear axis if the range includes 0."));
                 }
                 if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
                     return Err(Error::style(
@@ -449,7 +452,8 @@ impl ContinuousScale {
                         format!(
                             "the data range starts at {lo}; a log scale can only show positive values."
                         ),
-                    ));
+                    )
+                    .with_hint("use a linear axis, or remove values that are not positive."));
                 }
                 if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
                     return Err(Error::data(
@@ -1165,7 +1169,9 @@ mod tests {
             (0.0, 1e-291),
         ] {
             match ContinuousScale::new(Transform::Linear, lo, hi, "Axes.xlim()") {
-                Err(Error::Style { context, message }) => {
+                Err(Error::Style {
+                    context, message, ..
+                }) => {
                     assert_eq!(context, "Axes.xlim()");
                     assert!(
                         message.contains("are too close") && message.contains("1e-10"),

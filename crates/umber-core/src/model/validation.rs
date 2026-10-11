@@ -11,11 +11,22 @@ use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
 use crate::stacking::Totals;
 use crate::{ContinuousScale, Error, Result, ScaleKind};
 
+/// The hint for an infinite bar height.
+const BAR_GAP_HINT: &str = "use NaN to leave a category without a bar.";
+
 /// The largest accepted figure side, in inches.
 const MAX_FIGURE_IN: f64 = 200.0;
 
-/// Checks numeric values of the axis `name` (`"x"` or `"y"`) against its scale kind.
-fn check_numbers(context: &'static str, name: &str, values: &[f64], kind: ScaleKind) -> Result<()> {
+/// Checks `values`, shown as `name` in messages (`"y"`, `"series[1].heights"`), against the scale
+/// kind of their axis. An error names `parameter`, the Python parameter that holds them, and an
+/// infinite value gets `infinite_hint`, which says what to pass instead.
+fn check_numbers(
+    context: &'static str,
+    (name, parameter): (&str, &'static str),
+    values: &[f64],
+    kind: ScaleKind,
+    infinite_hint: &'static str,
+) -> Result<()> {
     let log = matches!(kind, ScaleKind::Log { .. });
     for (i, &v) in values.iter().enumerate() {
         if v.is_nan() {
@@ -24,21 +35,26 @@ fn check_numbers(context: &'static str, name: &str, values: &[f64], kind: ScaleK
         if v.is_infinite() {
             return Err(Error::data(
                 context,
-                format!("{name}[{i}] is {v}; values must be finite (NaN marks a gap)."),
-            ));
+                format!("{name}[{i}] is {v}; values must be finite."),
+            )
+            .with_parameter(parameter)
+            .with_hint(infinite_hint));
         }
         if v.abs() > MAX_MAGNITUDE {
             return Err(Error::data(
                 context,
                 format!("{name}[{i}] is {v:e}; magnitudes must not exceed {MAX_MAGNITUDE:e}."),
-            ));
+            )
+            .with_parameter(parameter));
         }
         if log {
             if v <= 0.0 {
                 return Err(Error::data(
                     context,
                     format!("{name}[{i}] is {v} on a log axis; values must be positive."),
-                ));
+                )
+                .with_parameter(parameter)
+                .with_hint("use a linear axis, or remove values that are not positive."));
             }
             if v < MIN_LOG_VALUE {
                 return Err(Error::data(
@@ -46,7 +62,9 @@ fn check_numbers(context: &'static str, name: &str, values: &[f64], kind: ScaleK
                     format!(
                         "{name}[{i}] is {v:e} on a log axis; values must be at least {MIN_LOG_VALUE:e}."
                     ),
-                ));
+                )
+                .with_parameter(parameter)
+                .with_hint("use a linear axis, or rescale the values."));
             }
         }
     }
@@ -62,6 +80,11 @@ pub(super) fn check_series(
     x: &AxisData,
     y: &[f64],
 ) -> Result<()> {
+    let gap_hint = if context == "Axes.scatter()" {
+        "use NaN to leave a point out."
+    } else {
+        "use NaN to leave a gap in the line."
+    };
     if x.len() != y.len() {
         return Err(Error::data(
             context,
@@ -75,28 +98,33 @@ pub(super) fn check_series(
     match (x, x_kind) {
         (AxisData::Categories(_), ScaleKind::Category) => {}
         (AxisData::Numbers(values), kind) if kind != ScaleKind::Category => {
-            check_numbers(context, "x", values, kind)?;
+            check_numbers(context, ("x", "x"), values, kind, gap_hint)?;
         }
         (AxisData::Numbers(_), _) => {
             return Err(Error::data(
                 context,
                 "x holds numbers but the x axis is a category axis; pass category names.",
-            ));
+            )
+            .with_parameter("x")
+            .with_hint("to plot numbers, use a linear or log x axis."));
         }
         (AxisData::Categories(_), _) => {
             return Err(Error::data(
                 context,
                 "x holds category names but the x axis is not a category axis; pass numbers.",
-            ));
+            )
+            .with_parameter("x")
+            .with_hint("to plot category names, use a category x axis."));
         }
     }
     if y_kind == ScaleKind::Category {
         return Err(Error::data(
             context,
             "y holds numbers but the y axis is a category axis; use a linear or log y axis.",
-        ));
+        )
+        .with_parameter("y"));
     }
-    check_numbers(context, "y", y, y_kind)
+    check_numbers(context, ("y", "y"), y, y_kind, gap_hint)
 }
 
 /// Validates the categories and heights of a bar mark for axes with scale kinds `x_kind` and
@@ -126,8 +154,14 @@ pub(super) fn check_bars(
         ));
     }
     check_categories(context, x_kind, categories)?;
-    check_numbers(context, "heights", heights, y_kind)?;
-    check_bar_y_axis(context, y_kind, "heights holds numbers")
+    check_numbers(
+        context,
+        ("heights", "heights"),
+        heights,
+        y_kind,
+        BAR_GAP_HINT,
+    )?;
+    check_bar_y_axis(context, y_kind, "heights holds numbers", Some("heights"))
 }
 
 /// Validates the categories and series of a grouped or stacked bar mark for axes with scale
@@ -151,10 +185,10 @@ pub(super) fn check_bar_group(
     series: &[BarSeries],
 ) -> Result<()> {
     if series.is_empty() {
-        return Err(Error::data(
-            context,
-            "series is empty; pass at least one series.",
-        ));
+        return Err(
+            Error::data(context, "series is empty; pass at least one series.")
+                .with_parameter("series"),
+        );
     }
     for (i, s) in series.iter().enumerate() {
         if s.heights.len() != categories.len() {
@@ -165,17 +199,24 @@ pub(super) fn check_bar_group(
                     categories.len(),
                     s.heights.len()
                 ),
-            ));
+            )
+            .with_parameter("series"));
         }
     }
     check_categories(context, x_kind, categories)?;
     for (i, s) in series.iter().enumerate() {
-        check_numbers(context, &format!("series[{i}].heights"), &s.heights, y_kind)?;
+        check_numbers(
+            context,
+            (&format!("series[{i}].heights"), "series"),
+            &s.heights,
+            y_kind,
+            BAR_GAP_HINT,
+        )?;
     }
     if arrangement == Arrangement::Stacked {
         check_stacked_totals(context, categories, series)?;
     }
-    check_bar_y_axis(context, y_kind, "the series hold numbers")
+    check_bar_y_axis(context, y_kind, "the series hold numbers", Some("series"))
 }
 
 /// Validates the values and bin count of a histogram for axes with scale kinds `x_kind` and
@@ -199,7 +240,8 @@ pub(super) fn check_hist(
         return Err(Error::style(
             context,
             format!("bins is {bins}; bins must be between 1 and {MAX_BINS}."),
-        ));
+        )
+        .with_parameter("bins"));
     };
     match x_kind {
         ScaleKind::Linear => {}
@@ -207,17 +249,25 @@ pub(super) fn check_hist(
             return Err(Error::data(
                 context,
                 "values holds numbers but the x axis is a category axis; use a linear x axis.",
-            ));
+            )
+            .with_parameter("values"));
         }
         ScaleKind::Log { .. } => {
             return Err(Error::usage(
                 context,
                 "the x axis is a log axis, which histograms do not support; use a linear x axis.",
-            ));
+            )
+            .with_parameter("values"));
         }
     }
-    check_numbers(context, "values", values, x_kind)?;
-    check_bar_y_axis(context, y_kind, "a histogram counts values")?;
+    check_numbers(
+        context,
+        ("values", "values"),
+        values,
+        x_kind,
+        "a histogram ignores NaN, so use it to leave a value out.",
+    )?;
+    check_bar_y_axis(context, y_kind, "a histogram counts values", None)?;
     Ok(count)
 }
 
@@ -228,7 +278,8 @@ fn check_categories(context: &'static str, x_kind: ScaleKind, categories: &[Stri
         return Err(Error::data(
             context,
             "categories holds names but the x axis is not a category axis; use a category x axis.",
-        ));
+        )
+        .with_parameter("categories"));
     }
     let mut first_index: HashMap<&str, usize> = HashMap::with_capacity(categories.len());
     for (i, name) in categories.iter().enumerate() {
@@ -238,7 +289,9 @@ fn check_categories(context: &'static str, x_kind: ScaleKind, categories: &[Stri
                 format!(
                     "categories[{i}] repeats {name:?} from categories[{first}]; each category must appear once."
                 ),
-            ));
+            )
+            .with_parameter("categories")
+            .with_hint("add up the heights of a repeated category before passing them."));
         }
     }
     Ok(())
@@ -264,7 +317,8 @@ fn check_stacked_totals(
                     format!(
                         "the heights of categories[{i}] ({name:?}) stack to {total:e}; each stack must stay within {MAX_MAGNITUDE:e} on both sides of 0."
                     ),
-                ));
+                )
+                .with_parameter("series"));
             }
         }
     }
@@ -273,12 +327,21 @@ fn check_stacked_totals(
 
 /// Checks that bar heights or histogram counts, described by `subject`, can be placed on the y
 /// axis: it must be a linear or log axis.
-fn check_bar_y_axis(context: &'static str, y_kind: ScaleKind, subject: &str) -> Result<()> {
+fn check_bar_y_axis(
+    context: &'static str,
+    y_kind: ScaleKind,
+    subject: &str,
+    parameter: Option<&'static str>,
+) -> Result<()> {
     if y_kind == ScaleKind::Category {
-        return Err(Error::data(
+        let err = Error::data(
             context,
             format!("{subject} but the y axis is a category axis; use a linear or log y axis."),
-        ));
+        );
+        return Err(match parameter {
+            Some(name) => err.with_parameter(name),
+            None => err,
+        });
     }
     Ok(())
 }
@@ -309,7 +372,8 @@ pub(super) fn check_figure_size(width_in: f64, height_in: f64) -> Result<()> {
                 format!(
                     "{name} is {v}; it must be finite, above 0 and at most {MAX_FIGURE_IN} inches."
                 ),
-            ));
+            )
+            .with_parameter(name));
         }
     }
     Ok(())

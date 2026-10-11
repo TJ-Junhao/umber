@@ -63,7 +63,8 @@ impl Figure {
             return Err(Error::usage(
                 "Figure.add_axes()",
                 "the figure already has axes; v0.1 supports one axes per figure.",
-            ));
+            )
+            .with_hint("create a new Figure for another chart."));
         }
         Ok(self.axes.insert(Axes::new(x, y)))
     }

@@ -131,7 +131,9 @@ mod tests {
     fn series_checks_run_in_order() {
         let log = ScaleKind::Log { base: LogBase::TEN };
         let message = |r: Result<Series>| match r {
-            Err(Error::Data { context, message }) => {
+            Err(Error::Data {
+                context, message, ..
+            }) => {
                 assert_eq!(context, "t");
                 message
             }

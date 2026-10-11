@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 545bf1ca9e4bde8e32610998e37ae273bf397c98
+# revision: 2f8ecdb51d53219a348c6cafd453ed2f59ac6083
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -7,10 +7,10 @@ ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-
 82227dd9629e2526af484a5b4146e70ee8601eaa6d3af39efefcb8bd2291df18  api/legend.txt
 3536acf5506c4d594e4520ef89a61f18df3c74e4d6ffbd924622509c69d9dab4  api/text-layout.txt
 9865c403f6119c17e36901efca2ed14948b4d3f1e1713cec9529aa0908caa2a3  api/themes.txt
-8fe5bc2493c9540bcf3e98cc6e5605c5eff6a793d8c4e109699d2ee3179a82ae  errors/api.txt
-ccef150c0ef602d9e87294e9cb2647bf674efab90b36a80a4dd5f69803410a08  errors/bars.txt
-73d800b070c06dc8b9b0ffdd41ac9ee54214f74329d4476630ffc609b9e9dbbe  errors/grouped-bars.txt
-eeb1e31a1056610a5edc3a718f0873758af7888b9e415ae370bf605e55daa8e5  errors/hist.txt
+0fdc7e3cc6cc21748bcbdf8930dbaecba7a447a0e0e53d150902f6eb1581d0fe  errors/api.txt
+88b46ae5d060c3634eed2bc83c4409b1fa774f3b7991154fa3443a6f9d8e11f2  errors/bars.txt
+b346d8f972e69015dab7c5ee45942aaf23438289bd2ecb5f9d1780e39595d642  errors/grouped-bars.txt
+771cf21b1dce4977c77d0ef55c2f66558dd198631b0bfba99900a1591b9c68fc  errors/hist.txt
 b710e3e007454e2777da6eec60c934545526878e132b512b1163d3a4fa892a26  png/fig-all-nan.dpi200.png
 9ac2df927f6a41e4d44387230417b4e09b9b0fa6a80f86fed8bc804c920a8c91  png/fig-all-nan.dpi72.png
 5329c8252bdb5c15c1e250d308ddb7d7100b3ddf8b7b68c50669d6d444b5e01b  png/fig-bars-graphite.dpi200.png
@@ -265,8 +265,8 @@ ccc330352c13fec7d2b00e3ce74772be2b594b92c3d63301c4b1f4608c390916  png/scene-host
 504e5bcf66b5e0ebec0802ae682b4c35c2a04ceb3f05700df045c70cca97655f  png/scene-hostile.dpi72.png
 8102e25e1b9cae5a1e7ac66df0d80b4b2fb33c1a8051c6d443eaf4bc00240d55  png/scene-markers.dpi200.png
 4ebf3eb37573252718d30a23e02c503259aead98d3d2b7953f1ade88a53bbd13  png/scene-markers.dpi72.png
-d1673a1123ef3e194eea9e6c32982f31caa874739d061f801723551c527a5e52  png/scene-nan-size.dpi200.png
-d1673a1123ef3e194eea9e6c32982f31caa874739d061f801723551c527a5e52  png/scene-nan-size.dpi72.png
+b1e971e704edf859feffd57db51c0911c29783c2e017ae7c5f8b2861ebdd82e3  png/scene-nan-size.dpi200.png
+b1e971e704edf859feffd57db51c0911c29783c2e017ae7c5f8b2861ebdd82e3  png/scene-nan-size.dpi72.png
 a44c82e4aeec7e4e1353769d071c4353d0eaba5f793f3d79ef7b0e0c1693bf42  png/scene-primitives.dpi200.png
 83c68532e46bf57e82fc320026aede661d1885b537d6d8783be98b9a203ff178  png/scene-primitives.dpi72.png
 0be51b6398100925130e80a2628d37a69579cac8ffbca0fe06bb6fc955e93b7f  png/scene-strokes.dpi200.png
