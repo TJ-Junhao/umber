@@ -2,8 +2,8 @@
 //! filled; the [`area`](super::area) mark draws its line with these same steps.
 
 use super::MarkContext;
-use super::clip::{Bounds, clip_polyline};
-use super::mapping::{PlotPoint, axis_x, axis_y};
+use super::clip::{Bounds, clamp_polyline, clip_polyline};
+use super::mapping::{AxisMaps, AxisPoint, PlotPoint, axis_x, axis_y};
 use crate::geometry::Path;
 use crate::layout::Area;
 use crate::m4_indices;
@@ -138,29 +138,69 @@ pub(super) fn plot_subpaths(
     xs: &[f64],
     ys: &[f64],
 ) -> Vec<Vec<PlotPoint>> {
-    let MarkContext {
-        theme, maps, plot, ..
-    } = *context;
-    let margin = f64::from(line_width(theme)).max(MIN_LINE_MARGIN);
-    let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
-    let bounds = Bounds {
-        left,
-        top,
-        right,
-        bottom,
-    };
-    // Clipped points are inside `bounds`, so they map to within `margin` of the plot area. The
-    // clamp only guards against rounding in the map.
-    let limit = PlotLimit::around(plot, margin);
-    clip_polyline(xs, ys, &bounds)
-        .into_iter()
-        .map(|subpath| {
-            subpath
-                .into_iter()
-                .map(|p| limit.clamp(maps.to_plot(p)))
-                .collect()
-        })
-        .collect()
+    let clip = LineClip::of(context);
+    clip.to_plot(clip_polyline(xs, ys, &clip.bounds))
+}
+
+/// The upper boundaries of the region between the axis-space line `(xs, ys)` and the
+/// baseline, in plot points, as far as the line's clip shows that region: one piece per run
+/// that NaN or the sides of the clip leave, with the parts of the line beyond the top or bottom
+/// of the clip running along that edge (see [`clamp_polyline`]). A line inside the clip gives
+/// the subpaths of [`plot_subpaths`] that hold two points or more.
+pub(super) fn fill_boundaries(
+    context: &MarkContext<'_>,
+    xs: &[f64],
+    ys: &[f64],
+) -> Vec<Vec<PlotPoint>> {
+    let clip = LineClip::of(context);
+    clip.to_plot(clamp_polyline(xs, ys, &clip.bounds))
+}
+
+/// The axis-space clip of a line, the domain expanded by `max(line width, 2)` pt, with the map
+/// of clipped pieces to plot points.
+struct LineClip {
+    /// The clip rectangle in axis space.
+    bounds: Bounds,
+    /// The axis maps.
+    maps: AxisMaps,
+    /// The plot area expanded by the same margin, which mapped points are clamped into.
+    limit: PlotLimit,
+}
+
+impl LineClip {
+    /// The line clip of `context`.
+    fn of(context: &MarkContext<'_>) -> LineClip {
+        let MarkContext {
+            theme, maps, plot, ..
+        } = *context;
+        let margin = f64::from(line_width(theme)).max(MIN_LINE_MARGIN);
+        let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
+        LineClip {
+            bounds: Bounds {
+                left,
+                top,
+                right,
+                bottom,
+            },
+            maps,
+            limit: PlotLimit::around(plot, margin),
+        }
+    }
+
+    /// `pieces`, clipped to the bounds, in plot points. Clipped points are inside the bounds,
+    /// so they map to within the margin of the plot area; the clamp only guards against
+    /// rounding in the map.
+    fn to_plot(&self, pieces: Vec<Vec<AxisPoint>>) -> Vec<Vec<PlotPoint>> {
+        pieces
+            .into_iter()
+            .map(|piece| {
+                piece
+                    .into_iter()
+                    .map(|p| self.limit.clamp(self.maps.to_plot(p)))
+                    .collect()
+            })
+            .collect()
+    }
 }
 
 /// The stroke through the plot-point `subpaths`, in `color` and `dash` at the theme's line

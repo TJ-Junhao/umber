@@ -237,3 +237,113 @@ fn clip_run(run: &[AxisPoint], bounds: &Bounds, out: &mut Vec<Vec<AxisPoint>>) {
         out.push(current);
     }
 }
+
+/// Splits the polyline through `(xs[i], ys[i])` at NaN and turns each run into the boundary of
+/// the region between the line and any level inside the y range of `bounds`, as far as `bounds`
+/// shows it. Each segment is cut to the x range of `bounds` as [`clip_segment`] cuts it, then
+/// clamped into the y range, with a point inserted where it crosses the top or the bottom
+/// edge, so a part of the line beyond the y range runs along that edge instead of being
+/// dropped. A piece ends only where the line leaves the x range; a single point is never a
+/// piece.
+///
+/// Clamping the line is exact for that region: for a level `b` inside the y range, the region
+/// between `y = f(x)` and `b`, cut to the y range, is the region between `clamp(f(x))` and `b`.
+/// Segments inside `bounds` are returned unchanged, and a segment that only crosses a side edge
+/// gets the crossing [`clip_segment`] computes, so a line inside the y range gives the points
+/// of [`clip_polyline`].
+pub(super) fn clamp_polyline(xs: &[f64], ys: &[f64], bounds: &Bounds) -> Vec<Vec<AxisPoint>> {
+    let points: Vec<AxisPoint> = xs
+        .iter()
+        .copied()
+        .zip(ys.iter().copied())
+        .map(|(x, y)| AxisPoint::new(x, y))
+        .collect();
+    let mut out = Vec::new();
+    for run in points.split(|p| p.x.is_nan() || p.y.is_nan()) {
+        let mut current: Vec<AxisPoint> = Vec::new();
+        for pair in run.windows(2) {
+            let [a, b] = pair else { continue };
+            let Some(along) = clamp_segment(*a, *b, bounds) else {
+                if current.len() > 1 {
+                    out.push(std::mem::take(&mut current));
+                }
+                current.clear();
+                continue;
+            };
+            let (Some(&start), Some(&end)) = (along.first(), along.last()) else {
+                continue;
+            };
+            // A segment continues the current piece only if it starts where the previous one
+            // ended: at its own first point, inside the x range.
+            if current.last() != Some(&start) {
+                if current.len() > 1 {
+                    out.push(std::mem::take(&mut current));
+                }
+                current.clear();
+                current.push(start);
+            }
+            current.extend(along.iter().skip(1));
+            // An end outside the x range was cut there: the line leaves the region.
+            if end.x != b.x {
+                if current.len() > 1 {
+                    out.push(std::mem::take(&mut current));
+                }
+                current.clear();
+            }
+        }
+        if current.len() > 1 {
+            out.push(current);
+        }
+    }
+    out
+}
+
+/// The segment `a..b` cut to the x range of `bounds` and clamped into its y range, as the
+/// points along it: the cut ends, with their y clamped, and between them the crossings with the
+/// top and bottom edges. `None` when no part lies inside the x range.
+fn clamp_segment(a: AxisPoint, b: AxisPoint, bounds: &Bounds) -> Option<Vec<AxisPoint>> {
+    let (lo_x, hi_x, lo_y, hi_y) = (bounds.left, bounds.right, bounds.top, bounds.bottom);
+    if (a.x < lo_x && b.x < lo_x) || (a.x > hi_x && b.x > hi_x) {
+        return None;
+    }
+    let mid_x = lo_x / 2.0 + hi_x / 2.0;
+    let mid_y = lo_y / 2.0 + hi_y / 2.0;
+    // The cut ends: an end outside the x range moves to its crossing with that side edge.
+    let cut = |p: AxisPoint| {
+        let edge = if p.x < lo_x {
+            lo_x
+        } else if p.x > hi_x {
+            hi_x
+        } else {
+            return Some(p);
+        };
+        crossing((a.x, a.y), (b.x, b.y), edge, mid_y).map(|y| AxisPoint::new(edge, y))
+    };
+    let (start, end) = (cut(a)?, cut(b)?);
+    let clamp = |p: AxisPoint| AxisPoint::new(p.x, p.y.clamp(lo_y, hi_y));
+    let mut along = vec![clamp(start)];
+    // The edges strictly between the ends' y values, in order along the segment.
+    let (low, high) = (start.y.min(end.y), start.y.max(end.y));
+    let edges = if start.y <= end.y {
+        [lo_y, hi_y]
+    } else {
+        [hi_y, lo_y]
+    };
+    let (min_x, max_x) = (start.x.min(end.x), start.x.max(end.x));
+    for edge in edges {
+        if low < edge
+            && edge < high
+            && let Some(x) = crossing((a.y, a.x), (b.y, b.x), edge, mid_x)
+        {
+            let p = AxisPoint::new(x.clamp(min_x, max_x), edge);
+            if along.last() != Some(&p) {
+                along.push(p);
+            }
+        }
+    }
+    let last = clamp(end);
+    if along.last() != Some(&last) || along.len() == 1 {
+        along.push(last);
+    }
+    Some(along)
+}

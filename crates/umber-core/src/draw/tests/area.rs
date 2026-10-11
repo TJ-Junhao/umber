@@ -390,3 +390,106 @@ fn opposite_runs_do_not_cancel_their_areas() {
     // A reversed run alone is filled too.
     assert_eq!(area_shows(&[1.0, 0.0], &[1.0, 1.0], &[(0.5, 0.5)]), [true]);
 }
+
+/// The mark items of an area of `x` and `y` in Midnight, on a y axis of `y_scale` with the
+/// limits `xlim` and `ylim`, with the plot area.
+fn limited_area(
+    y_scale: ScaleKind,
+    x: &[f64],
+    y: &[f64],
+    ylim: (f64, f64),
+) -> (crate::scene::Scene, crate::layout::Layout) {
+    let mut f = area_figure(Theme::midnight(), y_scale, x, y);
+    f.axes_mut()
+        .unwrap()
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(ylim.0, ylim.1)
+        .unwrap();
+    let (_, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+    (f.to_scene(FontLibrary::global()), layout)
+}
+
+/// The line margin of Midnight's line width, in points.
+fn margin() -> f32 {
+    Theme::midnight().drawn_line_width().max(2.0)
+}
+
+#[test]
+fn an_area_whose_line_runs_above_the_plot_fills_it() {
+    // The line at 2 (100 on log) lies above a y range of 0..1 (1..10): no stroke shows, but
+    // the region down to the baseline covers the whole plot, on a linear and on a log y axis.
+    for (y_scale, y, ylim) in [
+        (ScaleKind::Linear, [2.0, 2.0], (0.0, 1.0)),
+        (LOG, [100.0, 100.0], (1.0, 10.0)),
+    ] {
+        let (scene, layout) = limited_area(y_scale, &[0.0, 1.0], &y, ylim);
+        assert_scene_bounded(&scene);
+        let plot = layout.plot;
+        let [
+            Item::Fill {
+                path,
+                paint: Paint::Linear(gradient),
+                ..
+            },
+        ] = mark_group(&scene).1
+        else {
+            panic!(
+                "expected one fill and no stroke, got {:?}",
+                mark_group(&scene).1
+            )
+        };
+        let (lo, hi) = path.bounds().unwrap();
+        let top = plot.y as f32 - margin();
+        assert_eq!((lo.x, hi.x), (plot.x as f32, plot.right() as f32));
+        assert_eq!((lo.y, hi.y), (top, layout.baseline_y as f32));
+        assert_eq!(layout.baseline_y, plot.bottom());
+        // The gradient starts at the clip edge, where the boundary runs, and ends at the
+        // baseline.
+        assert_eq!((gradient.start.y, gradient.end.y), (top, hi.y));
+    }
+}
+
+#[test]
+fn an_area_entering_from_above_fills_from_its_first_point() {
+    // From 2 down to 0.5 on a y range of 0..1: the stroke starts where the line enters the
+    // clip, but the fill starts at x = 0, along the top of the clip.
+    let (scene, layout) = limited_area(ScaleKind::Linear, &[0.0, 1.0], &[2.0, 0.5], (0.0, 1.0));
+    assert_scene_bounded(&scene);
+    let plot = layout.plot;
+    let [
+        Item::Fill {
+            path: area,
+            paint: Paint::Linear(gradient),
+            ..
+        },
+        Item::Stroke { path: line, .. },
+    ] = mark_group(&scene).1
+    else {
+        panic!(
+            "expected a fill and the stroke, got {:?}",
+            mark_group(&scene).1
+        )
+    };
+    let (area_lo, area_hi) = area.bounds().unwrap();
+    let (line_lo, _) = line.bounds().unwrap();
+    assert_eq!(area_lo.x, plot.x as f32);
+    assert_eq!(area_hi.x, plot.right() as f32);
+    assert!(line_lo.x > plot.x as f32 + 100.0, "{line_lo:?}");
+    // The fill's top runs along the clip edge until the line enters, then follows it.
+    let top = plot.y as f32 - margin();
+    let outline = &subpaths(area)[0];
+    let entry = subpaths(line)[0][0];
+    assert_eq!(
+        outline[0],
+        crate::geometry::Point {
+            x: area_lo.x,
+            y: top
+        }
+    );
+    assert_eq!(outline[1], entry);
+    assert_eq!(entry.y, top);
+    // The gradient is anchored where it was for the clipped line: at the clip edge.
+    assert_eq!(gradient.start.y, top);
+    assert_eq!(gradient.end.y, layout.baseline_y as f32);
+}

@@ -4,7 +4,7 @@
 
 use super::MarkContext;
 use super::clip::crossing;
-use super::line::{plot_subpaths, stroke};
+use super::line::{fill_boundaries, plot_subpaths, stroke};
 use super::mapping::PlotPoint;
 use crate::geometry::Path;
 use crate::scene::{FillRule, GradientStop, Item, LinearGradient, Paint};
@@ -17,9 +17,14 @@ const AREA_ALPHA: f32 = 0.32;
 /// gradient across it would have no length).
 const MIN_AREA_HEIGHT: f64 = 0.01;
 
-/// The scene items of one area mark, its line given in axis space: the fill of every visible
-/// run of the line (see [`area_fills`]), then the line's stroke over them, exactly as a line
-/// mark of the same `color` and `dash` draws it. Nothing when no part of the line is visible.
+/// The scene items of one area mark, its line given in axis space: the fill of the region
+/// between the line and the baseline (see [`area_fills`]), then the line's stroke over it,
+/// exactly as a line mark of the same `color` and `dash` draws it.
+///
+/// The fill and the stroke are clipped separately. The stroke is the line's visible part. The
+/// fill is bounded by the line clamped into the clip (see [`fill_boundaries`]), so the region
+/// still shows where the line runs above or below the plot: a line far above a plot whose y
+/// range holds the baseline fills the whole plot. Nothing is drawn when neither is visible.
 pub(super) fn area_items(
     context: &MarkContext<'_>,
     xs: &[f64],
@@ -28,15 +33,14 @@ pub(super) fn area_items(
     dash: Dash,
     items: &mut Vec<Item>,
 ) {
-    let subpaths = plot_subpaths(context, xs, ys);
-    if subpaths.is_empty() {
-        return;
-    }
     let style = context.theme.fill_style();
-    for subpath in &subpaths {
-        items.extend(area_fills(subpath, context.baseline_y, color, style));
+    for boundary in &fill_boundaries(context, xs, ys) {
+        items.extend(area_fills(boundary, context.baseline_y, color, style));
     }
-    items.push(stroke(context.theme, &subpaths, color, dash));
+    let subpaths = plot_subpaths(context, xs, ys);
+    if !subpaths.is_empty() {
+        items.push(stroke(context.theme, &subpaths, color, dash));
+    }
 }
 
 /// Where a plot y lies relative to the baseline.
@@ -61,12 +65,15 @@ fn side(y: f64, baseline_y: f64) -> BaselineSide {
     }
 }
 
-/// The area between one clipped line `subpath` and `baseline_y`, split where the line crosses
-/// the baseline. Each part is its own fill, so parts never cancel each other: a closed polygon
-/// (the line, then down to the baseline and back). Under [`FillStyle::Gradient`] it is painted
-/// with a vertical gradient from the part's extreme y, at 0.32 of the line's opacity, to the
-/// baseline, at 0: parts above the baseline fade from their top, parts below from their
-/// bottom. Under [`FillStyle::Solid`] it is painted flat at 0.32 of the line's opacity.
+/// The area between one fill boundary `subpath` and `baseline_y`, split where the boundary
+/// crosses the baseline. Each part is its own fill, so parts never cancel each other: a closed
+/// polygon (the boundary, then down to the baseline and back). Under [`FillStyle::Gradient`] it
+/// is painted with a vertical gradient from the part's extreme y, at 0.32 of the line's
+/// opacity, to the baseline, at 0: parts above the baseline fade from their top, parts below
+/// from their bottom. The extreme is the boundary's, so where the line runs beyond the plot the
+/// gradient starts at the clip edge, at most the line margin past the plot, exactly where a
+/// clipped line part starts. Under [`FillStyle::Solid`] it is painted flat at 0.32 of the
+/// line's opacity.
 fn area_fills(subpath: &[PlotPoint], baseline_y: f64, color: Rgba, style: FillStyle) -> Vec<Item> {
     // Split into parts that each stay on one side of the baseline.
     let mut parts: Vec<(BaselineSide, Vec<PlotPoint>)> = Vec::new();

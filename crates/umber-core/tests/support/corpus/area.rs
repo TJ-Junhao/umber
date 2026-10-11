@@ -8,7 +8,9 @@
 //! and lines that cross the baseline; a log y axis, where areas fill down to the baseline; an
 //! area next to a scatter, which gives the x axis nice limits; a category x axis; explicit
 //! limits that leave 0 outside the y axis and cut the line ends, with direct labels at the edge
-//! and at end dots; chips set on the axes; 200 000 points, downsampled; and every error branch
+//! and at end dots; lines that run above and below the y axis, on a linear and on a log y axis,
+//! whose fills still show between the clip edge and the baseline; chips set on the axes;
+//! 200 000 points, downsampled; and every error branch
 //! of `Axes::area`, including which fault is reported when an input has several, and the state
 //! a failed call leaves.
 
@@ -196,7 +198,8 @@ fn figures() -> Vec<(String, umber_core::Figure)> {
 
     // Explicit limits: 0 lies below the y axis, so the areas fill to the lower limit; the x
     // limit cuts one area (a direct label at the edge, no end dot) and not the other (a label
-    // at its end dot); a third area lies above the y axis.
+    // at its end dot); the line of a third area lies above the y axis, so it shows no stroke
+    // but fills the plot from the baseline up to the top of the clip.
     for (theme_name, theme) in [
         ("graphite", Theme::graphite()),
         ("midnight", Theme::midnight()),
@@ -222,6 +225,43 @@ fn figures() -> Vec<(String, umber_core::Figure)> {
             .unwrap()
             .legend(LegendStyle::Direct);
         out.push((format!("fig-area-direct-limits-{theme_name}"), f));
+    }
+
+    // Lines that leave the y axis: entering from above, dipping below, and wholly above. The
+    // fills run along the clip edge where the lines are beyond it.
+    for (theme_name, theme, y_scale, ylim, ys) in [
+        (
+            "midnight",
+            Theme::midnight(),
+            linear(),
+            (0.0, 10.0),
+            [
+                vec![25.0, 4.0, 6.0, 30.0],
+                vec![2.0, -3.0, -1.0, 3.0],
+                vec![12.0, 15.0, 11.0, 14.0],
+            ],
+        ),
+        (
+            "pigment-log",
+            Theme::pigment(),
+            log(10.0),
+            (1.0, 100.0),
+            [
+                vec![1e4, 20.0, 50.0, 1e6],
+                vec![5.0, 0.01, 0.1, 8.0],
+                vec![300.0, 1e3, 500.0, 200.0],
+            ],
+        ),
+    ] {
+        let mut f = figure(6.0, 4.0, theme, linear(), y_scale);
+        labelled(&mut f, "Beyond the y axis");
+        for (label, y) in ["Enters", "Dips", "Above"].into_iter().zip(ys) {
+            axes(&mut f)
+                .area(numbers(vec![0.0, 1.0, 2.0, 3.0]), &y, labelled_area(label))
+                .unwrap();
+        }
+        axes(&mut f).ylim(ylim.0, ylim.1).unwrap();
+        out.push((format!("fig-area-beyond-y-{theme_name}"), f));
     }
 
     // Chips set on the axes, over a header theme.
