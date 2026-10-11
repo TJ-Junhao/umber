@@ -12,6 +12,7 @@ mod enums;
 mod errors;
 mod figure;
 mod scale;
+mod size;
 #[cfg(test)]
 mod test_support;
 mod theme;
@@ -34,5 +35,7 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(color::check_alpha, m)?)?;
     m.add_function(wrap_pyfunction!(color::check_palette_index, m)?)?;
     m.add_function(wrap_pyfunction!(scale::check_log_base, m)?)?;
+    m.add_function(wrap_pyfunction!(size::check_size_times, m)?)?;
+    m.add_function(wrap_pyfunction!(size::check_size_points, m)?)?;
     Ok(())
 }

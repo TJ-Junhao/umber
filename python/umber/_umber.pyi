@@ -30,6 +30,8 @@ __all__ = [
     "check_alpha",
     "check_log_base",
     "check_palette_index",
+    "check_size_points",
+    "check_size_times",
     "color_hex",
     "color_rgb",
     "color_with_alpha",
@@ -61,6 +63,13 @@ def check_palette_index(index: int) -> None: ...
 # A scale argument is (kind, base): kind 0 is linear, 1 is log, 2 is category; the base is
 # used by kind 1 only.
 def check_log_base(base: float) -> None: ...
+
+# A size argument: (kind, value). Kind 0 is Size.AUTO (value unused, 0.0), 1 is Size.times() (value:
+# the factor) and 2 is Size.pt() (value: the points).
+type _SizeArg = tuple[int, float]
+
+def check_size_times(factor: float) -> None: ...
+def check_size_points(points: float) -> None: ...
 
 # Float data: a one-dimensional float64 buffer as described above.
 type _FloatArray = numpy.typing.NDArray[numpy.float64]
@@ -115,10 +124,22 @@ class Figure:
     def ylim(self, low: float, high: float) -> None: ...
     def legend(self, style: int) -> None: ...
     def line(
-        self, x: _AxisValues, y: _FloatArray, label: str, color: _ColorArg, dash: int
+        self,
+        x: _AxisValues,
+        y: _FloatArray,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
     ) -> None: ...
     def scatter(
-        self, x: _AxisValues, y: _FloatArray, label: str, color: _ColorArg, marker: int
+        self,
+        x: _AxisValues,
+        y: _FloatArray,
+        label: str,
+        color: _ColorArg,
+        marker: int,
+        size: _SizeArg,
     ) -> None: ...
     def bar(
         self, categories: list[str], heights: _FloatArray, label: str, color: _ColorArg

@@ -27,6 +27,7 @@ use crate::color::{ColorArg, color_spec};
 use crate::enums::enum_value;
 use crate::errors::{core_error, internal_state};
 use crate::scale::scale_kind;
+use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
 use crate::values::{axis_data, floats, names};
 
@@ -163,12 +164,14 @@ impl Figure {
         label: String,
         color: ColorArg,
         dash: i64,
+        width: SizeArg,
     ) -> PyResult<()> {
         let (x, y) = (axis_data(x)?, floats(y)?);
         let options = LineOptions {
             label,
             color: color_spec(color)?,
             dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
             ..Default::default()
         };
         self.axes()?
@@ -185,12 +188,14 @@ impl Figure {
         label: String,
         color: ColorArg,
         marker: i64,
+        size: SizeArg,
     ) -> PyResult<()> {
         let (x, y) = (axis_data(x)?, floats(y)?);
         let options = ScatterOptions {
             label,
             color: color_spec(color)?,
             marker: enum_value::<Marker>(marker)?,
+            size: size_spec(size)?,
             ..Default::default()
         };
         self.axes()?

@@ -12,7 +12,7 @@ from typing_extensions import TypeVar
 # so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
 # ``umber.Figure`` through the package once it has loaded.
 import umber
-from umber import _args, _color, _series, _umber
+from umber import _args, _color, _series, _size, _umber
 from umber._args import instance, integer, real, type_name
 from umber._color import Color
 from umber._enums import Dash, LegendStyle, Marker
@@ -20,6 +20,7 @@ from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._series import BarSeries
+from umber._size import Size
 from umber._types import Values
 from umber._values import FloatArray, axis_values, floats, names
 
@@ -45,6 +46,9 @@ def _members_hint(cls: type[Enum]) -> str:
 
 _DASH_HINT: Final = _members_hint(Dash)
 _MARKER_HINT: Final = _members_hint(Marker)
+_SIZE_HINT: Final = (
+    "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
+)
 _LEGEND_HINT: Final = _members_hint(LegendStyle)
 
 
@@ -262,6 +266,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
     ) -> Self:
         """Add a line through the points ``(x[i], y[i])``, in order.
 
@@ -273,6 +278,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             label: The name shown in the legend; an empty string leaves the line out of it.
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
 
         Returns:
             These axes.
@@ -294,9 +300,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             name = _args.text(context, "label", label)
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
             xs = self._x_values(context, x)
             ys = floats(context, "y", y)
-            self._native.line(xs, ys, name, spec, style.value)
+            self._native.line(xs, ys, name, spec, style.value, extent)
             return self
 
     def scatter(
@@ -307,6 +314,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         label: str = "",
         color: Color = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
+        size: Size = Size.AUTO,
     ) -> Self:
         """Add a marker at each point ``(x[i], y[i])``.
 
@@ -318,6 +326,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             label: The name shown in the legend; an empty string leaves the series out of it.
             color: The marker color. ``Color.AUTO`` takes the next color of the theme palette.
             marker: The marker shape.
+            size: The marker size. ``Size.AUTO`` is the marker size of the theme.
 
         Returns:
             These axes.
@@ -339,9 +348,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             name = _args.text(context, "label", label)
             spec = _color_argument(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
+            extent = _size_argument(context, "size", size)
             xs = self._x_values(context, x)
             ys = floats(context, "y", y)
-            self._native.scatter(xs, ys, name, spec, shape.value)
+            self._native.scatter(xs, ys, name, spec, shape.value, extent)
             return self
 
     def bar(
@@ -545,6 +555,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 def _color_argument(context: str, value: object) -> tuple[int, int, float]:
     """Check a ``color`` argument and return its native form."""
     return _color.native(instance(context, "color", value, Color, _COLOR_HINT))
+
+
+def _size_argument(context: str, name: str, value: object) -> tuple[int, float]:
+    """Check a ``width`` or ``size`` argument and return its native form."""
+    return _size.native(instance(context, name, value, Size, _SIZE_HINT))
 
 
 def _series_arguments(
