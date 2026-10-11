@@ -126,6 +126,9 @@ fn ramp(v: f64, base: f64, tallest: f64) -> f32 {
         return 0.0;
     }
     let share = (v - base) / (tallest - base);
-    // `max` then `min` never panics, unlike `clamp`, and maps NaN to 0.
-    share.max(0.0).min(1.0) as f32
+    if share.is_nan() {
+        0.0
+    } else {
+        share.clamp(0.0, 1.0) as f32
+    }
 }

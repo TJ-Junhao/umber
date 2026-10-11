@@ -2,7 +2,7 @@
 //! tallest bin and the baseline, the top edges, and clipping in axis space.
 
 use super::{mark_group, subpaths};
-use crate::geometry::{Path, PathVerb, Point};
+use crate::geometry::{Path, PathVerb};
 use crate::layout::Layout;
 use crate::model::{Figure, HistOptions};
 use crate::render::{SvgText, render_png, render_svg};
