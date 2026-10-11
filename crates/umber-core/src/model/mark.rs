@@ -5,7 +5,7 @@ use std::fmt;
 use super::axis_data::{AxisData, Series};
 use super::bar::{BarGroupMark, BarMark};
 use super::hist::HistMark;
-use crate::{ColorSpec, Dash, Marker};
+use crate::{ColorSpec, Dash, Marker, SizeSpec};
 
 /// Options of a line mark.
 ///
@@ -13,11 +13,16 @@ use crate::{ColorSpec, Dash, Marker};
 ///
 /// ```
 /// use umber_core::figure::LineOptions;
-/// use umber_core::{ColorSpec, Dash};
+/// use umber_core::{ColorSpec, Dash, SizeSpec};
 ///
 /// let options = LineOptions::default();
 /// assert_eq!((options.color, options.dash), (ColorSpec::AUTO, Dash::Solid));
+/// assert_eq!(options.width, SizeSpec::Auto);
 /// assert!(options.label.is_empty());
+///
+/// let thick = LineOptions { width: SizeSpec::times(2.0)?, ..LineOptions::default() };
+/// assert_ne!(thick, options);
+/// # Ok::<(), umber_core::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct LineOptions {
@@ -27,6 +32,8 @@ pub struct LineOptions {
     pub color: ColorSpec,
     /// The dash style.
     pub dash: Dash,
+    /// The line width; [`SizeSpec::Auto`] for the theme's line width. Dashes scale with it.
+    pub width: SizeSpec,
 }
 
 impl Default for LineOptions {
@@ -35,12 +42,13 @@ impl Default for LineOptions {
             label: String::new(),
             color: ColorSpec::AUTO,
             dash: Dash::Solid,
+            width: SizeSpec::Auto,
         }
     }
 }
 
 /// Options of an area mark: the options of the line that bounds it, so an area takes exactly
-/// the label, color and dash of a line.
+/// the label, color, dash and width of a line.
 ///
 /// # Examples
 ///
@@ -60,11 +68,16 @@ pub type AreaOptions = LineOptions;
 ///
 /// ```
 /// use umber_core::figure::ScatterOptions;
-/// use umber_core::{ColorSpec, Marker};
+/// use umber_core::{ColorSpec, Marker, SizeSpec};
 ///
 /// let options = ScatterOptions::default();
 /// assert_eq!((options.color, options.marker), (ColorSpec::AUTO, Marker::Circle));
+/// assert_eq!(options.size, SizeSpec::Auto);
 /// assert!(options.label.is_empty());
+///
+/// let small = ScatterOptions { size: SizeSpec::pt(3.0)?, ..ScatterOptions::default() };
+/// assert_ne!(small, options);
+/// # Ok::<(), umber_core::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScatterOptions {
@@ -74,6 +87,8 @@ pub struct ScatterOptions {
     pub color: ColorSpec,
     /// The marker shape.
     pub marker: Marker,
+    /// The marker diameter; [`SizeSpec::Auto`] for the theme's marker size.
+    pub size: SizeSpec,
 }
 
 impl Default for ScatterOptions {
@@ -82,6 +97,7 @@ impl Default for ScatterOptions {
             label: String::new(),
             color: ColorSpec::AUTO,
             marker: Marker::Circle,
+            size: SizeSpec::Auto,
         }
     }
 }
@@ -235,7 +251,7 @@ impl LineMark {
         self.series.y()
     }
 
-    /// Label, color and dash.
+    /// Label, color, dash and width.
     #[must_use]
     pub fn options(&self) -> &LineOptions {
         &self.options
@@ -323,7 +339,7 @@ impl ScatterMark {
         self.series.y()
     }
 
-    /// Label, color and marker shape.
+    /// Label, color, marker shape and size.
     #[must_use]
     pub fn options(&self) -> &ScatterOptions {
         &self.options
@@ -392,7 +408,7 @@ impl AreaMark {
         self.line.y()
     }
 
-    /// Label, color and dash.
+    /// Label, color, dash and width of the line that bounds the area.
     #[must_use]
     pub fn options(&self) -> &AreaOptions {
         self.line.options()

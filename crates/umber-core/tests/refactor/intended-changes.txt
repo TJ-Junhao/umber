@@ -1,1 +1,1 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change; none. Per-series widths and sizes only add outputs.

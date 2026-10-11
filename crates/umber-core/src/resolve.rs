@@ -17,9 +17,10 @@
 //! data values again.
 //!
 //! Marks are resolved here too, once per render: each mark becomes a [`ResolvedMark`], a typed
-//! record that carries the mark's data and its [`ColorSpec`] resolved against the theme's
-//! palette. Axes are resolved from these records, once per layout pass, and drawing reads them
-//! instead of the marks.
+//! record that carries the mark's data, its [`ColorSpec`] resolved against the theme's palette
+//! and, for lines, areas and scatters, its [`SizeSpec`](crate::SizeSpec) resolved against the
+//! theme's line width or marker size. Axes are resolved from these records, once per layout
+//! pass, and drawing and the legend read them instead of the marks.
 
 use crate::binning::Histogram;
 use crate::model::{
@@ -29,7 +30,8 @@ use crate::model::{
 use crate::scale::{Padding, is_single_value, log_offset};
 use crate::stacking::Stacks;
 use crate::{
-    CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Tick, Transform,
+    CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Theme, Tick,
+    Transform,
 };
 
 /// The context of errors that cannot happen here: the model validated every input already.
@@ -314,7 +316,7 @@ pub(crate) fn resolve(
             explicit,
         } => {
             let data = extent(marks.iter().flat_map(|mark| mark.x_numbers()));
-            let all_lines = marks.iter().all(ResolvedMark::draws_a_line);
+            let all_lines = marks.iter().all(|mark| mark.line_width().is_some());
             let auto = if all_lines {
                 AutoLimits::Exact
             } else {
@@ -368,8 +370,9 @@ pub(crate) fn resolve(
 }
 
 /// A mark resolved for drawing: one variant per mark kind, each holding the mark and its color
-/// resolved against the theme's palette. Axes, the legend and drawing read marks through these
-/// records only.
+/// resolved against the theme's palette, and for lines, areas and scatters the stroke width or
+/// marker diameter they are drawn at, resolved against the theme. Axes, the legend and drawing
+/// read marks through these records only, so every reader sees the same color and size.
 ///
 /// A record may own data computed from its mark, such as bins or stacks, so the type is not
 /// `Copy`, and its accessors borrow from the record rather than from the mark.
@@ -390,6 +393,8 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a LineMark,
         /// The line color.
         color: Rgba,
+        /// The stroke width as drawn, in points.
+        width: f32,
     },
     /// A scatter mark.
     Scatter {
@@ -397,6 +402,8 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a ScatterMark,
         /// The marker color.
         color: Rgba,
+        /// The marker diameter as drawn, in points.
+        size: f32,
     },
     /// An area mark.
     Area {
@@ -404,6 +411,8 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a AreaMark,
         /// The color of the line and of its fill.
         color: Rgba,
+        /// The stroke width of the line as drawn, in points.
+        width: f32,
     },
     /// A bar mark.
     Bar {
@@ -528,17 +537,18 @@ impl<'a> ResolvedMark<'a> {
         }
     }
 
-    /// Whether the mark is drawn along a line stroked at the theme's line width, as line marks
-    /// and the line that bounds an area are. An x axis whose marks all draw a line keeps the
-    /// exact data extent, and such marks widen the marks clip by half their stroke.
-    pub fn draws_a_line(&self) -> bool {
-        match self {
-            ResolvedMark::Line { .. } | ResolvedMark::Area { .. } => true,
+    /// The stroke width, as drawn, of the line the mark is drawn along, as line marks and the
+    /// line that bounds an area are; `None` for marks not drawn along a line. An x axis whose
+    /// marks all draw a line keeps the exact data extent, and such marks widen the marks clip by
+    /// half their stroke.
+    pub fn line_width(&self) -> Option<f32> {
+        match *self {
+            ResolvedMark::Line { width, .. } | ResolvedMark::Area { width, .. } => Some(width),
             ResolvedMark::Scatter { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
-            | ResolvedMark::Hist { .. } => false,
+            | ResolvedMark::Hist { .. } => None,
         }
     }
 
@@ -546,19 +556,22 @@ impl<'a> ResolvedMark<'a> {
     /// an axes whose axes have the limits `limits`.
     pub fn keys(&self, limits: &Limits) -> Vec<SeriesKey<'a>> {
         match self {
-            &ResolvedMark::Line { mark, color } => vec![SeriesKey::of_line(mark, color, limits)],
+            &ResolvedMark::Line { mark, color, width } => {
+                vec![SeriesKey::of_line(mark, color, width, limits)]
+            }
             // An area is labelled as the line that bounds it: the line's swatch, and a direct
             // label at the line's anchor.
-            &ResolvedMark::Area { mark, color } => {
-                vec![SeriesKey::of_line(mark.line(), color, limits)]
+            &ResolvedMark::Area { mark, color, width } => {
+                vec![SeriesKey::of_line(mark.line(), color, width, limits)]
             }
-            &ResolvedMark::Scatter { mark, color } => {
+            &ResolvedMark::Scatter { mark, color, size } => {
                 let options = mark.options();
                 vec![SeriesKey {
                     label: &options.label,
                     color,
                     kind: SeriesKind::Points {
                         marker: options.marker,
+                        size,
                     },
                     anchor: None,
                 }]
@@ -620,14 +633,17 @@ pub(crate) struct SeriesKey<'a> {
 }
 
 impl<'a> SeriesKey<'a> {
-    /// The key of `line` in `color` on axes with the limits `limits`: a line swatch in the
-    /// line's dash, and the line's [`Anchor`].
-    fn of_line(line: &'a LineMark, color: Rgba, limits: &Limits) -> SeriesKey<'a> {
+    /// The key of `line` in `color`, drawn `width` pt wide, on axes with the limits `limits`: a
+    /// line swatch in the line's dash and width, and the line's [`Anchor`].
+    fn of_line(line: &'a LineMark, color: Rgba, width: f32, limits: &Limits) -> SeriesKey<'a> {
         let options = line.options();
         SeriesKey {
             label: &options.label,
             color,
-            kind: SeriesKind::Line { dash: options.dash },
+            kind: SeriesKind::Line {
+                dash: options.dash,
+                width,
+            },
             anchor: Anchor::of_line(line, limits),
         }
     }
@@ -784,27 +800,37 @@ fn crossing_at(
 const LOG_FACTOR_LIMIT: f64 = 700.0;
 
 /// How a series is drawn, as far as its legend swatch needs to know.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SeriesKind {
-    /// A line with its dash style.
+    /// A line with its dash style and drawn width.
     Line {
         /// The dash style.
         dash: Dash,
+        /// The stroke width as drawn, in points.
+        width: f32,
     },
-    /// Individual markers of one shape.
+    /// Individual markers of one shape and drawn size.
     Points {
         /// The marker shape.
         marker: Marker,
+        /// The marker diameter as drawn, in points.
+        size: f32,
     },
     /// Filled bars.
     Bar,
 }
 
-/// Each mark resolved for drawing, in mark order, with its colors resolved against `palette`,
-/// the stacks of stacked bars computed and the values of histograms binned. Every series takes
-/// its color in series order, the series of a grouped or stacked mark one after another: `Auto`
-/// colors take palette slots in that order; `Palette` and `Fixed` colors do not consume a slot.
-pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<ResolvedMark<'a>> {
+/// Each mark resolved for drawing in `theme`, in mark order: its colors resolved against the
+/// theme's palette, the width of lines and areas and the marker size of scatters resolved
+/// against the theme's line width and marker size (see [`Theme::drawn_line_width`] and
+/// [`Theme::drawn_marker_size`]), the stacks of stacked bars computed and the values of
+/// histograms binned. This is the one place where a mark's [`SizeSpec`](crate::SizeSpec) is resolved.
+///
+/// Every series takes its color in series order, the series of a grouped or stacked mark one
+/// after another: `Auto` colors take palette slots in that order; `Palette` and `Fixed` colors
+/// do not consume a slot.
+pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<ResolvedMark<'a>> {
+    let palette = theme.palette();
     let mut next_auto = 0_usize;
     let mut color_of = |spec: ColorSpec| {
         let color = spec.resolve(palette, next_auto);
@@ -819,14 +845,17 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
             Mark::Line(mark) => ResolvedMark::Line {
                 mark,
                 color: color_of(mark.options().color),
+                width: theme.drawn_line_width(mark.options().width),
             },
             Mark::Scatter(mark) => ResolvedMark::Scatter {
                 mark,
                 color: color_of(mark.options().color),
+                size: theme.drawn_marker_size(mark.options().size),
             },
             Mark::Area(mark) => ResolvedMark::Area {
                 mark,
                 color: color_of(mark.options().color),
+                width: theme.drawn_line_width(mark.options().width),
             },
             Mark::Bar(mark) => ResolvedMark::Bar {
                 mark,
@@ -908,7 +937,7 @@ mod tests {
 
     /// Both axes of `axes`, resolved from its marks.
     fn resolve_axes(axes: &Axes, x_target: usize, y_target: usize) -> Resolved {
-        let marks = resolve_marks(axes.marks(), &[]);
+        let marks = resolve_marks(axes.marks(), &Theme::pigment());
         resolve(&marks, &Limits::of(axes), x_target, y_target)
     }
 
@@ -1200,7 +1229,7 @@ mod tests {
             }
         }
         let marks = f.axes().unwrap().marks();
-        let resolved = resolve_marks(marks, &palette);
+        let resolved = resolve_marks(marks, f.theme());
         assert_eq!(resolved.len(), marks.len());
         for (record, mark) in resolved.iter().zip(marks) {
             let same = match (record, mark) {
@@ -1226,7 +1255,79 @@ mod tests {
                 palette[2],
             ]
         );
-        assert!(resolve_marks(&[], &palette).is_empty());
+        assert!(resolve_marks(&[], f.theme()).is_empty());
+    }
+
+    #[test]
+    fn widths_and_sizes_resolve_against_the_theme_once() {
+        use crate::SizeSpec;
+        let line = |width: SizeSpec| LineOptions {
+            width,
+            ..LineOptions::default()
+        };
+        let scatter = |size: SizeSpec| ScatterOptions {
+            size,
+            ..ScatterOptions::default()
+        };
+        let specs = [
+            SizeSpec::Auto,
+            SizeSpec::times(2.5).unwrap(),
+            SizeSpec::times(0.5).unwrap(),
+            SizeSpec::pt(3.0).unwrap(),
+        ];
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            let (w, d) = (theme.line_width(), theme.marker_size());
+            let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+            let a = f.add_axes(LIN, LIN).unwrap();
+            for spec in specs {
+                a.line(nums(&[0.0, 1.0]), &[1.0, 2.0], line(spec))
+                    .unwrap()
+                    .area(nums(&[0.0, 1.0]), &[1.0, 2.0], line(spec))
+                    .unwrap()
+                    .scatter(nums(&[0.5]), &[1.5], scatter(spec))
+                    .unwrap();
+            }
+            let resolved = resolve_marks(f.axes().unwrap().marks(), &theme);
+            let expected = [(w, d), (2.5 * w, 2.5 * d), (0.5 * w, 0.5 * d), (3.0, 3.0)];
+            for (records, (width, size)) in resolved.chunks(3).zip(expected) {
+                match records {
+                    [
+                        ResolvedMark::Line { width: lw, .. },
+                        ResolvedMark::Area { width: aw, .. },
+                        ResolvedMark::Scatter { size: sd, .. },
+                    ] => assert_eq!((*lw, *aw, *sd), (width, width, size)),
+                    other => panic!("unexpected records {other:?}"),
+                }
+                assert_eq!(records[0].line_width(), Some(width));
+                assert_eq!(records[1].line_width(), Some(width));
+                assert_eq!(records[2].line_width(), None);
+            }
+        }
+
+        // The drawn size is capped at 10 000 pt, as the theme's own values are.
+        let theme = Theme::graphite()
+            .with_line_width(5000.0)
+            .unwrap()
+            .with_marker_size(3e38)
+            .unwrap();
+        let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+        f.add_axes(LIN, LIN)
+            .unwrap()
+            .line(nums(&[0.0]), &[1.0], line(SizeSpec::times(10.0).unwrap()))
+            .unwrap()
+            .scatter(
+                nums(&[0.0]),
+                &[1.0],
+                scatter(SizeSpec::times(10.0).unwrap()),
+            )
+            .unwrap();
+        match resolve_marks(f.axes().unwrap().marks(), &theme).as_slice() {
+            [
+                ResolvedMark::Line { width, .. },
+                ResolvedMark::Scatter { size, .. },
+            ] => assert_eq!((*width, *size), (1.0e4, 1.0e4)),
+            other => panic!("unexpected records {other:?}"),
+        }
     }
 
     #[test]
@@ -1254,7 +1355,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
         let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()));
         assert_eq!(
             keys,
@@ -1262,7 +1363,10 @@ mod tests {
                 SeriesKey {
                     label: "trend",
                     color: palette[0],
-                    kind: SeriesKind::Line { dash: Dash::Dashed },
+                    kind: SeriesKind::Line {
+                        dash: Dash::Dashed,
+                        width: 2.0,
+                    },
                     anchor: Some(Anchor {
                         x: AnchorX::Number(0.0),
                         y: 1.0,
@@ -1274,6 +1378,7 @@ mod tests {
                     color: palette[1],
                     kind: SeriesKind::Points {
                         marker: Marker::Square,
+                        size: 6.0,
                     },
                     anchor: None,
                 },
@@ -1754,7 +1859,7 @@ mod tests {
             .unwrap()
             .bar(names(&["d"]), &[1.0], color(ColorSpec::AUTO, "last"))
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
         let colors = series_colors(&resolved);
         assert_eq!(
             colors,
@@ -1910,7 +2015,7 @@ mod tests {
                 vec![auto(&[1.0]), bar_series(at(0), &[1.0]), auto(&[2.0])],
             )
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
         assert_eq!(
             series_colors(&resolved),
             [
@@ -2011,7 +2116,7 @@ mod tests {
         for values in [&[][..], &[f64::NAN, f64::NAN][..]] {
             let f = hist_figure(LIN, values, 30);
             assert_eq!(domains(&f), ((0.0, 1.0), (0.0, 1.0)));
-            let marks = resolve_marks(f.axes().unwrap().marks(), &[]);
+            let marks = resolve_marks(f.axes().unwrap().marks(), &Theme::pigment());
             assert!(matches!(
                 marks.as_slice(),
                 [ResolvedMark::Hist {
@@ -2040,7 +2145,7 @@ mod tests {
             .unwrap()
             .line(nums(&[1.0]), &[1.0], LineOptions::default())
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
         assert_eq!(
             series_colors(&resolved),
             [palette[0], palette[1], palette[2]]
@@ -2082,7 +2187,7 @@ mod tests {
             axes(&mut f).xlim(lo, hi).unwrap();
         }
         let axes = f.axes().unwrap();
-        let resolved = resolve_marks(axes.marks(), &[]);
+        let resolved = resolve_marks(axes.marks(), &Theme::pigment());
         let keys = series_keys(&resolved, &Limits::of(axes));
         keys[0].anchor.map(|anchor| match anchor.x {
             AnchorX::Number(x) => (x, anchor.y, anchor.end),
@@ -2125,7 +2230,7 @@ mod tests {
             .line(cats(&["Jan", "Feb", "Mar"]), &[1.0, 2.0, nan], options)
             .unwrap();
         let axes = f.axes().unwrap();
-        let resolved = resolve_marks(axes.marks(), &[]);
+        let resolved = resolve_marks(axes.marks(), &Theme::pigment());
         let keys = series_keys(&resolved, &Limits::of(axes));
         let feb = Anchor {
             x: AnchorX::Category("Feb"),
@@ -2220,12 +2325,13 @@ mod tests {
     #[test]
     fn area_keys_are_their_line_keys() {
         use crate::Dash;
-        // An area is keyed exactly as the line that bounds it: the line swatch in its dash, its
-        // color, and the line's anchor, at the edge where an x limit cuts it.
+        // An area is keyed exactly as the line that bounds it: the line swatch in its dash and
+        // width, its color, and the line's anchor, at the edge where an x limit cuts it.
         let x = || nums(&[0.0, 1.0, 2.0]);
         let options = LineOptions {
             label: "Load".to_owned(),
             dash: Dash::Dotted,
+            width: crate::SizeSpec::times(1.5).unwrap(),
             ..LineOptions::default()
         };
         for xlim in [None, Some((0.0, 1.5))] {
@@ -2242,7 +2348,7 @@ mod tests {
                 }
                 let axes = f.axes().unwrap();
                 let palette = f.theme().palette();
-                let resolved = resolve_marks(axes.marks(), palette);
+                let resolved = resolve_marks(axes.marks(), f.theme());
                 let keys: Vec<OwnedKey> = series_keys(&resolved, &Limits::of(axes))
                     .iter()
                     .map(|key| {
@@ -2267,7 +2373,10 @@ mod tests {
                 [(
                     "Load".to_owned(),
                     color,
-                    SeriesKind::Line { dash: Dash::Dotted },
+                    SeriesKind::Line {
+                        dash: Dash::Dotted,
+                        width: 3.0,
+                    },
                     Some(end)
                 )]
             );
@@ -2299,7 +2408,7 @@ mod tests {
             .unwrap()
             .area(x(), &[1.0, 2.0], AreaOptions::default())
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
         assert!(matches!(
             resolved.as_slice(),
             [
@@ -2360,7 +2469,7 @@ mod tests {
             .hist(&[1.0, 2.0], HistOptions::default())
             .unwrap();
         let axes = f.axes().unwrap();
-        let resolved = resolve_marks(axes.marks(), &[]);
+        let resolved = resolve_marks(axes.marks(), &Theme::pigment());
         let anchors: Vec<bool> = series_keys(&resolved, &Limits::of(axes))
             .iter()
             .map(|key| key.anchor.is_some())

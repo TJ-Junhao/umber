@@ -4,7 +4,7 @@ use super::{line_figure, mark_group, nums, plot_of};
 use crate::model::{Figure, LineOptions, ScatterOptions};
 use crate::scene::{Item, Rect};
 use crate::test_support::scene::assert_scene_bounded;
-use crate::{FontLibrary, Rgba, ScaleKind, Theme};
+use crate::{FontLibrary, Rgba, ScaleKind, SizeSpec, Theme};
 
 #[test]
 fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
@@ -80,6 +80,120 @@ fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
         .line(nums(&[f64::NAN]), &[f64::NAN], LineOptions::default())
         .unwrap();
     assert_eq!(f.to_scene(FontLibrary::global()).items.len(), 2);
+}
+
+#[test]
+fn clip_widening_follows_the_widest_drawn_line_of_any_width() {
+    // Graphite lines are 1.8 pt wide; the area asks for 9 pt and is the widest line. The large
+    // scatter does not count: markers are culled by their own extent.
+    let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+    let line = |width: SizeSpec| LineOptions {
+        width,
+        ..LineOptions::default()
+    };
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(nums(&[0.0, 1.0]), &[0.0, 1.0], line(SizeSpec::Auto))
+        .unwrap()
+        .area(
+            nums(&[0.0, 1.0]),
+            &[0.5, 0.5],
+            line(SizeSpec::pt(9.0).unwrap()),
+        )
+        .unwrap()
+        .line(
+            nums(&[0.0, 1.0]),
+            &[1.0, 0.0],
+            line(SizeSpec::times(0.5).unwrap()),
+        )
+        .unwrap()
+        .scatter(
+            nums(&[0.5]),
+            &[0.5],
+            ScatterOptions {
+                size: SizeSpec::pt(40.0).unwrap(),
+                ..ScatterOptions::default()
+            },
+        )
+        .unwrap();
+    let scene = f.to_scene(FontLibrary::global());
+    let plot = plot_of(&f);
+    let (clip, _) = mark_group(&scene);
+    assert_eq!(
+        clip,
+        Rect {
+            x: (plot.x - 4.5) as f32,
+            y: plot.y as f32,
+            width: (plot.width + 9.0) as f32,
+            height: plot.height as f32,
+        }
+    );
+
+    // A thin line alone widens the clip by half its own width, not the theme's.
+    let f = line_figure(
+        Theme::graphite(),
+        &[0.0, 1.0],
+        &[0.0, 1.0],
+        line(SizeSpec::pt(0.5).unwrap()),
+    );
+    let scene = f.to_scene(FontLibrary::global());
+    let plot = plot_of(&f);
+    assert_eq!(mark_group(&scene).0.x, (plot.x - 0.25) as f32);
+}
+
+#[test]
+fn thin_lines_and_areas_next_to_a_thick_line_reach_the_widened_clip() {
+    // A thin line or area running far past both x limits, next to a 24 pt line: the marks clip
+    // reaches 12 pt past the plot on the right (and to the y tick labels on the left), and the
+    // thin series must reach past it on both sides, so the clip edge is its only cut.
+    for area in [false, true] {
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        let thin = LineOptions {
+            width: SizeSpec::pt(0.5).unwrap(),
+            ..LineOptions::default()
+        };
+        let thick = LineOptions {
+            width: SizeSpec::pt(24.0).unwrap(),
+            ..LineOptions::default()
+        };
+        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        a.xlim(0.0, 1.0).unwrap().ylim(0.0, 1.0).unwrap();
+        if area {
+            a.area(nums(&[-1.0, 2.0]), &[0.25, 0.25], thin).unwrap();
+        } else {
+            a.line(nums(&[-1.0, 2.0]), &[0.25, 0.25], thin).unwrap();
+        }
+        a.line(nums(&[0.0, 1.0]), &[0.75, 0.75], thick).unwrap();
+        let scene = f.to_scene(FontLibrary::global());
+        assert_scene_bounded(&scene);
+        let plot = plot_of(&f);
+        let (clip, items) = mark_group(&scene);
+        let (left, right) = (clip.x, clip.x + clip.width);
+        assert!(f64::from(right) > plot.right() + 11.9, "{clip:?}");
+        // Every item of the thin series: the area's fill and stroke, or the line's stroke.
+        let thin_items = &items[..items.len() - 1];
+        assert!(!thin_items.is_empty());
+        for item in thin_items {
+            let path = match item {
+                Item::Stroke { path, style } => {
+                    assert_eq!(style.width, 0.5);
+                    path
+                }
+                Item::Fill { path, .. } => path,
+                other => panic!("unexpected item {other:?}"),
+            };
+            let (min, max) = path.bounds().unwrap();
+            assert!(
+                min.x <= left && max.x >= right,
+                "area {area}: {min:?} {max:?} {clip:?}"
+            );
+        }
+        // The thick line keeps its own stroke.
+        let Some(Item::Stroke { style, .. }) = items.last() else {
+            panic!("the thick line comes last");
+        };
+        assert_eq!(style.width, 24.0);
+    }
 }
 
 #[test]
