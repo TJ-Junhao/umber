@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: ebf55fa689595cb31f113d0f951789618403fe4f
+# revision: c5c51e32d929c70c25fc54928bdd8104986fc7e4
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -393,6 +393,8 @@ cedb6d81a1a2c3dbeac5851526aea319a333e2cb82e39f9ebcea511964d7ab14  png/fig-ticks-
 817e8ed6a05b6e948acb59d8bd70873831c8d0aca481a1a54efed3b2c933b06c  png/fig-ticks-labeled-midnight.dpi72.png
 81d41197dd625fb2b226420e1d917f9777684e168e34ce7fae62d8f18ea09714  png/fig-ticks-labeled-pigment.dpi200.png
 3c4851f7241bab3cb2740b301a21e5324ff207534e1f2a0c573b347d1ab2b335  png/fig-ticks-labeled-pigment.dpi72.png
+6d4ceb0c94621bb4df4dcf0f5711137fba5bec66354102b269e2a37f1ddcfb93  png/fig-ticks-nan-bars.dpi200.png
+129afae4735c69b0521821f1cbb8a5dce1a770009f2cadb9e96ecd6cb932a626  png/fig-ticks-nan-bars.dpi72.png
 aae01d1b9cd446b20f36d53ee3ad44dc74b3fd622ccc321f415267e8a90f10a0  png/fig-ticks-percent-linear-graphite.dpi200.png
 77b7a5429aa06cb7253b8fd8c37efeff962a75110fee50098aa21402f9d06370  png/fig-ticks-percent-linear-graphite.dpi72.png
 dfcbbd6e34ad60067f67d22ec02243eb5054b36fc922b0565302e83e31e2503f  png/fig-ticks-percent-linear-midnight.dpi200.png
@@ -429,6 +431,8 @@ db75206902a92a2c2476cf8b228eaf04be935b435277d73a1a3fb6ae8f11a717  png/fig-ticks-
 12bdfedf465d3dfe55428c24f5d96ae51e3566f759c2cdb4406a1602e96a8fd8  png/fig-ticks-scientific-log-midnight.dpi72.png
 d5bb248612a202ec9376f95f8c4291b66d689534a931144652f89807c0a4b079  png/fig-ticks-scientific-log-pigment.dpi200.png
 b294504bb94c9ed3a967cf3696d7cae00a8fd582fce77813dad5bb9892ab2744  png/fig-ticks-scientific-log-pigment.dpi72.png
+9ada73a9e1c0fa3de78e5397fbd677baead2668b9cf27555d218468cbee7e9d4  png/fig-ticks-tiny-sparse.dpi200.png
+9be99abaf4c68445baf6e186883bce3efa42177ca41fd0cb9a36680a67d78fc9  png/fig-ticks-tiny-sparse.dpi72.png
 a25881dd282519c1d03691b491dfb37b7c0718d2bb8c4acdf53a090524bcfc3d  png/fig-wide-short.dpi200.png
 c8448bda3f9c4fb6b2ee689dac8de77aa27e36f4de01699e6b5339d9c176e463  png/fig-wide-short.dpi72.png
 8637072f6990377a53b12933ce5144910e62097a6e3d633f5ca24e5373ad95ac  png/fig-xlabel-only.dpi200.png
@@ -646,6 +650,7 @@ d5ef7cbcaa4d04ea9e9e4c8195571a712100b9eefba833ca3187b9954e0cb01f  scene/fig-tick
 32aab54c82d49668dac812cb1b4f19c3f7098508fb5214ca82384b42df30e22c  scene/fig-ticks-labeled-graphite.txt
 598fd72b55cb52f5045a978e46f20cb505004272b4c91eefb091a889041c5bd0  scene/fig-ticks-labeled-midnight.txt
 6297066174377343f9eedd90c1ef1ddefb72f5fe45ea1e156fdfe2fe140239e1  scene/fig-ticks-labeled-pigment.txt
+4b4b752ec30a25cd44c15a00bf6595343ebf310b1625ddf5e04d90d38021eb4f  scene/fig-ticks-nan-bars.txt
 a77a88f0f6a5cad3b2eea76bb34c190f96229ef99b5fa15f970b8ad9cf4fde3f  scene/fig-ticks-percent-linear-graphite.txt
 b6615edf489798c297d050e654c2e6b84f1926ff5bf6b03712cdfdb7b556c878  scene/fig-ticks-percent-linear-midnight.txt
 aea5b6de9982f8f49886d055dac79b048b0cdfff82d6299c51f4a1e5543c12c5  scene/fig-ticks-percent-linear-pigment.txt
@@ -664,6 +669,7 @@ c94c99e9267228fc50182bdb0ee9f95504c865b5d43e921280ee09a4d1b0cac8  scene/fig-tick
 52ae7835b67ca75ecf7e93215e64f856188a4eb68655d9855d038d7a34bdb6c1  scene/fig-ticks-scientific-log-graphite.txt
 d2c768d1c3f720c72cb7564487789870197c3146a4a29dbdc911acadb253344c  scene/fig-ticks-scientific-log-midnight.txt
 62de385ee4942abbf4228b9b4978faa7b973f9010c288bbb1c005c996fad4051  scene/fig-ticks-scientific-log-pigment.txt
+35331394b40c017d3335ca767b4fce43a38c7179fad59d7f3a91580abe784406  scene/fig-ticks-tiny-sparse.txt
 2db3b7e2038c00200b449626ccc1fd9d59d8b18efedf19b1ec4680371d0cc810  scene/fig-wide-short.txt
 5f99a34c9a882eff8b6d5036a01cadae3ec0083dddc9f06f914eddca25f51d56  scene/fig-xlabel-only.txt
 0388d8a6d2ec591700c10ea3cb48edaa32012f61f7bcd49fc0e6415037631832  scene/fig-ylabel-only.txt
@@ -1056,6 +1062,8 @@ d7b033a7ed8a080096ca882cd7b36fc33eea5ba1eeac34b56fdf67cd9f88ec93  svg/fig-ticks-
 ba919ca3e0aa67021f88dc041008c02e481b250f60e4f6f5cd4459312d1fa73c  svg/fig-ticks-labeled-midnight.outlines.svg
 c91b24acf8657989c5419d9f56add8f96a1922d33bfd085c05f92423416baf09  svg/fig-ticks-labeled-pigment.editable.svg
 93877b19e6aaeb0e12de630c9bf7996bd1b995948b67d5982c8a29373e5f7316  svg/fig-ticks-labeled-pigment.outlines.svg
+0c8fa3fcfad5737dd97e8e2cabfd804391d6e1100a2579e3dce8eee80a38264a  svg/fig-ticks-nan-bars.editable.svg
+2da6fca454d070b0bf9495c57ad402116ceb5b522941b5076102a1cca5629a36  svg/fig-ticks-nan-bars.outlines.svg
 2708d73c1f907bec2bc821743e091c44021f4b6d654ebdf8a5d79a802ce6ba20  svg/fig-ticks-percent-linear-graphite.editable.svg
 d78d839646bb9869bfa8a754907fb8c62cd7ab947529de557c7beb929e2021ff  svg/fig-ticks-percent-linear-graphite.outlines.svg
 6f22bb1bb50183d3945208344ab6d70af54ccc7322f9f232830ced9408a2d0e9  svg/fig-ticks-percent-linear-midnight.editable.svg
@@ -1092,6 +1100,8 @@ d839d2df18d2604d6917f2e6da92c14a8a51c1b93dc1f68f82748c1c2c07f3c7  svg/fig-ticks-
 9f50498a80670506069eff3dec7a3c8b3f5178ce670dde2d108c28f8c4851ccc  svg/fig-ticks-scientific-log-midnight.outlines.svg
 aa236f17fc68d6e074cb5b9acd229bc7f43dd978861ce46669cc8b9f75ac0932  svg/fig-ticks-scientific-log-pigment.editable.svg
 776801ef7fd63d7d9b8a36d0c9a141a20bd65c8376c019365e543ff2cd10f4b4  svg/fig-ticks-scientific-log-pigment.outlines.svg
+53d1d9e3dfb0fc820242166b76ffec93d06ad9cd547bd25dd9babff60dd4fc9b  svg/fig-ticks-tiny-sparse.editable.svg
+9f5af0213a8aa5cd2e0a7b90314cdea869066f7b791cbb355fe01085dbc003c9  svg/fig-ticks-tiny-sparse.outlines.svg
 89c86bf9078c594bea7e7b44e0e058f79b76c59ff5f60fd021b283de5e11917a  svg/fig-wide-short.editable.svg
 e4fdf74522df22c99300d983d0c3f2770a924c6dbe0afa63a2a40a2ca6a8c8ed  svg/fig-wide-short.outlines.svg
 842da93a6a4963798b65937177ab7df6a545fb35ab6e0099d86d89b51a54fec3  svg/fig-xlabel-only.editable.svg
