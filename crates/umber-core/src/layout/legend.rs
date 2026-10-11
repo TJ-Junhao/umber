@@ -39,7 +39,7 @@ const CHIP_DOT: f64 = 0.6;
 const ROW_GAP: f64 = 4.0;
 /// The gap between the title or subtitle and the legend row.
 pub(super) const ROW_TOP_GAP: f64 = 6.0;
-/// The length of a line swatch, in line widths (the wider of the theme's and the series').
+/// The length of a line swatch, in the theme's line widths, whatever the series' width.
 const LINE_SWATCH_LENGTH: f64 = 10.0;
 /// The side of a square swatch, as a share of the label size.
 const SQUARE_SWATCH_SIDE: f64 = 0.8;
@@ -103,10 +103,10 @@ impl LegendRow {
     /// A plain entry is its swatch, a 4 pt gap and its label, and entries are 12 pt apart.
     /// Swatches are sized as their series are drawn: a line as tall as the series' drawn line
     /// width, a dot of the series' drawn marker diameter, a square of `0.8 ×` the label size. A
-    /// line swatch is `10 ×` the theme's drawn line width long, so the swatches of lines at the
-    /// theme's width or thinner line up, and `10 ×` the series' width when that is wider, so a
-    /// thick dashed line still shows its dash pattern. Plain rows are one body line tall
-    /// (`1.35 ×` the label size), or as tall as the tallest swatch.
+    /// line swatch is always `10 ×` the theme's drawn line width long, so every line swatch has
+    /// the same length and only its thickness follows the series; a thick dashed line shows
+    /// fewer dash cycles. Plain rows are one body line tall (`1.35 ×` the label size), or as
+    /// tall as the tallest swatch.
     ///
     /// A chip is a pill one body line plus `2 × 3` pt tall, holding a dot of `0.6 ×` the label
     /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
@@ -458,9 +458,9 @@ fn entry_extent(
 ///
 /// A plain row keeps the entry's swatch at the size its series is drawn at, so each box is
 /// exactly what the drawing fills or strokes; the drawn sizes are finite and capped, and so is
-/// the label size. A line swatch is `10 ×` the wider of the theme's and the series' drawn line
-/// width long (see [`LegendRow::measure`]). A chips row always draws a dot of `0.6 ×` the label
-/// size, whatever the series.
+/// the label size. A line swatch is `10 ×` the theme's drawn line width long, whatever the
+/// series' width (see [`LegendRow::measure`]). A chips row always draws a dot of `0.6 ×` the
+/// label size, whatever the series.
 fn swatch_size(
     theme: &Theme,
     row_style: RowStyle,
@@ -475,7 +475,7 @@ fn swatch_size(
         (RowStyle::Plain, Swatch::Line { width, .. }) => {
             let width = f64::from(width);
             let theme_width = f64::from(theme.drawn_line_width(SizeSpec::Auto));
-            (swatch, LINE_SWATCH_LENGTH * theme_width.max(width), width)
+            (swatch, LINE_SWATCH_LENGTH * theme_width, width)
         }
         (RowStyle::Plain, Swatch::Dot { diameter }) => {
             let d = f64::from(diameter);
@@ -799,13 +799,13 @@ mod tests {
             .map(|e| (e.swatch.width, e.swatch.height))
             .collect();
         // Graphite lines are 1.8 pt wide and its markers 5.6 pt across. A line swatch is as tall
-        // as its series' stroke and 10 times the wider of that stroke and the theme's long.
+        // as its series' stroke and always 10 times the theme's line width long.
         let thick = f64::from(2.5_f32 * 1.8);
         let theme_width = f64::from(1.8_f32);
         assert_eq!(
             boxes,
             [
-                (10.0 * thick, thick),
+                (10.0 * theme_width, thick),
                 (10.0 * theme_width, 0.5),
                 (f64::from(2.8_f32), f64::from(2.8_f32)),
                 (12.0, 12.0),

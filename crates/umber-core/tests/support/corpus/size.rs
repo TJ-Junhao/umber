@@ -9,7 +9,7 @@
 //! or size) and once in the theme's own legend style (direct labels end in dots of the theme's
 //! marker size, chips keep their fixed dot). Also: widths and sizes in points next to the
 //! theme's on a log y axis; the widest effective stroke widening the marks clip to the y tick
-//! labels; a line too thick for its legend swatch's usual length; and every error branch of
+//! labels; a line thicker than its legend swatch is long; and every error branch of
 //! `SizeSpec::times` and `SizeSpec::pt`, with the specs they return.
 
 use std::fmt::Write as _;
@@ -179,7 +179,7 @@ fn figures() -> Vec<(String, Figure)> {
     }
 
     // The widest effective stroke widens the marks clip, up to the y tick labels, and a line
-    // in points wider than ten theme widths gets a longer swatch.
+    // in points thicker than ten theme widths keeps the swatch length of the others.
     let mut f = figure(6.0, 4.0, umber_core::Theme::graphite(), linear(), linear());
     labelled(&mut f, "Thick line ends");
     axes(&mut f)
