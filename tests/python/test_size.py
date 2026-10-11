@@ -325,8 +325,9 @@ def test_native_checks_report_the_core_errors() -> None:
 def test_native_marks_report_the_core_error_for_a_bad_size() -> None:
     fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
     fig.add_axes(LINEAR, 10.0, LINEAR, 10.0)
+    before = fig.to_svg(OUTLINES)
     with pytest.raises(ub.StyleError) as caught:
         fig.scatter(floats(0, 1), floats(1, 2), "", AUTO, 0, (2, 100.0))
     assert str(caught.value) == f"Size.pt(): points is 100; {POINTS_RANGE}"
     # The failed call stored no series.
-    assert "<circle" not in fig.to_svg(OUTLINES)
+    assert fig.to_svg(OUTLINES) == before
