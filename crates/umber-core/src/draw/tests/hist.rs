@@ -7,7 +7,7 @@ use crate::layout::Layout;
 use crate::model::{Figure, HistOptions};
 use crate::render::{SvgText, render_png, render_svg};
 use crate::resolve::{NormalizedPos, Resolved};
-use crate::scene::{Item, LineCap, LinearGradient, Paint, StrokeStyle};
+use crate::scene::{Item, LinearGradient, Paint};
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{AreaFill, FontLibrary, LogBase, MAX_BINS, Rgba, ScaleKind, Theme};
 
@@ -193,10 +193,17 @@ fn gradient_runs_top_to_baseline() {
     assert!(share > 0.5 && share < 1.0, "{share}");
 }
 
-/// The top-edge stroke of a histogram drawn alone under a gradient.
-fn top_edges(items: &[Item]) -> (&Path, &StrokeStyle) {
+/// The top edges of a histogram drawn alone under a gradient: one solid fill and its color.
+fn top_edges(items: &[Item]) -> (&Path, Rgba) {
     match items {
-        [Item::Fill { .. }, Item::Stroke { path, style }] => (path, style),
+        [
+            Item::Fill { .. },
+            Item::Fill {
+                path,
+                paint: Paint::Solid(color),
+                ..
+            },
+        ] => (path, *color),
         other => panic!("expected a fill and its top edges, got {other:?}"),
     }
 }
@@ -208,25 +215,79 @@ fn top_edges_follow_counts() {
     let scene = f.to_scene(FontLibrary::global());
     let items = mark_items(&scene);
     let drawn = bins(the_fill(items).0);
-    let (path, style) = top_edges(items);
-    // A 1.6 pt edge in the solid color, flat at each bin's top and as wide as the bin.
-    assert_eq!(style.color, theme.palette()[0]);
-    assert_eq!(style.width, 1.6);
-    assert_eq!(style.cap, LineCap::Butt);
-    assert!(style.dash.is_empty());
-    let edges = subpaths(path);
+    let (path, color) = top_edges(items);
+    // A 1.6 pt band in the solid color inside each bin: its outer edge is the bin's top, at the
+    // count, never above it; it is exactly as wide as the bin.
+    assert_eq!(color, theme.palette()[0]);
+    let edges = bins(path);
     assert_eq!(edges.len(), drawn.len());
-    for (edge, &(left, right, top, _)) in edges.iter().zip(&drawn) {
-        assert_eq!(
-            edge.as_slice(),
-            [Point { x: left, y: top }, Point { x: right, y: top }]
-        );
+    for (&(left, right, top, bottom), &(bin_left, bin_right, bin_top, _)) in
+        edges.iter().zip(&drawn)
+    {
+        assert_eq!((left, right, top), (bin_left, bin_right, bin_top));
+        assert_near(bottom, f64::from(top) + 1.6);
     }
 }
 
 #[test]
+fn top_edges_of_short_bins_stop_at_the_baseline() {
+    // Counts 1 and 1000: the short bin is far less than 1.6 pt high, so its edge fills it from
+    // its top to the baseline and paints nothing beyond.
+    let mut values = vec![0.0];
+    values.extend(std::iter::repeat_n(1.0, 1000));
+    let f = hist_figure(Theme::midnight(), ScaleKind::Linear, &values, 2);
+    let scene = f.to_scene(FontLibrary::global());
+    let layout = plan(&f).1;
+    let items = mark_items(&scene);
+    let drawn = bins(the_fill(items).0);
+    let edges = bins(top_edges(items).0);
+    let (short, short_edge) = (drawn[0], edges[0]);
+    assert!(f64::from(short.3 - short.2) < 1.6, "{short:?}");
+    assert_eq!(short_edge, short);
+    assert_near(short_edge.3, layout.baseline_y);
+    // The tall bin keeps the full 1.6 pt edge.
+    assert_near(edges[1].3, f64::from(drawn[1].2) + 1.6);
+}
+
+#[test]
+fn cropped_limits_keep_the_gradient_opacity() {
+    // One bin of count 100 under limits 50..60: the gradient is clipped to the plot, but each
+    // visible count keeps the opacity of the full ramp from 100 (0.95) down to 0 (none).
+    let mut f = hist_figure(Theme::midnight(), ScaleKind::Linear, &[0.0; 100], 1);
+    f.axes_mut().unwrap().ylim(50.0, 60.0).unwrap();
+    let scene = f.to_scene(FontLibrary::global());
+    assert_scene_bounded(&scene);
+    let (resolved, layout) = plan(&f);
+    let (_, paint) = the_fill(mark_items(&scene));
+    let gradient = gradient(paint);
+    let full = f64::from(Theme::midnight().palette()[0].a) * 0.95;
+    // The opacity the gradient paints at plot y `at`, interpolated between its stops.
+    let alpha_at = |at: f64| {
+        let (y0, y1) = (f64::from(gradient.start.y), f64::from(gradient.end.y));
+        let t = ((at - y0) / (y1 - y0)).clamp(0.0, 1.0);
+        let (a0, a1) = (
+            f64::from(gradient.stops[0].color.a),
+            f64::from(gradient.stops[1].color.a),
+        );
+        a0 + (a1 - a0) * t
+    };
+    for count in [50.0, 52.5, 55.0, 60.0] {
+        let alpha = alpha_at(y_of(&resolved, &layout, count));
+        let expected = full * count / 100.0;
+        assert!(
+            (alpha - expected).abs() < 1.5,
+            "{count}: {alpha} != {expected}"
+        );
+    }
+    // Both ends lie within the clip margin of the plot.
+    assert!(f64::from(gradient.start.y) >= layout.plot.y - 2.0 - 1e-3);
+    assert!(f64::from(gradient.end.y) <= layout.plot.bottom() + 2.0 + 1e-3);
+}
+
+#[test]
 fn one_gradient_item_per_histogram() {
-    // However many bins: one fill holding all of them, and one stroke holding their edges.
+    // However many bins: one gradient fill holding all of them, and one solid fill holding
+    // their top edges.
     for bins_count in [1, 30, MAX_BINS] {
         let values: Vec<f64> = (0..2 * bins_count)
             .map(|i| (i % 7) as f64 * 1.5 + i as f64)
@@ -235,12 +296,12 @@ fn one_gradient_item_per_histogram() {
         let scene = f.to_scene(FontLibrary::global());
         assert_scene_bounded(&scene);
         let items = mark_items(&scene);
-        let (path, _) = top_edges(items);
+        let (edges, _) = top_edges(items);
         let (fill, paint) = the_fill(items);
         gradient(paint);
         let drawn = bins(fill).len();
         assert!(drawn > 0 && drawn <= bins_count);
-        assert_eq!(subpaths(path).len(), drawn);
+        assert_eq!(subpaths(edges).len(), drawn);
     }
 }
 

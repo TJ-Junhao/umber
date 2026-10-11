@@ -509,7 +509,7 @@ impl<'a> ResolvedMark<'a> {
                 })
                 .collect(),
             &ResolvedMark::Hist { mark, color, .. } => vec![SeriesKey {
-                label: &mark.options().label,
+                label: mark.label(),
                 color,
                 kind: SeriesKind::Bar,
             }],
@@ -611,7 +611,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
             Mark::Hist(mark) => ResolvedMark::Hist {
                 mark,
                 histogram: Histogram::from_values(mark.values(), mark.bin_count()),
-                color: color_of(mark.options().color),
+                color: color_of(mark.color()),
             },
         })
         .collect()

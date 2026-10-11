@@ -1,5 +1,5 @@
 //! Area fills under lines: a gradient from the line to the baseline, split where the line
-//! crosses the baseline; and that vertical fade toward the baseline, which histogram bars share.
+//! crosses the baseline; and the vertical fade gradient, which histogram bars share.
 
 use super::clip::crossing;
 use super::mapping::PlotPoint;
@@ -91,32 +91,48 @@ pub(super) fn area_fills(subpath: &[PlotPoint], baseline_y: f64, color: Rgba) ->
             path.close();
             Some(Item::Fill {
                 path,
-                paint: baseline_fade(color, AREA_TOP_ALPHA, extreme, baseline_y),
+                paint: vertical_fade(
+                    color,
+                    FadeStop {
+                        y: extreme,
+                        share: AREA_TOP_ALPHA,
+                    },
+                    FadeStop {
+                        y: baseline_y,
+                        share: 0.0,
+                    },
+                ),
                 rule: FillRule::NonZero,
             })
         })
         .collect()
 }
 
-/// A vertical gradient that fades `color` toward the baseline: at plot y `top_y` it has
-/// `top_share` of the color's own opacity, at plot y `baseline_y` none. Beyond both ends the
-/// gradient keeps its end colors.
-pub(super) fn baseline_fade(color: Rgba, top_share: f32, top_y: f64, baseline_y: f64) -> Paint {
+/// One end of a [`vertical_fade`]: a plot y and the share of the color's own opacity there.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct FadeStop {
+    /// The plot y, in points.
+    pub(super) y: f64,
+    /// The share of the color's opacity, in `0..=1`.
+    pub(super) share: f32,
+}
+
+/// A vertical gradient of `color` from `start` to `end`, the opacity at each end being its
+/// share of the color's own (rounded by [`Rgba::scale_alpha`]). Beyond both ends the gradient
+/// keeps its end colors. Line areas fade from their extreme to the baseline; histograms from a
+/// point on their own ramp to another.
+pub(super) fn vertical_fade(color: Rgba, start: FadeStop, end: FadeStop) -> Paint {
     Paint::Linear(LinearGradient {
-        start: PlotPoint { x: 0.0, y: top_y }.to_scene(),
-        end: PlotPoint {
-            x: 0.0,
-            y: baseline_y,
-        }
-        .to_scene(),
+        start: PlotPoint { x: 0.0, y: start.y }.to_scene(),
+        end: PlotPoint { x: 0.0, y: end.y }.to_scene(),
         stops: vec![
             GradientStop {
                 offset: 0.0,
-                color: color.scale_alpha(top_share),
+                color: color.scale_alpha(start.share),
             },
             GradientStop {
                 offset: 1.0,
-                color: Rgba { a: 0, ..color },
+                color: color.scale_alpha(end.share),
             },
         ],
     })

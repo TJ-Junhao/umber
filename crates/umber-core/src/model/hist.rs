@@ -38,7 +38,8 @@ impl Default for HistOptions {
     }
 }
 
-/// A histogram mark: values to count in equal-width bins, with its [`HistOptions`].
+/// A histogram mark: values to count in equal-width bins, with the bin count, label and color
+/// of its [`HistOptions`].
 ///
 /// The values are validated and stored unchanged; they never change, and clones share them.
 /// They are binned when the figure is rendered, from their smallest to their largest finite
@@ -56,7 +57,7 @@ impl Default for HistOptions {
 /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(hist.values().len(), 4);
 /// assert_eq!(hist.bins(), 4);
-/// assert!(hist.options().label.is_empty());
+/// assert!(hist.label().is_empty());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 ///
@@ -69,14 +70,16 @@ impl Default for HistOptions {
 /// let mark = Mark::Hist(HistMark {
 ///     values: unreachable!(),
 ///     bins: unreachable!(),
-///     options: HistOptions::default(),
+///     label: HistOptions::default().label,
+///     color: HistOptions::default().color,
 /// });
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistMark {
     values: Arc<[f64]>,
     bins: BinCount,
-    options: HistOptions,
+    label: String,
+    color: ColorSpec,
 }
 
 impl HistMark {
@@ -94,7 +97,8 @@ impl HistMark {
         Ok(HistMark {
             values: Arc::from(values),
             bins,
-            options,
+            label: options.label,
+            color: options.color,
         })
     }
 
@@ -139,7 +143,7 @@ impl HistMark {
         self.bins.get()
     }
 
-    /// Bin count, label and color.
+    /// The legend label; empty for none.
     ///
     /// # Examples
     ///
@@ -152,12 +156,33 @@ impl HistMark {
     /// let options = HistOptions { label: "latency".into(), ..HistOptions::default() };
     /// axes.hist(&[1.0, 2.0], options)?;
     /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
-    /// assert_eq!(hist.options().label, "latency");
+    /// assert_eq!(hist.label(), "latency");
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
-    pub fn options(&self) -> &HistOptions {
-        &self.options
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// The color as given, before it is resolved against a palette.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{HistOptions, Mark};
+    /// use umber_core::{ColorSpec, Figure, Rgba, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let color = ColorSpec::Fixed(Rgba::opaque(10, 20, 30));
+    /// axes.hist(&[1.0, 2.0], HistOptions { color, ..HistOptions::default() })?;
+    /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
+    /// assert_eq!(hist.color(), color);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn color(&self) -> ColorSpec {
+        self.color
     }
 
     /// The validated number of bins.

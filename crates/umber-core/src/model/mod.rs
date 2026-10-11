@@ -895,7 +895,7 @@ mod tests {
         let bits = |v: &[f64]| v.iter().map(|h| h.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(hist.values()), bits(&values));
         assert_eq!(hist.bins(), 7);
-        assert_eq!(hist.options(), &options);
+        assert_eq!((hist.label(), hist.color()), ("latency", options.color));
         assert!(hist.shares_data_with(cloned));
     }
 
