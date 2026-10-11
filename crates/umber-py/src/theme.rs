@@ -6,7 +6,7 @@
 //! as the integers of the `enums` module, and numbers are validated by the core.
 
 use pyo3::prelude::*;
-use umber_core::{Dash, Font, GridLines, LegendStyle, Rgba};
+use umber_core::{Dash, FillStyle, Font, GridLines, LegendStyle, Rgba};
 
 use crate::color::{ColorArg, color_spec, concrete};
 use crate::enums::{IntEnum, enum_value};
@@ -142,6 +142,11 @@ impl Theme {
     /// This theme with the legend style `value` (a `LegendStyle` value).
     fn with_legend_style(&self, value: i64) -> PyResult<Theme> {
         self.with_enum::<LegendStyle>(value, umber_core::Theme::with_legend_style)
+    }
+
+    /// This theme with the fill style `value` (a `FillStyle` value).
+    fn with_fill_style(&self, value: i64) -> PyResult<Theme> {
+        self.with_enum::<FillStyle>(value, umber_core::Theme::with_fill_style)
     }
 
     /// This theme with the font scale `value`.

@@ -102,6 +102,23 @@ class LegendStyle(Enum):
 
 
 @unique
+class FillStyle(Enum):
+    """How areas and histogram bins are filled.
+
+    Example:
+        >>> import umber as ub
+        >>> ub.FillStyle.GRADIENT.name
+        'GRADIENT'
+    """
+
+    SOLID = 0
+    """A flat translucent fill."""
+
+    GRADIENT = 1
+    """A fill that fades out toward the baseline."""
+
+
+@unique
 class GridLines(Enum):
     """Which grid lines are drawn.
 

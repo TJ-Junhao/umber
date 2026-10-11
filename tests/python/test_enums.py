@@ -5,7 +5,7 @@ import pytest
 import umber as ub
 from umber import _umber
 
-ENUMS = [ub.Dash, ub.Marker, ub.Font, ub.LegendStyle, ub.GridLines, ub.SvgText]
+ENUMS = [ub.Dash, ub.Marker, ub.Font, ub.LegendStyle, ub.FillStyle, ub.GridLines, ub.SvgText]
 
 
 def _public_enums() -> list[type[enum.Enum]]:
@@ -43,3 +43,8 @@ def test_members_are_identified_by_name_and_value() -> None:
     assert ub.Marker.CROSS.value == 4
     assert ub.Font.JETBRAINS_MONO.name == "JETBRAINS_MONO"
     assert {m.value for m in ub.SvgText} == {0, 1}
+
+
+def test_fill_style_members() -> None:
+    assert [(m.name, m.value) for m in ub.FillStyle] == [("SOLID", 0), ("GRADIENT", 1)]
+    assert ub.FillStyle(1) is ub.FillStyle.GRADIENT

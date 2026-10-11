@@ -306,6 +306,55 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.line(xs, ys, name, spec, style.value, extent)
             return self
 
+    def area(
+        self,
+        x: Values[X],
+        y: Values[Y],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+        dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
+    ) -> Self:
+        """Add a line through the points ``(x[i], y[i])``, in order, and fill the region below it.
+
+        The fill reaches down to the baseline of the axes. A NaN in ``x`` or ``y`` leaves a gap in
+        the line and in the fill. The theme's fill style sets how the fill looks.
+
+        Args:
+            x: The x values: numbers on a linear or log x axis, names on a category x axis.
+            y: The y values, one per x value.
+            label: The name shown in the legend; an empty string leaves the area out of it.
+            color: The area color. ``Color.AUTO`` takes the next color of the theme palette.
+            dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+                value is not positive on a log axis, or names and numbers do not match the x
+                axis.
+            StyleError: If ``label`` is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.area([0, 1, 2, 3], [1.0, 3.0, 2.0, 4.0], label="Visitors")
+        """
+        with api_call():
+            context = "Axes.area()"
+            name = _args.text(context, "label", label)
+            spec = _color_argument(context, color)
+            style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
+            xs = self._x_values(context, x)
+            ys = floats(context, "y", y)
+            self._native.area(xs, ys, name, spec, style.value, extent)
+            return self
+
     def scatter(
         self,
         x: Values[X],
