@@ -68,6 +68,25 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
+/// Prints `v` for an error message: plain decimal from `1e-4` up to (not including) `1e6` in
+/// magnitude, scientific form (`1e301`, `5e-324`) outside it. Zero prints as `0` and negative
+/// zero as `-0`, negatives with `-`, and `NaN`, `inf` and `-inf` as such.
+pub(crate) fn number(v: f64) -> impl std::fmt::Display {
+    struct Number(f64);
+    impl std::fmt::Display for Number {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let v = self.0;
+            let magnitude = v.abs();
+            if v == 0.0 || !v.is_finite() || (1e-4..1e6).contains(&magnitude) {
+                write!(f, "{v}")
+            } else {
+                write!(f, "{v:e}")
+            }
+        }
+    }
+    Number(v)
+}
+
 impl Error {
     /// An [`Error::Data`] detected in `context`, without a parameter or a hint.
     pub(crate) fn data(context: &'static str, message: impl Into<String>) -> Error {
@@ -311,5 +330,24 @@ mod tests {
         let err = err.with_parameter("path").with_hint("check the path.");
         assert_eq!(err.parameter(), None);
         assert_eq!(err.hint(), None);
+    }
+
+    #[test]
+    fn number_prints_plain_decimals_in_range_and_scientific_outside() {
+        let shown = |v: f64| number(v).to_string();
+        assert_eq!(shown(1e-4), "0.0001");
+        assert_eq!(shown(9.9e-5), "9.9e-5");
+        assert_eq!(shown(999_999.0), "999999");
+        assert_eq!(shown(1e6), "1e6");
+        assert_eq!(shown(1e300), "1e300");
+        assert_eq!(shown(-1e300), "-1e300");
+        assert_eq!(shown(5e-324), "5e-324");
+        assert_eq!(shown(0.1 + 0.2), "0.30000000000000004");
+        assert_eq!(shown(-2.5), "-2.5");
+        assert_eq!(shown(0.0), "0");
+        assert_eq!(shown(-0.0), "-0");
+        assert_eq!(shown(f64::NAN), "NaN");
+        assert_eq!(shown(f64::INFINITY), "inf");
+        assert_eq!(shown(f64::NEG_INFINITY), "-inf");
     }
 }

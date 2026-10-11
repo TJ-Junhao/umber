@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use super::axis_data::AxisData;
 use super::bar::{Arrangement, BarSeries};
 use crate::binning::{BinCount, MAX_BINS};
+use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
 use crate::stacking::Totals;
 use crate::{ContinuousScale, Error, Result, ScaleKind};
@@ -52,7 +53,7 @@ fn check_numbers(
         if v.is_infinite() {
             return Err(Error::data(
                 context,
-                format!("{name}[{i}] is {v}; values must be finite."),
+                format!("{name}[{i}] is {v}; values must be finite.", v = number(v)),
             )
             .with_parameter(parameter)
             .with_hint(infinite_hint));
@@ -60,7 +61,10 @@ fn check_numbers(
         if v.abs() > MAX_MAGNITUDE {
             return Err(Error::data(
                 context,
-                format!("{name}[{i}] is {v:e}; magnitudes must not exceed {MAX_MAGNITUDE:e}."),
+                format!(
+                    "{name}[{i}] is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
+                    v = number(v)
+                ),
             )
             .with_parameter(parameter));
         }
@@ -68,7 +72,10 @@ fn check_numbers(
             if v <= 0.0 {
                 return Err(Error::data(
                     context,
-                    format!("{name}[{i}] is {v} on a log axis; values must be positive."),
+                    format!(
+                        "{name}[{i}] is {v} on a log axis; values must be positive.",
+                        v = number(v)
+                    ),
                 )
                 .with_parameter(parameter)
                 .with_hint("use a linear axis, or remove values that are not positive."));
@@ -77,7 +84,7 @@ fn check_numbers(
                 return Err(Error::data(
                     context,
                     format!(
-                        "{name}[{i}] is {v:e} on a log axis; values must be at least {MIN_LOG_VALUE:e}."
+                        "{name}[{i}] is {v} on a log axis; values must be at least {MIN_LOG_VALUE:e}.", v = number(v),
                     ),
                 )
                 .with_parameter(parameter)
@@ -346,7 +353,7 @@ fn check_stacked_totals(
                 return Err(Error::data(
                     context,
                     format!(
-                        "the heights of categories[{i}] ({name:?}) stack to {total:e}; each stack must stay within {MAX_MAGNITUDE:e} on both sides of 0."
+                        "the heights of categories[{i}] ({name:?}) stack to {total}; each stack must stay within {MAX_MAGNITUDE:e} on both sides of 0.", total = number(total),
                     ),
                 )
                 .with_parameter("series"));
@@ -395,7 +402,8 @@ pub(super) fn check_figure_size(width_in: f64, height_in: f64) -> Result<()> {
             return Err(Error::style(
                 "Figure()",
                 format!(
-                    "{name} is {v}; it must be finite, above 0 and at most {MAX_FIGURE_IN} inches."
+                    "{name} is {v}; it must be finite, above 0 and at most {MAX_FIGURE_IN} inches.",
+                    v = number(v),
                 ),
             )
             .with_parameter(name));

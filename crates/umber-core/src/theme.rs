@@ -15,6 +15,7 @@
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
+use crate::error::number;
 use crate::{Error, Font, Result, Rgba};
 
 /// The largest accepted `font_scale`.
@@ -238,7 +239,10 @@ fn check_number(context: &'static str, name: &str, value: f64, bound: Bound) -> 
     } else {
         Err(Error::style(
             context,
-            format!("{name} is {value}; {name} must be {required}."),
+            format!(
+                "{name} is {value}; {name} must be {required}.",
+                value = number(value)
+            ),
         )
         .with_parameter("value"))
     }
@@ -1162,6 +1166,15 @@ mod tests {
 
     fn hexes(theme: &Theme) -> Vec<String> {
         theme.palette().iter().map(|c| c.to_hex()).collect()
+    }
+
+    #[test]
+    fn extreme_values_print_in_scientific_form() {
+        let err = Theme::pigment().with_line_width(1e-50).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Theme.with_line_width(): line_width is 1e-50; line_width must be a finite number greater than 0."
+        );
     }
 
     #[test]
