@@ -256,18 +256,37 @@ fn bars_far_outside_limits_are_clipped() {
 }
 
 #[test]
-fn log_bars_grow_from_the_bottom_of_the_plot() {
+fn log_bars_grow_from_the_baseline() {
     let log = ScaleKind::Log { base: LogBase::TEN };
+    // The nice limits are 1..1000: the baseline sits at 1, the lowest tick, above the padded
+    // plot bottom, and both bars grow from it.
+    let f = bar_figure(Theme::graphite(), log, &["a", "b"], &[3.0, 1000.0]);
+    let scene = f.to_scene(FontLibrary::global());
+    let layout = layout_of(&f);
+    assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
+    let fills = bars(&scene);
+    assert_eq!(fills.len(), 2);
+    for (path, _) in &fills {
+        assert_near(bounds(path).1.y, layout.baseline_y);
+    }
+    // A bar as high as the lowest tick lies on the baseline and has no height to draw.
     let f = bar_figure(Theme::graphite(), log, &["a", "b"], &[10.0, 1000.0]);
     let scene = f.to_scene(FontLibrary::global());
     let layout = layout_of(&f);
     let fills = bars(&scene);
+    assert_eq!(fills.len(), 1);
+    assert_near(bounds(fills[0].0).1.y, layout.baseline_y);
+    // Explicit limits are not padded: the baseline, and the bars, start at the plot bottom.
+    let mut f = bar_figure(Theme::graphite(), log, &["a", "b"], &[10.0, 1000.0]);
+    f.axes_mut().unwrap().ylim(5.0, 2000.0).unwrap();
+    let scene = f.to_scene(FontLibrary::global());
+    let layout = layout_of(&f);
+    let fills = bars(&scene);
     assert_eq!(fills.len(), 2);
-    for (path, _) in &fills {
-        assert_near(bounds(path).1.y, layout.plot.bottom());
-    }
-    // The baseline is the bottom of the plot too.
     assert_near(layout.plot.bottom() as f32, layout.baseline_y);
+    for (path, _) in &fills {
+        assert_near(bounds(path).1.y, layout.baseline_y);
+    }
 }
 
 fn series(heights: &[f64]) -> BarSeries {
@@ -456,7 +475,7 @@ fn grouped_and_stacked_bars_are_drawn_by_category_then_series() {
 }
 
 #[test]
-fn log_stacks_start_at_the_bottom_of_the_plot() {
+fn log_stacks_start_at_the_baseline() {
     let log = ScaleKind::Log { base: LogBase::TEN };
     let f = group_figure(
         Theme::graphite(),
@@ -470,16 +489,16 @@ fn log_stacks_start_at_the_bottom_of_the_plot() {
     let layout = layout_of(&f);
     let fills = bars(&scene);
     assert_eq!(fills.len(), 4);
-    // The first segment of each stack starts at the bottom of the plot, the domain's low end;
-    // the second starts where the first ends.
+    // The first segment of each stack starts at the baseline, at the nice lower limit 1, above
+    // the padded plot bottom; the second starts where the first ends.
+    assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
     for pair in fills.chunks(2) {
         let (first, second) = (bounds(pair[0].0), bounds(pair[1].0));
-        assert_near(first.1.y, layout.plot.bottom());
+        assert_near(first.1.y, layout.baseline_y);
         // One point apart: the stack gap.
         assert_near(first.0.y - second.1.y, 1.0);
         assert!(second.0.y < first.0.y);
     }
-    assert_near(layout.plot.bottom() as f32, layout.baseline_y);
 }
 
 #[test]

@@ -8,7 +8,7 @@
 use crate::geometry::Point;
 use crate::layout::Area;
 use crate::model::AxisData;
-use crate::resolve::{AxisScale, ResolvedAxis};
+use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis};
 use crate::scale::log_offset;
 use crate::{ContinuousScale, Transform};
 
@@ -125,6 +125,13 @@ impl AxisMap {
     /// domain this cannot overflow.
     pub(super) fn plot_at(&self, u: f64) -> f64 {
         self.start + (u - self.lo) / (self.hi - self.lo) * self.extent
+    }
+
+    /// The axis-space value at the normalized position `pos` along the axis, from `lo` at the
+    /// low end to `hi` at the high end. Axis space is affine in normalized positions on every
+    /// axis, so this is the value a resolved position such as the baseline stands for.
+    pub(super) fn at(&self, pos: NormalizedPos) -> f64 {
+        self.lo + pos.get() * (self.hi - self.lo)
     }
 
     /// The axis-space range covered by the axis extended by `margin` points at both ends. The

@@ -306,23 +306,28 @@ fn one_gradient_item_per_histogram() {
 }
 
 #[test]
-fn log_y_bins_grow_from_the_bottom_of_the_plot() {
+fn log_y_bins_grow_from_the_baseline() {
     let log = ScaleKind::Log { base: LogBase::TEN };
     let f = hist_figure(Theme::midnight(), log, &VALUES, 4);
     let scene = f.to_scene(FontLibrary::global());
     assert_scene_bounded(&scene);
     let (resolved, layout) = plan(&f);
+    // The counts 1, 0, 3, 5 take the nice limits 1..10: the baseline sits at 1, the lowest
+    // tick, above the padded plot bottom.
+    assert_near(layout.baseline_y as f32, y_of(&resolved, &layout, 1.0));
+    assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
     let items = mark_items(&scene);
     let (path, paint) = the_fill(items);
     let drawn = bins(path);
-    // The empty bin draws nothing; the bin of count 1 still shows, from the bottom of the plot.
-    assert_eq!(drawn.len(), 3);
-    for (&(_, _, top, base), count) in drawn.iter().zip([1.0, 3.0, 5.0]) {
-        assert_near(base, layout.plot.bottom());
+    // The empty bin draws nothing, and neither does the bin of count 1, which lies on the
+    // baseline; the others grow from the baseline.
+    assert_eq!(drawn.len(), 2);
+    for (&(_, _, top, base), count) in drawn.iter().zip([3.0, 5.0]) {
+        assert_near(base, layout.baseline_y);
         assert_near(top, y_of(&resolved, &layout, count));
     }
     let gradient = gradient(paint);
-    assert_near(gradient.end.y, layout.plot.bottom());
+    assert_near(gradient.end.y, layout.baseline_y);
     assert_near(gradient.start.y, y_of(&resolved, &layout, 5.0));
 }
 
