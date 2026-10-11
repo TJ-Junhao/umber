@@ -235,7 +235,7 @@ impl Theme {
             baseline_width: 1.3,
             title_font: Font::SourceSerif4,
             body_font: Font::IbmPlexSans,
-            title_size: 13.0,
+            title_size: 15.0,
             body_size: 8.5,
             font_scale: 1.0,
             legend_style: LegendStyle::Header,
@@ -274,7 +274,7 @@ impl Theme {
             baseline_width: 1.0,
             title_font: Font::Geist,
             body_font: Font::Geist,
-            title_size: 13.0,
+            title_size: 15.0,
             body_size: 8.5,
             font_scale: 1.0,
             legend_style: LegendStyle::Direct,
@@ -313,7 +313,7 @@ impl Theme {
             baseline_width: 1.0,
             title_font: Font::Inter,
             body_font: Font::JetBrainsMono,
-            title_size: 12.5,
+            title_size: 14.5,
             body_size: 8.5,
             font_scale: 1.0,
             legend_style: LegendStyle::Chips,
@@ -505,7 +505,7 @@ impl Theme {
     /// ```
     /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
-    /// assert_eq!(Theme::midnight().title_size(), 12.5);
+    /// assert_eq!(Theme::midnight().title_size(), 14.5);
     /// ```
     #[must_use]
     pub fn title_size(&self) -> f32 {
@@ -1138,7 +1138,7 @@ mod tests {
         );
         assert_eq!(
             (p.title_size(), p.body_size(), p.font_scale()),
-            (13.0, 8.5, 1.0)
+            (15.0, 8.5, 1.0)
         );
         assert_eq!(
             (p.legend_style(), p.area_fill()),
@@ -1170,7 +1170,7 @@ mod tests {
         assert_eq!((g.title_font(), g.body_font()), (Font::Geist, Font::Geist));
         assert_eq!(
             (g.title_size(), g.body_size(), g.font_scale()),
-            (13.0, 8.5, 1.0)
+            (15.0, 8.5, 1.0)
         );
         assert_eq!(
             (g.legend_style(), g.area_fill()),
@@ -1205,7 +1205,7 @@ mod tests {
         );
         assert_eq!(
             (m.title_size(), m.body_size(), m.font_scale()),
-            (12.5, 8.5, 1.0)
+            (14.5, 8.5, 1.0)
         );
         assert_eq!(
             (m.legend_style(), m.area_fill()),
