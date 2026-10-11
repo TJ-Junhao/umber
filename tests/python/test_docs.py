@@ -1,4 +1,5 @@
 import importlib
+import os
 import sys
 from functools import cached_property
 from pathlib import Path
@@ -33,7 +34,6 @@ def test_every_alias_constant_and_class_constant_is_documented() -> None:
     assert undocumented_attributes(PACKAGE_DIR, umber.__all__) == []
 
 
-@pytest.mark.usefixtures("isolated_environment")
 def test_every_alias_and_constant_example_runs() -> None:
     assert failing_attribute_examples(PACKAGE_DIR, umber.__all__) == []
 
@@ -411,3 +411,88 @@ def test_attribute_checker_follows_an_assignment_from_an_imported_name(tmp_path:
     init = "from .mod import Palette as _Palette\nPalette = _Palette\n"
     package = _exporting(tmp_path, init, mod=_CLASS)
     assert undocumented_attributes(package, ["Palette"]) == ["Palette.COUNT"]
+
+
+def test_resolution_fails_closed_for_a_conditional_import(tmp_path: Path) -> None:
+    init = "try:\n    from .mod import Color\nexcept ImportError:\n    Color = None\n"
+    package = _exporting(tmp_path, init, mod='class Color:\n    """Doc."""\n')
+    with pytest.raises(LookupError, match="Color"):
+        undocumented_attributes(package, ["Color"])
+
+
+def test_resolution_fails_closed_beyond_the_depth_guard(tmp_path: Path) -> None:
+    modules = {f"m{i}": f"from .m{i + 1} import Values\n" for i in range(20)}
+    modules["m20"] = _ALIAS + _DOC
+    package = _exporting(tmp_path, "from .m0 import Values\n", **modules)
+    with pytest.raises(LookupError, match="Values"):
+        undocumented_attributes(package, ["Values"])
+
+
+def test_resolution_fails_closed_for_an_undefined_export(tmp_path: Path) -> None:
+    package = _exporting(tmp_path, "")
+    with pytest.raises(LookupError, match="Missing"):
+        undocumented_attributes(package, ["Missing"])
+
+
+def test_resolution_skips_functions_and_names_outside_the_package(tmp_path: Path) -> None:
+    init = "from ._native import version\nfrom .mod import helper\n"
+    package = _exporting(tmp_path, init, mod="def helper() -> None:\n    pass\n")
+    assert undocumented_attributes(package, ["version", "helper"]) == []
+
+
+def test_class_var_import_in_another_scope_does_not_shadow_the_module(tmp_path: Path) -> None:
+    source = (
+        "from typing import ClassVar\n"
+        "class Other:\n"
+        "    from builtins import int as ClassVar\n"
+        "class Color:\n"
+        '    """Doc."""\n'
+        "    SIZE: ClassVar[int] = 3\n"
+    )
+    package = _exporting(tmp_path, "from .mod import Color\n", mod=source)
+    assert undocumented_attributes(package, ["Color"]) == ["Color.SIZE"]
+
+
+def test_class_var_import_in_the_class_body_is_used(tmp_path: Path) -> None:
+    source = (
+        "class Color:\n"
+        '    """Doc."""\n'
+        "    from typing import ClassVar as CV\n"
+        "    SIZE: CV[int] = 3\n"
+    )
+    package = _exporting(tmp_path, "from .mod import Color\n", mod=source)
+    assert undocumented_attributes(package, ["Color"]) == ["Color.SIZE"]
+
+
+def _example_doc(code: str, expected: str = "") -> str:
+    return f'"""Alias.\n\nExample:\n    >>> {code}\n    {expected}\n"""\n'.replace("    \n", "")
+
+
+def test_attribute_examples_do_not_share_a_directory(tmp_path: Path) -> None:
+    make = "import pathlib; pathlib.Path('workspace').mkdir()"
+    package = _exporting(
+        tmp_path,
+        "from .mod import A, B\n",
+        mod=f"type A = int\n{_example_doc(make)}type B = int\n{_example_doc(make)}",
+    )
+    assert failing_attribute_examples(package, ["A", "B"]) == []
+
+
+def test_attribute_examples_do_not_share_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    change = "import os; os.environ['NO_COLOR'] = '0'; os.environ['KEEP'] = 'x'"
+    read = (
+        "import os; "
+        "print(os.environ['NO_COLOR'], os.environ.get('KEEP'), 'FORCE_COLOR' in os.environ)"
+    )
+    second = _example_doc(read, "1 None False")
+    package = _exporting(
+        tmp_path,
+        "from .mod import A, B\n",
+        mod=f"type A = int\n{_example_doc(change)}type B = int\n{second}",
+    )
+    assert failing_attribute_examples(package, ["A", "B"]) == []
+    assert os.environ["FORCE_COLOR"] == "1"
+    assert "KEEP" not in os.environ

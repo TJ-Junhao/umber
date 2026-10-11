@@ -4,7 +4,10 @@ import ast
 import doctest
 import enum
 import inspect
-from collections.abc import Iterable
+import os
+import tempfile
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -87,20 +90,30 @@ def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"))
 
 
-def _import_map(tree: ast.Module) -> dict[str, str]:
-    """Map each locally bound import name to its dotted origin."""
+def _scope_imports(body: list[ast.stmt]) -> dict[str, str]:
+    """Map each name imported in one scope to its dotted origin.
+
+    Conditional blocks (``if``, ``try``, ``with``, loops) belong to the scope; nested
+    classes and functions do not.
+    """
     imports: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
+    for stmt in body:
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
                 if alias.asname:
                     imports[alias.asname] = alias.name
                 else:
                     head = alias.name.split(".")[0]
                     imports[head] = head
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            for alias in node.names:
-                imports[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+        elif isinstance(stmt, ast.ImportFrom):
+            if stmt.level == 0 and stmt.module:
+                for alias in stmt.names:
+                    imports[alias.asname or alias.name] = f"{stmt.module}.{alias.name}"
+        elif not isinstance(stmt, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            for block in ("body", "orelse", "finalbody"):
+                imports.update(_scope_imports(getattr(stmt, block, [])))
+            for handler in getattr(stmt, "handlers", []):
+                imports.update(_scope_imports(handler.body))
     return imports
 
 
@@ -177,28 +190,32 @@ def _resolve(package_dir: Path, path: Path, name: str, depth: int = 0) -> _Defin
     """Follow ``name`` in ``path`` through imports and assignments to its definition.
 
     Names that lead outside the package (the native extension, the standard library) and
-    names bound to functions resolve to None. The last binding in a module wins.
+    names bound to functions resolve to None. The last binding in a module wins. A name that
+    cannot be followed inside the package (bound only conditionally, undefined, a cycle or
+    a chain deeper than the guard) raises ``LookupError`` instead of being skipped.
     """
     if depth > _MAX_DEPTH:
-        return None
+        raise LookupError(f"{name!r} in {path.name}: the import chain is deeper than {_MAX_DEPTH}")
     tree = _parse(path)
-    imports = _import_map(tree)
+    imports = _scope_imports(tree.body)
     found: _Definition | None = None
+    bound = False
 
     def defined(index: int, *, is_class: bool) -> _Definition:
         return _Definition(is_class, path, tree.body, index, imports)
 
     for index, stmt in enumerate(tree.body):
         if isinstance(stmt, ast.ClassDef) and stmt.name == name:
-            found = defined(index, is_class=True)
+            bound, found = True, defined(index, is_class=True)
         elif isinstance(stmt, ast.TypeAlias) and stmt.name.id == name:
-            found = defined(index, is_class=False)
+            bound, found = True, defined(index, is_class=False)
         elif isinstance(stmt, ast.Assign | ast.AnnAssign):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             if len(targets) != 1 or not (
                 isinstance(targets[0], ast.Name) and targets[0].id == name
             ):
                 continue
+            bound = True
             value = stmt.value
             followed: _Definition | None = None
             if isinstance(value, ast.Name):
@@ -209,20 +226,23 @@ def _resolve(package_dir: Path, path: Path, name: str, depth: int = 0) -> _Defin
                     followed = _resolve(package_dir, module, value.attr, depth + 1)
             found = followed or defined(index, is_class=False)
         elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef) and stmt.name == name:
-            found = None
+            bound, found = True, None
+        elif isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                if (alias.asname or alias.name.split(".")[0]) == name:
+                    bound, found = True, None
         elif isinstance(stmt, ast.ImportFrom):
             for alias in stmt.names:
                 if alias.name == "*" or (alias.asname or alias.name) != name:
                     continue
+                bound = True
                 target = _locate(package_dir, path, stmt.level, stmt.module)
                 found = None
                 if target is not None and target != path:
                     found = _resolve(package_dir, target, alias.name, depth + 1)
+    if not bound:
+        raise LookupError(f"{name!r} is not bound at the top level of {path.name}")
     return found
-
-
-def _class_definition(package_dir: Path, name: str) -> _Definition | None:
-    return _resolve(package_dir, package_dir / "__init__.py", name)
 
 
 def undocumented_enum_members(
@@ -253,8 +273,8 @@ def undocumented_enum_members(
     for name, obj in objects:
         if not (inspect.isclass(obj) and issubclass(obj, enum.Enum)):
             continue
-        definition = _class_definition(package_dir, name)
-        node = definition.statement if definition is not None else None
+        definition = _exported(package_dir, [name])
+        node = definition[0][1].statement if definition else None
         if not isinstance(node, ast.ClassDef):
             raise LookupError(f"no class definition found for the enum {name!r}")
         body = node.body
@@ -288,8 +308,15 @@ def _string_literal(stmt: ast.stmt | None) -> ast.Constant | None:
 def _exported(package_dir: Path, public: Iterable[str]) -> list[tuple[str, _Definition]]:
     """Resolve each public name through ``__init__.py`` to the place it is defined."""
     init = package_dir / "__init__.py"
-    pairs = [(name, _resolve(package_dir, init, name)) for name in public]
-    return [(name, definition) for name, definition in pairs if definition is not None]
+    exported: list[tuple[str, _Definition]] = []
+    for name in public:
+        try:
+            definition = _resolve(package_dir, init, name)
+        except LookupError as error:
+            raise LookupError(f"cannot resolve the export {name!r}: {error}") from error
+        if definition is not None:
+            exported.append((name, definition))
+    return exported
 
 
 def _value_docs(package_dir: Path, public: Iterable[str]) -> list[tuple[str, str | None]]:
@@ -320,7 +347,7 @@ def undocumented_attributes(package_dir: Path, public: Iterable[str]) -> list[st
         >>> package = Path("pkg")
         >>> package.mkdir()
         >>> _ = (package / "__init__.py").write_text("")
-        >>> undocumented_attributes(package, ["X"])
+        >>> undocumented_attributes(package, [])
         []
     """
     missing: list[str] = []
@@ -332,8 +359,9 @@ def undocumented_attributes(package_dir: Path, public: Iterable[str]) -> list[st
         node = definition.statement
         if not (definition.is_class and isinstance(node, ast.ClassDef)):
             continue
+        scope = {**definition.imports, **_scope_imports(node.body)}
         for i, stmt in enumerate(node.body):
-            if not _is_class_var(stmt, definition.imports):
+            if not _is_class_var(stmt, scope):
                 continue
             attr = (
                 stmt.target.id
@@ -346,18 +374,37 @@ def undocumented_attributes(package_dir: Path, public: Iterable[str]) -> list[st
     return missing
 
 
+@contextmanager
+def _isolated_example() -> Generator[None]:
+    """Run in a fresh temporary directory with colour off, then restore both."""
+    saved_environment = dict(os.environ)
+    saved_directory = Path.cwd()
+    with tempfile.TemporaryDirectory() as directory:
+        os.chdir(directory)
+        for name in ("FORCE_COLOR", "PYTHON_COLORS"):
+            os.environ.pop(name, None)
+        os.environ["NO_COLOR"] = "1"
+        try:
+            yield
+        finally:
+            os.chdir(saved_directory)
+            os.environ.clear()
+            os.environ.update(saved_environment)
+
+
 def failing_attribute_examples(package_dir: Path, public: Iterable[str]) -> list[str]:
     """Return exported aliases and constants whose ``Example:`` does not run cleanly.
 
     Attribute docstrings are not collected by ``--doctest-modules``, so they are run here.
-    The caller provides the isolation (working directory, colour) as for any other doctest.
+    Each example runs in its own temporary directory with its own copy of the environment
+    (``NO_COLOR=1``, ``FORCE_COLOR`` and ``PYTHON_COLORS`` unset), restored afterwards.
 
     Example:
         >>> from pathlib import Path
         >>> package = Path("pkg")
         >>> package.mkdir()
         >>> _ = (package / "__init__.py").write_text("")
-        >>> failing_attribute_examples(package, ["X"])
+        >>> failing_attribute_examples(package, [])
         []
     """
     parser = doctest.DocTestParser()
@@ -367,6 +414,8 @@ def failing_attribute_examples(package_dir: Path, public: Iterable[str]) -> list
             continue
         test = parser.get_doctest(inspect.cleandoc(doc), {}, name, None, 0)
         runner = doctest.DocTestRunner()
-        if runner.run(test, out=lambda _text: None).failed:
+        with _isolated_example():
+            results = runner.run(test, out=lambda _text: None)
+        if results.failed:
             failed.append(name)
     return failed
