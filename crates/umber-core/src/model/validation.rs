@@ -252,14 +252,19 @@ pub(super) fn check_hist(
     x_kind: ScaleKind,
     y_kind: ScaleKind,
     values: &[f64],
-    bins: usize,
+    bins: i64,
 ) -> Result<BinCount> {
     let Some(count) = BinCount::new(bins) else {
-        return Err(Error::style(
+        let error = Error::style(
             context,
             format!("bins is {bins}; bins must be between 1 and {MAX_BINS}."),
         )
-        .with_parameter("bins"));
+        .with_parameter("bins");
+        return Err(if bins < 1 {
+            error.with_hint("use at least one bin.")
+        } else {
+            error
+        });
     };
     match x_kind {
         ScaleKind::Linear => {}

@@ -15,7 +15,7 @@ use crate::{AreaFill, FontLibrary, LogBase, MAX_BINS, Rgba, ScaleKind, Theme};
 fn hist_figure(theme: Theme, y: ScaleKind, values: &[f64], bins: usize) -> Figure {
     let mut f = Figure::new(6.0, 4.0, theme).unwrap();
     let options = HistOptions {
-        bins,
+        bins: bins.try_into().unwrap(),
         ..HistOptions::default()
     };
     f.add_axes(ScaleKind::Linear, y)
