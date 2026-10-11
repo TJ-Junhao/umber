@@ -3,7 +3,8 @@
 import math
 import numbers
 from collections.abc import Callable
-from typing import ClassVar, Self, cast, final
+from operator import attrgetter
+from typing import ClassVar, Final, Self, cast, final
 
 from umber import _umber
 from umber._errors import StyleError, new_error
@@ -319,10 +320,6 @@ class Color:
             _umber.check_alpha(opacity)
             return _new(self._kind, self._payload, opacity)
 
-    def _argument(self) -> tuple[int, int, float]:
-        """Return the native color argument: ``(kind, payload, alpha)``."""
-        return self._kind, self._payload, self._alpha
-
     def _key(self) -> tuple[int, int, float]:
         return self._kind, self._payload, self._alpha
 
@@ -358,6 +355,28 @@ class Color:
 
     def __delattr__(self, name: str) -> None:
         raise AttributeError("a Color is immutable")
+
+
+_NATIVE: Final = attrgetter("_kind", "_payload", "_alpha")
+
+
+def native(color: Color) -> tuple[int, int, float]:
+    """Return the native color argument of ``color``: ``(kind, payload, alpha)``.
+
+    Args:
+        color: The color.
+
+    Returns:
+        The kind (0 for ``Color.AUTO``, 1 for a palette color, 2 for a fixed color), the
+        payload (the palette index, or the fixed color as ``0xRRGGBBAA``) and the opacity.
+
+    Example:
+        >>> import umber as ub
+        >>> from umber._color import native
+        >>> native(ub.Color.palette(2).alpha(0.5))
+        (1, 2, 0.5)
+    """
+    return cast(tuple[int, int, float], _NATIVE(color))
 
 
 def _new(kind: int, payload: int, alpha: float) -> "Color":

@@ -10,6 +10,7 @@ import pytest
 
 import umber as ub
 from umber._errors import details
+from umber._scale import native
 
 
 def _notes(err: BaseException) -> list[str]:
@@ -22,10 +23,10 @@ def _marked(line: str, argument: str) -> str:
 
 
 def test_linear_log_and_category_scales() -> None:
-    assert ub.Scale.linear()._kind_and_base()[0] == 0
-    assert ub.Scale.log()._kind_and_base() == (1, 10.0)
-    assert ub.Scale.log(2)._kind_and_base() == (1, 2.0)
-    assert ub.Scale.category()._kind_and_base()[0] == 2
+    assert native(ub.Scale.linear())[0] == 0
+    assert native(ub.Scale.log()) == (1, 10.0)
+    assert native(ub.Scale.log(2)) == (1, 2.0)
+    assert native(ub.Scale.category())[0] == 2
 
 
 def test_default_log_base_is_ten() -> None:
