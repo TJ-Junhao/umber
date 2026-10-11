@@ -35,6 +35,10 @@ dev = [
     "ruff>=0.16.10",
     "pyright>=1.1.414",
     "mypy>=2.4",
+    "pandas>=3.0.6",
+    "pandas-stubs>=3.0.5.260914",
+    "polars>=2.0.0",
+    "ipython>=9.17.1",
 ]
 
 [tool.maturin]
