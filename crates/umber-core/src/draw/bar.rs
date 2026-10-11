@@ -2,10 +2,10 @@
 
 use super::MarkContext;
 use super::bar_shape::BarFrame;
-use super::mapping::axis_value;
+use super::mapping::axis_y_value;
 use crate::geometry::Path;
 use crate::model::{BarGroupMark, BarMark, BarSeriesView};
-use crate::resolve::{AxisScale, ResolvedAxis};
+use crate::resolve::{AxisScale, ResolvedAxis, ResolvedContinuousAxis};
 use crate::scene::{FillRule, Item, Paint};
 use crate::stacking::Stacks;
 use crate::{CategoryScale, Rgba, Theme};
@@ -65,8 +65,8 @@ fn group_slots(group: f64, count: usize, gap: f64) -> (f64, f64) {
 }
 
 /// The [`BarFrame`] of bars `width` x axis units wide, rounded by the theme's corner radius; on a
-/// category x axis an axis unit is the plot width. `None` on axes that cannot hold bars.
-fn frame(context: &MarkContext<'_>, y: &ResolvedAxis, width: f64) -> Option<BarFrame> {
+/// category x axis an axis unit is the plot width.
+fn frame(context: &MarkContext<'_>, y: &ResolvedContinuousAxis, width: f64) -> BarFrame {
     let radius = corner_radius(context.theme);
     BarFrame::new(
         context.maps,
@@ -95,7 +95,7 @@ fn push_bar(outline: Option<Path>, color: Rgba, items: &mut Vec<Item>) {
 pub(super) fn bar_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
-    y: &ResolvedAxis,
+    y: &ResolvedContinuousAxis,
     mark: &BarMark,
     color: Rgba,
     items: &mut Vec<Item>,
@@ -105,14 +105,12 @@ pub(super) fn bar_items(
     };
     // Every band has the same width, so every bar of the mark has the same width.
     let (left, right) = bar_span(categories, 0);
-    let Some(bars) = frame(context, y, right - left) else {
-        return;
-    };
+    let bars = frame(context, y, right - left);
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let Some(&height) = mark.heights().get(i) else {
             continue;
         };
-        let end = axis_value(y, height);
+        let end = axis_y_value(y, height);
         let outline = bars.outline(bar_span(categories, index), bars.base(), end, true);
         push_bar(outline, color, items);
     }
@@ -128,7 +126,7 @@ pub(super) fn bar_items(
 pub(super) fn grouped_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
-    y: &ResolvedAxis,
+    y: &ResolvedContinuousAxis,
     mark: &BarGroupMark,
     series: &[(BarSeriesView<'_>, Rgba)],
     items: &mut Vec<Item>,
@@ -138,9 +136,7 @@ pub(super) fn grouped_items(
     };
     let (start, end) = bar_span(categories, 0);
     let (width, gap) = group_slots(end - start, series.len(), GROUP_GAP / context.plot.width);
-    let Some(bars) = frame(context, y, width) else {
-        return;
-    };
+    let bars = frame(context, y, width);
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let (group_left, _) = bar_span(categories, index);
         for (j, (view, color)) in series.iter().enumerate() {
@@ -148,7 +144,7 @@ pub(super) fn grouped_items(
                 continue;
             };
             let left = group_left + j as f64 * (width + gap);
-            let end = axis_value(y, height);
+            let end = axis_y_value(y, height);
             let outline = bars.outline((left, left + width), bars.base(), end, true);
             push_bar(outline, *color, items);
         }
@@ -167,7 +163,7 @@ pub(super) fn grouped_items(
 pub(super) fn stacked_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
-    y: &ResolvedAxis,
+    y: &ResolvedContinuousAxis,
     mark: &BarGroupMark,
     series: &[(BarSeriesView<'_>, Rgba)],
     stacks: &Stacks,
@@ -177,9 +173,7 @@ pub(super) fn stacked_items(
         return;
     };
     let (left, right) = bar_span(categories, 0);
-    let Some(bars) = frame(context, y, right - left) else {
-        return;
-    };
+    let bars = frame(context, y, right - left);
     let half_gap = context.maps.y.length(STACK_GAP / 2.0);
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let span = bar_span(categories, index);
@@ -190,9 +184,9 @@ pub(super) fn stacked_items(
             let from = if segment.bottom == 0.0 {
                 bars.base()
             } else {
-                axis_value(y, segment.bottom)
+                axis_y_value(y, segment.bottom)
             };
-            let to = axis_value(y, segment.top);
+            let to = axis_y_value(y, segment.top);
             let inner = (segment.bottom != 0.0, !segment.outermost);
             let Some((from, to)) = inset_segment(from, to, inner, half_gap) else {
                 continue;

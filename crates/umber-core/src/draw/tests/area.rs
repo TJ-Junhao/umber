@@ -207,7 +207,7 @@ fn areas_include_zero_on_a_linear_y_axis() {
         let lowest = &resolved.y.ticks[0];
         assert_eq!(lowest.label, "0");
         assert_eq!(resolved.baseline, lowest.pos);
-        assert_eq!(resolved.y.continuous().unwrap().domain().0, 0.0);
+        assert_eq!(resolved.y.scale.domain().0, 0.0);
         assert!((layout.baseline_y - layout.plot.bottom()).abs() < 1e-9);
         let scene = f.to_scene(FontLibrary::global());
         let Some(Item::Fill { path, .. }) = mark_group(&scene).1.first() else {
@@ -223,7 +223,7 @@ fn areas_include_zero_on_a_linear_y_axis() {
         &[-30.0, -10.0],
     );
     let (resolved, _) = crate::pipeline::plan_figure(&f, FontLibrary::global());
-    assert_eq!(resolved.y.continuous().unwrap().domain().1, 0.0);
+    assert_eq!(resolved.y.scale.domain().1, 0.0);
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn areas_fill_down_to_the_baseline_on_a_log_y_axis() {
             assert_eq!(gradient.end.y, baseline);
         }
         // The line's lowest point, 10, lies above the baseline.
-        let ten = resolved.y.continuous().unwrap().normalize(10.0);
+        let ten = resolved.y.scale.normalize(10.0);
         assert!(layout.plot.y_at(NormalizedPos::new(ten)) < layout.baseline_y - 1.0);
     }
 }

@@ -20,7 +20,10 @@
 use super::nudge::separate;
 use super::{Area, BODY_LINE, Label, PADDING, Styles, baseline_in_line, measure, metrics};
 use crate::legend::{Legend, RowStyle, Swatch};
-use crate::resolve::{Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis};
+use crate::resolve::{
+    Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis,
+    ResolvedContinuousAxis,
+};
 use crate::{FontLibrary, Rgba, SizeSpec, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
@@ -398,12 +401,9 @@ fn x_position(axis: &ResolvedAxis, x: AnchorX<'_>) -> f64 {
     }
 }
 
-/// The normalized y position of an anchor at `y` on `axis`; NaN when the axis cannot place it.
-fn y_position(axis: &ResolvedAxis, y: f64) -> f64 {
-    match &axis.scale {
-        AxisScale::Continuous(scale) => scale.normalize(y),
-        AxisScale::Category(_) => f64::NAN,
-    }
+/// The normalized y position of an anchor at `y` on `axis`.
+fn y_position(axis: &ResolvedContinuousAxis, y: f64) -> f64 {
+    axis.scale.normalize(y)
 }
 
 /// A direct label, placed: its label in its line color, and the end dot at its anchor. At
@@ -502,7 +502,7 @@ mod tests {
     use super::*;
     use crate::model::{AxisData, Figure, LineOptions};
     use crate::pipeline::plan_figure;
-    use crate::resolve::{AxisScale, ResolvedAxis};
+    use crate::resolve::AxisScale;
     use crate::scene::Item;
     use crate::test_support::scene::assert_scene_bounded;
     use crate::{ScaleKind, Theme};
@@ -1217,12 +1217,11 @@ mod tests {
             assert_eq!(f64::from(text_of(label).style.size), size);
             // The dot sits on the anchor, the label half a dot and 6 pt to its right, centered
             // on it: these ends are far apart, so nothing is nudged.
-            let continuous = |axis: &ResolvedAxis, v: f64| match &axis.scale {
-                AxisScale::Continuous(scale) => scale.normalize(v),
-                AxisScale::Category(_) => panic!("a continuous axis"),
+            let AxisScale::Continuous(x_scale) = &resolved.x.scale else {
+                panic!("a continuous axis");
             };
-            let anchor_x = plot.x_at(NormalizedPos::new(continuous(&resolved.x, x)));
-            let anchor_y = plot.y_at(NormalizedPos::new(continuous(&resolved.y, y)));
+            let anchor_x = plot.x_at(NormalizedPos::new(x_scale.normalize(x)));
+            let anchor_y = plot.y_at(NormalizedPos::new(resolved.y.scale.normalize(y)));
             let end = label.dot.unwrap();
             assert_eq!((end.x, end.y, end.diameter), (anchor_x, anchor_y, dot));
             assert!((text_of(label).x - (anchor_x + dot / 2.0 + DIRECT_GAP)).abs() < 1e-9);

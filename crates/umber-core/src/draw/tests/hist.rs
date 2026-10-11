@@ -67,7 +67,7 @@ fn x_of(resolved: &Resolved, layout: &Layout, v: f64) -> f64 {
 
 /// The plot y of the data value `v` on the resolved y axis.
 fn y_of(resolved: &Resolved, layout: &Layout, v: f64) -> f64 {
-    let scale = resolved.y.continuous().unwrap();
+    let scale = &resolved.y.scale;
     layout.plot.y_at(NormalizedPos::new(scale.normalize(v)))
 }
 
