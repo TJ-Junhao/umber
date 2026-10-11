@@ -47,20 +47,21 @@ def _stderr_is_terminal() -> bool:
     being reported, so a stream that cannot answer counts as no terminal instead of raising.
     """
     stderr = sys.stderr
-    if not hasattr(stderr, "fileno"):
-        return False
+    # Looking an attribute up can run the stream's own code too, so it is guarded as well.
     try:
-        return os.isatty(stderr.fileno())
+        fileno = getattr(stderr, "fileno", None)
+        if fileno is None:
+            return False
+        return os.isatty(fileno())
     except io.UnsupportedOperation:
         # A stream without a real descriptor, such as a captured stream, decides itself.
         pass
     except Exception:
-        # A closed or detached stream, or a replacement whose fileno() fails otherwise.
-        return False
-    if not hasattr(stderr, "isatty"):
+        # A closed or detached stream, or a replacement whose fileno fails otherwise.
         return False
     try:
-        return bool(stderr.isatty())
+        isatty = getattr(stderr, "isatty", None)
+        return isatty is not None and bool(isatty())
     except Exception:
         return False
 

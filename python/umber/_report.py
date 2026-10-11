@@ -1,8 +1,8 @@
 """The context manager around every public call: error notes and the traceback.
 
-Each public function and method wraps its whole body in ``with api_call(context,
-positional):``. When an exception that umber raised on purpose (see ``umber._errors``)
-leaves the body:
+Each public function and method wraps its whole body in ``with api_call():``. Entering
+records the values the parameters start with. When an exception that umber raised on
+purpose (see ``umber._errors``) leaves the body:
 
 - If the call came from inside the package (a quick function calling an ``Axes`` method),
   only the traceback is reset; the outer call reports the error.
@@ -13,13 +13,13 @@ leaves the body:
   called back into.
 
 Any other exception passes through untouched, with its full traceback. Reporting never
-raises: a note that cannot be built is left out.
+replaces the error: a note that cannot be built is left out.
 """
 
 import inspect
 import os
 from pathlib import Path
-from types import CodeType, FrameType, TracebackType
+from types import FrameType, TracebackType
 
 from umber._ansi import bold, color_enabled
 from umber._errors import details
@@ -32,21 +32,22 @@ _LOCATED = "_umber_located"
 class ApiCall:
     """Report an umber error raised inside one public call; see the module docstring."""
 
-    __slots__ = ("_context", "_positional")
+    __slots__ = ("_arguments",)
 
-    def __init__(self, context: str, positional: tuple[str, ...]) -> None:
-        """Create the reporter for the call ``context`` (such as ``"Axes.line()"``).
-
-        Args:
-            context: The context of the public call, as in its error messages.
-            positional: The parameters the call accepts by position, in order, without
-                ``self``.
-        """
-        self._context = context
-        self._positional = positional
+    def __init__(self) -> None:
+        """Create the reporter; ``__enter__`` records the call's arguments."""
+        self._arguments: dict[str, object] = {}
 
     def __enter__(self) -> None:
-        """Enter the call; nothing to set up."""
+        """Record the values the public function's parameters start with."""
+        frame = inspect.currentframe()
+        public = None if frame is None else frame.f_back
+        if public is None:
+            return
+        code = public.f_code
+        values = public.f_locals
+        names = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
+        self._arguments = {name: values[name] for name in names if name in values}
 
     def __exit__(
         self,
@@ -64,8 +65,13 @@ class ApiCall:
         public = _public_frame()
         caller = None if public is None else public.f_back
         if not (caller is not None and _in_package(caller)) and not hasattr(exc, _LOCATED):
-            target = None if public is None else public.f_code
-            self._add_notes(exc, caller, target, parameter, hint)
+            try:
+                self._add_notes(exc, public, caller, parameter, hint)
+            except Exception:
+                # The notes only add to an error that is already complete. Building them
+                # reads the user's source and environment, so a failure there, of any kind,
+                # must not replace the error the user needs to see.
+                pass
             setattr(exc, _LOCATED, True)
         # The interpreter re-raises the exception with this traceback and adds the frames
         # above as it propagates, so the package frames never reappear.
@@ -74,35 +80,28 @@ class ApiCall:
     def _add_notes(
         self,
         exc: BaseException,
+        public: FrameType | None,
         caller: FrameType | None,
-        target: CodeType | None,
         parameter: str | None,
         hint: str | None,
     ) -> None:
         """Add the highlight note, then the hint note, styled when colour is enabled."""
         color = color_enabled()
-        if caller is not None and target is not None and parameter is not None:
-            callee = self._context.removesuffix("()").rpartition(".")[2]
-            highlight = find(caller, callee, target, self._positional, parameter)
+        if public is not None and caller is not None and parameter is not None:
+            highlight = find(caller, public, self._arguments, parameter)
             if highlight is not None:
                 exc.add_note(render(highlight, color=color))
         if hint is not None:
             exc.add_note(f"{bold('hint:') if color else 'hint:'} {hint}")
 
 
-def api_call(context: str, positional: tuple[str, ...]) -> ApiCall:
-    """Return the reporter to wrap the body of the public call ``context`` in.
-
-    Args:
-        context: The context of the public call, as in its error messages, such as
-            ``"Axes.line()"`` or ``"Figure()"``.
-        positional: The parameters the call accepts by position, in order, without
-            ``self``.
+def api_call() -> ApiCall:
+    """Return the reporter to wrap the whole body of a public function or method in.
 
     Returns:
         A context manager; see the module docstring.
     """
-    return ApiCall(context, positional)
+    return ApiCall()
 
 
 def _public_frame() -> FrameType | None:

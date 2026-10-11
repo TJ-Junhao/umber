@@ -14,22 +14,20 @@ from umber._ansi import bold, bold_red
 from umber._highlight import Highlight, find, render
 
 
-def _record(
-    found: dict[str, str | None],
-    callee: str,
-    positional: tuple[str, ...],
-    keywords: tuple[str, ...],
-) -> None:
-    """Record, for each parameter, where ``find`` locates it in the call of the calling method."""
+def _record(found: dict[str, str | None]) -> None:
+    """Record, for each parameter of the calling method, where ``find`` locates its argument."""
     frame = inspect.currentframe()
     assert frame is not None
     method = frame.f_back
     assert method is not None
     caller = method.f_back
     assert caller is not None
-    for parameter in positional + keywords:
-        h = find(caller, callee, method.f_code, positional, parameter)
-        found[f"{callee}.{parameter}"] = None if h is None else render(h, color=False)
+    code = method.f_code
+    names = code.co_varnames[1 : code.co_argcount + code.co_kwonlyargcount]
+    arguments = {name: method.f_locals[name] for name in names}
+    for parameter in names:
+        h = find(caller, method, arguments, parameter)
+        found[f"{code.co_name}.{parameter}"] = None if h is None else render(h, color=False)
 
 
 class Probe:
@@ -41,31 +39,28 @@ class Probe:
     def __init__(self) -> None:
         self.found: dict[str, str | None] = {}
 
-    def line(self, x: object, y: object, *, label: object = None) -> "Probe":
-        _record(self.found, "line", ("x", "y"), ("label",))
+    def line(self, x: object, y: object, *, label: object = None) -> Self:
+        _record(self.found)
         return self
 
-    def xlim(self, low: object, high: object) -> "Probe":
-        _record(self.found, "xlim", ("low", "high"), ())
+    def xlim(self, low: object, high: object) -> Self:
+        _record(self.found)
         return self
 
     def title(self, text: object) -> Self:
-        _record(self.found, "title", ("text",), ())
+        _record(self.found)
         return self
 
-    def unannotated(self) -> "Probe":
+    def size(self, width: float = 6.0, height: float = 4.0) -> Self:
+        _record(self.found)
         return self
 
-    def optional(self) -> "Probe | None":
+    def plain(self) -> object:
         return self
 
     @classmethod
     def rgb(cls, r: object, g: object, b: object) -> None:
-        _record(cls.seen, "rgb", ("r", "g", "b"), ())
-
-
-# A method without a return annotation, as the run time sees it.
-del Probe.unannotated.__annotations__["return"]
+        _record(cls.seen)
 
 
 def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> dict[str, str | None]:
@@ -134,29 +129,15 @@ def test_long_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-@pytest.mark.parametrize("method", ["unannotated", "optional"])
-def test_chain_through_a_method_without_a_self_annotation_gives_no_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str
+@pytest.mark.parametrize("receiver", ["p.plain()", "same(p)", "p" + '.title("x")' * 40])
+def test_any_receiver_expression_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, receiver: str
 ) -> None:
-    found = _run(tmp_path, monkeypatch, f"def run(p, t, y):\n    p.{method}().xlim(0, 1)\n")
-    assert found["xlim.high"] is None
-
-
-def test_chain_through_a_function_outside_the_package_gives_no_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The annotation of a function outside the package is not trusted to be true.
-    source = "def same(p) -> Probe:\n    return p\ndef run(p, t, y):\n    same(p).xlim(0, 1)\n"
+    # Only the shape of the call itself matters, never what its receiver is.
+    source = f"def same(p):\n    return p\ndef run(p, t, y):\n    {receiver}.xlim(0, 1)\n"
     found = _run(tmp_path, monkeypatch, source)
-    assert found["xlim.high"] is None
-
-
-def test_chain_beyond_the_depth_limit_gives_no_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls = '.title("x")' * 40
-    found = _run(tmp_path, monkeypatch, f"def run(p, t, y):\n    p{calls}.xlim(0, 1)\n")
-    assert found["xlim.high"] is None
+    shown = f"  {receiver}.xlim(0, 1)"
+    assert found["xlim.high"] == f"{shown}\n{' ' * (len(shown) - 2)}^"
 
 
 def test_multi_line_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,26 +184,13 @@ def test_argument_spanning_lines_is_underlined_to_the_end_of_its_first_line(
     assert found["line.y"] == "  p.line(t, [y[0],\n            ^^^^^^"
 
 
-def test_starred_argument_before_the_parameter_gives_no_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("call", ["p.line(*[t], y)", "p.line(t, *[y])", 'p.line(t, **{"y": y})'])
+def test_unpacked_arguments_give_no_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, call: str
 ) -> None:
-    found = _run(tmp_path, monkeypatch, "def run(p, t, y):\n    p.line(*[t], y)\n")
-    assert found["line.x"] is None
-    assert found["line.y"] is None
-
-
-def test_starred_argument_after_the_parameter_keeps_the_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    found = _run(tmp_path, monkeypatch, "def run(p, t, y):\n    p.line(t, *[y])\n")
-    assert found["line.x"] == "  p.line(t, *[y])\n         ^"
-    assert found["line.y"] is None
-
-
-def test_keyword_unpacking_gives_no_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    found = _run(tmp_path, monkeypatch, 'def run(p, t, y):\n    p.line(t, **{"y": y})\n')
-    assert found["line.x"] == '  p.line(t, **{"y": y})\n         ^'
-    assert found["line.y"] is None
+    # The shape of a call that unpacks arguments is not known from the source.
+    found = _run(tmp_path, monkeypatch, f"def run(p, t, y):\n    {call}\n")
+    assert found == {"line.x": None, "line.y": None, "line.label": None}
 
 
 def test_callee_name_mismatch_gives_no_note(
@@ -279,8 +247,8 @@ def test_source_from_the_command_line_gives_no_note() -> None:
         "import inspect\n"
         "from umber._highlight import find\n"
         "def line(x, y):\n"
-        "    frame = inspect.currentframe().f_back\n"
-        "    print(find(frame, 'line', line.__code__, ('x', 'y'), 'y'))\n"
+        "    public = inspect.currentframe()\n"
+        "    print(find(public.f_back, public, {'x': x, 'y': y}, 'y'))\n"
         "line(1, 2)\n"
     )
     out = subprocess.run(
@@ -295,8 +263,8 @@ def test_missing_position_information_gives_no_note(tmp_path: Path) -> None:
         "import inspect\n"
         "from umber._highlight import find\n"
         "def line(x, y):\n"
-        "    frame = inspect.currentframe().f_back\n"
-        "    print(find(frame, 'line', line.__code__, ('x', 'y'), 'y'))\n"
+        "    public = inspect.currentframe()\n"
+        "    print(find(public.f_back, public, {'x': x, 'y': y}, 'y'))\n"
         "line(1, 2)\n",
         encoding="utf-8",
     )
@@ -339,7 +307,8 @@ def test_render_with_color_counts_wide_characters_by_display_column() -> None:
 
 
 def test_find_rejects_a_frame_not_in_a_call() -> None:
-    assert find(_frame_here(), "line", _frame_here.__code__, ("x", "y"), "y") is None
+    frame = _frame_here()
+    assert find(frame, frame, {}, "y") is None
 
 
 def test_alias_with_the_same_name_is_a_direct_call(
@@ -455,3 +424,45 @@ def test_unreadable_source_gives_no_note() -> None:
     probe = Probe()
     run(probe)
     assert probe.found["line.y"] is None
+
+
+def test_partial_that_binds_a_keyword_gives_no_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # label is left out of the source but no longer holds its default.
+    source = (
+        "import functools\n"
+        "def run(p, t, y):\n"
+        '    line = functools.partial(p.line, label="North")\n'
+        "    line(t, y)\n"
+    )
+    found = _run(tmp_path, monkeypatch, source)
+    assert found == {"line.x": None, "line.y": None, "line.label": None}
+
+
+def test_parameters_left_to_their_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    found = _run(tmp_path, monkeypatch, "def run(p, t, y):\n    p.size(1.0)\n")
+    assert found["size.width"] == "  p.size(1.0)\n         ^^^"
+    assert found["size.height"] is None
+
+
+def test_partial_that_binds_a_parameter_with_a_default_gives_no_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The 2.0 in the source is the height; width came from the partial. Binding the source
+    # alone would put 2.0 on width, but height then no longer holds its default.
+    source = (
+        "import functools\n"
+        "def run(p, t, y):\n"
+        "    size = functools.partial(p.size, 1.0)\n"
+        "    size(2.0)\n"
+    )
+    found = _run(tmp_path, monkeypatch, source)
+    assert found == {"size.width": None, "size.height": None}
+
+
+def test_python_wrapper_is_the_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A wrapper written in Python has its own frame, so the call inside it is highlighted.
+    source = "def line(y, x, p):\n    p.line(x, y)\ndef run(p, t, y):\n    line(y, t, p)\n"
+    found = _run(tmp_path, monkeypatch, source)
+    assert found["line.y"] == "  p.line(x, y)\n            ^"

@@ -38,7 +38,7 @@ def _check(context, name, value):
 
 
 def f(a, b, *, c=0):
-    with api_call("f()", ("a", "b")):
+    with api_call():
         _check("f()", "a", a)
         _check("f()", "b", b)
         _check("f()", "c", c)
@@ -46,17 +46,17 @@ def f(a, b, *, c=0):
 
 class Axes:
     def line(self, x, y) -> Self:
-        with api_call("Axes.line()", ("x", "y")):
+        with api_call():
             _check("Axes.line()", "x", x)
             _check("Axes.line()", "y", y)
             return self
 
     def title(self, text) -> Self:
-        with api_call("Axes.title()", ("text",)):
+        with api_call():
             return self
 
     def xlim(self, low, high) -> "Axes":
-        with api_call("Axes.xlim()", ("low", "high")):
+        with api_call():
             _check("Axes.xlim()", "low", low)
             _check("Axes.xlim()", "high", high)
             return self
@@ -67,18 +67,18 @@ class Axes:
 
 class Figure:
     def __init__(self, width, height):
-        with api_call("Figure()", ("width", "height")):
+        with api_call():
             _check("Figure()", "width", width)
             _check("Figure()", "height", height)
 
 
 def line(x, y):
-    with api_call("line()", ("x", "y")):
+    with api_call():
         return Axes().line(x, y)
 
 
 def without_parameter():
-    with api_call("without_parameter()", ()):
+    with api_call():
         raise new_error(
             UsageError,
             "without_parameter()",
@@ -89,14 +89,14 @@ def without_parameter():
 
 
 def without_hint(a):
-    with api_call("without_hint()", ("a",)):
+    with api_call():
         raise new_error(
             DataError, "without_hint()", "a is bad; a must be good.", parameter="a", hint=None
         )
 
 
 def wrong_type(a):
-    with api_call("wrong_type()", ("a",)):
+    with api_call():
         raise new_error(
             TypeError,
             "wrong_type()",
@@ -107,12 +107,32 @@ def wrong_type(a):
 
 
 def unexpected(kind):
-    with api_call("unexpected()", ("kind",)):
+    with api_call():
         raise kind("not raised by umber on purpose")
 
 
+def rebinding(a, *, scale=1.0):
+    with api_call():
+        scale = scale * 2
+        _check("rebinding()", "a", a)
+
+
+EVENTS = []
+
+
+def _side_effect():
+    EVENTS.append("annotation evaluated")
+    return Self
+
+
+class Annotated(Axes):
+    def title(self, text: _side_effect()) -> _side_effect():
+        with api_call():
+            return self
+
+
 def apply(fn):
-    with api_call("apply()", ("fn",)):
+    with api_call():
         fn()
 """
 
@@ -135,6 +155,7 @@ class Facade(Protocol):
     def wrong_type(self, a: object) -> None: ...
     def unexpected(self, kind: type[Exception]) -> None: ...
     def apply(self, fn: Callable[[], object]) -> None: ...
+    def rebinding(self, a: int, *, scale: float = 1.0) -> None: ...
 
 
 def _write_facade(directory: Path) -> Path:
@@ -251,13 +272,15 @@ def test_multi_line_chain_highlights_the_right_argument(facade: Facade) -> None:
     assert _notes(info.value) == ["  .xlim(0, y)\n           ^", "hint: pass a high of 0 or more."]
 
 
-def test_chain_through_a_method_without_a_self_annotation_gets_only_the_hint(
-    facade: Facade,
-) -> None:
+def test_chain_through_any_method_highlights_the_right_argument(facade: Facade) -> None:
+    # Only the shape of the failing call matters, not what its receiver was returned by.
     ax = facade.Axes()
     with pytest.raises(ub.DataError) as info:
         ax.unannotated().xlim(0, -1)
-    assert _notes(info.value) == ["hint: pass a high of 0 or more."]
+    assert _notes(info.value) == [
+        "  ax.unannotated().xlim(0, -1)\n                           ^^",
+        "hint: pass a high of 0 or more.",
+    ]
 
 
 def test_partial_with_the_same_name_gets_only_the_hint(facade: Facade) -> None:
@@ -526,3 +549,314 @@ def test_new_error_accepts_a_builtin_class_and_missing_details() -> None:
 def test_details_of_other_exceptions_is_none() -> None:
     assert details(ValueError("x")) is None
     assert details(ub.DataError("Axes.line(): y[3] is inf; values must be finite.")) is None
+
+
+# Callers that reach a public function through dynamic name resolution, attribute hooks,
+# wrappers or rebinding. Each must either highlight the argument that really caused the error
+# or leave the highlight out; never point at another argument or replace the error.
+_HINT_ONLY = {
+    "local_partial": """
+        def run():
+            line = partial(facade.line, -1)
+            line(123)
+    """,
+    "closure_partial": """
+        def run():
+            line = partial(facade.line, -1)
+            def inner():
+                line(123)
+            inner()
+    """,
+    "global_partial": """
+        line = partial(facade.line, -1)
+        def run():
+            global line
+            line(123)
+    """,
+    "class_body": """
+        def run():
+            class C:
+                line = partial(facade.line, -1)
+                line(123)
+    """,
+    "class_closure": """
+        line = facade.line
+        def run():
+            line = partial(facade.line, -1)
+            class C:
+                line(123)
+    """,
+    "comprehension": """
+        line = facade.line
+        def run():
+            [line(123) for line in [partial(facade.line, -1)]]
+    """,
+    "property": """
+        class Holder:
+            @property
+            def line(self):
+                return partial(facade.line, -1)
+        def run():
+            Holder().line(123)
+    """,
+    "module_getattr": """
+        m = ModuleType("fake")
+        m.__getattr__ = lambda name: partial(facade.line, -1)
+        def run():
+            m.line(123)
+    """,
+    "instance_getattribute": """
+        class Child(facade.Axes):
+            __slots__ = ()
+            def __getattribute__(self, name):
+                if name == "line":
+                    return partial(facade.Axes.line.__get__(self, type(self)), -1)
+                return super().__getattribute__(name)
+        def run():
+            Child().line(123)
+    """,
+    "module_getattribute": """
+        class M(ModuleType):
+            def __getattribute__(self, name):
+                if name == "line":
+                    return partial(facade.line, -1)
+                return super().__getattribute__(name)
+        m = M("fake")
+        m.line = facade.line
+        def run():
+            m.line(123)
+    """,
+    "metaclass_getattribute": """
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name == "line":
+                    return partial(facade.line, -1)
+                return super().__getattribute__(name)
+        class Holder(metaclass=Meta):
+            line = staticmethod(facade.line)
+        def run():
+            Holder.line(123)
+    """,
+    "staticmethod_descriptor": """
+        class Wrapped(staticmethod):
+            def __get__(self, obj, cls):
+                return partial(facade.line, -1)
+        class Holder:
+            line = Wrapped(facade.line)
+        def run():
+            Holder.line(123)
+    """,
+    "metaclass_call": """
+        class Meta(type):
+            __call__ = staticmethod(partial(type.__call__, facade.Figure, -1))
+        class Figure(facade.Figure, metaclass=Meta):
+            pass
+        def run():
+            Figure(123)
+    """,
+    "global_exec_locals": """
+        line = partial(facade.line, -1)
+        def run():
+            global line
+            exec("line = facade.line")
+            line(123)
+    """,
+    "class_global_shadow": """
+        line = partial(facade.line, -1)
+        class Meta(type):
+            @classmethod
+            def __prepare__(cls, name, bases):
+                return {"line": facade.line}
+        def run():
+            class C(metaclass=Meta):
+                global line
+                line(123)
+    """,
+    "walrus_rebind": """
+        def run():
+            line = partial(facade.line, -1)
+            line(line := facade.line)
+    """,
+    "argument_rebind": """
+        line = partial(facade.line, -1)
+        def switch():
+            global line
+            line = facade.line
+            return 123
+        def run():
+            line(switch())
+    """,
+    "subclass_staticmethod_partial": """
+        class Child(facade.Axes):
+            line = staticmethod(partial(facade.Axes.line, facade.Axes(), -1))
+        def run():
+            Child().title("ok").line(123)
+    """,
+}
+
+_HIGHLIGHTED = {
+    "class_property_hook": (
+        """
+        class Child(facade.Axes):
+            __slots__ = ()
+            @property
+            def __class__(self):
+                raise RuntimeError("class query failed")
+        def run():
+            p = Child()
+            p.line(-1, 123)
+        """,
+        "  p.line(-1, 123)\n         ^^",
+    ),
+    "metaclass_mro_hook": (
+        """
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name == "__mro__":
+                    raise RuntimeError("mro query failed")
+                return super().__getattribute__(name)
+        class Child(facade.Axes, metaclass=Meta):
+            pass
+        def run():
+            p = Child()
+            p.title("ok").line(-1, 123)
+        """,
+        '  p.title("ok").line(-1, 123)\n                     ^^',
+    ),
+    "deferred_annotations": (
+        """
+        def run():
+            p = facade.Annotated()
+            p.title("ok").line(-1, 123)
+        """,
+        '  p.title("ok").line(-1, 123)\n                     ^^',
+    ),
+    "override_calling_super": (
+        """
+        class Child(facade.Axes):
+            def line(self, x, y):
+                return super().line(-1, y)
+        def run():
+            Child().line(123, 456)
+        """,
+        "  return super().line(-1, y)\n                      ^^",
+    ),
+}
+
+
+def _run_caller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, facade: Facade, body: str
+) -> BaseException:
+    """Run ``run()`` from ``body``, written as a user module, and return the error it raised."""
+    path = tmp_path / "caller.py"
+    header = "from functools import partial\nfrom types import ModuleType\n"
+    path.write_text(header + textwrap.dedent(body), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("caller", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    module.__dict__["facade"] = facade
+    monkeypatch.setitem(sys.modules, "caller", module)
+    spec.loader.exec_module(module)
+    run: Callable[[], object] = module.__dict__["run"]
+    with pytest.raises(ub.DataError) as info:
+        run()
+    return info.value
+
+
+@pytest.mark.parametrize("body", _HINT_ONLY.values(), ids=_HINT_ONLY.keys())
+def test_call_through_a_wrapper_or_hook_gets_only_the_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, facade: Facade, body: str
+) -> None:
+    err = _run_caller(tmp_path, monkeypatch, facade, body)
+    parameter = "width" if "Figure" in body else "x"
+    assert _notes(err) == [f"hint: pass a {parameter} of 0 or more."]
+
+
+@pytest.mark.parametrize(("body", "highlight"), _HIGHLIGHTED.values(), ids=_HIGHLIGHTED.keys())
+def test_direct_call_with_user_hooks_highlights_the_right_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, facade: Facade, body: str, highlight: str
+) -> None:
+    events = list(cast(list[str], cast(object, facade).__dict__["EVENTS"]))
+    err = _run_caller(tmp_path, monkeypatch, facade, body)
+    assert _notes(err) == [highlight, "hint: pass a x of 0 or more."]
+    # Reporting evaluates no annotations and runs none of the caller's hooks.
+    assert cast(object, facade).__dict__["EVENTS"] == events
+
+
+class _Property:
+    """Replacement stderr streams whose attribute lookup itself fails."""
+
+    def __init__(self, failing: str) -> None:
+        self.failing = failing
+
+    def __getattribute__(self, name: str) -> object:
+        if name == object.__getattribute__(self, "failing"):
+            raise RuntimeError(f"stderr {name} lookup failed")
+        return object.__getattribute__(self, name)
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+    def fileno(self) -> int:
+        raise io.UnsupportedOperation("fileno")
+
+    def isatty(self) -> bool:
+        return False
+
+
+@pytest.mark.parametrize("failing", ["fileno", "isatty"])
+def test_failing_stderr_attribute_never_replaces_the_error(
+    facade: Facade, monkeypatch: pytest.MonkeyPatch, failing: str
+) -> None:
+    monkeypatch.delenv("NO_COLOR")
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setattr(sys, "stderr", _Property(failing))
+    a, b = 1, -1
+    with pytest.raises(ub.DataError) as info:
+        facade.f(a, b)
+    assert _notes(info.value) == [
+        "  facade.f(a, b)\n              ^",
+        "hint: pass a b of 0 or more.",
+    ]
+
+
+def test_failure_while_building_notes_never_replaces_the_error(
+    facade: Facade, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*args: object) -> None:
+        raise RuntimeError("note failed")
+
+    monkeypatch.setattr(_report, "find", broken)
+    with pytest.raises(ub.DataError) as info:
+        facade.f(1, -1)
+    assert str(info.value) == "f(): b is -1; b must be 0 or greater."
+    assert _frames(info.value) == ["test_failure_while_building_notes_never_replaces_the_error"]
+
+
+def test_large_source_gets_only_the_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, facade: Facade
+) -> None:
+    padding = "# " + "x" * 98 + "\n"
+    body = padding * 5300 + "def run():\n    facade.line(-1, 123)\n"
+    err = _run_caller(tmp_path, monkeypatch, facade, body)
+    assert _notes(err) == ["hint: pass a x of 0 or more."]
+
+
+def test_source_just_under_the_limit_gets_the_highlight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, facade: Facade
+) -> None:
+    padding = "# " + "x" * 98 + "\n"
+    body = padding * 5000 + "def run():\n    facade.line(-1, 123)\n"
+    err = _run_caller(tmp_path, monkeypatch, facade, body)
+    assert _notes(err)[0] == "  facade.line(-1, 123)\n              ^^"
+
+
+def test_parameters_rebound_in_the_body_keep_the_highlight(facade: Facade) -> None:
+    # Defaults are compared with the values the call started with, not later ones.
+    a = -1
+    with pytest.raises(ub.DataError) as info:
+        facade.rebinding(a)
+    assert _notes(info.value) == [
+        "  facade.rebinding(a)\n                   ^",
+        "hint: pass a a of 0 or more.",
+    ]
