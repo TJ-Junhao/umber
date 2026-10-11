@@ -7,7 +7,9 @@ from types import ModuleType
 import pytest
 
 import umber
-from docs_check import missing_docs, undocumented_enum_members
+from docs_check import missing_docs, undocumented_attributes, undocumented_enum_members
+
+PACKAGE_DIR = Path(umber.__file__).resolve().parent
 
 
 def _public_objects() -> list[tuple[str, object]]:
@@ -20,6 +22,10 @@ def test_every_public_object_is_documented() -> None:
 
 def test_every_enum_member_has_a_docstring() -> None:
     assert undocumented_enum_members(_public_objects()) == []
+
+
+def test_every_alias_constant_and_class_constant_is_documented() -> None:
+    assert undocumented_attributes(PACKAGE_DIR, umber.__all__) == []
 
 
 # --- self-tests: the checker must catch what it is meant to catch ---
@@ -240,3 +246,76 @@ def test_enum_checker_accepts_documented_aliased_enum(
         '    """Documented too."""\n',
     )
     assert undocumented_enum_members([("Dash", module.Dash)]) == []
+
+
+def test_enum_checker_flags_annotated_member(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _import_source(
+        tmp_path,
+        monkeypatch,
+        "enum_annotated_bad",
+        "from enum import Enum\n"
+        "class Dash(Enum):\n"
+        '    """Doc."""\n'
+        "    SOLID = 0\n"
+        '    """Documented."""\n'
+        "    DASHED: int = 1\n"
+        '    """Documented, but annotated."""\n',
+    )
+    assert undocumented_enum_members([("Dash", module.Dash)]) == ["Dash.DASHED"]
+
+
+type _Alias = list[int]
+
+
+def test_checker_skips_aliases_and_constants() -> None:
+    assert missing_docs([("_Alias", _Alias), ("LIMIT", 3)]) == []
+
+
+def _write_module(directory: Path, source: str) -> Path:
+    directory.mkdir(exist_ok=True)
+    (directory / "mod.py").write_text(source)
+    return directory
+
+
+_ALIAS_DOC = '"""A documented alias.\n\nExample:\n    >>> 1\n    1\n"""\n'
+
+
+def test_attribute_checker_flags_alias_without_docstring(tmp_path: Path) -> None:
+    package = _write_module(tmp_path / "pkg", "type Values = list[float]\n")
+    assert undocumented_attributes(package, ["Values"]) == ["Values"]
+
+
+def test_attribute_checker_accepts_documented_alias(tmp_path: Path) -> None:
+    package = _write_module(tmp_path / "pkg", "type Values = list[float]\n" + _ALIAS_DOC)
+    assert undocumented_attributes(package, ["Values"]) == []
+
+
+def test_attribute_checker_flags_constant_without_example(tmp_path: Path) -> None:
+    package = _write_module(tmp_path / "pkg", 'LIMIT = 3\n"""The limit."""\n')
+    assert undocumented_attributes(package, ["LIMIT"]) == ["LIMIT"]
+
+
+def test_attribute_checker_accepts_documented_constant(tmp_path: Path) -> None:
+    package = _write_module(tmp_path / "pkg", "LIMIT: int = 3\n" + _ALIAS_DOC)
+    assert undocumented_attributes(package, ["LIMIT"]) == []
+
+
+def test_attribute_checker_ignores_names_that_are_not_exported(tmp_path: Path) -> None:
+    package = _write_module(tmp_path / "pkg", "LIMIT = 3\n")
+    assert undocumented_attributes(package, []) == []
+
+
+def test_attribute_checker_flags_undocumented_class_var(tmp_path: Path) -> None:
+    source = (
+        "from typing import ClassVar\n"
+        "class Palette:\n"
+        '    """Doc."""\n'
+        "    SIZE: ClassVar[int] = 3\n"
+        '    """Documented."""\n'
+        "    COUNT: ClassVar[int] = 4\n"
+        "    other: int = 5\n"
+    )
+    package = _write_module(tmp_path / "pkg", source)
+    assert undocumented_attributes(package, ["Palette"]) == ["Palette.COUNT"]
