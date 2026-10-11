@@ -185,59 +185,17 @@ fn too_narrow(lo: f64, hi: f64) -> bool {
 
 /// Whether the data extent `lo..=hi` (finite, `lo <= hi`) counts as a single value: a linear
 /// extent narrower than [`ContinuousScale::new`] allows, or a log extent narrower than a factor
-/// of `1 + 1e-9`.
-fn is_single_value(transform: Transform, lo: f64, hi: f64) -> bool {
+/// of `1 + 1e-9`. [`ContinuousScale::from_extent`] pads such an extent on its own terms.
+pub(crate) fn is_single_value(transform: Transform, lo: f64, hi: f64) -> bool {
     match transform {
         Transform::Linear => lo == hi || too_narrow(lo, hi),
         Transform::Log(_) => hi / lo < MIN_LOG_RATIO,
     }
 }
 
-/// The share of a data extent's span that auto limits add on each side before nice rounding,
-/// so that marks never sit on the plot edge.
+/// The share of a nice domain's span that auto limits add on each side, so that marks never
+/// sit on the plot edge.
 const AUTO_LIMIT_PADDING: f64 = 0.05;
-
-/// The data extent `lo..=hi` padded for auto limits: widened on each side by
-/// [`AUTO_LIMIT_PADDING`] of its span, measured in log space on a log axis, and kept within the
-/// supported magnitudes (`|v| <= MAX_MAGNITUDE` linear, `[MIN_LOG_VALUE, MAX_MAGNITUDE]` log).
-/// The result is never narrower than the input.
-///
-/// An extent that counts as a single value is returned unchanged:
-/// [`ContinuousScale::from_extent`] pads it on its own terms. So is an extent that
-/// `from_extent` rejects (non-finite, inverted or beyond the supported magnitudes), so the same
-/// error is reported.
-pub(crate) fn padded_extent(transform: Transform, lo: f64, hi: f64) -> (f64, f64) {
-    let supported = lo.is_finite()
-        && hi.is_finite()
-        && lo <= hi
-        && match transform {
-            Transform::Linear => lo.abs() <= MAX_MAGNITUDE && hi.abs() <= MAX_MAGNITUDE,
-            Transform::Log(_) => MIN_LOG_VALUE <= lo && hi <= MAX_MAGNITUDE,
-        };
-    if !supported || is_single_value(transform, lo, hi) {
-        return (lo, hi);
-    }
-    let (padded_lo, padded_hi) = match transform {
-        Transform::Linear => {
-            // Both bounds are at most MAX_MAGNITUDE in magnitude, so the span is finite.
-            let pad = AUTO_LIMIT_PADDING * (hi - lo);
-            (
-                (lo - pad).max(-MAX_MAGNITUDE),
-                (hi + pad).min(MAX_MAGNITUDE),
-            )
-        }
-        Transform::Log(_) => {
-            // A share of the span in log space is the same factor in every base, so natural
-            // logarithms serve all of them.
-            let factor = (AUTO_LIMIT_PADDING * log_offset(hi, lo)).exp();
-            (
-                (lo / factor).max(MIN_LOG_VALUE),
-                (hi * factor).min(MAX_MAGNITUDE),
-            )
-        }
-    };
-    (padded_lo.min(lo), padded_hi.max(hi))
-}
 
 /// `ln(v / lo)` for positive `v` and `lo`: the log-axis position of `v` measured from the
 /// lower limit, in natural-log units. Measuring from `lo` keeps narrow log domains at large
@@ -691,6 +649,30 @@ impl ContinuousScale {
         }
         let ticks = nice.ticks(target);
         (nice, ticks)
+    }
+
+    /// This scale with its domain widened on each side by [`AUTO_LIMIT_PADDING`] of its span,
+    /// measured in log space on a log axis, and kept within the supported magnitudes
+    /// (`|v| <= MAX_MAGNITUDE` linear, `[MIN_LOG_VALUE, MAX_MAGNITUDE]` log). Auto limits apply
+    /// it to a nice domain, after its ticks are chosen, so the ticks stay on round values and
+    /// the outermost ones sit just inside the plot edge. Never narrower than `self`.
+    pub(crate) fn padded(&self) -> ContinuousScale {
+        let (lo, hi) = (self.lo, self.hi);
+        let padded = match self.transform {
+            Transform::Linear => {
+                // Both limits are at most MAX_MAGNITUDE in magnitude, so the span is finite.
+                let pad = AUTO_LIMIT_PADDING * (hi - lo);
+                (lo - pad, hi + pad)
+            }
+            Transform::Log(_) => {
+                // A share of the span in log space is the same factor in every base, so natural
+                // logarithms serve all of them.
+                let factor = (AUTO_LIMIT_PADDING * log_offset(hi, lo)).exp();
+                (lo / factor, hi * factor)
+            }
+        };
+        // `widened` keeps the result within the supported magnitudes.
+        self.widened(Some(padded))
     }
 
     /// Powers of `base` inside a log domain, with the domain ends always first and last.
@@ -1469,14 +1451,13 @@ mod tests {
     }
 
     #[test]
-    fn padded_extent_adds_five_percent_of_the_span() {
-        let lin = Transform::Linear;
+    fn padded_adds_five_percent_of_the_span() {
         for ((lo, hi), (want_lo, want_hi)) in [
             ((35.0, 65.0), (33.5, 66.5)),
             ((-10.0, 10.0), (-11.0, 11.0)),
             ((1e-5, 3e-5), (0.9e-5, 3.1e-5)),
         ] {
-            let (plo, phi) = padded_extent(lin, lo, hi);
+            let (plo, phi) = raw(lo, hi).padded().domain();
             assert!(
                 rel_close(plo, want_lo) && rel_close(phi, want_hi),
                 "{plo} {phi}"
@@ -1485,7 +1466,10 @@ mod tests {
         // Log: 5 % of the span in log space, the same factor at both ends and in every base.
         for base in [2.0, 10.0, 999.0] {
             let log = Transform::Log(LogBase::new(base).unwrap());
-            let (lo, hi) = padded_extent(log, 10.0, 1000.0);
+            let (lo, hi) = ContinuousScale::new(log, 10.0, 1000.0, "t")
+                .unwrap()
+                .padded()
+                .domain();
             let factor = 10f64.powf(0.1);
             assert!(rel_close(lo, 10.0 / factor), "base {base}: {lo}");
             assert!(rel_close(hi, 1000.0 * factor), "base {base}: {hi}");
@@ -1493,28 +1477,34 @@ mod tests {
     }
 
     #[test]
-    fn padded_extent_is_clamped_to_the_supported_magnitudes() {
+    fn padded_is_clamped_to_the_supported_magnitudes() {
         let lin = Transform::Linear;
+        let log = Transform::Log(LogBase::TEN);
+        let padded = |t: Transform, lo: f64, hi: f64| {
+            ContinuousScale::new(t, lo, hi, "t")
+                .unwrap()
+                .padded()
+                .domain()
+        };
         assert_eq!(
-            padded_extent(lin, -MAX_MAGNITUDE, MAX_MAGNITUDE),
+            padded(lin, -MAX_MAGNITUDE, MAX_MAGNITUDE),
             (-MAX_MAGNITUDE, MAX_MAGNITUDE)
         );
-        let (lo, hi) = padded_extent(lin, 0.0, MAX_MAGNITUDE);
+        let (lo, hi) = padded(lin, 0.0, MAX_MAGNITUDE);
         assert_eq!(hi, MAX_MAGNITUDE);
         assert!(rel_close(lo, -0.05 * MAX_MAGNITUDE), "{lo}");
-        let log = Transform::Log(LogBase::TEN);
         assert_eq!(
-            padded_extent(log, MIN_LOG_VALUE, MAX_MAGNITUDE),
+            padded(log, MIN_LOG_VALUE, MAX_MAGNITUDE),
             (MIN_LOG_VALUE, MAX_MAGNITUDE)
         );
         // About 100 decades pad by about 5 decades, past 1e-300 and 1e300.
-        let (lo, hi) = padded_extent(log, 2e-300, 1e-200);
+        let (lo, hi) = padded(log, 2e-300, 1e-200);
         assert_eq!(lo, MIN_LOG_VALUE);
         assert!(hi > 1e-196 && hi < 1e-195, "{hi}");
-        let (lo, hi) = padded_extent(log, 1e200, 5e299);
+        let (lo, hi) = padded(log, 1e200, 5e299);
         assert_eq!(hi, MAX_MAGNITUDE);
         assert!(lo < 1e196, "{lo}");
-        // The padded extents are valid domains.
+        // The padded domains are valid domains.
         for (t, lo, hi) in [
             (lin, -MAX_MAGNITUDE, MAX_MAGNITUDE),
             (lin, 0.0, MAX_MAGNITUDE),
@@ -1522,16 +1512,15 @@ mod tests {
             (log, 2e-300, 1e-200),
             (log, 1e200, 5e299),
         ] {
-            let (lo, hi) = padded_extent(t, lo, hi);
+            let (lo, hi) = padded(t, lo, hi);
             assert!(ContinuousScale::new(t, lo, hi, "t").is_ok(), "{lo} {hi}");
         }
     }
 
     #[test]
-    fn padded_extent_leaves_single_values_and_rejected_extents_alone() {
+    fn single_values_are_recognized_like_from_extent() {
         let lin = Transform::Linear;
         let log = Transform::Log(LogBase::TEN);
-        // Single values and extents narrower than the minimum width: `from_extent` pads them.
         for (t, lo, hi) in [
             (lin, 20.0, 20.0),
             (lin, 0.0, 0.0),
@@ -1539,19 +1528,10 @@ mod tests {
             (log, 5.0, 5.0),
             (log, 1e9, next_up(1e9)),
         ] {
-            assert_eq!(padded_extent(t, lo, hi), (lo, hi));
+            assert!(is_single_value(t, lo, hi), "{lo} {hi}");
         }
-        // Extents that `from_extent` rejects keep their error.
-        for (t, lo, hi) in [
-            (lin, f64::NAN, 1.0),
-            (lin, 2.0, 1.0),
-            (lin, 0.0, 1e301),
-            (log, -1.0, 10.0),
-            (log, 1e-310, 10.0),
-        ] {
-            let (plo, phi) = padded_extent(t, lo, hi);
-            assert!(plo.to_bits() == lo.to_bits() && phi.to_bits() == hi.to_bits());
-            assert!(ContinuousScale::from_extent(t, Some((plo, phi)), "t").is_err());
+        for (t, lo, hi) in [(lin, 0.0, 1.0), (lin, 35.0, 65.0), (log, 1.0, 1.1)] {
+            assert!(!is_single_value(t, lo, hi), "{lo} {hi}");
         }
     }
 

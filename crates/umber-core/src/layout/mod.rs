@@ -685,10 +685,9 @@ mod tests {
                 .subtitle("Daily mean, MW")
                 .xlabel("Day")
                 .ylabel("MW")
-                // 5..95 pads to 0.5..99.5 before nice rounding.
                 .scatter(
                     AxisData::Numbers(vec![0.0, 15.0, 30.0]),
-                    &[5.0, 50.0, 95.0],
+                    &[3.0, 50.0, 97.0],
                     ScatterOptions::default(),
                 )
                 .unwrap()

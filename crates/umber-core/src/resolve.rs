@@ -1,13 +1,13 @@
 //! Resolve: data extents to scales to ticks, computed at render time.
 //!
-//! Auto limits: a continuous axis pads its data extent by 5 % of the span on each side (in log
-//! space on a log axis) and widens the result to nice limits, so marks never sit on the plot
-//! edge. The exception is the x axis of an axes whose marks are all lines, which keeps the exact
-//! data extent. Explicit limits replace the auto range as given and are never padded. A
-//! category axis lists the marks' categories in order of first appearance. On a nice axis the
-//! ticks are the tick set that produced the nice limits, so both ends carry a tick. Tick
-//! positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch data
-//! values again.
+//! Auto limits: a continuous axis widens its data extent to nice limits, whose ticks are the
+//! tick set that produced them, then pads that nice domain by 5 % of its span on each side (in
+//! log space on a log axis), so marks never sit on the plot edge and the outermost ticks sit
+//! just inside it. The ticks are not changed by the padding. The exception is the x axis of an
+//! axes whose marks are all lines, which keeps the exact data extent. Explicit limits replace
+//! the auto range as given and are never padded. A category axis lists the marks' categories in
+//! order of first appearance. Tick positions are normalized to `[0, 1]` along the axis, so
+//! layout and drawing never touch data values again.
 //!
 //! Marks are resolved here too, once per render: each mark becomes a [`ResolvedMark`], a typed
 //! record that carries the mark's data and its [`ColorSpec`] resolved against the theme's
@@ -15,7 +15,7 @@
 //! instead of the marks.
 
 use crate::model::{Axes, AxisData, LineMark, Mark, ScatterMark};
-use crate::scale::padded_extent;
+use crate::scale::is_single_value;
 use crate::{
     CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Tick, Transform,
 };
@@ -111,8 +111,8 @@ pub(crate) fn coincides(a: NormalizedPos, b: NormalizedPos) -> bool {
 enum AutoLimits {
     /// The limits are the data extent.
     Exact,
-    /// The data extent is padded (see [`padded_extent`]), then widened to nice limits, which
-    /// carry a tick at both ends.
+    /// The data extent is widened to nice limits, which carry a tick at both ends, and the nice
+    /// domain is then padded (see [`ContinuousScale::padded`]); the ticks stay as they are.
     Nice,
 }
 
@@ -177,8 +177,8 @@ fn extent(values: impl IntoIterator<Item = f64>) -> Option<(f64, f64)> {
 /// A continuous axis: the scale of the explicit limits when set; otherwise the empty-data
 /// range (0 to 1, or 1 to 10 on log) when there is no finite data; otherwise the data extent,
 /// fitted as `auto` says. Nice axes take the ticks that produced their limits; the others take
-/// `ticks()`. Only a nice axis pads its extent; a single-valued extent is padded by
-/// [`ContinuousScale::from_extent`] alone.
+/// `ticks()`. Only a nice axis pads its domain, after its ticks are chosen; an extent that
+/// counts as a single value is padded by [`ContinuousScale::from_extent`] alone.
 fn continuous(
     transform: Transform,
     limits: Option<ContinuousScale>,
@@ -193,15 +193,15 @@ fn continuous(
         let scale = ContinuousScale::unit(transform);
         (scale, scale.ticks(target))
     } else {
-        let extent = match auto {
-            AutoLimits::Exact => data,
-            AutoLimits::Nice => data.map(|(lo, hi)| padded_extent(transform, lo, hi)),
-        };
-        let scale = ContinuousScale::from_extent(transform, extent, CONTEXT)
+        let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
         match auto {
             AutoLimits::Exact => (scale, scale.ticks(target)),
-            AutoLimits::Nice => scale.nice_with_ticks(target),
+            AutoLimits::Nice => {
+                let (nice, ticks) = scale.nice_with_ticks(target);
+                let single = data.is_some_and(|(lo, hi)| is_single_value(transform, lo, hi));
+                (if single { nice } else { nice.padded() }, ticks)
+            }
         }
     };
     ResolvedAxis {
@@ -514,6 +514,36 @@ mod tests {
 
     const LIN: ScaleKind = ScaleKind::Linear;
 
+    /// The nice domain `lo..hi` padded by 5 % of its span on each side.
+    fn pad(lo: f64, hi: f64) -> (f64, f64) {
+        let p = 0.05 * (hi - lo);
+        (lo - p, hi + p)
+    }
+
+    /// The log nice domain `lo..hi` padded by 5 % of its span in log space on each side.
+    fn pad_log(lo: f64, hi: f64) -> (f64, f64) {
+        let factor = (hi / lo).powf(0.05);
+        (lo / factor, hi * factor)
+    }
+
+    fn close(a: (f64, f64), b: (f64, f64)) -> bool {
+        let near = |x: f64, y: f64| (x - y).abs() <= 1e-12 * x.abs().max(y.abs()).max(1.0);
+        near(a.0, b.0) && near(a.1, b.1)
+    }
+
+    fn labels(axis: &ResolvedAxis) -> Vec<&str> {
+        axis.ticks.iter().map(|t| t.label.as_str()).collect()
+    }
+
+    /// The position of the first and last tick on a padded nice axis: 0.05 / 1.1 of the axis
+    /// in from each end.
+    fn assert_end_ticks_inset(axis: &ResolvedAxis) {
+        let inset = 0.05 / 1.1;
+        let (first, last) = (axis.ticks.first().unwrap(), axis.ticks.last().unwrap());
+        assert!((first.pos.get() - inset).abs() < 1e-9, "{first:?}");
+        assert!((last.pos.get() - (1.0 - inset)).abs() < 1e-9, "{last:?}");
+    }
+
     #[test]
     fn all_line_marks_use_exact_x_extent() {
         let mut f = figure(LIN, LIN);
@@ -536,13 +566,14 @@ mod tests {
         assert!(y0 <= 0.5 && y1 >= 3.3);
         assert_ne!((y0, y1), (0.5, 3.3));
 
-        // Adding a scatter turns the exception off: 0.3..9.7 is padded to -0.17..10.17, then
-        // widened to nice limits.
+        // Adding a scatter turns the exception off: x gets the nice limits 0..10, padded.
         axes(&mut f)
             .scatter(nums(&[0.3]), &[1.0], ScatterOptions::default())
             .unwrap();
         let ((x0, x1), _) = domains(&f);
-        assert_eq!((x0, x1), (-1.0, 11.0));
+        assert!(close((x0, x1), pad(0.0, 10.0)), "{x0} {x1}");
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(labels(&r.x), ["0.0", "2.5", "5.0", "7.5", "10.0"]);
     }
 
     #[test]
@@ -550,23 +581,23 @@ mod tests {
         let mut f = figure(LIN, LIN);
         axes(&mut f)
             .scatter(
-                nums(&[16.0, 47.0, 84.0]),
+                nums(&[12.0, 47.0, 88.0]),
                 &[3.2, 18.0, 36.5],
                 ScatterOptions::default(),
             )
             .unwrap();
-        // x is padded to 12.6..87.4, y to 1.535..38.165, before nice rounding.
+        // The nice limits 10..90 and 0..40, padded by 5 % of their span.
         let ((x0, x1), (y0, y1)) = domains(&f);
-        assert_eq!((x0, x1), (10.0, 90.0));
-        assert_eq!((y0, y1), (0.0, 40.0));
-        // Nice limits are the outer ticks on both axes: x is 10, 30, ..., 90, not 25, 50, 75.
+        assert!(close((x0, x1), pad(10.0, 90.0)), "{x0} {x1}");
+        assert!(close((y0, y1), pad(0.0, 40.0)), "{y0} {y1}");
+        // The ticks are the set that produced the nice limits, so the outermost ones sit at the
+        // nice limits, just inside the padded domain: x is 10, 30, ..., 90, not 25, 50, 75.
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         for axis in [&r.x, &r.y] {
-            assert_eq!(axis.ticks.first().map(|t| t.pos.get()), Some(0.0));
-            assert_eq!(axis.ticks.last().map(|t| t.pos.get()), Some(1.0));
+            assert_end_ticks_inset(axis);
         }
-        let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
-        assert_eq!(labels, ["10", "30", "50", "70", "90"]);
+        assert_eq!(labels(&r.x), ["10", "30", "50", "70", "90"]);
+        assert_eq!(labels(&r.y), ["0", "10", "20", "30", "40"]);
 
         // The same on a log axis.
         let log = ScaleKind::Log { base: LogBase::TEN };
@@ -575,11 +606,10 @@ mod tests {
             .scatter(nums(&[12.0, 88.0]), &[1.0, 2.0], ScatterOptions::default())
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(r.x.continuous().unwrap().domain(), (10.0, 100.0));
-        let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
-        assert_eq!(labels, ["10", "100"]);
-        assert_eq!(r.x.ticks.first().map(|t| t.pos.get()), Some(0.0));
-        assert_eq!(r.x.ticks.last().map(|t| t.pos.get()), Some(1.0));
+        let domain = r.x.continuous().unwrap().domain();
+        assert!(close(domain, pad_log(10.0, 100.0)), "{domain:?}");
+        assert_eq!(labels(&r.x), ["10", "100"]);
+        assert_end_ticks_inset(&r.x);
     }
 
     #[test]
@@ -672,12 +702,11 @@ mod tests {
             .scatter(nums(&[1.0, 2.0]), &[3.0, 4.2e4], ScatterOptions::default())
             .unwrap();
         let (_, (y0, y1)) = domains(&f);
-        assert_eq!((y0, y1), (1.0, 1e5));
+        assert!(close((y0, y1), pad_log(1.0, 1e5)), "{y0} {y1}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         // 0 is never inside a log range: the baseline sits at the bottom.
         assert_eq!(r.baseline.get(), 0.0);
-        let labels: Vec<&str> = r.y.ticks.iter().map(|t| t.label.as_str()).collect();
-        assert_eq!(labels.first(), Some(&"1"));
+        assert_eq!(labels(&r.y), ["1", "10", "100", "1000", "10000", "100000"]);
         assert!(r.y.ticks.windows(2).all(|w| w[0].pos < w[1].pos));
 
         // Explicit log limits are used as given.
@@ -853,7 +882,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_limits_pad_the_data_extent_before_nice_rounding() {
+    fn auto_limits_pad_the_nice_domain_and_keep_its_ticks() {
         let (xs, ys) = sinusoid();
         let (lo, hi) = extent(ys.iter().copied()).unwrap();
         assert_eq!((lo, hi), (35.0, 65.0));
@@ -862,30 +891,23 @@ mod tests {
             .line(nums(&xs), &ys, LineOptions::default())
             .unwrap();
         let ((x0, x1), (y0, y1)) = domains(&f);
-        // The line's minimum and maximum no longer sit on the plot edge.
+        // 35..65 is already nice; the domain grows by 1.5 on each side, so the line's minimum
+        // and maximum no longer sit on the plot edge, and the ticks stay 35..65.
         assert_ne!((y0, y1), (35.0, 65.0));
-        assert!(y0 <= 35.0 - 1.5 && y1 >= 65.0 + 1.5, "{y0} {y1}");
+        assert!(close((y0, y1), (33.5, 66.5)), "{y0} {y1}");
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(labels(&r.y), ["35", "45", "55", "65"]);
+        assert_end_ticks_inset(&r.y);
         // The x axis of an all-line axes keeps the exact extent, unpadded.
         assert_eq!((x0, x1), (0.0, 12.0));
-
-        // Nice rounding starts from the padded extent: 0..100 pads to -5..105.
-        let mut f = figure(LIN, LIN);
-        axes(&mut f)
-            .scatter(
-                nums(&[0.0, 100.0]),
-                &[0.0, 100.0],
-                ScatterOptions::default(),
-            )
-            .unwrap();
-        let ((x0, x1), (y0, y1)) = domains(&f);
-        assert!(x0 <= -5.0 && x1 >= 105.0, "{x0} {x1}");
-        assert!(y0 <= -5.0 && y1 >= 105.0, "{y0} {y1}");
+        assert_eq!(r.x.ticks.first().map(|t| t.pos.get()), Some(0.0));
+        assert_eq!(r.x.ticks.last().map(|t| t.pos.get()), Some(1.0));
     }
 
     #[test]
     fn log_auto_limits_pad_in_log_space() {
-        // 10..1000 spans two decades; 5 % of that is a factor of 10^0.1 on each side, so the
-        // nice limits move out to the next powers.
+        // The nice limits 10..1000 span two decades; 5 % of that is a factor of 10^0.1 on each
+        // side. The ticks stay the powers inside the nice limits.
         let log = ScaleKind::Log { base: LogBase::TEN };
         let mut f = figure(log, log);
         axes(&mut f)
@@ -895,7 +917,14 @@ mod tests {
                 ScatterOptions::default(),
             )
             .unwrap();
-        assert_eq!(domains(&f), ((1.0, 1e4), (1.0, 1e4)));
+        let (x, y) = domains(&f);
+        let factor = 10f64.powf(0.1);
+        for d in [x, y] {
+            assert!(close(d, (10.0 / factor, 1000.0 * factor)), "{d:?}");
+        }
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(labels(&r.x), ["10", "100", "1000"]);
+        assert_end_ticks_inset(&r.y);
     }
 
     #[test]
