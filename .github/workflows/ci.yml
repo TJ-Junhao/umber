@@ -105,6 +105,8 @@ jobs:
       - run: uv run mypy
       - run: uv run python -m mypy.stubtest umber._umber
       - run: uv run pytest -q
+      # The binding's unit tests embed this job's interpreter and import the package built above.
+      - run: uv run cargo test -p umber-py --locked
       - name: Build release dists without local paths
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: scripts/release/build-dists.sh

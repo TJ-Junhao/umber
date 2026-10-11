@@ -4,6 +4,11 @@ Errors that umber reports on purpose are ``DataError``, ``StyleError`` or ``Usag
 instance attributes ``_umber_parameter`` and ``_umber_hint``. A ``TypeError`` or ``ValueError``
 whose message starts with "internal error:" means an argument the Python layer should never
 pass; it carries neither attribute.
+
+Float data arguments must be one-dimensional, aligned (start and strides multiples of 8 bytes),
+C-contiguous or strided float64 buffers whose format is "d", "@d" or "=d"; an explicit byte order
+such as "<d" is refused. ``np.require(values, dtype="=f8", requirements=["A"]).view(np.float64)``
+produces such a buffer. Name arguments must be a ``list`` of ``str`` without lone surrogates.
 """
 
 __all__ = [

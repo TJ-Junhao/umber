@@ -11,6 +11,8 @@ mod color;
 mod enums;
 mod errors;
 mod scale;
+#[cfg(test)]
+mod test_support;
 mod values;
 
 use pyo3::prelude::*;

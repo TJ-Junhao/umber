@@ -1,5 +1,6 @@
 """Tests of the native extension's value validators, enum tables and error mapping."""
 
+import importlib
 from collections.abc import Callable
 
 import pytest
@@ -211,3 +212,26 @@ def test_reported_errors_are_style_errors_and_value_errors(call: Callable[[], ob
     assert isinstance(caught.value, ValueError)
     assert isinstance(caught.value, ub.UmberError)
     assert set(vars(caught.value)) == {"_umber_parameter", "_umber_hint"}
+
+
+def test_errors_take_the_classes_of_a_reloaded_errors_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from umber import _errors
+
+    _umber.check_alpha(0.5)
+    with pytest.raises(ub.StyleError):
+        _umber.check_alpha(2.0)
+    original = _errors.StyleError
+    # Restores the original classes afterwards, so later tests see the classes `umber` exports.
+    for name in ("UmberError", "DataError", "StyleError", "UsageError"):
+        monkeypatch.setattr(_errors, name, getattr(_errors, name))
+    importlib.reload(_errors)
+    assert _errors.StyleError is not original
+
+    with pytest.raises(_errors.StyleError) as caught:
+        _umber.check_alpha(2.0)
+    assert type(caught.value) is _errors.StyleError
+    assert isinstance(caught.value, _errors.UmberError)
+    assert not isinstance(caught.value, original)
+    assert details(caught.value) == ("a", None)
