@@ -20,7 +20,7 @@
 //! ```
 
 use crate::model::check_text;
-use crate::ticks::{self, Tick};
+use crate::ticks::{self, Tick, TickValues};
 use crate::{Error, Result};
 
 /// The most decimals [`TickFormat::fixed`] and [`TickFormat::percent`] accept.
@@ -342,19 +342,6 @@ impl TickFormat {
             })
             .collect()
     }
-}
-
-/// Where tick values come from, which decides whether a value near zero means zero.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TickValues {
-    /// Values computed on an evenly spaced linear grid with this step, as `start + i * step`: a
-    /// value within `step * 1e-9` of zero is a zero that missed by a rounding error.
-    Grid {
-        /// The grid step.
-        step: f64,
-    },
-    /// Exact values: positions a caller chose, and log ticks.
-    Exact,
 }
 
 /// `decimals` as [`Decimals`], or `Error::Style` under `context` unless it is between 0 and 12.

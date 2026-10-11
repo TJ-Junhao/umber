@@ -35,6 +35,30 @@ pub struct Tick {
     pub label: String,
 }
 
+/// Where tick values come from, which decides whether a value near zero means zero.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum TickValues {
+    /// Values computed on an evenly spaced linear grid with this step, as `start + i * step`: a
+    /// value within `step * 1e-9` of zero is a zero that missed by a rounding error.
+    Grid {
+        /// The grid step.
+        step: f64,
+    },
+    /// Exact values: positions a caller chose, and log ticks.
+    Exact,
+}
+
+/// Automatic ticks, with where their values come from: the step their labels were written for
+/// on a linear grid, so that another tick format decides zero exactly as the automatic labels
+/// did.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AutoTicks {
+    /// The ticks, with their automatic labels.
+    pub ticks: Vec<Tick>,
+    /// Where their values come from.
+    pub values: TickValues,
+}
+
 /// Largest number of ticks any function here aims for; larger targets are clamped to it.
 pub(crate) const MAX_TARGET: usize = 64;
 

@@ -34,7 +34,7 @@ use crate::model::{
 };
 use crate::scale::{Padding, is_single_value, log_offset};
 use crate::stacking::Stacks;
-use crate::tick_format::TickValues;
+use crate::ticks::{AutoTicks, TickValues};
 use crate::{
     CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Theme, Tick,
     Transform, ticks,
@@ -273,8 +273,11 @@ fn continuous(
     let (scale, unpadded, ticks) = match settings.explicit() {
         None => {
             let (scale, unpadded, ticks) = automatic(transform, explicit, data, auto, target);
-            let values = automatic_values(transform, &ticks);
-            (scale, unpadded, settings.format().relabel(ticks, values))
+            (
+                scale,
+                unpadded,
+                settings.format().relabel(ticks.ticks, ticks.values),
+            )
         }
         Some(given) => {
             let (scale, unpadded) = match explicit {
@@ -299,43 +302,31 @@ fn continuous(
     }
 }
 
-/// Where the values of the automatic `ticks` of an axis of `transform` come from: on a linear
-/// axis an evenly spaced grid, whose step is the gap between the first two ticks; on a log axis
-/// exact values (powers of the base, or positive values of a fallback grid that never stands for
-/// zero).
-fn automatic_values(transform: Transform, ticks: &[Tick]) -> TickValues {
-    match (transform, ticks) {
-        (Transform::Linear, [first, second, ..]) => TickValues::Grid {
-            step: second.value - first.value,
-        },
-        _ => TickValues::Exact,
-    }
-}
-
 /// The domain, the domain before padding and the automatic ticks of a continuous axis: the
 /// scale of the explicit limits when set; otherwise the empty-data range (0 to 1, or 1 to 10 on
 /// log) when there is no finite data; otherwise the data extent, fitted as `auto` says. Nice
 /// axes take the ticks that produced their limits; the others take `ticks()`. Only a nice axis
 /// pads its domain, after its ticks are chosen; an extent that counts as a single value is
-/// padded by [`ContinuousScale::from_extent`] alone. The labels are the automatic ones.
+/// padded by [`ContinuousScale::from_extent`] alone. The labels are the automatic ones, and
+/// the ticks carry the step they were written for.
 fn automatic(
     transform: Transform,
     limits: Option<ContinuousScale>,
     data: Option<(f64, f64)>,
     auto: AutoLimits,
     target: usize,
-) -> (ContinuousScale, ContinuousScale, Vec<Tick>) {
+) -> (ContinuousScale, ContinuousScale, AutoTicks) {
     if let Some(scale) = limits {
-        (scale, scale, scale.ticks(target))
+        (scale, scale, scale.auto_ticks(target))
     } else if data.is_none() {
         // The fallback range is final on every axis: never widened with `nice`.
         let scale = ContinuousScale::unit(transform);
-        (scale, scale, scale.ticks(target))
+        (scale, scale, scale.auto_ticks(target))
     } else {
         let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
         match auto {
-            AutoLimits::Exact => (scale, scale, scale.ticks(target)),
+            AutoLimits::Exact => (scale, scale, scale.auto_ticks(target)),
             AutoLimits::Nice(padding) | AutoLimits::NiceBelowData(padding) => {
                 let (nice, ticks) = scale.nice_with_ticks(target);
                 let (nice, ticks) = match (auto, data) {
@@ -2983,5 +2974,60 @@ mod tests {
             "{:?}",
             r.y.scale
         );
+    }
+
+    #[test]
+    fn every_format_decides_zero_as_the_automatic_labels_do() {
+        // With the lower limit within 1e-9 of the domain of zero, the zero candidate of the
+        // grid is moved onto the limit. Whether it then reads as zero is decided by the grid
+        // step, never by the gap the move left, and in every format alike.
+        let y_labels = |low: f64, format: TickFormat| {
+            let mut f = figure(LIN, LIN);
+            axes(&mut f)
+                .xticks(&[])
+                .unwrap()
+                .ylim(low, 1.0)
+                .unwrap()
+                .ytick_format(format)
+                .unwrap();
+            let r = resolve_axes(f.axes().unwrap(), 5, 6);
+            r.y.ticks.into_iter().map(|t| t.label).collect::<Vec<_>>()
+        };
+        let low = -0.2_f64 * 1e-9;
+        assert_eq!(y_labels(low, TickFormat::AUTO)[0], "\u{2212}2e\u{2212}10");
+        assert_eq!(
+            y_labels(low, TickFormat::scientific())[0],
+            "\u{2212}2e\u{2212}10"
+        );
+        assert_eq!(
+            y_labels(low, TickFormat::fixed(12).unwrap())[0],
+            "\u{2212}0.000000000200"
+        );
+        assert_eq!(
+            y_labels(low, TickFormat::percent(12).unwrap())[0],
+            "\u{2212}0.000000020000%"
+        );
+
+        let reads_zero = |label: &str| {
+            let number = label.trim_end_matches('%');
+            number == "0" || number.chars().all(|c| c == '0' || c == '.')
+        };
+        for low in [-2.1e-10, low, -1.9e-10, -1e-12, -1e-17, 0.0] {
+            let auto: Vec<bool> = y_labels(low, TickFormat::AUTO)
+                .iter()
+                .map(|l| reads_zero(l))
+                .collect();
+            for format in [
+                TickFormat::scientific(),
+                TickFormat::fixed(12).unwrap(),
+                TickFormat::percent(12).unwrap(),
+            ] {
+                let zeros: Vec<bool> = y_labels(low, format.clone())
+                    .iter()
+                    .map(|l| reads_zero(l))
+                    .collect();
+                assert_eq!(zeros, auto, "low {low:e}, {format:?}");
+            }
+        }
     }
 }
