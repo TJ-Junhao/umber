@@ -10,6 +10,11 @@
 //! swatches, the square swatch of a bar next to a line and of every series of a stacked bar;
 //! the legend switch (`LegendStyle::None` in the theme, and `Axes::legend` turning the row off
 //! and on); and the theme records with `LegendStyle::None`.
+//!
+//! Chips: 3 and 20 entries (wrapping), a 300-character label, fallback and undrawable labels,
+//! a faded series color, lines, points and bars (every chip holds a dot), the largest font
+//! scale and a 1 by 1 in figure with 50 entries, on the dark Midnight background and on the
+//! light Pigment and Graphite backgrounds.
 
 use std::fmt::Write as _;
 
@@ -245,6 +250,103 @@ fn figures() -> Vec<(&'static str, Figure)> {
         .stacked_bar(["Q1", "Q2", "Q3", "Q4"].map(String::from).to_vec(), series)
         .unwrap();
     out.push(("fig-legend-stacked-bar", stacked));
+
+    out.extend(chips_figures());
+    out
+}
+
+/// The chips legend figures, by name, in a fixed order.
+fn chips_figures() -> Vec<(&'static str, Figure)> {
+    let mut out = Vec::new();
+    let chips = |theme: Theme| theme.with_legend_style(LegendStyle::Chips).unwrap();
+
+    // Lines, a faded scatter and a dashed line: every chip holds a dot, tinted by its color.
+    for (name, theme) in [
+        ("fig-legend-chips-midnight", Theme::midnight()),
+        ("fig-legend-chips-pigment", chips(Theme::pigment())),
+        ("fig-legend-chips-graphite", chips(Theme::graphite())),
+    ] {
+        let mut f = lines(theme, "Chips", &names("Series", 2));
+        let (x, y) = wobble(20, 78);
+        axes(&mut f)
+            .scatter(
+                numbers(x),
+                &y,
+                ScatterOptions {
+                    label: "Faded points".into(),
+                    color: ColorSpec::Auto(umber_core::Alpha::new(0.5).unwrap()),
+                    ..ScatterOptions::default()
+                },
+            )
+            .unwrap();
+        let (x, y) = wobble(20, 79);
+        axes(&mut f)
+            .line(numbers(x), &y, labelled_line("Dashed", Dash::Dashed))
+            .unwrap();
+        out.push((name, f));
+    }
+
+    out.push((
+        "fig-legend-chips-20-wrapping",
+        lines(Theme::midnight(), "Twenty chips", &names("Station", 20)),
+    ));
+    out.push((
+        "fig-legend-chips-20-wrapping-light",
+        lines(
+            chips(Theme::pigment()),
+            "Twenty chips",
+            &names("Station", 20),
+        ),
+    ));
+
+    let long: String = "Long legend label ".repeat(17).chars().take(300).collect();
+    out.push((
+        "fig-legend-chips-long-label",
+        lines(Theme::midnight(), "Long chip", &[long, "Short".into()]),
+    ));
+
+    // U+E000 is drawn only by the in-memory fallback font; the CJK characters by no font.
+    let fallback: [String; 2] = [
+        "Fallback \u{E000}\u{E000}".into(),
+        "Missing \u{65e5}\u{672c}".into(),
+    ];
+    out.push((
+        "fig-legend-chips-text-fallback",
+        lines(Theme::midnight(), "Fallback chips", &fallback),
+    ));
+    out.push((
+        "fig-legend-chips-text-fallback-light",
+        lines(chips(Theme::graphite()), "Fallback chips", &fallback),
+    ));
+
+    out.push((
+        "fig-legend-chips-font-scale-max",
+        lines(
+            Theme::midnight().with_font_scale(10.0).unwrap(),
+            "Scaled",
+            &names("Series", 3),
+        ),
+    ));
+
+    let mut tiny = figure(1.0, 1.0, Theme::midnight(), linear(), linear());
+    labelled(&mut tiny, "Tiny");
+    add_lines(&mut tiny, &names("Entry", 50));
+    out.push(("fig-legend-chips-tiny-50-entries", tiny));
+
+    // A grouped bar: bars get a dot in a chip, not a square.
+    let series = [("North", 1.0), ("South", 2.0), ("East", 3.0)]
+        .map(|(label, k)| BarSeries {
+            label: label.into(),
+            heights: vec![10.0 + k, 14.0 - k, 9.0 + 2.0 * k],
+            color: ColorSpec::AUTO,
+        })
+        .to_vec();
+    let mut grouped = figure(6.0, 4.0, Theme::midnight(), ScaleKind::Category, linear());
+    labelled(&mut grouped, "Grouped chips");
+    axes(&mut grouped)
+        .grouped_bar(["Q1", "Q2", "Q3"].map(String::from).to_vec(), series)
+        .unwrap();
+    out.push(("fig-legend-chips-grouped-bar", grouped));
 
     out
 }

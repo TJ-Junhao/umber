@@ -6,15 +6,27 @@
 //! canvas inside the outer padding); an entry wider than a whole row gets a row of its own and
 //! is clipped by the canvas. All rows have the height of the tallest entry. The row depends only
 //! on the canvas width, so it is measured once and then placed by each layout pass.
+//!
+//! A plain entry is its swatch and its label. A chip is a pill as tall as the row, holding a dot
+//! and the label inside a horizontal padding. Both styles wrap the same way: an entry box is
+//! the swatch, the label and the padding around them, and only the gap between boxes differs.
 
-use super::{BODY_LINE, Label, PADDING, Styles, baseline_in_line, measure, metrics};
-use crate::legend::{Legend, Swatch};
+use super::{Area, BODY_LINE, Label, PADDING, Styles, baseline_in_line, measure, metrics};
+use crate::legend::{Legend, RowStyle, Swatch};
 use crate::{FontLibrary, Rgba, Theme};
 
-/// The gap between a swatch and its label.
+/// The gap between a swatch and its label, in both row styles.
 const SWATCH_GAP: f64 = 4.0;
-/// The gap between two entries in a row.
+/// The gap between two plain entries in a row.
 const ENTRY_GAP: f64 = 12.0;
+/// The gap between two chips in a row.
+const CHIP_GAP: f64 = 6.0;
+/// The padding left of a chip's dot and right of its label.
+const CHIP_PADDING_X: f64 = 7.0;
+/// The padding above and below a chip's line of text.
+const CHIP_PADDING_Y: f64 = 3.0;
+/// The diameter of a chip's dot, as a share of the label size.
+const CHIP_DOT: f64 = 0.6;
 /// The vertical gap between wrapped rows.
 const ROW_GAP: f64 = 4.0;
 /// The gap between the title or subtitle and the legend row.
@@ -46,13 +58,16 @@ pub(crate) struct SwatchBox {
     pub height: f64,
 }
 
-/// One entry of the legend row: its swatch and its label.
+/// One entry of the legend row: its swatch and its label, and in a chips row the pill around
+/// them.
 #[derive(Debug, Clone)]
 pub(crate) struct RowEntry {
-    /// The swatch.
+    /// The swatch; in a chips row always a dot.
     pub swatch: SwatchBox,
     /// The label, in the body style, to the right of the swatch.
     pub label: Label,
+    /// The box of the pill, as tall as the row, in a chips row; `None` in a plain row.
+    pub chip: Option<Area>,
     /// The row the entry is on, counted from 0.
     row: usize,
 }
@@ -72,12 +87,16 @@ impl LegendRow {
     /// The row entries of `legend`, measured in the body font and wrapped within the inner
     /// width of a `width` pt canvas, with the first row's top at 0.
     ///
-    /// Each entry is its swatch, a 4 pt gap and its label; entries are 12 pt apart and rows
-    /// 4 pt apart. Swatches, sized as the marks are drawn: a line `10 ×` the drawn line width
-    /// long and that width tall, a dot of the drawn marker diameter, a square of `0.8 ×` the
-    /// label size. Rows are one body line tall (`1.35 ×`
-    /// the label size), or as tall as the tallest swatch, and swatches and labels are centered
-    /// in them.
+    /// A plain entry is its swatch, a 4 pt gap and its label, and entries are 12 pt apart.
+    /// Swatches are sized as the marks are drawn: a line `10 ×` the drawn line width long and
+    /// that width tall, a dot of the drawn marker diameter, a square of `0.8 ×` the label size.
+    /// Plain rows are one body line tall (`1.35 ×` the label size), or as tall as the tallest
+    /// swatch.
+    ///
+    /// A chip is a pill one body line plus `2 × 3` pt tall, holding a dot of `0.6 ×` the label
+    /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
+    ///
+    /// Rows are 4 pt apart in both styles, and swatches and labels are centered in them.
     pub fn measure(width: f64, theme: &Theme, legend: &Legend, lib: &FontLibrary) -> LegendRow {
         if legend.is_empty() {
             return LegendRow::default();
@@ -85,29 +104,23 @@ impl LegendRow {
         let style = Styles::new(theme).body;
         let size = f64::from(style.size);
         let (ascent, descent) = metrics(lib, &style);
+        let row_style = legend.row_style();
+        let (padding_x, entry_gap, line) = match row_style {
+            RowStyle::Plain => (0.0, ENTRY_GAP, BODY_LINE * size),
+            RowStyle::Chips => (
+                CHIP_PADDING_X,
+                CHIP_GAP,
+                BODY_LINE * size + 2.0 * CHIP_PADDING_Y,
+            ),
+        };
         let mut entries: Vec<RowEntry> = legend
             .row()
             .iter()
             .map(|entry| {
-                // The drawn sizes, so each box is exactly what the drawing fills or strokes.
-                // They are finite and capped, and so is the label size.
-                let (w, h) = match entry.swatch() {
-                    Swatch::Line { .. } => {
-                        let line_width = f64::from(theme.drawn_line_width());
-                        (LINE_SWATCH_LENGTH * line_width, line_width)
-                    }
-                    Swatch::Dot => {
-                        let d = f64::from(theme.drawn_marker_size());
-                        (d, d)
-                    }
-                    Swatch::Square => {
-                        let side = SQUARE_SWATCH_SIDE * size;
-                        (side, side)
-                    }
-                };
+                let (kind, w, h) = swatch_size(theme, row_style, entry.swatch(), size);
                 RowEntry {
                     swatch: SwatchBox {
-                        kind: entry.swatch(),
+                        kind,
                         color: entry.color(),
                         x: 0.0,
                         center_y: 0.0,
@@ -115,6 +128,7 @@ impl LegendRow {
                         height: h,
                     },
                     label: measure(lib, entry.label(), style),
+                    chip: None,
                     row: 0,
                 }
             })
@@ -123,22 +137,28 @@ impl LegendRow {
         let row_height = entries
             .iter()
             .map(|entry| entry.swatch.height)
-            .fold(BODY_LINE * size, f64::max);
+            .fold(line, f64::max);
         let right = width - PADDING;
         let (mut x, mut row, mut row_used) = (PADDING, 0_usize, false);
         for entry in &mut entries {
-            let entry_width = entry.swatch.width + SWATCH_GAP + entry.label.width();
+            let (inset, entry_width) = entry_extent(row_style, padding_x, row_height, entry);
             if row_used && x + entry_width > right {
                 row += 1;
                 x = PADDING;
             }
             let top = row_top(row, row_height);
             entry.row = row;
-            entry.swatch.x = x;
+            entry.swatch.x = x + inset;
             entry.swatch.center_y = top + row_height / 2.0;
-            entry.label.x = x + entry.swatch.width + SWATCH_GAP;
+            entry.label.x = entry.swatch.x + entry.swatch.width + SWATCH_GAP;
             entry.label.y = baseline_in_line(top, row_height, ascent, descent);
-            x += entry_width + ENTRY_GAP;
+            entry.chip = (row_style == RowStyle::Chips).then_some(Area {
+                x,
+                y: top,
+                width: entry_width,
+                height: row_height,
+            });
+            x += entry_width + entry_gap;
             row_used = true;
         }
         LegendRow {
@@ -161,6 +181,9 @@ impl LegendRow {
                 let mut entry = entry.clone();
                 entry.swatch.center_y += top;
                 entry.label.y += top;
+                if let Some(chip) = &mut entry.chip {
+                    chip.y += top;
+                }
                 entry
             })
             .collect();
@@ -183,6 +206,62 @@ impl LegendRow {
     /// Whether the row has no entries.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+}
+
+/// The horizontal inset of `entry`'s swatch from the left edge of its box, and the width of
+/// that box, in a row of `row_style` whose rows are `row_height` tall and whose boxes have
+/// `padding_x` at each end.
+///
+/// A box is the padding, the swatch, the gap, the label and the padding again. A chip is never
+/// narrower than it is tall, so that its ends stay half circles: a chip whose dot and label are
+/// too short is widened to the row height, with its dot and label centered in it, which leaves
+/// more than the padding at each end.
+fn entry_extent(
+    row_style: RowStyle,
+    padding_x: f64,
+    row_height: f64,
+    entry: &RowEntry,
+) -> (f64, f64) {
+    let width = padding_x + entry.swatch.width + SWATCH_GAP + entry.label.width() + padding_x;
+    match row_style {
+        RowStyle::Chips if width < row_height => {
+            let content = entry.swatch.width + SWATCH_GAP + entry.label.width();
+            ((row_height - content) / 2.0, row_height)
+        }
+        RowStyle::Chips | RowStyle::Plain => (padding_x, width),
+    }
+}
+
+/// The swatch a row of `row_style` draws for an entry with `swatch`, and its width and height
+/// for a label `size` pt tall.
+///
+/// A plain row keeps the entry's swatch at its drawn size, so each box is exactly what the
+/// drawing fills or strokes; the drawn sizes are finite and capped, and so is the label size.
+/// A chips row always draws a dot of `0.6 ×` the label size.
+fn swatch_size(
+    theme: &Theme,
+    row_style: RowStyle,
+    swatch: Swatch,
+    size: f64,
+) -> (Swatch, f64, f64) {
+    match (row_style, swatch) {
+        (RowStyle::Chips, _) => {
+            let d = CHIP_DOT * size;
+            (Swatch::Dot, d, d)
+        }
+        (RowStyle::Plain, Swatch::Line { .. }) => {
+            let line_width = f64::from(theme.drawn_line_width());
+            (swatch, LINE_SWATCH_LENGTH * line_width, line_width)
+        }
+        (RowStyle::Plain, Swatch::Dot) => {
+            let d = f64::from(theme.drawn_marker_size());
+            (swatch, d, d)
+        }
+        (RowStyle::Plain, Swatch::Square) => {
+            let side = SQUARE_SWATCH_SIDE * size;
+            (swatch, side, side)
+        }
     }
 }
 
@@ -281,6 +360,129 @@ mod tests {
                 assert!(last >= 2, "20 entries wrap onto several rows");
             }
         }
+    }
+
+    /// The box of `entry`: its chip, or for a plain entry the swatch and label together.
+    fn entry_box(entry: &RowEntry) -> (f64, f64) {
+        match entry.chip {
+            Some(chip) => (chip.x, chip.right()),
+            None => (entry.swatch.x, entry.label.x + entry.label.width()),
+        }
+    }
+
+    #[test]
+    fn chips_wrap_like_the_header_row() {
+        let width = 6.0 * 72.0;
+        let chips_theme = Theme::midnight();
+        assert_eq!(chips_theme.legend_style(), crate::LegendStyle::Chips);
+        let header_theme = chips_theme
+            .clone()
+            .with_legend_style(crate::LegendStyle::Header)
+            .unwrap();
+        let size = f64::from(chips_theme.body_size() * chips_theme.font_scale());
+        for n in [1, 3, 20, 60] {
+            let chips = plan_figure(
+                &figure(6.0, 4.0, chips_theme.clone(), &names(n)),
+                FontLibrary::global(),
+            )
+            .1
+            .legend;
+            let header = plan_figure(
+                &figure(6.0, 4.0, header_theme.clone(), &names(n)),
+                FontLibrary::global(),
+            )
+            .1
+            .legend;
+            assert_eq!(chips.entries().len(), n);
+            assert!(header.entries().iter().all(|e| e.chip.is_none()));
+            // A chip is the pill around its dot and label, one body line plus 2 × 3 pt tall.
+            assert_eq!(chips.row_height, BODY_LINE * size + 2.0 * CHIP_PADDING_Y);
+            for entry in chips.entries() {
+                let chip = entry.chip.unwrap();
+                let top = row_top(entry.row, chips.row_height) + chips.entries()[0].chip.unwrap().y;
+                assert!((chip.y - top).abs() < 1e-9 && chip.height == chips.row_height);
+                assert_eq!(entry.swatch.kind, Swatch::Dot);
+                assert!((entry.swatch.width - CHIP_DOT * size).abs() < 1e-9);
+                assert!((entry.swatch.x - (chip.x + CHIP_PADDING_X)).abs() < 1e-9);
+                assert!(
+                    (entry.label.x - (entry.swatch.x + entry.swatch.width + SWATCH_GAP)).abs()
+                        < 1e-9
+                );
+                let label_end = entry.label.x + entry.label.width();
+                assert!((chip.right() - (label_end + CHIP_PADDING_X)).abs() < 1e-9);
+                assert!((entry.swatch.center_y - (chip.y + chip.height / 2.0)).abs() < 1e-9);
+            }
+            // The same wrapping rule for both styles, each with its own entry gap: rows only
+            // advance by one, every box stays within the inner width, and an entry starts a
+            // row only when it would not have fitted at the end of the row above.
+            for (row, gap) in [(&chips, CHIP_GAP), (&header, ENTRY_GAP)] {
+                let rows = rows_of(row);
+                assert!(rows.windows(2).all(|p| p[1] == p[0] || p[1] == p[0] + 1));
+                for pair in row.entries().windows(2) {
+                    let ((_, a_end), (b_start, b_end)) = (entry_box(&pair[0]), entry_box(&pair[1]));
+                    assert!(b_start >= PADDING && b_end <= width - PADDING + 1e-9);
+                    if pair[1].row > pair[0].row {
+                        assert!(a_end + gap + (b_end - b_start) > width - PADDING);
+                        assert_eq!(b_start, PADDING);
+                    } else {
+                        assert!((b_start - (a_end + gap)).abs() < 1e-9);
+                    }
+                }
+                let last = rows.last().copied().unwrap_or(0);
+                let expected = (last + 1) as f64 * row.row_height + last as f64 * ROW_GAP;
+                assert!((row.height() - expected).abs() < 1e-9);
+            }
+            if n == 20 {
+                assert!(chips.rows >= 3, "20 chips wrap onto several rows");
+            }
+        }
+        // A chip wider than a whole row gets a row of its own, as a header entry does.
+        let long = "Long legend label ".repeat(17);
+        let labels = ["A".to_owned(), long, "B".to_owned()];
+        let row = plan_figure(
+            &figure(6.0, 4.0, chips_theme, &labels),
+            FontLibrary::global(),
+        )
+        .1
+        .legend;
+        assert_eq!(rows_of(&row), [0, 1, 2]);
+        assert_eq!(row.entries()[1].chip.unwrap().x, PADDING);
+    }
+
+    #[test]
+    fn a_short_chip_is_as_wide_as_it_is_tall() {
+        // A one-character label at a large font scale: dot, gap and label are narrower than
+        // the chip is tall.
+        let theme = Theme::pigment()
+            .with_legend_style(crate::LegendStyle::Chips)
+            .unwrap()
+            .with_font_scale(10.0)
+            .unwrap();
+        // No title, so the row starts at the top padding and stays on the canvas.
+        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1.0, 2.0],
+                LineOptions {
+                    label: ".".to_owned(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        let row = plan_figure(&f, FontLibrary::global()).1.legend;
+        let [short] = row.entries() else {
+            panic!("one entry");
+        };
+        let chip = short.chip.unwrap();
+        let content = short.swatch.width + SWATCH_GAP + short.label.width();
+        assert!(content + 2.0 * CHIP_PADDING_X < chip.height);
+        assert_eq!(chip.width, chip.height);
+        // The dot and the label are centered, with more than the padding at each end.
+        let left = short.swatch.x - chip.x;
+        let right = chip.right() - (short.label.x + short.label.width());
+        assert!((left - right).abs() < 1e-9 && left > CHIP_PADDING_X);
     }
 
     #[test]
