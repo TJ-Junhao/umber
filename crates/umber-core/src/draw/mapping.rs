@@ -8,7 +8,7 @@
 use crate::geometry::Point;
 use crate::layout::Area;
 use crate::model::AxisData;
-use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis};
+use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis, ResolvedContinuousAxis};
 use crate::scale::log_offset;
 use crate::{ContinuousScale, Transform};
 
@@ -67,7 +67,7 @@ pub(super) struct AxisMaps {
 
 impl AxisMaps {
     /// The maps of the resolved axes onto `plot`.
-    pub(super) fn new(x: &ResolvedAxis, y: &ResolvedAxis, plot: Area) -> AxisMaps {
+    pub(super) fn new(x: &ResolvedAxis, y: &ResolvedContinuousAxis, plot: Area) -> AxisMaps {
         AxisMaps {
             x: AxisMap::x(x, plot),
             y: AxisMap::y(y, plot),
@@ -101,7 +101,10 @@ pub(super) struct AxisMap {
 impl AxisMap {
     /// The map of the x axis `axis` onto `plot`.
     fn x(axis: &ResolvedAxis, plot: Area) -> AxisMap {
-        let (lo, hi) = axis_domain(axis);
+        let (lo, hi) = match &axis.scale {
+            AxisScale::Continuous(scale) => continuous_domain(scale),
+            AxisScale::Category(_) => (0.0, 1.0),
+        };
         AxisMap {
             lo,
             hi,
@@ -111,8 +114,8 @@ impl AxisMap {
     }
 
     /// The map of the y axis `axis` onto `plot`, bottom up.
-    fn y(axis: &ResolvedAxis, plot: Area) -> AxisMap {
-        let (lo, hi) = axis_domain(axis);
+    fn y(axis: &ResolvedContinuousAxis, plot: Area) -> AxisMap {
+        let (lo, hi) = continuous_domain(&axis.scale);
         AxisMap {
             lo,
             hi,
@@ -148,19 +151,15 @@ impl AxisMap {
     }
 }
 
-/// The axis-space domain of `axis`: the limits on a linear axis, `0..ln(hi / lo)` on a log
-/// axis (with [`log_offset`], exactly as `ContinuousScale::normalize` measures, so marks and
-/// gridlines agree), and `0..1` (the band centers' range) on a category axis.
-fn axis_domain(axis: &ResolvedAxis) -> (f64, f64) {
-    match &axis.scale {
-        AxisScale::Continuous(scale) => {
-            let (lo, hi) = scale.domain();
-            match scale.transform() {
-                Transform::Linear => (lo, hi),
-                Transform::Log(_) => (0.0, log_offset(hi, lo)),
-            }
-        }
-        AxisScale::Category(_) => (0.0, 1.0),
+/// The axis-space domain of the continuous `scale`: the limits on a linear axis, and
+/// `0..ln(hi / lo)` on a log axis (with [`log_offset`], exactly as `ContinuousScale::normalize`
+/// measures, so marks and gridlines agree). A category axis spans `0..1`, the band centers'
+/// range.
+fn continuous_domain(scale: &ContinuousScale) -> (f64, f64) {
+    let (lo, hi) = scale.domain();
+    match scale.transform() {
+        Transform::Linear => (lo, hi),
+        Transform::Log(_) => (0.0, log_offset(hi, lo)),
     }
 }
 
@@ -181,21 +180,22 @@ pub(super) fn axis_x(axis: &ResolvedAxis, x: &AxisData) -> Vec<f64> {
 }
 
 /// The axis-space y values of `y`; NaN maps to NaN.
-pub(super) fn axis_y(axis: &ResolvedAxis, y: &[f64]) -> Vec<f64> {
-    match &axis.scale {
-        AxisScale::Continuous(scale) => continuous_values(scale, y),
-        // Marks hold numeric y, which a category y axis cannot place.
-        AxisScale::Category(_) => vec![f64::NAN; y.len()],
-    }
+pub(super) fn axis_y(axis: &ResolvedContinuousAxis, y: &[f64]) -> Vec<f64> {
+    continuous_values(&axis.scale, y)
 }
 
-/// The axis-space value of the number `v` on `axis`, as [`axis_x`] and [`axis_y`] map numbers;
+/// The axis-space value of the number `v` on the x axis `axis`, as [`axis_x`] maps numbers;
 /// NaN on a category axis.
-pub(super) fn axis_value(axis: &ResolvedAxis, v: f64) -> f64 {
+pub(super) fn axis_x_value(axis: &ResolvedAxis, v: f64) -> f64 {
     match &axis.scale {
         AxisScale::Continuous(scale) => continuous_value(scale, v),
         AxisScale::Category(_) => f64::NAN,
     }
+}
+
+/// The axis-space value of the number `v` on the y axis `axis`, as [`axis_y`] maps numbers.
+pub(super) fn axis_y_value(axis: &ResolvedContinuousAxis, v: f64) -> f64 {
+    continuous_value(&axis.scale, v)
 }
 
 /// `values` in the axis space of `scale`, each as [`continuous_value`] maps it.

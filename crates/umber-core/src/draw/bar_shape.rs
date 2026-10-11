@@ -6,7 +6,7 @@
 use super::mapping::{AxisMap, AxisMaps, AxisPoint};
 use crate::Transform;
 use crate::geometry::{Path, Point};
-use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis};
+use crate::resolve::{NormalizedPos, ResolvedContinuousAxis};
 
 /// The cubic Bézier handle length for a quarter circle of unit radius.
 const KAPPA: f64 = 0.552_284_749_830_793_4;
@@ -15,15 +15,11 @@ const MIN_BAR_MARGIN: f64 = 2.0;
 
 /// Where bars start on the y axis `y`, in axis space: the value 0 on a linear axis, and on a
 /// log axis, which cannot show 0, the resolved `baseline` (the lowest nice tick for auto
-/// limits, the bottom of the plot for explicit ones). `None` on a category axis, which cannot
-/// place numeric heights.
-fn bar_base(y: &ResolvedAxis, map: AxisMap, baseline: NormalizedPos) -> Option<f64> {
-    match &y.scale {
-        AxisScale::Continuous(scale) => Some(match scale.transform() {
-            Transform::Linear => 0.0,
-            Transform::Log(_) => map.at(baseline),
-        }),
-        AxisScale::Category(_) => None,
+/// limits, the bottom of the plot for explicit ones).
+fn bar_base(y: &ResolvedContinuousAxis, map: AxisMap, baseline: NormalizedPos) -> f64 {
+    match y.scale.transform() {
+        Transform::Linear => 0.0,
+        Transform::Log(_) => map.at(baseline),
     }
 }
 
@@ -53,35 +49,34 @@ pub(super) struct BarFrame {
 
 impl BarFrame {
     /// The frame of bars `width` points wide whose ends may be rounded by `radius` points (at
-    /// least 0 and finite), on the y axis `y` whose baseline sits at `baseline`; `None` on axes
-    /// that cannot hold bars (the model rejects them).
+    /// least 0 and finite), on the y axis `y` whose baseline sits at `baseline`.
     pub(super) fn new(
         maps: AxisMaps,
-        y: &ResolvedAxis,
+        y: &ResolvedContinuousAxis,
         baseline: NormalizedPos,
         radius: f64,
         width: f64,
-    ) -> Option<BarFrame> {
-        let base = bar_base(y, maps.y, baseline)?;
+    ) -> BarFrame {
+        let base = bar_base(y, maps.y, baseline);
         let margin = radius.min(width / 2.0).max(MIN_BAR_MARGIN);
         let (low, high) = maps.y.expanded(margin);
-        Some(BarFrame {
+        BarFrame {
             maps,
             base,
             radius,
             margin,
             low,
             high,
-        })
+        }
     }
 
     /// The frame of bars with square corners on the y axis `y`, clipped with the smallest
     /// margin; see [`BarFrame::new`].
     pub(super) fn square(
         maps: AxisMaps,
-        y: &ResolvedAxis,
+        y: &ResolvedContinuousAxis,
         baseline: NormalizedPos,
-    ) -> Option<BarFrame> {
+    ) -> BarFrame {
         BarFrame::new(maps, y, baseline, 0.0, 0.0)
     }
 
