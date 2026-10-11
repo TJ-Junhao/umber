@@ -14,7 +14,9 @@ const KAPPA: f64 = 0.552_284_749_830_793_4;
 /// `round_end = false` draws square corners. A bar without width or height, or with a
 /// coordinate that is not finite, gives an empty path.
 ///
-/// All arithmetic is in `f64`; each coordinate is narrowed to `f32` once, at the end.
+/// All arithmetic is in `f64`; each coordinate is narrowed to `f32` once, at the end. The
+/// caller passes coordinates already clipped to `MAX_COORD`: narrowing an arbitrary finite
+/// `f64` beyond the `f32` range would overflow.
 pub(super) fn bar_outline(
     x0: f64,
     x1: f64,
@@ -157,6 +159,22 @@ mod tests {
         assert!(bar_outline(0.0, 10.0, 4.0, 4.0, 2.0, true).is_empty());
         assert!(bar_outline(0.0, f64::NAN, 4.0, 0.0, 2.0, true).is_empty());
         assert!(bar_outline(0.0, 10.0, 4.0, f64::INFINITY, 2.0, true).is_empty());
+    }
+
+    #[test]
+    fn the_visible_end_of_a_stack_keeps_its_rounding() {
+        use crate::stacking::Stacks;
+
+        // 1e100 + 1.0 == 1e100: the second series spans nothing and must not take the end.
+        for sign in [1.0_f64, -1.0] {
+            let (big, tiny) = ([sign * 1e100], [sign]);
+            let stacks = Stacks::new(1, &[&big, &tiny]);
+            let segment = stacks.segment(0, 0).unwrap();
+            // Maps 0..1e100 onto 100..0 points, y down.
+            let end_y = 100.0 - segment.top / 1e100 * 100.0;
+            let path = bar_outline(0.0, 20.0, 100.0, end_y, 4.0, segment.outermost);
+            assert_eq!(cubics(&path), 2);
+        }
     }
 
     #[test]

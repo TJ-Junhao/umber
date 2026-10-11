@@ -29,7 +29,9 @@ impl Stacks {
     ///
     /// Positive heights stack upward from 0 and negative ones downward, each side in series
     /// order. NaN and 0 contribute no segment, and neither does a height missing from a short
-    /// series. Sums are `f64`; the caller keeps the totals within the scale limits.
+    /// series. A height too small to change the running total (`1e100 + 1.0 == 1e100`) spans
+    /// nothing, so it gets no segment either, and the last segment that is visible on its side
+    /// is the outermost. Sums are `f64`; the caller keeps the totals within the scale limits.
     pub(crate) fn new(categories: usize, series: &[&[f64]]) -> Stacks {
         let mut rows: Vec<Box<[Option<Segment>]>> = series
             .iter()
@@ -49,6 +51,9 @@ impl Stacks {
                     continue;
                 };
                 let (bottom, top) = (side.0, side.0 + height);
+                if top == bottom {
+                    continue;
+                }
                 side.0 = top;
                 side.1 = Some(index);
                 if let Some(slot) = rows.get_mut(index).and_then(|row| row.get_mut(category)) {
@@ -146,6 +151,18 @@ mod tests {
     }
 
     #[test]
+    fn a_height_that_cannot_move_the_total_adds_no_segment() {
+        for sign in [1.0, -1.0] {
+            let (big, tiny) = ([sign * 1e100], [sign * 1.0]);
+            let stacks = Stacks::new(1, &[&big, &tiny]);
+            let visible = stacks.segment(0, 0).unwrap();
+            assert_eq!((visible.bottom, visible.top), (0.0, sign * 1e100));
+            assert!(visible.outermost);
+            assert!(stacks.segment(0, 1).is_none());
+        }
+    }
+
+    #[test]
     fn a_short_series_has_no_segment_past_its_end() {
         let stacks = Stacks::new(2, &[&[1.0]]);
         assert!(stacks.segment(0, 0).is_some());
@@ -175,8 +192,12 @@ mod tests {
                         prop_assert!(segment.is_none());
                         continue;
                     }
-                    let segment = segment.unwrap();
                     let side = usize::from(height < 0.0);
+                    if previous[side] + height == previous[side] {
+                        prop_assert!(segment.is_none());
+                        continue;
+                    }
+                    let segment = segment.unwrap();
                     prop_assert_eq!(segment.bottom, previous[side]);
                     prop_assert_eq!(segment.top, previous[side] + height);
                     previous[side] = segment.top;

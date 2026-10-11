@@ -93,7 +93,8 @@ impl Histogram {
         (self.hi - self.lo) / self.bins() as f64
     }
 
-    /// The lower edge of bin `i`. `edge(0)` is `lo` and `edge(n)` is `hi`, exactly.
+    /// The lower edge of bin `i`. `edge(0)` is `lo` and `edge(n)` is `hi`, exactly; an index
+    /// beyond `n` saturates to `hi`.
     pub(crate) fn edge(&self, i: usize) -> f64 {
         if i >= self.bins() {
             self.hi
