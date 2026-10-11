@@ -363,31 +363,130 @@ def test_text_cap_ignores_an_overridden_length(context: str, name: str) -> None:
     )
 
 
-class BrokenRepr:
+class Recorded:
+    """An object that records every call of ``__repr__`` and ``__str__``."""
+
+    calls = 0
+
     def __repr__(self) -> str:
-        raise RuntimeError("no repr")
+        Recorded.calls += 1
+        raise SystemExit("never called")
+
+    def __str__(self) -> str:
+        Recorded.calls += 1
+        raise SystemExit("never called")
+
+
+class RecordedText(str):
+    def __repr__(self) -> str:
+        Recorded.calls += 1
+        raise SystemExit("never called")
+
+
+class RecordedFloat(np.float64):
+    def __repr__(self) -> str:
+        Recorded.calls += 1
+        raise SystemExit("never called")
+
+
+class Compared:
+    def __lt__(self, other: object) -> bool:
+        Recorded.calls += 1
+        raise SystemExit("never called")
+
+    def __hash__(self) -> int:
+        return id(self)
+
+
+class HiddenName(type):
+    def __getattribute__(cls, name: str) -> object:
+        if name == "__qualname__":
+            Recorded.calls += 1
+            raise SystemExit("never called")
+        return super().__getattribute__(name)
+
+
+class Hidden(metaclass=HiddenName):
+    pass
+
+
+LongName = type("L" * 1000, (), {})
 
 
 @pytest.mark.parametrize(
     ("value", "shown"),
     [
-        (Fraction(10**5000, 3), "Fraction"),
-        ({"a": 10**5000}, f"{{'a': int ({(10**5000).bit_length():,} bits)}}"),
-        ([Fraction(10**5000, 3), BrokenRepr()], "[Fraction, BrokenRepr]"),
-        (BrokenRepr(), "BrokenRepr"),
-        (10**5000, f"int ({(10**5000).bit_length():,} bits)"),
-        (-(2**200), "int (201 bits)"),
+        (None, "None"),
+        (True, "True"),
+        (2.5, "2.5"),
+        (float("nan"), "nan"),
+        (-7, "-7"),
         (2**128 - 1, repr(2**128 - 1)),
         (2**128, "int (129 bits)"),
+        (-(2**200), "int (201 bits)"),
+        (10**5000, f"int ({(10**5000).bit_length():,} bits)"),
+        ("North", "'North'"),
+        (np.str_("a"), "'a'"),
+        (np.float32(1.5), "np.float32(1.5)"),
+        (np.int8(-3), "np.int8(-3)"),
+        (np.True_, "np.True_"),
+        (np.datetime64("2020-01-01"), "np.datetime64('2020-01-01')"),
+        (Fraction(10**5000, 3), "Fraction"),
+        (Decimal("9" * 1_000_000), "Decimal"),
+        (b"abc", "bytes"),
+        (1j, "complex"),
+        ([1, 2], "list"),
+        ({"a": 10**5000}, "dict"),
+        (Dash.SOLID, "Dash"),
     ],
-    ids=["fraction", "dict", "list", "broken", "huge", "negative", "128-bits", "129-bits"],
+    ids=lambda value: type(value).__name__,
 )
-def test_short_repr_never_raises(value: object, shown: str) -> None:
+def test_short_repr_shows_only_builtin_and_numpy_scalars(value: object, shown: str) -> None:
     assert short_repr(value) == shown
 
 
-def test_short_repr_bounds_text_and_containers() -> None:
+def test_short_repr_runs_no_user_code() -> None:
+    Recorded.calls = 0
+    values: list[object] = [
+        Recorded(),
+        [Recorded()],
+        {Compared(): 1, Compared(): 2},
+        {Compared(), Compared()},
+        Hidden(),
+    ]
+    assert [short_repr(value) for value in values] == ["Recorded", "list", "dict", "set", "Hidden"]
+    assert short_repr(RecordedText("plain")) == "'plain'"
+    assert short_repr(RecordedFloat(1.5)) == "RecordedFloat"
+    assert type_name(Hidden()) == "Hidden"
+    assert Recorded.calls == 0
+
+
+def test_short_repr_caps_every_result() -> None:
     assert short_repr("x" * 10**7) == "'" + "x" * 38 + "…"
-    assert short_repr(b"y" * 10**7) == "b'" + "y" * 37 + "…"
-    assert short_repr(list(range(10**6))) == "[0, 1, 2, 3, ...]"
-    assert short_repr({"a": [[1, [2]]]}) == "{'a': [[...]]}"
+    assert short_repr(LongName()) == "L" * 39 + "…"
+    assert type(short_repr(RecordedText("y" * 100))) is str
+    assert short_repr(dict.fromkeys(range(10**6))) == "dict"
+
+
+def _seven(self: object) -> int:
+    return 7
+
+
+def _seven_point_zero(self: object) -> float:
+    return 7.0
+
+
+FakeInteger = type("integer", (), {"__module__": "numpy", "__index__": _seven})
+FakeFloating = type("floating", (), {"__module__": "numpy", "__float__": _seven_point_zero})
+
+
+@pytest.mark.parametrize("value", [FakeInteger(), FakeFloating()], ids=["integer", "floating"])
+def test_classes_that_only_look_like_numpy_numbers_are_refused(value: object) -> None:
+    message, parameter, hint = error(TypeError, lambda: real("Scale.log()", "base", value))
+    assert (message, parameter, hint) == (
+        f"Scale.log(): base is {type_name(value)}; base must be a float.",
+        "base",
+        REAL_HINT,
+    )
+    message, _, _ = error(TypeError, lambda: integer("Axes.hist()", "bins", value))
+    assert message.endswith("bins must be an int.")

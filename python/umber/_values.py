@@ -256,7 +256,10 @@ def _sequence_array(
         if _is_number(value):
             continue
         if not _is_nested(value):
-            raise _element_error(context, name, index, value, mixed=mixed)
+            # A nested element before this one makes the data invalid too; the first
+            # offending element is reported, whatever is wrong with it.
+            first = index if nested is None else nested
+            raise _element_error(context, name, first, items[first], mixed=mixed)
         if nested is None:
             nested = index
     try:

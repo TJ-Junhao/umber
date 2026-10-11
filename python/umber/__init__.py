@@ -13,6 +13,7 @@ from umber._color import Color
 from umber._enums import Dash, Font, GridLines, LegendStyle, Marker, SvgText
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._scale import Scale
+from umber._types import SupportsArray, Values
 from umber._umber import MAX_BINS as _MAX_BINS
 from umber._umber import __version__
 
@@ -36,9 +37,11 @@ __all__ = [
     "Marker",
     "Scale",
     "StyleError",
+    "SupportsArray",
     "SvgText",
     "UmberError",
     "UsageError",
+    "Values",
     "__version__",
 ]
 
@@ -61,6 +64,7 @@ _report_package_as_module(
     LegendStyle,
     Marker,
     Scale,
+    SupportsArray,
     SvgText,
     DataError,
     StyleError,

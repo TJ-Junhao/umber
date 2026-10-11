@@ -11,8 +11,9 @@ import math
 import operator
 import os
 import re
-import reprlib
-from typing import Final, SupportsFloat, SupportsIndex, cast, override
+import sys
+from collections.abc import Iterable
+from typing import Any, Final, SupportsFloat, SupportsIndex, cast
 
 from umber._errors import DataError, StyleError, new_error
 
@@ -46,8 +47,14 @@ _SURROGATE_HINT: Final = (
 )
 
 
+_QUALNAME: Final[Any] = type.__dict__["__qualname__"]
+
+
 def type_name(value: object) -> str:
     """Return the name of a value's type for an error message; ``None`` is named ``None``.
+
+    The name is read from the type itself, bypassing any ``__qualname__`` a metaclass defines,
+    so no user code runs. It is ``"object"`` if the name cannot be read.
 
     Args:
         value: Any object.
@@ -60,57 +67,32 @@ def type_name(value: object) -> str:
         >>> type_name(1.5), type_name(None)
         ('float', 'None')
     """
-    return "None" if value is None else type(value).__qualname__
+    if value is None:
+        return "None"
+    try:
+        name: object = _QUALNAME.__get__(type(value))
+        return str.__str__(name) if isinstance(name, str) else "object"
+    except Exception:
+        return "object"
 
 
-class _BoundedRepr(reprlib.Repr):
-    """Show at most a few items and levels of a container, without formatting huge ints."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            maxlevel=2,
-            maxtuple=4,
-            maxlist=4,
-            maxarray=4,
-            maxdict=4,
-            maxset=4,
-            maxfrozenset=4,
-            maxdeque=4,
-            maxstring=_REPR_LENGTH,
-            maxlong=_REPR_LENGTH,
-            maxother=_REPR_LENGTH,
-        )
-
-    @override
-    def repr_int(self, x: int, level: int) -> str:
-        return _int_repr(x)
-
-    @override
-    def repr_instance(self, x: object, level: int) -> str:
-        try:
-            text = repr(x)
-        except Exception:
-            return type_name(x)
-        return text if len(text) <= _REPR_LENGTH else text[: _REPR_LENGTH - 1] + "…"
-
-
-def _int_repr(value: int) -> str:
-    """The decimal form of an int, or its size when it has more than 128 bits."""
-    bits = int.bit_length(value)
-    if bits > _REPR_INT_BITS:
-        return f"{type_name(value)} ({bits:,} bits)"
-    return repr(value)
-
-
-_CONTAINER_REPR: Final = _BoundedRepr()
+def _numpy_scalar_types() -> frozenset[type]:
+    """The NumPy number, bool, datetime and timedelta scalar types, if NumPy is imported."""
+    np = sys.modules.get("numpy")
+    if np is None:
+        return frozenset()
+    shown = (np.number, np.bool_, np.datetime64, np.timedelta64)
+    types = cast(Iterable[type], np.sctypeDict.values())
+    return frozenset(kind for kind in types if issubclass(kind, shown))
 
 
 def short_repr(value: object) -> str:
-    """Return ``repr(value)`` cut to at most 40 characters, ending with "…" when cut.
+    """Show a value in an error message, in at most 40 characters, ending with "…" when cut.
 
-    The work is bounded: long text is cut before it is formatted, containers show only their
-    first items, and an int of more than 128 bits is shown by its size. When ``repr`` raises,
-    the type name is shown instead. This function never raises.
+    Only values whose representation runs no user code are shown: ``None``, ``bool``,
+    ``int`` (more than 128 bits are shown by their size), ``float``, ``str`` (subclasses as
+    the plain text they hold) and the NumPy number, bool, datetime and timedelta scalars.
+    Any other value, including containers, is shown by its type name.
 
     Args:
         value: Any object.
@@ -120,28 +102,28 @@ def short_repr(value: object) -> str:
 
     Example:
         >>> from umber._args import short_repr
-        >>> short_repr([1, 2])
-        '[1, 2]'
+        >>> short_repr(2.5), short_repr("North"), short_repr([1, 2])
+        ('2.5', "'North'", 'list')
         >>> cut = short_repr("x" * 50)
         >>> len(cut), cut[-1]
         (40, '…')
         >>> short_repr(10**100)
         'int (333 bits)'
     """
-    # Types are tested with ``issubclass`` so that ``value`` keeps its declared type.
     kind = type(value)
-    try:
-        if issubclass(kind, int) and not issubclass(kind, bool):
-            text = _int_repr(cast(int, value))
-        elif issubclass(kind, str | bytes | bytearray):
-            # One character more than fits, so that a longer value is still cut.
-            text = repr(cast(str | bytes | bytearray, value)[: _REPR_LENGTH + 1])
-        elif issubclass(kind, list | tuple | dict | set | frozenset):
-            text = _CONTAINER_REPR.repr(value)
-        else:
-            text = repr(value)
-    except Exception:
-        return type_name(value)
+    if value is None or kind is bool or kind is float:
+        text = repr(value)
+    elif kind is int:
+        bits = int.bit_length(cast(int, value))
+        text = f"int ({bits:,} bits)" if bits > _REPR_INT_BITS else repr(value)
+    elif issubclass(kind, str):
+        # One character more than fits, so that a longer value is still cut.
+        text = repr(str.__str__(cast(str, value))[: _REPR_LENGTH + 1])
+    elif kind in _numpy_scalar_types():
+        text = repr(value)
+    else:
+        text = type_name(value)
+    text = str.__str__(text)
     return text if len(text) <= _REPR_LENGTH else text[: _REPR_LENGTH - 1] + "…"
 
 
@@ -149,8 +131,8 @@ def _number_kind(value: object) -> str | None:
     """Return ``"int"`` or ``"float"`` for an accepted number type, else ``None``.
 
     Accepted are ``int`` (not ``bool``), ``float``, and the NumPy integer and floating scalars
-    except ``timedelta64``. NumPy types are recognised by their class hierarchy, so this
-    module does not import NumPy.
+    except ``timedelta64``. NumPy's own classes are used when NumPy is imported; this module
+    does not import it, and without it no value can be a NumPy scalar.
     """
     kind = type(value)
     if issubclass(kind, bool):
@@ -159,12 +141,12 @@ def _number_kind(value: object) -> str | None:
         return "int"
     if issubclass(kind, float):
         return "float"
-    numpy_bases = {base.__name__ for base in kind.__mro__ if base.__module__ == "numpy"}
-    if "timedelta64" in numpy_bases:
+    np = sys.modules.get("numpy")
+    if np is None or isinstance(value, np.timedelta64 | np.bool_):
         return None
-    if "integer" in numpy_bases:
+    if isinstance(value, np.integer):
         return "int"
-    if "floating" in numpy_bases:
+    if isinstance(value, np.floating):
         return "float"
     return None
 

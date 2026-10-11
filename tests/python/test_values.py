@@ -397,16 +397,16 @@ def test_datetime_and_timedelta_data_is_refused(values: object, dtype: str) -> N
 @pytest.mark.parametrize(
     ("values", "index", "shown"),
     [
-        ([1.0, datetime.datetime(2020, 1, 2)], 1, "datetime.datetime(2020, 1, 2, 0, 0)"),
+        ([1.0, datetime.datetime(2020, 1, 2)], 1, "datetime"),
         ([np.datetime64("2020-01-01", "D")], 0, "np.datetime64('2020-01-01')"),
-        ([datetime.date(2020, 1, 2)], 0, "datetime.date(2020, 1, 2)"),
-        ([1.0, datetime.timedelta(seconds=3)], 1, "datetime.timedelta(seconds=3)"),
+        ([datetime.date(2020, 1, 2)], 0, "date"),
+        ([1.0, datetime.timedelta(seconds=3)], 1, "timedelta"),
         ([1, np.datetime64("2020-01-01")], 1, "np.datetime64('2020-01-01')"),
         (np.array([1, np.timedelta64(2, "s")], dtype=object), 1, "np.timedelta64(2,'s')"),
         (
             pd.Series(pd.to_datetime(["2020-01-01"]).tz_localize("UTC")),
             0,
-            "Timestamp('2020-01-01 00:00:00+0000', t…",
+            "Timestamp",
         ),
     ],
 )
@@ -436,7 +436,7 @@ def test_complex_data_is_refused(values: object, dtype: str) -> None:
 @pytest.mark.parametrize("values", [np.array([1.0, 2j], dtype=object), [1.0, 2j], (1, 2j)])
 def test_complex_elements_are_refused(values: object) -> None:
     assert y_error(ub.DataError, values) == (
-        "Axes.line(): y[1] is 2j; values must be real numbers.",
+        "Axes.line(): y[1] is complex; values must be real numbers.",
         "y",
         COMPLEX_HINT,
     )
@@ -472,8 +472,8 @@ def test_long_double_that_is_float64_is_accepted() -> None:
         (np.array(["1", "2"]), 0, "'1'"),
         ([1.0, "a"], 1, "'a'"),
         ([1.0, 2.0, np.str_("b")], 2, "'b'"),
-        (np.array([b"a"]), 0, "b'a'"),
-        ([b"x", 1.0], 0, "b'x'"),
+        (np.array([b"a"]), 0, "bytes"),
+        ([b"x", 1.0], 0, "bytes"),
         (np.array(["a"], dtype=np.dtypes.StringDType()), 0, "'a'"),
         (pd.Series(["a", "b"]), 0, "'a'"),
         (pl.Series(["a", "b"]), 0, "'a'"),
@@ -496,8 +496,8 @@ def test_text_among_numbers_names_the_first_text_element(
     [
         ([1.0, None, 3.0], 1, "None"),
         ([None], 0, "None"),
-        (pd.Series([1.0, pd.NA], dtype=object), 1, "<NA>"),
-        (pd.Series([1.0, pd.NaT], dtype=object), 1, "NaT"),
+        (pd.Series([1.0, pd.NA], dtype=object), 1, "NAType"),
+        (pd.Series([1.0, pd.NaT], dtype=object), 1, "NaTType"),
         (np.array([2.0, None], dtype=object), 1, "None"),
     ],
 )
@@ -513,7 +513,7 @@ def test_missing_values_are_refused_with_the_nan_hint(
 
 @pytest.mark.parametrize(
     ("values", "index", "shown"),
-    [([1.0, Decimal("1.5")], 1, "Decimal('1.5')"), ([Fraction(1, 3)], 0, "Fraction(1, 3)")],
+    [([1.0, Decimal("1.5")], 1, "Decimal"), ([Fraction(1, 3)], 0, "Fraction")],
 )
 def test_other_number_types_are_refused(values: object, index: int, shown: str) -> None:
     assert y_error(ub.DataError, values) == (
@@ -525,7 +525,7 @@ def test_other_number_types_are_refused(values: object, index: int, shown: str) 
 
 def test_other_objects_are_refused() -> None:
     assert y_error(ub.DataError, [1.0, {"a": 1}]) == (
-        "Axes.line(): y[1] is {'a': 1}; values must be numbers.",
+        "Axes.line(): y[1] is dict; values must be numbers.",
         "y",
         NUMBER_HINT,
     )
@@ -598,15 +598,15 @@ def test_names_converts_text(values: object, expected: list[str]) -> None:
         (["a", 1], 1, "1", NAME_HINT),
         (["a", 2.5], 1, "2.5", NAME_HINT),
         (["a", True], 1, "True", NAME_HINT),
-        ([b"a"], 0, "b'a'", NAME_HINT),
-        (["a", ["b"]], 1, "['b']", NAME_HINT),
+        ([b"a"], 0, "bytes", NAME_HINT),
+        (["a", ["b"]], 1, "list", NAME_HINT),
         (range(2), 0, "0", NAME_HINT),
         (["a", None], 1, "None", MISSING_NAME_HINT),
         (["a", float("nan")], 1, "nan", MISSING_NAME_HINT),
-        (np.array([b"a"]), 0, "b'a'", NAME_HINT),
+        (np.array([b"a"]), 0, "bytes", NAME_HINT),
         (np.array(["a", 1], dtype=object), 1, "1", NAME_HINT),
         (pd.Series(["a", None]), 1, "nan", MISSING_NAME_HINT),
-        (pd.Series(["a", None], dtype="string"), 1, "<NA>", MISSING_NAME_HINT),
+        (pd.Series(["a", None], dtype="string"), 1, "NAType", MISSING_NAME_HINT),
         (pl.Series(["a", None]), 1, "None", MISSING_NAME_HINT),
     ],
 )
@@ -860,7 +860,7 @@ def test_messages_do_not_format_huge_values() -> None:
     )
     bits = (10**5000).bit_length()
     assert y_error(ub.DataError, [{"a": 10**5000}]) == (
-        f"Axes.line(): y[0] is {{'a': int ({bits:,} bits)}}; values must be numbers.",
+        "Axes.line(): y[0] is dict; values must be numbers.",
         "y",
         NUMBER_HINT,
     )
@@ -917,3 +917,16 @@ def test_nullable_missing_values_arrive_as_nan() -> None:
         result = floats("Axes.line()", "y", values)
         assert np.isnan(result[1])
         assert_native(result, np.asarray(values, dtype=np.float64).tolist())
+
+
+@pytest.mark.parametrize(
+    "values",
+    [[[1.0], None], [[1.0], True], [(1.0, 2.0), np.ma.masked], [[1.0], 2j], [np.ones(2), "a"]],
+    ids=["none", "bool", "masked", "complex", "text"],
+)
+def test_the_earliest_offending_element_is_reported(values: object) -> None:
+    assert y_error(ub.DataError, values) == (
+        "Axes.line(): y[0] is a sequence; values must be numbers.",
+        "y",
+        NESTED_HINT,
+    )
