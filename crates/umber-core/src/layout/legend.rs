@@ -102,7 +102,8 @@ impl LegendRow {
     ///
     /// A plain entry is its swatch, a 4 pt gap and its label, and entries are 12 pt apart.
     /// Swatches are sized as their series are drawn: a line as tall as the series' drawn line
-    /// width, a dot of the series' drawn marker diameter, a square of `0.8 ×` the label size. A
+    /// width (at most `0.8 ×` the label size, the side of a square swatch), a dot of the
+    /// series' drawn marker diameter, a square of `0.8 ×` the label size. A
     /// line swatch is always `10 ×` the theme's drawn line width long, so every line swatch has
     /// the same length and only its thickness follows the series; a thick dashed line shows
     /// fewer dash cycles. Plain rows are one body line tall (`1.35 ×` the label size), or as
@@ -459,8 +460,10 @@ fn entry_extent(
 /// A plain row keeps the entry's swatch at the size its series is drawn at, so each box is
 /// exactly what the drawing fills or strokes; the drawn sizes are finite and capped, and so is
 /// the label size. A line swatch is `10 ×` the theme's drawn line width long, whatever the
-/// series' width (see [`LegendRow::measure`]). A chips row always draws a dot of `0.6 ×` the
-/// label size, whatever the series.
+/// series' width (see [`LegendRow::measure`]), and stroked at the series' width up to the side
+/// of a square swatch (`0.8 ×` the label size): a thicker line shows as a bar of that height,
+/// so its stroke never spills out of its box onto the label. A chips row always draws a dot of
+/// `0.6 ×` the label size, whatever the series.
 fn swatch_size(
     theme: &Theme,
     row_style: RowStyle,
@@ -472,10 +475,14 @@ fn swatch_size(
             let d = CHIP_DOT * size;
             (Swatch::Dot { diameter: d as f32 }, d, d)
         }
-        (RowStyle::Plain, Swatch::Line { width, .. }) => {
-            let width = f64::from(width);
+        (RowStyle::Plain, Swatch::Line { dash, width }) => {
             let theme_width = f64::from(theme.drawn_line_width(SizeSpec::Auto));
-            (swatch, LINE_SWATCH_LENGTH * theme_width, width)
+            let thickness = f64::from(width).min(SQUARE_SWATCH_SIDE * size);
+            let capped = Swatch::Line {
+                dash,
+                width: thickness as f32,
+            };
+            (capped, LINE_SWATCH_LENGTH * theme_width, thickness)
         }
         (RowStyle::Plain, Swatch::Dot { diameter }) => {
             let d = f64::from(diameter);
@@ -870,6 +877,61 @@ mod tests {
     }
 
     #[test]
+    fn a_line_thicker_than_a_square_swatch_stays_inside_its_box() {
+        use crate::{Dash, SizeSpec};
+        for dash in [Dash::Solid, Dash::Dashed, Dash::Dotted] {
+            let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+            f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .line(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[1.0, 2.0],
+                    LineOptions {
+                        label: "Wide".into(),
+                        dash,
+                        width: SizeSpec::pt(24.0).unwrap(),
+                        ..LineOptions::default()
+                    },
+                )
+                .unwrap()
+                .legend(crate::LegendStyle::Header);
+            let (b, marks, legend) = swatch_and_items(&f);
+            let theme = f.theme();
+            let side = SQUARE_SWATCH_SIDE * f64::from(theme.body_size() * theme.font_scale());
+            assert!(side < 24.0, "{side}");
+            // As long as every line swatch, as tall as a square swatch.
+            assert_eq!((b.width, b.height), (10.0 * f64::from(1.8_f32), side));
+            let Item::Stroke { style, .. } = &legend[0] else {
+                panic!("a line swatch is a stroke");
+            };
+            assert_eq!(f64::from(style.width), f64::from(side as f32));
+            // The mark itself keeps its full width.
+            let mark_width = marks.iter().find_map(|item| match item {
+                Item::Stroke { style, .. } => Some(style.width),
+                _ => None,
+            });
+            assert_eq!(mark_width, Some(24.0));
+            // The stroke, caps included, stays inside the box, and the label starts after it.
+            let (x0, y0, x1, y1) = bounds(&legend[0]);
+            let half = f64::from(style.width) / 2.0;
+            let cap = match style.cap {
+                crate::scene::LineCap::Butt => 0.0,
+                crate::scene::LineCap::Round | crate::scene::LineCap::Square => half,
+            };
+            assert!(
+                x0 - cap >= b.x - 1e-3 && x1 + cap <= b.x + b.width + 1e-3,
+                "{dash:?}"
+            );
+            assert!(y0 - half >= b.center_y - b.height / 2.0 - 1e-3, "{dash:?}");
+            assert!(y1 + half <= b.center_y + b.height / 2.0 + 1e-3, "{dash:?}");
+            let Item::Text(label) = &legend[1] else {
+                panic!("the label follows the swatch");
+            };
+            assert!(f64::from(label.origin.x) >= b.x + b.width + SWATCH_GAP - 1e-3);
+        }
+    }
+
+    #[test]
     fn chips_and_end_dots_keep_their_fixed_sizes() {
         // Chips draw the same dot for every series, whatever its width or size.
         let f = sized_series_figure(crate::LegendStyle::Chips);
@@ -1001,17 +1063,20 @@ mod tests {
             );
             assert_eq!((stroke, diameter), (1.0e4, 1.0e4));
 
-            // The line swatch is exactly as wide as the stroke of the line mark.
+            // The line swatch is ten strokes long, but its thickness stops at the side of a
+            // square swatch: the line shows as a bar inside its box.
             let (line, marks, legend) = swatch_and_items(&huge_token_figure(theme.clone(), false));
-            assert_eq!((line.width, line.height), (10.0 * stroke, stroke));
+            let theme_size = theme.body_size() * theme.font_scale();
+            let side = SQUARE_SWATCH_SIDE * f64::from(theme_size);
+            assert_eq!((line.width, line.height), (10.0 * stroke, side));
             let stroke_of = |items: &[Item]| {
                 items.iter().find_map(|item| match item {
                     Item::Stroke { style, .. } => Some(f64::from(style.width)),
                     _ => None,
                 })
             };
-            assert_eq!(stroke_of(&legend), Some(line.height));
-            assert_eq!(stroke_of(&marks), Some(line.height));
+            assert_eq!(stroke_of(&legend), Some(f64::from(side as f32)));
+            assert_eq!(stroke_of(&marks), Some(stroke));
             let (_, y0, _, y1) = bounds(&legend[0]);
             assert!(y0 == y1 && (y0 - line.center_y).abs() < 1e-3);
 
@@ -1033,12 +1098,20 @@ mod tests {
                 dot.width
             );
 
-            // Each box starts on the canvas, at the row top.
-            for b in [line, dot] {
-                let top = b.center_y - b.height / 2.0;
-                assert!((top - PADDING).abs() < 1e-9, "{token}: {b:?}");
-                assert!(b.x < width && top < height, "{token}: {b:?}");
-            }
+            // Each box starts on the canvas. The dot is the tallest thing in its row, so it
+            // starts at the row top; the capped line is centered in a body-line row.
+            let top = dot.center_y - dot.height / 2.0;
+            assert!((top - PADDING).abs() < 1e-9, "{token}: {dot:?}");
+            assert!(dot.x < width && top < height, "{token}: {dot:?}");
+            let row = BODY_LINE * f64::from(theme_size);
+            assert!(
+                (line.center_y - (PADDING + row / 2.0)).abs() < 1e-9,
+                "{token}: {line:?}"
+            );
+            assert!(
+                line.x < width && line.center_y < height,
+                "{token}: {line:?}"
+            );
         }
     }
 
