@@ -106,7 +106,17 @@ jobs:
       - run: uv run python -m mypy.stubtest umber._umber
       - run: uv run pytest -q
       # The binding's unit tests embed this job's interpreter and import the package built above.
-      - run: uv run cargo test -p umber-py --locked
+      # The test binary links the interpreter's shared library, so the loader must find this
+      # interpreter's copy first: LD_LIBRARY_PATH on Linux, PATH on Windows.
+      - name: Test the binding crate
+        shell: bash
+        run: |
+          libdir="$(uv run python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR") or "")')"
+          base="$(uv run python -c 'import sys; print(sys.base_prefix)')"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then base="$(cygpath -u "$base")"; fi
+          export LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export PATH="$base:$PATH"
+          uv run cargo test -p umber-py --locked
       - name: Build release dists without local paths
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: scripts/release/build-dists.sh

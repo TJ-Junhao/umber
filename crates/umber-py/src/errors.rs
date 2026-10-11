@@ -96,7 +96,7 @@ pub(crate) fn internal_value(message: impl Into<String>) -> PyErr {
 
 #[cfg(test)]
 mod tests {
-    use pyo3::exceptions::{PyFileExistsError, PyFileNotFoundError, PyPermissionError};
+    use pyo3::exceptions::PyFileNotFoundError;
     use umber_core::Error;
 
     use super::*;
@@ -215,6 +215,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn os_errors_map_to_the_matching_subclass_on_unix() {
+        use pyo3::exceptions::{PyFileExistsError, PyPermissionError};
+
         with_python(|py| {
             let cases = [
                 (2, py.get_type::<PyFileNotFoundError>()),
