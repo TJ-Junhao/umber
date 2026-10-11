@@ -1,16 +1,43 @@
-//! Area fills under lines: a gradient from the line to the baseline, split where the line
-//! crosses the baseline; and the vertical fade gradient, which histogram bars share.
+//! Area marks: the region between a line and the baseline, split where the line crosses the
+//! baseline and painted as the theme's [`FillStyle`] says, under the line itself; and the
+//! vertical fade gradient, which histogram bars share.
 
+use super::MarkContext;
 use super::clip::crossing;
+use super::line::{plot_subpaths, stroke};
 use super::mapping::PlotPoint;
-use crate::Rgba;
 use crate::geometry::Path;
 use crate::scene::{FillRule, GradientStop, Item, LinearGradient, Paint};
+use crate::{Dash, FillStyle, Rgba};
 
-/// The area gradient's opacity at the top of the line, as a share of the line's own opacity.
-const AREA_TOP_ALPHA: f32 = 0.32;
-/// Gradient vectors shorter than this give no area fill (the area is empty).
+/// The opacity of an area fill, as a share of the line's own opacity: all over under
+/// [`FillStyle::Solid`], at the line's extreme under [`FillStyle::Gradient`].
+const AREA_ALPHA: f32 = 0.32;
+/// Parts of an area less tall than this, in points, are not filled (the part is empty, and a
+/// gradient across it would have no length).
 const MIN_AREA_HEIGHT: f64 = 0.01;
+
+/// The scene items of one area mark, its line given in axis space: the fill of every visible
+/// run of the line (see [`area_fills`]), then the line's stroke over them, exactly as a line
+/// mark of the same `color` and `dash` draws it. Nothing when no part of the line is visible.
+pub(super) fn area_items(
+    context: &MarkContext<'_>,
+    xs: &[f64],
+    ys: &[f64],
+    color: Rgba,
+    dash: Dash,
+    items: &mut Vec<Item>,
+) {
+    let subpaths = plot_subpaths(context, xs, ys);
+    if subpaths.is_empty() {
+        return;
+    }
+    let style = context.theme.fill_style();
+    for subpath in &subpaths {
+        items.extend(area_fills(subpath, context.baseline_y, color, style));
+    }
+    items.push(stroke(context.theme, &subpaths, color, dash));
+}
 
 /// Where a plot y lies relative to the baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,10 +63,11 @@ fn side(y: f64, baseline_y: f64) -> BaselineSide {
 
 /// The area between one clipped line `subpath` and `baseline_y`, split where the line crosses
 /// the baseline. Each part is its own fill, so parts never cancel each other: a closed polygon
-/// (the line, then down to the baseline and back) painted with a vertical gradient from the
-/// part's extreme y, at 0.32 of the line's opacity, to the baseline, at 0. Parts above the
-/// baseline fade from their top, parts below from their bottom.
-pub(super) fn area_fills(subpath: &[PlotPoint], baseline_y: f64, color: Rgba) -> Vec<Item> {
+/// (the line, then down to the baseline and back). Under [`FillStyle::Gradient`] it is painted
+/// with a vertical gradient from the part's extreme y, at 0.32 of the line's opacity, to the
+/// baseline, at 0: parts above the baseline fade from their top, parts below from their
+/// bottom. Under [`FillStyle::Solid`] it is painted flat at 0.32 of the line's opacity.
+fn area_fills(subpath: &[PlotPoint], baseline_y: f64, color: Rgba, style: FillStyle) -> Vec<Item> {
     // Split into parts that each stay on one side of the baseline.
     let mut parts: Vec<(BaselineSide, Vec<PlotPoint>)> = Vec::new();
     let mut points = subpath.iter().copied();
@@ -89,19 +117,23 @@ pub(super) fn area_fills(subpath: &[PlotPoint], baseline_y: f64, color: Rgba) ->
             path.line_to(at_baseline(last.x));
             path.line_to(at_baseline(first.x));
             path.close();
-            Some(Item::Fill {
-                path,
-                paint: vertical_fade(
+            let paint = match style {
+                FillStyle::Solid => Paint::Solid(color.scale_alpha(AREA_ALPHA)),
+                FillStyle::Gradient => vertical_fade(
                     color,
                     FadeStop {
                         y: extreme,
-                        share: AREA_TOP_ALPHA,
+                        share: AREA_ALPHA,
                     },
                     FadeStop {
                         y: baseline_y,
                         share: 0.0,
                     },
                 ),
+            };
+            Some(Item::Fill {
+                path,
+                paint,
                 rule: FillRule::NonZero,
             })
         })
@@ -119,8 +151,8 @@ pub(super) struct FadeStop {
 
 /// A vertical gradient of `color` from `start` to `end`, the opacity at each end being its
 /// share of the color's own (rounded by [`Rgba::scale_alpha`]). Beyond both ends the gradient
-/// keeps its end colors. Line areas fade from their extreme to the baseline; histograms from a
-/// point on their own ramp to another.
+/// keeps its end colors. Areas fade from their extreme to the baseline; histograms from a point
+/// on their own ramp to another.
 pub(super) fn vertical_fade(color: Rgba, start: FadeStop, end: FadeStop) -> Paint {
     Paint::Linear(LinearGradient {
         start: PlotPoint { x: 0.0, y: start.y }.to_scene(),

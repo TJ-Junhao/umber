@@ -19,7 +19,7 @@ pub use axis_data::AxisData;
 pub use bar::{BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView};
 pub use figure::Figure;
 pub use hist::{HistMark, HistOptions};
-pub use mark::{LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
+pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 
 #[cfg(test)]
 mod tests {

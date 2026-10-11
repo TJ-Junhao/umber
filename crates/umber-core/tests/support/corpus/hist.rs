@@ -16,7 +16,7 @@
 use std::fmt::Write as _;
 
 use umber_core::figure::HistOptions;
-use umber_core::{AreaFill, ColorSpec, FontLibrary, MAX_BINS, Rgba, ScaleKind, Theme};
+use umber_core::{ColorSpec, FillStyle, FontLibrary, MAX_BINS, Rgba, ScaleKind, Theme};
 
 use super::super::{Log, Output, axes, emit_scene, figure, labelled, lcg, linear, log, themes};
 
@@ -79,11 +79,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
 
     // The gradient switched on where the theme has none, and off where it has one.
     for (name, theme, fill) in [
-        ("gradient-pigment", Theme::pigment(), AreaFill::Gradient),
-        ("gradient-graphite", Theme::graphite(), AreaFill::Gradient),
-        ("solid-midnight", Theme::midnight(), AreaFill::None),
+        ("gradient-pigment", Theme::pigment(), FillStyle::Gradient),
+        ("gradient-graphite", Theme::graphite(), FillStyle::Gradient),
+        ("solid-midnight", Theme::midnight(), FillStyle::Solid),
     ] {
-        let theme = theme.with_area_fill(fill).unwrap();
+        let theme = theme.with_fill_style(fill).unwrap();
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
         labelled(&mut f, "Area fill");
         axes(&mut f).hist(&values, HistOptions::default()).unwrap();

@@ -1,20 +1,59 @@
-//! Area fills under lines: geometry, gradients and fills on both sides of the baseline.
+//! Area marks: lines never fill, the fill under an area's line in both fill styles, the
+//! baseline it ends at, NaN gaps and fills on both sides of the baseline.
 
-use super::{Pixels, line_figure, mark_group, plot_of, subpaths};
-use crate::model::{Figure, LineOptions};
+use super::{Pixels, line_figure, mark_group, nums, plot_of, subpaths};
+use crate::model::{AreaOptions, Figure, LineOptions};
 use crate::resolve::NormalizedPos;
 use crate::scene::{FillRule, Item, LinearGradient, Paint};
 use crate::test_support::scene::assert_scene_bounded;
-use crate::{AreaFill, FontLibrary, GridLines, Theme};
+use crate::{FillStyle, FontLibrary, GridLines, LogBase, ScaleKind, Theme};
+
+const LOG: ScaleKind = ScaleKind::Log { base: LogBase::TEN };
+
+/// Linear x axes, a y axis of `y_scale` and one area of `x` and `y`.
+fn area_figure(theme: Theme, y_scale: ScaleKind, x: &[f64], y: &[f64]) -> Figure {
+    let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+    f.add_axes(ScaleKind::Linear, y_scale)
+        .unwrap()
+        .area(nums(x), y, AreaOptions::default())
+        .unwrap();
+    f
+}
+
+fn themes() -> [Theme; 3] {
+    [Theme::pigment(), Theme::graphite(), Theme::midnight()]
+}
 
 #[test]
-fn area_fill_sits_under_line() {
+fn lines_never_fill() {
+    // In every theme and under either fill style, a line is its stroke alone.
+    for theme in themes() {
+        for style in [FillStyle::Solid, FillStyle::Gradient] {
+            let theme = theme.with_fill_style(style).unwrap();
+            let f = line_figure(
+                theme,
+                &[0.0, 1.0, 2.0, 3.0],
+                &[10.0, 40.0, 25.0, 30.0],
+                LineOptions::default(),
+            );
+            let scene = f.to_scene(FontLibrary::global());
+            assert!(
+                matches!(mark_group(&scene).1, [Item::Stroke { .. }]),
+                "{style:?}: {:?}",
+                mark_group(&scene).1
+            );
+        }
+    }
+}
+
+#[test]
+fn gradient_area_sits_under_its_line() {
     let theme = Theme::midnight();
-    let f = line_figure(
+    let f = area_figure(
         theme.clone(),
+        ScaleKind::Linear,
         &[0.0, 1.0, 2.0, 3.0],
         &[10.0, 40.0, 25.0, 30.0],
-        LineOptions::default(),
     );
     let scene = f.to_scene(FontLibrary::global());
     assert_scene_bounded(&scene);
@@ -64,53 +103,145 @@ fn area_fill_sits_under_line() {
             .iter()
             .all(|s| (s.color.r, s.color.g, s.color.b) == (color.r, color.g, color.b))
     );
-
-    // Without `AreaFill::Gradient`, there is no fill.
-    let f = line_figure(
-        Theme::graphite(),
-        &[0.0, 1.0],
-        &[1.0, 2.0],
-        LineOptions::default(),
-    );
-    let scene = f.to_scene(FontLibrary::global());
-    assert!(matches!(mark_group(&scene).1, [Item::Stroke { .. }]));
 }
 
 #[test]
-fn area_fill_ends_at_the_baseline_below_the_data() {
-    // y from 10 to 40 would take the nice limits 10..40 (10..100 on log), but its minimum lands
-    // on the lowest tick, so the limit moves one step down, to 5 (1 on log), and is padded
-    // below that: the baseline sits on the lowest tick, above the plot bottom and below the
-    // line, and the area fades to it, on a linear and on a log y axis.
-    let log = crate::ScaleKind::Log {
-        base: crate::LogBase::TEN,
+fn an_area_is_drawn_as_its_line_over_the_fill() {
+    // With the same limits, an area's stroke is exactly the line mark's stroke: the fill comes
+    // first and the line goes over it, unchanged.
+    let (x, y) = (
+        [0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        [10.0, 40.0, f64::NAN, 30.0, 20.0, f64::NAN],
+    );
+    for theme in themes() {
+        let limited = |mut f: Figure| {
+            f.axes_mut()
+                .unwrap()
+                .xlim(-0.5, 4.5)
+                .unwrap()
+                .ylim(0.0, 50.0)
+                .unwrap();
+            f.to_scene(FontLibrary::global())
+        };
+        let area = limited(area_figure(theme.clone(), ScaleKind::Linear, &x, &y));
+        let line = limited(line_figure(theme, &x, &y, LineOptions::default()));
+        let (area_clip, area_items) = mark_group(&area);
+        let (line_clip, line_items) = mark_group(&line);
+        assert_eq!(area_clip, line_clip);
+        let [fills @ .., stroke] = area_items else {
+            panic!("expected the fills and the stroke")
+        };
+        assert_eq!(fills.len(), 2);
+        assert!(fills.iter().all(|item| matches!(item, Item::Fill { .. })));
+        assert_eq!(std::slice::from_ref(stroke), line_items);
+    }
+}
+
+#[test]
+fn solid_area_is_flat_at_the_area_alpha() {
+    // Pigment and Graphite fill flat; so does Midnight switched to `Solid`.
+    for theme in [
+        Theme::pigment(),
+        Theme::graphite(),
+        Theme::midnight().with_fill_style(FillStyle::Solid).unwrap(),
+    ] {
+        assert_eq!(theme.fill_style(), FillStyle::Solid);
+        let color = theme.palette()[0];
+        let f = area_figure(theme, ScaleKind::Linear, &[0.0, 1.0, 2.0], &[3.0, 5.0, 4.0]);
+        let scene = f.to_scene(FontLibrary::global());
+        assert_scene_bounded(&scene);
+        let [
+            Item::Fill {
+                paint: Paint::Solid(fill),
+                rule: FillRule::NonZero,
+                ..
+            },
+            Item::Stroke { style, .. },
+        ] = mark_group(&scene).1
+        else {
+            panic!("expected a solid fill under the line")
+        };
+        assert_eq!(style.color, color);
+        assert_eq!(*fill, crate::Rgba { a: 82, ..color });
+    }
+    // A faded color fades the fill with it: 0.32 of its own opacity.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .area(
+            nums(&[0.0, 1.0]),
+            &[1.0, 2.0],
+            AreaOptions {
+                color: crate::ColorSpec::Auto(crate::Alpha::new(0.5).unwrap()),
+                ..AreaOptions::default()
+            },
+        )
+        .unwrap();
+    let scene = f.to_scene(FontLibrary::global());
+    let [
+        Item::Fill {
+            paint: Paint::Solid(fill),
+            ..
+        },
+        Item::Stroke { style, .. },
+    ] = mark_group(&scene).1
+    else {
+        panic!("expected a solid fill under the line")
     };
-    for y_scale in [crate::ScaleKind::Linear, log] {
-        let mut f = Figure::new(6.0, 4.0, Theme::midnight()).unwrap();
-        f.add_axes(crate::ScaleKind::Linear, y_scale)
-            .unwrap()
-            .line(
-                crate::model::AxisData::Numbers(vec![0.0, 1.0, 2.0, 3.0]),
-                &[10.0, 40.0, 25.0, 30.0],
-                LineOptions::default(),
-            )
-            .unwrap();
+    assert_eq!(style.color.a, 128);
+    assert_eq!(fill.a, 41);
+}
+
+#[test]
+fn areas_include_zero_on_a_linear_y_axis() {
+    // y from 10 to 40 alone would take the limits 5..40; an area keeps 0 on the axis, at the
+    // plot bottom without padding, and the baseline sits there.
+    for theme in themes() {
+        let f = area_figure(
+            theme,
+            ScaleKind::Linear,
+            &[0.0, 1.0, 2.0, 3.0],
+            &[10.0, 40.0, 25.0, 30.0],
+        );
         let (resolved, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
         let lowest = &resolved.y.ticks[0];
-        let expected = if y_scale == crate::ScaleKind::Linear {
-            "5"
-        } else {
-            "1"
+        assert_eq!(lowest.label, "0");
+        assert_eq!(resolved.baseline, lowest.pos);
+        assert_eq!(resolved.y.continuous().unwrap().domain().0, 0.0);
+        assert!((layout.baseline_y - layout.plot.bottom()).abs() < 1e-9);
+        let scene = f.to_scene(FontLibrary::global());
+        let Some(Item::Fill { path, .. }) = mark_group(&scene).1.first() else {
+            panic!("expected an area fill")
         };
-        assert_eq!(lowest.label, expected, "{y_scale:?}");
+        assert_eq!(path.bounds().unwrap().1.y, layout.baseline_y as f32);
+    }
+    // Negative values too: the axis spans them and 0.
+    let f = area_figure(
+        Theme::pigment(),
+        ScaleKind::Linear,
+        &[0.0, 1.0],
+        &[-30.0, -10.0],
+    );
+    let (resolved, _) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+    assert_eq!(resolved.y.continuous().unwrap().domain().1, 0.0);
+}
+
+#[test]
+fn areas_fill_down_to_the_baseline_on_a_log_y_axis() {
+    // y from 10 to 40 takes the nice limits 10..100, but its minimum lands on the lowest tick,
+    // so the limit moves one decade down, to 1, and is padded below that: the baseline sits on
+    // the lowest tick, above the plot bottom and below the line, and the area fills down to it.
+    for theme in themes() {
+        let f = area_figure(theme, LOG, &[0.0, 1.0, 2.0, 3.0], &[10.0, 40.0, 25.0, 30.0]);
+        let (resolved, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+        let lowest = &resolved.y.ticks[0];
+        assert_eq!(lowest.label, "1");
         assert_eq!(resolved.baseline, lowest.pos);
         assert!(layout.baseline_y < layout.plot.bottom() - 1.0);
         let scene = f.to_scene(FontLibrary::global());
         let [
             Item::Fill {
-                path: area,
-                paint: Paint::Linear(gradient),
-                ..
+                path: area, paint, ..
             },
             Item::Stroke { .. },
         ] = mark_group(&scene).1
@@ -121,11 +252,42 @@ fn area_fill_ends_at_the_baseline_below_the_data() {
         let (top, bottom) = area.bounds().unwrap();
         assert_eq!(bottom.y, baseline);
         assert!(top.y < baseline);
-        assert_eq!(gradient.end.y, baseline);
+        if let Paint::Linear(gradient) = paint {
+            assert_eq!(gradient.end.y, baseline);
+        }
         // The line's lowest point, 10, lies above the baseline.
         let ten = resolved.y.continuous().unwrap().normalize(10.0);
         assert!(layout.plot.y_at(NormalizedPos::new(ten)) < layout.baseline_y - 1.0);
     }
+}
+
+#[test]
+fn nan_breaks_the_line_and_the_fill() {
+    let f = area_figure(
+        Theme::midnight(),
+        ScaleKind::Linear,
+        &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        &[1.0, 2.0, f64::NAN, 3.0, 2.0, 4.0],
+    );
+    let scene = f.to_scene(FontLibrary::global());
+    let [
+        Item::Fill { path: first, .. },
+        Item::Fill { path: second, .. },
+        Item::Stroke { path: line, .. },
+    ] = mark_group(&scene).1
+    else {
+        panic!("expected a fill for each run, then the line")
+    };
+    let runs = subpaths(line);
+    assert_eq!(runs.len(), 2);
+    // Each fill is its run, then down to the baseline and back.
+    for (fill, run) in [first, second].into_iter().zip(&runs) {
+        let outline = &subpaths(fill)[0];
+        assert_eq!(&outline[..run.len()], run.as_slice());
+        assert_eq!(outline.len(), run.len() + 2);
+    }
+    // Nothing spans the gap.
+    assert!(first.bounds().unwrap().1.x < second.bounds().unwrap().0.x);
 }
 
 /// The PNG pixel at data position `(x, y)` of a figure with limits 0..1 by -2..2.
@@ -140,8 +302,8 @@ fn data_pixel(f: &Figure, png: &[u8], x: f64, y: f64) -> [u8; 3] {
     )
 }
 
-fn area_figure(theme: &Theme, x: &[f64], y: &[f64]) -> Figure {
-    let mut f = line_figure(theme.clone(), x, y, LineOptions::default());
+/// `f` limited to 0..1 by -2..2.
+fn limited(mut f: Figure) -> Figure {
     f.axes_mut()
         .unwrap()
         .xlim(0.0, 1.0)
@@ -151,12 +313,12 @@ fn area_figure(theme: &Theme, x: &[f64], y: &[f64]) -> Figure {
     f
 }
 
-/// Whether the area fill shows at each data position: the pixel differs from the same
-/// figure drawn without area fill.
+/// Whether the area fill shows at each data position: the pixel differs from the same data
+/// drawn as a line.
 fn area_shows(x: &[f64], y: &[f64], probes: &[(f64, f64)]) -> Vec<bool> {
     let theme = Theme::midnight().with_grid_lines(GridLines::None).unwrap();
-    let with = area_figure(&theme, x, y);
-    let without = area_figure(&theme.with_area_fill(AreaFill::None).unwrap(), x, y);
+    let with = limited(area_figure(theme.clone(), ScaleKind::Linear, x, y));
+    let without = limited(line_figure(theme, x, y, LineOptions::default()));
     let (a, b) = (with.to_png(300).unwrap(), without.to_png(300).unwrap());
     probes
         .iter()
@@ -175,17 +337,22 @@ fn areas_crossing_the_baseline_fill_both_sides() {
     );
     assert_eq!(shows, [true, true, false, false]);
 
-    // NaN-separated runs on opposite sides, each fading towards the baseline.
+    // NaN-separated runs on opposite sides, each fading towards the baseline, and nothing in
+    // the gap.
     let shows = area_shows(
         &[0.0, 0.4, f64::NAN, 0.6, 1.0],
         &[1.0, 1.0, f64::NAN, -1.0, -1.0],
-        &[(0.2, 0.5), (0.8, -0.5), (0.2, -0.5), (0.8, 0.5)],
+        &[(0.2, 0.5), (0.8, -0.5), (0.2, -0.5), (0.8, 0.5), (0.5, 0.5)],
     );
-    assert_eq!(shows, [true, true, false, false]);
+    assert_eq!(shows, [true, true, false, false, false]);
 
     // Each side is its own fill, with its gradient from its extreme to the baseline.
-    let theme = Theme::midnight();
-    let f = area_figure(&theme, &[0.0, 0.5, 1.0], &[1.0, 0.0, -1.0]);
+    let f = limited(area_figure(
+        Theme::midnight(),
+        ScaleKind::Linear,
+        &[0.0, 0.5, 1.0],
+        &[1.0, 0.0, -1.0],
+    ));
     let scene = f.to_scene(FontLibrary::global());
     assert_scene_bounded(&scene);
     let plot = plot_of(&f);

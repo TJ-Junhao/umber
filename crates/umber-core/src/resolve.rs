@@ -5,9 +5,10 @@
 //! log space on a log axis), so marks never sit on the plot edge and the outermost ticks sit
 //! just inside it. The ticks are not changed by the padding. The exception is the x axis of an
 //! axes whose marks are all lines, which keeps the exact data extent. Explicit limits replace
-//! the auto range as given and are never padded. A linear y axis that holds bars or a histogram
-//! always includes 0, and a side of its nice domain that ends at 0 is not padded, so bars start
-//! on the plot edge. A category axis lists the marks' categories in order of first appearance.
+//! the auto range as given and are never padded. Areas count as lines here, since each is drawn
+//! along its line. A linear y axis that holds bars, a histogram or an area always includes 0, and a
+//! side of its nice domain that ends at 0 is not padded, so bars start on the plot edge. A category
+//! axis lists the marks' categories in order of first appearance.
 //! The baseline sits at 0 when 0 lies inside a linear y domain, and otherwise at the y axis's
 //! lower limit before padding. Auto y limits keep that lower limit strictly below the data: when
 //! the smallest y value lands on (or within 5 % of the span above) the lowest nice tick, the
@@ -22,7 +23,8 @@
 
 use crate::binning::Histogram;
 use crate::model::{
-    Axes, AxisData, BarGroupMark, BarMark, BarSeriesView, HistMark, LineMark, Mark, ScatterMark,
+    AreaMark, Axes, AxisData, BarGroupMark, BarMark, BarSeriesView, HistMark, LineMark, Mark,
+    ScatterMark,
 };
 use crate::scale::{Padding, is_single_value, log_offset};
 use crate::stacking::Stacks;
@@ -312,9 +314,7 @@ pub(crate) fn resolve(
             explicit,
         } => {
             let data = extent(marks.iter().flat_map(|mark| mark.x_numbers()));
-            let all_lines = marks
-                .iter()
-                .all(|mark| matches!(mark, ResolvedMark::Line { .. }));
+            let all_lines = marks.iter().all(ResolvedMark::draws_a_line);
             let auto = if all_lines {
                 AutoLimits::Exact
             } else {
@@ -336,8 +336,8 @@ pub(crate) fn resolve(
             explicit,
         } => {
             let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
-            // Bars grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
-            // edge when it is a limit. On a log axis they grow from the baseline.
+            // Bars and areas grow from 0 on a linear axis, so the axis shows 0 and keeps it on
+            // the plot edge when it is a limit. On a log axis they grow from the baseline.
             let bars = marks.iter().any(ResolvedMark::grows_from_baseline);
             let (data, padding) = if bars && transform == Transform::Linear {
                 let with_zero = data.map(|(lo, hi)| (lo.min(0.0), hi.max(0.0)));
@@ -398,6 +398,13 @@ pub(crate) enum ResolvedMark<'a> {
         /// The marker color.
         color: Rgba,
     },
+    /// An area mark.
+    Area {
+        /// The mark.
+        mark: &'a AreaMark,
+        /// The color of the line and of its fill.
+        color: Rgba,
+    },
     /// A bar mark.
     Bar {
         /// The mark.
@@ -443,6 +450,7 @@ impl<'a> ResolvedMark<'a> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
+            ResolvedMark::Area { mark, .. } => numbers(mark.x()),
             ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. } => &[],
@@ -460,6 +468,7 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => category_names(mark.x()),
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
+            ResolvedMark::Area { mark, .. } => category_names(mark.x()),
             ResolvedMark::Bar { mark, .. } => mark.categories(),
             ResolvedMark::Grouped { mark, .. } | ResolvedMark::Stacked { mark, .. } => {
                 mark.categories()
@@ -472,17 +481,18 @@ impl<'a> ResolvedMark<'a> {
 
     /// The values the mark contributes to the y domain. See [`ResolvedMark`] for the contract.
     ///
-    /// Lines, scatters and bars yield their y values or heights in data order, and grouped bars
-    /// the heights of each series in turn. Stacked bars yield the end of every segment away from
-    /// 0 ([`Stacks::ends`]), never 0 itself: on a linear axis the bars put 0 into the domain
+    /// Lines, scatters, areas and bars yield their y values or heights in data order, and grouped
+    /// bars the heights of each series in turn. Stacked bars yield the end of every segment away
+    /// from 0 ([`Stacks::ends`]), never 0 itself: on a linear axis the bars put 0 into the domain
     /// anyway (see [`grows_from_baseline`](Self::grows_from_baseline)), and on a log axis, where
-    /// every height is positive, these are the positive segment ends, which a log domain can
-    /// hold. Histograms yield the count of every non-empty bin, in bin order, and so never 0
-    /// either: on a log axis the domain spans the smallest positive count to the largest.
+    /// every height is positive, these are the positive segment ends, which a log domain can hold.
+    /// Histograms yield the count of every non-empty bin, in bin order, and so never 0 either: on a
+    /// log axis the domain spans the smallest positive count to the largest.
     pub fn y_values(&self) -> Box<dyn Iterator<Item = f64> + '_> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
+            ResolvedMark::Area { mark, .. } => mark.y(),
             ResolvedMark::Bar { mark, .. } => mark.heights(),
             ResolvedMark::Grouped { series, .. } => {
                 return Box::new(
@@ -505,15 +515,30 @@ impl<'a> ResolvedMark<'a> {
         Box::new(values.iter().copied())
     }
 
-    /// Whether the mark grows from the baseline, as bars and histogram bins do: such a mark puts
-    /// 0 into a linear y domain.
+    /// Whether the mark grows from the baseline, as bars, histogram bins and the fill of an
+    /// area do: such a mark puts 0 into a linear y domain.
     pub fn grows_from_baseline(&self) -> bool {
         match self {
             ResolvedMark::Line { .. } | ResolvedMark::Scatter { .. } => false,
-            ResolvedMark::Bar { .. }
+            ResolvedMark::Area { .. }
+            | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::Hist { .. } => true,
+        }
+    }
+
+    /// Whether the mark is drawn along a line stroked at the theme's line width, as line marks
+    /// and the line that bounds an area are. An x axis whose marks all draw a line keeps the
+    /// exact data extent, and such marks widen the marks clip by half their stroke.
+    pub fn draws_a_line(&self) -> bool {
+        match self {
+            ResolvedMark::Line { .. } | ResolvedMark::Area { .. } => true,
+            ResolvedMark::Scatter { .. }
+            | ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. }
+            | ResolvedMark::Hist { .. } => false,
         }
     }
 
@@ -521,14 +546,11 @@ impl<'a> ResolvedMark<'a> {
     /// an axes whose axes have the limits `limits`.
     pub fn keys(&self, limits: &Limits) -> Vec<SeriesKey<'a>> {
         match self {
-            &ResolvedMark::Line { mark, color } => {
-                let options = mark.options();
-                vec![SeriesKey {
-                    label: &options.label,
-                    color,
-                    kind: SeriesKind::Line { dash: options.dash },
-                    anchor: Anchor::of_line(mark, limits),
-                }]
+            &ResolvedMark::Line { mark, color } => vec![SeriesKey::of_line(mark, color, limits)],
+            // An area is labelled as the line that bounds it: the line's swatch, and a direct
+            // label at the line's anchor.
+            &ResolvedMark::Area { mark, color } => {
+                vec![SeriesKey::of_line(mark.line(), color, limits)]
             }
             &ResolvedMark::Scatter { mark, color } => {
                 let options = mark.options();
@@ -592,8 +614,23 @@ pub(crate) struct SeriesKey<'a> {
     pub color: Rgba,
     /// How the series is drawn.
     pub kind: SeriesKind,
-    /// The anchor of a line series; `None` for a line without one and for every other series.
+    /// The anchor of a line series, an area's included; `None` for a line without one and for
+    /// every other series.
     pub anchor: Option<Anchor<'a>>,
+}
+
+impl<'a> SeriesKey<'a> {
+    /// The key of `line` in `color` on axes with the limits `limits`: a line swatch in the
+    /// line's dash, and the line's [`Anchor`].
+    fn of_line(line: &'a LineMark, color: Rgba, limits: &Limits) -> SeriesKey<'a> {
+        let options = line.options();
+        SeriesKey {
+            label: &options.label,
+            color,
+            kind: SeriesKind::Line { dash: options.dash },
+            anchor: Anchor::of_line(line, limits),
+        }
+    }
 }
 
 /// The x value of a line's point, as the line holds it.
@@ -787,6 +824,10 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
                 mark,
                 color: color_of(mark.options().color),
             },
+            Mark::Area(mark) => ResolvedMark::Area {
+                mark,
+                color: color_of(mark.options().color),
+            },
             Mark::Bar(mark) => ResolvedMark::Bar {
                 mark,
                 color: color_of(mark.options().color),
@@ -822,7 +863,9 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{BarOptions, BarSeries, Figure, HistOptions, LineOptions, ScatterOptions};
+    use crate::model::{
+        AreaOptions, BarOptions, BarSeries, Figure, HistOptions, LineOptions, ScatterOptions,
+    };
     use crate::{LogBase, MIN_LOG_VALUE, ScaleKind, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
@@ -2169,6 +2212,140 @@ mod tests {
         assert_eq!(back, point(2.0, 6.0));
         // A line wholly past the high end has no anchor, so it goes to the header row.
         assert_eq!(number_anchor(lin, &x, &y, Some((-2.0, -1.0))), None);
+    }
+
+    /// A series key as owned values: label, color, kind and the anchor's x, y and end.
+    type OwnedKey = (String, Rgba, SeriesKind, Option<(f64, f64, EndKind)>);
+
+    #[test]
+    fn area_keys_are_their_line_keys() {
+        use crate::Dash;
+        // An area is keyed exactly as the line that bounds it: the line swatch in its dash, its
+        // color, and the line's anchor, at the edge where an x limit cuts it.
+        let x = || nums(&[0.0, 1.0, 2.0]);
+        let options = LineOptions {
+            label: "Load".to_owned(),
+            dash: Dash::Dotted,
+            ..LineOptions::default()
+        };
+        for xlim in [None, Some((0.0, 1.5))] {
+            let keys_of = |area: bool| {
+                let mut f = figure(LIN, LIN);
+                let a = axes(&mut f);
+                if area {
+                    a.area(x(), &[5.0, 6.0, 7.0], options.clone()).unwrap();
+                } else {
+                    a.line(x(), &[5.0, 6.0, 7.0], options.clone()).unwrap();
+                }
+                if let Some((lo, hi)) = xlim {
+                    a.xlim(lo, hi).unwrap();
+                }
+                let axes = f.axes().unwrap();
+                let palette = f.theme().palette();
+                let resolved = resolve_marks(axes.marks(), palette);
+                let keys: Vec<OwnedKey> = series_keys(&resolved, &Limits::of(axes))
+                    .iter()
+                    .map(|key| {
+                        let anchor = key.anchor.map(|a| match a.x {
+                            AnchorX::Number(ax) => (ax, a.y, a.end),
+                            AnchorX::Category(_) => panic!("numbers expected"),
+                        });
+                        (key.label.to_owned(), key.color, key.kind, anchor)
+                    })
+                    .collect();
+                (keys, palette[0])
+            };
+            let (area, color) = keys_of(true);
+            assert_eq!(area, keys_of(false).0);
+            let end = if xlim.is_some() {
+                (1.5, 6.5, EndKind::Edge)
+            } else {
+                (2.0, 7.0, EndKind::Point)
+            };
+            assert_eq!(
+                area,
+                [(
+                    "Load".to_owned(),
+                    color,
+                    SeriesKind::Line { dash: Dash::Dotted },
+                    Some(end)
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn each_area_takes_one_auto_color() {
+        // Areas take Auto slots in series order with the other marks, one each.
+        let mut f = figure(LIN, LIN);
+        let palette = f.theme().palette().to_vec();
+        let x = || nums(&[0.0, 1.0]);
+        axes(&mut f)
+            .area(x(), &[1.0, 2.0], AreaOptions::default())
+            .unwrap()
+            .line(x(), &[1.0, 2.0], LineOptions::default())
+            .unwrap()
+            .area(
+                x(),
+                &[1.0, 2.0],
+                AreaOptions {
+                    color: ColorSpec::Palette {
+                        index: 5,
+                        alpha: crate::Alpha::OPAQUE,
+                    },
+                    ..AreaOptions::default()
+                },
+            )
+            .unwrap()
+            .area(x(), &[1.0, 2.0], AreaOptions::default())
+            .unwrap();
+        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        assert!(matches!(
+            resolved.as_slice(),
+            [
+                ResolvedMark::Area { .. },
+                ResolvedMark::Line { .. },
+                ResolvedMark::Area { .. },
+                ResolvedMark::Area { .. },
+            ]
+        ));
+        assert_eq!(
+            series_colors(&resolved),
+            [palette[0], palette[1], palette[5], palette[2]]
+        );
+    }
+
+    #[test]
+    fn areas_include_zero_and_keep_the_exact_x_extent() {
+        // A linear y axis holding an area includes 0 and keeps it on the plot edge; areas and
+        // lines alone keep the exact x extent, as lines alone do.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .area(nums(&[35.0, 65.0]), &[10.0, 40.0], AreaOptions::default())
+            .unwrap()
+            .line(nums(&[40.0, 60.0]), &[20.0, 30.0], LineOptions::default())
+            .unwrap();
+        let ((x_lo, x_hi), (y_lo, y_hi)) = domains(&f);
+        assert_eq!((x_lo, x_hi), (35.0, 65.0));
+        assert_eq!(y_lo, 0.0);
+        assert!(y_hi > 40.0);
+        // Next to a scatter, x gets nice padded limits.
+        axes(&mut f)
+            .scatter(nums(&[50.0]), &[20.0], ScatterOptions::default())
+            .unwrap();
+        let ((x_lo, x_hi), _) = domains(&f);
+        assert!(x_lo < 35.0 && x_hi > 65.0, "{x_lo} {x_hi}");
+
+        // On a log y axis, the area adds no 0: the domain spans the data, and the baseline
+        // sits at the lowest tick, below the data.
+        let mut f = figure(LIN, ScaleKind::Log { base: LogBase::TEN });
+        axes(&mut f)
+            .area(nums(&[0.0, 1.0]), &[10.0, 40.0], AreaOptions::default())
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(r.y.ticks[0].label, "1");
+        assert_eq!(r.baseline, r.y.ticks[0].pos);
+        assert!(r.y.continuous().unwrap().domain().0 > 0.0);
     }
 
     #[test]

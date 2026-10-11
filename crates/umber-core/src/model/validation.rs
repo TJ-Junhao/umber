@@ -25,6 +25,9 @@ pub(super) const LINE_GAP_HINT: &str = "use NaN to leave a gap in the line.";
 /// The hint for an infinite scatter value.
 pub(super) const SCATTER_GAP_HINT: &str = "use NaN to leave a point out.";
 
+/// The hint for an infinite area value.
+pub(super) const AREA_GAP_HINT: &str = "use NaN to leave a gap in the area.";
+
 /// The hint for an infinite bar height.
 const BAR_GAP_HINT: &str = "use NaN to leave a category without a bar.";
 

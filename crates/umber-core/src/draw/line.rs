@@ -1,15 +1,16 @@
-//! Line marks: M4 downsampling over x, clipping in axis space, then the stroke and, with
-//! `AreaFill::Gradient`, the area fill under it.
+//! Line marks: M4 downsampling over x, clipping in axis space, then the stroke. Lines are never
+//! filled; the [`area`](super::area) mark draws its line with these same steps.
 
 use super::MarkContext;
-use super::area::area_fills;
 use super::clip::{Bounds, clip_polyline};
-use super::mapping::PlotPoint;
+use super::mapping::{PlotPoint, axis_x, axis_y};
 use crate::geometry::Path;
 use crate::layout::Area;
 use crate::m4_indices;
+use crate::model::LineMark;
+use crate::resolve::Resolved;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
-use crate::{AreaFill, Dash, Rgba, Theme};
+use crate::{Dash, Rgba, Theme};
 
 /// The smallest line clip margin, in points.
 const MIN_LINE_MARGIN: f64 = 2.0;
@@ -24,6 +25,21 @@ pub(super) fn downsample_columns(width: f64) -> usize {
         columns as usize
     } else {
         1
+    }
+}
+
+/// The points of `line` in axis space, reduced by [`downsample`] on a continuous x axis.
+pub(super) fn line_points(
+    context: &MarkContext<'_>,
+    resolved: &Resolved,
+    line: &LineMark,
+) -> (Vec<f64>, Vec<f64>) {
+    let xs = axis_x(&resolved.x, line.x());
+    let ys = axis_y(&resolved.y, line.y());
+    if resolved.x.is_category() {
+        (xs, ys)
+    } else {
+        downsample(context, xs, ys)
     }
 }
 
@@ -98,9 +114,8 @@ pub(super) fn line_style(theme: &Theme, color: Rgba, dash: Dash) -> StrokeStyle 
     }
 }
 
-/// The scene items of one line, given in axis space: the area fill (with
-/// `AreaFill::Gradient`), then the stroke. The line is clipped in axis space and only the
-/// clipped points are mapped to plot coordinates.
+/// The scene item of one line, given in axis space: its stroke, and nothing when no part of
+/// the line is visible. See [`plot_subpaths`] for the clipping.
 pub(super) fn line_items(
     context: &MarkContext<'_>,
     xs: &[f64],
@@ -109,12 +124,22 @@ pub(super) fn line_items(
     dash: Dash,
     items: &mut Vec<Item>,
 ) {
+    let subpaths = plot_subpaths(context, xs, ys);
+    if !subpaths.is_empty() {
+        items.push(stroke(context.theme, &subpaths, color, dash));
+    }
+}
+
+/// The visible runs of the axis-space line `(xs, ys)` in plot points, one subpath per run that
+/// NaN or the clip leaves. The line is clipped in axis space and only the clipped points are
+/// mapped to plot coordinates.
+pub(super) fn plot_subpaths(
+    context: &MarkContext<'_>,
+    xs: &[f64],
+    ys: &[f64],
+) -> Vec<Vec<PlotPoint>> {
     let MarkContext {
-        theme,
-        maps,
-        plot,
-        baseline_y,
-        ..
+        theme, maps, plot, ..
     } = *context;
     let margin = f64::from(line_width(theme)).max(MIN_LINE_MARGIN);
     let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
@@ -127,7 +152,7 @@ pub(super) fn line_items(
     // Clipped points are inside `bounds`, so they map to within `margin` of the plot area. The
     // clamp only guards against rounding in the map.
     let limit = PlotLimit::around(plot, margin);
-    let subpaths: Vec<Vec<PlotPoint>> = clip_polyline(xs, ys, &bounds)
+    clip_polyline(xs, ys, &bounds)
         .into_iter()
         .map(|subpath| {
             subpath
@@ -135,19 +160,14 @@ pub(super) fn line_items(
                 .map(|p| limit.clamp(maps.to_plot(p)))
                 .collect()
         })
-        .collect();
-    if subpaths.is_empty() {
-        return;
-    }
+        .collect()
+}
 
-    if theme.area_fill() == AreaFill::Gradient {
-        for subpath in &subpaths {
-            items.extend(area_fills(subpath, baseline_y, color));
-        }
-    }
-
+/// The stroke through the plot-point `subpaths`, in `color` and `dash` at the theme's line
+/// width.
+pub(super) fn stroke(theme: &Theme, subpaths: &[Vec<PlotPoint>], color: Rgba, dash: Dash) -> Item {
     let mut path = Path::new();
-    for subpath in &subpaths {
+    for subpath in subpaths {
         let mut points = subpath.iter().map(|p| p.to_scene());
         let Some(first) = points.next() else {
             continue;
@@ -162,8 +182,8 @@ pub(super) fn line_items(
             }
         }
     }
-    items.push(Item::Stroke {
+    Item::Stroke {
         path,
         style: line_style(theme, color, dash),
-    });
+    }
 }
