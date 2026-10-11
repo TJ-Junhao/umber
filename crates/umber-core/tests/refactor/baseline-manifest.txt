@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: ec0cb2611c50bd88d7d45c6e268de6f5d99530f1
+# revision: 06c75954c07274e5d6283c9b356913709b6e14f6
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
