@@ -1,3 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# Histogram bin counts below 1 gain a hint, and the largest-count case is now i64::MAX.
-errors/hist
+# Cases whose committed outputs change on purpose in this change; none.
