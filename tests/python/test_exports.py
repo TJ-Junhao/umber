@@ -15,6 +15,7 @@ EXPECTED = [
     "Color",
     "DataError",
     "Dash",
+    "FillStyle",
     "Figure",
     "Font",
     "GridLines",
@@ -70,7 +71,15 @@ def test_enums_are_exported_as_enums() -> None:
         for name in umber.__all__
         if inspect.isclass(obj := getattr(umber, name)) and issubclass(obj, enum.Enum)
     }
-    assert enums == {"Dash", "Font", "GridLines", "LegendStyle", "Marker", "SvgText"}
+    assert enums == {
+        "Dash",
+        "FillStyle",
+        "Font",
+        "GridLines",
+        "LegendStyle",
+        "Marker",
+        "SvgText",
+    }
 
 
 def _public_members() -> list[tuple[str, object]]:

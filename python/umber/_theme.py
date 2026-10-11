@@ -8,7 +8,7 @@ from typing import ClassVar, Final, Never, Self, cast, final
 from umber import _color, _umber
 from umber._args import instance, real, type_name
 from umber._color import Color
-from umber._enums import Dash, Font, GridLines, LegendStyle
+from umber._enums import Dash, FillStyle, Font, GridLines, LegendStyle
 from umber._errors import new_error
 from umber._report import api_call
 
@@ -362,6 +362,32 @@ class Theme:
         with api_call():
             code = _member("Theme.with_legend_style()", value, LegendStyle)
             return _wrap(self._native.with_legend_style(code))
+
+    def with_fill_style(self, value: FillStyle) -> "Theme":
+        """Return this theme with the fill style of areas and histogram bins set to ``value``.
+
+        ``FillStyle.SOLID`` paints a flat translucent fill. ``FillStyle.GRADIENT`` paints a fill
+        that fades out toward the baseline. The style applies to areas and histograms; lines are
+        never filled, so it does not change them.
+
+        Args:
+            value: The FillStyle to use.
+
+        Returns:
+            A new theme; this one is unchanged.
+
+        Raises:
+            TypeError: If ``value`` is not a ``FillStyle``.
+
+        Example:
+            >>> import umber as ub
+            >>> theme = ub.Theme.PIGMENT.with_fill_style(ub.FillStyle.GRADIENT)
+            >>> theme == ub.Theme.PIGMENT
+            False
+        """
+        with api_call():
+            code = _member("Theme.with_fill_style()", value, FillStyle)
+            return _wrap(self._native.with_fill_style(code))
 
     def with_font_scale(self, value: float) -> "Theme":
         """Return this theme with the font scale set to ``value``.

@@ -12,7 +12,7 @@ from typing import Final
 
 from umber._axes import Axes
 from umber._color import Color
-from umber._enums import Dash, Font, GridLines, LegendStyle, Marker, SvgText
+from umber._enums import Dash, FillStyle, Font, GridLines, LegendStyle, Marker, SvgText
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
 from umber._quick import bar, hist, line, scatter
@@ -40,6 +40,7 @@ __all__ = [
     "Color",
     "DataError",
     "Dash",
+    "FillStyle",
     "Figure",
     "Font",
     "GridLines",
@@ -81,6 +82,7 @@ _report_package_as_module(
     BarSeries,
     Color,
     Dash,
+    FillStyle,
     Figure,
     Font,
     GridLines,

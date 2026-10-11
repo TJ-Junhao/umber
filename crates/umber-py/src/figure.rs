@@ -19,7 +19,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use umber_core::{
-    Axes, BarOptions, BarSeries, Dash, HistOptions, LegendStyle, LineOptions, Marker,
+    AreaOptions, Axes, BarOptions, BarSeries, Dash, HistOptions, LegendStyle, LineOptions, Marker,
     ScatterOptions, SvgText,
 };
 
@@ -176,6 +176,30 @@ impl Figure {
         };
         self.axes()?
             .line(x, &y, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds an area: a line with the region down to the baseline filled.
+    fn area(
+        &mut self,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let (x, y) = (axis_data(x)?, floats(y)?);
+        let options = AreaOptions {
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+            ..Default::default()
+        };
+        self.axes()?
+            .area(x, &y, options)
             .map(drop)
             .map_err(core_error)
     }

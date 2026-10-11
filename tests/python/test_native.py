@@ -32,17 +32,19 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
             ("JETBRAINS_MONO", 4),
         ],
         "LegendStyle": [("HEADER", 0), ("DIRECT", 1), ("CHIPS", 2), ("NONE", 3)],
+        "FillStyle": [("SOLID", 0), ("GRADIENT", 1)],
         "GridLines": [("HORIZONTAL", 0), ("VERTICAL", 1), ("BOTH", 2), ("NONE", 3)],
         "SvgText": [("OUTLINES", 0), ("EDITABLE", 1)],
     }
 
 
-def test_enum_members_keys_are_the_six_enum_names() -> None:
+def test_enum_members_keys_are_the_seven_enum_names() -> None:
     assert set(_umber.enum_members()) == {
         "Dash",
         "Marker",
         "Font",
         "LegendStyle",
+        "FillStyle",
         "GridLines",
         "SvgText",
     }
