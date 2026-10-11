@@ -1,4 +1,4 @@
-"""Static typing expectations for ``Figure`` and ``Axes`` (spec section 6.4).
+"""Static typing expectations for ``Figure`` and ``Axes``.
 
 Checked by pyright and mypy in strict mode. The marker convention is the one described in
 ``check_errors.py``: a line that must produce an error carries both
