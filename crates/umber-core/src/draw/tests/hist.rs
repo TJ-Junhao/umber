@@ -312,19 +312,21 @@ fn log_y_bins_grow_from_the_baseline() {
     let scene = f.to_scene(FontLibrary::global());
     assert_scene_bounded(&scene);
     let (resolved, layout) = plan(&f);
-    // The counts 1, 0, 3, 5 take the nice limits 1..10: the baseline sits at 1, the lowest
-    // tick, above the padded plot bottom.
-    assert_near(layout.baseline_y as f32, y_of(&resolved, &layout, 1.0));
+    // The counts 1, 0, 3, 5 would take the nice limits 1..10, but the smallest count lands on
+    // the lowest tick, so the axis starts a decade lower, at 0.1: the baseline sits there,
+    // above the padded plot bottom and below every count.
+    assert_eq!(resolved.y.ticks[0].label, "0.1");
+    assert_near(layout.baseline_y as f32, y_of(&resolved, &layout, 0.1));
     assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
     let items = mark_items(&scene);
     let (path, paint) = the_fill(items);
     let drawn = bins(path);
-    // The empty bin draws nothing, and neither does the bin of count 1, which lies on the
-    // baseline; the others grow from the baseline.
-    assert_eq!(drawn.len(), 2);
-    for (&(_, _, top, base), count) in drawn.iter().zip([3.0, 5.0]) {
+    // The empty bin draws nothing; the bin of count 1 still shows, from the baseline.
+    assert_eq!(drawn.len(), 3);
+    for (&(_, _, top, base), count) in drawn.iter().zip([1.0, 3.0, 5.0]) {
         assert_near(base, layout.baseline_y);
         assert_near(top, y_of(&resolved, &layout, count));
+        assert!(f64::from(top) < layout.baseline_y - 1.0, "{top}");
     }
     let gradient = gradient(paint);
     assert_near(gradient.end.y, layout.baseline_y);

@@ -689,6 +689,70 @@ impl ContinuousScale {
         (nice, ticks)
     }
 
+    /// This nice scale and its `ticks` (as [`nice_with_ticks`](Self::nice_with_ticks) gives
+    /// them), with the lowest tick moved strictly below the data, whose smallest value is
+    /// `data_low`: the rule that keeps the data off the baseline when the baseline sits at the
+    /// lower limit.
+    ///
+    /// The data counts as starting on the lower limit when `data_low` lies less than
+    /// [`AUTO_LIMIT_PADDING`] of the domain's span above it (in log space on a log axis): the
+    /// same share the padding keeps marks off the plot edge, so a minimum that only rounds
+    /// to the limit, such as a sampled sine trough, does not sit on the baseline either. When
+    /// it does and the limit carries the first tick, the limit moves down by one tick step and
+    /// gets a tick of its own: `lo - step` on a linear axis, with `step` the gap between the
+    /// first two ticks, and `lo / base` on a log axis; all ticks are then labelled again as
+    /// `nice_with_ticks` labels them. Everything else is returned unchanged: a linear domain
+    /// that holds 0, where the baseline sits at 0 and a zero value on it is correct; data
+    /// further above the lower limit; ticks that do not start at the limit or number fewer
+    /// than two; a degenerate linear domain; and a move that would leave the supported
+    /// magnitudes. Auto limits apply it before [`padded`](Self::padded).
+    pub(crate) fn below_data(
+        &self,
+        ticks: Vec<Tick>,
+        data_low: f64,
+    ) -> (ContinuousScale, Vec<Tick>) {
+        let (lo, hi) = (self.lo, self.hi);
+        let unchanged = (*self, ticks);
+        let holds_zero = self.transform == Transform::Linear && lo <= 0.0 && 0.0 <= hi;
+        let (Some(first), Some(second)) = (unchanged.1.first(), unchanged.1.get(1)) else {
+            return unchanged;
+        };
+        let rise = match self.transform {
+            Transform::Linear => (data_low - lo) / (hi - lo),
+            Transform::Log(_) => log_offset(data_low, lo) / log_offset(hi, lo),
+        };
+        let on_limit = (0.0..AUTO_LIMIT_PADDING).contains(&rise);
+        if holds_zero || !on_limit || first.value != lo {
+            return unchanged;
+        }
+        let step = second.value - first.value;
+        let lowered = match self.transform {
+            Transform::Linear if !is_degenerate(lo, hi) => lo - step,
+            Transform::Linear => return unchanged,
+            Transform::Log(base) => lo / base.get(),
+        };
+        let floor = match self.transform {
+            Transform::Linear => -MAX_MAGNITUDE,
+            Transform::Log(_) => MIN_LOG_VALUE,
+        };
+        if !(lowered.is_finite() && floor <= lowered && lowered < lo) {
+            return unchanged;
+        }
+        let values: Vec<f64> = std::iter::once(lowered)
+            .chain(unchanged.1.iter().map(|tick| tick.value))
+            .collect();
+        let labels = match self.transform {
+            Transform::Linear => ticks::format_ticks(&values, step),
+            Transform::Log(_) => ticks::format_values(&values),
+        };
+        let scale = ContinuousScale {
+            transform: self.transform,
+            lo: lowered,
+            hi,
+        };
+        (scale, Self::pair(values, labels))
+    }
+
     /// This scale with its domain widened on each side by [`AUTO_LIMIT_PADDING`] of its span,
     /// measured in log space on a log axis, and kept within the supported magnitudes
     /// (`|v| <= MAX_MAGNITUDE` linear, `[MIN_LOG_VALUE, MAX_MAGNITUDE]` log). Auto limits apply

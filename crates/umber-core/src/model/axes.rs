@@ -570,8 +570,8 @@ impl Axes {
     /// half a bin, and have square corners. With [`AreaFill::Gradient`](crate::AreaFill), all
     /// bars share one vertical gradient from the top of the tallest bar to the baseline, and
     /// each bar gets a solid top edge. On a linear y axis the bars grow from 0; on a log y axis
-    /// they grow from the baseline, at the lowest y tick (or the explicit lower limit), so a
-    /// bin whose count is that tick has no height.
+    /// they grow from the baseline, at the lowest y tick (or the explicit lower limit). Auto
+    /// limits put that tick below the smallest count, so every non-empty bin has a height.
     ///
     /// Errors leave the axes unchanged. They are checked in this order: `Error::Style` for
     /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and

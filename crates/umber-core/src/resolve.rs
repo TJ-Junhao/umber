@@ -9,7 +9,9 @@
 //! always includes 0, and a side of its nice domain that ends at 0 is not padded, so bars start
 //! on the plot edge. A category axis lists the marks' categories in order of first appearance.
 //! The baseline sits at 0 when 0 lies inside a linear y domain, and otherwise at the y axis's
-//! lower limit before padding.
+//! lower limit before padding. Auto y limits keep that lower limit strictly below the data: when
+//! the smallest y value lands on (or within 5 % of the span above) the lowest nice tick, the
+//! limit moves down one tick step.
 //! Tick positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch
 //! data values again.
 //!
@@ -126,6 +128,10 @@ enum AutoLimits {
     /// domain is then padded on the given sides (see [`ContinuousScale::padded`]); the ticks
     /// stay as they are.
     Nice(Padding),
+    /// As [`Nice`](Self::Nice), with the lowest tick moved strictly below the data before the
+    /// padding when the data starts on it (see [`ContinuousScale::below_data`]): the y axis,
+    /// whose baseline sits at the lower limit when 0 is not in the domain.
+    NiceBelowData(Padding),
 }
 
 /// What an axis fixes before any data is seen: whether it lists categories, and for a
@@ -219,8 +225,14 @@ fn continuous(
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
         match auto {
             AutoLimits::Exact => (scale, scale, scale.ticks(target)),
-            AutoLimits::Nice(padding) => {
+            AutoLimits::Nice(padding) | AutoLimits::NiceBelowData(padding) => {
                 let (nice, ticks) = scale.nice_with_ticks(target);
+                let (nice, ticks) = match (auto, data) {
+                    (AutoLimits::NiceBelowData(_), Some((data_low, _))) => {
+                        nice.below_data(ticks, data_low)
+                    }
+                    _ => (nice, ticks),
+                };
                 let single = data.is_some_and(|(lo, hi)| is_single_value(transform, lo, hi));
                 let padded = if single { nice } else { nice.padded(padding) };
                 (padded, nice, ticks)
@@ -333,7 +345,7 @@ pub(crate) fn resolve(
             } else {
                 (data, Padding::BothSides)
             };
-            let auto = AutoLimits::Nice(padding);
+            let auto = AutoLimits::NiceBelowData(padding);
             let ContinuousAxis { axis, unpadded_low } =
                 continuous(transform, explicit, data, auto, y_target);
             let baseline = match &axis.scale {
@@ -620,11 +632,13 @@ pub(crate) struct Anchor<'a> {
 impl<'a> Anchor<'a> {
     /// The anchor of `line` on axes with the limits `limits`. Its last point, in data order,
     /// with finite x and y whose x lies inside the x domain (both ends included), is the
-    /// [`EndKind::Point`] anchor, unless the next point in data order has finite x and y and an
-    /// x past the high end of the domain: the line then leaves the plot between the two, and
-    /// the anchor is the [`EndKind::Edge`] where it crosses the high end, the two points
-    /// interpolated in axis space (see [`crossing_at`]). A next point with a NaN breaks the
-    /// line, so the line ends at the last point. `None` when the line has no point inside.
+    /// [`EndKind::Point`] anchor, unless it lies below the high end of the domain and the next
+    /// point in data order has finite x and y and an x past that end: the line then leaves the
+    /// plot between the two, and the anchor is the [`EndKind::Edge`] where it crosses the high
+    /// end, the two points interpolated in axis space (see [`crossing_at`]). A last point on
+    /// the high end is a data point the plot shows, so it stays the `Point` anchor. A next
+    /// point with a NaN breaks the line, so the line ends at the last point. `None` when the
+    /// line has no point inside.
     ///
     /// Only explicit limits can leave a finite point outside the x domain: auto limits always
     /// contain every finite x value, and a category axis holds every category of its marks. So
@@ -655,7 +669,8 @@ impl<'a> Anchor<'a> {
                 else {
                     return Some(point);
                 };
-                if !(next_x.is_finite() && next_y.is_finite() && next_x > hi) {
+                let leaves = xs[last] < hi && next_x > hi;
+                if !(leaves && next_x.is_finite() && next_y.is_finite()) {
                     return Some(point);
                 }
                 let y_transform = match limits.y {
@@ -694,7 +709,7 @@ impl<'a> Anchor<'a> {
 /// the way to `edge` is measured in axis space along x, and y is interpolated by that share in
 /// axis space along y.
 ///
-/// `from.0 <= edge < to.0`, every value finite, and every value on a log axis positive, as the
+/// `from.0 < edge < to.0`, every value finite, and every value on a log axis positive, as the
 /// model validates them; the result then lies between `from.1` and `to.1`.
 fn crossing_at(
     (x_transform, y_transform): (Transform, Transform),
@@ -789,7 +804,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
 mod tests {
     use super::*;
     use crate::model::{BarOptions, BarSeries, Figure, HistOptions, LineOptions, ScatterOptions};
-    use crate::{LogBase, ScaleKind, Theme};
+    use crate::{LogBase, MIN_LOG_VALUE, ScaleKind, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
         AxisData::Numbers(v.to_vec())
@@ -1225,6 +1240,62 @@ mod tests {
     }
 
     #[test]
+    fn lowest_tick_lies_strictly_below_the_data() {
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let line_axes = |y_scale, ys: &[f64]| {
+            let mut f = figure(LIN, y_scale);
+            let xs: Vec<f64> = (0..ys.len()).map(|i| i as f64).collect();
+            axes(&mut f)
+                .line(nums(&xs), ys, LineOptions::default())
+                .unwrap();
+            f
+        };
+        let lowest = |f: &Figure| {
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            assert_eq!(r.baseline, r.y.ticks[0].pos);
+            r.y.ticks[0].label.clone()
+        };
+        // A minimum on a nice tick: the limit moves one tick step down, linear and log.
+        assert_eq!(lowest(&line_axes(LIN, &[20.0, 35.0, 40.0])), "15");
+        assert_eq!(lowest(&line_axes(log, &[1.0, 40.0])), "0.1");
+        assert_eq!(lowest(&line_axes(log, &[10.0, 40.0])), "1");
+        // A minimum within 5 % of the span above the lowest tick counts as on it: 20.9 on
+        // 20..40, and on log 1.2 on 1..100 (a factor of 100^0.05, about 1.26).
+        assert_eq!(lowest(&line_axes(LIN, &[20.9, 35.0, 40.0])), "15");
+        assert_eq!(lowest(&line_axes(log, &[1.2, 40.0])), "0.1");
+        // A minimum further above the lowest tick: unchanged.
+        assert_eq!(lowest(&line_axes(LIN, &[21.0, 35.0, 40.0])), "20");
+        assert_eq!(lowest(&line_axes(LIN, &[22.0, 35.0, 40.0])), "20");
+        assert_eq!(lowest(&line_axes(log, &[2.0, 40.0])), "1");
+        // A linear domain that holds 0 keeps 0 as its limit: the baseline is at 0 already.
+        let f = line_axes(LIN, &[0.0, 30.0]);
+        assert!(close(y_domain(&f), pad(0.0, 30.0)), "{:?}", y_domain(&f));
+        let f = bar_figure(LIN, &[0.0, 40.0]);
+        assert_eq!(y_domain(&f), (0.0, 42.0));
+        // Explicit limits are used as given.
+        let mut f = line_axes(LIN, &[20.0, 40.0]);
+        axes(&mut f).ylim(20.0, 40.0).unwrap();
+        assert_eq!(y_domain(&f), (20.0, 40.0));
+        // A move that would leave the supported magnitudes keeps the old limit.
+        let f = line_axes(log, &[MIN_LOG_VALUE, 1.0]);
+        assert_eq!(y_domain(&f).0, MIN_LOG_VALUE);
+        let f = line_axes(LIN, &[-1e300, 1e300]);
+        assert_eq!(y_domain(&f).0, -1e300);
+        // Log bars: the smallest height counts.
+        let f = bar_figure(log, &[10.0, 1000.0]);
+        assert_eq!(lowest(&f), "1");
+        // The x axis is not affected: x from 35 to 65 keeps its lowest tick at 35.
+        let (_, ys) = sinusoid();
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .scatter(nums(&ys), &ys, ScatterOptions::default())
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 4, 4);
+        assert_eq!(labels(&r.x)[0], "35");
+        assert_eq!(labels(&r.y)[0], "25");
+    }
+
+    #[test]
     fn baseline_sits_at_zero_or_the_nice_lower_limit() {
         // Auto limits that hold 0: the baseline is at 0, wherever 0 is.
         let mut f = figure(LIN, LIN);
@@ -1251,14 +1322,15 @@ mod tests {
                 "{:?}",
                 r.baseline
             );
-            let expected = if ys[0] > 0.0 { "35" } else { "\u{2212}65" };
+            // The extreme lands on a nice tick, so the limit moves one step below it.
+            let expected = if ys[0] > 0.0 { "25" } else { "\u{2212}75" };
             assert_eq!(lowest.label, expected);
         }
         // Log auto limits: the lowest power of the base, 10 here.
         let log = ScaleKind::Log { base: LogBase::TEN };
         let mut f = figure(LIN, log);
         axes(&mut f)
-            .scatter(nums(&[0.0, 1.0]), &[12.0, 880.0], ScatterOptions::default())
+            .scatter(nums(&[0.0, 1.0]), &[20.0, 880.0], ScatterOptions::default())
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(r.y.ticks[0].label, "10");
@@ -1291,12 +1363,13 @@ mod tests {
             .line(nums(&xs), &ys, LineOptions::default())
             .unwrap();
         let ((x0, x1), (y0, y1)) = domains(&f);
-        // 35..65 is already nice; the domain grows by 1.5 on each side, so the line's minimum
-        // and maximum no longer sit on the plot edge, and the ticks stay 35..65.
-        assert_ne!((y0, y1), (35.0, 65.0));
-        assert!(close((y0, y1), (33.5, 66.5)), "{y0} {y1}");
+        // 35..65 is already nice, and the minimum lands on its lowest tick, so the lower limit
+        // moves down one step to 25. The domain 25..65 then grows by 2 on each side, so the
+        // line's minimum and maximum no longer sit on the plot edge, and the ticks stay 25..65.
+        assert_ne!((y0, y1), (25.0, 65.0));
+        assert!(close((y0, y1), (23.0, 67.0)), "{y0} {y1}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(labels(&r.y), ["35", "45", "55", "65"]);
+        assert_eq!(labels(&r.y), ["25", "35", "45", "55", "65"]);
         assert_end_ticks_inset(&r.y);
         // The x axis of an all-line axes keeps the exact extent, unpadded.
         assert_eq!((x0, x1), (0.0, 12.0));
@@ -1306,8 +1379,10 @@ mod tests {
 
     #[test]
     fn log_auto_limits_pad_in_log_space() {
-        // The nice limits 10..1000 span two decades; 5 % of that is a factor of 10^0.1 on each
-        // side. The ticks stay the powers inside the nice limits.
+        // The nice x limits 10..1000 span two decades; 5 % of that is a factor of 10^0.1 on
+        // each side. The ticks stay the powers inside the nice limits. On y the minimum lands
+        // on the lowest tick, so the lower limit moves down a decade: 1..1000, three decades,
+        // padded by a factor of 10^0.15.
         let log = ScaleKind::Log { base: LogBase::TEN };
         let mut f = figure(log, log);
         axes(&mut f)
@@ -1319,11 +1394,12 @@ mod tests {
             .unwrap();
         let (x, y) = domains(&f);
         let factor = 10f64.powf(0.1);
-        for d in [x, y] {
-            assert!(close(d, (10.0 / factor, 1000.0 * factor)), "{d:?}");
-        }
+        assert!(close(x, (10.0 / factor, 1000.0 * factor)), "{x:?}");
+        let factor = 10f64.powf(0.15);
+        assert!(close(y, (1.0 / factor, 1000.0 * factor)), "{y:?}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(labels(&r.x), ["10", "100", "1000"]);
+        assert_eq!(labels(&r.y), ["1", "10", "100", "1000"]);
         assert_end_ticks_inset(&r.y);
     }
 
@@ -1780,13 +1856,14 @@ mod tests {
     fn hist_log_y_extent_comes_from_positive_counts() {
         // Counts 1, 0, 0, 40: on a log axis the domain is fitted to the positive counts, 1..40,
         // never to an extent that includes 0, which a log axis cannot hold (it would fall back
-        // to the unit range 1..10).
+        // to the unit range 1..10). The count 1 lands on the lowest nice tick, so the lower
+        // limit moves down a decade, to 0.1, and the bin of count 1 rises above the baseline.
         let log = ScaleKind::Log { base: LogBase::TEN };
         let mut values = vec![0.0];
         values.extend(std::iter::repeat_n(4.0, 40));
         let f = hist_figure(log, &values, 4);
         let domain = y_domain(&f);
-        assert!(close(domain, pad_log(1.0, 100.0)), "{domain:?}");
+        assert!(close(domain, pad_log(0.1, 100.0)), "{domain:?}");
         // The same domain as a line through exactly the smallest and largest positive count.
         let mut g = figure(LIN, log);
         axes(&mut g)
@@ -1795,7 +1872,7 @@ mod tests {
         assert_eq!(domain, y_domain(&g));
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(r.baseline, r.y.ticks[0].pos);
-        assert_eq!(r.y.ticks[0].label, "1");
+        assert_eq!(r.y.ticks[0].label, "0.1");
     }
 
     #[test]
@@ -1937,8 +2014,14 @@ mod tests {
         let (x, y) = ([0.0, 1.0, 2.0, 3.0], [5.0, 6.0, 7.0, 8.0]);
         // Linear x: the segment from (1, 6) to (2, 7) crosses x = 1.5 at y = 6.5.
         assert_eq!(number_anchor(lin, &x, &y, Some((0.5, 1.5))), edge(1.5, 6.5));
-        // A last point on the high end, with the line going on: the edge is that point.
-        assert_eq!(number_anchor(lin, &x, &y, Some((0.0, 2.0))), edge(2.0, 7.0));
+        // A last point on the high end is a data point the plot shows: the line ends there,
+        // with its dot, although it goes on past the limit; on a log x axis too.
+        assert_eq!(
+            number_anchor(lin, &x, &y, Some((0.0, 2.0))),
+            point(2.0, 7.0)
+        );
+        let on_end = number_anchor((log, LIN), &[1.0, 10.0, 100.0], &y[..3], Some((1.0, 10.0)));
+        assert_eq!(on_end, point(10.0, 6.0));
         // A falling segment: from (1, 6) to (2, -2) crosses x = 1.25 at y = 4.
         let falling = [5.0, 6.0, -2.0, 0.0];
         let cut = Some((0.0, 1.25));

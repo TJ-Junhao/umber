@@ -1,7 +1,8 @@
 # Cases whose committed outputs change on purpose in this change.
 # The baseline moves from the plot bottom to the unpadded lower limit of the y domain when 0 is
-# outside it, and bars and histogram bins on a log y axis grow from it. A direct label whose line
-# goes on past an explicit x limit sits where the line leaves the plot, without an end dot.
+# outside it, and bars and histogram bins on a log y axis grow from it. Auto y limits keep that
+# limit strictly below the data. A direct label whose line goes on past an explicit x limit sits
+# where the line leaves the plot, without an end dot.
 fig-bars-log-y-graphite
 fig-bars-log-y-midnight
 fig-category-crowded-log

@@ -1106,6 +1106,26 @@ mod tests {
         assert!((end.y - plot.y_at(NormalizedPos::new(0.9))).abs() < 1e-9);
         assert_scene_bounded(&f.to_scene(FontLibrary::global()));
 
+        // A line whose last point inside lies on the high end goes on past it, but that point
+        // is data the plot shows: it keeps its dot, on the right edge.
+        let mut f = line_figure(
+            Theme::graphite(),
+            &[("On the edge", vec![0.0, 1.0, 2.0], vec![10.0, 40.0, 30.0])],
+        );
+        f.axes_mut()
+            .unwrap()
+            .xlim(0.0, 1.0)
+            .unwrap()
+            .ylim(0.0, 100.0)
+            .unwrap();
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let [edge] = layout.direct.as_slice() else {
+            panic!("one direct label");
+        };
+        let dot = edge.dot.expect("a data point on the edge keeps its dot");
+        assert!((dot.x - layout.plot.right()).abs() < 1e-9);
+        assert!((dot.y - layout.plot.y_at(NormalizedPos::new(0.4))).abs() < 1e-9);
+
         // On a log x axis the crossing is interpolated in log space: from (10, 0) to
         // (1000, 40), the edge at 100 lies halfway, at y = 20.
         let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();

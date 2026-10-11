@@ -269,13 +269,18 @@ fn log_bars_grow_from_the_baseline() {
     for (path, _) in &fills {
         assert_near(bounds(path).1.y, layout.baseline_y);
     }
-    // A bar as high as the lowest tick lies on the baseline and has no height to draw.
+    // A bar as high as the nice lower limit, 10, moves that limit a decade down, to 1: the
+    // bar rises above the baseline and is drawn.
     let f = bar_figure(Theme::graphite(), log, &["a", "b"], &[10.0, 1000.0]);
     let scene = f.to_scene(FontLibrary::global());
     let layout = layout_of(&f);
     let fills = bars(&scene);
-    assert_eq!(fills.len(), 1);
-    assert_near(bounds(fills[0].0).1.y, layout.baseline_y);
+    assert_eq!(fills.len(), 2);
+    for (path, _) in &fills {
+        let (top, base) = bounds(path);
+        assert_near(base.y, layout.baseline_y);
+        assert!(f64::from(top.y) < layout.baseline_y - 1.0, "{top:?}");
+    }
     // Explicit limits are not padded: the baseline, and the bars, start at the plot bottom.
     let mut f = bar_figure(Theme::graphite(), log, &["a", "b"], &[10.0, 1000.0]);
     f.axes_mut().unwrap().ylim(5.0, 2000.0).unwrap();
