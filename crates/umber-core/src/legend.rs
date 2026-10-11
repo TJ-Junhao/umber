@@ -213,6 +213,39 @@ mod tests {
     }
 
     #[test]
+    fn bar_series_get_square_swatches_in_series_order() {
+        use crate::model::BarSeries;
+        let series = |labels: [&str; 3]| -> Vec<BarSeries> {
+            labels
+                .map(|label| BarSeries {
+                    label: label.to_owned(),
+                    heights: vec![1.0, 2.0],
+                    color: ColorSpec::AUTO,
+                })
+                .to_vec()
+        };
+        let categories = || vec!["A".to_owned(), "B".to_owned()];
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .stacked_bar(categories(), series(["2024", "", "2026"]))
+            .unwrap()
+            .grouped_bar(categories(), series(["North", "South", "East"]))
+            .unwrap();
+        let legend = legend_of(&f, LegendStyle::Header);
+        let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
+        assert_eq!(labels, ["2024", "2026", "North", "South", "East"]);
+        assert!(legend.row().iter().all(|e| e.swatch() == Swatch::Square));
+        // Every series takes a palette slot, the unlabelled one included.
+        let palette = f.theme().palette();
+        let colors: Vec<Rgba> = legend.row().iter().map(LegendEntry::color).collect();
+        assert_eq!(
+            colors,
+            [palette[0], palette[2], palette[3], palette[4], palette[5]]
+        );
+    }
+
+    #[test]
     fn other_styles_have_no_row_entries() {
         let f = figure();
         for style in [LegendStyle::None, LegendStyle::Chips, LegendStyle::Direct] {

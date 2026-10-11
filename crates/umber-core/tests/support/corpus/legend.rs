@@ -7,14 +7,14 @@
 //! subtitle, at the largest font scale, in a 1 by 1 in figure with 50 entries, in every theme;
 //! a 300-character label; labels drawn by the in-memory fallback font and labels with
 //! characters no font draws; unlabelled series mixed in; line swatches in every dash, dot
-//! swatches, and the square swatch of a bar next to a line; the legend switch
-//! (`LegendStyle::None` in the theme, and `Axes::legend` turning the row off and on); and the
-//! theme records with `LegendStyle::None`.
+//! swatches, the square swatch of a bar next to a line and of every series of a stacked bar;
+//! the legend switch (`LegendStyle::None` in the theme, and `Axes::legend` turning the row off
+//! and on); and the theme records with `LegendStyle::None`.
 
 use std::fmt::Write as _;
 
 use umber_core::figure::{AxisData, BarOptions, LineOptions, ScatterOptions};
-use umber_core::{ColorSpec, Dash, Figure, FontLibrary, LegendStyle, ScaleKind, Theme};
+use umber_core::{BarSeries, ColorSpec, Dash, Figure, FontLibrary, LegendStyle, ScaleKind, Theme};
 
 use super::super::{Output, axes, emit_scene, figure, labelled, linear, numbers, record, wobble};
 
@@ -226,6 +226,25 @@ fn figures() -> Vec<(&'static str, Figure)> {
         )
         .unwrap();
     out.push(("fig-legend-bar-and-line", bars));
+
+    // A stacked bar with three labelled series: one square swatch per series, in series order.
+    let mut stacked = figure(6.0, 4.0, Theme::pigment(), ScaleKind::Category, linear());
+    labelled(&mut stacked, "Stacked series");
+    let series = [
+        ("2024", [12.0, 18.0, 15.0, 22.0]),
+        ("2025", [9.0, 14.0, 19.0, 17.0]),
+        ("2026", [5.0, 8.0, 11.0, 14.0]),
+    ]
+    .map(|(label, heights)| BarSeries {
+        label: label.into(),
+        heights: heights.to_vec(),
+        color: ColorSpec::AUTO,
+    })
+    .to_vec();
+    axes(&mut stacked)
+        .stacked_bar(["Q1", "Q2", "Q3", "Q4"].map(String::from).to_vec(), series)
+        .unwrap();
+    out.push(("fig-legend-stacked-bar", stacked));
 
     out
 }
