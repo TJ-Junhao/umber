@@ -12,6 +12,7 @@ import pytest
 
 import umber as ub
 from umber import _umber
+from umber._color import native
 from umber._errors import details
 
 NAMES = [
@@ -58,40 +59,40 @@ def test_named_colors_match_the_documented_hex_table() -> None:
     assert [name for name, _ in _umber.named_colors()] == NAMES
     for name in NAMES:
         assert getattr(ub.Color, name) == ub.Color.hex(HEX[name])
-        assert ub.Color.hex(HEX[name])._argument() == (2, int(HEX[name][1:] + "FF", 16), 1.0)
+        assert native(ub.Color.hex(HEX[name])) == (2, int(HEX[name][1:] + "FF", 16), 1.0)
 
 
 def test_named_colors_are_not_the_auto_color() -> None:
     assert ub.Color.AUTO != ub.Color.BLACK
-    assert ub.Color.AUTO._argument() == (0, 0, 1.0)
+    assert native(ub.Color.AUTO) == (0, 0, 1.0)
 
 
 def test_hex_accepts_six_and_eight_digits_in_either_case() -> None:
     assert ub.Color.hex("#3366b8") == ub.Color.BLUE
     assert ub.Color.hex("#3366B8FF") == ub.Color.BLUE
-    assert ub.Color.hex("#3366B880")._argument() == (2, 0x3366B880, 1.0)
+    assert native(ub.Color.hex("#3366B880")) == (2, 0x3366B880, 1.0)
 
 
 def test_rgb_builds_an_opaque_color() -> None:
     assert ub.Color.rgb(0x33, 0x66, 0xB8) == ub.Color.BLUE
-    assert ub.Color.rgb(0, 0, 0)._argument() == (2, 0x000000FF, 1.0)
+    assert native(ub.Color.rgb(0, 0, 0)) == (2, 0x000000FF, 1.0)
 
 
 def test_palette_color_wraps_at_resolution_time() -> None:
-    assert ub.Color.palette(2)._argument() == (1, 2, 1.0)
-    assert ub.Color.palette(2**63 - 1)._argument() == (1, 2**63 - 1, 1.0)
+    assert native(ub.Color.palette(2)) == (1, 2, 1.0)
+    assert native(ub.Color.palette(2**63 - 1)) == (1, 2**63 - 1, 1.0)
 
 
 def test_alpha_replaces_the_alpha_of_a_fixed_color() -> None:
     half = ub.Color.BLUE.alpha(0.5)
-    assert half._argument() == (2, 0x3366B880, 1.0)
+    assert native(half) == (2, 0x3366B880, 1.0)
     assert half.alpha(1.0) == ub.Color.BLUE
-    assert half.alpha(0.0)._argument() == (2, 0x3366B800, 1.0)
+    assert native(half.alpha(0.0)) == (2, 0x3366B800, 1.0)
 
 
 def test_alpha_keeps_the_kind_of_a_theme_color() -> None:
-    assert ub.Color.AUTO.alpha(0.25)._argument() == (0, 0, 0.25)
-    assert ub.Color.palette(2).alpha(0.5)._argument() == (1, 2, 0.5)
+    assert native(ub.Color.AUTO.alpha(0.25)) == (0, 0, 0.25)
+    assert native(ub.Color.palette(2).alpha(0.5)) == (1, 2, 0.5)
     assert ub.Color.palette(2).alpha(0.5).alpha(1.0) == ub.Color.palette(2)
 
 

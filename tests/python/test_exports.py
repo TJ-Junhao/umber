@@ -19,6 +19,7 @@ EXPECTED = [
     "StyleError",
     "SupportsArray",
     "SvgText",
+    "Theme",
     "UmberError",
     "UsageError",
     "Values",
@@ -112,7 +113,7 @@ def test_public_method_examples_run() -> None:
 
 
 def _constant_docs() -> dict[str, str]:
-    """Docstrings that follow an assignment in ``__init__.py`` and in the ``Color`` class."""
+    """Docstrings that follow an assignment in ``__init__.py``, ``Color`` and ``Theme``."""
     package = Path(umber.__file__).resolve().parent
     docs: dict[str, str] = {}
 
@@ -128,15 +129,17 @@ def _constant_docs() -> dict[str, str]:
                 docs[prefix + target.id] = text
 
     collect(ast.parse((package / "__init__.py").read_text()).body, "")
-    for stmt in ast.parse((package / "_color.py").read_text()).body:
-        if isinstance(stmt, ast.ClassDef) and stmt.name == "Color":
-            collect(stmt.body, "Color.")
+    for module, class_name in (("_color.py", "Color"), ("_theme.py", "Theme")):
+        for stmt in ast.parse((package / module).read_text()).body:
+            if isinstance(stmt, ast.ClassDef) and stmt.name == class_name:
+                collect(stmt.body, f"{class_name}.")
     return docs
 
 
 def test_class_constant_and_attribute_examples_run() -> None:
     docs = _constant_docs()
     assert {"MAX_BINS", "Color.AUTO", "Color.BLUE", "Color.BROWN"} <= set(docs)
+    assert {"Theme.PIGMENT", "Theme.GRAPHITE", "Theme.MIDNIGHT"} <= set(docs)
     failed = [name for name, doc in docs.items() if _run_examples(name, doc).failed]
     assert failed == []
     assert all(doctest.DocTestParser().get_examples(doc) for doc in docs.values())
