@@ -99,7 +99,7 @@ fn scatter_outline_uses_background() {
         let dx = 16.0 / plot.width;
         let f = scatter_figure(theme.clone(), &[0.5, 0.5 + dx], &[0.5, 0.5], Marker::Circle);
         let dpi = 300.0;
-        let pixels = Pixels::decode(&f.to_png(dpi as u32).unwrap());
+        let pixels = Pixels::decode(&f.to_png(dpi as i64).unwrap());
         let (cx, cy) = (
             plot.x_at(NormalizedPos::new(0.5 + dx)),
             plot.y_at(NormalizedPos::new(0.5)),

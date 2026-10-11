@@ -106,14 +106,21 @@ fn too_large(what: &str) -> Error {
     )
 }
 
-fn pixel_size(scene: &Scene, dpi: u32) -> Result<(u32, u32)> {
-    if !(MIN_DPI..=MAX_DPI).contains(&dpi) {
-        return Err(Error::style(
-            CONTEXT,
+/// `dpi` as the `u32` the renderer works in, or `Error::Style` under `context` when it is
+/// outside `10..=2400`. The message names the value as given, however large or negative.
+pub(crate) fn check_dpi(context: &'static str, dpi: i64) -> Result<u32> {
+    match u32::try_from(dpi) {
+        Ok(valid) if (MIN_DPI..=MAX_DPI).contains(&valid) => Ok(valid),
+        _ => Err(Error::style(
+            context,
             format!("dpi {dpi} is out of range; use a value from {MIN_DPI} to {MAX_DPI}."),
         )
-        .with_parameter("dpi"));
+        .with_parameter("dpi")),
     }
+}
+
+fn pixel_size(scene: &Scene, dpi: u32) -> Result<(u32, u32)> {
+    check_dpi(CONTEXT, i64::from(dpi))?;
     if !scene.width.is_finite() || !scene.height.is_finite() {
         return Err(Error::style(
             CONTEXT,
@@ -1015,6 +1022,20 @@ mod tests {
         };
         assert!(ink_in_rows(4..24), "no ink above the baseline");
         assert!(ink_in_rows(25..34), "no ink below the baseline");
+    }
+
+    #[test]
+    fn dpi_beyond_u32_keeps_its_value() {
+        for dpi in [i64::MIN, -72, 0, 9, 2401, i64::from(u32::MAX) + 1, i64::MAX] {
+            let err = check_dpi("Figure.to_png()", dpi).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("Figure.to_png(): dpi {dpi} is out of range; use a value from 10 to 2400.")
+            );
+            assert_eq!(err.parameter(), Some("dpi"));
+        }
+        assert_eq!(check_dpi("Figure.to_png()", 10).unwrap(), 10);
+        assert_eq!(check_dpi("Figure.to_png()", 2400).unwrap(), 2400);
     }
 
     #[test]

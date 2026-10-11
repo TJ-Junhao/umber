@@ -82,6 +82,7 @@ driver_files=(
   crates/umber-core/tests/support/refactor_cases.rs
   crates/umber-core/tests/support/corpus/bars.rs
   crates/umber-core/tests/support/corpus/hist.rs
+  crates/umber-core/tests/support/corpus/inputs.rs
   crates/umber-core/tests/support/corpus/legend.rs
 )
 

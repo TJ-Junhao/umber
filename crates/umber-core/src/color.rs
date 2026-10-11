@@ -369,6 +369,34 @@ impl ColorSpec {
     /// ```
     pub const AUTO: ColorSpec = ColorSpec::Auto(Alpha::OPAQUE);
 
+    /// A fixed palette slot, wrapping around the palette length at render time.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Style` (context `"Color.palette()"`, parameter `index`) when `index` is
+    /// negative, or does not fit the platform's `usize`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Alpha, ColorSpec, Rgba};
+    /// let spec = ColorSpec::palette(3, Alpha::OPAQUE)?;
+    /// assert_eq!(spec.resolve(&[Rgba::RED, Rgba::BLUE], 0), Rgba::BLUE);
+    /// assert!(ColorSpec::palette(-1, Alpha::OPAQUE).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn palette(index: i64, alpha: Alpha) -> Result<ColorSpec> {
+        match usize::try_from(index) {
+            Ok(index) => Ok(ColorSpec::Palette { index, alpha }),
+            Err(_) => Err(Error::style(
+                "Color.palette()",
+                format!("index is {index}; a palette index must be 0 or greater."),
+            )
+            .with_parameter("index")
+            .with_hint("indexes start at 0 and wrap around the palette.")),
+        }
+    }
+
     /// Replace the opacity of this spec.
     ///
     /// # Examples
@@ -549,6 +577,30 @@ mod tests {
             alpha: Alpha::OPAQUE,
         };
         assert_eq!(p.resolve(&pal, 0), Rgba::BLUE);
+    }
+
+    #[test]
+    fn negative_palette_index_is_rejected() {
+        let err = ColorSpec::palette(-1, Alpha::OPAQUE).unwrap_err();
+        assert!(matches!(err, Error::Style { .. }));
+        assert_eq!(
+            err.to_string(),
+            "Color.palette(): index is -1; a palette index must be 0 or greater."
+        );
+        assert_eq!(err.parameter(), Some("index"));
+        assert_eq!(
+            err.hint(),
+            Some("indexes start at 0 and wrap around the palette.")
+        );
+        assert!(ColorSpec::palette(i64::MIN, Alpha::OPAQUE).is_err());
+        let half = Alpha::new(0.5).unwrap();
+        assert_eq!(
+            ColorSpec::palette(7, half).unwrap(),
+            ColorSpec::Palette {
+                index: 7,
+                alpha: half
+            }
+        );
     }
 
     #[test]

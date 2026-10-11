@@ -1,8 +1,3 @@
 # Cases whose committed outputs change on purpose in this change.
-# Structured errors: every error record gains its parameter and hint.
-errors/api
-errors/bars
-errors/grouped-bars
+# Histogram bin counts below 1 gain a hint, and the largest-count case is now i64::MAX.
 errors/hist
-# The PNG output of this figure is the error record of the failed render; its scene and SVG are unchanged.
-scene-nan-size

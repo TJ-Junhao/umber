@@ -84,6 +84,7 @@ use umber_core::{
 mod corpus {
     pub mod bars;
     pub mod hist;
+    pub mod inputs;
     pub mod legend;
 }
 
@@ -125,6 +126,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     text("api", "text-layout.txt", text_layout_cases(&lib));
     corpus::bars::cases(&lib, &mut sink);
     corpus::hist::cases(&lib, &mut sink);
+    corpus::inputs::cases(&lib, &mut sink);
     corpus::legend::cases(&lib, &mut sink);
 }
 
