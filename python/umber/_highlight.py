@@ -3,10 +3,8 @@
 The call site comes from the caller frame's instruction position (``co_positions``): the
 call node with exactly that position is looked up in the parsed source of the caller.
 Arguments are mapped to parameters only when the call provably invokes the function that
-reports the error: the callee expression is resolved through the caller's variables and
-``inspect.getattr_static``, which runs no code, and must lead to that function's code
-object, called with the usual binding of ``self``. A call through ``functools.partial``,
-another wrapper or an expression that cannot be resolved this way gets no highlight.
+reports the error (see ``umber._callee``); a call through ``functools.partial``, another
+wrapper or an expression that cannot be resolved without running code gets no highlight.
 
 Whenever the source or the positions are unavailable, the call cannot be matched, or the
 line cannot be measured in display columns, no highlight is produced; the message alone
@@ -14,15 +12,14 @@ stays complete.
 """
 
 import ast
-import inspect
 import linecache
 import unicodedata
 from dataclasses import dataclass
 from itertools import islice
-from types import CodeType, FrameType, FunctionType, MethodType, ModuleType
-from typing import cast
+from types import CodeType, FrameType
 
 from umber._ansi import bold, bold_red
+from umber._callee import calls
 
 _INDENT = "  "
 _MISSING = object()
@@ -78,7 +75,7 @@ def find(
     if found is None:
         return None
     call, lines = found
-    if _callee_name(call.func) != callee or not _calls(call.func, frame, target):
+    if _callee_name(call.func) != callee or not calls(call.func, frame, target):
         return None
     argument = _argument(call, positional, parameter)
     if argument is None:
@@ -161,81 +158,6 @@ def _callee_name(func: ast.expr) -> str | None:
     if isinstance(func, ast.Attribute):
         return func.attr
     return None
-
-
-def _calls(func: ast.expr, frame: FrameType, target: CodeType) -> bool:
-    """Return whether calling ``func`` in ``frame`` provably calls ``target`` directly.
-
-    Direct means that the arguments in the source are the arguments ``target`` receives,
-    after ``self`` or ``cls`` where the call binds one. Nothing is evaluated: names are read
-    from the frame and attributes are looked up with ``inspect.getattr_static``.
-    """
-    if isinstance(func, ast.Name):
-        value = _variable(frame, func.id)
-        # A plain function reached by name is called unbound, so it must not be a method.
-        return _is_target(value, target, bound=False)
-    if not isinstance(func, ast.Attribute):
-        return False
-    owner = _resolve(func.value, frame)
-    if owner is _MISSING:
-        return False
-    member = _static_attribute(owner, func.attr)
-    if isinstance(owner, ModuleType | type):
-        # Through a module or a class, a plain function is called unbound.
-        return _is_target(member, target, bound=False)
-    # Through an instance, the member must come from its class (an instance attribute could
-    # be a wrapper), and a plain function is then bound to the instance.
-    if member is not _static_attribute(type(owner), func.attr):
-        return False
-    return _is_target(member, target, bound=True)
-
-
-def _is_target(value: object, target: CodeType, *, bound: bool) -> bool:
-    """Return whether calling ``value`` runs ``target`` with the source's arguments."""
-    if isinstance(value, type):
-        init = _static_attribute(value, "__init__")
-        return isinstance(init, FunctionType) and init.__code__ is target
-    if isinstance(value, classmethod | staticmethod | MethodType):
-        # A bound method, class method or static method passes the source's arguments on
-        # after the object it binds, if any.
-        wrapper = cast(
-            "classmethod[object, ..., object] | staticmethod[..., object] | MethodType", value
-        )
-        function: object = wrapper.__func__
-        return isinstance(function, FunctionType) and function.__code__ is target
-    if isinstance(value, FunctionType) and value.__code__ is target:
-        # A module-level function has a qualified name without a dot; a method's has one.
-        is_method = target.co_qualname != target.co_name
-        return is_method == bound
-    return False
-
-
-def _resolve(node: ast.expr, frame: FrameType) -> object:
-    """Return the value of a dotted name such as ``ub.Color`` without running code."""
-    if isinstance(node, ast.Name):
-        return _variable(frame, node.id)
-    if isinstance(node, ast.Attribute):
-        owner = _resolve(node.value, frame)
-        return _MISSING if owner is _MISSING else _static_attribute(owner, node.attr)
-    return _MISSING
-
-
-def _variable(frame: FrameType, name: str) -> object:
-    """Return the value ``name`` has in ``frame``: local, enclosing, global or builtin."""
-    for namespace in (frame.f_locals, frame.f_globals, frame.f_builtins):
-        if name in namespace:
-            return namespace[name]
-    return _MISSING
-
-
-def _static_attribute(owner: object, name: str) -> object:
-    """Return ``owner.name`` as stored, without calling descriptors or ``__getattr__``."""
-    if owner is _MISSING:
-        return _MISSING
-    try:
-        return inspect.getattr_static(owner, name)
-    except AttributeError:
-        return _MISSING
 
 
 def _argument(

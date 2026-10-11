@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
-from typing import ClassVar
+from typing import ClassVar, Self
 
 import pytest
 
@@ -49,9 +49,23 @@ class Probe:
         _record(self.found, "xlim", ("low", "high"), ())
         return self
 
+    def title(self, text: object) -> Self:
+        _record(self.found, "title", ("text",), ())
+        return self
+
+    def unannotated(self) -> "Probe":
+        return self
+
+    def optional(self) -> "Probe | None":
+        return self
+
     @classmethod
     def rgb(cls, r: object, g: object, b: object) -> None:
         _record(cls.seen, "rgb", ("r", "g", "b"), ())
+
+
+# A method without a return annotation, as the run time sees it.
+del Probe.unannotated.__annotations__["return"]
 
 
 def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> dict[str, str | None]:
@@ -100,8 +114,48 @@ def test_chained_calls_highlight_inside_the_failing_call(
 ) -> None:
     found = _run(tmp_path, monkeypatch, "def run(p, t, y):\n    p.line(t, y).xlim(0, 1)\n")
     assert found["line.y"] == "  p.line(t, y).xlim(0, 1)\n            ^"
-    # The receiver of xlim is the result of a call, which cannot be checked without running
-    # it, so the call target is not provable and the note is left out.
+    # line is declared to return "Probe", so the receiver of xlim is a Probe.
+    assert found["xlim.high"] == "  p.line(t, y).xlim(0, 1)\n                       ^"
+
+
+def test_chain_through_a_method_returning_self(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    found = _run(tmp_path, monkeypatch, 'def run(p, t, y):\n    p.title("x").xlim(0, -1)\n')
+    assert found["title.text"] == '  p.title("x").xlim(0, -1)\n          ^^^'
+    assert found["xlim.high"] == '  p.title("x").xlim(0, -1)\n                       ^^'
+
+
+def test_long_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = 'def run(p, t, y):\n    p.title("a").line(t, y).title("b").xlim(0, 1)\n'
+    found = _run(tmp_path, monkeypatch, source)
+    assert found["xlim.low"] == (
+        '  p.title("a").line(t, y).title("b").xlim(0, 1)\n' + " " * 42 + "^"
+    )
+
+
+@pytest.mark.parametrize("method", ["unannotated", "optional"])
+def test_chain_through_a_method_without_a_self_annotation_gives_no_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    found = _run(tmp_path, monkeypatch, f"def run(p, t, y):\n    p.{method}().xlim(0, 1)\n")
+    assert found["xlim.high"] is None
+
+
+def test_chain_through_a_function_outside_the_package_gives_no_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The annotation of a function outside the package is not trusted to be true.
+    source = "def same(p) -> Probe:\n    return p\ndef run(p, t, y):\n    same(p).xlim(0, 1)\n"
+    found = _run(tmp_path, monkeypatch, source)
+    assert found["xlim.high"] is None
+
+
+def test_chain_beyond_the_depth_limit_gives_no_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = '.title("x")' * 40
+    found = _run(tmp_path, monkeypatch, f"def run(p, t, y):\n    p{calls}.xlim(0, 1)\n")
     assert found["xlim.high"] is None
 
 
@@ -122,6 +176,23 @@ def test_multi_line_chain_highlights_the_method_on_its_own_line(
     found = _run(tmp_path, monkeypatch, source)
     assert found["xlim.low"] == "  .xlim(0,\n        ^"
     assert found["xlim.high"] == "  1))\n  ^"
+
+
+def test_multi_line_chain_of_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = (
+        "def run(p, t, y):\n"
+        "    (\n"
+        "        p.line(t, y)\n"
+        '        .title("x")\n'
+        "        .xlim(0,\n"
+        "              1)\n"
+        "    )\n"
+    )
+    found = _run(tmp_path, monkeypatch, source)
+    assert found["line.y"] == "  p.line(t, y)\n            ^"
+    assert found["title.text"] == '  .title("x")\n         ^^^'
+    assert found["xlim.low"] == "  .xlim(0,\n        ^"
+    assert found["xlim.high"] == "  1)\n  ^"
 
 
 def test_argument_spanning_lines_is_underlined_to_the_end_of_its_first_line(

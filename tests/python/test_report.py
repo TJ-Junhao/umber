@@ -20,6 +20,8 @@ from umber._errors import details, new_error
 # A stand-in for the public API: each call checks its arguments the way umber does and wraps
 # its body in api_call. Negative numbers are rejected with the parameter's name and a hint.
 _FACADE = """
+from typing import Self
+
 from umber._errors import DataError, UsageError, new_error
 from umber._report import api_call
 
@@ -43,11 +45,24 @@ def f(a, b, *, c=0):
 
 
 class Axes:
-    def line(self, x, y):
+    def line(self, x, y) -> Self:
         with api_call("Axes.line()", ("x", "y")):
             _check("Axes.line()", "x", x)
             _check("Axes.line()", "y", y)
             return self
+
+    def title(self, text) -> Self:
+        with api_call("Axes.title()", ("text",)):
+            return self
+
+    def xlim(self, low, high) -> "Axes":
+        with api_call("Axes.xlim()", ("low", "high")):
+            _check("Axes.xlim()", "low", low)
+            _check("Axes.xlim()", "high", high)
+            return self
+
+    def unannotated(self):
+        return self
 
 
 class Figure:
@@ -104,6 +119,9 @@ def apply(fn):
 
 class _Axes(Protocol):
     def line(self, x: int, y: int) -> Self: ...
+    def title(self, text: str) -> Self: ...
+    def xlim(self, low: int, high: int) -> Self: ...
+    def unannotated(self) -> Self: ...
 
 
 class Facade(Protocol):
@@ -199,15 +217,47 @@ def test_method_call(facade: Facade) -> None:
     assert _frames(info.value) == ["test_method_call"]
 
 
-def test_chained_call_on_a_call_result_gets_only_the_hint(facade: Facade) -> None:
-    # The receiver of the failing call is the result of another call, so the call target
-    # cannot be proven without running code, and the highlight is left out.
+def test_chained_call_highlights_inside_the_outer_call(facade: Facade) -> None:
     ax = facade.Axes()
     t, y = 1, -1
     with pytest.raises(ub.DataError) as info:
         ax.line(t, t).line(t, y)
-    assert _notes(info.value) == ["hint: pass a y of 0 or more."]
-    assert _frames(info.value) == ["test_chained_call_on_a_call_result_gets_only_the_hint"]
+    assert _notes(info.value) == [
+        "  ax.line(t, t).line(t, y)\n                        ^",
+        "hint: pass a y of 0 or more.",
+    ]
+    assert _frames(info.value) == ["test_chained_call_highlights_inside_the_outer_call"]
+
+
+def test_chained_setter_highlights_the_right_argument(facade: Facade) -> None:
+    ax = facade.Axes()
+    with pytest.raises(ub.DataError) as info:
+        ax.title("x").xlim(0, -1)
+    assert _notes(info.value) == [
+        '  ax.title("x").xlim(0, -1)\n                        ^^',
+        "hint: pass a high of 0 or more.",
+    ]
+
+
+def test_multi_line_chain_highlights_the_right_argument(facade: Facade) -> None:
+    ax = facade.Axes()
+    t, y = 1, -1
+    with pytest.raises(ub.DataError) as info:
+        (
+            ax.title("x")
+            .line(t, t)
+            .xlim(0, y)
+        )  # fmt: skip
+    assert _notes(info.value) == ["  .xlim(0, y)\n           ^", "hint: pass a high of 0 or more."]
+
+
+def test_chain_through_a_method_without_a_self_annotation_gets_only_the_hint(
+    facade: Facade,
+) -> None:
+    ax = facade.Axes()
+    with pytest.raises(ub.DataError) as info:
+        ax.unannotated().xlim(0, -1)
+    assert _notes(info.value) == ["hint: pass a high of 0 or more."]
 
 
 def test_partial_with_the_same_name_gets_only_the_hint(facade: Facade) -> None:
