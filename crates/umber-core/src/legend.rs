@@ -66,35 +66,56 @@ impl LegendEntry {
     }
 }
 
-/// The legend of one axes: the entries of its legend row, in series order.
+/// How the entries of a legend row are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowStyle {
+    /// Each entry is its swatch and its label.
+    Plain,
+    /// Each entry is a tinted pill holding a dot and the label.
+    Chips,
+}
+
+/// The legend of one axes: the entries of its legend row, in series order, and how the row
+/// draws them.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Legend {
     row: Vec<LegendEntry>,
+    row_style: RowStyle,
 }
 
 impl Legend {
     /// The legend of `marks` in the effective `style`: the style set on the axes, else the
     /// theme's.
     ///
-    /// - `Header` gives one row entry per labelled series, in series order. Unlabelled series
-    ///   are skipped; duplicate labels are kept.
+    /// - `Header` gives one row entry per labelled series, in series order, drawn
+    ///   [`RowStyle::Plain`]. Unlabelled series are skipped; duplicate labels are kept.
+    /// - `Chips` gives the same entries, drawn [`RowStyle::Chips`].
     /// - `None` gives nothing.
-    /// - `Chips` and `Direct` give nothing yet; these styles do not draw entries.
+    /// - `Direct` gives nothing yet; this style does not draw entries.
     pub fn new(style: LegendStyle, marks: &[ResolvedMark<'_>]) -> Legend {
-        let row = match style {
-            LegendStyle::Header => marks
+        let entries = || {
+            marks
                 .iter()
                 .flat_map(ResolvedMark::keys)
                 .filter_map(|key| LegendEntry::of(&key))
-                .collect(),
-            LegendStyle::Chips | LegendStyle::Direct | LegendStyle::None => Vec::new(),
+                .collect()
         };
-        Legend { row }
+        let (row, row_style) = match style {
+            LegendStyle::Header => (entries(), RowStyle::Plain),
+            LegendStyle::Chips => (entries(), RowStyle::Chips),
+            LegendStyle::Direct | LegendStyle::None => (Vec::new(), RowStyle::Plain),
+        };
+        Legend { row, row_style }
     }
 
     /// The entries of the legend row, in series order.
     pub fn row(&self) -> &[LegendEntry] {
         &self.row
+    }
+
+    /// How the row draws its entries.
+    pub fn row_style(&self) -> RowStyle {
+        self.row_style
     }
 
     /// Whether the legend shows nothing.
@@ -248,9 +269,22 @@ mod tests {
     #[test]
     fn other_styles_have_no_row_entries() {
         let f = figure();
-        for style in [LegendStyle::None, LegendStyle::Chips, LegendStyle::Direct] {
+        for style in [LegendStyle::None, LegendStyle::Direct] {
             assert!(legend_of(&f, style).is_empty(), "{style:?}");
         }
+    }
+
+    #[test]
+    fn chips_show_the_header_entries_as_chips() {
+        let f = figure();
+        let (header, chips) = (
+            legend_of(&f, LegendStyle::Header),
+            legend_of(&f, LegendStyle::Chips),
+        );
+        assert_eq!(header.row_style(), RowStyle::Plain);
+        assert_eq!(chips.row_style(), RowStyle::Chips);
+        assert_eq!(chips.row(), header.row());
+        assert!(!chips.is_empty());
     }
 
     #[test]
@@ -261,6 +295,7 @@ mod tests {
             .line(nums(&[0.0, 1.0]), &[1.0, 2.0], LineOptions::default())
             .unwrap();
         assert!(legend_of(&f, LegendStyle::Header).is_empty());
+        assert!(legend_of(&f, LegendStyle::Chips).is_empty());
         assert!(Legend::new(LegendStyle::Header, &[]).is_empty());
     }
 }

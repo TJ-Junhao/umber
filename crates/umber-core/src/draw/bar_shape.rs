@@ -1,6 +1,7 @@
 //! Bar outlines in plot points, shared by bars and histogram bins: where bars start, the
 //! clipping of their ends in axis space, the mapping to plot points, and the outline itself, a
-//! rectangle whose end away from the baseline may be rounded.
+//! rectangle whose end away from the baseline may be rounded; and the rounded rectangle that
+//! outline is built on, which also draws the pills of the chips legend.
 
 use super::mapping::{AxisMap, AxisMaps, AxisPoint};
 use crate::Transform;
@@ -164,36 +165,60 @@ pub(super) fn bar_outline(
     radius: f64,
     round_end: bool,
 ) -> Path {
+    let end_radius = if round_end { radius } else { 0.0 };
+    rounded_rect(x0, x1, base_y, end_y, 0.0, end_radius)
+}
+
+/// A rectangle between `x0` and `x1` and from `base_y` to `end_y`, in points, y down, whose two
+/// corners at `end_y` are rounded with quarter circles of `end_radius` and whose two corners at
+/// `base_y` with quarter circles of `base_radius`.
+///
+/// The end radius is clamped to `min(end_radius, width / 2, height)` and the base radius to
+/// `min(base_radius, width / 2, height - end radius)`, so the corners never overlap; a negative
+/// or NaN radius is 0, a square corner. A pill is `base_radius = end_radius = height / 2`.
+/// `end_y` may lie above or below `base_y`. A rectangle without width or height, or with a
+/// coordinate that is not finite, gives an empty path.
+///
+/// The path starts at the base on the `x0` side and runs up that side, along the end and down
+/// the `x1` side. All arithmetic is in `f64`; each coordinate is narrowed to `f32` once, at the
+/// end, so the caller passes coordinates within the `f32` range.
+pub(super) fn rounded_rect(
+    x0: f64,
+    x1: f64,
+    base_y: f64,
+    end_y: f64,
+    base_radius: f64,
+    end_radius: f64,
+) -> Path {
     let (x0, x1) = (x0.min(x1), x0.max(x1));
     let (width, height) = (x1 - x0, (end_y - base_y).abs());
     let mut path = Path::new();
     if !(width > 0.0 && height > 0.0 && width.is_finite() && height.is_finite()) {
         return path;
     }
-    let r = if round_end {
-        radius.max(0.0).min(width / 2.0).min(height)
-    } else {
-        0.0
-    };
+    let re = end_radius.max(0.0).min(width / 2.0).min(height);
+    let rb = base_radius.max(0.0).min(width / 2.0).min(height - re);
     // `away` points from the base towards the end.
     let away = (end_y - base_y).signum();
     let p = |x: f64, y: f64| Point {
         x: x as f32,
         y: y as f32,
     };
-    path.move_to(p(x0, base_y));
-    if r > 0.0 {
-        let k = KAPPA * r;
-        let shoulder = end_y - away * r;
+    // Square base corners use `base_y` itself, so a bar's base keeps its exact bits.
+    let base_shoulder = if rb > 0.0 { base_y + away * rb } else { base_y };
+    path.move_to(p(x0, base_shoulder));
+    if re > 0.0 {
+        let k = KAPPA * re;
+        let shoulder = end_y - away * re;
         path.line_to(p(x0, shoulder));
         path.cubic_to(
             p(x0, shoulder + away * k),
-            p(x0 + r - k, end_y),
-            p(x0 + r, end_y),
+            p(x0 + re - k, end_y),
+            p(x0 + re, end_y),
         );
-        path.line_to(p(x1 - r, end_y));
+        path.line_to(p(x1 - re, end_y));
         path.cubic_to(
-            p(x1 - r + k, end_y),
+            p(x1 - re + k, end_y),
             p(x1, shoulder + away * k),
             p(x1, shoulder),
         );
@@ -201,7 +226,21 @@ pub(super) fn bar_outline(
         path.line_to(p(x0, end_y));
         path.line_to(p(x1, end_y));
     }
-    path.line_to(p(x1, base_y));
+    path.line_to(p(x1, base_shoulder));
+    if rb > 0.0 {
+        let k = KAPPA * rb;
+        path.cubic_to(
+            p(x1, base_shoulder - away * k),
+            p(x1 - rb + k, base_y),
+            p(x1 - rb, base_y),
+        );
+        path.line_to(p(x0 + rb, base_y));
+        path.cubic_to(
+            p(x0 + rb - k, base_y),
+            p(x0, base_shoulder - away * k),
+            p(x0, base_shoulder),
+        );
+    }
     path.close();
     path
 }
@@ -314,6 +353,50 @@ mod tests {
             let path = bar_outline(0.0, 20.0, 100.0, end_y, 4.0, segment.outermost);
             assert_eq!(cubics(&path), 2);
         }
+    }
+
+    #[test]
+    fn a_pill_rounds_all_four_corners_with_half_its_height() {
+        // A 40 by 10 box from y 20 (base) to y 10 (end).
+        let path = rounded_rect(0.0, 40.0, 20.0, 10.0, 5.0, 5.0);
+        assert_eq!(cubics(&path), 4);
+        assert_eq!(
+            bounds(&path),
+            (Point { x: 0.0, y: 10.0 }, Point { x: 40.0, y: 20.0 })
+        );
+        // The flat top and bottom run between the end points of the half circles.
+        assert_eq!(end_points_at(&path, 10.0), vec![5.0, 35.0]);
+        assert_eq!(end_points_at(&path, 20.0), vec![35.0, 5.0]);
+        // Both sides are a single point, at mid height.
+        assert_eq!(end_points_at(&path, 15.0), vec![0.0, 0.0, 40.0, 40.0, 0.0]);
+    }
+
+    #[test]
+    fn rounded_rect_corners_never_overlap() {
+        // The end radius takes the height first; the base gets what is left.
+        let path = rounded_rect(0.0, 100.0, 10.0, 0.0, 8.0, 6.0);
+        assert_eq!(end_points_at(&path, 0.0), vec![6.0, 94.0]);
+        assert_eq!(end_points_at(&path, 10.0), vec![96.0, 4.0]);
+        // Both radii are limited to half the width.
+        let path = rounded_rect(0.0, 4.0, 100.0, 0.0, 50.0, 50.0);
+        assert_eq!(end_points_at(&path, 0.0), vec![2.0, 2.0]);
+        assert_eq!(end_points_at(&path, 100.0), vec![2.0, 2.0]);
+        // Negative and NaN radii are square corners.
+        assert_eq!(
+            cubics(&rounded_rect(0.0, 4.0, 10.0, 0.0, -1.0, f64::NAN)),
+            0
+        );
+        assert!(rounded_rect(0.0, 4.0, 10.0, 10.0, 1.0, 1.0).is_empty());
+    }
+
+    #[test]
+    fn a_bar_base_keeps_its_exact_bits() {
+        // The square base starts at `base_y` itself, the sign of zero included.
+        let path = bar_outline(10.0, 30.0, -0.0, 30.0, 4.0, true);
+        let Some(PathVerb::MoveTo(start)) = path.verbs().first() else {
+            panic!("the outline starts with a move");
+        };
+        assert!(start.y == 0.0 && start.y.is_sign_negative());
     }
 
     #[test]
