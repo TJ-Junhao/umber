@@ -307,7 +307,9 @@ def test_with_palette_rejects_a_non_sequence(colors: object) -> None:
 def test_with_palette_names_the_element_that_is_not_a_color() -> None:
     with pytest.raises(TypeError) as caught:
         BASE.with_palette(cast(list[ub.Color], [ub.Color.RED, "blue", 3]))
-    assert str(caught.value) == "Theme.with_palette(): colors[1] is str; colors[1] must be a Color."
+    assert str(caught.value) == (
+        "Theme.with_palette(): colors[1] is str; colors[1] must be of type Color."
+    )
     assert details(caught.value) == ("colors", COLOR_HINT)
 
 

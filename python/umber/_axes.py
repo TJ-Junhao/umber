@@ -1,5 +1,6 @@
 """``Axes``: the plot area of a figure, with its marks, texts, limits and legend."""
 
+from collections.abc import Sequence
 from enum import Enum
 from operator import attrgetter
 from typing import Any, Final, Generic, Never, Self, cast, final
@@ -11,15 +12,16 @@ from typing_extensions import TypeVar
 # so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
 # ``umber.Figure`` through the package once it has loaded.
 import umber
-from umber import _args, _color, _umber
-from umber._args import instance, real
+from umber import _args, _color, _series, _umber
+from umber._args import instance, integer, real, type_name
 from umber._color import Color
 from umber._enums import Dash, LegendStyle, Marker
 from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
+from umber._series import BarSeries
 from umber._types import Values
-from umber._values import FloatArray, axis_values, floats
+from umber._values import FloatArray, axis_values, floats, names
 
 # Old-style, invariant type variables with defaults: ``Figure().add_axes()`` is
 # ``Axes[float, float]`` without annotations, and ``Axes[str, float]`` is not assignable to
@@ -31,6 +33,8 @@ _CATEGORY: Final = Scale.category()
 _COLOR_HINT: Final = 'use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.'
 _COPY_HINT: Final = "copy the figure instead: copy.copy(ax.figure)."
 _PICKLE_HINT: Final = "save the figure with save_png() or save_svg(), or build it again."
+_SERIES_HINT: Final = 'pass a list of series, e.g. [BarSeries("North", [3, 5])].'
+_SERIES_ITEM_HINT: Final = 'make each series with BarSeries(), e.g. BarSeries("North", [3, 5]).'
 
 
 def _members_hint(cls: type[Enum]) -> str:
@@ -340,6 +344,166 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.scatter(xs, ys, name, spec, shape.value)
             return self
 
+    def bar(
+        self: "Axes[str, float]",
+        categories: Values[str],
+        heights: Values[float],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+    ) -> "Axes[str, float]":
+        """Add one bar per category, from the baseline to its height; for a category x axis.
+
+        A negative height draws below the baseline. A NaN height leaves its category without
+        a bar.
+
+        Args:
+            categories: The category names, each at most once.
+            heights: The bar heights, one per category.
+            label: The name shown in the legend; an empty string leaves the bars out of it.
+            color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If the data cannot be plotted: lengths differ, a category repeats, a
+                height is infinite or not positive on a log axis, or the x axis is not a
+                category axis.
+            StyleError: If ``label`` or a category name is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.bar(["North", "South", "East"], [3, 5, 2], label="2025")
+        """
+        with api_call():
+            context = "Axes.bar()"
+            name = _args.text(context, "label", label)
+            spec = _color_argument(context, color)
+            category_names = names(context, "categories", categories)
+            values = floats(context, "heights", heights)
+            self._native.bar(category_names, values, name, spec)
+            return self
+
+    def grouped_bar(
+        self: "Axes[str, float]", categories: Values[str], series: Sequence[BarSeries]
+    ) -> "Axes[str, float]":
+        """Add grouped bars: in each category, one bar per series, side by side.
+
+        Args:
+            categories: The category names, each at most once.
+            series: One or more ``BarSeries``, each with one height per category. The series
+                take their places in the group in this order.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``series`` is not a sequence of ``BarSeries``, or ``categories`` has
+                the wrong type.
+            DataError: If the data cannot be plotted: ``series`` is empty, a series has a
+                different length, a category repeats, a height is infinite or not positive on
+                a log axis, or the x axis is not a category axis.
+            StyleError: If a category name is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.grouped_bar(
+            ...     ["Q1", "Q2", "Q3"],
+            ...     [ub.BarSeries("North", [3, 5, 2]), ub.BarSeries("South", [4, 1, 3])],
+            ... )
+        """
+        with api_call():
+            context = "Axes.grouped_bar()"
+            arguments = _series_arguments(context, series)
+            category_names = names(context, "categories", categories)
+            self._native.grouped_bar(category_names, arguments)
+            return self
+
+    def stacked_bar(
+        self: "Axes[str, float]", categories: Values[str], series: Sequence[BarSeries]
+    ) -> "Axes[str, float]":
+        """Add stacked bars: in each category, the series stacked on one another.
+
+        Positive and negative heights stack separately, above and below the baseline.
+
+        Args:
+            categories: The category names, each at most once.
+            series: One or more ``BarSeries``, each with one height per category. The first
+                series sits on the baseline.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``series`` is not a sequence of ``BarSeries``, or ``categories`` has
+                the wrong type.
+            DataError: If the data cannot be plotted: ``series`` is empty, a series has a
+                different length, a category repeats, a height is infinite or not positive on
+                a log axis, a stack exceeds the supported magnitude, or the x axis is not a
+                category axis.
+            StyleError: If a category name is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.stacked_bar(
+            ...     ["Q1", "Q2", "Q3"],
+            ...     [ub.BarSeries("North", [3, 5, 2]), ub.BarSeries("South", [4, 1, 3])],
+            ... )
+        """
+        with api_call():
+            context = "Axes.stacked_bar()"
+            arguments = _series_arguments(context, series)
+            category_names = names(context, "categories", categories)
+            self._native.stacked_bar(category_names, arguments)
+            return self
+
+    def hist(
+        self: "Axes[float, float]",
+        values: Values[float],
+        *,
+        bins: int = 30,
+        label: str = "",
+        color: Color = Color.AUTO,
+    ) -> "Axes[float, float]":
+        """Add a histogram: the count of ``values`` in equal-width bins over their range.
+
+        NaN values are left out of the counts. The x axis must be linear.
+
+        Args:
+            values: The values to count.
+            bins: The number of bins, from 1 to ``MAX_BINS``.
+            label: The name shown in the legend; an empty string leaves the histogram out of
+                it.
+            color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If a value is infinite, or the x axis is a category axis.
+            StyleError: If ``bins`` is out of range, or ``label`` is too long.
+            UsageError: If the x axis is a log axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.hist([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bins=4, label="Sizes")
+        """
+        with api_call():
+            context = "Axes.hist()"
+            count = integer(context, "bins", bins)
+            name = _args.text(context, "label", label)
+            spec = _color_argument(context, color)
+            data = floats(context, "values", values)
+            self._native.hist(data, count, name, spec)
+            return self
+
     def _x_values(self, context: str, x: object) -> FloatArray | list[str]:
         """Convert x values; empty data is an empty list of names on a category x axis."""
         values = axis_values(context, "x", x)
@@ -381,6 +545,24 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 def _color_argument(context: str, value: object) -> tuple[int, int, float]:
     """Check a ``color`` argument and return its native form."""
     return _color.native(instance(context, "color", value, Color, _COLOR_HINT))
+
+
+def _series_arguments(
+    context: str, value: object
+) -> list[tuple[str, FloatArray, tuple[int, int, float]]]:
+    """Check a ``series`` argument and return the native form of each series."""
+    if isinstance(value, str | bytes) or not isinstance(value, Sequence):
+        message = f"series is {type_name(value)}; series must be a sequence of BarSeries."
+        raise new_error(TypeError, context, message, parameter="series", hint=_SERIES_HINT)
+    items = cast(Sequence[object], value)
+    arguments: list[tuple[str, FloatArray, tuple[int, int, float]]] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, BarSeries):
+            label = f"series[{index}]"
+            message = f"{label} is {type_name(item)}; {label} must be of type BarSeries."
+            raise new_error(TypeError, context, message, parameter="series", hint=_SERIES_ITEM_HINT)
+        arguments.append(_series.native(item))
+    return arguments
 
 
 _SCALES: Final = attrgetter("_x", "_y")
