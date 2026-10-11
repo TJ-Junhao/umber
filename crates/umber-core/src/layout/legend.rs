@@ -1243,4 +1243,48 @@ mod tests {
         let texts = items.iter().filter(|i| matches!(i, Item::Text(_))).count();
         assert_eq!((dots, texts), (30, shown));
     }
+
+    #[test]
+    fn areas_get_direct_labels_and_end_dots_as_lines_do() {
+        // The same series as areas or as lines, on the same limits: the same direct labels,
+        // with an end dot where the series ends inside the plot and none where the x limit cuts
+        // it.
+        use crate::model::AreaOptions;
+        let series: [(&str, Vec<f64>, Vec<f64>); 2] = [
+            ("Ends", vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 6.0]),
+            ("Cut", vec![0.0, 2.0, 4.0], vec![2.0, 5.0, 8.0]),
+        ];
+        let laid_out = |as_areas: bool| {
+            let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+            let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+            for (label, x, y) in &series {
+                let options = AreaOptions {
+                    label: (*label).to_owned(),
+                    ..AreaOptions::default()
+                };
+                let x = AxisData::Numbers(x.clone());
+                if as_areas {
+                    axes.area(x, y, options).unwrap();
+                } else {
+                    axes.line(x, y, options).unwrap();
+                }
+            }
+            axes.xlim(0.0, 3.0).unwrap().ylim(0.0, 10.0).unwrap();
+            let layout = plan_figure(&f, FontLibrary::global()).1;
+            layout
+                .direct
+                .iter()
+                .map(|d| {
+                    let label = text_of(d);
+                    (label.text.clone(), label.x, label.y, d.color, d.dot)
+                })
+                .collect::<Vec<_>>()
+        };
+        let areas = laid_out(true);
+        assert_eq!(areas, laid_out(false));
+        let texts: Vec<&str> = areas.iter().map(|(text, ..)| text.as_str()).collect();
+        assert_eq!(texts, ["Ends", "Cut"]);
+        assert!(areas[0].4.is_some(), "an area ending inside has an end dot");
+        assert!(areas[1].4.is_none(), "an area cut by the x limit has none");
+    }
 }

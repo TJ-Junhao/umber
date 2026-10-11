@@ -261,6 +261,53 @@ mod tests {
     }
 
     #[test]
+    fn areas_show_their_line_swatch_and_label_directly() {
+        use crate::model::AreaOptions;
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .area(
+                nums(&[0.0, 1.0]),
+                &[1.0, 2.0],
+                AreaOptions {
+                    label: "Load".to_owned(),
+                    dash: Dash::Dashed,
+                    ..AreaOptions::default()
+                },
+            )
+            .unwrap()
+            .scatter(nums(&[0.5]), &[1.5], scatter("Samples"))
+            .unwrap();
+        let palette = f.theme().palette();
+        // Header and chips: the area's entry is the line swatch in its dash and color.
+        for style in [LegendStyle::Header, LegendStyle::Chips] {
+            let legend = legend_of(&f, style);
+            let entries: Vec<(&str, Rgba, Swatch)> = legend
+                .row()
+                .iter()
+                .map(|e| (e.label(), e.color(), e.swatch()))
+                .collect();
+            assert_eq!(
+                entries,
+                [
+                    ("Load", palette[0], Swatch::Line { dash: Dash::Dashed }),
+                    ("Samples", palette[1], Swatch::Dot),
+                ]
+            );
+        }
+        // Direct: the area is labelled at its line's last point; the scatter goes to the row.
+        let legend = legend_of(&f, LegendStyle::Direct);
+        let [load] = legend.direct() else {
+            panic!("one direct label");
+        };
+        assert_eq!((load.label(), load.color()), ("Load", palette[0]));
+        assert_eq!(load.anchor().x, crate::resolve::AnchorX::Number(1.0));
+        assert_eq!(load.anchor().y, 2.0);
+        let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
+        assert_eq!(labels, ["Samples"]);
+    }
+
+    #[test]
     fn swatch_colors_keep_their_alpha() {
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         let color = ColorSpec::Fixed(Rgba {
