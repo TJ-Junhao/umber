@@ -5,17 +5,19 @@
 //! log space on a log axis), so marks never sit on the plot edge and the outermost ticks sit
 //! just inside it. The ticks are not changed by the padding. The exception is the x axis of an
 //! axes whose marks are all lines, which keeps the exact data extent. Explicit limits replace
-//! the auto range as given and are never padded. A category axis lists the marks' categories in
-//! order of first appearance. Tick positions are normalized to `[0, 1]` along the axis, so
-//! layout and drawing never touch data values again.
+//! the auto range as given and are never padded. A linear y axis that holds bars always
+//! includes 0, and a side of its nice domain that ends at 0 is not padded, so bars start on the
+//! plot edge. A category axis lists the marks' categories in order of first appearance. Tick
+//! positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch data
+//! values again.
 //!
 //! Marks are resolved here too, once per render: each mark becomes a [`ResolvedMark`], a typed
 //! record that carries the mark's data and its [`ColorSpec`] resolved against the theme's
 //! palette. Axes are resolved from these records, once per layout pass, and drawing reads them
 //! instead of the marks.
 
-use crate::model::{Axes, AxisData, LineMark, Mark, ScatterMark};
-use crate::scale::is_single_value;
+use crate::model::{Axes, AxisData, BarMark, LineMark, Mark, ScatterMark};
+use crate::scale::{Padding, is_single_value};
 use crate::{
     CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Tick, Transform,
 };
@@ -112,8 +114,9 @@ enum AutoLimits {
     /// The limits are the data extent.
     Exact,
     /// The data extent is widened to nice limits, which carry a tick at both ends, and the nice
-    /// domain is then padded (see [`ContinuousScale::padded`]); the ticks stay as they are.
-    Nice,
+    /// domain is then padded on the given sides (see [`ContinuousScale::padded`]); the ticks
+    /// stay as they are.
+    Nice(Padding),
 }
 
 /// What an axis fixes before any data is seen: whether it lists categories, and for a
@@ -197,10 +200,10 @@ fn continuous(
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
         match auto {
             AutoLimits::Exact => (scale, scale.ticks(target)),
-            AutoLimits::Nice => {
+            AutoLimits::Nice(padding) => {
                 let (nice, ticks) = scale.nice_with_ticks(target);
                 let single = data.is_some_and(|(lo, hi)| is_single_value(transform, lo, hi));
-                (if single { nice } else { nice.padded() }, ticks)
+                (if single { nice } else { nice.padded(padding) }, ticks)
             }
         }
     };
@@ -261,7 +264,7 @@ pub(crate) fn resolve(
             let auto = if all_lines {
                 AutoLimits::Exact
             } else {
-                AutoLimits::Nice
+                AutoLimits::Nice(Padding::BothSides)
             };
             continuous(transform, explicit, data, auto, x_target)
         }
@@ -279,7 +282,17 @@ pub(crate) fn resolve(
             explicit,
         } => {
             let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
-            let axis = continuous(transform, explicit, data, AutoLimits::Nice, y_target);
+            // Bars grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
+            // edge when it is a limit. On a log axis they grow from the bottom of the plot.
+            let bars = marks.iter().any(ResolvedMark::grows_from_baseline);
+            let (data, padding) = if bars && transform == Transform::Linear {
+                let with_zero = data.map(|(lo, hi)| (lo.min(0.0), hi.max(0.0)));
+                (with_zero, Padding::KeepZero)
+            } else {
+                (data, Padding::BothSides)
+            };
+            let auto = AutoLimits::Nice(padding);
+            let axis = continuous(transform, explicit, data, auto, y_target);
             let baseline = match &axis.scale {
                 AxisScale::Continuous(scale) => {
                     let (lo, hi) = scale.domain();
@@ -338,6 +351,13 @@ pub(crate) enum ResolvedMark<'a> {
         /// The marker color.
         color: Rgba,
     },
+    /// A bar mark.
+    Bar {
+        /// The mark.
+        mark: &'a BarMark,
+        /// The bar color.
+        color: Rgba,
+    },
 }
 
 impl<'a> ResolvedMark<'a> {
@@ -347,6 +367,7 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
+            ResolvedMark::Bar { .. } => &[],
         }
         .iter()
         .copied()
@@ -358,6 +379,7 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => category_names(mark.x()),
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
+            ResolvedMark::Bar { mark, .. } => mark.categories(),
         }
         .iter()
         .map(String::as_str)
@@ -369,16 +391,28 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
+            ResolvedMark::Bar { mark, .. } => mark.heights(),
         }
         .iter()
         .copied()
+    }
+
+    /// Whether the mark grows from the baseline, as bars do: such a mark puts 0 into a linear y
+    /// domain.
+    pub fn grows_from_baseline(&self) -> bool {
+        match self {
+            ResolvedMark::Line { .. } | ResolvedMark::Scatter { .. } => false,
+            ResolvedMark::Bar { .. } => true,
+        }
     }
 
     /// The mark's resolved color.
     #[cfg(test)]
     pub fn color(&self) -> Rgba {
         match *self {
-            ResolvedMark::Line { color, .. } | ResolvedMark::Scatter { color, .. } => color,
+            ResolvedMark::Line { color, .. }
+            | ResolvedMark::Scatter { color, .. }
+            | ResolvedMark::Bar { color, .. } => color,
         }
     }
 
@@ -404,6 +438,11 @@ impl<'a> ResolvedMark<'a> {
                     },
                 }]
             }
+            ResolvedMark::Bar { mark, color } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Bar,
+            }],
         }
     }
 }
@@ -449,7 +488,6 @@ pub(crate) enum SeriesKind {
         marker: Marker,
     },
     /// Filled bars.
-    #[allow(dead_code, reason = "bar marks will produce it")]
     Bar,
 }
 
@@ -469,6 +507,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
             match mark {
                 Mark::Line(mark) => ResolvedMark::Line { mark, color },
                 Mark::Scatter(mark) => ResolvedMark::Scatter { mark, color },
+                Mark::Bar(mark) => ResolvedMark::Bar { mark, color },
             }
         })
         .collect()
@@ -477,7 +516,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Figure, LineOptions, ScatterOptions};
+    use crate::model::{BarOptions, Figure, LineOptions, ScatterOptions};
     use crate::{LogBase, ScaleKind, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
@@ -1004,5 +1043,163 @@ mod tests {
         // Empty data still falls back to the unit range.
         let f = figure(LIN, LIN);
         assert_eq!(domains(&f), ((0.0, 1.0), (0.0, 1.0)));
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    /// Category x axes holding one bar mark of `heights`, on a y axis of `y`.
+    fn bar_figure(y: ScaleKind, heights: &[f64]) -> Figure {
+        let categories: Vec<String> = (0..heights.len()).map(|i| format!("c{i}")).collect();
+        let mut f = figure(ScaleKind::Category, y);
+        axes(&mut f)
+            .bar(categories, heights, BarOptions::default())
+            .unwrap();
+        f
+    }
+
+    fn y_domain(figure: &Figure) -> (f64, f64) {
+        resolve_axes(figure.axes().unwrap(), 5, 4)
+            .y
+            .continuous()
+            .unwrap()
+            .domain()
+    }
+
+    #[test]
+    fn bar_y_extent_includes_zero() {
+        // Positive bars: the nice limits 0..40, padded above only, so the bars start on the
+        // bottom edge, where the baseline and the first tick sit.
+        let f = bar_figure(LIN, &[12.0, 36.5]);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(y_domain(&f), (0.0, 42.0));
+        assert_eq!(labels(&r.y), ["0", "10", "20", "30", "40"]);
+        assert_eq!(r.y.ticks[0].pos.get(), 0.0);
+        assert_eq!(r.baseline.get(), 0.0);
+
+        // Negative bars: the mirror image, padded below only.
+        let f = bar_figure(LIN, &[-12.0, -36.5]);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(y_domain(&f), (-42.0, 0.0));
+        assert_eq!(r.baseline.get(), 1.0);
+
+        // Bars on both sides of 0: both sides padded as usual.
+        let f = bar_figure(LIN, &[-12.0, 36.5]);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_end_ticks_inset(&r.y);
+        assert!(labels(&r.y).contains(&"0"));
+
+        // A line below 0 on the same axes moves the lower limit off 0, so it is padded.
+        let mut f = bar_figure(LIN, &[12.0, 36.5]);
+        axes(&mut f)
+            .line(
+                AxisData::Categories(names(&["c0", "c1"])),
+                &[-9.0, 1.0],
+                LineOptions::default(),
+            )
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_end_ticks_inset(&r.y);
+
+        // Without bars, data away from 0 keeps its own nice limits.
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .line(
+                AxisData::Categories(names(&["a", "b"])),
+                &[12.0, 36.5],
+                LineOptions::default(),
+            )
+            .unwrap();
+        assert!(y_domain(&f).0 > 0.0, "{:?}", y_domain(&f));
+
+        // Log y: 0 cannot be shown, so the axis fits the heights and pads both sides; the
+        // baseline is the bottom of the plot.
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let f = bar_figure(log, &[3.0, 4.2e4]);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert!(close(y_domain(&f), pad_log(1.0, 1e5)), "{:?}", y_domain(&f));
+        assert_eq!(r.baseline.get(), 0.0);
+
+        // All-NaN bars have no extent: the axis falls back to 0..1, as for other marks.
+        let f = bar_figure(LIN, &[f64::NAN, f64::NAN]);
+        assert_eq!(y_domain(&f), (0.0, 1.0));
+        // Explicit limits are used as given, even when they exclude 0.
+        let mut f = bar_figure(LIN, &[12.0, 36.5]);
+        axes(&mut f).ylim(10.0, 20.0).unwrap();
+        assert_eq!(y_domain(&f), (10.0, 20.0));
+    }
+
+    #[test]
+    fn bar_categories_join_first_appearance() {
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .line(cats(&["b", "a"]), &[1.0, 2.0], LineOptions::default())
+            .unwrap()
+            .bar(
+                names(&["c", "a", "d"]),
+                &[1.0, 2.0, 3.0],
+                BarOptions::default(),
+            )
+            .unwrap()
+            .scatter(cats(&["e", "d"]), &[1.0, 2.0], ScatterOptions::default())
+            .unwrap()
+            .bar(names(&["f"]), &[1.0], BarOptions::default())
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(labels(&r.x), ["b", "a", "c", "d", "e", "f"]);
+    }
+
+    #[test]
+    fn each_bar_mark_takes_one_auto_color() {
+        use crate::Alpha;
+        let mut f = figure(ScaleKind::Category, LIN);
+        let palette = f.theme().palette().to_vec();
+        let fixed = Rgba::opaque(9, 8, 7);
+        let color = |color: ColorSpec, label: &str| BarOptions {
+            label: label.to_owned(),
+            color,
+        };
+        axes(&mut f)
+            .line(cats(&["a"]), &[1.0], LineOptions::default())
+            .unwrap()
+            .bar(
+                names(&["a", "b"]),
+                &[1.0, 2.0],
+                color(ColorSpec::AUTO, "first"),
+            )
+            .unwrap()
+            .bar(names(&["a"]), &[1.0], color(ColorSpec::Fixed(fixed), ""))
+            .unwrap()
+            .bar(
+                names(&["c"]),
+                &[1.0],
+                color(
+                    ColorSpec::Palette {
+                        index: 6,
+                        alpha: Alpha::OPAQUE,
+                    },
+                    "",
+                ),
+            )
+            .unwrap()
+            .bar(names(&["d"]), &[1.0], color(ColorSpec::AUTO, "last"))
+            .unwrap();
+        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        let colors: Vec<Rgba> = resolved.iter().map(ResolvedMark::color).collect();
+        assert_eq!(
+            colors,
+            [palette[0], palette[1], fixed, palette[6], palette[2]]
+        );
+        let keys: Vec<SeriesKey<'_>> = resolved.iter().flat_map(ResolvedMark::keys).collect();
+        assert_eq!(
+            keys[1],
+            SeriesKey {
+                label: "first",
+                color: palette[1],
+                kind: SeriesKind::Bar,
+            }
+        );
+        assert_eq!(keys[4].label, "last");
     }
 }
