@@ -7,13 +7,20 @@ to the public function is decided from the shape of the call alone:
 
 - The call must end in the public function's name (the class name for a constructor).
 - It must not unpack arguments with ``*`` or ``**``.
-- Its positional count and keyword names must bind to the function's signature, and every
-  parameter they leave out must still hold its default value in the running call.
+- Its positional count and keyword names must bind to the function's parameters (read
+  from its code object and defaults, never its annotations), and every parameter they
+  leave out must still hold its default value in the running call.
+- Every argument written as a literal must equal the value its parameter received.
 
 A callable that adds arguments without a frame of its own, such as ``functools.partial``,
-breaks the binding or changes a default, so it gets no highlight. A Python wrapper has a
-frame of its own, which is then the caller, so the highlight lands inside it. The argument
-the parameter binds to is the one highlighted.
+breaks the binding, changes a default or contradicts a literal, so it gets no highlight. A
+Python wrapper has a frame of its own, which is then the caller, so the highlight lands
+inside it. The argument the parameter binds to is the one highlighted.
+
+The highlight is a convenience, and one case is a known limitation: C-level dispatch that
+passes the public function different arguments under the same name and count, such as
+``operator.methodcaller`` or a callback that a built-in calls (``list.sort(key=...)``), can
+make the highlight point at an argument the function did not receive.
 
 Whenever the source or the positions are unavailable, the source is too large to parse
 quickly, the call does not fit, or the line cannot be measured in display columns, no
@@ -33,6 +40,7 @@ from typing import cast
 from umber._ansi import bold, bold_red
 
 _INDENT = "  "
+_NOT_LITERAL = object()
 _MAX_SOURCE_BYTES = 512 * 1024
 """Larger sources are not parsed: the note is optional and parsing costs grow with size."""
 
@@ -216,39 +224,89 @@ def _bound_argument(
     arguments: Mapping[str, object],
     parameter: str,
 ) -> ast.expr | ast.keyword | None:
-    """Return the node ``parameter`` binds to, if the call's shape fits ``function``."""
+    """Return the node ``parameter`` binds to, if the call's shape fits ``function``.
+
+    The binding follows Python's rules for the function's parameters, read from its code
+    object and defaults; its annotations are never touched.
+    """
     if any(isinstance(arg, ast.Starred) for arg in call.args):
         return None
     if any(keyword.arg is None for keyword in call.keywords):
         return None
-    signature = inspect.signature(function, follow_wrapped=False)
-    parameters = list(signature.parameters.values())
-    if binds_first:
-        parameters = parameters[1:]
-    signature = signature.replace(parameters=parameters)
-    nodes: list[ast.expr | ast.keyword] = [*call.args, *call.keywords]
-    try:
-        bound = signature.bind(
-            *range(len(call.args)),
-            **{
-                keyword.arg: len(call.args) + i
-                for i, keyword in enumerate(call.keywords)
-                if keyword.arg
-            },
-        )
-    except TypeError:
+    code = function.__code__
+    if code.co_flags & (inspect.CO_VARARGS | inspect.CO_VARKEYWORDS):
         return None
-    for name, declared in signature.parameters.items():
-        if name in bound.arguments:
-            continue
-        if declared.kind in (declared.VAR_POSITIONAL, declared.VAR_KEYWORD):
+    skip = 1 if binds_first else 0
+    names = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
+    positional = names[skip : code.co_argcount]
+    positional_only = positional[: max(code.co_posonlyargcount - skip, 0)]
+    keyword_only = names[code.co_argcount :]
+    defaults = _defaults(function)
+    if len(call.args) > len(positional):
+        return None
+    bound: dict[str, ast.expr | ast.keyword] = dict(zip(positional, call.args, strict=False))
+    for keyword in call.keywords:
+        name = keyword.arg
+        if name is None or name in bound or name in positional_only:
             return None
+        if name not in positional and name not in keyword_only:
+            return None
+        bound[name] = keyword
+    for name in (*positional, *keyword_only):
+        if name in bound:
+            if not _agrees(bound[name], arguments, name):
+                return None
+            continue
         # A parameter the source leaves out must have its default; anything else was supplied
         # by a callable between the source and the function, such as functools.partial.
-        if name not in arguments or arguments[name] is not declared.default:
+        if name not in defaults or name not in arguments or arguments[name] is not defaults[name]:
             return None
-    index = bound.arguments.get(parameter)
-    return nodes[index] if isinstance(index, int) else None
+    return bound.get(parameter)
+
+
+def _defaults(function: FunctionType) -> dict[str, object]:
+    """Return the default value of each parameter of ``function`` that has one."""
+    code = function.__code__
+    positional = code.co_varnames[: code.co_argcount]
+    values = function.__defaults__ or ()
+    defaults: dict[str, object] = dict(
+        zip(positional[len(positional) - len(values) :], values, strict=True)
+    )
+    defaults.update(function.__kwdefaults__ or {})
+    return defaults
+
+
+def _agrees(node: ast.expr | ast.keyword, arguments: Mapping[str, object], name: str) -> bool:
+    """Return whether a literal argument has the value the parameter received.
+
+    A callable such as ``functools.partial`` can shift the source's arguments onto other
+    parameters; where an argument is a literal, the shift shows as a different value.
+    Arguments that are not literals are not evaluated and always agree.
+    """
+    value = node.value if isinstance(node, ast.keyword) else node
+    literal = _literal(value)
+    if literal is _NOT_LITERAL:
+        return True
+    if name not in arguments:
+        return False
+    received = arguments[name]
+    # Both values have the same built-in type, so the comparison runs no user code.
+    return type(received) is type(literal) and received == literal
+
+
+def _literal(node: ast.expr) -> object:
+    """Return the value of a constant or a negated numeric constant, else a marker."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if (
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, ast.USub)
+        and isinstance(node.operand, ast.Constant)
+        and type(node.operand.value) in (int, float, complex)
+    ):
+        number = cast(int | float | complex, node.operand.value)
+        return -number
+    return _NOT_LITERAL
 
 
 def _shown(raw: str, start: int, end: int | None) -> Highlight | None:

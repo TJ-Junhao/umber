@@ -1,11 +1,14 @@
 import functools
+import gc
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import sys
 import textwrap
 import traceback
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, Self, cast
@@ -117,12 +120,49 @@ def rebinding(a, *, scale=1.0):
         _check("rebinding()", "a", a)
 
 
+def optional(x, y=0):
+    with api_call():
+        _check("optional()", "x", x)
+        _check("optional()", "y", y)
+
+
+def optional_none(x, y=None):
+    with api_call():
+        _check("optional_none()", "x", x)
+
+
+def unary(x):
+    with api_call():
+        _check("unary()", "x", x)
+
+
+def sortkey(key):
+    with api_call():
+        _check("sortkey()", "key", key)
+        return key
+
+
+def consume(obj):
+    with api_call():
+        pass
+
+
+def consume_rebound(obj):
+    with api_call():
+        obj = None
+
+
 EVENTS = []
 
 
 def _side_effect():
     EVENTS.append("annotation evaluated")
     return Self
+
+
+def annotated(x: _side_effect()) -> _side_effect():
+    with api_call():
+        _check("annotated()", "x", x)
 
 
 class Annotated(Axes):
@@ -156,6 +196,10 @@ class Facade(Protocol):
     def unexpected(self, kind: type[Exception]) -> None: ...
     def apply(self, fn: Callable[[], object]) -> None: ...
     def rebinding(self, a: int, *, scale: float = 1.0) -> None: ...
+    def optional(self, x: int, y: int = 0) -> None: ...
+    def consume(self, obj: object) -> None: ...
+    def consume_rebound(self, obj: object) -> None: ...
+    def annotated(self, x: int) -> None: ...
 
 
 def _write_facade(directory: Path) -> Path:
@@ -860,3 +904,170 @@ def test_parameters_rebound_in_the_body_keep_the_highlight(facade: Facade) -> No
         "  facade.rebinding(a)\n                   ^",
         "hint: pass a a of 0 or more.",
     ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        """
+        optional = partial(facade.optional, -1)
+        def run():
+            optional(0)
+        """,
+        """
+        optional_none = partial(facade.optional_none, -1)
+        def run():
+            optional_none(None)
+        """,
+    ],
+    ids=["zero", "none"],
+)
+def test_partial_shifting_a_literal_onto_a_default_gets_only_the_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, facade: Facade, body: str
+) -> None:
+    # The source argument binds to x by shape, and y keeps its default, but the literal does
+    # not match the x the function received (the partial's -1).
+    err = _run_caller(tmp_path, monkeypatch, facade, body)
+    assert _notes(err) == ["hint: pass a x of 0 or more."]
+
+
+def test_literal_arguments_that_match_keep_the_highlight(facade: Facade) -> None:
+    with pytest.raises(ub.DataError) as info:
+        facade.optional(-1, 0)
+    assert _notes(info.value) == [
+        "  facade.optional(-1, 0)\n                  ^^",
+        "hint: pass a x of 0 or more.",
+    ]
+
+
+# Known limitation: C-level dispatch can call the public function with other arguments under
+# the same name and count, and the highlight then points at an argument the function did not
+# receive. These tests pin that behaviour so a change to it is noticed.
+_C_LEVEL_DISPATCH = {
+    "methodcaller": (
+        """
+        from operator import methodcaller
+        class Receiver:
+            unary = staticmethod(facade.unary)
+        unary = methodcaller("unary", -1)
+        def run():
+            unary(Receiver())
+        """,
+        ["  unary(Receiver())\n        ^^^^^^^^^^", "hint: pass a x of 0 or more."],
+    ),
+    "builtin_callback": (
+        """
+        sortkey = [-1, 3].sort
+        def run():
+            sortkey(key=facade.sortkey)
+        """,
+        [
+            "  sortkey(key=facade.sortkey)\n          ^^^^^^^^^^^^^^^^^^",
+            "hint: pass a key of 0 or more.",
+        ],
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("body", "notes"), _C_LEVEL_DISPATCH.values(), ids=_C_LEVEL_DISPATCH.keys()
+)
+def test_c_level_dispatch_is_a_known_limitation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, facade: Facade, body: str, notes: list[str]
+) -> None:
+    err = _run_caller(tmp_path, monkeypatch, facade, body)
+    assert _notes(err) == notes
+
+
+def test_reporting_never_evaluates_annotations(facade: Facade) -> None:
+    # On Python 3.14 annotations are evaluated on first access; reporting never accesses them.
+    events = list(cast(list[str], cast(object, facade).__dict__["EVENTS"]))
+    x = -1
+    with pytest.raises(ub.DataError) as info:
+        facade.annotated(x)
+    assert _notes(info.value) == [
+        "  facade.annotated(x)\n                   ^",
+        "hint: pass a x of 0 or more.",
+    ]
+    assert cast(object, facade).__dict__["EVENTS"] == events
+
+
+class _Payload:
+    """An object whose lifetime the tests observe."""
+
+
+@pytest.mark.parametrize("name", ["consume", "consume_rebound"])
+def test_arguments_are_released_when_the_call_returns(facade: Facade, name: str) -> None:
+    function: Callable[[object], None] = getattr(facade, name)
+    gc.collect()
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        payload = _Payload()
+        ref = weakref.ref(payload)
+        function(payload)
+        del payload
+        # Released by reference counting alone, without waiting for the cycle collector.
+        assert ref() is None
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def test_stop_requests_while_building_notes_propagate(
+    facade: Facade, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupted(*args: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_report, "find", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        facade.f(1, -1)
+
+
+def test_refused_frame_inspection_changes_nothing_but_the_highlight(tmp_path: Path) -> None:
+    script = tmp_path / "audited.py"
+    script.write_text(
+        textwrap.dedent(
+            """\
+            import json
+            import sys
+            from umber._errors import DataError, new_error
+            from umber._report import api_call
+
+            def consume(obj):
+                with api_call():
+                    return obj
+
+            def check(x):
+                with api_call():
+                    if x < 0:
+                        raise new_error(
+                            DataError, "check()", "x is -1; x must be 0 or greater.",
+                            parameter="x", hint="pass 0 or more.",
+                        )
+
+            def refuse(event, args):
+                if event == "sys._getframe":
+                    raise RuntimeError("frame inspection refused")
+
+            sys.addaudithook(refuse)
+            value = object()
+            assert consume(value) is value
+            try:
+                check(-1)
+            except DataError as err:
+                print(json.dumps({"message": str(err), "notes": err.__notes__}))
+            """
+        ),
+        encoding="utf-8",
+    )
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHON_COLORS", "FORCE_COLOR")}
+    env["NO_COLOR"] = "1"
+    result = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, env=env, check=True
+    )
+    assert json.loads(result.stdout) == {
+        "message": "check(): x is -1; x must be 0 or greater.",
+        "notes": ["hint: pass 0 or more."],
+    }

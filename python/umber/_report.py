@@ -36,18 +36,30 @@ class ApiCall:
 
     def __init__(self) -> None:
         """Create the reporter; ``__enter__`` records the call's arguments."""
-        self._arguments: dict[str, object] = {}
+        self._arguments: dict[str, object] | None = None
 
     def __enter__(self) -> None:
-        """Record the values the public function's parameters start with."""
-        frame = inspect.currentframe()
-        public = None if frame is None else frame.f_back
-        if public is None:
-            return
-        code = public.f_code
-        values = public.f_locals
-        names = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
-        self._arguments = {name: values[name] for name in names if name in values}
+        """Record the values the public function's parameters start with.
+
+        Recording is best effort: where frames cannot be inspected, for example because an
+        audit hook refuses it, the call runs exactly as before and only loses the highlight.
+        """
+        frame: FrameType | None = None
+        public: FrameType | None = None
+        try:
+            frame = inspect.currentframe()
+            public = None if frame is None else frame.f_back
+            if public is not None:
+                code = public.f_code
+                values = public.f_locals
+                names = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
+                self._arguments = {name: values[name] for name in names if name in values}
+        except Exception:
+            self._arguments = None
+        finally:
+            # This frame refers to itself through ``frame``; dropping the references keeps
+            # the caller's objects from waiting for the cycle collector.
+            del frame, public
 
     def __exit__(
         self,
@@ -56,39 +68,64 @@ class ApiCall:
         tb: TracebackType | None,
     ) -> None:
         """Add notes to an umber error and drop the package's frames; never suppress it."""
+        # The recorded arguments are needed at most until here; release them on every path.
+        arguments, self._arguments = self._arguments, None
         if exc is None:
             return
         found = details(exc)
         if found is None:
             return
         parameter, hint = found
-        public = _public_frame()
-        caller = None if public is None else public.f_back
-        if not (caller is not None and _in_package(caller)) and not hasattr(exc, _LOCATED):
+        public: FrameType | None = None
+        caller: FrameType | None = None
+        try:
             try:
-                self._add_notes(exc, public, caller, parameter, hint)
+                public = _public_frame()
+                caller = None if public is None else public.f_back
+                nested = caller is not None and _in_package(caller)
             except Exception:
-                # The notes only add to an error that is already complete. Building them
-                # reads the user's source and environment, so a failure there, of any kind,
-                # must not replace the error the user needs to see.
+                # Frames cannot be inspected: report here, without a highlight.
+                public = caller = None
+                nested = False
+            if not nested and not hasattr(exc, _LOCATED):
+                try:
+                    self._add_notes(exc, public, caller, arguments, parameter, hint)
+                except Exception:
+                    # The notes only add to an error that is already complete. Building them
+                    # reads the user's source and environment, so a failure there must not
+                    # replace the error the user needs to see. BaseException is deliberately
+                    # not caught: KeyboardInterrupt, SystemExit and GeneratorExit are requests
+                    # to stop, not failures of the notes, and must propagate.
+                    pass
+                setattr(exc, _LOCATED, True)
+            try:
+                # The interpreter re-raises the exception with this traceback and adds the
+                # frames above as it propagates, so the package frames never reappear.
+                exc.__traceback__ = _without_package_frames(exc.__traceback__)
+            except Exception:
+                # Frames cannot be inspected: the full traceback stays.
                 pass
-            setattr(exc, _LOCATED, True)
-        # The interpreter re-raises the exception with this traceback and adds the frames
-        # above as it propagates, so the package frames never reappear.
-        exc.__traceback__ = _without_package_frames(exc.__traceback__)
+        finally:
+            del public, caller
 
     def _add_notes(
         self,
         exc: BaseException,
         public: FrameType | None,
         caller: FrameType | None,
+        arguments: dict[str, object] | None,
         parameter: str | None,
         hint: str | None,
     ) -> None:
         """Add the highlight note, then the hint note, styled when colour is enabled."""
         color = color_enabled()
-        if public is not None and caller is not None and parameter is not None:
-            highlight = find(caller, public, self._arguments, parameter)
+        if (
+            public is not None
+            and caller is not None
+            and arguments is not None
+            and parameter is not None
+        ):
+            highlight = find(caller, public, arguments, parameter)
             if highlight is not None:
                 exc.add_note(render(highlight, color=color))
         if hint is not None:
