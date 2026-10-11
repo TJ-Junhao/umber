@@ -59,7 +59,7 @@ fn narrow_limits_stay_bounded_on_every_axis_combination() {
                 }
                 let scene = f.to_scene(FontLibrary::global());
                 assert_scene_bounded(&scene);
-                if scene.items.len() == 2 {
+                if scene.items.len() == 3 {
                     visible += 1;
                 }
             }
@@ -134,7 +134,7 @@ fn check_against_oracle(figure: &Figure, a: AxisPoint, b: AxisPoint) -> Option<f
     let (maps, bounds) = axis_clip(figure);
     let want = oracle::exact_plot(a, b, &bounds, maps);
     let got: Vec<Vec<Point>> = match scene.items.as_slice() {
-        [_, Item::Group { items, .. }] => items
+        [_, Item::Group { items, .. }, _] => items
             .iter()
             .filter_map(|item| match item {
                 Item::Stroke { path, .. } => Some(subpaths(path)),

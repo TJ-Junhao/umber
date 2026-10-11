@@ -7,7 +7,9 @@ use crate::test_support::scene::assert_scene_bounded;
 use crate::{FontLibrary, Rgba, ScaleKind, Theme};
 
 #[test]
-fn marks_group_is_clipped_to_the_plot_area() {
+fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
+    // Graphite lines are 1.8 pt wide: the clip reaches 0.9 pt past the left and right edges,
+    // and its top and bottom are the plot area's.
     let f = line_figure(
         Theme::graphite(),
         &[0.0, 1.0],
@@ -17,6 +19,51 @@ fn marks_group_is_clipped_to_the_plot_area() {
     let scene = f.to_scene(FontLibrary::global());
     let plot = plot_of(&f);
     let (clip, items) = mark_group(&scene);
+    let half = f64::from(Theme::graphite().line_width()) / 2.0;
+    assert!((half - 0.9).abs() < 1e-6);
+    assert_eq!(
+        clip,
+        Rect {
+            x: (plot.x - half) as f32,
+            y: plot.y as f32,
+            width: (plot.width + 2.0 * half) as f32,
+            height: plot.height as f32,
+        }
+    );
+    assert_eq!(items.len(), 1);
+    assert_scene_bounded(&scene);
+
+    // The widest line sets the widening, whatever other marks the axes hold.
+    let theme = Theme::graphite().with_line_width(6.0).unwrap();
+    let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .scatter(nums(&[0.0, 1.0]), &[0.0, 1.0], ScatterOptions::default())
+        .unwrap()
+        .line(nums(&[0.0, 1.0]), &[1.0, 0.0], LineOptions::default())
+        .unwrap();
+    let scene = f.to_scene(FontLibrary::global());
+    let plot = plot_of(&f);
+    let (clip, _) = mark_group(&scene);
+    assert_eq!(
+        clip,
+        Rect {
+            x: (plot.x - 3.0) as f32,
+            y: plot.y as f32,
+            width: (plot.width + 6.0) as f32,
+            height: plot.height as f32,
+        }
+    );
+
+    // Without line marks the clip is the plot area.
+    let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .scatter(nums(&[0.0, 1.0]), &[0.0, 1.0], ScatterOptions::default())
+        .unwrap();
+    let scene = f.to_scene(FontLibrary::global());
+    let plot = plot_of(&f);
+    let (clip, _) = mark_group(&scene);
     assert_eq!(
         clip,
         Rect {
@@ -26,15 +73,13 @@ fn marks_group_is_clipped_to_the_plot_area() {
             height: plot.height as f32,
         }
     );
-    assert_eq!(items.len(), 1);
-    assert_scene_bounded(&scene);
     // No marks, or none visible: no marks group.
     let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .line(nums(&[f64::NAN]), &[f64::NAN], LineOptions::default())
         .unwrap();
-    assert_eq!(f.to_scene(FontLibrary::global()).items.len(), 1);
+    assert_eq!(f.to_scene(FontLibrary::global()).items.len(), 2);
 }
 
 #[test]

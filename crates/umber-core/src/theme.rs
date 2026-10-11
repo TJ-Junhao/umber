@@ -65,23 +65,6 @@ pub enum Marker {
     Cross,
 }
 
-/// Where y tick labels sit relative to the plot area.
-///
-/// # Examples
-///
-/// ```
-/// use umber_core::TickLabelPlacement;
-///
-/// assert_ne!(TickLabelPlacement::AboveGridline, TickLabelPlacement::Outside);
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TickLabelPlacement {
-    /// Inside the plot area, just above each gridline.
-    AboveGridline,
-    /// Outside the plot area, to its left.
-    Outside,
-}
-
 /// How legends are drawn.
 ///
 /// # Examples
@@ -171,7 +154,6 @@ pub struct Theme {
     title_size: f32,
     body_size: f32,
     font_scale: f32,
-    tick_label_placement: TickLabelPlacement,
     legend_style: LegendStyle,
     area_fill: AreaFill,
     line_width: f32,
@@ -256,7 +238,6 @@ impl Theme {
             title_size: 13.0,
             body_size: 8.5,
             font_scale: 1.0,
-            tick_label_placement: TickLabelPlacement::AboveGridline,
             legend_style: LegendStyle::Header,
             area_fill: AreaFill::None,
             line_width: 2.0,
@@ -296,7 +277,6 @@ impl Theme {
             title_size: 13.0,
             body_size: 8.5,
             font_scale: 1.0,
-            tick_label_placement: TickLabelPlacement::Outside,
             legend_style: LegendStyle::Direct,
             area_fill: AreaFill::None,
             line_width: 1.8,
@@ -336,7 +316,6 @@ impl Theme {
             title_size: 12.5,
             body_size: 8.5,
             font_scale: 1.0,
-            tick_label_placement: TickLabelPlacement::Outside,
             legend_style: LegendStyle::Chips,
             area_fill: AreaFill::Gradient,
             line_width: 1.9,
@@ -370,7 +349,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().background().to_hex(), "#FAF6F0");
     /// ```
@@ -384,7 +363,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().text_color().to_hex(), "#2B211B");
     /// ```
@@ -398,7 +377,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().muted_color().to_hex(), "#8C8076");
     /// ```
@@ -412,7 +391,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().grid_color().to_hex(), "#DDD3C7");
     /// ```
@@ -426,7 +405,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().grid_lines(), GridLines::Horizontal);
     /// ```
@@ -440,7 +419,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().grid_dash(), Dash::Dotted);
     /// ```
@@ -454,7 +433,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().grid_width(), 0.75);
     /// ```
@@ -468,7 +447,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::midnight().baseline_color().to_hex(), "#3C4250");
     /// ```
@@ -482,7 +461,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().baseline_width(), 1.3);
     /// ```
@@ -496,7 +475,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().title_font(), Font::SourceSerif4);
     /// ```
@@ -510,7 +489,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::midnight().body_font(), Font::JetBrainsMono);
     /// ```
@@ -524,7 +503,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::midnight().title_size(), 12.5);
     /// ```
@@ -538,7 +517,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().body_size(), 8.5);
     /// ```
@@ -552,7 +531,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().font_scale(), 1.0);
     /// ```
@@ -561,26 +540,12 @@ impl Theme {
         self.font_scale
     }
 
-    /// Where y tick labels sit relative to the plot area.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
-    ///
-    /// assert_eq!(Theme::pigment().tick_label_placement(), TickLabelPlacement::AboveGridline);
-    /// ```
-    #[must_use]
-    pub fn tick_label_placement(&self) -> TickLabelPlacement {
-        self.tick_label_placement
-    }
-
     /// How legends are drawn.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::graphite().legend_style(), LegendStyle::Direct);
     /// ```
@@ -594,7 +559,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::midnight().area_fill(), AreaFill::Gradient);
     /// ```
@@ -608,7 +573,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::pigment().line_width(), 2.0);
     /// ```
@@ -622,7 +587,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::midnight().marker_size(), 6.2);
     /// ```
@@ -636,7 +601,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::graphite().marker_alpha(), 0.9);
     /// ```
@@ -650,7 +615,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::midnight().bar_corner_radius(), 3.5);
     /// ```
@@ -664,7 +629,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
     ///
     /// assert_eq!(Theme::graphite().hist_gap(), 1.2);
     /// ```
@@ -684,7 +649,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_palette(&[Rgba::RED, Rgba::BLUE])?;
     /// # let _ = theme;
@@ -713,7 +678,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_background(Rgba::WHITE)?;
     /// # let _ = theme;
@@ -733,7 +698,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_text_color(Rgba::WHITE)?;
     /// # let _ = theme;
@@ -753,7 +718,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_muted_color(Rgba::GRAY)?;
     /// # let _ = theme;
@@ -773,7 +738,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_grid_color(Rgba::GRAY)?;
     /// # let _ = theme;
@@ -793,7 +758,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_baseline_color(Rgba::GRAY)?;
     /// # let _ = theme;
@@ -813,7 +778,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_grid_lines(GridLines::Both)?;
     /// # let _ = theme;
@@ -833,7 +798,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_grid_dash(Dash::Solid)?;
     /// # let _ = theme;
@@ -853,7 +818,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_title_font(Font::Inter)?;
     /// # let _ = theme;
@@ -873,7 +838,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_body_font(Font::Inter)?;
     /// # let _ = theme;
@@ -899,7 +864,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_font_scale(1.2)?;
     /// # let _ = theme;
@@ -929,7 +894,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_line_width(2.5)?;
     /// # let _ = theme;
@@ -959,7 +924,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_marker_size(7.0)?;
     /// # let _ = theme;
@@ -989,7 +954,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_marker_alpha(0.5)?;
     /// # let _ = theme;
@@ -1019,7 +984,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_baseline_width(1.5)?;
     /// # let _ = theme;
@@ -1049,7 +1014,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_bar_corner_radius(2.0)?;
     /// # let _ = theme;
@@ -1079,7 +1044,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_hist_gap(1.0)?;
     /// # let _ = theme;
@@ -1098,26 +1063,6 @@ impl Theme {
         })
     }
 
-    /// Replace the tick label placement.
-    ///
-    /// Returns a new theme; `self` is unchanged.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
-    ///
-    /// let theme = Theme::pigment().with_tick_label_placement(TickLabelPlacement::Outside)?;
-    /// # let _ = theme;
-    /// # Ok::<(), umber_core::Error>(())
-    /// ```
-    pub fn with_tick_label_placement(&self, value: TickLabelPlacement) -> Result<Theme> {
-        Ok(Theme {
-            tick_label_placement: value,
-            ..self.clone()
-        })
-    }
-
     /// Replace the legend style.
     ///
     /// Returns a new theme; `self` is unchanged.
@@ -1125,7 +1070,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_legend_style(LegendStyle::Chips)?;
     /// # let _ = theme;
@@ -1145,7 +1090,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, TickLabelPlacement, Theme, Rgba};
+    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_area_fill(AreaFill::Gradient)?;
     /// # let _ = theme;
@@ -1195,7 +1140,6 @@ mod tests {
             (p.title_size(), p.body_size(), p.font_scale()),
             (13.0, 8.5, 1.0)
         );
-        assert_eq!(p.tick_label_placement(), TickLabelPlacement::AboveGridline);
         assert_eq!(
             (p.legend_style(), p.area_fill()),
             (LegendStyle::Header, AreaFill::None)
@@ -1228,7 +1172,6 @@ mod tests {
             (g.title_size(), g.body_size(), g.font_scale()),
             (13.0, 8.5, 1.0)
         );
-        assert_eq!(g.tick_label_placement(), TickLabelPlacement::Outside);
         assert_eq!(
             (g.legend_style(), g.area_fill()),
             (LegendStyle::Direct, AreaFill::None)
@@ -1264,7 +1207,6 @@ mod tests {
             (m.title_size(), m.body_size(), m.font_scale()),
             (12.5, 8.5, 1.0)
         );
-        assert_eq!(m.tick_label_placement(), TickLabelPlacement::Outside);
         assert_eq!(
             (m.legend_style(), m.area_fill()),
             (LegendStyle::Chips, AreaFill::Gradient)
@@ -1324,12 +1266,6 @@ mod tests {
         assert_eq!(
             t.with_body_font(Font::Inter).unwrap().body_font(),
             Font::Inter
-        );
-        assert_eq!(
-            t.with_tick_label_placement(TickLabelPlacement::Outside)
-                .unwrap()
-                .tick_label_placement(),
-            TickLabelPlacement::Outside
         );
         assert_eq!(
             t.with_legend_style(LegendStyle::Chips)

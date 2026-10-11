@@ -76,8 +76,8 @@ use umber_core::scene::{
 };
 use umber_core::{
     Alpha, AreaFill, ColorSpec, ContinuousScale, Dash, Figure, Font, FontLibrary, GridLines,
-    LegendStyle, LogBase, Marker, Path, Point, Rgba, ScaleKind, TextStyle, Theme,
-    TickLabelPlacement, Transform, Weight,
+    LegendStyle, LogBase, Marker, Path, Point, Rgba, ScaleKind, TextStyle, Theme, Transform,
+    Weight,
 };
 
 /// Cases of the newer features, one module each, so that a feature edits only its own file.
@@ -296,8 +296,6 @@ fn scene_cases(lib: &FontLibrary) -> Vec<(String, Scene)> {
             .with_grid_lines(GridLines::Vertical)
             .unwrap()
             .with_grid_dash(Dash::Dotted)
-            .unwrap()
-            .with_tick_label_placement(TickLabelPlacement::Outside)
             .unwrap()
             .with_area_fill(AreaFill::Gradient)
             .unwrap(),
@@ -1418,8 +1416,7 @@ mod record {
     };
     use umber_core::{
         Alpha, AreaFill, Axes, ColorSpec, Dash, Error, Figure, Font, GridLines, LegendStyle,
-        Marker, Path, PathVerb, Point, Rgba, ScaleKind, TextStyle, Theme, TickLabelPlacement,
-        Transform, Weight,
+        Marker, Path, PathVerb, Point, Rgba, ScaleKind, TextStyle, Theme, Transform, Weight,
     };
 
     pub fn f32(v: f32) -> String {
@@ -1517,13 +1514,6 @@ mod record {
         }
     }
 
-    pub fn placement(p: TickLabelPlacement) -> &'static str {
-        match p {
-            TickLabelPlacement::AboveGridline => "above-gridline",
-            TickLabelPlacement::Outside => "outside",
-        }
-    }
-
     pub fn legend(l: LegendStyle) -> &'static str {
         match l {
             LegendStyle::Header => "header",
@@ -1616,10 +1606,6 @@ mod record {
             ("title_size", f32(t.title_size())),
             ("body_size", f32(t.body_size())),
             ("font_scale", f32(t.font_scale())),
-            (
-                "tick_label_placement",
-                placement(t.tick_label_placement()).into(),
-            ),
             ("legend_style", legend(t.legend_style()).into()),
             ("area_fill", area_fill(t.area_fill()).into()),
             ("line_width", f32(t.line_width())),
@@ -2533,7 +2519,7 @@ fn theme_errors(rec: &mut Log) {
         b: 3,
         a: 4,
     };
-    let rows: [(&str, umber_core::Result<Theme>); 11] = [
+    let rows: [(&str, umber_core::Result<Theme>); 10] = [
         ("with_background", base.with_background(c)),
         ("with_text_color", base.with_text_color(c)),
         ("with_muted_color", base.with_muted_color(c)),
@@ -2546,10 +2532,6 @@ fn theme_errors(rec: &mut Log) {
         ("with_grid_dash", base.with_grid_dash(Dash::Dashed)),
         ("with_title_font", base.with_title_font(Font::JetBrainsMono)),
         ("with_body_font", base.with_body_font(Font::IbmPlexSans)),
-        (
-            "with_tick_label_placement",
-            base.with_tick_label_placement(TickLabelPlacement::AboveGridline),
-        ),
         (
             "with_legend_style",
             base.with_legend_style(LegendStyle::Header),
