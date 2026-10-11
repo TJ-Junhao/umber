@@ -17,9 +17,11 @@ EXPECTED = [
     "Marker",
     "Scale",
     "StyleError",
+    "SupportsArray",
     "SvgText",
     "UmberError",
     "UsageError",
+    "Values",
     "__version__",
 ]
 
@@ -138,3 +140,12 @@ def test_class_constant_and_attribute_examples_run() -> None:
     failed = [name for name, doc in docs.items() if _run_examples(name, doc).failed]
     assert failed == []
     assert all(doctest.DocTestParser().get_examples(doc) for doc in docs.values())
+
+
+def test_values_alias_is_exported_from_its_module() -> None:
+    from umber import _types
+
+    assert umber.Values is _types.Values
+    # A ``type`` alias cannot be given another module; its name is what hover shows.
+    assert umber.Values.__name__ == "Values"
+    assert umber.SupportsArray is _types.SupportsArray
