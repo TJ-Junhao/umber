@@ -239,6 +239,15 @@ impl Rgba {
         }
     }
 
+    /// This color with its alpha multiplied by `share` (a fraction in `0..=1`), rounded to the
+    /// nearest 8-bit value. Drawing uses it wherever a theme fades a color.
+    pub(crate) fn scale_alpha(self, share: f32) -> Rgba {
+        Rgba {
+            a: (f32::from(self.a) * share).round().clamp(0.0, 255.0) as u8,
+            ..self
+        }
+    }
+
     /// Format as `#RRGGBB` when opaque, otherwise `#RRGGBBAA`, using uppercase digits.
     ///
     /// # Examples

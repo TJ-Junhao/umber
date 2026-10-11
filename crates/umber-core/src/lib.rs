@@ -47,9 +47,10 @@
 //!
 //! - the figure model: [`Figure`] (size, theme and axes getters, [`Figure::add_axes`],
 //!   [`Figure::to_png`], [`Figure::to_svg`]), [`Axes`] (text and limit setters, mark methods
-//!   and their getters), [`AxisData`], [`LineOptions`], [`ScatterOptions`], [`BarOptions`] and
-//!   [`BarSeries`], and the read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`BarMark`],
-//!   [`BarGroupMark`] and [`BarSeriesView`] that [`Axes::marks`] returns;
+//!   and their getters), [`AxisData`], [`LineOptions`], [`ScatterOptions`], [`BarOptions`],
+//!   [`BarSeries`] and [`HistOptions`] with its bin limit [`MAX_BINS`], and the read-only
+//!   [`Mark`], [`LineMark`], [`ScatterMark`], [`BarMark`], [`BarGroupMark`], [`BarSeriesView`]
+//!   and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`AreaFill`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
@@ -101,12 +102,13 @@ pub mod text;
 pub mod theme;
 pub mod ticks;
 
+pub use binning::MAX_BINS;
 pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
 pub use figure::{
-    Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView, Figure, LineMark,
-    LineOptions, Mark, ScatterMark, ScatterOptions,
+    Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView, Figure, HistMark,
+    HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
 };
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};

@@ -22,8 +22,8 @@
 //! ```
 
 pub use crate::model::{
-    Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView, Figure, LineMark,
-    LineOptions, Mark, ScatterMark, ScatterOptions,
+    Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView, Figure, HistMark,
+    HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
 };
 
 use crate::render::{SvgText, render_png, render_svg};
