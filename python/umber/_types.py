@@ -42,13 +42,10 @@ NaN for missing values. Nullable pandas and polars Series need no conversion: th
 Example:
     >>> import numpy as np
     >>> import pandas as pd
-    >>> from umber._values import floats
-    >>> floats("Axes.line()", "y", [1, 2.5, 4])
-    array([1. , 2.5, 4. ])
-    >>> floats("Axes.line()", "y", np.array([1, 2, 3], dtype=np.int32))
-    array([1., 2., 3.])
-    >>> floats("Axes.line()", "y", pd.Series([0.5, float("nan"), 2.0]))
-    array([0.5, nan, 2. ])
-    >>> floats("Axes.line()", "y", pd.Series([1, None, 3], dtype="Int64"))
-    array([ 1., nan,  3.])
+    >>> import umber as ub
+    >>> ax = ub.line([0, 1, 2], [1, 2.5, 4])
+    >>> ax = ub.line(np.arange(3), np.array([1, 2, 3], dtype=np.int32))
+    >>> ax = ub.line([0, 1, 2], pd.Series([0.5, float("nan"), 2.0]))
+    >>> ax = ub.line([0, 1, 2], pd.Series([1, None, 3], dtype="Int64"))
+    >>> ax = ub.bar(pd.Series(["North", "South"]), [3, 5])
 """

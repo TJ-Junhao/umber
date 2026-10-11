@@ -6,6 +6,7 @@ Example:
     True
 """
 
+from collections.abc import Callable
 from types import FunctionType
 from typing import Final
 
@@ -14,7 +15,9 @@ from umber._color import Color
 from umber._enums import Dash, Font, GridLines, LegendStyle, Marker, SvgText
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
+from umber._quick import bar, hist, line, scatter
 from umber._scale import Scale
+from umber._series import BarSeries
 from umber._theme import Theme
 from umber._types import SupportsArray, Values
 from umber._umber import MAX_BINS as _MAX_BINS
@@ -32,6 +35,7 @@ Example:
 __all__ = [
     "MAX_BINS",
     "Axes",
+    "BarSeries",
     "Color",
     "DataError",
     "Dash",
@@ -49,14 +53,20 @@ __all__ = [
     "UsageError",
     "Values",
     "__version__",
+    "bar",
+    "hist",
+    "line",
+    "scatter",
 ]
 
 
-def _report_package_as_module(*exported: type) -> None:
-    """Make each class, its public methods and its properties report ``umber`` as their module."""
-    for cls in exported:
-        cls.__module__ = "umber"
-        for member in vars(cls).values():
+def _report_package_as_module(*exported: type | Callable[..., object]) -> None:
+    """Make each function, class, class method and property report ``umber`` as its module."""
+    for obj in exported:
+        obj.__module__ = "umber"
+        if not isinstance(obj, type):
+            continue
+        for member in vars(obj).values():
             function = getattr(member, "__func__", member)
             if isinstance(member, property):
                 function = member.fget
@@ -66,6 +76,7 @@ def _report_package_as_module(*exported: type) -> None:
 
 _report_package_as_module(
     Axes,
+    BarSeries,
     Color,
     Dash,
     Figure,
@@ -81,4 +92,8 @@ _report_package_as_module(
     StyleError,
     UmberError,
     UsageError,
+    bar,
+    hist,
+    line,
+    scatter,
 )
