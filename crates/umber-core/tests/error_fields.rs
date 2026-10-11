@@ -80,7 +80,7 @@ fn errors_carry_their_parameter_and_hint() {
                     .map(|_| ())
             }),
             None,
-            Some("to plot numbers, use a linear or log x axis."),
+            Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
         ),
         (
             "line, category y axis",
@@ -89,7 +89,7 @@ fn errors_carry_their_parameter_and_hint() {
                     .map(|_| ())
             }),
             None,
-            Some("create the axes with a linear or log y scale."),
+            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "bar, non-category x axis",
@@ -98,7 +98,7 @@ fn errors_carry_their_parameter_and_hint() {
                     .map(|_| ())
             }),
             None,
-            Some("create the axes with a category x scale."),
+            Some("pass x=Scale.category() to Figure.add_axes()."),
         ),
         (
             "stacked bar, category y axis",
@@ -107,7 +107,7 @@ fn errors_carry_their_parameter_and_hint() {
                     .map(|_| ())
             }),
             None,
-            Some("create the axes with a linear or log y scale."),
+            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "hist, category x axis",
@@ -115,7 +115,7 @@ fn errors_carry_their_parameter_and_hint() {
                 a.hist(&[1.0], HistOptions::default()).map(|_| ())
             }),
             None,
-            Some("create the axes with a linear x scale."),
+            Some("pass x=Scale.linear() to Figure.add_axes()."),
         ),
         (
             "hist, log x axis",
@@ -123,7 +123,7 @@ fn errors_carry_their_parameter_and_hint() {
                 a.hist(&[1.0], HistOptions::default()).map(|_| ())
             }),
             None,
-            Some("create the axes with a linear x scale; histograms do not support log x."),
+            Some("pass x=Scale.linear() to Figure.add_axes()."),
         ),
         (
             "hist, category y axis",
@@ -131,7 +131,7 @@ fn errors_carry_their_parameter_and_hint() {
                 a.hist(&[1.0], HistOptions::default()).map(|_| ())
             }),
             None,
-            Some("create the axes with a linear or log y scale."),
+            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "scatter, infinite x",
@@ -158,7 +158,7 @@ fn errors_carry_their_parameter_and_hint() {
                     .map(|_| ())
             }),
             Some("categories"),
-            Some("add up the heights of a repeated category before passing them."),
+            Some("combine repeated categories and sum their heights."),
         ),
         (
             "grouped bar, no series",
@@ -175,7 +175,7 @@ fn errors_carry_their_parameter_and_hint() {
                     .map(|_| ())
             }),
             Some("series"),
-            Some("use NaN to leave a category without a bar."),
+            Some("use NaN to omit that height."),
         ),
         (
             "stacked bar, infinite height",
@@ -184,7 +184,7 @@ fn errors_carry_their_parameter_and_hint() {
                     .map(|_| ())
             }),
             Some("series"),
-            Some("use NaN to leave a category without a bar."),
+            Some("use NaN to omit that height."),
         ),
         (
             "hist, bins out of range",
@@ -219,11 +219,116 @@ fn errors_carry_their_parameter_and_hint() {
             "xlim, log with a non-positive lower limit",
             on_axes(LOG, linear, |a| a.xlim(0.0, 10.0).map(|_| ())),
             Some("low"),
-            Some("use a linear axis if the range includes 0."),
+            Some("use a linear axis if either limit is not positive."),
         ),
         (
             "xlim, category axis",
             on_axes(cat, linear, |a| a.xlim(0.0, 1.0).map(|_| ())),
+            None,
+            Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
+        ),
+        (
+            "ylim, category axis",
+            on_axes(linear, cat, |a| a.ylim(0.0, 1.0).map(|_| ())),
+            None,
+            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
+        ),
+        (
+            "grouped bar, repeated category",
+            on_axes(cat, linear, |a| {
+                a.grouped_bar(names(&["a", "a"]), vec![series(&[1.0, 2.0])])
+                    .map(|_| ())
+            }),
+            Some("categories"),
+            Some("combine repeated categories and sum their heights within each series."),
+        ),
+        (
+            "xlim, non-finite low",
+            on_axes(linear, linear, |a| a.xlim(f64::NAN, 1.0).map(|_| ())),
+            Some("low"),
+            None,
+        ),
+        (
+            "xlim, non-finite high",
+            on_axes(linear, linear, |a| a.xlim(0.0, inf).map(|_| ())),
+            Some("high"),
+            None,
+        ),
+        (
+            "xlim, low beyond the magnitude",
+            on_axes(linear, linear, |a| a.xlim(-1e301, 0.0).map(|_| ())),
+            Some("low"),
+            None,
+        ),
+        (
+            "xlim, high beyond the magnitude",
+            on_axes(linear, linear, |a| a.xlim(0.0, 1e301).map(|_| ())),
+            Some("high"),
+            None,
+        ),
+        (
+            "xlim, low below the log range",
+            on_axes(LOG, linear, |a| a.xlim(1e-301, 1.0).map(|_| ())),
+            Some("low"),
+            None,
+        ),
+        (
+            "xlim, high above the log range",
+            on_axes(LOG, linear, |a| a.xlim(1.0, 1e301).map(|_| ())),
+            Some("high"),
+            None,
+        ),
+        (
+            "ylim, non-finite low",
+            on_axes(linear, linear, |a| a.ylim(f64::NAN, 1.0).map(|_| ())),
+            Some("low"),
+            None,
+        ),
+        (
+            "ylim, non-finite high",
+            on_axes(linear, linear, |a| a.ylim(0.0, inf).map(|_| ())),
+            Some("high"),
+            None,
+        ),
+        (
+            "ylim, low beyond the magnitude",
+            on_axes(linear, linear, |a| a.ylim(-1e301, 0.0).map(|_| ())),
+            Some("low"),
+            None,
+        ),
+        (
+            "ylim, high beyond the magnitude",
+            on_axes(linear, linear, |a| a.ylim(0.0, 1e301).map(|_| ())),
+            Some("high"),
+            None,
+        ),
+        (
+            "ylim, low below the log range",
+            on_axes(linear, LOG, |a| a.ylim(1e-301, 1.0).map(|_| ())),
+            Some("low"),
+            None,
+        ),
+        (
+            "ylim, high above the log range",
+            on_axes(linear, LOG, |a| a.ylim(1.0, 1e301).map(|_| ())),
+            Some("high"),
+            None,
+        ),
+        (
+            "xlim, both limits non-finite",
+            on_axes(linear, linear, |a| a.xlim(f64::NAN, inf).map(|_| ())),
+            None,
+            None,
+        ),
+        (
+            "xlim, too narrow",
+            on_axes(linear, linear, |a| a.xlim(1.0, 1.0 + 1e-12).map(|_| ())),
+            None,
+            None,
+        ),
+        (
+            "ylim, log with both limits below the log range",
+            on_axes(linear, LOG, |a| a.ylim(1e-302, 1e-301).map(|_| ())),
             None,
             None,
         ),

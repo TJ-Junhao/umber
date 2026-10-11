@@ -11,8 +11,13 @@ use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
 use crate::stacking::Totals;
 use crate::{ContinuousScale, Error, Result, ScaleKind};
 
+/// The hint for an x axis of the wrong kind for limits or numeric data.
+pub(super) const X_SCALE_HINT: &str =
+    "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes().";
+
 /// The hint for data that meets a category y axis.
-const Y_SCALE_HINT: &str = "create the axes with a linear or log y scale.";
+pub(super) const Y_SCALE_HINT: &str =
+    "pass y=Scale.linear() or y=Scale.log() to Figure.add_axes().";
 
 /// The hint for an infinite line value.
 pub(super) const LINE_GAP_HINT: &str = "use NaN to leave a gap in the line.";
@@ -110,14 +115,14 @@ pub(super) fn check_series(
                 context,
                 "x holds numbers but the x axis is a category axis; pass category names.",
             )
-            .with_hint("to plot numbers, use a linear or log x axis."));
+            .with_hint("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."));
         }
         (AxisData::Categories(_), _) => {
             return Err(Error::data(
                 context,
                 "x holds category names but the x axis is not a category axis; pass numbers.",
             )
-            .with_hint("to plot category names, use a category x axis."));
+            .with_hint("pass x=Scale.category() to Figure.add_axes()."));
         }
     }
     if y_kind == ScaleKind::Category {
@@ -156,7 +161,12 @@ pub(super) fn check_bars(
             ),
         ));
     }
-    check_categories(context, x_kind, categories)?;
+    check_categories(
+        context,
+        x_kind,
+        categories,
+        "combine repeated categories and sum their heights.",
+    )?;
     check_numbers(
         context,
         ("heights", "heights"),
@@ -206,14 +216,19 @@ pub(super) fn check_bar_group(
             .with_parameter("series"));
         }
     }
-    check_categories(context, x_kind, categories)?;
+    check_categories(
+        context,
+        x_kind,
+        categories,
+        "combine repeated categories and sum their heights within each series.",
+    )?;
     for (i, s) in series.iter().enumerate() {
         check_numbers(
             context,
             (&format!("series[{i}].heights"), "series"),
             &s.heights,
             y_kind,
-            BAR_GAP_HINT,
+            "use NaN to omit that height.",
         )?;
     }
     if arrangement == Arrangement::Stacked {
@@ -253,14 +268,14 @@ pub(super) fn check_hist(
                 context,
                 "values holds numbers but the x axis is a category axis; use a linear x axis.",
             )
-            .with_hint("create the axes with a linear x scale."));
+            .with_hint("pass x=Scale.linear() to Figure.add_axes()."));
         }
         ScaleKind::Log { .. } => {
             return Err(Error::usage(
                 context,
                 "the x axis is a log axis, which histograms do not support; use a linear x axis.",
             )
-            .with_hint("create the axes with a linear x scale; histograms do not support log x."));
+            .with_hint("pass x=Scale.linear() to Figure.add_axes()."));
         }
     }
     check_numbers(
@@ -276,13 +291,18 @@ pub(super) fn check_hist(
 
 /// Checks the categories of a bar mark: the x axis is a category axis, and no category appears
 /// twice.
-fn check_categories(context: &'static str, x_kind: ScaleKind, categories: &[String]) -> Result<()> {
+fn check_categories(
+    context: &'static str,
+    x_kind: ScaleKind,
+    categories: &[String],
+    repeat_hint: &'static str,
+) -> Result<()> {
     if x_kind != ScaleKind::Category {
         return Err(Error::data(
             context,
             "categories holds names but the x axis is not a category axis; use a category x axis.",
         )
-        .with_hint("create the axes with a category x scale."));
+        .with_hint("pass x=Scale.category() to Figure.add_axes()."));
     }
     let mut first_index: HashMap<&str, usize> = HashMap::with_capacity(categories.len());
     for (i, name) in categories.iter().enumerate() {
@@ -294,7 +314,7 @@ fn check_categories(context: &'static str, x_kind: ScaleKind, categories: &[Stri
                 ),
             )
             .with_parameter("categories")
-            .with_hint("add up the heights of a repeated category before passing them."));
+            .with_hint(repeat_hint));
         }
     }
     Ok(())
@@ -348,12 +368,14 @@ pub(super) fn check_limits(
     kind: ScaleKind,
     low: f64,
     high: f64,
+    category_hint: &'static str,
 ) -> Result<ContinuousScale> {
     let Some(transform) = kind.transform() else {
         return Err(Error::usage(
             context,
             "this is a category axis; limits apply to linear and log axes only.",
-        ));
+        )
+        .with_hint(category_hint));
     };
     ContinuousScale::new(transform, low, high, context)
 }
