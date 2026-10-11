@@ -1,2 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# None: this change is a refactor and every output stays byte-identical.
+# Cases whose committed outputs change on purpose in this change; none.

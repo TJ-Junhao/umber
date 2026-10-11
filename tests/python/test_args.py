@@ -242,14 +242,14 @@ def test_instance_returns_the_value_unchanged() -> None:
 def test_instance_rejects_other_types_with_the_given_hint() -> None:
     assert error(
         TypeError, lambda: instance("Axes.line()", "dash", "solid", Dash, "use Dash.SOLID.")
-    ) == ("Axes.line(): dash is str; dash must be a Dash.", "dash", "use Dash.SOLID.")
+    ) == ("Axes.line(): dash is str; dash must be of type Dash.", "dash", "use Dash.SOLID.")
 
 
-def test_instance_message_uses_an_before_a_vowel() -> None:
+def test_instance_message_names_the_type_without_an_article() -> None:
     message, _, _ = error(
         TypeError, lambda: instance("Figure.add_axes()", "inset", 3, Inset, "pass an Inset.")
     )
-    assert message == "Figure.add_axes(): inset is int; inset must be an Inset."
+    assert message == "Figure.add_axes(): inset is int; inset must be of type Inset."
 
 
 def test_instance_accepts_subclasses() -> None:

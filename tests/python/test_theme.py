@@ -220,7 +220,7 @@ def test_color_setters_refuse_colors_that_are_not_concrete(
 def test_color_setters_reject_a_non_color(name: str) -> None:
     with pytest.raises(TypeError) as caught:
         _setter(BASE, name)(cast(ub.Color, "#3366B8"))
-    assert str(caught.value) == f"Theme.{name}(): value is str; value must be a Color."
+    assert str(caught.value) == f"Theme.{name}(): value is str; value must be of type Color."
     assert details(caught.value) == ("value", COLOR_HINT)
 
 
@@ -374,7 +374,7 @@ def test_enum_setters_reject_other_types(
         with pytest.raises(TypeError) as caught:
             _setter(BASE, name)(value)
         assert str(caught.value) == (
-            f"Theme.{name}(): value is {_type_name(value)}; value must be a {cls}."
+            f"Theme.{name}(): value is {_type_name(value)}; value must be of type {cls}."
         )
         assert details(caught.value) == ("value", hint)
 
