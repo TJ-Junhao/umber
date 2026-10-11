@@ -699,17 +699,21 @@ impl ContinuousScale {
     /// same share the padding keeps marks off the plot edge, so a minimum that only rounds
     /// to the limit, such as a sampled sine trough, does not sit on the baseline either. When
     /// it does and the limit carries the first tick, the limit moves down by one tick step and
-    /// gets a tick of its own: `lo - step` on a linear axis, with `step` the gap between the
-    /// first two ticks, and `lo / base` on a log axis; all ticks are then labelled again as
-    /// `nice_with_ticks` labels them. Everything else is returned unchanged: a linear domain
-    /// that holds 0, where the baseline sits at 0 and a zero value on it is correct; data
-    /// further above the lower limit; ticks that do not start at the limit or number fewer
-    /// than two; a degenerate linear domain; and a move that would leave the supported
-    /// magnitudes. Auto limits apply it before [`padded`](Self::padded).
+    /// gets a tick of its own. On a linear axis the limit moves to `lo - step`, with `step` the
+    /// gap between the first two ticks, and the new tick goes in front of the others. On a log
+    /// axis it moves to `lo / base`, and the ticks are chosen again for the wider domain as
+    /// `nice_with_ticks` chooses them for about `target` ticks, so thinned powers stay evenly
+    /// spaced. All ticks are labelled as `nice_with_ticks` labels them. Everything else is
+    /// returned unchanged: a linear domain that holds 0, where the baseline sits at 0 and a
+    /// zero value on it is correct; data further above the lower limit; ticks that do not
+    /// start at the limit or number fewer than two; a step that is not finite and positive;
+    /// and a move that would leave the supported magnitudes or not move the limit at all.
+    /// Auto limits apply it before [`padded`](Self::padded).
     pub(crate) fn below_data(
         &self,
         ticks: Vec<Tick>,
         data_low: f64,
+        target: usize,
     ) -> (ContinuousScale, Vec<Tick>) {
         let (lo, hi) = (self.lo, self.hi);
         let unchanged = (*self, ticks);
@@ -726,29 +730,36 @@ impl ContinuousScale {
             return unchanged;
         }
         let step = second.value - first.value;
-        let lowered = match self.transform {
-            Transform::Linear if !is_degenerate(lo, hi) => lo - step,
-            Transform::Linear => return unchanged,
-            Transform::Log(base) => lo / base.get(),
+        let (lowered, floor) = match self.transform {
+            Transform::Linear => (lo - step, -MAX_MAGNITUDE),
+            Transform::Log(base) => (lo / base.get(), MIN_LOG_VALUE),
         };
-        let floor = match self.transform {
-            Transform::Linear => -MAX_MAGNITUDE,
-            Transform::Log(_) => MIN_LOG_VALUE,
-        };
-        if !(lowered.is_finite() && floor <= lowered && lowered < lo) {
+        let valid_step = step.is_finite() && step > 0.0;
+        if !(valid_step && lowered.is_finite() && floor <= lowered && lowered < lo) {
             return unchanged;
         }
-        let values: Vec<f64> = std::iter::once(lowered)
-            .chain(unchanged.1.iter().map(|tick| tick.value))
-            .collect();
-        let labels = match self.transform {
-            Transform::Linear => ticks::format_ticks(&values, step),
-            Transform::Log(_) => ticks::format_values(&values),
-        };
         let scale = ContinuousScale {
             transform: self.transform,
             lo: lowered,
             hi,
+        };
+        let (values, labels) = match self.transform {
+            // Ticks one step apart stay one step apart with one more in front.
+            Transform::Linear => {
+                let values: Vec<f64> = std::iter::once(lowered)
+                    .chain(unchanged.1.iter().map(|tick| tick.value))
+                    .collect();
+                let labels = ticks::format_ticks(&values, step);
+                (values, labels)
+            }
+            // The powers are chosen again for the wider domain, so thinning stays even and no
+            // power crowds the new end.
+            Transform::Log(base) => {
+                let target = ticks::clamp_target(target);
+                let values = scale.log_values_with_ends(base.get(), target);
+                let labels = ticks::format_values(&values);
+                (values, labels)
+            }
         };
         (scale, Self::pair(values, labels))
     }
@@ -1102,6 +1113,51 @@ impl CategoryScale {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn below_data_keeps_log_ticks_sorted_distinct_and_inside() {
+        let mut checked = 0;
+        for base in [
+            1.0 + f64::EPSILON,
+            1.0 + 1e-9,
+            1.001,
+            1.1,
+            2.0,
+            10.0,
+            1e100,
+            1e300,
+        ] {
+            let transform = Transform::Log(LogBase::new(base).unwrap());
+            for low in [1e-300, 1e-250, 1e-30, 0.1, 1.0, 10.0, 1e30, 1e200, 1e290] {
+                for factor in [1.000_001, 1.1, 2.0, 10.0, 1e6] {
+                    let high = low * factor;
+                    if high > MAX_MAGNITUDE {
+                        continue;
+                    }
+                    let scale = ContinuousScale::new(transform, low, high, "test").unwrap();
+                    for target in [2, 3, 4, 8] {
+                        let (nice, ticks) = scale.nice_with_ticks(target);
+                        let (lowered, ticks) = nice.below_data(ticks, low, target);
+                        let (lo, hi) = lowered.domain();
+                        let context = format!("base {base}, {low:e}..{high:e}: {ticks:?}");
+                        assert!(lo >= MIN_LOG_VALUE && lo < hi, "{context}");
+                        assert!(
+                            ticks.windows(2).all(|w| w[0].value < w[1].value
+                                && w[0].label != w[1].label
+                                && lowered.normalize(w[0].value) < lowered.normalize(w[1].value)),
+                            "{context}"
+                        );
+                        assert!(
+                            ticks.iter().all(|t| (lo..=hi).contains(&t.value)),
+                            "{context}"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000);
+    }
 
     fn lin(lo: f64, hi: f64) -> ContinuousScale {
         ContinuousScale::new(Transform::Linear, lo, hi, "test").unwrap()

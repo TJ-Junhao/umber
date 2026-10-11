@@ -229,7 +229,7 @@ fn continuous(
                 let (nice, ticks) = scale.nice_with_ticks(target);
                 let (nice, ticks) = match (auto, data) {
                     (AutoLimits::NiceBelowData(_), Some((data_low, _))) => {
-                        nice.below_data(ticks, data_low)
+                        nice.below_data(ticks, data_low, target)
                     }
                     _ => (nice, ticks),
                 };
@@ -710,7 +710,10 @@ impl<'a> Anchor<'a> {
 /// axis space along y.
 ///
 /// `from.0 < edge < to.0`, every value finite, and every value on a log axis positive, as the
-/// model validates them; the result then lies between `from.1` and `to.1`.
+/// model validates them; the result then lies between `from.1` and `to.1`. On a log y axis no
+/// intermediate value leaves the range of `f64`, even between the smallest and largest values
+/// a log axis holds, and the result is kept between the two ends, so it is finite and
+/// positive.
 fn crossing_at(
     (x_transform, y_transform): (Transform, Transform),
     from: (f64, f64),
@@ -723,9 +726,25 @@ fn crossing_at(
     };
     match y_transform {
         Transform::Linear => from.1 + share * (to.1 - from.1),
-        Transform::Log(_) => from.1 * (share * log_offset(to.1, from.1)).exp(),
+        Transform::Log(_) => {
+            // The way along in natural-log units, measured from `from.1` with full precision
+            // for narrow spans (see `log_offset`).
+            let rise = share * log_offset(to.1, from.1);
+            // A factor within e^±700 neither overflows nor underflows, and the product lies
+            // between the ends; beyond that, add the logarithms and exponentiate once.
+            let y = if rise.abs() <= LOG_FACTOR_LIMIT {
+                from.1 * rise.exp()
+            } else {
+                (from.1.ln() + rise).exp()
+            };
+            y.clamp(from.1.min(to.1), from.1.max(to.1))
+        }
     }
 }
+
+/// The largest natural-log distance [`crossing_at`] turns into a factor with `exp`: `e^700` is
+/// about `1e304`, inside the range of `f64`, and `e^-700` is a normal number.
+const LOG_FACTOR_LIMIT: f64 = 700.0;
 
 /// How a series is drawn, as far as its legend swatch needs to know.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1293,6 +1312,75 @@ mod tests {
         let r = resolve_axes(f.axes().unwrap(), 4, 4);
         assert_eq!(labels(&r.x)[0], "35");
         assert_eq!(labels(&r.y)[0], "25");
+    }
+
+    #[test]
+    fn lowering_a_log_limit_keeps_the_ticks_evenly_spaced_and_distinct() {
+        // 1..1e100 on base 10 has its powers thinned; the lower limit moves to 0.1 and the
+        // powers are chosen again for 0.1..1e100, so they stay evenly spaced in log space and
+        // none crowds the new end. Bases near 1 keep distinct positions too.
+        for base in [10.0, 1.000_001, 1.0 + f64::EPSILON] {
+            let log = ScaleKind::Log {
+                base: LogBase::new(base).unwrap(),
+            };
+            let mut f = figure(LIN, log);
+            axes(&mut f)
+                .line(nums(&[0.0, 1.0]), &[1.0, 1e100], LineOptions::default())
+                .unwrap();
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let pos: Vec<f64> = r.y.ticks.iter().map(|t| t.pos.get()).collect();
+            assert!(pos.len() >= 2, "base {base}: {:?}", r.y.ticks);
+            assert!(
+                pos.windows(2).all(|w| w[0] < w[1]),
+                "base {base}: {:?}",
+                r.y.ticks
+            );
+            assert_eq!(r.baseline, r.y.ticks[0].pos, "base {base}");
+            // At base 1 + EPSILON one step down is a factor of 1 + EPSILON, too small to move
+            // any position; every other base moves the limit visibly below the data.
+            let data_low = r.y.continuous().unwrap().normalize(1.0);
+            if base > 1.0 + f64::EPSILON {
+                assert!(r.baseline.get() < data_low, "base {base}: {:?}", r.y.ticks);
+            } else {
+                assert!(r.baseline.get() <= data_low, "base {base}: {:?}", r.y.ticks);
+            }
+            if base == 10.0 {
+                assert_eq!(r.y.ticks[0].label, "1e\u{2212}1");
+                let gaps: Vec<f64> = pos.windows(2).map(|w| w[1] - w[0]).collect();
+                let (min, max) = gaps
+                    .iter()
+                    .fold((f64::MAX, 0.0_f64), |(a, b), &g| (a.min(g), b.max(g)));
+                assert!(max - min < 0.02, "uneven spacing: {gaps:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn lowering_works_at_extreme_linear_magnitudes() {
+        // Spans far above or below the tick search's usual range still move their limit below
+        // the data, positive and negative.
+        for (low, high) in [
+            (1e250, 2e250),
+            (1e-250, 2e-250),
+            (-2e250, -1e250),
+            (-2e-250, -1e-250),
+        ] {
+            let mut f = figure(LIN, LIN);
+            axes(&mut f)
+                .line(nums(&[0.0, 1.0]), &[low, high], LineOptions::default())
+                .unwrap();
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let data_low = r.y.continuous().unwrap().normalize(low);
+            assert!(
+                r.baseline.get() < data_low,
+                "{low:e}..{high:e}: {:?}",
+                r.y.ticks
+            );
+            assert_eq!(r.baseline, r.y.ticks[0].pos);
+            let values: Vec<&str> = labels(&r.y);
+            let unique: std::collections::HashSet<&&str> = values.iter().collect();
+            assert_eq!(unique.len(), values.len(), "{values:?}");
+        }
     }
 
     #[test]
@@ -2049,6 +2137,26 @@ mod tests {
         // Linear x, log y: a quarter of the way from (0, 1) to (4, 10000) is y = 10.
         let anchor = number_anchor((LIN, log), &[0.0, 4.0], &[1.0, 1e4], Some((0.0, 1.0)));
         near(anchor, 1.0, 10.0);
+
+        // Log y between the smallest and largest values a log axis holds: nine tenths of the
+        // way from 1e-300 to 1e300 is 1e240, rising, and 1e-240, falling, both finite and
+        // positive.
+        let cut = Some((0.0, 9.0));
+        for (ys, expected) in [([1e-300, 1e300], 1e240), ([1e300, 1e-300], 1e-240)] {
+            let (ax, ay, end) = number_anchor((LIN, log), &[0.0, 10.0], &ys, cut).unwrap();
+            assert_eq!((ax, end), (9.0, EndKind::Edge));
+            assert!(ay.is_finite() && ay > 0.0, "{ay:e}");
+            assert!((ay / expected - 1.0).abs() < 1e-9, "{ay:e} vs {expected:e}");
+        }
+        // Narrow log spans keep full precision: from 1e200 to 1e200 (1 + 1e-8), halfway.
+        let (lo, hi) = (1e200, 1e200 * (1.0 + 1e-8));
+        let (_, ay, _) =
+            number_anchor((LIN, log), &[0.0, 10.0], &[lo, hi], Some((0.0, 5.0))).unwrap();
+        let expected = lo * (0.5 * (1e-8_f64).ln_1p()).exp();
+        assert!(
+            (ay / expected - 1.0).abs() < 1e-15,
+            "{ay:e} vs {expected:e}"
+        );
 
         // A NaN right after the last point inside breaks the line there: it ends inside.
         let cut = Some((0.0, 1.5));

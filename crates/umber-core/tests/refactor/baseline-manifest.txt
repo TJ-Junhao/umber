@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 7943ff0acea4dc5252fb9a79249298eab8cc4e93
+# revision: 2ed253dbebd2484dea57661b849e8a5e158ed57f
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -207,10 +207,10 @@ d1dcf108279c210d8b13ec5cc7f55f5fdf97114f41ddbd8590fd0203cc3435f8  png/fig-legend
 74b37cde568a0bc054f072c4731292f9c38972b39c52de0df3022a0b620846d1  png/fig-legend-without-title.dpi72.png
 c56e0852ae3cfcb32121a0242f0fae60fe68200cf5289e1f02361e9ee36c0749  png/fig-line-dashes-and-palette-wrap.dpi200.png
 40924d42d67b769e1d695dff6a04e2925511ab09f6caf4c303b763a55078f8df  png/fig-line-dashes-and-palette-wrap.dpi72.png
-1f87ccfe28242ef8d94cacae74322011076f5e44fb031036fec341d2329e17a4  png/fig-log-both-base10-small.dpi200.png
-9c58e123215e8429ad8362e52e10969b1b35b29e9cca9bf34d75eb8b70f38c76  png/fig-log-both-base10-small.dpi72.png
-a6e7d452e600a5fa80c196487de63334e4e55c9a14367895eb018e2b097aed13  png/fig-log-both-base2.dpi200.png
-e0d8630ebfc3474c74ccc9a873d3e315651a8635ff89df81c33ff39be5d32007  png/fig-log-both-base2.dpi72.png
+25188b17e2110feb7890e50473489a49c0ab09c03b3019575ed4c9f5b1828511  png/fig-log-both-base10-small.dpi200.png
+04b21e5ec6ac7f60c16822fe699db7eb462dee597b0362036319745fb3a298a7  png/fig-log-both-base10-small.dpi72.png
+69df5a0032748e31e715c7ad709a4dca16494d908127c96bfec434f8bf9896ea  png/fig-log-both-base2.dpi200.png
+c624a9fdc104a143114c91cfb8a357454dca280c183456d9b7184ffb068873ea  png/fig-log-both-base2.dpi72.png
 c7e9c5680c9d589ffa6e2173aba51f71bad6c1e3b57b712913ae6ef5f019564b  png/fig-log-extreme-limits.dpi200.png
 27082deb5de35712260d2f3d66a4d370e06a38e1c07be949a4cf04a2ed030f39  png/fig-log-extreme-limits.dpi72.png
 cb340a3cb9d6f236a80ccd740a7bbf84d48e9bfcf46982cc59b53100499eee98  png/fig-log-y.dpi200.png
@@ -403,8 +403,8 @@ fcd5c4ca340d2323f00c3be66e4ca775cac4118ae97f29816d6e1efa916606a3  scene/fig-lege
 5c23fe169abcf2f02e7497c39b4123c8c778858d9b5abaf547fa829046f02a96  scene/fig-legend-unlabelled-mixed.txt
 6e7e2312cea3a781ee77f6c44c5b3dea85f08813a4c966bc2913c545b52d6155  scene/fig-legend-without-title.txt
 39dc22818d4ba841cec96e46b213018507e297fd7e4ca0dddb85ef6174419216  scene/fig-line-dashes-and-palette-wrap.txt
-6d926e31bf7bc5d65ab9fe9cedc43471fc27061d52010ae04b186900113741ae  scene/fig-log-both-base10-small.txt
-7c9dbc2c50e458861f5a170f965c54a54cdcabf4ed088091ce7f88f619e54204  scene/fig-log-both-base2.txt
+e71670007d1d6427b04932fb897fffa30bbae47219a5d3354609d79079be544e  scene/fig-log-both-base10-small.txt
+41841375f71f35e5b678e2e17adde8209f9f6eef0e8170becbc010a47be5a879  scene/fig-log-both-base2.txt
 65e2c5690cf7ea2f85b2b04c38f21ef8d04c86a24d710d19a4a57bfba6822104  scene/fig-log-extreme-limits.txt
 cec583974785fa5b08f98f7151d60492c88676c045efb040505a03b12e3b70a0  scene/fig-log-y.txt
 4415abb52932906106574dae46e1b67c7776f7dd0a654ec080de62404da0741f  scene/fig-midnight-empty-axes.txt
@@ -648,10 +648,10 @@ d1bf102c07a85c2b7ede1d1c6902d70e854d7700a51f5eba692ffbee5e3e1ce7  svg/fig-legend
 501391c6d73dadfca58ba1048ab46c611bdee1b355b73e6f8e18afa80e8a5180  svg/fig-legend-without-title.outlines.svg
 3471c5e7e9ceb064918aa71a3d1ba600f826896bbf697bdf0b9caf82b12ca5aa  svg/fig-line-dashes-and-palette-wrap.editable.svg
 7098b96514e22261d579fd766585be683ff405a57ff7b00ddb3d8bda470d4210  svg/fig-line-dashes-and-palette-wrap.outlines.svg
-d0773a3292ed354562ddbe0a998c2df618fb9fce60113c8b38e04c2351bcf69f  svg/fig-log-both-base10-small.editable.svg
-c9f22338bec840c62778b10ed2d43b5541ab0535f8ee5bc202900f96f3dbbc5a  svg/fig-log-both-base10-small.outlines.svg
-eb21f44bb94e0e3bd09033a05922d0709da4c6f0214b6d64448e01bb4ec041a9  svg/fig-log-both-base2.editable.svg
-de78a8d9ba7ae2b0b127aa6cb905917347ec356c2d8474df8001faacfdf65142  svg/fig-log-both-base2.outlines.svg
+0fa9aed51f8df072eee0c5440b986407cdc8f801ece271c83a61138a7dc8d101  svg/fig-log-both-base10-small.editable.svg
+b5075edf2858459ac46919ad2dea9bad1efe2857b2fa260b2547a775612e1abb  svg/fig-log-both-base10-small.outlines.svg
+590b6de343274af92c2aa50b09b98d46a1656460d0e37fd7770e41063f634ffc  svg/fig-log-both-base2.editable.svg
+234b3ffa8e3ee5213df6a7170d4ebc623cbb3332a59c393a34b6745247b6e49b  svg/fig-log-both-base2.outlines.svg
 7080e587f67a55ef835668acdc30ac6133fe85a219b6f7c4026e42f223aa856d  svg/fig-log-extreme-limits.editable.svg
 bec60f0eab6bd9fbc6c1b5fe8546c7d64668af5490437f169cf4d0468827c51c  svg/fig-log-extreme-limits.outlines.svg
 d857d0934cdbe70a8bf0e530b1111ea6f6862ae21a521406f345642cee45082a  svg/fig-log-y.editable.svg
