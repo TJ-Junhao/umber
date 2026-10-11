@@ -22,8 +22,8 @@
 //! ```
 
 pub use crate::model::{
-    Axes, AxisData, BarMark, BarOptions, Figure, LineMark, LineOptions, Mark, ScatterMark,
-    ScatterOptions,
+    Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView, Figure, LineMark,
+    LineOptions, Mark, ScatterMark, ScatterOptions,
 };
 
 use crate::render::{SvgText, render_png, render_svg};
@@ -111,7 +111,8 @@ mod tests {
         };
         resolve::resolve_marks(axes.marks(), figure.theme().palette())
             .into_iter()
-            .map(|resolved| resolved.color())
+            .flat_map(|resolved| resolved.keys())
+            .map(|key| key.color)
             .collect()
     }
 

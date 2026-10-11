@@ -16,8 +16,11 @@
 //! palette. Axes are resolved from these records, once per layout pass, and drawing reads them
 //! instead of the marks.
 
-use crate::model::{Axes, AxisData, BarMark, LineMark, Mark, ScatterMark};
+use crate::model::{
+    Axes, AxisData, BarGroupMark, BarMark, BarSeriesView, LineMark, Mark, ScatterMark,
+};
 use crate::scale::{Padding, is_single_value};
+use crate::stacking::Stacks;
 use crate::{
     CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Tick, Transform,
 };
@@ -331,7 +334,7 @@ pub(crate) fn resolve(
 /// [`x_categories`](Self::x_categories) and [`y_values`](Self::y_values)) each yield what the
 /// mark contributes to an axis, in a fixed order, borrowed from the record. A mark with raw data
 /// yields its data in data order. A mark with computed data yields values computed from what
-/// the record owns, such as the ends of its stacked extent or the range of its bin counts, never
+/// the record owns, such as the ends of its stack segments or the range of its bin counts, never
 /// a copy of raw data shaped to fit. Non-finite numbers are allowed; the extent ignores them.
 /// Axis resolution scans the marks in order, and each mark's values in the order given, so that
 /// order is part of the output.
@@ -358,6 +361,23 @@ pub(crate) enum ResolvedMark<'a> {
         /// The bar color.
         color: Rgba,
     },
+    /// A grouped bar mark.
+    Grouped {
+        /// The mark.
+        mark: &'a BarGroupMark,
+        /// Each series of the mark, in order, with its resolved color.
+        series: Box<[(BarSeriesView<'a>, Rgba)]>,
+    },
+    /// A stacked bar mark.
+    Stacked {
+        /// The mark.
+        mark: &'a BarGroupMark,
+        /// Each series of the mark, in order, with its resolved color.
+        series: Box<[(BarSeriesView<'a>, Rgba)]>,
+        /// The segments of every series in every category of the mark, indexed as the mark's
+        /// categories and series.
+        stacks: Stacks,
+    },
 }
 
 impl<'a> ResolvedMark<'a> {
@@ -367,7 +387,9 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
-            ResolvedMark::Bar { .. } => &[],
+            ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. } => &[],
         }
         .iter()
         .copied()
@@ -380,21 +402,37 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { mark, .. } => category_names(mark.x()),
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
             ResolvedMark::Bar { mark, .. } => mark.categories(),
+            ResolvedMark::Grouped { mark, .. } | ResolvedMark::Stacked { mark, .. } => {
+                mark.categories()
+            }
         }
         .iter()
         .map(String::as_str)
     }
 
-    /// The values the mark contributes to the y domain, in data order. See [`ResolvedMark`]
-    /// for the contract.
-    pub fn y_values(&self) -> impl Iterator<Item = f64> + '_ {
-        match self {
+    /// The values the mark contributes to the y domain. See [`ResolvedMark`] for the contract.
+    ///
+    /// Lines, scatters and bars yield their y values or heights in data order, and grouped bars
+    /// the heights of each series in turn. Stacked bars yield the end of every segment away from
+    /// 0 ([`Stacks::ends`]), never 0 itself: on a linear axis the bars put 0 into the domain
+    /// anyway (see [`grows_from_baseline`](Self::grows_from_baseline)), and on a log axis, where
+    /// every height is positive, these are the positive segment ends, which a log domain can
+    /// hold.
+    pub fn y_values(&self) -> Box<dyn Iterator<Item = f64> + '_> {
+        let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
             ResolvedMark::Bar { mark, .. } => mark.heights(),
-        }
-        .iter()
-        .copied()
+            ResolvedMark::Grouped { series, .. } => {
+                return Box::new(
+                    series
+                        .iter()
+                        .flat_map(|(view, _)| view.heights().iter().copied()),
+                );
+            }
+            ResolvedMark::Stacked { stacks, .. } => return Box::new(stacks.ends()),
+        };
+        Box::new(values.iter().copied())
     }
 
     /// Whether the mark grows from the baseline, as bars do: such a mark puts 0 into a linear y
@@ -402,25 +440,17 @@ impl<'a> ResolvedMark<'a> {
     pub fn grows_from_baseline(&self) -> bool {
         match self {
             ResolvedMark::Line { .. } | ResolvedMark::Scatter { .. } => false,
-            ResolvedMark::Bar { .. } => true,
-        }
-    }
-
-    /// The mark's resolved color.
-    #[cfg(test)]
-    pub fn color(&self) -> Rgba {
-        match *self {
-            ResolvedMark::Line { color, .. }
-            | ResolvedMark::Scatter { color, .. }
-            | ResolvedMark::Bar { color, .. } => color,
+            ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. } => true,
         }
     }
 
     /// The series the mark shows, in order, one key each: what a legend lists for the mark.
     #[allow(dead_code, reason = "the legend will read it")]
     pub fn keys(&self) -> Vec<SeriesKey<'a>> {
-        match *self {
-            ResolvedMark::Line { mark, color } => {
+        match self {
+            &ResolvedMark::Line { mark, color } => {
                 let options = mark.options();
                 vec![SeriesKey {
                     label: &options.label,
@@ -428,7 +458,7 @@ impl<'a> ResolvedMark<'a> {
                     kind: SeriesKind::Line { dash: options.dash },
                 }]
             }
-            ResolvedMark::Scatter { mark, color } => {
+            &ResolvedMark::Scatter { mark, color } => {
                 let options = mark.options();
                 vec![SeriesKey {
                     label: &options.label,
@@ -438,11 +468,19 @@ impl<'a> ResolvedMark<'a> {
                     },
                 }]
             }
-            ResolvedMark::Bar { mark, color } => vec![SeriesKey {
+            &ResolvedMark::Bar { mark, color } => vec![SeriesKey {
                 label: &mark.options().label,
                 color,
                 kind: SeriesKind::Bar,
             }],
+            ResolvedMark::Grouped { series, .. } | ResolvedMark::Stacked { series, .. } => series
+                .iter()
+                .map(|&(view, color)| SeriesKey {
+                    label: view.label(),
+                    color,
+                    kind: SeriesKind::Bar,
+                })
+                .collect(),
         }
     }
 }
@@ -491,23 +529,52 @@ pub(crate) enum SeriesKind {
     Bar,
 }
 
-/// Each mark resolved for drawing, in mark order, with its color resolved against `palette`.
-/// `Auto` colors take palette slots in series order; `Palette` and `Fixed` colors do not
-/// consume a slot.
+/// Each mark resolved for drawing, in mark order, with its colors resolved against `palette`,
+/// and the stacks of stacked bars computed. Every series takes its color in series order, the
+/// series of a grouped or stacked mark one after another: `Auto` colors take palette slots in
+/// that order; `Palette` and `Fixed` colors do not consume a slot.
 pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<ResolvedMark<'a>> {
     let mut next_auto = 0_usize;
+    let mut color_of = |spec: ColorSpec| {
+        let color = spec.resolve(palette, next_auto);
+        if matches!(spec, ColorSpec::Auto(_)) {
+            next_auto += 1;
+        }
+        color
+    };
     marks
         .iter()
-        .map(|mark| {
-            let spec = mark.color();
-            let color = spec.resolve(palette, next_auto);
-            if matches!(spec, ColorSpec::Auto(_)) {
-                next_auto += 1;
-            }
-            match mark {
-                Mark::Line(mark) => ResolvedMark::Line { mark, color },
-                Mark::Scatter(mark) => ResolvedMark::Scatter { mark, color },
-                Mark::Bar(mark) => ResolvedMark::Bar { mark, color },
+        .map(|mark| match mark {
+            Mark::Line(mark) => ResolvedMark::Line {
+                mark,
+                color: color_of(mark.options().color),
+            },
+            Mark::Scatter(mark) => ResolvedMark::Scatter {
+                mark,
+                color: color_of(mark.options().color),
+            },
+            Mark::Bar(mark) => ResolvedMark::Bar {
+                mark,
+                color: color_of(mark.options().color),
+            },
+            Mark::GroupedBar(mark) => ResolvedMark::Grouped {
+                mark,
+                series: mark
+                    .series()
+                    .map(|view| (view, color_of(view.color())))
+                    .collect(),
+            },
+            Mark::StackedBar(mark) => {
+                let series: Box<[_]> = mark
+                    .series()
+                    .map(|view| (view, color_of(view.color())))
+                    .collect();
+                let heights: Vec<&[f64]> = series.iter().map(|(view, _)| view.heights()).collect();
+                ResolvedMark::Stacked {
+                    mark,
+                    stacks: Stacks::new(mark.categories().len(), &heights),
+                    series,
+                }
             }
         })
         .collect()
@@ -516,7 +583,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{BarOptions, Figure, LineOptions, ScatterOptions};
+    use crate::model::{BarOptions, BarSeries, Figure, LineOptions, ScatterOptions};
     use crate::{LogBase, ScaleKind, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
@@ -535,6 +602,15 @@ mod tests {
 
     fn axes(figure: &mut Figure) -> &mut Axes {
         figure.axes_mut().unwrap()
+    }
+
+    /// The resolved color of every series of `resolved`, in order.
+    fn series_colors(resolved: &[ResolvedMark<'_>]) -> Vec<Rgba> {
+        resolved
+            .iter()
+            .flat_map(ResolvedMark::keys)
+            .map(|key| key.color)
+            .collect()
     }
 
     /// Both axes of `axes`, resolved from its marks.
@@ -839,7 +915,7 @@ mod tests {
             };
             assert!(same, "{record:?} does not hold {mark:?}");
         }
-        let colors: Vec<Rgba> = resolved.iter().map(ResolvedMark::color).collect();
+        let colors = series_colors(&resolved);
         assert_eq!(
             colors,
             [
@@ -1186,7 +1262,7 @@ mod tests {
             .bar(names(&["d"]), &[1.0], color(ColorSpec::AUTO, "last"))
             .unwrap();
         let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
-        let colors: Vec<Rgba> = resolved.iter().map(ResolvedMark::color).collect();
+        let colors = series_colors(&resolved);
         assert_eq!(
             colors,
             [palette[0], palette[1], fixed, palette[6], palette[2]]
@@ -1201,5 +1277,169 @@ mod tests {
             }
         );
         assert_eq!(keys[4].label, "last");
+    }
+
+    fn bar_series(color: ColorSpec, heights: &[f64]) -> BarSeries {
+        BarSeries {
+            label: String::new(),
+            heights: heights.to_vec(),
+            color,
+        }
+    }
+
+    fn auto(heights: &[f64]) -> BarSeries {
+        bar_series(ColorSpec::AUTO, heights)
+    }
+
+    #[test]
+    fn grouped_y_extent_includes_zero() {
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .grouped_bar(
+                names(&["a", "b"]),
+                vec![auto(&[12.0, f64::NAN]), auto(&[36.5, 3.0])],
+            )
+            .unwrap();
+        assert_eq!(y_domain(&f), (0.0, 42.0));
+        // The heights of every series count, not only the first's.
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .grouped_bar(names(&["a"]), vec![auto(&[-12.0]), auto(&[-36.5])])
+            .unwrap();
+        assert_eq!(y_domain(&f), (-42.0, 0.0));
+    }
+
+    #[test]
+    fn stacked_y_extent_spans_the_stacks_and_zero() {
+        // Category a stacks to 12 + 24.5 = 36.5; nothing below 0, so 0 stays on the edge.
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .stacked_bar(
+                names(&["a", "b"]),
+                vec![auto(&[12.0, 5.0]), auto(&[24.5, f64::NAN])],
+            )
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(y_domain(&f), (0.0, 42.0));
+        assert_eq!(r.baseline.get(), 0.0);
+        // All negative: mirrored.
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .stacked_bar(names(&["a"]), vec![auto(&[-12.0]), auto(&[-24.5])])
+            .unwrap();
+        assert_eq!(y_domain(&f), (-42.0, 0.0));
+    }
+
+    #[test]
+    fn mixed_sign_stacks_are_padded_on_both_sides() {
+        // Stacks reach 30 + 6 = 36 above 0 and -(12 + 7) = -19 below it: the nice limits
+        // -20..40 end at neither 0, so `KeepZero` keeps neither side and both are padded.
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .stacked_bar(
+                names(&["a", "b"]),
+                vec![auto(&[30.0, -12.0]), auto(&[6.0, -7.0]), auto(&[-3.0, 2.0])],
+            )
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let (lo, hi) = y_domain(&f);
+        assert!(lo < -19.0 && hi > 36.0, "{lo} {hi}");
+        let nice = (
+            r.y.ticks[0].label.clone(),
+            r.y.ticks.last().unwrap().label.clone(),
+        );
+        assert_ne!(nice.0, "0");
+        assert_ne!(nice.1, "0");
+        assert_end_ticks_inset(&r.y);
+        assert!(labels(&r.y).contains(&"0"));
+        // The baseline sits at 0, inside the plot.
+        assert!(r.baseline.get() > 0.0 && r.baseline.get() < 1.0);
+    }
+
+    #[test]
+    fn stacked_log_y_extent_comes_from_positive_segment_ends() {
+        // On a log axis the stacks start at the bottom of the plot. The domain is fitted to the
+        // segment ends, 2..1500 here, and never to an extent that includes 0, which a log axis
+        // cannot hold (it would fall back to the unit range 1..10).
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let mut f = figure(ScaleKind::Category, log);
+        axes(&mut f)
+            .stacked_bar(
+                names(&["a", "b"]),
+                vec![auto(&[2.0, 500.0]), auto(&[f64::NAN, 1000.0])],
+            )
+            .unwrap();
+        let domain = y_domain(&f);
+        assert!(close(domain, pad_log(1.0, 1e4)), "{domain:?}");
+        // The same domain as a line through exactly the segment ends.
+        let mut g = figure(ScaleKind::Category, log);
+        axes(&mut g)
+            .line(
+                cats(&["a", "b", "b"]),
+                &[2.0, 500.0, 1500.0],
+                LineOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(domain, y_domain(&g));
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(r.baseline.get(), 0.0);
+    }
+
+    #[test]
+    fn auto_colors_follow_series_order_across_marks() {
+        use crate::Alpha;
+        let mut f = figure(ScaleKind::Category, LIN);
+        let palette = f.theme().palette().to_vec();
+        let fixed = Rgba::opaque(9, 8, 7);
+        let at = |index: usize| ColorSpec::Palette {
+            index,
+            alpha: Alpha::OPAQUE,
+        };
+        axes(&mut f)
+            .bar(names(&["a"]), &[1.0], BarOptions::default())
+            .unwrap()
+            .grouped_bar(
+                names(&["a"]),
+                vec![
+                    auto(&[1.0]),
+                    bar_series(ColorSpec::Fixed(fixed), &[1.0]),
+                    bar_series(at(5), &[1.0]),
+                    auto(&[1.0]),
+                ],
+            )
+            .unwrap()
+            .line(cats(&["a"]), &[1.0], LineOptions::default())
+            .unwrap()
+            .stacked_bar(
+                names(&["a"]),
+                vec![auto(&[1.0]), bar_series(at(0), &[1.0]), auto(&[2.0])],
+            )
+            .unwrap();
+        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        assert_eq!(
+            series_colors(&resolved),
+            [
+                palette[0], palette[1], fixed, palette[5], palette[2], palette[3], palette[4],
+                palette[0], palette[5],
+            ]
+        );
+        // Every grouped or stacked series is a legend key of its own, drawn as a bar.
+        let keys: Vec<SeriesKey<'_>> = resolved.iter().flat_map(ResolvedMark::keys).collect();
+        assert_eq!(keys.len(), 9);
+        assert!(keys[1..5].iter().all(|key| key.kind == SeriesKind::Bar));
+    }
+
+    #[test]
+    fn bar_group_categories_join_first_appearance() {
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .bar(names(&["b"]), &[1.0], BarOptions::default())
+            .unwrap()
+            .stacked_bar(names(&["c", "b", "a"]), vec![auto(&[1.0, 2.0, 3.0])])
+            .unwrap()
+            .grouped_bar(names(&["d", "a"]), vec![auto(&[1.0, 2.0])])
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(labels(&r.x), ["b", "c", "a", "d"]);
     }
 }

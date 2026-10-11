@@ -121,6 +121,34 @@ pub(crate) fn marks(
                     &mut items,
                 );
             }
+            ResolvedMark::Grouped {
+                mark: group_mark,
+                ref series,
+            } => {
+                bar::grouped_items(
+                    &context,
+                    &resolved.x,
+                    &resolved.y,
+                    group_mark,
+                    series,
+                    &mut items,
+                );
+            }
+            ResolvedMark::Stacked {
+                mark: stack_mark,
+                ref series,
+                ref stacks,
+            } => {
+                bar::stacked_items(
+                    &context,
+                    &resolved.x,
+                    &resolved.y,
+                    stack_mark,
+                    series,
+                    stacks,
+                    &mut items,
+                );
+            }
         }
     }
     if items.is_empty() {

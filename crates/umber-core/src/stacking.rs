@@ -1,8 +1,6 @@
 //! Stacking: the cumulative segments of stacked series per category, with positive and
 //! negative values stacked separately away from zero.
 
-#![allow(dead_code, reason = "stacked bar marks will use it")]
-
 /// One series' share of a stack: the span from `bottom` to `top`.
 ///
 /// `bottom` is the end nearer zero and `top` the end away from it, so a negative segment has
@@ -17,6 +15,51 @@ pub(crate) struct Segment {
     pub(crate) outermost: bool,
 }
 
+/// The running totals of one stack, one per side of zero.
+///
+/// Heights are put on the stack in series order: a positive height extends the positive side
+/// upward, a negative one the negative side downward. [`Stacks`] builds its segments with it,
+/// and the model checks stacked totals with it, so both sum in the same order.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Totals {
+    /// The sum of the positive heights so far.
+    positive: f64,
+    /// The sum of the negative heights so far.
+    negative: f64,
+}
+
+impl Totals {
+    /// Puts `height` on its side of the stack and returns the span it covers, `(bottom, top)`,
+    /// with `bottom` the end nearer zero. `None` when it spans nothing: NaN, 0, or a height too
+    /// small to change its side's total (`1e100 + 1.0 == 1e100`), which leaves the totals as
+    /// they are.
+    pub(crate) fn push(&mut self, height: f64) -> Option<(f64, f64)> {
+        let side = if height > 0.0 {
+            &mut self.positive
+        } else if height < 0.0 {
+            &mut self.negative
+        } else {
+            return None;
+        };
+        let (bottom, top) = (*side, *side + height);
+        if top == bottom {
+            return None;
+        }
+        *side = top;
+        Some((bottom, top))
+    }
+
+    /// The sum of the positive heights put so far; 0 when there is none.
+    pub(crate) fn positive(self) -> f64 {
+        self.positive
+    }
+
+    /// The sum of the negative heights put so far; 0 when there is none.
+    pub(crate) fn negative(self) -> f64 {
+        self.negative
+    }
+}
+
 /// The segments of every series in every category.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Stacks {
@@ -28,34 +71,28 @@ impl Stacks {
     /// Stacks `series` (one height per category each) over `categories` categories.
     ///
     /// Positive heights stack upward from 0 and negative ones downward, each side in series
-    /// order. NaN and 0 contribute no segment, and neither does a height missing from a short
-    /// series. A height too small to change the running total (`1e100 + 1.0 == 1e100`) spans
-    /// nothing, so it gets no segment either, and the last segment that is visible on its side
-    /// is the outermost. Sums are `f64`; the caller keeps the totals within the scale limits.
+    /// order (see [`Totals`]). NaN and 0 contribute no segment, and neither does a height
+    /// missing from a short series. A height too small to change the running total
+    /// (`1e100 + 1.0 == 1e100`) spans nothing, so it gets no segment either, and the last
+    /// segment that is visible on its side is the outermost. Sums are `f64`; the caller keeps
+    /// the totals within the scale limits.
     pub(crate) fn new(categories: usize, series: &[&[f64]]) -> Stacks {
         let mut rows: Vec<Box<[Option<Segment>]>> = series
             .iter()
             .map(|_| vec![None; categories].into_boxed_slice())
             .collect();
         for category in 0..categories {
-            // Running totals and the last series that contributed, for each side.
-            let mut positive = (0.0_f64, None::<usize>);
-            let mut negative = (0.0_f64, None::<usize>);
+            let mut totals = Totals::default();
+            // The last series that contributed to the positive and the negative side.
+            let mut last = [None::<usize>; 2];
             for (index, heights) in series.iter().enumerate() {
                 let height = heights.get(category).copied().unwrap_or(f64::NAN);
-                let side = if height > 0.0 {
-                    &mut positive
-                } else if height < 0.0 {
-                    &mut negative
-                } else {
+                let Some((bottom, top)) = totals.push(height) else {
                     continue;
                 };
-                let (bottom, top) = (side.0, side.0 + height);
-                if top == bottom {
-                    continue;
+                if let Some(side) = last.get_mut(usize::from(top < 0.0)) {
+                    *side = Some(index);
                 }
-                side.0 = top;
-                side.1 = Some(index);
                 if let Some(slot) = rows.get_mut(index).and_then(|row| row.get_mut(category)) {
                     *slot = Some(Segment {
                         bottom,
@@ -64,9 +101,9 @@ impl Stacks {
                     });
                 }
             }
-            for last in [positive.1, negative.1].into_iter().flatten() {
+            for index in last.into_iter().flatten() {
                 if let Some(Some(segment)) =
-                    rows.get_mut(last).and_then(|row| row.get_mut(category))
+                    rows.get_mut(index).and_then(|row| row.get_mut(category))
                 {
                     segment.outermost = true;
                 }
@@ -80,19 +117,14 @@ impl Stacks {
         self.rows.get(series)?.get(category).copied().flatten()
     }
 
-    /// The lowest and highest value any stack reaches, 0 included, or `None` when no series
-    /// has a segment.
-    pub(crate) fn extent(&self) -> Option<(f64, f64)> {
+    /// The end away from zero of every segment, series by series and within a series in
+    /// category order. These are the values a stack reaches besides 0, which is never among
+    /// them: a segment spans a non-zero height away from it. When every height is positive, as
+    /// on a log axis, they are exactly the positive segment ends.
+    pub(crate) fn ends(&self) -> impl Iterator<Item = f64> + '_ {
         self.rows
             .iter()
-            .flat_map(|row| row.iter().flatten())
-            .fold(None, |extent, segment| {
-                let (lo, hi) = extent.unwrap_or((0.0_f64, 0.0_f64));
-                Some((
-                    lo.min(segment.bottom).min(segment.top),
-                    hi.max(segment.bottom).max(segment.top),
-                ))
-            })
+            .flat_map(|row| row.iter().flatten().map(|segment| segment.top))
     }
 }
 
@@ -100,6 +132,14 @@ impl Stacks {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    /// The lowest and highest value any stack reaches, 0 included, or `None` without segments.
+    fn extent(stacks: &Stacks) -> Option<(f64, f64)> {
+        stacks.ends().fold(None, |extent, end| {
+            let (lo, hi) = extent.unwrap_or((0.0_f64, 0.0_f64));
+            Some((lo.min(end), hi.max(end)))
+        })
+    }
 
     #[test]
     fn positive_and_negative_heights_stack_apart() {
@@ -112,7 +152,11 @@ mod tests {
         assert_eq!((seg(0, 2).bottom, seg(0, 2).top), (1.0, 3.0));
         assert_eq!((seg(1, 1).bottom, seg(1, 1).top), (2.0, 5.0));
         assert_eq!((seg(1, 2).bottom, seg(1, 2).top), (0.0, -4.0));
-        assert_eq!(stacks.extent(), Some((-4.0, 5.0)));
+        assert_eq!(extent(&stacks), Some((-4.0, 5.0)));
+        assert_eq!(
+            stacks.ends().collect::<Vec<_>>(),
+            [1.0, 2.0, -1.0, 5.0, 3.0, -4.0]
+        );
     }
 
     #[test]
@@ -146,8 +190,25 @@ mod tests {
         let stacks = Stacks::new(1, &[&[1.0]]);
         assert!(stacks.segment(1, 0).is_none());
         assert!(stacks.segment(0, 1).is_none());
-        assert_eq!(Stacks::new(3, &[]).extent(), None);
-        assert_eq!(Stacks::new(1, &[&[0.0]]).extent(), None);
+        assert_eq!(extent(&Stacks::new(3, &[])), None);
+        assert_eq!(extent(&Stacks::new(1, &[&[0.0]])), None);
+    }
+
+    #[test]
+    fn totals_sum_each_side_in_order() {
+        let mut totals = Totals::default();
+        assert_eq!(totals.push(2.0), Some((0.0, 2.0)));
+        assert_eq!(totals.push(-1.5), Some((0.0, -1.5)));
+        assert_eq!(totals.push(f64::NAN), None);
+        assert_eq!(totals.push(0.0), None);
+        assert_eq!(totals.push(-0.0), None);
+        assert_eq!(totals.push(3.0), Some((2.0, 5.0)));
+        assert_eq!((totals.positive(), totals.negative()), (5.0, -1.5));
+        // A height that cannot move its side's total spans nothing and changes nothing.
+        let mut big = Totals::default();
+        big.push(1e100);
+        assert_eq!(big.push(1.0), None);
+        assert_eq!(big.positive(), 1e100);
     }
 
     #[test]

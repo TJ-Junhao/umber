@@ -1,9 +1,10 @@
-//! Bar marks: band share, base and end, clipping in axis space and the rounded end.
+//! Bar marks: band share, base and end, clipping in axis space and the rounded end; grouped
+//! bars side by side and stacked segments.
 
 use super::mark_group;
 use crate::geometry::{Path, PathVerb, Point};
 use crate::layout::Layout;
-use crate::model::{AxisData, BarOptions, Figure, LineOptions};
+use crate::model::{AxisData, BarOptions, BarSeries, Figure, LineOptions};
 use crate::render::{SvgText, render_png, render_svg};
 use crate::scene::{Item, Paint, Scene};
 use crate::test_support::scene::assert_scene_bounded;
@@ -267,4 +268,240 @@ fn log_bars_grow_from_the_bottom_of_the_plot() {
     }
     // The baseline is the bottom of the plot too.
     assert_near(layout.plot.bottom() as f32, layout.baseline_y);
+}
+
+fn series(heights: &[f64]) -> BarSeries {
+    BarSeries {
+        heights: heights.to_vec(),
+        ..BarSeries::default()
+    }
+}
+
+/// A figure with a category x axis, a y axis of `y` and one grouped (or stacked) bar mark.
+fn group_figure(
+    theme: Theme,
+    y: ScaleKind,
+    stacked: bool,
+    categories: &[&str],
+    heights: &[&[f64]],
+) -> Figure {
+    let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+    let axes = f.add_axes(ScaleKind::Category, y).unwrap();
+    let list: Vec<BarSeries> = heights.iter().map(|h| series(h)).collect();
+    if stacked {
+        axes.stacked_bar(names(categories), list).unwrap();
+    } else {
+        axes.grouped_bar(names(categories), list).unwrap();
+    }
+    f
+}
+
+#[test]
+fn group_fills_72_percent_of_band() {
+    let theme = Theme::graphite();
+    let f = group_figure(
+        theme.clone(),
+        ScaleKind::Linear,
+        false,
+        &["a", "b"],
+        &[&[3.0, 1.0], &[2.0, -1.0], &[4.0, 2.0]],
+    );
+    let scene = f.to_scene(FontLibrary::global());
+    assert_scene_bounded(&scene);
+    let plot = layout_of(&f).plot;
+    let fills = bars(&scene);
+    assert_eq!(fills.len(), 6);
+    let palette = theme.palette();
+    for (category, group) in fills.chunks(3).enumerate() {
+        // Two bands of half the plot width each; the group takes 72 % of its band.
+        let center = plot.x + (category as f64 + 0.5) / 2.0 * plot.width;
+        let half = 0.36 * plot.width / 2.0;
+        let spans: Vec<(f32, f32)> = group
+            .iter()
+            .map(|(path, _)| {
+                let (lo, hi) = bounds(path);
+                (lo.x, hi.x)
+            })
+            .collect();
+        assert_near(spans[0].0, center - half);
+        assert_near(spans[2].1, center + half);
+        // Equal widths, 2 pt apart, in series order and colors.
+        let width = (2.0 * half - 2.0 * 2.0) / 3.0;
+        for (j, &(left, right)) in spans.iter().enumerate() {
+            assert_near(right - left, width);
+            assert_near(left, center - half + j as f64 * (width + 2.0));
+            assert_eq!(group[j].1, palette[j]);
+        }
+    }
+}
+
+#[test]
+fn group_gap_closes_when_bars_would_be_thinner_than_it() {
+    // Twelve series in twelve categories: with 2 pt gaps the bars would be narrower than the
+    // gap, so they touch and share the group evenly.
+    let heights: Vec<Vec<f64>> = (0..12).map(|j| vec![f64::from(j) + 1.0; 12]).collect();
+    let heights: Vec<&[f64]> = heights.iter().map(Vec::as_slice).collect();
+    let categories: Vec<String> = (0..12).map(|i| format!("c{i}")).collect();
+    let categories: Vec<&str> = categories.iter().map(String::as_str).collect();
+    let f = group_figure(
+        Theme::pigment(),
+        ScaleKind::Linear,
+        false,
+        &categories,
+        &heights,
+    );
+    let scene = f.to_scene(FontLibrary::global());
+    let plot = layout_of(&f).plot;
+    let fills = bars(&scene);
+    assert_eq!(fills.len(), 144);
+    let group = 0.72 * plot.width / 12.0;
+    assert!(
+        (group - 11.0 * 2.0) / 12.0 < 2.0,
+        "the case must close the gap"
+    );
+    let first: Vec<(Point, Point)> = fills[..12].iter().map(|(path, _)| bounds(path)).collect();
+    assert_near(first[0].0.x, plot.x + (0.5 - 0.36) * plot.width / 12.0);
+    for pair in first.windows(2) {
+        assert_near(pair[1].0.x - pair[0].1.x, 0.0);
+        assert_near(pair[0].1.x - pair[0].0.x, group / 12.0);
+    }
+}
+
+#[test]
+fn stacked_signs_stack_separately() {
+    // Midnight rounds bar ends by 3.5 pt; only the outermost segment on each side is rounded.
+    let f = group_figure(
+        Theme::midnight(),
+        ScaleKind::Linear,
+        true,
+        &["a"],
+        &[&[3.0], &[-2.0], &[f64::NAN], &[4.0], &[0.0]],
+    );
+    let scene = f.to_scene(FontLibrary::global());
+    assert_scene_bounded(&scene);
+    let layout = layout_of(&f);
+    let fills = bars(&scene);
+    // NaN and 0 add no segment.
+    let [(up, _), (down, _), (top, _)] = fills.as_slice() else {
+        panic!("expected three segments, got {fills:?}")
+    };
+    let (up, down, top) = (*up, *down, *top);
+    let base = layout.baseline_y;
+    // Points per unit, from the first segment, which runs from 0 to 3.
+    let (up_lo, up_hi) = bounds(up);
+    assert_near(up_hi.y, base);
+    let unit = (base - f64::from(up_lo.y)) / 3.0;
+    // The negative segment grows down from the baseline; the third stacks on the first.
+    let (down_lo, down_hi) = bounds(down);
+    assert_near(down_lo.y, base);
+    assert_near(down_hi.y, base + 2.0 * unit);
+    let (top_lo, top_hi) = bounds(top);
+    assert_eq!(top_hi.y, up_lo.y);
+    assert_near(top_lo.y, base - 7.0 * unit);
+    // One stack: every segment spans the same x range.
+    assert_eq!((up_lo.x, up_hi.x), (top_lo.x, top_hi.x));
+    assert_eq!((up_lo.x, up_hi.x), (down_lo.x, down_hi.x));
+    assert_eq!((cubics(up), cubics(down), cubics(top)), (0, 2, 2));
+    // The colors are those of the series that drew: the first, second and fourth.
+    let palette = Theme::midnight().palette().to_vec();
+    let colors: Vec<Rgba> = fills.iter().map(|(_, c)| *c).collect();
+    assert_eq!(colors, [palette[0], palette[1], palette[3]]);
+}
+
+#[test]
+fn grouped_and_stacked_bars_are_drawn_by_category_then_series() {
+    // An earlier all-NaN line sets the category order a, b; the marks list b, a.
+    for stacked in [false, true] {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let axes = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        axes.line(
+            AxisData::Categories(names(&["a", "b"])),
+            &[f64::NAN; 2],
+            LineOptions::default(),
+        )
+        .unwrap();
+        let list = vec![series(&[2.0, 1.0]), series(&[3.0, 4.0])];
+        if stacked {
+            axes.stacked_bar(names(&["b", "a"]), list).unwrap();
+        } else {
+            axes.grouped_bar(names(&["b", "a"]), list).unwrap();
+        }
+        let scene = f.to_scene(FontLibrary::global());
+        let plot = layout_of(&f).plot;
+        let palette = Theme::pigment().palette().to_vec();
+        let fills = bars(&scene);
+        let order: Vec<(bool, Rgba)> = fills
+            .iter()
+            .map(|(path, color)| {
+                (
+                    f64::from(bounds(path).0.x) < plot.x + plot.width / 2.0,
+                    *color,
+                )
+            })
+            .collect();
+        assert_eq!(
+            order,
+            // The line takes the first palette slot.
+            [
+                (true, palette[1]),
+                (true, palette[2]),
+                (false, palette[1]),
+                (false, palette[2]),
+            ],
+            "stacked: {stacked}"
+        );
+    }
+}
+
+#[test]
+fn log_stacks_start_at_the_bottom_of_the_plot() {
+    let log = ScaleKind::Log { base: LogBase::TEN };
+    let f = group_figure(
+        Theme::graphite(),
+        log,
+        true,
+        &["a", "b"],
+        &[&[10.0, 3.0], &[90.0, 300.0]],
+    );
+    let scene = f.to_scene(FontLibrary::global());
+    assert_scene_bounded(&scene);
+    let layout = layout_of(&f);
+    let fills = bars(&scene);
+    assert_eq!(fills.len(), 4);
+    // The first segment of each stack starts at the bottom of the plot, the domain's low end;
+    // the second starts where the first ends.
+    for pair in fills.chunks(2) {
+        let (first, second) = (bounds(pair[0].0), bounds(pair[1].0));
+        assert_near(first.1.y, layout.plot.bottom());
+        assert_eq!(second.1.y, first.0.y);
+        assert!(second.0.y < first.0.y);
+    }
+    assert_near(layout.plot.bottom() as f32, layout.baseline_y);
+}
+
+#[test]
+fn stacks_and_groups_far_outside_limits_are_clipped() {
+    // Totals at the largest magnitude, under limits 1e-10 wide.
+    for stacked in [false, true] {
+        let mut f = group_figure(
+            Theme::midnight(),
+            ScaleKind::Linear,
+            stacked,
+            &["up", "down", "inside"],
+            &[&[5e299, -5e299, 2e-11], &[5e299, -5e299, 3e-11]],
+        );
+        f.axes_mut().unwrap().ylim(1e-11, 1e-10).unwrap();
+        let scene = f.to_scene(FontLibrary::global());
+        assert_scene_bounded(&scene);
+        let plot = layout_of(&f).plot;
+        let fills = bars(&scene);
+        assert!(!fills.is_empty());
+        for (path, _) in &fills {
+            let (lo, hi) = bounds(path);
+            assert!(f64::from(lo.y) >= plot.y - 4.0, "{lo:?}");
+            assert!(f64::from(hi.y) <= plot.bottom() + 4.0, "{hi:?}");
+        }
+        assert!(render_png(&scene, 72).is_ok());
+        assert!(!render_svg(&scene, SvgText::Outlines).is_empty());
+    }
 }

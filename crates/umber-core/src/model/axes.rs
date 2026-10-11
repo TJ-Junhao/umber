@@ -2,7 +2,7 @@
 //! every input before storing it.
 
 use super::axis_data::{AxisData, Series};
-use super::bar::{BarMark, BarOptions};
+use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
 use super::mark::{LineOptions, Mark, ScatterOptions};
 use super::validation::check_limits;
 use crate::{ContinuousScale, Result, ScaleKind};
@@ -400,6 +400,104 @@ impl Axes {
     ) -> Result<&mut Axes> {
         let mark = BarMark::new("Axes.bar()", self.x, self.y, categories, heights, options)?;
         self.marks.push(Mark::Bar(mark));
+        Ok(self)
+    }
+
+    /// Adds grouped bars: in each category, one bar per series, side by side in series order.
+    /// The group takes 72 % of the category's band, centered in it, with a 2 pt gap between
+    /// its bars; when the bars would be narrower than the gap, they touch. Each bar grows from
+    /// the baseline as in [`Axes::bar`]. Each series takes its own color; `Auto` colors take
+    /// palette slots in series order. Categories join the x axis in order of first appearance
+    /// across all marks.
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: an empty
+    /// `series`; a series whose heights are not one per category (the message names the
+    /// series' index); then the categories and each series' heights as in [`Axes::bar`]; a
+    /// category y axis. NaN is allowed and draws no bar.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::BarSeries;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let series = |label: &str, heights: &[f64]| BarSeries {
+    ///     label: label.into(),
+    ///     heights: heights.to_vec(),
+    ///     ..BarSeries::default()
+    /// };
+    /// axes.grouped_bar(
+    ///     vec!["2025".into(), "2026".into()],
+    ///     vec![series("north", &[3.0, 4.0]), series("south", &[2.5, f64::NAN])],
+    /// )?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // A series with a height missing is an error, and the axes keep their one mark.
+    /// assert!(axes.grouped_bar(vec!["a".into()], vec![series("x", &[])]).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_bar(
+        &mut self,
+        categories: Vec<String>,
+        series: Vec<BarSeries>,
+    ) -> Result<&mut Axes> {
+        let mark = BarGroupMark::new(
+            "Axes.grouped_bar()",
+            Arrangement::Grouped,
+            self.x,
+            self.y,
+            categories,
+            series,
+        )?;
+        self.marks.push(Mark::GroupedBar(mark));
+        Ok(self)
+    }
+
+    /// Adds stacked bars: in each category, one stack, as wide as a bar of [`Axes::bar`], with
+    /// the series stacked in series order. Positive heights stack upward from the baseline and
+    /// negative ones downward, each side separately; NaN and 0 add no segment. Only the outermost
+    /// segment on each side has its end rounded. On a log y axis the first segment starts at
+    /// the bottom of the plot. Colors and categories work as in [`Axes::grouped_bar`].
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
+    /// [`Axes::grouped_bar`], with one more check before the y axis kind: in each category, the
+    /// positive heights and the negative heights must each add up to at most
+    /// [`MAX_MAGNITUDE`] in magnitude (the message names the category).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::BarSeries;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let series = |heights: &[f64]| BarSeries { heights: heights.to_vec(), ..BarSeries::default() };
+    /// axes.stacked_bar(vec!["a".into(), "b".into()], vec![series(&[3.0, -1.0]), series(&[2.0, 4.0])])?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // Totals beyond the supported magnitudes are an error.
+    /// assert!(axes.stacked_bar(vec!["a".into()], vec![series(&[1e300]), series(&[1e300])]).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    ///
+    /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
+    pub fn stacked_bar(
+        &mut self,
+        categories: Vec<String>,
+        series: Vec<BarSeries>,
+    ) -> Result<&mut Axes> {
+        let mark = BarGroupMark::new(
+            "Axes.stacked_bar()",
+            Arrangement::Stacked,
+            self.x,
+            self.y,
+            categories,
+            series,
+        )?;
+        self.marks.push(Mark::StackedBar(mark));
         Ok(self)
     }
 
