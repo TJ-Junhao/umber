@@ -374,7 +374,7 @@ impl ColorSpec {
     /// # Errors
     ///
     /// Returns `Error::Style` (context `"Color.palette()"`, parameter `index`) when `index` is
-    /// negative, or does not fit the platform's `usize`.
+    /// negative, or too large for the platform's `usize`.
     ///
     /// # Examples
     ///
@@ -386,15 +386,25 @@ impl ColorSpec {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn palette(index: i64, alpha: Alpha) -> Result<ColorSpec> {
-        match usize::try_from(index) {
-            Ok(index) => Ok(ColorSpec::Palette { index, alpha }),
-            Err(_) => Err(Error::style(
+        if index < 0 {
+            return Err(Error::style(
                 "Color.palette()",
                 format!("index is {index}; a palette index must be 0 or greater."),
             )
             .with_parameter("index")
-            .with_hint("indexes start at 0 and wrap around the palette.")),
+            .with_hint("indexes start at 0 and wrap around the palette."));
         }
+        let Ok(index) = usize::try_from(index) else {
+            return Err(Error::style(
+                "Color.palette()",
+                format!(
+                    "index is {index}; a palette index must be at most {}.",
+                    usize::MAX
+                ),
+            )
+            .with_parameter("index"));
+        };
+        Ok(ColorSpec::Palette { index, alpha })
     }
 
     /// Replace the opacity of this spec.
@@ -601,6 +611,23 @@ mod tests {
                 alpha: half
             }
         );
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn palette_index_beyond_usize_names_the_limit() {
+        assert!(ColorSpec::palette(i64::from(u32::MAX), Alpha::OPAQUE).is_ok());
+        for index in [i64::from(u32::MAX) + 1, i64::MAX] {
+            let err = ColorSpec::palette(index, Alpha::OPAQUE).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "Color.palette(): index is {index}; a palette index must be at most 4294967295."
+                )
+            );
+            assert_eq!(err.parameter(), Some("index"));
+            assert_eq!(err.hint(), None);
+        }
     }
 
     #[test]

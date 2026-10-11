@@ -138,6 +138,7 @@ fn identity_context(theme: &Theme, plot: Area) -> MarkContext<'_> {
         theme,
         maps: identity_maps(plot),
         plot,
+        baseline: NormalizedPos::LOW,
         baseline_y: plot.bottom(),
     }
 }

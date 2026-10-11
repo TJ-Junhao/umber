@@ -8,6 +8,10 @@
 //! the auto range as given and are never padded. A linear y axis that holds bars or a histogram
 //! always includes 0, and a side of its nice domain that ends at 0 is not padded, so bars start
 //! on the plot edge. A category axis lists the marks' categories in order of first appearance.
+//! The baseline sits at 0 when 0 lies inside a linear y domain, and otherwise at the y axis's
+//! lower limit before padding. Auto y limits keep that lower limit strictly below the data: when
+//! the smallest y value lands on (or within 5 % of the span above) the lowest nice tick, the
+//! limit moves down one tick step.
 //! Tick positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch
 //! data values again.
 //!
@@ -20,7 +24,7 @@ use crate::binning::Histogram;
 use crate::model::{
     Axes, AxisData, BarGroupMark, BarMark, BarSeriesView, HistMark, LineMark, Mark, ScatterMark,
 };
-use crate::scale::{Padding, is_single_value};
+use crate::scale::{Padding, is_single_value, log_offset};
 use crate::stacking::Stacks;
 use crate::{
     CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Tick, Transform,
@@ -103,7 +107,10 @@ pub(crate) struct Resolved {
     /// The y axis.
     pub y: ResolvedAxis,
     /// Where the baseline sits along the y axis, in `[0, 1]`: at y = 0 when 0 is inside the y
-    /// range, otherwise at the bottom (0).
+    /// domain of a linear axis, otherwise at the y axis's lower limit before padding (the
+    /// lowest nice tick for auto limits, the explicit low limit, which is the plot bottom, for
+    /// explicit ones). Resolve decides it once; layout draws the baseline there, line area
+    /// fills fade to it, and bars on a log y axis grow from it.
     pub baseline: NormalizedPos,
 }
 
@@ -121,6 +128,10 @@ enum AutoLimits {
     /// domain is then padded on the given sides (see [`ContinuousScale::padded`]); the ticks
     /// stay as they are.
     Nice(Padding),
+    /// As [`Nice`](Self::Nice), with the lowest tick moved strictly below the data before the
+    /// padding when the data starts on it (see [`ContinuousScale::below_data`]): the y axis,
+    /// whose baseline sits at the lower limit when 0 is not in the domain.
+    NiceBelowData(Padding),
 }
 
 /// What an axis fixes before any data is seen: whether it lists categories, and for a
@@ -181,6 +192,16 @@ fn extent(values: impl IntoIterator<Item = f64>) -> Option<(f64, f64)> {
         })
 }
 
+/// A continuous axis resolved by [`continuous`], with the lower limit of its domain before
+/// padding.
+struct ContinuousAxis {
+    /// The axis.
+    axis: ResolvedAxis,
+    /// The lower limit before padding: the nice lower limit of a padded axis, the domain's own
+    /// lower limit otherwise.
+    unpadded_low: f64,
+}
+
 /// A continuous axis: the scale of the explicit limits when set; otherwise the empty-data
 /// range (0 to 1, or 1 to 10 on log) when there is no finite data; otherwise the data extent,
 /// fitted as `auto` says. Nice axes take the ticks that produced their limits; the others take
@@ -192,28 +213,57 @@ fn continuous(
     data: Option<(f64, f64)>,
     auto: AutoLimits,
     target: usize,
-) -> ResolvedAxis {
-    let (scale, ticks) = if let Some(scale) = limits {
-        (scale, scale.ticks(target))
+) -> ContinuousAxis {
+    let (scale, unpadded, ticks) = if let Some(scale) = limits {
+        (scale, scale, scale.ticks(target))
     } else if data.is_none() {
         // The fallback range is final on every axis: never widened with `nice`.
         let scale = ContinuousScale::unit(transform);
-        (scale, scale.ticks(target))
+        (scale, scale, scale.ticks(target))
     } else {
         let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
         match auto {
-            AutoLimits::Exact => (scale, scale.ticks(target)),
-            AutoLimits::Nice(padding) => {
+            AutoLimits::Exact => (scale, scale, scale.ticks(target)),
+            AutoLimits::Nice(padding) | AutoLimits::NiceBelowData(padding) => {
                 let (nice, ticks) = scale.nice_with_ticks(target);
+                let (nice, ticks) = match (auto, data) {
+                    (AutoLimits::NiceBelowData(_), Some((data_low, _))) => {
+                        nice.below_data(ticks, data_low, target)
+                    }
+                    _ => (nice, ticks),
+                };
                 let single = data.is_some_and(|(lo, hi)| is_single_value(transform, lo, hi));
-                (if single { nice } else { nice.padded(padding) }, ticks)
+                let padded = if single { nice } else { nice.padded(padding) };
+                (padded, nice, ticks)
             }
         }
     };
-    ResolvedAxis {
-        ticks: positioned(&scale, ticks),
-        scale: AxisScale::Continuous(scale),
+    ContinuousAxis {
+        axis: ResolvedAxis {
+            ticks: positioned(&scale, ticks),
+            scale: AxisScale::Continuous(scale),
+        },
+        unpadded_low: unpadded.domain().0,
+    }
+}
+
+/// Where the baseline sits on the continuous y axis `scale` of `transform`, whose lower limit
+/// before padding is `unpadded_low`: at 0 when 0 lies inside the domain of a linear axis,
+/// otherwise at `unpadded_low`. A position that does not map (impossible for a validated
+/// scale) falls back to the bottom.
+fn baseline(scale: &ContinuousScale, transform: Transform, unpadded_low: f64) -> NormalizedPos {
+    let (lo, hi) = scale.domain();
+    let value = if transform == Transform::Linear && lo <= 0.0 && 0.0 <= hi {
+        0.0
+    } else {
+        unpadded_low
+    };
+    let pos = scale.normalize(value);
+    if pos.is_finite() {
+        NormalizedPos::new(pos)
+    } else {
+        NormalizedPos::LOW
     }
 }
 
@@ -270,7 +320,7 @@ pub(crate) fn resolve(
             } else {
                 AutoLimits::Nice(Padding::BothSides)
             };
-            continuous(transform, explicit, data, auto, x_target)
+            continuous(transform, explicit, data, auto, x_target).axis
         }
         AxisLimits::Category => {
             let scale = categories(marks);
@@ -287,7 +337,7 @@ pub(crate) fn resolve(
         } => {
             let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
             // Bars grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
-            // edge when it is a limit. On a log axis they grow from the bottom of the plot.
+            // edge when it is a limit. On a log axis they grow from the baseline.
             let bars = marks.iter().any(ResolvedMark::grows_from_baseline);
             let (data, padding) = if bars && transform == Transform::Linear {
                 let with_zero = data.map(|(lo, hi)| (lo.min(0.0), hi.max(0.0)));
@@ -295,21 +345,14 @@ pub(crate) fn resolve(
             } else {
                 (data, Padding::BothSides)
             };
-            let auto = AutoLimits::Nice(padding);
-            let axis = continuous(transform, explicit, data, auto, y_target);
+            let auto = AutoLimits::NiceBelowData(padding);
+            let ContinuousAxis { axis, unpadded_low } =
+                continuous(transform, explicit, data, auto, y_target);
             let baseline = match &axis.scale {
-                AxisScale::Continuous(scale) => {
-                    let (lo, hi) = scale.domain();
-                    if transform == Transform::Linear && lo <= 0.0 && 0.0 <= hi {
-                        scale.normalize(0.0)
-                    } else {
-                        0.0
-                    }
-                }
-                AxisScale::Category(_) => 0.0,
+                AxisScale::Continuous(scale) => baseline(scale, transform, unpadded_low),
+                AxisScale::Category(_) => NormalizedPos::LOW,
             };
-            let baseline = if baseline.is_finite() { baseline } else { 0.0 };
-            (axis, NormalizedPos::new(baseline))
+            (axis, baseline)
         }
         AxisLimits::Category => {
             // Marks always hold numeric y, so a category y axis never has categories.
@@ -475,8 +518,8 @@ impl<'a> ResolvedMark<'a> {
     }
 
     /// The series the mark shows, in order, one key each: what a legend lists for the mark, on
-    /// an axes whose x axis has the limits `x`.
-    pub fn keys(&self, x: &AxisLimits) -> Vec<SeriesKey<'a>> {
+    /// an axes whose axes have the limits `limits`.
+    pub fn keys(&self, limits: &Limits) -> Vec<SeriesKey<'a>> {
         match self {
             &ResolvedMark::Line { mark, color } => {
                 let options = mark.options();
@@ -484,7 +527,7 @@ impl<'a> ResolvedMark<'a> {
                     label: &options.label,
                     color,
                     kind: SeriesKind::Line { dash: options.dash },
-                    anchor: Anchor::of_line(mark, x),
+                    anchor: Anchor::of_line(mark, limits),
                 }]
             }
             &ResolvedMark::Scatter { mark, color } => {
@@ -562,47 +605,90 @@ pub(crate) enum AnchorX<'a> {
     Category(&'a str),
 }
 
+/// How a direct label's anchor ends its line: whether the line ends there, so that an end dot
+/// marks the point, or leaves the plot there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EndKind {
+    /// The anchor is a point of the line, the last one the plot shows: an end dot marks it.
+    Point,
+    /// The anchor is where the line leaves the plot across the high end of the x domain: the
+    /// line continues past it, so no end dot is drawn.
+    Edge,
+}
+
 /// The point of a line that its direct label is attached to: the last point whose x and y are
-/// finite and whose x lies inside the x domain.
+/// finite and whose x lies inside the x domain, or, when the line continues from that point
+/// past the high end of the x domain, the point where it crosses that end.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Anchor<'a> {
     /// The x value.
     pub x: AnchorX<'a>,
     /// The y value; finite.
     pub y: f64,
+    /// Whether the line ends at the anchor or leaves the plot there.
+    pub end: EndKind,
 }
 
 impl<'a> Anchor<'a> {
-    /// The anchor of `line` on an x axis with the limits `x`: its last point, in data order,
-    /// with finite x and y whose x lies inside the x domain (both ends included). `None` when
-    /// the line has no such point.
+    /// The anchor of `line` on axes with the limits `limits`. Its last point, in data order,
+    /// with finite x and y whose x lies inside the x domain (both ends included), is the
+    /// [`EndKind::Point`] anchor, unless it lies below the high end of the domain and the next
+    /// point in data order has finite x and y and an x past that end: the line then leaves the
+    /// plot between the two, and the anchor is the [`EndKind::Edge`] where it crosses the high
+    /// end, the two points interpolated in axis space (see [`crossing_at`]). A last point on
+    /// the high end is a data point the plot shows, so it stays the `Point` anchor. A next
+    /// point with a NaN breaks the line, so the line ends at the last point. `None` when the
+    /// line has no point inside.
     ///
     /// Only explicit limits can leave a finite point outside the x domain: auto limits always
     /// contain every finite x value, and a category axis holds every category of its marks. So
     /// the limits decide the anchor before any layout pass, and it is the same in all of them.
-    fn of_line(line: &'a LineMark, x: &AxisLimits) -> Option<Anchor<'a>> {
-        let range = match x {
-            AxisLimits::Continuous {
-                explicit: Some(scale),
-                ..
-            } => Some(scale.domain()),
-            AxisLimits::Continuous { explicit: None, .. } | AxisLimits::Category => None,
-        };
+    fn of_line(line: &'a LineMark, limits: &Limits) -> Option<Anchor<'a>> {
         let y = line.y();
         match line.x() {
-            AxisData::Numbers(xs) => xs
-                .iter()
-                .zip(y)
-                .rev()
-                .find(|&(&x, &y)| {
-                    x.is_finite()
-                        && y.is_finite()
-                        && range.is_none_or(|(lo, hi)| lo <= x && x <= hi)
+            AxisData::Numbers(xs) => {
+                let range = match limits.x {
+                    AxisLimits::Continuous {
+                        transform,
+                        explicit: Some(scale),
+                    } => Some((transform, scale.domain())),
+                    AxisLimits::Continuous { explicit: None, .. } | AxisLimits::Category => None,
+                };
+                let inside = |x: f64| range.is_none_or(|(_, (lo, hi))| lo <= x && x <= hi);
+                let last = xs
+                    .iter()
+                    .zip(y)
+                    .rposition(|(&x, &y)| x.is_finite() && y.is_finite() && inside(x))?;
+                let point = Anchor {
+                    x: AnchorX::Number(xs[last]),
+                    y: y[last],
+                    end: EndKind::Point,
+                };
+                let (Some((x_transform, (_, hi))), Some(&next_x), Some(&next_y)) =
+                    (range, xs.get(last + 1), y.get(last + 1))
+                else {
+                    return Some(point);
+                };
+                let leaves = xs[last] < hi && next_x > hi;
+                if !(leaves && next_x.is_finite() && next_y.is_finite()) {
+                    return Some(point);
+                }
+                let y_transform = match limits.y {
+                    AxisLimits::Continuous { transform, .. } => transform,
+                    AxisLimits::Category => Transform::Linear,
+                };
+                let crossing = crossing_at(
+                    (x_transform, y_transform),
+                    (xs[last], y[last]),
+                    (next_x, next_y),
+                    hi,
+                );
+                Some(Anchor {
+                    x: AnchorX::Number(hi),
+                    y: crossing,
+                    end: EndKind::Edge,
                 })
-                .map(|(&x, &y)| Anchor {
-                    x: AnchorX::Number(x),
-                    y,
-                }),
+            }
             AxisData::Categories(names) => names
                 .iter()
                 .zip(y)
@@ -611,10 +697,54 @@ impl<'a> Anchor<'a> {
                 .map(|(name, &y)| Anchor {
                     x: AnchorX::Category(name),
                     y,
+                    end: EndKind::Point,
                 }),
         }
     }
 }
+
+/// The y where the straight segment from `from` to `to` crosses `x = edge`, on axes with the
+/// x and y transforms `transforms`. The segment is straight in axis space, where lines are
+/// drawn: in the values on a linear axis and in their logarithms on a log axis. So the share of
+/// the way to `edge` is measured in axis space along x, and y is interpolated by that share in
+/// axis space along y.
+///
+/// `from.0 < edge < to.0`, every value finite, and every value on a log axis positive, as the
+/// model validates them; the result then lies between `from.1` and `to.1`. On a log y axis no
+/// intermediate value leaves the range of `f64`, even between the smallest and largest values
+/// a log axis holds, and the result is kept between the two ends, so it is finite and
+/// positive.
+fn crossing_at(
+    (x_transform, y_transform): (Transform, Transform),
+    from: (f64, f64),
+    to: (f64, f64),
+    edge: f64,
+) -> f64 {
+    let share = match x_transform {
+        Transform::Linear => (edge - from.0) / (to.0 - from.0),
+        Transform::Log(_) => log_offset(edge, from.0) / log_offset(to.0, from.0),
+    };
+    match y_transform {
+        Transform::Linear => from.1 + share * (to.1 - from.1),
+        Transform::Log(_) => {
+            // The way along in natural-log units, measured from `from.1` with full precision
+            // for narrow spans (see `log_offset`).
+            let rise = share * log_offset(to.1, from.1);
+            // A factor within e^±700 neither overflows nor underflows, and the product lies
+            // between the ends; beyond that, add the logarithms and exponentiate once.
+            let y = if rise.abs() <= LOG_FACTOR_LIMIT {
+                from.1 * rise.exp()
+            } else {
+                (from.1.ln() + rise).exp()
+            };
+            y.clamp(from.1.min(to.1), from.1.max(to.1))
+        }
+    }
+}
+
+/// The largest natural-log distance [`crossing_at`] turns into a factor with `exp`: `e^700` is
+/// about `1e304`, inside the range of `f64`, and `e^-700` is a normal number.
+const LOG_FACTOR_LIMIT: f64 = 700.0;
 
 /// How a series is drawn, as far as its legend swatch needs to know.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -693,7 +823,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
 mod tests {
     use super::*;
     use crate::model::{BarOptions, BarSeries, Figure, HistOptions, LineOptions, ScatterOptions};
-    use crate::{LogBase, ScaleKind, Theme};
+    use crate::{LogBase, MIN_LOG_VALUE, ScaleKind, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
         AxisData::Numbers(v.to_vec())
@@ -716,15 +846,21 @@ mod tests {
     /// The resolved color of every series of `resolved`, in order. Colors do not depend on the
     /// axis limits.
     fn series_colors(resolved: &[ResolvedMark<'_>]) -> Vec<Rgba> {
-        series_keys(resolved, &AxisLimits::Category)
-            .iter()
-            .map(|key| key.color)
-            .collect()
+        series_keys(
+            resolved,
+            &Limits {
+                x: AxisLimits::Category,
+                y: AxisLimits::Category,
+            },
+        )
+        .iter()
+        .map(|key| key.color)
+        .collect()
     }
 
-    /// The key of every series of `resolved`, in order, on an x axis with the limits `x`.
-    fn series_keys<'a>(resolved: &[ResolvedMark<'a>], x: &AxisLimits) -> Vec<SeriesKey<'a>> {
-        resolved.iter().flat_map(|mark| mark.keys(x)).collect()
+    /// The key of every series of `resolved`, in order, on axes with the limits `limits`.
+    fn series_keys<'a>(resolved: &[ResolvedMark<'a>], limits: &Limits) -> Vec<SeriesKey<'a>> {
+        resolved.iter().flat_map(|mark| mark.keys(limits)).collect()
     }
 
     /// Both axes of `axes`, resolved from its marks.
@@ -933,8 +1069,14 @@ mod tests {
         let (_, (y0, y1)) = domains(&f);
         assert!(close((y0, y1), pad_log(1.0, 1e5)), "{y0} {y1}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        // 0 is never inside a log range: the baseline sits at the bottom.
-        assert_eq!(r.baseline.get(), 0.0);
+        // 0 is never inside a log range: the baseline sits at the nice lower limit, the
+        // lowest tick, inside the padded domain.
+        assert_eq!(r.baseline, r.y.ticks[0].pos);
+        assert!(
+            (r.baseline.get() - 0.05 / 1.1).abs() < 1e-9,
+            "{:?}",
+            r.baseline
+        );
         assert_eq!(labels(&r.y), ["1", "10", "100", "1000", "10000", "100000"]);
         assert!(r.y.ticks.windows(2).all(|w| w[0].pos < w[1].pos));
 
@@ -1070,7 +1212,7 @@ mod tests {
             )
             .unwrap();
         let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
-        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()).x);
+        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()));
         assert_eq!(
             keys,
             [
@@ -1081,6 +1223,7 @@ mod tests {
                     anchor: Some(Anchor {
                         x: AnchorX::Number(0.0),
                         y: 1.0,
+                        end: EndKind::Point,
                     }),
                 },
                 SeriesKey {
@@ -1096,13 +1239,196 @@ mod tests {
     }
 
     #[test]
-    fn baseline_sits_at_zero_or_bottom() {
+    fn baseline_sits_at_zero_or_the_explicit_low_limit() {
         let mut f = figure(LIN, LIN);
         axes(&mut f).ylim(-10.0, 30.0).unwrap();
         assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.25);
+        // Explicit limits are not padded: their low limit is the plot bottom.
         axes(&mut f).ylim(5.0, 30.0).unwrap();
         assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
         axes(&mut f).ylim(-30.0, -5.0).unwrap();
+        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let mut f = figure(LIN, log);
+        axes(&mut f)
+            .line(nums(&[0.0, 1.0]), &[3.0, 4.2e4], LineOptions::default())
+            .unwrap()
+            .ylim(2.0, 5e4)
+            .unwrap();
+        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
+    }
+
+    #[test]
+    fn lowest_tick_lies_strictly_below_the_data() {
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let line_axes = |y_scale, ys: &[f64]| {
+            let mut f = figure(LIN, y_scale);
+            let xs: Vec<f64> = (0..ys.len()).map(|i| i as f64).collect();
+            axes(&mut f)
+                .line(nums(&xs), ys, LineOptions::default())
+                .unwrap();
+            f
+        };
+        let lowest = |f: &Figure| {
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            assert_eq!(r.baseline, r.y.ticks[0].pos);
+            r.y.ticks[0].label.clone()
+        };
+        // A minimum on a nice tick: the limit moves one tick step down, linear and log.
+        assert_eq!(lowest(&line_axes(LIN, &[20.0, 35.0, 40.0])), "15");
+        assert_eq!(lowest(&line_axes(log, &[1.0, 40.0])), "0.1");
+        assert_eq!(lowest(&line_axes(log, &[10.0, 40.0])), "1");
+        // A minimum within 5 % of the span above the lowest tick counts as on it: 20.9 on
+        // 20..40, and on log 1.2 on 1..100 (a factor of 100^0.05, about 1.26).
+        assert_eq!(lowest(&line_axes(LIN, &[20.9, 35.0, 40.0])), "15");
+        assert_eq!(lowest(&line_axes(log, &[1.2, 40.0])), "0.1");
+        // A minimum further above the lowest tick: unchanged.
+        assert_eq!(lowest(&line_axes(LIN, &[21.0, 35.0, 40.0])), "20");
+        assert_eq!(lowest(&line_axes(LIN, &[22.0, 35.0, 40.0])), "20");
+        assert_eq!(lowest(&line_axes(log, &[2.0, 40.0])), "1");
+        // A linear domain that holds 0 keeps 0 as its limit: the baseline is at 0 already.
+        let f = line_axes(LIN, &[0.0, 30.0]);
+        assert!(close(y_domain(&f), pad(0.0, 30.0)), "{:?}", y_domain(&f));
+        let f = bar_figure(LIN, &[0.0, 40.0]);
+        assert_eq!(y_domain(&f), (0.0, 42.0));
+        // Explicit limits are used as given.
+        let mut f = line_axes(LIN, &[20.0, 40.0]);
+        axes(&mut f).ylim(20.0, 40.0).unwrap();
+        assert_eq!(y_domain(&f), (20.0, 40.0));
+        // A move that would leave the supported magnitudes keeps the old limit.
+        let f = line_axes(log, &[MIN_LOG_VALUE, 1.0]);
+        assert_eq!(y_domain(&f).0, MIN_LOG_VALUE);
+        let f = line_axes(LIN, &[-1e300, 1e300]);
+        assert_eq!(y_domain(&f).0, -1e300);
+        // Log bars: the smallest height counts.
+        let f = bar_figure(log, &[10.0, 1000.0]);
+        assert_eq!(lowest(&f), "1");
+        // The x axis is not affected: x from 35 to 65 keeps its lowest tick at 35.
+        let (_, ys) = sinusoid();
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .scatter(nums(&ys), &ys, ScatterOptions::default())
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 4, 4);
+        assert_eq!(labels(&r.x)[0], "35");
+        assert_eq!(labels(&r.y)[0], "25");
+    }
+
+    #[test]
+    fn lowering_a_log_limit_keeps_the_ticks_evenly_spaced_and_distinct() {
+        // 1..1e100 on base 10 has its powers thinned; the lower limit moves to 0.1 and the
+        // powers are chosen again for 0.1..1e100, so they stay evenly spaced in log space and
+        // none crowds the new end. Bases near 1 keep distinct positions too.
+        for base in [10.0, 1.000_001, 1.0 + f64::EPSILON] {
+            let log = ScaleKind::Log {
+                base: LogBase::new(base).unwrap(),
+            };
+            let mut f = figure(LIN, log);
+            axes(&mut f)
+                .line(nums(&[0.0, 1.0]), &[1.0, 1e100], LineOptions::default())
+                .unwrap();
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let pos: Vec<f64> = r.y.ticks.iter().map(|t| t.pos.get()).collect();
+            assert!(pos.len() >= 2, "base {base}: {:?}", r.y.ticks);
+            assert!(
+                pos.windows(2).all(|w| w[0] < w[1]),
+                "base {base}: {:?}",
+                r.y.ticks
+            );
+            assert_eq!(r.baseline, r.y.ticks[0].pos, "base {base}");
+            // At base 1 + EPSILON one step down is a factor of 1 + EPSILON, too small to move
+            // any position; every other base moves the limit visibly below the data.
+            let data_low = r.y.continuous().unwrap().normalize(1.0);
+            if base > 1.0 + f64::EPSILON {
+                assert!(r.baseline.get() < data_low, "base {base}: {:?}", r.y.ticks);
+            } else {
+                assert!(r.baseline.get() <= data_low, "base {base}: {:?}", r.y.ticks);
+            }
+            if base == 10.0 {
+                assert_eq!(r.y.ticks[0].label, "1e\u{2212}1");
+                let gaps: Vec<f64> = pos.windows(2).map(|w| w[1] - w[0]).collect();
+                let (min, max) = gaps
+                    .iter()
+                    .fold((f64::MAX, 0.0_f64), |(a, b), &g| (a.min(g), b.max(g)));
+                assert!(max - min < 0.02, "uneven spacing: {gaps:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn lowering_works_at_extreme_linear_magnitudes() {
+        // Spans far above or below the tick search's usual range still move their limit below
+        // the data, positive and negative.
+        for (low, high) in [
+            (1e250, 2e250),
+            (1e-250, 2e-250),
+            (-2e250, -1e250),
+            (-2e-250, -1e-250),
+        ] {
+            let mut f = figure(LIN, LIN);
+            axes(&mut f)
+                .line(nums(&[0.0, 1.0]), &[low, high], LineOptions::default())
+                .unwrap();
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let data_low = r.y.continuous().unwrap().normalize(low);
+            assert!(
+                r.baseline.get() < data_low,
+                "{low:e}..{high:e}: {:?}",
+                r.y.ticks
+            );
+            assert_eq!(r.baseline, r.y.ticks[0].pos);
+            let values: Vec<&str> = labels(&r.y);
+            let unique: std::collections::HashSet<&&str> = values.iter().collect();
+            assert_eq!(unique.len(), values.len(), "{values:?}");
+        }
+    }
+
+    #[test]
+    fn baseline_sits_at_zero_or_the_nice_lower_limit() {
+        // Auto limits that hold 0: the baseline is at 0, wherever 0 is.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .line(nums(&[0.0, 1.0]), &[-12.0, 36.5], LineOptions::default())
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let scale = r.y.continuous().unwrap();
+        assert_eq!(r.baseline.get(), scale.normalize(0.0));
+        assert!(r.baseline.get() > r.y.ticks[0].pos.get());
+        // Auto limits away from 0, above or below it: the baseline is at the lowest tick, the
+        // nice lower limit, not at the padded plot bottom.
+        let (xs, ys) = sinusoid();
+        for ys in [ys.clone(), ys.iter().map(|y| -y).collect()] {
+            let mut f = figure(LIN, LIN);
+            axes(&mut f)
+                .line(nums(&xs), &ys, LineOptions::default())
+                .unwrap();
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let lowest = &r.y.ticks[0];
+            assert_eq!(r.baseline, lowest.pos);
+            assert!(
+                (r.baseline.get() - 0.05 / 1.1).abs() < 1e-9,
+                "{:?}",
+                r.baseline
+            );
+            // The extreme lands on a nice tick, so the limit moves one step below it.
+            let expected = if ys[0] > 0.0 { "25" } else { "\u{2212}75" };
+            assert_eq!(lowest.label, expected);
+        }
+        // Log auto limits: the lowest power of the base, 10 here.
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let mut f = figure(LIN, log);
+        axes(&mut f)
+            .scatter(nums(&[0.0, 1.0]), &[20.0, 880.0], ScatterOptions::default())
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(r.y.ticks[0].label, "10");
+        assert_eq!(r.baseline, r.y.ticks[0].pos);
+        assert!(r.baseline.get() > 0.0);
+        // A single value is not padded, so its nice lower limit is the plot bottom.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .scatter(nums(&[1.0]), &[20.0], ScatterOptions::default())
+            .unwrap();
         assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
     }
 
@@ -1125,12 +1451,13 @@ mod tests {
             .line(nums(&xs), &ys, LineOptions::default())
             .unwrap();
         let ((x0, x1), (y0, y1)) = domains(&f);
-        // 35..65 is already nice; the domain grows by 1.5 on each side, so the line's minimum
-        // and maximum no longer sit on the plot edge, and the ticks stay 35..65.
-        assert_ne!((y0, y1), (35.0, 65.0));
-        assert!(close((y0, y1), (33.5, 66.5)), "{y0} {y1}");
+        // 35..65 is already nice, and the minimum lands on its lowest tick, so the lower limit
+        // moves down one step to 25. The domain 25..65 then grows by 2 on each side, so the
+        // line's minimum and maximum no longer sit on the plot edge, and the ticks stay 25..65.
+        assert_ne!((y0, y1), (25.0, 65.0));
+        assert!(close((y0, y1), (23.0, 67.0)), "{y0} {y1}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(labels(&r.y), ["35", "45", "55", "65"]);
+        assert_eq!(labels(&r.y), ["25", "35", "45", "55", "65"]);
         assert_end_ticks_inset(&r.y);
         // The x axis of an all-line axes keeps the exact extent, unpadded.
         assert_eq!((x0, x1), (0.0, 12.0));
@@ -1140,8 +1467,10 @@ mod tests {
 
     #[test]
     fn log_auto_limits_pad_in_log_space() {
-        // The nice limits 10..1000 span two decades; 5 % of that is a factor of 10^0.1 on each
-        // side. The ticks stay the powers inside the nice limits.
+        // The nice x limits 10..1000 span two decades; 5 % of that is a factor of 10^0.1 on
+        // each side. The ticks stay the powers inside the nice limits. On y the minimum lands
+        // on the lowest tick, so the lower limit moves down a decade: 1..1000, three decades,
+        // padded by a factor of 10^0.15.
         let log = ScaleKind::Log { base: LogBase::TEN };
         let mut f = figure(log, log);
         axes(&mut f)
@@ -1153,11 +1482,12 @@ mod tests {
             .unwrap();
         let (x, y) = domains(&f);
         let factor = 10f64.powf(0.1);
-        for d in [x, y] {
-            assert!(close(d, (10.0 / factor, 1000.0 * factor)), "{d:?}");
-        }
+        assert!(close(x, (10.0 / factor, 1000.0 * factor)), "{x:?}");
+        let factor = 10f64.powf(0.15);
+        assert!(close(y, (1.0 / factor, 1000.0 * factor)), "{y:?}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(labels(&r.x), ["10", "100", "1000"]);
+        assert_eq!(labels(&r.y), ["1", "10", "100", "1000"]);
         assert_end_ticks_inset(&r.y);
     }
 
@@ -1309,12 +1639,13 @@ mod tests {
         assert!(y_domain(&f).0 > 0.0, "{:?}", y_domain(&f));
 
         // Log y: 0 cannot be shown, so the axis fits the heights and pads both sides; the
-        // baseline is the bottom of the plot.
+        // baseline is the nice lower limit, the lowest tick.
         let log = ScaleKind::Log { base: LogBase::TEN };
         let f = bar_figure(log, &[3.0, 4.2e4]);
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert!(close(y_domain(&f), pad_log(1.0, 1e5)), "{:?}", y_domain(&f));
-        assert_eq!(r.baseline.get(), 0.0);
+        assert_eq!(r.baseline, r.y.ticks[0].pos);
+        assert_eq!(r.y.ticks[0].label, "1");
 
         // All-NaN bars have no extent: the axis falls back to 0..1, as for other marks.
         let f = bar_figure(LIN, &[f64::NAN, f64::NAN]);
@@ -1386,7 +1717,7 @@ mod tests {
             colors,
             [palette[0], palette[1], fixed, palette[6], palette[2]]
         );
-        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()).x);
+        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()));
         assert_eq!(
             keys[1],
             SeriesKey {
@@ -1478,7 +1809,7 @@ mod tests {
 
     #[test]
     fn stacked_log_y_extent_comes_from_positive_segment_ends() {
-        // On a log axis the stacks start at the bottom of the plot. The domain is fitted to the
+        // On a log axis the stacks start at the baseline. The domain is fitted to the
         // segment ends, 2..1500 here, and never to an extent that includes 0, which a log axis
         // cannot hold (it would fall back to the unit range 1..10).
         let log = ScaleKind::Log { base: LogBase::TEN };
@@ -1502,7 +1833,8 @@ mod tests {
             .unwrap();
         assert_eq!(domain, y_domain(&g));
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(r.baseline.get(), 0.0);
+        assert_eq!(r.baseline, r.y.ticks[0].pos);
+        assert_eq!(r.y.ticks[0].label, "1");
     }
 
     #[test]
@@ -1544,7 +1876,7 @@ mod tests {
             ]
         );
         // Every grouped or stacked series is a legend key of its own, drawn as a bar.
-        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()).x);
+        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()));
         assert_eq!(keys.len(), 9);
         assert!(keys[1..5].iter().all(|key| key.kind == SeriesKind::Bar));
     }
@@ -1612,13 +1944,14 @@ mod tests {
     fn hist_log_y_extent_comes_from_positive_counts() {
         // Counts 1, 0, 0, 40: on a log axis the domain is fitted to the positive counts, 1..40,
         // never to an extent that includes 0, which a log axis cannot hold (it would fall back
-        // to the unit range 1..10).
+        // to the unit range 1..10). The count 1 lands on the lowest nice tick, so the lower
+        // limit moves down a decade, to 0.1, and the bin of count 1 rises above the baseline.
         let log = ScaleKind::Log { base: LogBase::TEN };
         let mut values = vec![0.0];
         values.extend(std::iter::repeat_n(4.0, 40));
         let f = hist_figure(log, &values, 4);
         let domain = y_domain(&f);
-        assert!(close(domain, pad_log(1.0, 100.0)), "{domain:?}");
+        assert!(close(domain, pad_log(0.1, 100.0)), "{domain:?}");
         // The same domain as a line through exactly the smallest and largest positive count.
         let mut g = figure(LIN, log);
         axes(&mut g)
@@ -1626,7 +1959,8 @@ mod tests {
             .unwrap();
         assert_eq!(domain, y_domain(&g));
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(r.baseline.get(), 0.0);
+        assert_eq!(r.baseline, r.y.ticks[0].pos);
+        assert_eq!(r.y.ticks[0].label, "0.1");
     }
 
     #[test]
@@ -1677,7 +2011,7 @@ mod tests {
         };
         assert_eq!(histogram.counts(), &[1, 3]);
         assert_eq!(
-            resolved[1].keys(&Limits::of(f.axes().unwrap()).x),
+            resolved[1].keys(&Limits::of(f.axes().unwrap())),
             [SeriesKey {
                 label: "sizes",
                 color: palette[1],
@@ -1687,61 +2021,154 @@ mod tests {
         );
     }
 
+    /// The anchor of a labelled line through the numbers `x` and `y` on axes of the scales
+    /// `kinds`, with the explicit x limits `xlim`, if any, as its x, y and end.
+    fn number_anchor(
+        kinds: (ScaleKind, ScaleKind),
+        x: &[f64],
+        y: &[f64],
+        xlim: Option<(f64, f64)>,
+    ) -> Option<(f64, f64, EndKind)> {
+        let mut f = figure(kinds.0, kinds.1);
+        let options = LineOptions {
+            label: "Line".to_owned(),
+            ..LineOptions::default()
+        };
+        axes(&mut f).line(nums(x), y, options).unwrap();
+        if let Some((lo, hi)) = xlim {
+            axes(&mut f).xlim(lo, hi).unwrap();
+        }
+        let axes = f.axes().unwrap();
+        let resolved = resolve_marks(axes.marks(), &[]);
+        let keys = series_keys(&resolved, &Limits::of(axes));
+        keys[0].anchor.map(|anchor| match anchor.x {
+            AnchorX::Number(x) => (x, anchor.y, anchor.end),
+            AnchorX::Category(name) => panic!("expected a number anchor, got {name}"),
+        })
+    }
+
     #[test]
     fn anchor_is_last_visible_finite_point() {
         let nan = f64::NAN;
-        let check = |x: AxisData, y: &[f64], xlim: Option<(f64, f64)>, expected| {
-            let kind = match x {
-                AxisData::Numbers(_) => LIN,
-                AxisData::Categories(_) => ScaleKind::Category,
-            };
-            let mut f = figure(kind, LIN);
-            let options = LineOptions {
-                label: "Line".to_owned(),
-                ..LineOptions::default()
-            };
-            axes(&mut f).line(x, y, options).unwrap();
-            if let Some((lo, hi)) = xlim {
-                axes(&mut f).xlim(lo, hi).unwrap();
-            }
-            let axes = f.axes().unwrap();
-            let resolved = resolve_marks(axes.marks(), &[]);
-            let keys = series_keys(&resolved, &Limits::of(axes).x);
-            let expected: Option<Anchor<'static>> = expected;
-            assert_eq!(keys[0].anchor, expected);
+        let check = |x: &[f64], y: &[f64], xlim, expected| {
+            assert_eq!(number_anchor((LIN, LIN), x, y, xlim), expected);
         };
-        let at = |x: f64, y: f64| {
-            Some(Anchor {
-                x: AnchorX::Number(x),
-                y,
-            })
-        };
+        let point = |x, y| Some((x, y, EndKind::Point));
         // The last point.
-        check(nums(&[0.0, 1.0, 2.0]), &[5.0, 6.0, 7.0], None, at(2.0, 7.0));
+        check(&[0.0, 1.0, 2.0], &[5.0, 6.0, 7.0], None, point(2.0, 7.0));
         // A NaN tail in y, and a NaN x, are skipped.
-        let (x, y) = (nums(&[0.0, 1.0, 2.0, nan]), [5.0, 6.0, nan, 8.0]);
-        check(x, &y, None, at(1.0, 6.0));
+        check(
+            &[0.0, 1.0, 2.0, nan],
+            &[5.0, 6.0, nan, 8.0],
+            None,
+            point(1.0, 6.0),
+        );
         // Unsorted x: the last point in data order, not the largest x.
-        check(nums(&[3.0, 1.0]), &[5.0, 6.0], None, at(1.0, 6.0));
-        // Explicit limits cut the end: the last point inside them, ends included.
-        let (x, y) = (nums(&[0.0, 1.0, 2.0, 3.0]), [5.0, 6.0, 7.0, 8.0]);
-        check(x.clone(), &y, Some((0.0, 2.0)), at(2.0, 7.0));
-        check(x.clone(), &y, Some((0.5, 1.5)), at(1.0, 6.0));
+        check(&[3.0, 1.0], &[5.0, 6.0], None, point(1.0, 6.0));
+        // Explicit limits that hold the whole line: it ends at its last point.
+        let (x, y) = ([0.0, 1.0, 2.0, 3.0], [5.0, 6.0, 7.0, 8.0]);
+        check(&x, &y, Some((0.0, 3.0)), point(3.0, 8.0));
         // No point to label: all NaN, no finite x, or wholly outside the limits.
-        check(x, &y, Some((5.0, 6.0)), None);
-        check(nums(&[0.0, 1.0]), &[nan, nan], None, None);
-        check(nums(&[nan, nan]), &[1.0, 2.0], None, None);
-        // A category line: the last category with a finite y.
+        check(&x, &y, Some((5.0, 6.0)), None);
+        check(&[0.0, 1.0], &[nan, nan], None, None);
+        check(&[nan, nan], &[1.0, 2.0], None, None);
+        // A category line: the last category with a finite y, ending there.
+        let mut f = figure(ScaleKind::Category, LIN);
+        let options = LineOptions {
+            label: "Line".to_owned(),
+            ..LineOptions::default()
+        };
+        axes(&mut f)
+            .line(cats(&["Jan", "Feb", "Mar"]), &[1.0, 2.0, nan], options)
+            .unwrap();
+        let axes = f.axes().unwrap();
+        let resolved = resolve_marks(axes.marks(), &[]);
+        let keys = series_keys(&resolved, &Limits::of(axes));
         let feb = Anchor {
             x: AnchorX::Category("Feb"),
             y: 2.0,
+            end: EndKind::Point,
         };
-        check(
-            cats(&["Jan", "Feb", "Mar"]),
-            &[1.0, 2.0, nan],
-            None,
-            Some(feb),
+        assert_eq!(keys[0].anchor, Some(feb));
+    }
+
+    #[test]
+    fn anchor_of_a_line_cut_by_the_x_limits_is_where_it_leaves_the_plot() {
+        let nan = f64::NAN;
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let lin = (LIN, LIN);
+        let edge = |x, y| Some((x, y, EndKind::Edge));
+        let point = |x, y| Some((x, y, EndKind::Point));
+        let (x, y) = ([0.0, 1.0, 2.0, 3.0], [5.0, 6.0, 7.0, 8.0]);
+        // Linear x: the segment from (1, 6) to (2, 7) crosses x = 1.5 at y = 6.5.
+        assert_eq!(number_anchor(lin, &x, &y, Some((0.5, 1.5))), edge(1.5, 6.5));
+        // A last point on the high end is a data point the plot shows: the line ends there,
+        // with its dot, although it goes on past the limit; on a log x axis too.
+        assert_eq!(
+            number_anchor(lin, &x, &y, Some((0.0, 2.0))),
+            point(2.0, 7.0)
         );
+        let on_end = number_anchor((log, LIN), &[1.0, 10.0, 100.0], &y[..3], Some((1.0, 10.0)));
+        assert_eq!(on_end, point(10.0, 6.0));
+        // A falling segment: from (1, 6) to (2, -2) crosses x = 1.25 at y = 4.
+        let falling = [5.0, 6.0, -2.0, 0.0];
+        let cut = Some((0.0, 1.25));
+        assert_eq!(number_anchor(lin, &x, &falling, cut), edge(1.25, 4.0));
+
+        // Log x: the share is measured in log space. From (10, 2) to (1000, 4), x = 100 lies
+        // halfway, so y = 3.
+        let near = |anchor: Option<(f64, f64, EndKind)>, x: f64, y: f64| {
+            let (ax, ay, end) = anchor.expect("an anchor");
+            assert_eq!((ax, end), (x, EndKind::Edge));
+            assert!((ay - y).abs() <= 1e-12 * y.abs(), "{ay} vs {y}");
+        };
+        let (lx, cut) = ([1.0, 10.0, 1000.0], Some((1.0, 100.0)));
+        near(
+            number_anchor((log, LIN), &lx, &[1.0, 2.0, 4.0], cut),
+            100.0,
+            3.0,
+        );
+        // Log y as well: y is interpolated in log space, halfway from 2 to 32 is 8.
+        near(
+            number_anchor((log, log), &lx, &[1.0, 2.0, 32.0], cut),
+            100.0,
+            8.0,
+        );
+        // Linear x, log y: a quarter of the way from (0, 1) to (4, 10000) is y = 10.
+        let anchor = number_anchor((LIN, log), &[0.0, 4.0], &[1.0, 1e4], Some((0.0, 1.0)));
+        near(anchor, 1.0, 10.0);
+
+        // Log y between the smallest and largest values a log axis holds: nine tenths of the
+        // way from 1e-300 to 1e300 is 1e240, rising, and 1e-240, falling, both finite and
+        // positive.
+        let cut = Some((0.0, 9.0));
+        for (ys, expected) in [([1e-300, 1e300], 1e240), ([1e300, 1e-300], 1e-240)] {
+            let (ax, ay, end) = number_anchor((LIN, log), &[0.0, 10.0], &ys, cut).unwrap();
+            assert_eq!((ax, end), (9.0, EndKind::Edge));
+            assert!(ay.is_finite() && ay > 0.0, "{ay:e}");
+            assert!((ay / expected - 1.0).abs() < 1e-9, "{ay:e} vs {expected:e}");
+        }
+        // Narrow log spans keep full precision: from 1e200 to 1e200 (1 + 1e-8), halfway.
+        let (lo, hi) = (1e200, 1e200 * (1.0 + 1e-8));
+        let (_, ay, _) =
+            number_anchor((LIN, log), &[0.0, 10.0], &[lo, hi], Some((0.0, 5.0))).unwrap();
+        let expected = lo * (0.5 * (1e-8_f64).ln_1p()).exp();
+        assert!(
+            (ay / expected - 1.0).abs() < 1e-15,
+            "{ay:e} vs {expected:e}"
+        );
+
+        // A NaN right after the last point inside breaks the line there: it ends inside.
+        let cut = Some((0.0, 1.5));
+        let gap_y = [5.0, 6.0, nan, 8.0];
+        assert_eq!(number_anchor(lin, &x, &gap_y, cut), point(1.0, 6.0));
+        let gap_x = [0.0, 1.0, nan, 3.0];
+        assert_eq!(number_anchor(lin, &gap_x, &y, cut), point(1.0, 6.0));
+        // A line that goes on past the low end, not the high end, ends at its last point.
+        let back = number_anchor(lin, &[1.0, 2.0, 0.0], &[5.0, 6.0, 7.0], Some((0.5, 3.0)));
+        assert_eq!(back, point(2.0, 6.0));
+        // A line wholly past the high end has no anchor, so it goes to the header row.
+        assert_eq!(number_anchor(lin, &x, &y, Some((-2.0, -1.0))), None);
     }
 
     #[test]
@@ -1757,7 +2184,7 @@ mod tests {
             .unwrap();
         let axes = f.axes().unwrap();
         let resolved = resolve_marks(axes.marks(), &[]);
-        let anchors: Vec<bool> = series_keys(&resolved, &Limits::of(axes).x)
+        let anchors: Vec<bool> = series_keys(&resolved, &Limits::of(axes))
             .iter()
             .map(|key| key.anchor.is_some())
             .collect();

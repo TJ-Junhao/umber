@@ -5,7 +5,7 @@
 //! mark kind reaches the legend through its keys alone. A key's anchor, the point a direct
 //! label is attached to, is found by resolve as well.
 
-use crate::resolve::{Anchor, AxisLimits, ResolvedMark, SeriesKey, SeriesKind};
+use crate::resolve::{Anchor, Limits, ResolvedMark, SeriesKey, SeriesKind};
 use crate::{Dash, LegendStyle, Rgba};
 
 /// The small figure drawn before a legend label, showing how its series is drawn.
@@ -112,8 +112,8 @@ pub(crate) struct Legend<'a> {
 
 impl<'a> Legend<'a> {
     /// The legend of `marks` in the effective `style`: the style set on the axes, else the
-    /// theme's. `x` is the x axis's limits, which decide which points of a line can carry its
-    /// direct label.
+    /// theme's. `limits` are the axes' limits, which decide where a line's direct label is
+    /// attached.
     ///
     /// - `Header` gives one row entry per labelled series, in series order, drawn
     ///   [`RowStyle::Plain`]. Unlabelled series are skipped; duplicate labels are kept.
@@ -123,8 +123,8 @@ impl<'a> Legend<'a> {
     ///   anchor included, into a row drawn [`RowStyle::Plain`], exactly as `Header` would show
     ///   them. So every labelled series is labelled somewhere.
     /// - `None` gives nothing.
-    pub fn new(style: LegendStyle, marks: &[ResolvedMark<'a>], x: &AxisLimits) -> Legend<'a> {
-        let keys = marks.iter().flat_map(|mark| mark.keys(x));
+    pub fn new(style: LegendStyle, marks: &[ResolvedMark<'a>], limits: &Limits) -> Legend<'a> {
+        let keys = marks.iter().flat_map(|mark| mark.keys(limits));
         let (mut row, mut direct) = (Vec::new(), Vec::new());
         let row_style = match style {
             LegendStyle::Header | LegendStyle::Direct | LegendStyle::None => RowStyle::Plain,
@@ -221,7 +221,7 @@ mod tests {
     fn legend_of(f: &Figure, style: LegendStyle) -> Legend<'_> {
         let axes = f.axes().unwrap();
         let marks = resolve_marks(axes.marks(), f.theme().palette());
-        Legend::new(style, &marks, &Limits::of(axes).x)
+        Legend::new(style, &marks, &Limits::of(axes))
     }
 
     #[test]
@@ -444,7 +444,7 @@ mod tests {
         assert!(legend_of(&f, LegendStyle::Direct).is_empty());
         let limits = Limits::of(f.axes().unwrap());
         for style in [LegendStyle::Header, LegendStyle::Direct] {
-            assert!(Legend::new(style, &[], &limits.x).is_empty());
+            assert!(Legend::new(style, &[], &limits).is_empty());
         }
     }
 }

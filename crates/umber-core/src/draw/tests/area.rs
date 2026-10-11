@@ -76,6 +76,58 @@ fn area_fill_sits_under_line() {
     assert!(matches!(mark_group(&scene).1, [Item::Stroke { .. }]));
 }
 
+#[test]
+fn area_fill_ends_at_the_baseline_below_the_data() {
+    // y from 10 to 40 would take the nice limits 10..40 (10..100 on log), but its minimum lands
+    // on the lowest tick, so the limit moves one step down, to 5 (1 on log), and is padded
+    // below that: the baseline sits on the lowest tick, above the plot bottom and below the
+    // line, and the area fades to it, on a linear and on a log y axis.
+    let log = crate::ScaleKind::Log {
+        base: crate::LogBase::TEN,
+    };
+    for y_scale in [crate::ScaleKind::Linear, log] {
+        let mut f = Figure::new(6.0, 4.0, Theme::midnight()).unwrap();
+        f.add_axes(crate::ScaleKind::Linear, y_scale)
+            .unwrap()
+            .line(
+                crate::model::AxisData::Numbers(vec![0.0, 1.0, 2.0, 3.0]),
+                &[10.0, 40.0, 25.0, 30.0],
+                LineOptions::default(),
+            )
+            .unwrap();
+        let (resolved, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+        let lowest = &resolved.y.ticks[0];
+        let expected = if y_scale == crate::ScaleKind::Linear {
+            "5"
+        } else {
+            "1"
+        };
+        assert_eq!(lowest.label, expected, "{y_scale:?}");
+        assert_eq!(resolved.baseline, lowest.pos);
+        assert!(layout.baseline_y < layout.plot.bottom() - 1.0);
+        let scene = f.to_scene(FontLibrary::global());
+        let [
+            Item::Fill {
+                path: area,
+                paint: Paint::Linear(gradient),
+                ..
+            },
+            Item::Stroke { .. },
+        ] = mark_group(&scene).1
+        else {
+            panic!("expected an area fill under the line");
+        };
+        let baseline = layout.baseline_y as f32;
+        let (top, bottom) = area.bounds().unwrap();
+        assert_eq!(bottom.y, baseline);
+        assert!(top.y < baseline);
+        assert_eq!(gradient.end.y, baseline);
+        // The line's lowest point, 10, lies above the baseline.
+        let ten = resolved.y.continuous().unwrap().normalize(10.0);
+        assert!(layout.plot.y_at(NormalizedPos::new(ten)) < layout.baseline_y - 1.0);
+    }
+}
+
 /// The PNG pixel at data position `(x, y)` of a figure with limits 0..1 by -2..2.
 fn data_pixel(f: &Figure, png: &[u8], x: f64, y: f64) -> [u8; 3] {
     let plot = plot_of(f);

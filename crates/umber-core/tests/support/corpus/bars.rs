@@ -130,7 +130,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .unwrap();
     emit_scene("fig-bars-huge-narrow-limits", &f.to_scene(lib), sink);
 
-    // Log y: bars grow from the bottom of the plot.
+    // Log y: bars grow from the baseline, at the lowest y tick.
     for (theme_name, theme) in [
         ("graphite", Theme::graphite()),
         ("midnight", Theme::midnight()),
@@ -303,7 +303,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(&format!("fig-{kind}-bars-colors"), &f.to_scene(lib), sink);
 
-        // Log y: bars and the first segment of each stack grow from the bottom of the plot.
+        // Log y: bars and the first segment of each stack grow from the baseline.
         for (theme_name, theme) in [
             ("graphite", Theme::graphite()),
             ("midnight", Theme::midnight()),

@@ -114,6 +114,7 @@ pub(super) fn line_items(
         maps,
         plot,
         baseline_y,
+        ..
     } = *context;
     let margin = f64::from(line_width(theme)).max(MIN_LINE_MARGIN);
     let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
