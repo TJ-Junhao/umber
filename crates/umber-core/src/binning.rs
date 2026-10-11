@@ -5,17 +5,10 @@
 
 use std::num::NonZeroUsize;
 
-use crate::scale::MAX_MAGNITUDE;
+use crate::scale::{MAX_MAGNITUDE, too_narrow};
 
 /// The largest number of bins a histogram may have.
 pub(crate) const MAX_BINS: usize = 10_000;
-
-/// A data range must be at least this share of its larger bound's magnitude wide. This is
-/// the minimum width of a linear scale domain; a narrower extent is treated as constant data.
-const MIN_RELATIVE_WIDTH: f64 = 1e-10;
-
-/// A data range must also be at least this wide, which keeps the same rule near 0.
-const MIN_WIDTH: f64 = 1e-290;
 
 /// Constant data `v` is spread over `v ± max(HALF_RANGE, |v| × RELATIVE_HALF_RANGE)`.
 const HALF_RANGE: f64 = 0.5;
@@ -130,10 +123,10 @@ impl Histogram {
     }
 }
 
-/// The range binned for data spanning `min..=max` (both finite, `min <= max`).
+/// The range binned for data spanning `min..=max` (both finite, `min <= max`). Data narrower
+/// than the minimum width of a linear scale domain is treated as constant.
 fn bin_range(min: f64, max: f64) -> (f64, f64) {
-    let magnitude = min.abs().max(max.abs());
-    if max - min >= (MIN_RELATIVE_WIDTH * magnitude).max(MIN_WIDTH) {
+    if !too_narrow(min, max) {
         return (min, max);
     }
     let center = min / 2.0 + max / 2.0;

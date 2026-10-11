@@ -3,6 +3,7 @@
 //! production arithmetic.
 
 mod area;
+mod bar;
 mod chrome;
 mod clip;
 mod line;

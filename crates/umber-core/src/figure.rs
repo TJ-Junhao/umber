@@ -22,7 +22,8 @@
 //! ```
 
 pub use crate::model::{
-    Axes, AxisData, Figure, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
+    Axes, AxisData, BarMark, BarOptions, Figure, LineMark, LineOptions, Mark, ScatterMark,
+    ScatterOptions,
 };
 
 use crate::render::{SvgText, render_png, render_svg};

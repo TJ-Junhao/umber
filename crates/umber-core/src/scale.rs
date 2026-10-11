@@ -177,8 +177,9 @@ const MIN_LINEAR_RELATIVE_WIDTH: f64 = 1e-10;
 /// (where the relative bound alone would allow a range of a few subnormals).
 const MIN_LINEAR_WIDTH: f64 = 1e-290;
 
-/// Whether `lo..hi` (with `lo < hi`, both finite) is too narrow for a linear domain.
-fn too_narrow(lo: f64, hi: f64) -> bool {
+/// Whether `lo..=hi` (with `lo <= hi`, both finite) is too narrow for a linear domain: narrower
+/// than `max(1e-10 × max(|lo|, |hi|), 1e-290)`. A single value (`lo == hi`) is too narrow.
+pub(crate) fn too_narrow(lo: f64, hi: f64) -> bool {
     let magnitude = lo.abs().max(hi.abs());
     hi - lo < (MIN_LINEAR_RELATIVE_WIDTH * magnitude).max(MIN_LINEAR_WIDTH)
 }
@@ -196,6 +197,17 @@ pub(crate) fn is_single_value(transform: Transform, lo: f64, hi: f64) -> bool {
 /// The share of a nice domain's span that auto limits add on each side, so that marks never
 /// sit on the plot edge.
 const AUTO_LIMIT_PADDING: f64 = 0.05;
+
+/// Which sides of a nice domain [`ContinuousScale::padded`] widens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Padding {
+    /// Both sides.
+    BothSides,
+    /// Both sides, except a side whose limit is exactly 0 on a linear domain: bars grow from 0,
+    /// so their base stays on the plot edge. A log domain never has 0 as a limit, so it is
+    /// padded on both sides.
+    KeepZero,
+}
 
 /// `ln(v / lo)` for positive `v` and `lo`: the log-axis position of `v` measured from the
 /// lower limit, in natural-log units. Measuring from `lo` keeps narrow log domains at large
@@ -655,14 +667,19 @@ impl ContinuousScale {
     /// measured in log space on a log axis, and kept within the supported magnitudes
     /// (`|v| <= MAX_MAGNITUDE` linear, `[MIN_LOG_VALUE, MAX_MAGNITUDE]` log). Auto limits apply
     /// it to a nice domain, after its ticks are chosen, so the ticks stay on round values and
-    /// the outermost ones sit just inside the plot edge. Never narrower than `self`.
-    pub(crate) fn padded(&self) -> ContinuousScale {
+    /// the outermost ones sit just inside the plot edge. With [`Padding::KeepZero`], a linear
+    /// limit that is exactly 0 is not moved. Never narrower than `self`.
+    pub(crate) fn padded(&self, padding: Padding) -> ContinuousScale {
         let (lo, hi) = (self.lo, self.hi);
         let padded = match self.transform {
             Transform::Linear => {
                 // Both limits are at most MAX_MAGNITUDE in magnitude, so the span is finite.
                 let pad = AUTO_LIMIT_PADDING * (hi - lo);
-                (lo - pad, hi + pad)
+                let kept = |limit: f64| padding == Padding::KeepZero && limit == 0.0;
+                (
+                    if kept(lo) { lo } else { lo - pad },
+                    if kept(hi) { hi } else { hi + pad },
+                )
             }
             Transform::Log(_) => {
                 // A share of the span in log space is the same factor in every base, so natural
@@ -1457,7 +1474,7 @@ mod tests {
             ((-10.0, 10.0), (-11.0, 11.0)),
             ((1e-5, 3e-5), (0.9e-5, 3.1e-5)),
         ] {
-            let (plo, phi) = raw(lo, hi).padded().domain();
+            let (plo, phi) = raw(lo, hi).padded(Padding::BothSides).domain();
             assert!(
                 rel_close(plo, want_lo) && rel_close(phi, want_hi),
                 "{plo} {phi}"
@@ -1468,7 +1485,7 @@ mod tests {
             let log = Transform::Log(LogBase::new(base).unwrap());
             let (lo, hi) = ContinuousScale::new(log, 10.0, 1000.0, "t")
                 .unwrap()
-                .padded()
+                .padded(Padding::BothSides)
                 .domain();
             let factor = 10f64.powf(0.1);
             assert!(rel_close(lo, 10.0 / factor), "base {base}: {lo}");
@@ -1483,7 +1500,7 @@ mod tests {
         let padded = |t: Transform, lo: f64, hi: f64| {
             ContinuousScale::new(t, lo, hi, "t")
                 .unwrap()
-                .padded()
+                .padded(Padding::BothSides)
                 .domain()
         };
         assert_eq!(
@@ -1515,6 +1532,24 @@ mod tests {
             let (lo, hi) = padded(t, lo, hi);
             assert!(ContinuousScale::new(t, lo, hi, "t").is_ok(), "{lo} {hi}");
         }
+    }
+
+    #[test]
+    fn keep_zero_padding_leaves_a_zero_limit_in_place() {
+        let keep = |lo: f64, hi: f64| raw(lo, hi).padded(Padding::KeepZero).domain();
+        // A zero limit stays; the far side is padded as usual.
+        assert_eq!(keep(0.0, 40.0), (0.0, 42.0));
+        assert_eq!(keep(-40.0, 0.0), (-42.0, 0.0));
+        // A domain that does not end at 0 is padded on both sides.
+        assert_eq!(keep(-10.0, 30.0), (-12.0, 32.0));
+        assert_eq!(keep(10.0, 30.0), (9.0, 31.0));
+        // A log domain never ends at 0, so it is padded on both sides.
+        let log = Transform::Log(LogBase::TEN);
+        let scale = ContinuousScale::new(log, 10.0, 1000.0, "t").unwrap();
+        assert_eq!(
+            scale.padded(Padding::KeepZero),
+            scale.padded(Padding::BothSides)
+        );
     }
 
     #[test]

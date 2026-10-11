@@ -99,6 +99,7 @@ mod tests {
         match mark {
             Mark::Line(line) => line.series(),
             Mark::Scatter(scatter) => scatter.series(),
+            other => panic!("{other:?} holds no series"),
         }
     }
 

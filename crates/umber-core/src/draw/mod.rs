@@ -16,13 +16,15 @@
 //! with limits 0 to 1e-10), and saturating an overflowed coordinate would change the line's
 //! direction. Lines are clipped against the axis-space domain expanded by `max(line_width, 2)`
 //! pt, scatter points against the domain expanded by each marker shape's extent plus its
-//! outline and 1 pt (both converted to axis units). Only the clipped or kept points are mapped
-//! to plot coordinates, so every mark coordinate in the scene is within a few points of the
-//! plot area, and nothing is narrowed to `f32` before that.
+//! outline and 1 pt, and bars against the y domain expanded by `max(corner radius, 2)` pt (all
+//! converted to axis units). Only the clipped or kept points are mapped to plot coordinates, so
+//! every mark coordinate in the scene is within a few points of the plot area, and nothing is
+//! narrowed to `f32` before that.
 //!
 //! Each mark kind has its own module: [`line`](mod@line) with the [`area`] fills under lines,
-//! and [`scatter`] with the [`marker`] shapes. They share the axis maps of [`mapping`] and the
-//! clipping of [`clip`], and receive their input as one [`MarkContext`].
+//! [`scatter`] with the [`marker`] shapes, and [`bar`] with the [`bar_shape`] outlines. They
+//! share the axis maps of [`mapping`] and the clipping of [`clip`], and receive their input as
+//! one [`MarkContext`].
 
 mod area;
 mod bar;
@@ -105,6 +107,19 @@ pub(crate) fn marks(
                 let ys = axis_y(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;
                 items.extend(scatter::scatter_item(&context, &xs, &ys, color, marker));
+            }
+            ResolvedMark::Bar {
+                mark: bar_mark,
+                color,
+            } => {
+                bar::bar_items(
+                    &context,
+                    &resolved.x,
+                    &resolved.y,
+                    bar_mark,
+                    color,
+                    &mut items,
+                );
             }
         }
     }

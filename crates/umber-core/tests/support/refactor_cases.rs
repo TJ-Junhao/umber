@@ -1649,6 +1649,16 @@ mod record {
                 color_spec(scatter.options().color),
                 marker(scatter.options().marker)
             ),
+            Mark::Bar(bar) => {
+                let names: Vec<String> = bar.categories().iter().map(|s| text(s)).collect();
+                format!(
+                    "bar categories=[{}] heights={} label={} color={}",
+                    names.join(","),
+                    floats64(bar.heights()),
+                    text(&bar.options().label),
+                    color_spec(bar.options().color)
+                )
+            }
             _ => "unknown-mark".into(),
         }
     }

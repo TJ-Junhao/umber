@@ -16,6 +16,7 @@ mod validation;
 
 pub use axes::Axes;
 pub use axis_data::AxisData;
+pub use bar::{BarMark, BarOptions};
 pub use figure::Figure;
 pub use mark::{LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 
@@ -404,5 +405,139 @@ mod tests {
             ),
             ("t", "s", "x", "y")
         );
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn bars(a: &mut Axes, categories: &[&str], heights: &[f64]) -> Result<()> {
+        a.bar(names(categories), heights, BarOptions::default())
+            .map(|_| ())
+    }
+
+    #[test]
+    fn bar_checks_run_in_order() {
+        const BAR: &str = "Axes.bar()";
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        // Lengths first, whatever else is wrong.
+        assert_data(
+            bars(a, &["a", "a"], &[f64::INFINITY]),
+            BAR,
+            "categories has 2 values but heights has 1; categories and heights must have the same length.",
+        );
+        // Duplicates before heights; the message names both indices.
+        assert_data(
+            bars(a, &["a", "b", "a"], &[f64::INFINITY, 1.0, 2.0]),
+            BAR,
+            "categories[2] repeats \"a\" from categories[0]; each category must appear once.",
+        );
+        // The first bad height, by index.
+        assert_data(
+            bars(
+                a,
+                &["a", "b", "c", "d"],
+                &[1.0, f64::NAN, 1e301, f64::INFINITY],
+            ),
+            BAR,
+            "heights[2] is 1e301; magnitudes must not exceed 1e300.",
+        );
+        assert_data(
+            bars(a, &["a", "b", "c", "d"], &[1.0, 2.0, 3.0, f64::INFINITY]),
+            BAR,
+            "heights[3] is inf; values must be finite",
+        );
+        assert!(a.marks().is_empty());
+
+        // The x axis kind before duplicates.
+        let mut g = figure();
+        let b = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        assert_data(
+            bars(b, &["a", "a"], &[1.0, 2.0]),
+            BAR,
+            "categories holds names but the x axis is not a category axis; use a category x axis.",
+        );
+
+        // Heights before the y axis kind.
+        let mut h = figure();
+        let c = h
+            .add_axes(ScaleKind::Category, ScaleKind::Category)
+            .unwrap();
+        assert_data(
+            bars(c, &["a"], &[f64::NEG_INFINITY]),
+            BAR,
+            "heights[0] is -inf",
+        );
+        assert_data(
+            bars(c, &["a"], &[1.0]),
+            BAR,
+            "heights holds numbers but the y axis is a category axis; use a linear or log y axis.",
+        );
+        assert!(c.marks().is_empty());
+    }
+
+    #[test]
+    fn bars_on_a_log_y_axis_need_positive_heights() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Category, log_kind()).unwrap();
+        assert_data(
+            bars(a, &["a", "b"], &[2.0, 0.0]),
+            "Axes.bar()",
+            "heights[1] is 0 on a log axis; values must be positive.",
+        );
+        assert_data(
+            bars(a, &["a"], &[1e-301]),
+            "Axes.bar()",
+            "heights[0] is 1e-301 on a log axis",
+        );
+        assert!(a.marks().is_empty());
+        bars(a, &["a", "b"], &[2.0, f64::NAN]).unwrap();
+        assert_eq!(a.marks().len(), 1);
+    }
+
+    #[test]
+    fn bars_store_their_input_and_share_it_with_clones() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let heights = [-0.0, f64::from_bits(0xfff8_0000_0000_0001), -2.5, 0.0];
+        let options = BarOptions {
+            label: "sales".to_owned(),
+            color: crate::ColorSpec::Palette {
+                index: 2,
+                alpha: crate::Alpha::OPAQUE,
+            },
+        };
+        // Empty bars are allowed, and so is an empty category name.
+        a.bar(Vec::new(), &[], BarOptions::default())
+            .unwrap()
+            .bar(names(&["b", "", "a", "c"]), &heights, options.clone())
+            .unwrap();
+        let copy = f.clone();
+        let (Some([_, Mark::Bar(bar)]), Some([_, Mark::Bar(cloned)])) =
+            (f.axes().map(Axes::marks), copy.axes().map(Axes::marks))
+        else {
+            panic!("expected two bar marks");
+        };
+        assert_eq!(bar.categories(), names(&["b", "", "a", "c"]));
+        let bits = |v: &[f64]| v.iter().map(|h| h.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(bar.heights()), bits(&heights));
+        assert_eq!(bar.options(), &options);
+        assert!(bar.shares_data_with(cloned));
+    }
+
+    #[test]
+    fn failed_bar_calls_change_nothing() {
+        let mut f = figure();
+        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .bar(names(&["a"]), &[1.0], BarOptions::default())
+            .unwrap();
+        let before = f.clone();
+        let a = f.axes_mut().unwrap();
+        assert!(bars(a, &["a"], &[]).is_err());
+        assert!(bars(a, &["a", "a"], &[1.0, 1.0]).is_err());
+        assert!(bars(a, &["b"], &[f64::INFINITY]).is_err());
+        assert_eq!(f, before);
     }
 }
