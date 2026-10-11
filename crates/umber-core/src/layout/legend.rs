@@ -11,7 +11,8 @@
 //! and the label inside a horizontal padding. Both styles wrap the same way: an entry box is
 //! the swatch, the label and the padding around them, and only the gap between boxes differs.
 //!
-//! Direct labels sit right of the point each labels, its anchor, after the end dot drawn there.
+//! Direct labels sit right of the point each labels, its anchor, after the end dot drawn there
+//! when the line ends at the anchor; a line that leaves the plot at its anchor has no end dot.
 //! The plot area gives up room on its right for them (see [`DirectLabels::reserve`]), and
 //! labels that would come too close vertically are moved apart (see [`super::nudge`]). Their
 //! anchors move with the axes, so they are placed in every layout pass.
@@ -19,7 +20,7 @@
 use super::nudge::separate;
 use super::{Area, BODY_LINE, Label, PADDING, Styles, baseline_in_line, measure, metrics};
 use crate::legend::{Legend, RowStyle, Swatch};
-use crate::resolve::{Anchor, AnchorX, AxisScale, NormalizedPos, Resolved, ResolvedAxis};
+use crate::resolve::{Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis};
 use crate::{FontLibrary, Rgba, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
@@ -319,8 +320,10 @@ impl<'a> DirectLabels<'a> {
     /// `canvas_height` pt tall, in series order.
     ///
     /// Each anchor is placed on the plot, its x clamped to the plot's horizontal range. Its end
-    /// dot is centered on it when it lies inside the plot's vertical range; a dot outside would
-    /// mark a point the plot does not show, so there is none. The label starts half a dot and
+    /// dot is centered on it when the line ends there ([`EndKind::Point`]) and it lies inside
+    /// the plot's vertical range; a dot outside would mark a point the plot does not show, and
+    /// a line that leaves the plot at its anchor ([`EndKind::Edge`]) does not end there, so
+    /// neither gets one. The label starts half a dot and
     /// 6 pt right of the anchor, and is vertically centered on the anchor's y, clamped to the
     /// plot's vertical range and then moved apart from its neighbours by [`separate`], so that
     /// label centers are at least `1.2 ×` the label size apart. Labels that would not fit
@@ -362,7 +365,8 @@ impl<'a> DirectLabels<'a> {
                         baseline_in_line(center - line / 2.0, line, self.ascent, self.descent);
                     label
                 });
-                let dot = (0.0..=1.0).contains(&y).then(|| EndDot {
+                let ends = entry.anchor.end == EndKind::Point;
+                let dot = (ends && (0.0..=1.0).contains(&y)).then(|| EndDot {
                     x: anchor_x,
                     y: at(y),
                     diameter: self.dot,
@@ -406,7 +410,8 @@ pub(crate) struct DirectLabel {
     pub label: Option<Label>,
     /// The line color, alpha included, for the label and the dot.
     pub color: Rgba,
-    /// The end dot; `None` when the anchor lies above or below the plot area.
+    /// The end dot; `None` when the line leaves the plot at the anchor or the anchor lies above
+    /// or below the plot area.
     pub dot: Option<EndDot>,
 }
 
@@ -996,7 +1001,7 @@ mod tests {
             let axes = f.axes().unwrap();
             let marks = crate::resolve::resolve_marks(axes.marks(), f.theme().palette());
             let limits = crate::resolve::Limits::of(axes);
-            let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits.x);
+            let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits);
             DirectLabels::measure(f.theme(), &legend, FontLibrary::global()).reserve(cap)
         };
         let short = measured(&["Short"]);
@@ -1066,6 +1071,91 @@ mod tests {
         assert!((center_of(text_of(high)) - plot.y).abs() < 1e-3);
         assert!((center_of(text_of(low)) - plot.bottom()).abs() < 1e-3);
         assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+    }
+
+    #[test]
+    fn a_line_cut_by_the_x_limits_is_labelled_where_it_leaves_the_plot() {
+        // "Cut" goes on past x = 1.5 and is labelled where it crosses the right edge, at
+        // y = 25, with no end dot; "Ends" stops inside and keeps its dot at its last point.
+        let mut f = line_figure(
+            Theme::graphite(),
+            &[
+                ("Cut", vec![0.0, 1.0, 2.0], vec![0.0, 20.0, 30.0]),
+                ("Ends", vec![0.0, 1.0], vec![80.0, 90.0]),
+            ],
+        );
+        f.axes_mut()
+            .unwrap()
+            .xlim(0.0, 1.5)
+            .unwrap()
+            .ylim(0.0, 100.0)
+            .unwrap();
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let plot = layout.plot;
+        let [cut, ends] = layout.direct.as_slice() else {
+            panic!("two direct labels");
+        };
+        assert!(cut.dot.is_none());
+        let label = text_of(cut);
+        let dot = f64::from(Theme::graphite().drawn_marker_size());
+        assert!((label.x - (plot.right() + dot / 2.0 + DIRECT_GAP)).abs() < 1e-9);
+        let crossing = plot.y_at(NormalizedPos::new(0.25));
+        assert!((center_of(label) - crossing).abs() < 1e-6);
+        let end = ends.dot.expect("the line ends inside, so it keeps its dot");
+        assert!((end.x - plot.x_at(NormalizedPos::new(1.0 / 1.5))).abs() < 1e-9);
+        assert!((end.y - plot.y_at(NormalizedPos::new(0.9))).abs() < 1e-9);
+        assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+
+        // A line whose last point inside lies on the high end goes on past it, but that point
+        // is data the plot shows: it keeps its dot, on the right edge.
+        let mut f = line_figure(
+            Theme::graphite(),
+            &[("On the edge", vec![0.0, 1.0, 2.0], vec![10.0, 40.0, 30.0])],
+        );
+        f.axes_mut()
+            .unwrap()
+            .xlim(0.0, 1.0)
+            .unwrap()
+            .ylim(0.0, 100.0)
+            .unwrap();
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let [edge] = layout.direct.as_slice() else {
+            panic!("one direct label");
+        };
+        let dot = edge.dot.expect("a data point on the edge keeps its dot");
+        assert!((dot.x - layout.plot.right()).abs() < 1e-9);
+        assert!((dot.y - layout.plot.y_at(NormalizedPos::new(0.4))).abs() < 1e-9);
+
+        // On a log x axis the crossing is interpolated in log space: from (10, 0) to
+        // (1000, 40), the edge at 100 lies halfway, at y = 20.
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        f.add_axes(
+            ScaleKind::Log {
+                base: crate::LogBase::TEN,
+            },
+            ScaleKind::Linear,
+        )
+        .unwrap()
+        .line(
+            AxisData::Numbers(vec![1.0, 10.0, 1000.0]),
+            &[0.0, 0.0, 40.0],
+            LineOptions {
+                label: "Log".to_owned(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap()
+        .xlim(1.0, 100.0)
+        .unwrap()
+        .ylim(0.0, 100.0)
+        .unwrap();
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let [log] = layout.direct.as_slice() else {
+            panic!("one direct label");
+        };
+        assert!(log.dot.is_none());
+        let crossing = layout.plot.y_at(NormalizedPos::new(0.2));
+        assert!((center_of(text_of(log)) - crossing).abs() < 1e-6);
     }
 
     #[test]
@@ -1152,5 +1242,49 @@ mod tests {
             .count();
         let texts = items.iter().filter(|i| matches!(i, Item::Text(_))).count();
         assert_eq!((dots, texts), (30, shown));
+    }
+
+    #[test]
+    fn areas_get_direct_labels_and_end_dots_as_lines_do() {
+        // The same series as areas or as lines, on the same limits: the same direct labels,
+        // with an end dot where the series ends inside the plot and none where the x limit cuts
+        // it.
+        use crate::model::AreaOptions;
+        let series: [(&str, Vec<f64>, Vec<f64>); 2] = [
+            ("Ends", vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 6.0]),
+            ("Cut", vec![0.0, 2.0, 4.0], vec![2.0, 5.0, 8.0]),
+        ];
+        let laid_out = |as_areas: bool| {
+            let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+            let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+            for (label, x, y) in &series {
+                let options = AreaOptions {
+                    label: (*label).to_owned(),
+                    ..AreaOptions::default()
+                };
+                let x = AxisData::Numbers(x.clone());
+                if as_areas {
+                    axes.area(x, y, options).unwrap();
+                } else {
+                    axes.line(x, y, options).unwrap();
+                }
+            }
+            axes.xlim(0.0, 3.0).unwrap().ylim(0.0, 10.0).unwrap();
+            let layout = plan_figure(&f, FontLibrary::global()).1;
+            layout
+                .direct
+                .iter()
+                .map(|d| {
+                    let label = text_of(d);
+                    (label.text.clone(), label.x, label.y, d.color, d.dot)
+                })
+                .collect::<Vec<_>>()
+        };
+        let areas = laid_out(true);
+        assert_eq!(areas, laid_out(false));
+        let texts: Vec<&str> = areas.iter().map(|(text, ..)| text.as_str()).collect();
+        assert_eq!(texts, ["Ends", "Cut"]);
+        assert!(areas[0].4.is_some(), "an area ending inside has an end dot");
+        assert!(areas[1].4.is_none(), "an area cut by the x limit has none");
     }
 }

@@ -9,13 +9,13 @@ use crate::render::{SvgText, render_png, render_svg};
 use crate::resolve::{NormalizedPos, Resolved};
 use crate::scene::{Item, LinearGradient, Paint};
 use crate::test_support::scene::assert_scene_bounded;
-use crate::{AreaFill, FontLibrary, LogBase, MAX_BINS, Rgba, ScaleKind, Theme};
+use crate::{FillStyle, FontLibrary, LogBase, MAX_BINS, Rgba, ScaleKind, Theme};
 
 /// Linear x axes, a y axis of `y` and one histogram of `values` in `bins` bins.
 fn hist_figure(theme: Theme, y: ScaleKind, values: &[f64], bins: usize) -> Figure {
     let mut f = Figure::new(6.0, 4.0, theme).unwrap();
     let options = HistOptions {
-        bins,
+        bins: bins.try_into().unwrap(),
         ..HistOptions::default()
     };
     f.add_axes(ScaleKind::Linear, y)
@@ -131,7 +131,7 @@ fn bins_have_square_corners_and_start_on_the_baseline() {
 fn the_gap_is_at_most_half_a_bin() {
     // MAX_BINS bins across about 400 pt are far narrower than the 1.5 pt gap: the gap shrinks
     // to half of each bin, which keeps the other half.
-    let theme = Theme::midnight().with_area_fill(AreaFill::None).unwrap();
+    let theme = Theme::midnight().with_fill_style(FillStyle::Solid).unwrap();
     let values: Vec<f64> = (0..=MAX_BINS).map(|i| i as f64).collect();
     let f = hist_figure(theme, ScaleKind::Linear, &values, MAX_BINS);
     let scene = f.to_scene(FontLibrary::global());
@@ -306,23 +306,30 @@ fn one_gradient_item_per_histogram() {
 }
 
 #[test]
-fn log_y_bins_grow_from_the_bottom_of_the_plot() {
+fn log_y_bins_grow_from_the_baseline() {
     let log = ScaleKind::Log { base: LogBase::TEN };
     let f = hist_figure(Theme::midnight(), log, &VALUES, 4);
     let scene = f.to_scene(FontLibrary::global());
     assert_scene_bounded(&scene);
     let (resolved, layout) = plan(&f);
+    // The counts 1, 0, 3, 5 would take the nice limits 1..10, but the smallest count lands on
+    // the lowest tick, so the axis starts a decade lower, at 0.1: the baseline sits there,
+    // above the padded plot bottom and below every count.
+    assert_eq!(resolved.y.ticks[0].label, "0.1");
+    assert_near(layout.baseline_y as f32, y_of(&resolved, &layout, 0.1));
+    assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
     let items = mark_items(&scene);
     let (path, paint) = the_fill(items);
     let drawn = bins(path);
-    // The empty bin draws nothing; the bin of count 1 still shows, from the bottom of the plot.
+    // The empty bin draws nothing; the bin of count 1 still shows, from the baseline.
     assert_eq!(drawn.len(), 3);
     for (&(_, _, top, base), count) in drawn.iter().zip([1.0, 3.0, 5.0]) {
-        assert_near(base, layout.plot.bottom());
+        assert_near(base, layout.baseline_y);
         assert_near(top, y_of(&resolved, &layout, count));
+        assert!(f64::from(top) < layout.baseline_y - 1.0, "{top}");
     }
     let gradient = gradient(paint);
-    assert_near(gradient.end.y, layout.plot.bottom());
+    assert_near(gradient.end.y, layout.baseline_y);
     assert_near(gradient.start.y, y_of(&resolved, &layout, 5.0));
 }
 
@@ -371,5 +378,45 @@ fn a_histogram_without_finite_values_draws_nothing() {
         let scene = f.to_scene(FontLibrary::global());
         // Only the chrome and the baseline: no marks group.
         assert_eq!(scene.items.len(), 2, "{:?}", scene.items);
+    }
+}
+
+#[test]
+fn hist_reads_the_fill_style() {
+    // The fill style alone decides how bins are painted, in every theme: `Solid` gives flat
+    // bins in the series color and no top edges; `Gradient` gives the gradient fill and the
+    // solid top edges. Each theme's own style is the one it had as an area fill setting
+    // (Pigment and Graphite flat, Midnight gradient), so its histograms are unchanged; the
+    // output gate pins their bytes.
+    for (theme, own) in [
+        (Theme::pigment(), FillStyle::Solid),
+        (Theme::graphite(), FillStyle::Solid),
+        (Theme::midnight(), FillStyle::Gradient),
+    ] {
+        assert_eq!(theme.fill_style(), own);
+        let color = theme.palette()[0];
+        let scene_of = |style: FillStyle| {
+            let theme = theme.with_fill_style(style).unwrap();
+            hist_figure(theme, ScaleKind::Linear, &VALUES, 4).to_scene(FontLibrary::global())
+        };
+        let own_scene = hist_figure(theme.clone(), ScaleKind::Linear, &VALUES, 4)
+            .to_scene(FontLibrary::global());
+        assert_eq!(scene_of(own), own_scene);
+
+        let solid = scene_of(FillStyle::Solid);
+        let items = mark_items(&solid);
+        assert_eq!(items.len(), 1);
+        assert_eq!(the_fill(items).1, &Paint::Solid(color));
+
+        let gradient_scene = scene_of(FillStyle::Gradient);
+        let items = mark_items(&gradient_scene);
+        assert_eq!(items.len(), 2);
+        let (fill, paint) = the_fill(items);
+        gradient(paint);
+        let (edges, edge_color) = top_edges(items);
+        assert_eq!(edge_color, color);
+        assert_eq!(subpaths(edges).len(), bins(fill).len());
+        // The bins themselves are the same under either style.
+        assert_eq!(bins(the_fill(mark_items(&solid)).0), bins(fill));
     }
 }

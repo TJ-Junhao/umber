@@ -1,13 +1,13 @@
 //! Drawing: turns a [`Layout`] into scene items.
 //!
-//! The axes chrome (gridlines, tick labels, the header and the axis labels) is one unclipped
-//! group, drawn by [`chrome()`]. The marks follow in a second group, drawn in insertion order by
-//! [`marks()`] and clipped to the plot area. When the axes hold line marks, that clip is widened
-//! horizontally on each side by half of the widest line stroke, as far as the room beside the
-//! plot area allows (see [`marks_clip`]), so the round end of a line that starts or ends on the
-//! left or right edge stays whole; the top and bottom of the clip are the plot area's. The
-//! baseline comes last, in an unclipped group of its own drawn by [`baseline()`], so marks never
-//! cover it.
+//! The axes chrome (gridlines, tick labels, the header and the axis labels) is one unclipped group,
+//! drawn by [`chrome()`]. The marks follow in a second group, drawn in insertion order by
+//! [`marks()`] and clipped to the plot area. When the axes hold marks drawn along a line (lines and
+//! areas), that clip is widened horizontally on each side by half of the widest line stroke, as far
+//! as the room beside the plot area allows (see [`marks_clip`]), so the round end of a line that
+//! starts or ends on the left or right edge stays whole; the top and bottom of the clip are the
+//! plot area's. The baseline comes last, in an unclipped group of its own drawn by [`baseline()`],
+//! so marks never cover it.
 //!
 //! Marks are clipped in *axis space*, before they are mapped to plot coordinates: the raw value
 //! on a linear axis, `ln(value / lower limit)` on a log axis, the band center (in `0..=1`) on a
@@ -21,10 +21,10 @@
 //! clipped or kept points are mapped to plot coordinates, so every mark coordinate in the scene
 //! is within a few points of the plot area, and nothing is narrowed to `f32` before that.
 //!
-//! Each mark kind has its own module: [`line`](mod@line) with the [`area`] fills under lines,
-//! [`scatter`] with the [`marker`] shapes, and [`bar`] and [`hist`] with the [`bar_shape`]
-//! outlines they share. They share the axis maps of [`mapping`] and the clipping of [`clip`],
-//! and receive their input as one [`MarkContext`].
+//! Each mark kind has its own module: [`line`](mod@line), [`area`], which fills under a line drawn
+//! as [`line`](mod@line) draws it, [`scatter`] with the [`marker`] shapes, and [`bar`] and [`hist`]
+//! with the [`bar_shape`] outlines they share. They share the axis maps of [`mapping`] and the
+//! clipping of [`clip`], and receive their input as one [`MarkContext`].
 
 mod area;
 mod bar;
@@ -45,7 +45,7 @@ pub(crate) use chrome::{baseline, chrome};
 
 use crate::Theme;
 use crate::layout::{Area, Layout};
-use crate::resolve::{Resolved, ResolvedMark};
+use crate::resolve::{NormalizedPos, Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
 use mapping::{AxisMaps, axis_x, axis_y};
 
@@ -59,7 +59,9 @@ struct MarkContext<'a> {
     maps: AxisMaps,
     /// The plot area.
     plot: Area,
-    /// The y of the baseline, where area fills end.
+    /// Where the baseline sits along the y axis, as resolved; bars on a log y axis start there.
+    baseline: NormalizedPos,
+    /// The plot y of the baseline, as laid out; area fills end there.
     baseline_y: f64,
 }
 
@@ -76,6 +78,7 @@ pub(crate) fn marks(
         theme,
         maps: AxisMaps::new(&resolved.x, &resolved.y, plot),
         plot,
+        baseline: resolved.baseline,
         baseline_y: layout.baseline_y,
     };
     let mut items = Vec::new();
@@ -85,17 +88,27 @@ pub(crate) fn marks(
                 mark: line_mark,
                 color,
             } => {
-                let mut xs = axis_x(&resolved.x, line_mark.x());
-                let mut ys = axis_y(&resolved.y, line_mark.y());
-                if !resolved.x.is_category() {
-                    (xs, ys) = line::downsample(&context, xs, ys);
-                }
+                let (xs, ys) = line::line_points(&context, resolved, line_mark);
                 line::line_items(
                     &context,
                     &xs,
                     &ys,
                     color,
                     line_mark.options().dash,
+                    &mut items,
+                );
+            }
+            ResolvedMark::Area {
+                mark: area_mark,
+                color,
+            } => {
+                let (xs, ys) = line::line_points(&context, resolved, area_mark.line());
+                area::area_items(
+                    &context,
+                    &xs,
+                    &ys,
+                    color,
+                    area_mark.options().dash,
                     &mut items,
                 );
             }
@@ -177,7 +190,8 @@ pub(crate) fn marks(
 }
 
 /// The clip rectangle of the marks: the plot area, widened horizontally on each side by half of
-/// the widest stroke among the line `marks`; the plot area itself when there is no line mark.
+/// the widest stroke among the `marks` drawn along a line
+/// ([`ResolvedMark::draws_a_line`]); the plot area itself when there is no such mark.
 ///
 /// The widening never takes more than the free room beside the plot area
 /// ([`Layout::room_left`], [`Layout::room_right`]): on the left it stops at the y tick labels
@@ -192,7 +206,7 @@ pub(super) fn marks_clip(theme: &Theme, layout: &Layout, marks: &[ResolvedMark<'
     let plot = layout.plot;
     let widest = marks
         .iter()
-        .filter(|mark| matches!(mark, ResolvedMark::Line { .. }))
+        .filter(|mark| mark.draws_a_line())
         .map(|_| f64::from(line::line_width(theme)))
         .fold(0.0, f64::max);
     let half = widest / 2.0;

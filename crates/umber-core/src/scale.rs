@@ -105,7 +105,8 @@ impl LogBase {
             Err(Error::style(
                 "Scale.log()",
                 format!("base is {base}; a log base must be finite and greater than 1."),
-            ))
+            )
+            .with_parameter("base"))
         }
     }
 
@@ -311,6 +312,16 @@ fn strictly_increasing(values: Vec<f64>) -> Vec<f64> {
     out
 }
 
+/// Names `low` or `high` on `err` when exactly one of the limits breaks the rule; when both do,
+/// or neither does on its own (a relation between them), no single parameter is at fault.
+fn blame(err: Error, low_bad: bool, high_bad: bool) -> Error {
+    match (low_bad, high_bad) {
+        (true, false) => err.with_parameter("low"),
+        (false, true) => err.with_parameter("high"),
+        _ => err,
+    }
+}
+
 impl ContinuousScale {
     /// Creates a scale over `[lo, hi]`.
     ///
@@ -333,21 +344,29 @@ impl ContinuousScale {
     /// ```
     pub fn new(transform: Transform, lo: f64, hi: f64, context: &'static str) -> Result<Self> {
         if !(lo.is_finite() && hi.is_finite() && lo < hi) {
-            return Err(Error::style(
-                context,
-                format!(
-                    "the limits are {lo} and {hi}; both must be finite and the lower limit must be below the upper limit."
+            return Err(blame(
+                Error::style(
+                    context,
+                    format!(
+                        "the limits are {lo} and {hi}; both must be finite and the lower limit must be below the upper limit."
+                    ),
                 ),
+                !lo.is_finite(),
+                !hi.is_finite(),
             ));
         }
         match transform {
             Transform::Linear => {
                 if lo.abs() > MAX_MAGNITUDE || hi.abs() > MAX_MAGNITUDE {
-                    return Err(Error::style(
-                        context,
-                        format!(
-                            "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}."
+                    return Err(blame(
+                        Error::style(
+                            context,
+                            format!(
+                                "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}."
+                            ),
                         ),
+                        lo.abs() > MAX_MAGNITUDE,
+                        hi.abs() > MAX_MAGNITUDE,
                     ));
                 }
                 if too_narrow(lo, hi) {
@@ -366,14 +385,20 @@ impl ContinuousScale {
                         format!(
                             "the lower limit is {lo}; a log scale needs a positive lower limit."
                         ),
-                    ));
+                    )
+                    .with_parameter("low")
+                    .with_hint("use a linear axis if either limit is not positive."));
                 }
                 if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
-                    return Err(Error::style(
-                        context,
-                        format!(
-                            "the limits are {lo} and {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                    return Err(blame(
+                        Error::style(
+                            context,
+                            format!(
+                                "the limits are {lo} and {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                            ),
                         ),
+                        !(MIN_LOG_VALUE..=MAX_MAGNITUDE).contains(&lo),
+                        !(MIN_LOG_VALUE..=MAX_MAGNITUDE).contains(&hi),
                     ));
                 }
                 if hi / lo < MIN_LOG_RATIO {
@@ -449,7 +474,8 @@ impl ContinuousScale {
                         format!(
                             "the data range starts at {lo}; a log scale can only show positive values."
                         ),
-                    ));
+                    )
+                    .with_hint("use a linear axis, or remove values that are not positive."));
                 }
                 if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
                     return Err(Error::data(
@@ -661,6 +687,81 @@ impl ContinuousScale {
         }
         let ticks = nice.ticks(target);
         (nice, ticks)
+    }
+
+    /// This nice scale and its `ticks` (as [`nice_with_ticks`](Self::nice_with_ticks) gives
+    /// them), with the lowest tick moved strictly below the data, whose smallest value is
+    /// `data_low`: the rule that keeps the data off the baseline when the baseline sits at the
+    /// lower limit.
+    ///
+    /// The data counts as starting on the lower limit when `data_low` lies less than
+    /// [`AUTO_LIMIT_PADDING`] of the domain's span above it (in log space on a log axis): the
+    /// same share the padding keeps marks off the plot edge, so a minimum that only rounds
+    /// to the limit, such as a sampled sine trough, does not sit on the baseline either. When
+    /// it does and the limit carries the first tick, the limit moves down by one tick step and
+    /// gets a tick of its own. On a linear axis the limit moves to `lo - step`, with `step` the
+    /// gap between the first two ticks, and the new tick goes in front of the others. On a log
+    /// axis it moves to `lo / base`, and the ticks are chosen again for the wider domain as
+    /// `nice_with_ticks` chooses them for about `target` ticks, so thinned powers stay evenly
+    /// spaced. All ticks are labelled as `nice_with_ticks` labels them. Everything else is
+    /// returned unchanged: a linear domain that holds 0, where the baseline sits at 0 and a
+    /// zero value on it is correct; data further above the lower limit; ticks that do not
+    /// start at the limit or number fewer than two; a step that is not finite and positive;
+    /// and a move that would leave the supported magnitudes or not move the limit at all.
+    /// Auto limits apply it before [`padded`](Self::padded).
+    pub(crate) fn below_data(
+        &self,
+        ticks: Vec<Tick>,
+        data_low: f64,
+        target: usize,
+    ) -> (ContinuousScale, Vec<Tick>) {
+        let (lo, hi) = (self.lo, self.hi);
+        let unchanged = (*self, ticks);
+        let holds_zero = self.transform == Transform::Linear && lo <= 0.0 && 0.0 <= hi;
+        let (Some(first), Some(second)) = (unchanged.1.first(), unchanged.1.get(1)) else {
+            return unchanged;
+        };
+        let rise = match self.transform {
+            Transform::Linear => (data_low - lo) / (hi - lo),
+            Transform::Log(_) => log_offset(data_low, lo) / log_offset(hi, lo),
+        };
+        let on_limit = (0.0..AUTO_LIMIT_PADDING).contains(&rise);
+        if holds_zero || !on_limit || first.value != lo {
+            return unchanged;
+        }
+        let step = second.value - first.value;
+        let (lowered, floor) = match self.transform {
+            Transform::Linear => (lo - step, -MAX_MAGNITUDE),
+            Transform::Log(base) => (lo / base.get(), MIN_LOG_VALUE),
+        };
+        let valid_step = step.is_finite() && step > 0.0;
+        if !(valid_step && lowered.is_finite() && floor <= lowered && lowered < lo) {
+            return unchanged;
+        }
+        let scale = ContinuousScale {
+            transform: self.transform,
+            lo: lowered,
+            hi,
+        };
+        let (values, labels) = match self.transform {
+            // Ticks one step apart stay one step apart with one more in front.
+            Transform::Linear => {
+                let values: Vec<f64> = std::iter::once(lowered)
+                    .chain(unchanged.1.iter().map(|tick| tick.value))
+                    .collect();
+                let labels = ticks::format_ticks(&values, step);
+                (values, labels)
+            }
+            // The powers are chosen again for the wider domain, so thinning stays even and no
+            // power crowds the new end.
+            Transform::Log(base) => {
+                let target = ticks::clamp_target(target);
+                let values = scale.log_values_with_ends(base.get(), target);
+                let labels = ticks::format_values(&values);
+                (values, labels)
+            }
+        };
+        (scale, Self::pair(values, labels))
     }
 
     /// This scale with its domain widened on each side by [`AUTO_LIMIT_PADDING`] of its span,
@@ -1013,6 +1114,51 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    #[test]
+    fn below_data_keeps_log_ticks_sorted_distinct_and_inside() {
+        let mut checked = 0;
+        for base in [
+            1.0 + f64::EPSILON,
+            1.0 + 1e-9,
+            1.001,
+            1.1,
+            2.0,
+            10.0,
+            1e100,
+            1e300,
+        ] {
+            let transform = Transform::Log(LogBase::new(base).unwrap());
+            for low in [1e-300, 1e-250, 1e-30, 0.1, 1.0, 10.0, 1e30, 1e200, 1e290] {
+                for factor in [1.000_001, 1.1, 2.0, 10.0, 1e6] {
+                    let high = low * factor;
+                    if high > MAX_MAGNITUDE {
+                        continue;
+                    }
+                    let scale = ContinuousScale::new(transform, low, high, "test").unwrap();
+                    for target in [2, 3, 4, 8] {
+                        let (nice, ticks) = scale.nice_with_ticks(target);
+                        let (lowered, ticks) = nice.below_data(ticks, low, target);
+                        let (lo, hi) = lowered.domain();
+                        let context = format!("base {base}, {low:e}..{high:e}: {ticks:?}");
+                        assert!(lo >= MIN_LOG_VALUE && lo < hi, "{context}");
+                        assert!(
+                            ticks.windows(2).all(|w| w[0].value < w[1].value
+                                && w[0].label != w[1].label
+                                && lowered.normalize(w[0].value) < lowered.normalize(w[1].value)),
+                            "{context}"
+                        );
+                        assert!(
+                            ticks.iter().all(|t| (lo..=hi).contains(&t.value)),
+                            "{context}"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000);
+    }
+
     fn lin(lo: f64, hi: f64) -> ContinuousScale {
         ContinuousScale::new(Transform::Linear, lo, hi, "test").unwrap()
     }
@@ -1165,7 +1311,9 @@ mod tests {
             (0.0, 1e-291),
         ] {
             match ContinuousScale::new(Transform::Linear, lo, hi, "Axes.xlim()") {
-                Err(Error::Style { context, message }) => {
+                Err(Error::Style {
+                    context, message, ..
+                }) => {
                     assert_eq!(context, "Axes.xlim()");
                     assert!(
                         message.contains("are too close") && message.contains("1e-10"),

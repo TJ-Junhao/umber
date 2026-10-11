@@ -21,7 +21,7 @@ use crate::{ColorSpec, Result, ScaleKind};
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistOptions {
     /// The number of equal-width bins, from 1 to [`MAX_BINS`](crate::MAX_BINS).
-    pub bins: usize,
+    pub bins: i64,
     /// The legend label; empty for none.
     pub label: String,
     /// The bar color.

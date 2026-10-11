@@ -39,6 +39,21 @@ impl Default for LineOptions {
     }
 }
 
+/// Options of an area mark: the options of the line that bounds it, so an area takes exactly
+/// the label, color and dash of a line.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::figure::AreaOptions;
+/// use umber_core::{ColorSpec, Dash};
+///
+/// let options = AreaOptions::default();
+/// assert_eq!((options.color, options.dash), (ColorSpec::AUTO, Dash::Solid));
+/// assert!(options.label.is_empty());
+/// ```
+pub type AreaOptions = LineOptions;
+
 /// Options of a scatter mark.
 ///
 /// # Examples
@@ -74,12 +89,13 @@ impl Default for ScatterOptions {
 /// One series drawn in an [`Axes`](super::Axes).
 ///
 /// Marks are created by [`Axes::line`](super::Axes::line),
-/// [`Axes::scatter`](super::Axes::scatter), [`Axes::bar`](super::Axes::bar),
-/// [`Axes::grouped_bar`](super::Axes::grouped_bar),
+/// [`Axes::scatter`](super::Axes::scatter), [`Axes::area`](super::Axes::area),
+/// [`Axes::bar`](super::Axes::bar), [`Axes::grouped_bar`](super::Axes::grouped_bar),
 /// [`Axes::stacked_bar`](super::Axes::stacked_bar) and [`Axes::hist`](super::Axes::hist), which
-/// validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`BarMark`],
-/// [`BarGroupMark`], [`HistMark`]) that keeps the validated values together and exposes them
-/// read-only; it has no public constructor. Read a mark by matching on its variant.
+/// validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`],
+/// [`AreaMark`], [`BarMark`], [`BarGroupMark`], [`HistMark`]) that keeps the validated values
+/// together and exposes them read-only; it has no public constructor. Read a mark by matching
+/// on its variant.
 ///
 /// # Examples
 ///
@@ -130,6 +146,9 @@ pub enum Mark {
     Line(LineMark),
     /// Individual markers; NaN skips a point.
     Scatter(ScatterMark),
+    /// A line with the region between it and the baseline filled; NaN breaks both the line and
+    /// the fill.
+    Area(AreaMark),
     /// One bar per category, from the baseline to its height; NaN draws no bar.
     Bar(BarMark),
     /// One bar per series in each category, side by side within the category's band; NaN draws
@@ -152,6 +171,13 @@ impl Mark {
     /// Markers at the points of a validated series.
     pub(super) fn scatter(series: Series, options: ScatterOptions) -> Mark {
         Mark::Scatter(ScatterMark { series, options })
+    }
+
+    /// An area under a validated series.
+    pub(super) fn area(series: Series, options: AreaOptions) -> Mark {
+        Mark::Area(AreaMark {
+            line: LineMark { series, options },
+        })
     }
 }
 
@@ -316,6 +342,80 @@ impl fmt::Debug for ScatterMark {
             .field("x", self.x())
             .field("y", &self.y())
             .field("options", &self.options)
+            .finish()
+    }
+}
+
+/// An area mark: the line that bounds it, a [`LineMark`] in every respect, whose region down to
+/// the baseline is filled.
+///
+/// The x and y values are stored together and never change; clones share them.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::figure::{AreaOptions, AxisData, Mark};
+/// use umber_core::{Dash, Figure, ScaleKind, Theme};
+///
+/// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// axes.area(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], AreaOptions::default())?;
+/// let Some(Mark::Area(area)) = axes.marks().first() else { unreachable!() };
+/// assert_eq!(area.x(), &AxisData::Numbers(vec![0.0, 1.0]));
+/// assert_eq!(area.y(), &[2.0, 3.0]);
+/// assert_eq!(area.options().dash, Dash::Solid);
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+///
+/// An area mark cannot be built outside [`Axes`](super::Axes):
+///
+/// ```compile_fail,E0451
+/// use umber_core::figure::{AreaMark, Mark};
+///
+/// let mark = Mark::Area(AreaMark { line: unreachable!() });
+/// ```
+#[derive(Clone, PartialEq)]
+pub struct AreaMark {
+    line: LineMark,
+}
+
+impl AreaMark {
+    /// The x values.
+    #[must_use]
+    pub fn x(&self) -> &AxisData {
+        self.line.x()
+    }
+
+    /// The y values, as many as the x values.
+    #[must_use]
+    pub fn y(&self) -> &[f64] {
+        self.line.y()
+    }
+
+    /// Label, color and dash.
+    #[must_use]
+    pub fn options(&self) -> &AreaOptions {
+        self.line.options()
+    }
+
+    /// The line that bounds the area, which is drawn and labelled as a line mark is.
+    pub(crate) fn line(&self) -> &LineMark {
+        &self.line
+    }
+
+    /// The validated series.
+    #[cfg(test)]
+    pub(super) fn series(&self) -> &Series {
+        self.line.series()
+    }
+}
+
+impl fmt::Debug for AreaMark {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AreaMark")
+            .field("x", self.x())
+            .field("y", &self.y())
+            .field("options", self.options())
             .finish()
     }
 }

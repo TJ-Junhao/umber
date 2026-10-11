@@ -16,12 +16,17 @@
 use std::fmt::Write as _;
 
 use umber_core::figure::HistOptions;
-use umber_core::{AreaFill, ColorSpec, FontLibrary, MAX_BINS, Rgba, ScaleKind, Theme};
+use umber_core::{ColorSpec, FillStyle, FontLibrary, MAX_BINS, Rgba, ScaleKind, Theme};
 
 use super::super::{Log, Output, axes, emit_scene, figure, labelled, lcg, linear, log, themes};
 
+/// `MAX_BINS` as the type of `HistOptions::bins`.
+fn max_bins() -> i64 {
+    i64::try_from(MAX_BINS).expect("MAX_BINS fits in i64")
+}
+
 /// Options with `bins` bins, no label and the automatic color.
-fn bins(bins: usize) -> HistOptions {
+fn bins(bins: i64) -> HistOptions {
     HistOptions {
         bins,
         ..HistOptions::default()
@@ -79,11 +84,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
 
     // The gradient switched on where the theme has none, and off where it has one.
     for (name, theme, fill) in [
-        ("gradient-pigment", Theme::pigment(), AreaFill::Gradient),
-        ("gradient-graphite", Theme::graphite(), AreaFill::Gradient),
-        ("solid-midnight", Theme::midnight(), AreaFill::None),
+        ("gradient-pigment", Theme::pigment(), FillStyle::Gradient),
+        ("gradient-graphite", Theme::graphite(), FillStyle::Gradient),
+        ("solid-midnight", Theme::midnight(), FillStyle::Solid),
     ] {
-        let theme = theme.with_area_fill(fill).unwrap();
+        let theme = theme.with_fill_style(fill).unwrap();
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
         labelled(&mut f, "Area fill");
         axes(&mut f).hist(&values, HistOptions::default()).unwrap();
@@ -104,7 +109,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
         labelled(&mut f, "Most bins");
         axes(&mut f)
-            .hist(&triangle(60_000), bins(MAX_BINS))
+            .hist(&triangle(60_000), bins(max_bins()))
             .unwrap();
         emit_scene(
             &format!("fig-hist-max-bins-{theme_name}"),
@@ -175,7 +180,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .unwrap();
     emit_scene("fig-hist-huge-narrow-limits", &f.to_scene(lib), sink);
 
-    // Log y: bins grow from the bottom of the plot, the y axis spans the positive counts, and
+    // Log y: bins grow from the baseline, the y axis spans the positive counts, and
     // empty bins draw nothing.
     for (theme_name, theme) in [
         ("graphite", Theme::graphite()),
@@ -247,12 +252,12 @@ fn hist_errors() -> String {
         a.hist(&[1.0], bins(1)).map(drop)
     });
     rec.on_axes(&mut f, "hist MAX_BINS bins", |a| {
-        a.hist(&[1.0], bins(MAX_BINS)).map(drop)
+        a.hist(&[1.0], bins(max_bins())).map(drop)
     });
-    let cases: Vec<(&str, Vec<f64>, usize)> = vec![
+    let cases: Vec<(&str, Vec<f64>, i64)> = vec![
         ("zero bins", vec![1.0], 0),
-        ("MAX_BINS + 1 bins", vec![1.0], MAX_BINS + 1),
-        ("usize::MAX bins", vec![1.0], usize::MAX),
+        ("MAX_BINS + 1 bins", vec![1.0], max_bins() + 1),
+        ("i64::MAX bins", vec![1.0], i64::MAX),
         ("zero bins before an infinite value", vec![inf], 0),
         ("infinite value", vec![1.0, nan, inf], 30),
         ("negative infinite value", vec![f64::NEG_INFINITY], 30),
@@ -291,7 +296,7 @@ fn hist_errors() -> String {
         |a| a.hist(&[-1.0, 0.0, inf], HistOptions::default()).map(drop),
     );
     rec.on_axes(&mut f, "hist on a log x axis, too many bins", |a| {
-        a.hist(&[1.0], bins(MAX_BINS + 1)).map(drop)
+        a.hist(&[1.0], bins(max_bins() + 1)).map(drop)
     });
 
     rec.section("Axes.hist, linear/log");

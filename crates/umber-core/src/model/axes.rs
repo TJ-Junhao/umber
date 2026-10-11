@@ -4,8 +4,10 @@
 use super::axis_data::{AxisData, Series};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
 use super::hist::{HistMark, HistOptions};
-use super::mark::{LineOptions, Mark, ScatterOptions};
-use super::validation::check_limits;
+use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
+use super::validation::{
+    AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, X_SCALE_HINT, Y_SCALE_HINT, check_limits,
+};
 use crate::{ContinuousScale, LegendStyle, Result, ScaleKind};
 
 /// A plotting area with its scales, texts, limits and marks.
@@ -294,7 +296,13 @@ impl Axes {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Axes> {
-        self.xlim = Some(check_limits("Axes.xlim()", self.x, low, high)?);
+        self.xlim = Some(check_limits(
+            "Axes.xlim()",
+            self.x,
+            low,
+            high,
+            X_SCALE_HINT,
+        )?);
         Ok(self)
     }
 
@@ -312,7 +320,13 @@ impl Axes {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Axes> {
-        self.ylim = Some(check_limits("Axes.ylim()", self.y, low, high)?);
+        self.ylim = Some(check_limits(
+            "Axes.ylim()",
+            self.y,
+            low,
+            high,
+            Y_SCALE_HINT,
+        )?);
         Ok(self)
     }
 
@@ -374,7 +388,7 @@ impl Axes {
     ///
     /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
     pub fn line(&mut self, x: AxisData, y: &[f64], options: LineOptions) -> Result<&mut Axes> {
-        let series = Series::new("Axes.line()", self.x, self.y, x, y)?;
+        let series = Series::new("Axes.line()", self.x, self.y, x, y, LINE_GAP_HINT)?;
         self.marks.push(Mark::line(series, options));
         Ok(self)
     }
@@ -399,16 +413,49 @@ impl Axes {
         y: &[f64],
         options: ScatterOptions,
     ) -> Result<&mut Axes> {
-        let series = Series::new("Axes.scatter()", self.x, self.y, x, y)?;
+        let series = Series::new("Axes.scatter()", self.x, self.y, x, y, SCATTER_GAP_HINT)?;
         self.marks.push(Mark::scatter(series, options));
+        Ok(self)
+    }
+
+    /// Adds an area: the line through the points, drawn as [`Axes::line`] draws it, over the
+    /// region between the line and the baseline, filled in the line's color as the theme's
+    /// [`FillStyle`](crate::FillStyle) paints it. The fill is drawn first and the line over it.
+    /// Like bars, an area puts 0 into a linear y axis, so the filled region is proportional to
+    /// the values; on a log y axis it fills down to the baseline, at the lowest y tick (or the
+    /// explicit lower limit). Same rules as [`Axes::line`]: NaN breaks both the line and the
+    /// fill.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AreaOptions, AxisData};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let x = AxisData::Numbers(vec![0.0, 1.0, 2.0]);
+    /// axes.area(x, &[3.0, f64::NAN, 4.0], AreaOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // An infinite value is an error, and the axes keep their one mark.
+    /// assert!(axes
+    ///     .area(AxisData::Numbers(vec![0.0]), &[f64::INFINITY], AreaOptions::default())
+    ///     .is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn area(&mut self, x: AxisData, y: &[f64], options: AreaOptions) -> Result<&mut Axes> {
+        let series = Series::new("Axes.area()", self.x, self.y, x, y, AREA_GAP_HINT)?;
+        self.marks.push(Mark::area(series, options));
         Ok(self)
     }
 
     /// Adds bars: one bar per category, centered in the category's band, from the baseline to
     /// its height. On a linear y axis bars grow from 0 and negative heights grow downwards; on a
-    /// log y axis they grow from the bottom of the plot. Bar marks added one after another are
-    /// drawn at the same positions, in the order they were added; categories join the x axis
-    /// in order of first appearance across all marks.
+    /// log y axis they grow from the baseline, at the lowest y tick (or the explicit lower
+    /// limit). Bar marks added one after another are drawn at the same positions, in the order
+    /// they were added; categories join the x axis in order of first appearance across all
+    /// marks.
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order:
     /// `categories` and `heights` of different lengths; an x axis that is not a category axis;
@@ -500,8 +547,9 @@ impl Axes {
     /// the series stacked in series order. Positive heights stack upward from the baseline and
     /// negative ones downward, each side separately; NaN and 0 add no segment. Neighbouring
     /// segments on one side are 1 pt apart, and a segment too thin for that gap is not drawn.
-    /// Only the outermost segment on each side has its end rounded. On a log y axis the first segment starts at
-    /// the bottom of the plot. Colors and categories work as in [`Axes::grouped_bar`].
+    /// Only the outermost segment on each side has its end rounded. On a log y axis the first
+    /// segment starts at the baseline, at the lowest y tick (or the explicit lower limit).
+    /// Colors and categories work as in [`Axes::grouped_bar`].
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
     /// [`Axes::grouped_bar`], with one more check before the y axis kind: in each category, the
@@ -551,10 +599,11 @@ impl Axes {
     /// midpoint `v`. The values are stored as given and binned when the figure is rendered.
     ///
     /// Neighbouring bars are the theme's [`hist_gap`](crate::Theme::hist_gap) apart, at most
-    /// half a bin, and have square corners. With [`AreaFill::Gradient`](crate::AreaFill), all
+    /// half a bin, and have square corners. With [`FillStyle::Gradient`](crate::FillStyle), all
     /// bars share one vertical gradient from the top of the tallest bar to the baseline, and
     /// each bar gets a solid top edge. On a linear y axis the bars grow from 0; on a log y axis
-    /// they grow from the bottom of the plot.
+    /// they grow from the baseline, at the lowest y tick (or the explicit lower limit). Auto
+    /// limits put that tick below the smallest count, so every non-empty bin has a height.
     ///
     /// Errors leave the axes unchanged. They are checked in this order: `Error::Style` for
     /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and

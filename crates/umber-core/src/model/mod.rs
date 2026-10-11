@@ -19,7 +19,7 @@ pub use axis_data::AxisData;
 pub use bar::{BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView};
 pub use figure::Figure;
 pub use hist::{HistMark, HistOptions};
-pub use mark::{LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
+pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 
 #[cfg(test)]
 mod tests {
@@ -45,6 +45,7 @@ mod tests {
             Err(Error::Data {
                 context: c,
                 message,
+                ..
             }) => {
                 assert_eq!(c, context);
                 assert!(message.contains(needle), "{message}");
@@ -122,7 +123,7 @@ mod tests {
                 LineOptions::default(),
             ),
             "Axes.line()",
-            "x[3] is inf; values must be finite (NaN marks a gap).",
+            "x[3] is inf; values must be finite.",
         );
         assert_data(
             a.scatter(
@@ -770,7 +771,7 @@ mod tests {
         assert_eq!(f, before);
     }
 
-    fn hist(a: &mut Axes, values: &[f64], bins: usize) -> Result<()> {
+    fn hist(a: &mut Axes, values: &[f64], bins: i64) -> Result<()> {
         let options = HistOptions {
             bins,
             ..HistOptions::default()
@@ -784,10 +785,12 @@ mod tests {
     fn hist_bin_count_outside_its_range_is_a_style_error_naming_bins() {
         let mut f = figure();
         let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-        for (bins, shown) in [(0, "0"), (crate::MAX_BINS + 1, "10001")] {
+        for (bins, shown) in [(0, "0"), (10_001, "10001")] {
             // Before anything else, even an infinite value on a log x axis.
             match hist(a, &[f64::INFINITY], bins) {
-                Err(Error::Style { context, message }) => {
+                Err(Error::Style {
+                    context, message, ..
+                }) => {
                     assert_eq!(context, HIST);
                     assert_eq!(
                         message,
@@ -799,11 +802,30 @@ mod tests {
         }
         assert!(a.marks().is_empty());
         hist(a, &[1.0], 1).unwrap();
-        hist(a, &[1.0], crate::MAX_BINS).unwrap();
+        hist(a, &[1.0], 10_000).unwrap();
         assert_eq!(a.marks().len(), 2);
         let mut g = figure();
         let b = g.add_axes(log_kind(), ScaleKind::Linear).unwrap();
         assert_style(hist(b, &[f64::INFINITY], 0), HIST);
+    }
+
+    #[test]
+    fn negative_bins_are_a_style_error() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        for bins in [-1, i64::MIN] {
+            let err = hist(a, &[1.0], bins).unwrap_err();
+            assert!(matches!(err, Error::Style { .. }));
+            assert_eq!(
+                err.to_string(),
+                format!("{HIST}: bins is {bins}; bins must be between 1 and 10000.")
+            );
+            assert_eq!(err.parameter(), Some("bins"));
+            assert_eq!(err.hint(), Some("use at least one bin."));
+        }
+        // Above the range there is no hint to give.
+        assert_eq!(hist(a, &[1.0], 10_001).unwrap_err().hint(), None);
+        assert!(a.marks().is_empty());
     }
 
     #[test]
@@ -812,7 +834,9 @@ mod tests {
         let a = f.add_axes(log_kind(), ScaleKind::Linear).unwrap();
         // Before the values are checked.
         match hist(a, &[-1.0, f64::INFINITY], 30) {
-            Err(Error::Usage { context, message }) => {
+            Err(Error::Usage {
+                context, message, ..
+            }) => {
                 assert_eq!(context, HIST);
                 assert_eq!(
                     message,
@@ -909,7 +933,7 @@ mod tests {
         let before = f.clone();
         let a = f.axes_mut().unwrap();
         assert!(hist(a, &[1.0], 0).is_err());
-        assert!(hist(a, &[1.0], crate::MAX_BINS + 1).is_err());
+        assert!(hist(a, &[1.0], 10_001).is_err());
         assert!(hist(a, &[f64::INFINITY], 30).is_err());
         assert_eq!(f, before);
     }

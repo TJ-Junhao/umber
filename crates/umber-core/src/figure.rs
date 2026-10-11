@@ -22,11 +22,12 @@
 //! ```
 
 pub use crate::model::{
-    Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView, Figure, HistMark,
-    HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
+    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries,
+    BarSeriesView, Figure, HistMark, HistOptions, LineMark, LineOptions, Mark, ScatterMark,
+    ScatterOptions,
 };
 
-use crate::render::{SvgText, render_png, render_svg};
+use crate::render::{SvgText, check_dpi, render_png, render_svg};
 use crate::scene::Scene;
 use crate::{FontLibrary, Result, pipeline};
 
@@ -35,10 +36,10 @@ impl Figure {
     /// The scene is `width × 72` by `height × 72` pt on the theme background. It holds the
     /// axes chrome (gridlines, tick labels, header and axis labels) as one unclipped group,
     /// followed by the visible marks, in insertion order, as one group clipped to the plot area
-    /// (widened horizontally by half of the widest line stroke when the axes hold lines, as far
-    /// as the room beside the plot allows, so line ends stay whole), and last the baseline as
-    /// an unclipped group of its own, so marks never cover it. Without axes it holds the
-    /// background only. The same figure always gives the same scene.
+    /// (widened horizontally by half of the widest line stroke when the axes hold lines or
+    /// areas, as far as the room beside the plot allows, so line ends stay whole), and last the
+    /// baseline as an unclipped group of its own, so marks never cover it. Without axes it
+    /// holds the background only. The same figure always gives the same scene.
     ///
     /// # Examples
     ///
@@ -59,8 +60,8 @@ impl Figure {
     }
 
     /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`]. Errors as
-    /// [`render_png`] does: `Error::Style` when `dpi` is outside `10..=2400` or the image would
-    /// be too large.
+    /// [`render_png`] does: `Error::Style` when `dpi` is outside `10..=2400` (the message names
+    /// the value however large or negative it is) or the image would be too large.
     ///
     /// # Examples
     ///
@@ -72,9 +73,11 @@ impl Figure {
     /// let png = figure.to_png(72)?;
     /// assert_eq!(&png[1..4], b"PNG");
     /// assert!(figure.to_png(1).is_err());
+    /// assert!(figure.to_png(-72).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn to_png(&self, dpi: u32) -> Result<Vec<u8>> {
+    pub fn to_png(&self, dpi: i64) -> Result<Vec<u8>> {
+        let dpi = check_dpi("Figure.to_png()", dpi)?;
         render_png(&self.to_scene(FontLibrary::global()), dpi)
     }
 
@@ -111,7 +114,7 @@ mod tests {
         };
         resolve::resolve_marks(axes.marks(), figure.theme().palette())
             .into_iter()
-            .flat_map(|resolved| resolved.keys(&resolve::Limits::of(axes).x))
+            .flat_map(|resolved| resolved.keys(&resolve::Limits::of(axes)))
             .map(|key| key.color)
             .collect()
     }

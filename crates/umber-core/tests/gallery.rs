@@ -19,8 +19,8 @@ use std::path::PathBuf;
 
 use umber_core::render::render_png;
 use umber_core::{
-    AreaFill, AxisData, BarOptions, BarSeries, ColorSpec, Figure, FontLibrary, HistOptions,
-    LegendStyle, LineOptions, LogBase, Marker, ScaleKind, ScatterOptions, Theme,
+    AreaOptions, AxisData, BarOptions, BarSeries, ColorSpec, Dash, Figure, FillStyle, FontLibrary,
+    HistOptions, LegendStyle, LineOptions, LogBase, Marker, ScaleKind, ScatterOptions, Theme,
 };
 
 use golden_compare::{assert_golden, golden_dir};
@@ -31,7 +31,7 @@ const SUBTITLE: &str = "Daily mean, MW";
 const YLABEL: &str = "Daily mean, MW";
 
 /// `(name, caption)` of every gallery image, in contact-sheet order.
-const IMAGES: [(&str, &str); 24] = [
+const IMAGES: [(&str, &str); 27] = [
     ("pigment_line", "Pigment: three sine series"),
     ("graphite_line", "Graphite: three sine series"),
     ("midnight_line", "Midnight: three sine series"),
@@ -67,7 +67,7 @@ const IMAGES: [(&str, &str); 24] = [
     ),
     (
         "midnight_hist_area_off",
-        "Midnight: histogram without the fill gradient",
+        "Midnight: histogram with a solid fill",
     ),
     (
         "pigment_legend_wrap",
@@ -86,6 +86,9 @@ const IMAGES: [(&str, &str); 24] = [
         "Midnight: chips with long labels",
     ),
     ("pigment_legend_none", "Pigment: labelled lines, legend off"),
+    ("pigment_area", "Pigment: an area and a dashed line"),
+    ("graphite_area", "Graphite: an area and a dashed line"),
+    ("midnight_area", "Midnight: an area and a dashed line"),
 ];
 
 /// The four panels per theme: `(image kind, caption)`.
@@ -103,6 +106,8 @@ const REFERENCE_BLOCKS: [(&str, u32, u32); 3] = [
     ("midnight", 1669, 643),
 ];
 const REFERENCE_SIZE: (u32, u32) = (940, 2500);
+/// The Midnight line panel of the reference image: `(left, top, width, height)` in pixels.
+const REFERENCE_MIDNIGHT_LINE_PANEL: (u32, u32, u32, u32) = (25, 1687, 427, 294);
 
 /// Renders with the bundled fonts only: no system fallback, so output is machine independent.
 fn render(figure: &Figure) -> Vec<u8> {
@@ -383,6 +388,58 @@ fn many_lines(theme: Theme, title: &str, labels: &[String]) -> Figure {
     figure
 }
 
+/// The first two series of the line images: the first as an area, the second as a dashed line.
+fn area_figure(theme_name: &str) -> Figure {
+    let mut figure = Figure::new(6.0, 4.0, theme(theme_name)).unwrap();
+    let axes = figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap();
+    axes.title(TITLE).subtitle(SUBTITLE).xlabel("Day");
+    let x: Vec<f64> = (0..60).map(f64::from).collect();
+    let series = |k: f64| -> Vec<f64> {
+        x.iter()
+            .map(|t| {
+                40.0 + 10.0 * k + (12.0 - 2.0 * k) * (t * 2.0 * PI / (30.0 + 6.0 * k) + k).sin()
+            })
+            .collect()
+    };
+    axes.area(
+        numbers(x.clone()),
+        &series(0.0),
+        AreaOptions {
+            label: "North".to_owned(),
+            ..AreaOptions::default()
+        },
+    )
+    .unwrap()
+    .line(
+        numbers(x.clone()),
+        &series(1.0),
+        LineOptions {
+            label: "Central".to_owned(),
+            dash: Dash::Dashed,
+            ..LineOptions::default()
+        },
+    )
+    .unwrap();
+    figure
+}
+
+#[test]
+fn pigment_area() {
+    check("pigment_area", &area_figure("pigment"));
+}
+
+#[test]
+fn graphite_area() {
+    check("graphite_area", &area_figure("graphite"));
+}
+
+#[test]
+fn midnight_area() {
+    check("midnight_area", &area_figure("midnight"));
+}
+
 #[test]
 fn pigment_grouped_bar() {
     check("pigment_grouped_bar", &grouped_bar_figure("pigment"));
@@ -450,7 +507,7 @@ fn graphite_bar_negative() {
 
 #[test]
 fn midnight_hist_area_off() {
-    let theme = Theme::midnight().with_area_fill(AreaFill::None).unwrap();
+    let theme = Theme::midnight().with_fill_style(FillStyle::Solid).unwrap();
     check("midnight_hist_area_off", &hist_figure(theme));
 }
 
@@ -608,6 +665,23 @@ fn write_contact_sheet() {
             "<section class=\"pair\"><div class=\"grid\">{panels}</div>{reference_crop}</section>"
         );
     }
+    // The Midnight area image beside the reference's Midnight line panel, which shows the
+    // gradient look.
+    if reference.is_file() {
+        let file = copy_image("midnight_area");
+        let (x, y, w, h) = REFERENCE_MIDNIGHT_LINE_PANEL;
+        let px = f64::from(x) / f64::from(REFERENCE_SIZE.0 - w) * 100.0;
+        let py = f64::from(y) / f64::from(REFERENCE_SIZE.1 - h) * 100.0;
+        let zoom = f64::from(REFERENCE_SIZE.0) / f64::from(w) * 100.0;
+        let _ = writeln!(
+            cards,
+            "<h2>Area</h2><section class=\"pair\"><figure><img src=\"{file}\">\
+             <figcaption>midnight_area</figcaption></figure>\
+             <div class=\"crop\" style=\"aspect-ratio:{w}/{h};background-size:{zoom:.2}% auto;\
+             background-position:{px:.3}% {py:.3}%\"></div></section>"
+        );
+    }
+    grid_names.push("midnight_area".to_owned());
     let mut rest = String::new();
     for (name, _) in IMAGES {
         if grid_names.iter().any(|n| n == name) {

@@ -110,20 +110,26 @@ pub enum LegendStyle {
     None,
 }
 
-/// Whether lines get a filled area below them.
+/// How area and histogram fills are painted. It never decides whether something is filled:
+/// lines are never filled, and the fill under a line is the explicit
+/// [`Axes::area`](crate::Axes::area) mark.
 ///
 /// # Examples
 ///
 /// ```
-/// use umber_core::AreaFill;
+/// use umber_core::{FillStyle, Theme};
 ///
-/// assert_ne!(AreaFill::None, AreaFill::Gradient);
+/// assert_eq!(Theme::pigment().fill_style(), FillStyle::Solid);
+/// assert_eq!(Theme::midnight().fill_style(), FillStyle::Gradient);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AreaFill {
-    /// No fill.
-    None,
-    /// A gradient that fades out toward the baseline.
+pub enum FillStyle {
+    /// A flat fill: areas at 0.32 of the series color's opacity, histogram bins in the series
+    /// color.
+    Solid,
+    /// A vertical gradient that fades out toward the baseline: areas from 0.32 of the series
+    /// color's opacity at the line, histogram bins from 0.95 at the tallest bin, with a solid
+    /// top edge on each bin.
     Gradient,
 }
 
@@ -181,7 +187,7 @@ pub struct Theme {
     body_size: f32,
     font_scale: f32,
     legend_style: LegendStyle,
-    area_fill: AreaFill,
+    fill_style: FillStyle,
     line_width: f32,
     marker_size: f32,
     marker_alpha: f32,
@@ -233,7 +239,8 @@ fn check_number(context: &'static str, name: &str, value: f64, bound: Bound) -> 
         Err(Error::style(
             context,
             format!("{name} is {value}; {name} must be {required}."),
-        ))
+        )
+        .with_parameter("value"))
     }
 }
 
@@ -265,7 +272,7 @@ impl Theme {
             body_size: 8.5,
             font_scale: 1.0,
             legend_style: LegendStyle::Header,
-            area_fill: AreaFill::None,
+            fill_style: FillStyle::Solid,
             line_width: 2.0,
             marker_size: 6.0,
             marker_alpha: 0.85,
@@ -304,7 +311,7 @@ impl Theme {
             body_size: 8.5,
             font_scale: 1.0,
             legend_style: LegendStyle::Direct,
-            area_fill: AreaFill::None,
+            fill_style: FillStyle::Solid,
             line_width: 1.8,
             marker_size: 5.6,
             marker_alpha: 0.90,
@@ -316,7 +323,7 @@ impl Theme {
         }
     }
 
-    /// A dark theme with a monospaced body font and gradient area fills.
+    /// A dark theme with a monospaced body font and gradient fills.
     ///
     /// # Examples
     ///
@@ -343,7 +350,7 @@ impl Theme {
             body_size: 8.5,
             font_scale: 1.0,
             legend_style: LegendStyle::Chips,
-            area_fill: AreaFill::Gradient,
+            fill_style: FillStyle::Gradient,
             line_width: 1.9,
             marker_size: 6.2,
             marker_alpha: 0.90,
@@ -375,7 +382,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().background().to_hex(), "#FAF6F0");
     /// ```
@@ -389,7 +396,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().text_color().to_hex(), "#2B211B");
     /// ```
@@ -403,7 +410,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().muted_color().to_hex(), "#8C8076");
     /// ```
@@ -417,7 +424,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().grid_color().to_hex(), "#DDD3C7");
     /// ```
@@ -431,7 +438,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().grid_lines(), GridLines::Horizontal);
     /// ```
@@ -445,7 +452,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().grid_dash(), Dash::Dotted);
     /// ```
@@ -459,7 +466,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().grid_width(), 0.75);
     /// ```
@@ -473,7 +480,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::midnight().baseline_color().to_hex(), "#3C4250");
     /// ```
@@ -487,7 +494,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().baseline_width(), 1.3);
     /// ```
@@ -501,7 +508,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().title_font(), Font::SourceSerif4);
     /// ```
@@ -515,7 +522,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::midnight().body_font(), Font::JetBrainsMono);
     /// ```
@@ -529,7 +536,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::midnight().title_size(), 14.5);
     /// ```
@@ -543,7 +550,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().body_size(), 8.5);
     /// ```
@@ -557,7 +564,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().font_scale(), 1.0);
     /// ```
@@ -571,7 +578,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::graphite().legend_style(), LegendStyle::Direct);
     /// ```
@@ -580,18 +587,18 @@ impl Theme {
         self.legend_style
     }
 
-    /// Whether lines get a gradient area fill below them.
+    /// How area and histogram fills are painted.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
-    /// assert_eq!(Theme::midnight().area_fill(), AreaFill::Gradient);
+    /// assert_eq!(Theme::midnight().fill_style(), FillStyle::Gradient);
     /// ```
     #[must_use]
-    pub fn area_fill(&self) -> AreaFill {
-        self.area_fill
+    pub fn fill_style(&self) -> FillStyle {
+        self.fill_style
     }
 
     /// The line width in points.
@@ -599,7 +606,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::pigment().line_width(), 2.0);
     /// ```
@@ -613,7 +620,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::midnight().marker_size(), 6.2);
     /// ```
@@ -639,7 +646,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::graphite().marker_alpha(), 0.9);
     /// ```
@@ -653,7 +660,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::midnight().bar_corner_radius(), 3.5);
     /// ```
@@ -667,7 +674,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
     /// assert_eq!(Theme::graphite().hist_gap(), 1.2);
     /// ```
@@ -687,7 +694,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_palette(&[Rgba::RED, Rgba::BLUE])?;
     /// # let _ = theme;
@@ -701,7 +708,8 @@ impl Theme {
                     "palette has {} colors; a palette needs 1 to {MAX_PALETTE} colors.",
                     colors.len()
                 ),
-            ));
+            )
+            .with_parameter("colors"));
         }
         Ok(Theme {
             palette: colors.to_vec(),
@@ -716,7 +724,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_background(Rgba::WHITE)?;
     /// # let _ = theme;
@@ -736,7 +744,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_text_color(Rgba::WHITE)?;
     /// # let _ = theme;
@@ -756,7 +764,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_muted_color(Rgba::GRAY)?;
     /// # let _ = theme;
@@ -776,7 +784,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_grid_color(Rgba::GRAY)?;
     /// # let _ = theme;
@@ -796,7 +804,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_baseline_color(Rgba::GRAY)?;
     /// # let _ = theme;
@@ -816,7 +824,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_grid_lines(GridLines::Both)?;
     /// # let _ = theme;
@@ -836,7 +844,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_grid_dash(Dash::Solid)?;
     /// # let _ = theme;
@@ -856,7 +864,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_title_font(Font::Inter)?;
     /// # let _ = theme;
@@ -876,7 +884,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_body_font(Font::Inter)?;
     /// # let _ = theme;
@@ -902,7 +910,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_font_scale(1.2)?;
     /// # let _ = theme;
@@ -932,7 +940,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_line_width(2.5)?;
     /// # let _ = theme;
@@ -962,7 +970,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_marker_size(7.0)?;
     /// # let _ = theme;
@@ -992,7 +1000,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_marker_alpha(0.5)?;
     /// # let _ = theme;
@@ -1022,7 +1030,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_baseline_width(1.5)?;
     /// # let _ = theme;
@@ -1052,7 +1060,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_bar_corner_radius(2.0)?;
     /// # let _ = theme;
@@ -1082,7 +1090,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_hist_gap(1.0)?;
     /// # let _ = theme;
@@ -1108,7 +1116,7 @@ impl Theme {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
     /// let theme = Theme::pigment().with_legend_style(LegendStyle::Chips)?;
     /// # let _ = theme;
@@ -1121,22 +1129,22 @@ impl Theme {
         })
     }
 
-    /// Replace the area fill.
+    /// Replace the fill style of areas and histograms.
     ///
     /// Returns a new theme; `self` is unchanged.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Dash, Font, GridLines, LegendStyle, AreaFill, Theme, Rgba};
+    /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
-    /// let theme = Theme::pigment().with_area_fill(AreaFill::Gradient)?;
-    /// # let _ = theme;
+    /// let theme = Theme::pigment().with_fill_style(FillStyle::Gradient)?;
+    /// assert_eq!(theme.fill_style(), FillStyle::Gradient);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn with_area_fill(&self, value: AreaFill) -> Result<Theme> {
+    pub fn with_fill_style(&self, value: FillStyle) -> Result<Theme> {
         Ok(Theme {
-            area_fill: value,
+            fill_style: value,
             ..self.clone()
         })
     }
@@ -1179,8 +1187,8 @@ mod tests {
             (15.0, 8.5, 1.0)
         );
         assert_eq!(
-            (p.legend_style(), p.area_fill()),
-            (LegendStyle::Header, AreaFill::None)
+            (p.legend_style(), p.fill_style()),
+            (LegendStyle::Header, FillStyle::Solid)
         );
         assert_eq!(p.line_width(), 2.0);
         assert_eq!((p.marker_size(), p.marker_alpha()), (6.0, 0.85));
@@ -1211,8 +1219,8 @@ mod tests {
             (15.0, 8.5, 1.0)
         );
         assert_eq!(
-            (g.legend_style(), g.area_fill()),
-            (LegendStyle::Direct, AreaFill::None)
+            (g.legend_style(), g.fill_style()),
+            (LegendStyle::Direct, FillStyle::Solid)
         );
         assert_eq!(g.line_width(), 1.8);
         assert_eq!((g.marker_size(), g.marker_alpha()), (5.6, 0.90));
@@ -1246,8 +1254,8 @@ mod tests {
             (14.5, 8.5, 1.0)
         );
         assert_eq!(
-            (m.legend_style(), m.area_fill()),
-            (LegendStyle::Chips, AreaFill::Gradient)
+            (m.legend_style(), m.fill_style()),
+            (LegendStyle::Chips, FillStyle::Gradient)
         );
         assert_eq!(m.line_width(), 1.9);
         assert_eq!((m.marker_size(), m.marker_alpha()), (6.2, 0.90));
@@ -1312,8 +1320,8 @@ mod tests {
             LegendStyle::Chips
         );
         assert_eq!(
-            t.with_area_fill(AreaFill::Gradient).unwrap().area_fill(),
-            AreaFill::Gradient
+            t.with_fill_style(FillStyle::Gradient).unwrap().fill_style(),
+            FillStyle::Gradient
         );
 
         // Palette.
