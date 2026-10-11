@@ -420,9 +420,10 @@ impl Axes {
 
     /// Adds bars: one bar per category, centered in the category's band, from the baseline to
     /// its height. On a linear y axis bars grow from 0 and negative heights grow downwards; on a
-    /// log y axis they grow from the bottom of the plot. Bar marks added one after another are
-    /// drawn at the same positions, in the order they were added; categories join the x axis
-    /// in order of first appearance across all marks.
+    /// log y axis they grow from the baseline, at the lowest y tick (or the explicit lower
+    /// limit). Bar marks added one after another are drawn at the same positions, in the order
+    /// they were added; categories join the x axis in order of first appearance across all
+    /// marks.
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order:
     /// `categories` and `heights` of different lengths; an x axis that is not a category axis;
@@ -514,8 +515,9 @@ impl Axes {
     /// the series stacked in series order. Positive heights stack upward from the baseline and
     /// negative ones downward, each side separately; NaN and 0 add no segment. Neighbouring
     /// segments on one side are 1 pt apart, and a segment too thin for that gap is not drawn.
-    /// Only the outermost segment on each side has its end rounded. On a log y axis the first segment starts at
-    /// the bottom of the plot. Colors and categories work as in [`Axes::grouped_bar`].
+    /// Only the outermost segment on each side has its end rounded. On a log y axis the first
+    /// segment starts at the baseline, at the lowest y tick (or the explicit lower limit).
+    /// Colors and categories work as in [`Axes::grouped_bar`].
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
     /// [`Axes::grouped_bar`], with one more check before the y axis kind: in each category, the
@@ -568,7 +570,8 @@ impl Axes {
     /// half a bin, and have square corners. With [`AreaFill::Gradient`](crate::AreaFill), all
     /// bars share one vertical gradient from the top of the tallest bar to the baseline, and
     /// each bar gets a solid top edge. On a linear y axis the bars grow from 0; on a log y axis
-    /// they grow from the bottom of the plot.
+    /// they grow from the baseline, at the lowest y tick (or the explicit lower limit). Auto
+    /// limits put that tick below the smallest count, so every non-empty bin has a height.
     ///
     /// Errors leave the axes unchanged. They are checked in this order: `Error::Style` for
     /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and

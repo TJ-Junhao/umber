@@ -175,7 +175,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .unwrap();
     emit_scene("fig-hist-huge-narrow-limits", &f.to_scene(lib), sink);
 
-    // Log y: bins grow from the bottom of the plot, the y axis spans the positive counts, and
+    // Log y: bins grow from the baseline, the y axis spans the positive counts, and
     // empty bins draw nothing.
     for (theme_name, theme) in [
         ("graphite", Theme::graphite()),

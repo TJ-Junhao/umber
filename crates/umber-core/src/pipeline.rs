@@ -38,7 +38,7 @@ fn measure_legend<'a>(
     lib: &FontLibrary,
 ) -> MeasuredLegend<'a> {
     let style = axes.legend_style().unwrap_or(theme.legend_style());
-    let legend = Legend::new(style, marks, &Limits::of(axes).x);
+    let legend = Legend::new(style, marks, &Limits::of(axes));
     MeasuredLegend::measure(width, theme, &legend, lib)
 }
 
