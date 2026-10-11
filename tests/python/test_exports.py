@@ -4,13 +4,17 @@ import enum
 import inspect
 from pathlib import Path
 
+import pytest
+
 import umber
 
 EXPECTED = [
     "MAX_BINS",
+    "Axes",
     "Color",
     "DataError",
     "Dash",
+    "Figure",
     "Font",
     "GridLines",
     "LegendStyle",
@@ -102,7 +106,9 @@ def _run_examples(name: str, doc: str) -> doctest.TestResults:
     return doctest.DocTestRunner().run(test, out=lambda _text: None)
 
 
+@pytest.mark.usefixtures("isolated_environment")
 def test_public_method_examples_run() -> None:
+    # Examples that save a figure write to the working directory, a temporary one here.
     failed = [
         name
         for name, member in _public_members()
