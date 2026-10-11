@@ -69,8 +69,7 @@ fn chip(pill: Area, color: Rgba) -> Item {
 
 /// The tint of a chip: `color` at `0.14 ×` its own alpha.
 fn chip_tint(color: Rgba) -> Rgba {
-    let a = (f32::from(color.a) * CHIP_TINT).round().clamp(0.0, 255.0) as u8;
-    Rgba { a, ..color }
+    color.scale_alpha(CHIP_TINT)
 }
 
 /// The swatch of `entry`, in its series color, inside its swatch box: a line in the series dash

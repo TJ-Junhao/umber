@@ -1,11 +1,12 @@
-//! Input validation of the model: series and bar data against their axes' scale kinds, stacked
-//! bar totals, explicit limits and figure sizes. Every check runs before anything is stored, so
-//! a failed call changes nothing.
+//! Input validation of the model: series, bar and histogram data against their axes' scale
+//! kinds, stacked bar totals, histogram bin counts, explicit limits and figure sizes. Every check
+//! runs before anything is stored, so a failed call changes nothing.
 
 use std::collections::HashMap;
 
 use super::axis_data::AxisData;
 use super::bar::{Arrangement, BarSeries};
+use crate::binning::{BinCount, MAX_BINS};
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
 use crate::stacking::Totals;
 use crate::{ContinuousScale, Error, Result, ScaleKind};
@@ -177,6 +178,49 @@ pub(super) fn check_bar_group(
     check_bar_y_axis(context, y_kind, "the series hold numbers")
 }
 
+/// Validates the values and bin count of a histogram for axes with scale kinds `x_kind` and
+/// `y_kind`, before it is stored, so a failed call changes nothing, and returns the bin count.
+/// The checks run in a fixed order and the first failure is the error, under `context`:
+///
+/// 1. `bins` is within `1..=MAX_BINS` (`Error::Style`);
+/// 2. the x axis is a linear axis: a category x axis is `Error::Data`, and a log x axis, which
+///    histograms do not support, is `Error::Usage`;
+/// 3. every value is finite (NaN is allowed and ignored) and within the supported magnitudes
+///    (`Error::Data`);
+/// 4. the y axis is a linear or log axis (`Error::Data`).
+pub(super) fn check_hist(
+    context: &'static str,
+    x_kind: ScaleKind,
+    y_kind: ScaleKind,
+    values: &[f64],
+    bins: usize,
+) -> Result<BinCount> {
+    let Some(count) = BinCount::new(bins) else {
+        return Err(Error::style(
+            context,
+            format!("bins is {bins}; bins must be between 1 and {MAX_BINS}."),
+        ));
+    };
+    match x_kind {
+        ScaleKind::Linear => {}
+        ScaleKind::Category => {
+            return Err(Error::data(
+                context,
+                "values holds numbers but the x axis is a category axis; use a linear x axis.",
+            ));
+        }
+        ScaleKind::Log { .. } => {
+            return Err(Error::usage(
+                context,
+                "the x axis is a log axis, which histograms do not support; use a linear x axis.",
+            ));
+        }
+    }
+    check_numbers(context, "values", values, x_kind)?;
+    check_bar_y_axis(context, y_kind, "a histogram counts values")?;
+    Ok(count)
+}
+
 /// Checks the categories of a bar mark: the x axis is a category axis, and no category appears
 /// twice.
 fn check_categories(context: &'static str, x_kind: ScaleKind, categories: &[String]) -> Result<()> {
@@ -227,8 +271,8 @@ fn check_stacked_totals(
     Ok(())
 }
 
-/// Checks that bar heights, described by `subject`, can be placed on the y axis: it must be a
-/// linear or log axis.
+/// Checks that bar heights or histogram counts, described by `subject`, can be placed on the y
+/// axis: it must be a linear or log axis.
 fn check_bar_y_axis(context: &'static str, y_kind: ScaleKind, subject: &str) -> Result<()> {
     if y_kind == ScaleKind::Category {
         return Err(Error::data(

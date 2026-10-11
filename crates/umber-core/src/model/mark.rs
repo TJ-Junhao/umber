@@ -4,6 +4,7 @@ use std::fmt;
 
 use super::axis_data::{AxisData, Series};
 use super::bar::{BarGroupMark, BarMark};
+use super::hist::HistMark;
 use crate::{ColorSpec, Dash, Marker};
 
 /// Options of a line mark.
@@ -74,11 +75,11 @@ impl Default for ScatterOptions {
 ///
 /// Marks are created by [`Axes::line`](super::Axes::line),
 /// [`Axes::scatter`](super::Axes::scatter), [`Axes::bar`](super::Axes::bar),
-/// [`Axes::grouped_bar`](super::Axes::grouped_bar) and
-/// [`Axes::stacked_bar`](super::Axes::stacked_bar), which validate the data. Each variant holds
-/// a payload ([`LineMark`], [`ScatterMark`], [`BarMark`], [`BarGroupMark`]) that keeps the
-/// validated values together and exposes them read-only; it has no public constructor. Read a
-/// mark by matching on its variant.
+/// [`Axes::grouped_bar`](super::Axes::grouped_bar),
+/// [`Axes::stacked_bar`](super::Axes::stacked_bar) and [`Axes::hist`](super::Axes::hist), which
+/// validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`BarMark`],
+/// [`BarGroupMark`], [`HistMark`]) that keeps the validated values together and exposes them
+/// read-only; it has no public constructor. Read a mark by matching on its variant.
 ///
 /// # Examples
 ///
@@ -123,7 +124,7 @@ impl Default for ScatterOptions {
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive] // further mark kinds, such as histograms, are added as variants
+#[non_exhaustive] // further mark kinds are added as variants
 pub enum Mark {
     /// A polyline through the points; NaN breaks it.
     Line(LineMark),
@@ -137,6 +138,9 @@ pub enum Mark {
     /// One stack per category, its series stacked in order, positive heights upward and
     /// negative ones downward from the baseline; NaN and 0 add no segment.
     StackedBar(BarGroupMark),
+    /// The values counted in equal-width bins, one bar per bin from the baseline to its count;
+    /// NaN is ignored and an empty bin draws nothing.
+    Hist(HistMark),
 }
 
 impl Mark {

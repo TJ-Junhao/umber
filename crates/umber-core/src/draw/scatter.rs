@@ -57,13 +57,9 @@ pub(super) fn scatter_item(
     } else {
         1.0
     };
-    let fill_alpha = (f32::from(color.a) * alpha).round().clamp(0.0, 255.0) as u8;
     Some(Item::Markers {
         shape: shape_path,
-        fill: Some(Rgba {
-            a: fill_alpha,
-            ..color
-        }),
+        fill: Some(color.scale_alpha(alpha)),
         stroke: Some(StrokeStyle {
             color: theme.background(),
             width: MARKER_OUTLINE,

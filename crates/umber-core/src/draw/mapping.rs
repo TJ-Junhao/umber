@@ -121,8 +121,9 @@ impl AxisMap {
         }
     }
 
-    /// The plot coordinate of axis-space value `u`.
-    fn plot_at(&self, u: f64) -> f64 {
+    /// The plot coordinate of axis-space value `u`. For `u` within a few points of the axis
+    /// domain this cannot overflow.
+    pub(super) fn plot_at(&self, u: f64) -> f64 {
         self.start + (u - self.lo) / (self.hi - self.lo) * self.extent
     }
 
@@ -181,8 +182,9 @@ pub(super) fn axis_y(axis: &ResolvedAxis, y: &[f64]) -> Vec<f64> {
     }
 }
 
-/// The axis-space y value of `v`, as [`axis_y`] maps it.
-pub(super) fn axis_y_value(axis: &ResolvedAxis, v: f64) -> f64 {
+/// The axis-space value of the number `v` on `axis`, as [`axis_x`] and [`axis_y`] map numbers;
+/// NaN on a category axis.
+pub(super) fn axis_value(axis: &ResolvedAxis, v: f64) -> f64 {
     match &axis.scale {
         AxisScale::Continuous(scale) => continuous_value(scale, v),
         AxisScale::Category(_) => f64::NAN,

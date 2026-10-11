@@ -3,6 +3,7 @@
 
 use super::axis_data::{AxisData, Series};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
+use super::hist::{HistMark, HistOptions};
 use super::mark::{LineOptions, Mark, ScatterOptions};
 use super::validation::check_limits;
 use crate::{ContinuousScale, LegendStyle, Result, ScaleKind};
@@ -539,6 +540,48 @@ impl Axes {
             series,
         )?;
         self.marks.push(Mark::StackedBar(mark));
+        Ok(self)
+    }
+
+    /// Adds a histogram: the finite `values` counted in `options.bins` equal-width bins from
+    /// their smallest to their largest value, drawn as one bar per non-empty bin from the
+    /// baseline to its count. Bins are half-open, `[low, high)`, except the last, which also
+    /// holds the largest value. NaN is ignored. Values that are all the same, or that span less
+    /// than a linear axis can show, are binned over `v ± max(0.5, |v| × 1e-9)` around their
+    /// midpoint `v`. The values are stored as given and binned when the figure is rendered.
+    ///
+    /// Neighbouring bars are the theme's [`hist_gap`](crate::Theme::hist_gap) apart, at most
+    /// half a bin, and have square corners. With [`AreaFill::Gradient`](crate::AreaFill), all
+    /// bars share one vertical gradient from the top of the tallest bar to the baseline, and
+    /// each bar gets a solid top edge. On a linear y axis the bars grow from 0; on a log y axis
+    /// they grow from the bottom of the plot.
+    ///
+    /// Errors leave the axes unchanged. They are checked in this order: `Error::Style` for
+    /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and
+    /// `Error::Usage` for a log x axis, which histograms do not support; `Error::Data` for a
+    /// value that is infinite or beyond [`MAX_MAGNITUDE`]; `Error::Data` for a category y axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::HistOptions;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.hist(&[1.2, 3.4, 2.2, f64::NAN, 2.9], HistOptions { bins: 3, ..HistOptions::default() })?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // No bins is an error, and the axes keep their one mark.
+    /// assert!(axes.hist(&[1.0], HistOptions { bins: 0, ..HistOptions::default() }).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    ///
+    /// [`MAX_BINS`]: crate::MAX_BINS
+    /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
+    pub fn hist(&mut self, values: &[f64], options: HistOptions) -> Result<&mut Axes> {
+        let mark = HistMark::new("Axes.hist()", self.x, self.y, values, options)?;
+        self.marks.push(Mark::Hist(mark));
         Ok(self)
     }
 

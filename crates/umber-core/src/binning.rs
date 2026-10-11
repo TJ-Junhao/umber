@@ -1,14 +1,26 @@
 //! Binning: the validated bin count, the histogram of a set of values (its range and the
 //! count in each bin) and the rule that assigns each value to a bin.
 
-#![allow(dead_code, reason = "histogram marks will use it")]
-
 use std::num::NonZeroUsize;
 
 use crate::scale::{MAX_MAGNITUDE, too_narrow};
 
-/// The largest number of bins a histogram may have.
-pub(crate) const MAX_BINS: usize = 10_000;
+/// The largest number of bins a histogram may have; more is an `Error::Style` from
+/// [`Axes::hist`](crate::Axes::hist).
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::figure::HistOptions;
+/// use umber_core::{Figure, MAX_BINS, ScaleKind, Theme};
+///
+/// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// assert!(axes.hist(&[1.0], HistOptions { bins: MAX_BINS, ..HistOptions::default() }).is_ok());
+/// assert!(axes.hist(&[1.0], HistOptions { bins: MAX_BINS + 1, ..HistOptions::default() }).is_err());
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+pub const MAX_BINS: usize = 10_000;
 
 /// Constant data `v` is spread over `v ± max(HALF_RANGE, |v| × RELATIVE_HALF_RANGE)`.
 const HALF_RANGE: f64 = 0.5;
@@ -94,6 +106,11 @@ impl Histogram {
         } else {
             self.lo + i as f64 * self.width()
         }
+    }
+
+    /// The binned range: the low edge of the first bin and the high edge of the last.
+    pub(crate) fn range(&self) -> (f64, f64) {
+        (self.lo, self.hi)
     }
 
     /// The count in each bin, lowest first.

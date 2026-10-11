@@ -1,10 +1,151 @@
-//! The bar outline: a rectangle in plot points whose end away from the baseline is rounded,
-//! and the rounded rectangle it is built on, which also draws the pills of the chips legend.
+//! Bar outlines in plot points, shared by bars and histogram bins: where bars start, the
+//! clipping of their ends in axis space, the mapping to plot points, and the outline itself, a
+//! rectangle whose end away from the baseline may be rounded; and the rounded rectangle that
+//! outline is built on, which also draws the pills of the chips legend.
 
+use super::mapping::{AxisMap, AxisMaps, AxisPoint};
+use crate::Transform;
 use crate::geometry::{Path, Point};
+use crate::resolve::{AxisScale, ResolvedAxis};
 
 /// The cubic Bézier handle length for a quarter circle of unit radius.
 const KAPPA: f64 = 0.552_284_749_830_793_4;
+/// The smallest bar clip margin, in points.
+const MIN_BAR_MARGIN: f64 = 2.0;
+
+/// Where bars start on the y axis `y`, in axis space: the value 0 on a linear axis, the low end
+/// of the domain (the bottom of the plot) on a log axis, which cannot show 0. `None` on a
+/// category axis, which cannot place numeric heights.
+fn bar_base(y: &ResolvedAxis, map: AxisMap) -> Option<f64> {
+    match &y.scale {
+        AxisScale::Continuous(scale) => Some(match scale.transform() {
+            Transform::Linear => 0.0,
+            Transform::Log(_) => map.lo,
+        }),
+        AxisScale::Category(_) => None,
+    }
+}
+
+/// What the bars of one mark share: the axis maps, where bars start, the corner radius and the
+/// axis-space range bar ends are clipped to.
+///
+/// Bars are clipped in axis space against the y domain expanded by `max(r, 2)` pt, where `r`
+/// is the corner radius as [`bar_outline`] clamps it to half the bar width; only the clipped
+/// ends are mapped to plot points. An end is rounded only when it may be rounded and its true
+/// value lies inside that expanded domain; a cut end is square and lies at least `r` beyond the
+/// plot area, outside the marks clip.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct BarFrame {
+    /// The axis maps.
+    maps: AxisMaps,
+    /// Where bars start, in y axis space; see [`bar_base`].
+    base: f64,
+    /// The corner radius, in points.
+    radius: f64,
+    /// The clip margin, in points.
+    margin: f64,
+    /// The y range, in axis space, that bar ends are clipped to.
+    low: f64,
+    /// See `low`.
+    high: f64,
+}
+
+impl BarFrame {
+    /// The frame of bars `width` points wide whose ends may be rounded by `radius` points (at
+    /// least 0 and finite), on the y axis `y`; `None` on axes that cannot hold bars (the model
+    /// rejects them).
+    pub(super) fn new(
+        maps: AxisMaps,
+        y: &ResolvedAxis,
+        radius: f64,
+        width: f64,
+    ) -> Option<BarFrame> {
+        let base = bar_base(y, maps.y)?;
+        let margin = radius.min(width / 2.0).max(MIN_BAR_MARGIN);
+        let (low, high) = maps.y.expanded(margin);
+        Some(BarFrame {
+            maps,
+            base,
+            radius,
+            margin,
+            low,
+            high,
+        })
+    }
+
+    /// The frame of bars with square corners on the y axis `y`, clipped with the smallest
+    /// margin; see [`BarFrame::new`].
+    pub(super) fn square(maps: AxisMaps, y: &ResolvedAxis) -> Option<BarFrame> {
+        BarFrame::new(maps, y, 0.0, 0.0)
+    }
+
+    /// Where bars start, in y axis space: 0 on a linear axis, the bottom of the plot on a log
+    /// axis.
+    pub(super) fn base(&self) -> f64 {
+        self.base
+    }
+
+    /// `v` (y axis space) clipped to the range bar ends are clipped to. NaN stays NaN.
+    pub(super) fn clip_y(&self, v: f64) -> f64 {
+        // `max` then `min` never panics, unlike `clamp`, and keeps finite values within the
+        // range.
+        v.max(self.low).min(self.high)
+    }
+
+    /// Whether the y axis-space value `v` lies inside the range bar ends are clipped to, so
+    /// that it is drawn where it truly is.
+    pub(super) fn contains_y(&self, v: f64) -> bool {
+        (self.low..=self.high).contains(&v)
+    }
+
+    /// The x range `(left, right)` (axis space, `left <= right`) clipped to the x domain
+    /// expanded by the clip margin; `None` when nothing of it is left. Category bands always
+    /// lie inside the x domain, so only bars on a continuous x axis need this.
+    pub(super) fn clip_x(&self, (left, right): (f64, f64)) -> Option<(f64, f64)> {
+        let (low, high) = self.maps.x.expanded(self.margin);
+        let clip = |v: f64| v.max(low).min(high);
+        let (left, right) = (clip(left), clip(right));
+        (left < right).then_some((left, right))
+    }
+
+    /// The plot y of the y axis-space value `v`, clipped first as [`clip_y`](Self::clip_y)
+    /// does, so it is never far outside the plot area.
+    pub(super) fn plot_y(&self, v: f64) -> f64 {
+        self.maps.y.plot_at(self.clip_y(v))
+    }
+
+    /// The outline of one bar across `(left, right)` in x axis space, from `from` to `to` in y
+    /// axis space, in plot points. The end at `to` is rounded when `round` holds and `to` lies
+    /// inside the clip range. `None` when either end is NaN, the ends are equal, the whole bar
+    /// lies beyond one end of the clip range, or the outline is empty.
+    pub(super) fn outline(
+        &self,
+        (left, right): (f64, f64),
+        from: f64,
+        to: f64,
+        round: bool,
+    ) -> Option<Path> {
+        if from.is_nan() || to.is_nan() || from == to {
+            return None;
+        }
+        let (visible_from, visible_to) = (self.clip_y(from), self.clip_y(to));
+        if visible_from == visible_to {
+            return None;
+        }
+        let round_end = round && self.contains_y(to);
+        let at_from = self.maps.to_plot(AxisPoint::new(left, visible_from));
+        let at_to = self.maps.to_plot(AxisPoint::new(right, visible_to));
+        let path = bar_outline(
+            at_from.x,
+            at_to.x,
+            at_from.y,
+            at_to.y,
+            self.radius,
+            round_end,
+        );
+        (!path.is_empty()).then_some(path)
+    }
+}
 
 /// A bar from `base_y` to `end_y` between `x0` and `x1`, in plot points, y down.
 ///

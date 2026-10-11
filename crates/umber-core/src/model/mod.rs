@@ -18,6 +18,7 @@ pub use axes::Axes;
 pub use axis_data::AxisData;
 pub use bar::{BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView};
 pub use figure::Figure;
+pub use hist::{HistMark, HistOptions};
 pub use mark::{LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 
 #[cfg(test)]
@@ -766,6 +767,150 @@ mod tests {
         assert!(stacked(a, &["a", "a"], &[&[1.0, 1.0]]).is_err());
         assert!(stacked(a, &["a"], &[&[1e300], &[1e300]]).is_err());
         assert!(grouped(a, &["b"], &[&[f64::INFINITY]]).is_err());
+        assert_eq!(f, before);
+    }
+
+    fn hist(a: &mut Axes, values: &[f64], bins: usize) -> Result<()> {
+        let options = HistOptions {
+            bins,
+            ..HistOptions::default()
+        };
+        a.hist(values, options).map(|_| ())
+    }
+
+    const HIST: &str = "Axes.hist()";
+
+    #[test]
+    fn hist_bin_count_outside_its_range_is_a_style_error_naming_bins() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        for (bins, shown) in [(0, "0"), (crate::MAX_BINS + 1, "10001")] {
+            // Before anything else, even an infinite value on a log x axis.
+            match hist(a, &[f64::INFINITY], bins) {
+                Err(Error::Style { context, message }) => {
+                    assert_eq!(context, HIST);
+                    assert_eq!(
+                        message,
+                        format!("bins is {shown}; bins must be between 1 and 10000.")
+                    );
+                }
+                other => panic!("expected a Style error, got {other:?}"),
+            }
+        }
+        assert!(a.marks().is_empty());
+        hist(a, &[1.0], 1).unwrap();
+        hist(a, &[1.0], crate::MAX_BINS).unwrap();
+        assert_eq!(a.marks().len(), 2);
+        let mut g = figure();
+        let b = g.add_axes(log_kind(), ScaleKind::Linear).unwrap();
+        assert_style(hist(b, &[f64::INFINITY], 0), HIST);
+    }
+
+    #[test]
+    fn hist_on_a_log_x_axis_is_a_usage_error() {
+        let mut f = figure();
+        let a = f.add_axes(log_kind(), ScaleKind::Linear).unwrap();
+        // Before the values are checked.
+        match hist(a, &[-1.0, f64::INFINITY], 30) {
+            Err(Error::Usage { context, message }) => {
+                assert_eq!(context, HIST);
+                assert_eq!(
+                    message,
+                    "the x axis is a log axis, which histograms do not support; use a linear x axis."
+                );
+            }
+            other => panic!("expected a Usage error, got {other:?}"),
+        }
+        assert!(a.marks().is_empty());
+    }
+
+    #[test]
+    fn hist_checks_run_in_order() {
+        // A category x axis, before the values.
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        assert_data(
+            hist(a, &[f64::INFINITY], 30),
+            HIST,
+            "values holds numbers but the x axis is a category axis; use a linear x axis.",
+        );
+        assert!(a.marks().is_empty());
+
+        // The first bad value, by index; NaN is allowed.
+        let mut g = figure();
+        let b = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        assert_data(
+            hist(b, &[1.0, f64::NAN, -1e301, f64::INFINITY], 30),
+            HIST,
+            "values[2] is -1e301; magnitudes must not exceed 1e300.",
+        );
+        assert_data(
+            hist(b, &[1.0, f64::NEG_INFINITY], 30),
+            HIST,
+            "values[1] is -inf; values must be finite",
+        );
+        assert!(b.marks().is_empty());
+
+        // Values before the y axis kind.
+        let mut h = figure();
+        let c = h.add_axes(ScaleKind::Linear, ScaleKind::Category).unwrap();
+        assert_data(hist(c, &[f64::INFINITY], 30), HIST, "values[0] is inf");
+        assert_data(
+            hist(c, &[1.0], 30),
+            HIST,
+            "a histogram counts values but the y axis is a category axis; use a linear or log y axis.",
+        );
+        assert!(c.marks().is_empty());
+
+        // A log y axis is fine: the counts are positive, whatever the values.
+        let mut k = figure();
+        let d = k.add_axes(ScaleKind::Linear, log_kind()).unwrap();
+        hist(d, &[-3.0, 0.0, 1e300, -1e300], 30).unwrap();
+        assert_eq!(d.marks().len(), 1);
+    }
+
+    #[test]
+    fn hist_stores_its_input_and_shares_it_with_clones() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let values = [-0.0, f64::from_bits(0x7ff8_0000_0000_0001), 2.5, 1e300];
+        let options = HistOptions {
+            bins: 7,
+            label: "latency".to_owned(),
+            color: crate::ColorSpec::Fixed(crate::Rgba::opaque(1, 2, 3)),
+        };
+        // Empty and all-NaN values are allowed.
+        a.hist(&[], HistOptions::default())
+            .unwrap()
+            .hist(&[f64::NAN], HistOptions::default())
+            .unwrap()
+            .hist(&values, options.clone())
+            .unwrap();
+        let copy = f.clone();
+        let (Some([_, _, Mark::Hist(hist)]), Some([_, _, Mark::Hist(cloned)])) =
+            (f.axes().map(Axes::marks), copy.axes().map(Axes::marks))
+        else {
+            panic!("expected three histogram marks");
+        };
+        let bits = |v: &[f64]| v.iter().map(|h| h.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(hist.values()), bits(&values));
+        assert_eq!(hist.bins(), 7);
+        assert_eq!((hist.label(), hist.color()), ("latency", options.color));
+        assert!(hist.shares_data_with(cloned));
+    }
+
+    #[test]
+    fn failed_hist_calls_change_nothing() {
+        let mut f = figure();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .hist(&[1.0, 2.0], HistOptions::default())
+            .unwrap();
+        let before = f.clone();
+        let a = f.axes_mut().unwrap();
+        assert!(hist(a, &[1.0], 0).is_err());
+        assert!(hist(a, &[1.0], crate::MAX_BINS + 1).is_err());
+        assert!(hist(a, &[f64::INFINITY], 30).is_err());
         assert_eq!(f, before);
     }
 }
