@@ -45,7 +45,7 @@ pub(crate) use chrome::{baseline, chrome};
 
 use crate::Theme;
 use crate::layout::{Area, Layout};
-use crate::resolve::{Resolved, ResolvedMark};
+use crate::resolve::{NormalizedPos, Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
 use mapping::{AxisMaps, axis_x, axis_y};
 
@@ -59,7 +59,9 @@ struct MarkContext<'a> {
     maps: AxisMaps,
     /// The plot area.
     plot: Area,
-    /// The y of the baseline, where area fills end.
+    /// Where the baseline sits along the y axis, as resolved; bars on a log y axis start there.
+    baseline: NormalizedPos,
+    /// The plot y of the baseline, as laid out; area fills end there.
     baseline_y: f64,
 }
 
@@ -76,6 +78,7 @@ pub(crate) fn marks(
         theme,
         maps: AxisMaps::new(&resolved.x, &resolved.y, plot),
         plot,
+        baseline: resolved.baseline,
         baseline_y: layout.baseline_y,
     };
     let mut items = Vec::new();

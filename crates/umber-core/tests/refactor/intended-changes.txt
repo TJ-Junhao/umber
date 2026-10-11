@@ -1,8 +1,23 @@
 # Cases whose committed outputs change on purpose in this change.
-# Structured errors: every error record gains its parameter and hint.
-errors/api
-errors/bars
-errors/grouped-bars
-errors/hist
-# The PNG output of this figure is the error record of the failed render; its scene and SVG are unchanged.
-scene-nan-size
+# The baseline moves from the plot bottom to the unpadded lower limit of the y domain when 0 is
+# outside it, and bars and histogram bins on a log y axis grow from it. Auto y limits keep that
+# limit strictly below the data. A direct label whose line goes on past an explicit x limit sits
+# where the line leaves the plot, without an end dot.
+fig-bars-log-y-graphite
+fig-bars-log-y-midnight
+fig-category-crowded-log
+fig-direct-category
+fig-direct-xlim-cuts-ends
+fig-font-scale-max
+fig-font-scale-tiny
+fig-grouped-bars-log-y-graphite
+fig-grouped-bars-log-y-midnight
+fig-hist-log-y-graphite
+fig-hist-log-y-midnight
+fig-legend-category
+fig-log-both-base10-small
+fig-log-both-base2
+fig-log-y
+fig-stacked-bars-log-y-graphite
+fig-stacked-bars-log-y-midnight
+fig-text-truncated
