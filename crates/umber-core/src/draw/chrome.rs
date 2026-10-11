@@ -8,7 +8,8 @@ use crate::layout::{Label, Layout};
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle, TextItem};
 use crate::{Dash, GridLines, Rgba, Theme};
 
-fn segment(from: Point, to: Point) -> Path {
+/// The straight path from `from` to `to`.
+pub(super) fn segment(from: Point, to: Point) -> Path {
     let mut path = Path::new();
     path.move_to(from);
     path.line_to(to);
@@ -31,7 +32,8 @@ fn grid_style(theme: &Theme) -> StrokeStyle {
     }
 }
 
-fn text(label: &Label, color: Rgba) -> Item {
+/// `label` as a text item in `color`, reusing its shaped layout.
+pub(super) fn text(label: &Label, color: Rgba) -> Item {
     let origin = point(label.x, label.y);
     Item::Text(TextItem::from_layout(
         label.text.clone(),

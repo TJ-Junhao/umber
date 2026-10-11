@@ -83,7 +83,7 @@ pub(super) fn line_width(theme: &Theme) -> f32 {
 }
 
 /// The stroke of a line mark of `color` and `dash` at the theme's line width.
-fn line_style(theme: &Theme, color: Rgba, dash: Dash) -> StrokeStyle {
+pub(super) fn line_style(theme: &Theme, color: Rgba, dash: Dash) -> StrokeStyle {
     let w = line_width(theme);
     let (dash, cap) = match dash {
         Dash::Solid => (Vec::new(), LineCap::Round),

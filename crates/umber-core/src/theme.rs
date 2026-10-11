@@ -67,12 +67,16 @@ pub enum Marker {
 
 /// How legends are drawn.
 ///
+/// A theme sets the style for every axes; [`Axes::legend`](crate::Axes::legend) overrides it
+/// for one axes.
+///
 /// # Examples
 ///
 /// ```
 /// use umber_core::LegendStyle;
 ///
 /// assert_ne!(LegendStyle::Header, LegendStyle::Chips);
+/// assert_ne!(LegendStyle::Header, LegendStyle::None);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LegendStyle {
@@ -82,6 +86,8 @@ pub enum LegendStyle {
     Direct,
     /// Entries as chips.
     Chips,
+    /// No legend: no entry row and no direct labels.
+    None,
 }
 
 /// Whether lines get a filled area below them.

@@ -11,7 +11,7 @@ const SQUARE_SIDE: f32 = 0.886;
 const KAPPA: f32 = 0.552_284_8;
 
 /// A closed polygon through `points`.
-fn polygon(points: &[(f32, f32)]) -> Path {
+pub(super) fn polygon(points: &[(f32, f32)]) -> Path {
     let mut path = Path::new();
     let mut iter = points.iter().map(|&(x, y)| Point { x, y });
     if let Some(first) = iter.next() {

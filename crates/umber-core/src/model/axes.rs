@@ -4,7 +4,7 @@
 use super::axis_data::{AxisData, Series};
 use super::mark::{LineOptions, Mark, ScatterOptions};
 use super::validation::check_limits;
-use crate::{ContinuousScale, Result, ScaleKind};
+use crate::{ContinuousScale, LegendStyle, Result, ScaleKind};
 
 /// A plotting area with its scales, texts, limits and marks.
 ///
@@ -33,6 +33,8 @@ pub struct Axes {
     xlim: Option<ContinuousScale>,
     /// The explicit y limits, validated as a scale for the y axis.
     ylim: Option<ContinuousScale>,
+    /// The legend style set for these axes; the theme's applies when unset.
+    legend: Option<LegendStyle>,
     marks: Vec<Mark>,
 }
 
@@ -48,6 +50,7 @@ impl Axes {
             ylabel: String::new(),
             xlim: None,
             ylim: None,
+            legend: None,
             marks: Vec::new(),
         }
     }
@@ -309,6 +312,43 @@ impl Axes {
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Axes> {
         self.ylim = Some(check_limits("Axes.ylim()", self.y, low, high)?);
         Ok(self)
+    }
+
+    /// Sets the legend style of these axes, overriding the theme's style.
+    /// [`LegendStyle::None`] hides the legend. Calling it again replaces the style.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LegendStyle, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.legend(LegendStyle::Chips).legend(LegendStyle::None);
+    /// assert_eq!(axes.legend_style(), Some(LegendStyle::None));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn legend(&mut self, style: LegendStyle) -> &mut Axes {
+        self.legend = Some(style);
+        self
+    }
+
+    /// The legend style set with [`Axes::legend`]; `None` when unset, in which case the
+    /// theme's style applies.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert_eq!(axes.legend_style(), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn legend_style(&self) -> Option<LegendStyle> {
+        self.legend
     }
 
     /// Adds a line. Errors leave the axes unchanged: `Error::Data` for mismatched lengths, an
