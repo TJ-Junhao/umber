@@ -444,10 +444,80 @@ fn an_area_whose_line_runs_above_the_plot_fills_it() {
         assert_eq!((lo.x, hi.x), (plot.x as f32, plot.right() as f32));
         assert_eq!((lo.y, hi.y), (top, layout.baseline_y as f32));
         assert_eq!(layout.baseline_y, plot.bottom());
-        // The gradient starts at the clip edge, where the boundary runs, and ends at the
-        // baseline.
+        // The gradient stays inside the clip, from its edge to the baseline, and keeps the true
+        // ramp from the line at 2 (100): the plot top, halfway up the ramp in axis space,
+        // gets 0.16 of the line's opacity, not the 0.32 of the line itself.
         assert_eq!((gradient.start.y, gradient.end.y), (top, hi.y));
+        assert_ramp(gradient, plot.y as f32, 0.16);
+        assert_ramp(gradient, layout.baseline_y as f32, 0.0);
     }
+}
+
+/// The opacity of the vertical gradient `g` at plot y `y`, as a share of the full opacity:
+/// its two stops interpolated, as the renderers do.
+fn share_at(g: &LinearGradient, y: f32) -> f32 {
+    let [from, to] = g.stops.as_slice() else {
+        panic!("expected two stops, got {:?}", g.stops)
+    };
+    let t = ((y - g.start.y) / (g.end.y - g.start.y)).clamp(0.0, 1.0);
+    (f32::from(from.color.a) + t * (f32::from(to.color.a) - f32::from(from.color.a))) / 255.0
+}
+
+/// Asserts that `g` gives `expected` of the full opacity at plot y `y`, within the rounding of
+/// its 8-bit stops.
+fn assert_ramp(g: &LinearGradient, y: f32, expected: f32) {
+    let share = share_at(g, y);
+    assert!(
+        (share - expected).abs() <= 1.0 / 255.0,
+        "share {share} at {y}, expected {expected}: {g:?}"
+    );
+}
+
+#[test]
+fn clipped_ramps_keep_the_lines_opacity_at_every_height() {
+    // Each case's line lies at twice the distance from the baseline that the plot edge does,
+    // so the edge of the plot gets half of the line's 0.32: below the baseline for negative
+    // values, and on both sides of a baseline that the line crosses.
+    let fills = |y: &[f64], ylim: (f64, f64)| {
+        let (scene, layout) = limited_area(ScaleKind::Linear, &[0.0, 1.0], y, ylim);
+        assert_scene_bounded(&scene);
+        let gradients: Vec<LinearGradient> = mark_group(&scene)
+            .1
+            .iter()
+            .filter_map(|item| match item {
+                Item::Fill {
+                    paint: Paint::Linear(g),
+                    ..
+                } => Some(g.clone()),
+                _ => None,
+            })
+            .collect();
+        (gradients, layout)
+    };
+    // Negative values: 0 is the top of a -1..0 axis, and the line at -2 lies below it.
+    let (gradients, layout) = fills(&[-2.0, -2.0], (-1.0, 0.0));
+    let [below] = gradients.as_slice() else {
+        panic!("one fill expected, got {gradients:?}")
+    };
+    assert!((layout.baseline_y - layout.plot.y).abs() < 1e-9);
+    assert_ramp(below, layout.plot.bottom() as f32, 0.16);
+    assert_ramp(below, layout.plot.y as f32, 0.0);
+    // A baseline crossing: from 2 down to -2 on a -1..1 axis, with the baseline in the middle.
+    let (gradients, layout) = fills(&[2.0, -2.0], (-1.0, 1.0));
+    let [above, below] = gradients.as_slice() else {
+        panic!("two fills expected, got {gradients:?}")
+    };
+    assert_ramp(above, layout.plot.y as f32, 0.16);
+    assert_ramp(below, layout.plot.bottom() as f32, 0.16);
+    for g in [above, below] {
+        assert_ramp(g, layout.baseline_y as f32, 0.0);
+    }
+    // The ramp's own extreme: a line just inside the plot keeps exactly 0.32 there.
+    let (gradients, _) = fills(&[0.75, 0.5], (0.0, 1.0));
+    let [inside] = gradients.as_slice() else {
+        panic!("one fill expected, got {gradients:?}")
+    };
+    assert_eq!(inside.stops[0].color.a, 82);
 }
 
 #[test]
@@ -489,7 +559,9 @@ fn an_area_entering_from_above_fills_from_its_first_point() {
     );
     assert_eq!(outline[1], entry);
     assert_eq!(entry.y, top);
-    // The gradient is anchored where it was for the clipped line: at the clip edge.
+    // The gradient stays inside the clip and keeps the true ramp from the line's start at 2:
+    // the plot top gets 0.16 of the line's opacity.
     assert_eq!(gradient.start.y, top);
     assert_eq!(gradient.end.y, layout.baseline_y as f32);
+    assert_ramp(gradient, plot.y as f32, 0.16);
 }

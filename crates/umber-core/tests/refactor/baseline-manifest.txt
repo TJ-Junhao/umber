@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 8991f1d531dddf66ab15e3661953f3c85ccfa975
+# revision: 1d67e56d075639464963f8224965d2ee1b9de5d7
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -17,8 +17,8 @@ b710e3e007454e2777da6eec60c934545526878e132b512b1163d3a4fa892a26  png/fig-all-na
 9ac2df927f6a41e4d44387230417b4e09b9b0fa6a80f86fed8bc804c920a8c91  png/fig-all-nan.dpi72.png
 8f4d10c6e19fc5c3651bb5a4739f0bc9590656acd1f32658c5e9348f35bc3c78  png/fig-area-200k-points.dpi200.png
 67cb7523f0bc60af9d38e000bf7fa2c552946e03e5af60b08734c54a46f276c7  png/fig-area-200k-points.dpi72.png
-70e486b60e5732bba39cc2efa33b258fe247ab50a807dc685420eb297df85c98  png/fig-area-beyond-y-midnight.dpi200.png
-a743b3f17015c45608637cc586e472917d8cf7bf23d2f38511a1ed5b1729c218  png/fig-area-beyond-y-midnight.dpi72.png
+383d4f4de8c434d965c89af041d7f911c9f0b95eb42967dcdbb72a27a7c17eb2  png/fig-area-beyond-y-midnight.dpi200.png
+2cf060997b5d07923fe1b92c83e2d299a03e663b184c895c154816a50cc7cc2f  png/fig-area-beyond-y-midnight.dpi72.png
 538e740cb09f261f320b77e9967061bfd466514abd90b01a93ba80bdf9817402  png/fig-area-beyond-y-pigment-log.dpi200.png
 babc89260166acf6430bc137c81b2fea7919426a81595fc7382552ed75826d97  png/fig-area-beyond-y-pigment-log.dpi72.png
 2b136b7f1c9f42fa79e4594cbc1af8b33f4c780d68098ad7c6a722ef53a44ac9  png/fig-area-category.dpi200.png
@@ -27,8 +27,8 @@ babc89260166acf6430bc137c81b2fea7919426a81595fc7382552ed75826d97  png/fig-area-b
 1c58f52679df87e201e7b2c0ed326405a23eadc151e71ddea95c7a33cf6587e6  png/fig-area-chips.dpi72.png
 3733650e398c58157774e2f0a5616c6efe32c86f700c2b9359541336c4917bab  png/fig-area-direct-limits-graphite.dpi200.png
 3db25ebaf8ca1b2ec820d19c792f8afe814d9a866f9f267cc53bdb7a68f24a88  png/fig-area-direct-limits-graphite.dpi72.png
-2e9a5be0b117e100e21d3aa2a5d3aa6238e5ed16fb322e0dd59a7191cc302b21  png/fig-area-direct-limits-midnight.dpi200.png
-e4e4ee4fae50dc27d8c4793c531a76744b7bc8a752834bb5d355701ce3f6aae5  png/fig-area-direct-limits-midnight.dpi72.png
+1445cdaa27d1821058ec33ff080b5808282a72789581b529503aeb740512f44b  png/fig-area-direct-limits-midnight.dpi200.png
+6ebcab2c347edca8d5afb9800ab89f4e30d2a7ee5d1329feab0385db6097a137  png/fig-area-direct-limits-midnight.dpi72.png
 3b6a04d5dba432ee796c23166416b7dd37a9a7ab844faf7a8fae53cc341e66b8  png/fig-area-gradient-graphite.dpi200.png
 975a8d7b80e7b9f63b00f2b1658adaf505182ec16ea1a0d76fd678ab70276187  png/fig-area-gradient-graphite.dpi72.png
 1ea3ee56579b6c9dfa08a168778dfc8d67567764f5ec812420be17d89a0c5272  png/fig-area-gradient-pigment.dpi200.png
@@ -345,12 +345,12 @@ c8c5918387b21ac2116aff0fd884143e001769accc3f348c948b373a9b61bc1f  png/scene-zero
 d64bccb376a35aee85a34a358f296ab310e76357152b27f3ae8140dd47b60eef  png/scene-zero-size.dpi72.png
 53efbf7da6ac4be26e4028633ecadc785e7d4c7f8a6d13e51e91bc665a7fba85  scene/fig-all-nan.txt
 45d1c8626a18b4041109bea940173ba760cc2767a78bd4a450dff0df3eeaaf90  scene/fig-area-200k-points.txt
-d8d063715277409782896c3a6c54c7e32b660d5d5bd86cfc45db0ad78d398ea3  scene/fig-area-beyond-y-midnight.txt
+84f3f19ce5c365a810ba172e352f895beae189d3ba3acc8863167454f39de6dc  scene/fig-area-beyond-y-midnight.txt
 d9b8b963a4f6d8ecee711bc487be949eb4e2ef829caa2bf2aff3f34cb0b19552  scene/fig-area-beyond-y-pigment-log.txt
 b8ade5020f8ba47cdeca8f21a46e17578ae4591523e6de485cb4069143fed2a4  scene/fig-area-category.txt
 d512ef5bfe2e78bec3528464ffb1b50e4dfe80bfa2d9fe1bb17c9318f2fefb3a  scene/fig-area-chips.txt
 28a68987967dea42a7d5903ae2816e15a47fde905b5f8138c39bfbc2b28fa6f7  scene/fig-area-direct-limits-graphite.txt
-50ca2695bdba1170792aa97e671c4c3b64980bbd671f631b3dca43f434cd1c35  scene/fig-area-direct-limits-midnight.txt
+591c555d616d19fecbb6159bf2fa41af334c17146d1476d1a21f2559118f932b  scene/fig-area-direct-limits-midnight.txt
 153a16a0c89b211a6ffe2c6714064e87a0f5fdc00c51a9d202ba7f7b4e0d6ed3  scene/fig-area-gradient-graphite.txt
 01034e04e14c8e00a380e0b76740edeaacad310f94d32abe63852dbf28d0c900  scene/fig-area-gradient-pigment.txt
 859d95fba86b2d28a56ff588171657af9b08c9feeceaa38d74eec2e5c2091c15  scene/fig-area-graphite.txt
@@ -512,8 +512,8 @@ e24ae5322e5034976f03f8539e3bde8ff9b038ceef9dbb218b1b69390262727c  svg/fig-all-na
 11c988e877d27d8432cf557a14d12140ecd2e48971b07aaffef13a519526c393  svg/fig-all-nan.outlines.svg
 b2f803f715af5c716202451d18bf88d8b30856b80d5b4bca4da7a95685340877  svg/fig-area-200k-points.editable.svg
 cfd7e5a258c6f50446453a56b79ac75595032560b59bded9ff6da7b3daa1d7c4  svg/fig-area-200k-points.outlines.svg
-a4c86a0eefcb2fa2d863daa2bd9b2c28b134edb31bc8348bba11c549718a7114  svg/fig-area-beyond-y-midnight.editable.svg
-7c69cd9d04e2f42ac5f4883aa3c492ce8ef9084f3c1a10253cdeb08e8acded0a  svg/fig-area-beyond-y-midnight.outlines.svg
+867fb361b6b18a63f480cda7fa9f09f99d9c9edf13b5ea8868b5e59c51c52b0d  svg/fig-area-beyond-y-midnight.editable.svg
+f6d267bdd71f41c835908a8d82da0ea5fe3abed2ba21eb8ec230440dd31650ba  svg/fig-area-beyond-y-midnight.outlines.svg
 59ce111dce4703199d43ad1ad0a58d71a7f2ef2a9030092f9312ca9764c8af87  svg/fig-area-beyond-y-pigment-log.editable.svg
 ea5401ef11231739fe35464a1cb0546f2acb133b49d2f295a33642ad7ec6f635  svg/fig-area-beyond-y-pigment-log.outlines.svg
 92bf037389d11863d620f81b6e22c21fafc4a92f437c15be324be3eeec4679eb  svg/fig-area-category.editable.svg
@@ -522,8 +522,8 @@ d0b3096bf531df2f217782d851e0e2e9930e59ad7906eccd0a382ffafd4b7519  svg/fig-area-c
 99469687881e0acfbd2b30fa85a0bdf1bc074ecbf60d61c7ca61cf88f01d1f84  svg/fig-area-chips.outlines.svg
 86cf318d7419a018d0eaeff6f2630a8f98b0cc18f92310dd7dea89659abba3d0  svg/fig-area-direct-limits-graphite.editable.svg
 41ac4c5f2d68b8405ca399ad16dee8c951c612b9e6d89bb84ba9c1c59396fb9a  svg/fig-area-direct-limits-graphite.outlines.svg
-817816bfe6382a1cb8d381284b050742226b12d3dcc89d7e635f160858e1891b  svg/fig-area-direct-limits-midnight.editable.svg
-03d3ef806962e52913a4822995b37e3732231a3444806f98b6d4183b71a420b6  svg/fig-area-direct-limits-midnight.outlines.svg
+80760f12debffeff5855d4f89bd864601ef53aab76af778022268776e749653d  svg/fig-area-direct-limits-midnight.editable.svg
+3a7b1ff9768c4e35ebc9f6c30939cb0b3e438236cd6036bafec3bbe6b48d5e01  svg/fig-area-direct-limits-midnight.outlines.svg
 b120e6a18b3394db212d22b12c902c6580bf32e6bbb5d261dedc84ad5599adf6  svg/fig-area-gradient-graphite.editable.svg
 9f988904de6a49d3dc0962583ac5b9ffe0a277fdee59659f87ef792e0fd1ec34  svg/fig-area-gradient-graphite.outlines.svg
 fab9722405b7b72ff7444c2cf34a12d66f247fe430ab110c989498283a1c515a  svg/fig-area-gradient-pigment.editable.svg

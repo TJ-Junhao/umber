@@ -238,20 +238,30 @@ fn clip_run(run: &[AxisPoint], bounds: &Bounds, out: &mut Vec<Vec<AxisPoint>>) {
     }
 }
 
+/// A point of a clamped line (see [`clamp_polyline`]): where it is drawn, inside the bounds,
+/// and the y of the line itself there, which lies beyond the bounds where the line does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ClampedPoint {
+    /// The point, with its y clamped into the bounds.
+    pub(super) at: AxisPoint,
+    /// The line's own y at `at.x`, before clamping.
+    pub(super) line_y: f64,
+}
+
 /// Splits the polyline through `(xs[i], ys[i])` at NaN and turns each run into the boundary of
 /// the region between the line and any level inside the y range of `bounds`, as far as `bounds`
 /// shows it. Each segment is cut to the x range of `bounds` as [`clip_segment`] cuts it, then
 /// clamped into the y range, with a point inserted where it crosses the top or the bottom
 /// edge, so a part of the line beyond the y range runs along that edge instead of being
-/// dropped. A piece ends only where the line leaves the x range; a single point is never a
-/// piece.
+/// dropped. Each point keeps the line's own y as well. A piece ends only where the line leaves
+/// the x range; a single point is never a piece.
 ///
 /// Clamping the line is exact for that region: for a level `b` inside the y range, the region
 /// between `y = f(x)` and `b`, cut to the y range, is the region between `clamp(f(x))` and `b`.
 /// Segments inside `bounds` are returned unchanged, and a segment that only crosses a side edge
 /// gets the crossing [`clip_segment`] computes, so a line inside the y range gives the points
 /// of [`clip_polyline`].
-pub(super) fn clamp_polyline(xs: &[f64], ys: &[f64], bounds: &Bounds) -> Vec<Vec<AxisPoint>> {
+pub(super) fn clamp_polyline(xs: &[f64], ys: &[f64], bounds: &Bounds) -> Vec<Vec<ClampedPoint>> {
     let points: Vec<AxisPoint> = xs
         .iter()
         .copied()
@@ -260,7 +270,7 @@ pub(super) fn clamp_polyline(xs: &[f64], ys: &[f64], bounds: &Bounds) -> Vec<Vec
         .collect();
     let mut out = Vec::new();
     for run in points.split(|p| p.x.is_nan() || p.y.is_nan()) {
-        let mut current: Vec<AxisPoint> = Vec::new();
+        let mut current: Vec<ClampedPoint> = Vec::new();
         for pair in run.windows(2) {
             let [a, b] = pair else { continue };
             let Some(along) = clamp_segment(*a, *b, bounds) else {
@@ -284,7 +294,7 @@ pub(super) fn clamp_polyline(xs: &[f64], ys: &[f64], bounds: &Bounds) -> Vec<Vec
             }
             current.extend(along.iter().skip(1));
             // An end outside the x range was cut there: the line leaves the region.
-            if end.x != b.x {
+            if end.at.x != b.x {
                 if current.len() > 1 {
                     out.push(std::mem::take(&mut current));
                 }
@@ -301,7 +311,7 @@ pub(super) fn clamp_polyline(xs: &[f64], ys: &[f64], bounds: &Bounds) -> Vec<Vec
 /// The segment `a..b` cut to the x range of `bounds` and clamped into its y range, as the
 /// points along it: the cut ends, with their y clamped, and between them the crossings with the
 /// top and bottom edges. `None` when no part lies inside the x range.
-fn clamp_segment(a: AxisPoint, b: AxisPoint, bounds: &Bounds) -> Option<Vec<AxisPoint>> {
+fn clamp_segment(a: AxisPoint, b: AxisPoint, bounds: &Bounds) -> Option<Vec<ClampedPoint>> {
     let (lo_x, hi_x, lo_y, hi_y) = (bounds.left, bounds.right, bounds.top, bounds.bottom);
     if (a.x < lo_x && b.x < lo_x) || (a.x > hi_x && b.x > hi_x) {
         return None;
@@ -320,7 +330,10 @@ fn clamp_segment(a: AxisPoint, b: AxisPoint, bounds: &Bounds) -> Option<Vec<Axis
         crossing((a.x, a.y), (b.x, b.y), edge, mid_y).map(|y| AxisPoint::new(edge, y))
     };
     let (start, end) = (cut(a)?, cut(b)?);
-    let clamp = |p: AxisPoint| AxisPoint::new(p.x, p.y.clamp(lo_y, hi_y));
+    let clamp = |p: AxisPoint| ClampedPoint {
+        at: AxisPoint::new(p.x, p.y.clamp(lo_y, hi_y)),
+        line_y: p.y,
+    };
     let mut along = vec![clamp(start)];
     // The edges strictly between the ends' y values, in order along the segment.
     let (low, high) = (start.y.min(end.y), start.y.max(end.y));
@@ -335,15 +348,17 @@ fn clamp_segment(a: AxisPoint, b: AxisPoint, bounds: &Bounds) -> Option<Vec<Axis
             && edge < high
             && let Some(x) = crossing((a.y, a.x), (b.y, b.x), edge, mid_x)
         {
-            let p = AxisPoint::new(x.clamp(min_x, max_x), edge);
-            if along.last() != Some(&p) {
+            let p = clamp(AxisPoint::new(x.clamp(min_x, max_x), edge));
+            if along.last().map(|q| q.at) != Some(p.at) {
                 along.push(p);
             }
         }
     }
+    // The end replaces a crossing at its own position, keeping the line's y beyond the edge.
     let last = clamp(end);
-    if along.last() != Some(&last) || along.len() == 1 {
-        along.push(last);
+    match along.as_mut_slice() {
+        [_, .., previous] if previous.at == last.at => *previous = last,
+        _ => along.push(last),
     }
     Some(along)
 }

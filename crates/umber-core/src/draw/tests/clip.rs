@@ -1,7 +1,9 @@
 //! Clipping in axis space: bounded output on every axis combination, subpath splitting,
 //! crossings at extreme magnitudes, and agreement with the exact oracle.
 
-use super::super::clip::{Bounds, clamp_polyline, clip_polyline, crossing, crossing_offset_fast};
+use super::super::clip::{
+    Bounds, ClampedPoint, clamp_polyline, clip_polyline, crossing, crossing_offset_fast,
+};
 use super::super::mapping::{AxisMaps, AxisPoint};
 use super::{Pixels, line_figure, near, nums, oracle, plot_of, subpaths};
 use crate::geometry::Point;
@@ -416,29 +418,41 @@ fn clamping_keeps_lines_inside_and_runs_beyond_along_the_edges() {
         .into_iter()
         .filter(|piece| piece.len() > 1)
         .collect();
-    assert_eq!(clamp_polyline(&xs, &ys, &bounds), clipped);
+    let clamped = clamp_polyline(&xs, &ys, &bounds);
+    let at = |pieces: &[Vec<ClampedPoint>]| -> Vec<Vec<AxisPoint>> {
+        pieces
+            .iter()
+            .map(|piece| piece.iter().map(|p| p.at).collect())
+            .collect()
+    };
+    assert_eq!(at(&clamped), clipped);
     assert_eq!(clipped.len(), 3);
+    // Unclamped points keep their own y as the line's.
+    assert!(clamped.iter().flatten().all(|p| p.line_y == p.at.y));
 
     // Wholly above: one piece along the top edge, which clipping drops.
-    assert_eq!(
-        clamp_polyline(&[0.0, 10.0], &[2.0, 2.0], &bounds),
-        [vec![p(0.0, 1.0), p(10.0, 1.0)]]
-    );
+    let above = clamp_polyline(&[0.0, 10.0], &[2.0, 2.0], &bounds);
+    assert_eq!(at(&above), [vec![p(0.0, 1.0), p(10.0, 1.0)]]);
+    // ... keeping the line's own y.
+    assert!(above[0].iter().all(|q| q.line_y == 2.0));
     assert!(clip_polyline(&[0.0, 10.0], &[2.0, 2.0], &bounds).is_empty());
     // Entering from above: along the top edge to the crossing, then the line.
+    let entering = clamp_polyline(&[0.0, 10.0], &[2.0, 0.0], &bounds);
     assert_eq!(
-        clamp_polyline(&[0.0, 10.0], &[2.0, 0.0], &bounds),
+        at(&entering),
         [vec![p(0.0, 1.0), p(5.0, 1.0), p(10.0, 0.0)]]
     );
+    let lines: Vec<f64> = entering[0].iter().map(|q| q.line_y).collect();
+    assert_eq!(lines, [2.0, 1.0, 0.0]);
     // Through both edges, from far below to far above: along the bottom, up through the
     // range at x = 5, then along the top.
     assert_eq!(
-        clamp_polyline(&[0.0, 10.0], &[-1e300, 1e300], &bounds),
+        at(&clamp_polyline(&[0.0, 10.0], &[-1e300, 1e300], &bounds)),
         [vec![p(0.0, 0.0), p(5.0, 0.0), p(5.0, 1.0), p(10.0, 1.0)]]
     );
     // Cut at the right side, where the line is still below the range.
     assert_eq!(
-        clamp_polyline(&[0.0, 30.0], &[-1e300, 1e300], &bounds),
+        at(&clamp_polyline(&[0.0, 30.0], &[-1e300, 1e300], &bounds)),
         [vec![p(0.0, 0.0), p(10.0, 0.0)]]
     );
     // Wholly beside the x range: nothing.
