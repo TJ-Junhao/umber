@@ -201,7 +201,9 @@ class Figure:
         with api_call():
             target = _args.path("Figure.save_svg()", "path", path)
             mode = instance("Figure.save_svg()", "text", text, SvgText, _SVG_TEXT_HINT)
-            Path(target).write_text(self._native.svg_for_file(mode.value), encoding="utf-8")
+            svg = self._native.svg_for_file(mode.value)
+            # ``newline=""`` writes the document's line ends as they are, on every platform.
+            Path(target).write_text(svg, encoding="utf-8", newline="")
 
     def __copy__(self) -> Self:
         with api_call():
