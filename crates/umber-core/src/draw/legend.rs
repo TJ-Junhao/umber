@@ -284,6 +284,61 @@ mod tests {
     }
 
     #[test]
+    fn a_short_chip_is_drawn_with_half_circle_ends() {
+        use crate::geometry::PathVerb;
+
+        // No title, a one-character label and a large font scale: the chip's dot and label
+        // are narrower than the chip is tall.
+        let theme = Theme::pigment()
+            .with_legend_style(crate::LegendStyle::Chips)
+            .unwrap()
+            .with_font_scale(10.0)
+            .unwrap();
+        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1.0, 2.0],
+                LineOptions {
+                    label: ".".to_owned(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        let scene = f.to_scene(FontLibrary::global());
+        let [_, _, Item::Group { items, .. }, _] = scene.items.as_slice() else {
+            panic!("chrome, marks, legend and baseline groups");
+        };
+        let Item::Fill { path, .. } = &items[0] else {
+            panic!("the chip comes first");
+        };
+        let (x0, y0, x1, y1) = bounds(&items[0]);
+        let (width, height) = (f64::from(x1 - x0), f64::from(y1 - y0));
+        assert!(width >= height - 1e-3, "{width} x {height}");
+        // Every corner is a quarter circle of half the height, horizontally and vertically.
+        let verbs = path.verbs();
+        let mut corners = 0;
+        for (i, verb) in verbs.iter().enumerate() {
+            let PathVerb::CubicTo(_, _, end) = verb else {
+                continue;
+            };
+            let start = match verbs.get(i.wrapping_sub(1)) {
+                Some(PathVerb::MoveTo(p) | PathVerb::LineTo(p) | PathVerb::CubicTo(_, _, p)) => *p,
+                other => panic!("a corner after {other:?}"),
+            };
+            let (rx, ry) = (
+                f64::from((end.x - start.x).abs()),
+                f64::from((end.y - start.y).abs()),
+            );
+            assert!((rx - height / 2.0).abs() < 1e-3, "{rx} vs {}", height / 2.0);
+            assert!((ry - height / 2.0).abs() < 1e-3, "{ry} vs {}", height / 2.0);
+            corners += 1;
+        }
+        assert_eq!(corners, 4);
+    }
+
+    #[test]
     fn no_entries_no_group() {
         let theme = Theme::pigment()
             .with_legend_style(crate::LegendStyle::None)
