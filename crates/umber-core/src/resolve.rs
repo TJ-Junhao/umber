@@ -13,6 +13,11 @@
 //! lower limit before padding. Auto y limits keep that lower limit strictly below the data: when
 //! the smallest y value lands on (or within 5 % of the span above) the lowest nice tick, the
 //! limit moves down one tick step.
+//! Explicit ticks replace the automatic ones. Without explicit limits the domain then encloses
+//! the data and the ticks as they are, with no rounding to nice limits and no lowering of the
+//! lowest tick, and is padded as auto limits are; with explicit limits the ticks outside them
+//! are dropped. The axis's tick format labels every tick except those given with their own
+//! labels.
 //! Tick positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch
 //! data values again.
 //!
