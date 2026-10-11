@@ -2,6 +2,7 @@
 //! every input before storing it.
 
 use super::axis_data::{AxisData, Series};
+use super::bar::{BarMark, BarOptions};
 use super::mark::{LineOptions, Mark, ScatterOptions};
 use super::validation::check_limits;
 use crate::{ContinuousScale, LegendStyle, Result, ScaleKind};
@@ -399,6 +400,46 @@ impl Axes {
     ) -> Result<&mut Axes> {
         let series = Series::new("Axes.scatter()", self.x, self.y, x, y)?;
         self.marks.push(Mark::scatter(series, options));
+        Ok(self)
+    }
+
+    /// Adds bars: one bar per category, centered in the category's band, from the baseline to
+    /// its height. On a linear y axis bars grow from 0 and negative heights grow downwards; on a
+    /// log y axis they grow from the bottom of the plot. Bar marks added one after another are
+    /// drawn at the same positions, in the order they were added; categories join the x axis
+    /// in order of first appearance across all marks.
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order:
+    /// `categories` and `heights` of different lengths; an x axis that is not a category axis;
+    /// a category that appears twice; a height that is infinite, beyond [`MAX_MAGNITUDE`], or
+    /// outside the log range on a log y axis; a category y axis. NaN is allowed and draws no
+    /// bar.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::BarOptions;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// axes.bar(vec!["a".into(), "b".into()], &[3.0, f64::NAN], BarOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // A repeated category is an error, and the axes keep their one mark.
+    /// assert!(axes.bar(vec!["a".into(), "a".into()], &[1.0, 2.0], BarOptions::default()).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    ///
+    /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
+    pub fn bar(
+        &mut self,
+        categories: Vec<String>,
+        heights: &[f64],
+        options: BarOptions,
+    ) -> Result<&mut Axes> {
+        let mark = BarMark::new("Axes.bar()", self.x, self.y, categories, heights, options)?;
+        self.marks.push(Mark::Bar(mark));
         Ok(self)
     }
 

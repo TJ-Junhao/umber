@@ -3,6 +3,7 @@
 use std::fmt;
 
 use super::axis_data::{AxisData, Series};
+use super::bar::BarMark;
 use crate::{ColorSpec, Dash, Marker};
 
 /// Options of a line mark.
@@ -71,11 +72,11 @@ impl Default for ScatterOptions {
 
 /// One series drawn in an [`Axes`](super::Axes).
 ///
-/// Marks are created by [`Axes::line`](super::Axes::line) and
-/// [`Axes::scatter`](super::Axes::scatter), which validate the data. Each variant holds a
-/// payload ([`LineMark`], [`ScatterMark`]) that keeps the validated x and y values together
-/// and exposes them read-only; it has no public constructor. Read a mark by matching on its
-/// variant.
+/// Marks are created by [`Axes::line`](super::Axes::line),
+/// [`Axes::scatter`](super::Axes::scatter) and [`Axes::bar`](super::Axes::bar), which validate
+/// the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`BarMark`]) that
+/// keeps the validated values together and exposes them read-only; it has no public
+/// constructor. Read a mark by matching on its variant.
 ///
 /// # Examples
 ///
@@ -120,12 +121,14 @@ impl Default for ScatterOptions {
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive] // further mark kinds, such as bars and histograms, are added as variants
+#[non_exhaustive] // further mark kinds, such as grouped bars and histograms, are added as variants
 pub enum Mark {
     /// A polyline through the points; NaN breaks it.
     Line(LineMark),
     /// Individual markers; NaN skips a point.
     Scatter(ScatterMark),
+    /// One bar per category, from the baseline to its height; NaN draws no bar.
+    Bar(BarMark),
 }
 
 impl Mark {
@@ -144,6 +147,7 @@ impl Mark {
         match self {
             Mark::Line(line) => line.options.color,
             Mark::Scatter(scatter) => scatter.options.color,
+            Mark::Bar(bar) => bar.options().color,
         }
     }
 }

@@ -1,7 +1,5 @@
 //! The bar outline: a rectangle in plot points whose end away from the baseline is rounded.
 
-#![allow(dead_code, reason = "bar and histogram drawing will use it")]
-
 use crate::geometry::{Path, Point};
 
 /// The cubic Bézier handle length for a quarter circle of unit radius.
