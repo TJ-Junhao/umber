@@ -447,7 +447,6 @@ impl<'a> ResolvedMark<'a> {
     }
 
     /// The series the mark shows, in order, one key each: what a legend lists for the mark.
-    #[allow(dead_code, reason = "the legend will read it")]
     pub fn keys(&self) -> Vec<SeriesKey<'a>> {
         match self {
             &ResolvedMark::Line { mark, color } => {

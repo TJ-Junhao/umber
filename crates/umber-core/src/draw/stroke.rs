@@ -1,13 +1,4 @@
-//! Stroke widths as drawn, shared by the chrome and the lines.
+//! Stroke widths as drawn, shared by the chrome and the lines. The rule lives with the theme,
+//! so that layout sizes legend swatches by the same widths.
 
-/// The widest stroke drawn, whatever the theme says.
-const MAX_STROKE_WIDTH: f32 = 1.0e4;
-
-/// A stroke width that is finite and within `0..=MAX_STROKE_WIDTH`.
-pub(super) fn stroke_width(width: f32) -> f32 {
-    if width.is_finite() && width > 0.0 {
-        width.min(MAX_STROKE_WIDTH)
-    } else {
-        0.0
-    }
-}
+pub(super) use crate::theme::drawn_stroke_width as stroke_width;
