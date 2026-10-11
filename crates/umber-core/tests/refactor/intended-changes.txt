@@ -1,1 +1,2 @@
-# Cases whose committed outputs change on purpose in this change; none.
+fig-line-dashes-and-palette-wrap
+fig-pigment-line-scatter

@@ -23,6 +23,26 @@ const MAX_FONT_SCALE: f64 = 10.0;
 /// The most colors a palette may hold.
 const MAX_PALETTE: usize = 16;
 
+/// The widest stroke drawn, whatever the theme says.
+const MAX_STROKE_WIDTH: f32 = 1.0e4;
+/// The largest marker diameter drawn, whatever the theme says.
+const MAX_MARKER_SIZE: f32 = 1.0e4;
+
+/// `v` if it is finite and greater than 0, capped at `max`; 0 otherwise.
+fn drawn_size(v: f32, max: f32) -> f32 {
+    if v.is_finite() && v > 0.0 {
+        v.min(max)
+    } else {
+        0.0
+    }
+}
+
+/// A stroke width as drawn: finite and within `0..=MAX_STROKE_WIDTH`. Gridlines, the baseline
+/// and lines are stroked at this width of their token.
+pub(crate) fn drawn_stroke_width(width: f32) -> f32 {
+    drawn_size(width, MAX_STROKE_WIDTH)
+}
+
 /// Gridline dash style.
 ///
 /// # Examples
@@ -67,12 +87,16 @@ pub enum Marker {
 
 /// How legends are drawn.
 ///
+/// A theme sets the style for every axes; [`Axes::legend`](crate::Axes::legend) overrides it
+/// for one axes.
+///
 /// # Examples
 ///
 /// ```
 /// use umber_core::LegendStyle;
 ///
 /// assert_ne!(LegendStyle::Header, LegendStyle::Chips);
+/// assert_ne!(LegendStyle::Header, LegendStyle::None);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LegendStyle {
@@ -82,6 +106,8 @@ pub enum LegendStyle {
     Direct,
     /// Entries as chips.
     Chips,
+    /// No legend: no entry row and no direct labels.
+    None,
 }
 
 /// Whether lines get a filled area below them.
@@ -594,6 +620,18 @@ impl Theme {
     #[must_use]
     pub fn marker_size(&self) -> f32 {
         self.marker_size
+    }
+
+    /// The stroke width of line marks as drawn, and of their legend swatches: the line width,
+    /// finite and within `0..=MAX_STROKE_WIDTH`.
+    pub(crate) fn drawn_line_width(&self) -> f32 {
+        drawn_stroke_width(self.line_width)
+    }
+
+    /// The marker diameter as drawn, for scatter points and legend dots: the marker size,
+    /// finite and within `0..=MAX_MARKER_SIZE`.
+    pub(crate) fn drawn_marker_size(&self) -> f32 {
+        drawn_size(self.marker_size, MAX_MARKER_SIZE)
     }
 
     /// The marker opacity, from 0.0 to 1.0.

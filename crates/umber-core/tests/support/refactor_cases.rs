@@ -1519,6 +1519,7 @@ mod record {
             LegendStyle::Header => "header",
             LegendStyle::Direct => "direct",
             LegendStyle::Chips => "chips",
+            LegendStyle::None => "none",
         }
     }
 

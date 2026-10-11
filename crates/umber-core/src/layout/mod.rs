@@ -12,6 +12,8 @@
 mod legend;
 mod nudge;
 
+pub(crate) use legend::{LegendRow, RowEntry};
+
 use crate::model::Axes;
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, coincides};
 use crate::{FontLibrary, TextLayout, TextStyle, Theme, Weight};
@@ -20,8 +22,8 @@ use crate::{FontLibrary, TextLayout, TextStyle, Theme, Weight};
 pub(crate) const PADDING: f64 = 12.0;
 /// Title line height, as a multiple of the title size.
 const TITLE_LINE: f64 = 1.25;
-/// Subtitle line height, as a multiple of the body size.
-const SUBTITLE_LINE: f64 = 1.35;
+/// Body text line height (the subtitle's and a legend row's), as a multiple of the body size.
+const BODY_LINE: f64 = 1.35;
 /// The gap between title and subtitle.
 const TITLE_GAP: f64 = 2.0;
 /// The gap below a non-empty header.
@@ -124,15 +126,14 @@ pub(crate) struct Layout {
     /// The plot area.
     pub plot: Area,
     /// Where the header ends, gap included; [`PADDING`] when the header is empty.
-    #[allow(dead_code, reason = "read by tests; a legend row will read it")]
+    #[allow(dead_code, reason = "read by tests")]
     pub header_bottom: f64,
-    /// Height reserved under the subtitle for a legend row; 0 while there is no legend.
-    #[allow(dead_code, reason = "a legend row will set and read it")]
-    pub header_extra_height: f64,
     /// The title, if not empty.
     pub title: Option<Label>,
     /// The subtitle, if not empty.
     pub subtitle: Option<Label>,
+    /// The legend row, under the subtitle; empty when the legend has no row entries.
+    pub legend: LegendRow,
     /// The x axis label, if not empty.
     pub xlabel: Option<Label>,
     /// The y axis label, if not empty.
@@ -317,19 +318,40 @@ pub(crate) fn initial_plot_size(width: f64, height: f64) -> PlotSize {
     }
 }
 
-/// Lays out the axes of a `width` by `height` pt figure for already resolved scales.
-/// `reference_width` is the plot width the x end-label reservation measures tick offsets on.
+/// What the layout of one axes is computed from besides its resolved scales. It is the same
+/// for every layout pass.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LayoutInput<'a> {
+    /// The canvas width, in points.
+    pub width: f64,
+    /// The canvas height, in points.
+    pub height: f64,
+    /// The theme.
+    pub theme: &'a Theme,
+    /// The axes, for their texts.
+    pub axes: &'a Axes,
+    /// The legend row, measured by [`LegendRow::measure`] for this canvas width.
+    pub legend: &'a LegendRow,
+    /// The fonts.
+    pub lib: &'a FontLibrary,
+}
+
+/// Lays out the axes of `input` for already resolved scales. `reference_width` is the plot
+/// width the x end-label reservation measures tick offsets on.
 pub(crate) fn lay_out(
-    width: f64,
-    height: f64,
-    theme: &Theme,
-    axes: &Axes,
+    input: &LayoutInput<'_>,
     resolved: &Resolved,
-    lib: &FontLibrary,
     reference_width: f64,
 ) -> Layout {
+    let LayoutInput {
+        width,
+        height,
+        theme,
+        axes,
+        legend,
+        lib,
+    } = *input;
     let styles = Styles::new(theme);
-    let header_extra_height = 0.0;
 
     // Header, top down.
     let mut y = PADDING;
@@ -348,14 +370,24 @@ pub(crate) fn lay_out(
         }
         let mut label = measure(lib, axes.subtitle_text(), styles.body);
         let (ascent, descent) = metrics(lib, &styles.body);
-        let line = SUBTITLE_LINE * f64::from(styles.body.size);
+        let line = BODY_LINE * f64::from(styles.body.size);
         label.x = PADDING;
         label.y = baseline_in_line(y, line, ascent, descent);
         y += line;
         label
     });
-    y += header_extra_height;
-    if title.is_some() || subtitle.is_some() || header_extra_height > 0.0 {
+    let has_legend = !legend.is_empty();
+    let legend = if has_legend {
+        if title.is_some() || subtitle.is_some() {
+            y += legend::ROW_TOP_GAP;
+        }
+        let placed = legend.placed(y, height);
+        y += legend.height();
+        placed
+    } else {
+        LegendRow::default()
+    };
+    if title.is_some() || subtitle.is_some() || has_legend {
         y += HEADER_GAP;
     }
     let header_bottom = y;
@@ -489,9 +521,9 @@ pub(crate) fn lay_out(
     Layout {
         plot,
         header_bottom,
-        header_extra_height,
         title,
         subtitle,
+        legend,
         xlabel,
         ylabel,
         x_tick_labels: x_labels.into_iter().map(|(_, label)| label).collect(),
@@ -538,7 +570,7 @@ mod tests {
         let empty = plan_of(&f).1;
         assert!(empty.title.is_none() && empty.subtitle.is_none());
         assert_eq!(empty.header_bottom, PADDING);
-        assert_eq!(empty.header_extra_height, 0.0);
+        assert!(empty.legend.is_empty() && empty.legend.height() == 0.0);
 
         f.axes_mut().unwrap().title("Station output");
         let title = plan_of(&f).1;

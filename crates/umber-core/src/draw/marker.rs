@@ -3,15 +3,13 @@
 use crate::geometry::{Path, Point};
 use crate::{Marker, Theme};
 
-/// The largest marker diameter drawn, whatever the theme says.
-const MAX_MARKER_SIZE: f32 = 1.0e4;
 /// The side of a square with the area of a unit-diameter circle: `sqrt(pi) / 2`.
 const SQUARE_SIDE: f32 = 0.886;
 /// The cubic Bézier handle length for a quarter circle of unit radius.
 const KAPPA: f32 = 0.552_284_8;
 
 /// A closed polygon through `points`.
-fn polygon(points: &[(f32, f32)]) -> Path {
+pub(super) fn polygon(points: &[(f32, f32)]) -> Path {
     let mut path = Path::new();
     let mut iter = points.iter().map(|&(x, y)| Point { x, y });
     if let Some(first) = iter.next() {
@@ -90,12 +88,8 @@ pub(super) fn extent(path: &Path) -> (f64, f64) {
     })
 }
 
-/// The marker diameter: the theme's, finite and within `0..=MAX_MARKER_SIZE`.
+/// The marker diameter as drawn: the theme's, finite and capped (see
+/// `Theme::drawn_marker_size`).
 pub(super) fn marker_size(theme: &Theme) -> f32 {
-    let d = theme.marker_size();
-    if d.is_finite() && d > 0.0 {
-        d.min(MAX_MARKER_SIZE)
-    } else {
-        0.0
-    }
+    theme.drawn_marker_size()
 }
