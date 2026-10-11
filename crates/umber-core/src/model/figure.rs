@@ -46,7 +46,9 @@ impl Figure {
         })
     }
 
-    /// Adds the figure's axes. `Error::Usage` if it already has some (v0.1 allows one).
+    /// Adds the figure's axes, with an x axis of scale `x` and a y axis of scale `y`. Errors
+    /// add no axes. They are `Error::Usage`, checked in this order: the figure already has axes
+    /// (v0.1 allows one); `y` is a category scale, because the y axis is always linear or log.
     ///
     /// # Examples
     ///
@@ -54,7 +56,9 @@ impl Figure {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert!(figure.add_axes(ScaleKind::Linear, ScaleKind::Category).is_err());
+    /// assert!(figure.axes().is_none());
+    /// figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// assert!(figure.add_axes(ScaleKind::Linear, ScaleKind::Linear).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -66,6 +70,14 @@ impl Figure {
             )
             .with_hint("create a new Figure for another chart."));
         }
+        let Some(y) = y.transform() else {
+            return Err(Error::usage(
+                "Figure.add_axes()",
+                "y is a category scale; the y axis must be linear or log.",
+            )
+            .with_parameter("y")
+            .with_hint("pass y=Scale.linear() or y=Scale.log()."));
+        };
         Ok(self.axes.insert(Axes::new(x, y)))
     }
 

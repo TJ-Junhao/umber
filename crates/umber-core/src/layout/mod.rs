@@ -500,17 +500,13 @@ pub(crate) fn lay_out(
 
     let direct = legend.direct.placed(resolved, plot, height);
     let baseline_y = plot.y_at(baseline);
-    let y_grid = if resolved.y.is_category() {
-        Vec::new()
-    } else {
-        resolved
-            .y
-            .ticks
-            .iter()
-            .filter(|tick| !coincides(tick.pos, baseline))
-            .map(|tick| plot.y_at(tick.pos))
-            .collect()
-    };
+    let y_grid = resolved
+        .y
+        .ticks
+        .iter()
+        .filter(|tick| !coincides(tick.pos, baseline))
+        .map(|tick| plot.y_at(tick.pos))
+        .collect();
     let x_grid = if resolved.x.is_category() {
         Vec::new()
     } else {
