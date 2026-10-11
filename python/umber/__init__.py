@@ -9,9 +9,11 @@ Example:
 from types import FunctionType
 from typing import Final
 
+from umber._axes import Axes
 from umber._color import Color
 from umber._enums import Dash, Font, GridLines, LegendStyle, Marker, SvgText
 from umber._errors import DataError, StyleError, UmberError, UsageError
+from umber._figure import Figure
 from umber._scale import Scale
 from umber._theme import Theme
 from umber._types import SupportsArray, Values
@@ -29,9 +31,11 @@ Example:
 
 __all__ = [
     "MAX_BINS",
+    "Axes",
     "Color",
     "DataError",
     "Dash",
+    "Figure",
     "Font",
     "GridLines",
     "LegendStyle",
@@ -49,18 +53,22 @@ __all__ = [
 
 
 def _report_package_as_module(*exported: type) -> None:
-    """Make each class, and each public method of it, report ``umber`` as its module."""
+    """Make each class, its public methods and its properties report ``umber`` as their module."""
     for cls in exported:
         cls.__module__ = "umber"
         for member in vars(cls).values():
             function = getattr(member, "__func__", member)
+            if isinstance(member, property):
+                function = member.fget
             if isinstance(function, FunctionType) and not function.__name__.startswith("_"):
                 function.__module__ = "umber"
 
 
 _report_package_as_module(
+    Axes,
     Color,
     Dash,
+    Figure,
     Font,
     GridLines,
     LegendStyle,

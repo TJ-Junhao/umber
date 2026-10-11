@@ -328,11 +328,10 @@ def instance[T](context: str, name: str, value: object, cls: type[T], hint: str)
         ...     instance("Axes.line()", "dash", "solid", Dash, "use Dash.SOLID.")
         ... except TypeError as err:
         ...     print(err)
-        Axes.line(): dash is str; dash must be a Dash.
+        Axes.line(): dash is str; dash must be of type Dash.
     """
     if not isinstance(value, cls):
-        article = "an" if cls.__name__[:1].lower() in "aeiou" else "a"
-        raise _wrong_type(context, name, value, f"{article} {cls.__name__}", hint)
+        raise _wrong_type(context, name, value, f"of type {cls.__name__}", hint)
     return value
 
 
