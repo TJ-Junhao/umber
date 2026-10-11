@@ -12,6 +12,7 @@
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
+use crate::error::number;
 use crate::{Error, Result};
 
 /// A concrete sRGB color with 8-bit channels and straight (non-premultiplied) alpha.
@@ -304,7 +305,10 @@ impl Alpha {
         } else {
             Err(Error::style(
                 "Color.alpha()",
-                format!("alpha is {a}; alpha must be between 0.0 and 1.0."),
+                format!(
+                    "alpha is {a}; alpha must be between 0.0 and 1.0.",
+                    a = number(a)
+                ),
             )
             .with_parameter("a"))
         }

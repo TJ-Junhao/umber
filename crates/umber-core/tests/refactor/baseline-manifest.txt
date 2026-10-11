@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 8d5e3c33678f855424a412cf7164ee8ca036b426
+# revision: 8353b0a6087f78964f6854faebbe4cb1ddbf33d3
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -7,7 +7,7 @@ ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-
 149d05f25fa3d408684c51d0f2282a6ff2e55ca837e4d486c6b31da4ce326981  api/legend.txt
 3536acf5506c4d594e4520ef89a61f18df3c74e4d6ffbd924622509c69d9dab4  api/text-layout.txt
 a550728a79f1484f468f30b07f202fd5e16a63bc420848c9a6ea05917fb0649d  api/themes.txt
-91aa353756f6938161209bc13b18a30af58027a84b6ac67d0ef1568626728413  errors/api.txt
+0a04584943275601f21c50b14801e0a49dd0c01b242e989feee9262e33197d10  errors/api.txt
 7170b070762b552df71d8ae72dce958fd4e498b3ce7309790207d11cfd740236  errors/area.txt
 2dcb81da9a93806e57ab17524d72fb1d64fb18a2e3bf3ea41e123d30274a0c73  errors/bars.txt
 f405bf20b5ad0b960c1d302858baaa70885eb3f14d9265d0a2d1e6e7cee52f6e  errors/grouped-bars.txt

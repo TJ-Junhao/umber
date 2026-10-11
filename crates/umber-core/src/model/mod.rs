@@ -284,6 +284,20 @@ mod tests {
     }
 
     #[test]
+    fn extreme_limits_print_in_scientific_form() {
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
+        assert_eq!(
+            a.xlim(0.0, 1e301).unwrap_err().to_string(),
+            "Axes.xlim(): the limits are 0 and 1e301; their magnitude must not exceed 1e300."
+        );
+        assert_eq!(
+            a.ylim(1e-301, 1.0).unwrap_err().to_string(),
+            "Axes.ylim(): the limits are 1e-301 and 1; a log scale supports values from 1e-300 to 1e300."
+        );
+    }
+
+    #[test]
     fn limits_on_a_category_axis_are_usage_errors() {
         let mut f = figure();
         let a = f
