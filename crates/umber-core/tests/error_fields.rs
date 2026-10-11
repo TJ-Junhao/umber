@@ -4,8 +4,8 @@
 #![allow(clippy::expect_used)]
 
 use umber_core::{
-    Alpha, AxisData, BarOptions, BarSeries, Error, Figure, HistOptions, LineOptions, LogBase,
-    Result, Rgba, ScaleKind, ScatterOptions, Theme,
+    Alpha, AreaOptions, AxisData, BarOptions, BarSeries, Error, Figure, HistOptions, LineOptions,
+    LogBase, Result, Rgba, ScaleKind, ScatterOptions, Theme,
 };
 
 const LOG: ScaleKind = ScaleKind::Log { base: LogBase::TEN };
@@ -46,6 +46,69 @@ fn errors_carry_their_parameter_and_hint() {
     let linear = ScaleKind::Linear;
     let cat = ScaleKind::Category;
     let cases: Vec<(&str, Error, Option<&str>, Option<&str>)> = vec![
+        (
+            "area, infinite y",
+            on_axes(linear, linear, |a| {
+                a.area(nums(&[1.0, 2.0]), &[1.0, inf], AreaOptions::default())
+                    .map(|_| ())
+            }),
+            Some("y"),
+            Some("use NaN to leave a gap in the area."),
+        ),
+        (
+            "area, infinite x",
+            on_axes(linear, linear, |a| {
+                a.area(nums(&[-inf]), &[1.0], AreaOptions::default())
+                    .map(|_| ())
+            }),
+            Some("x"),
+            Some("use NaN to leave a gap in the area."),
+        ),
+        (
+            "area, huge y",
+            on_axes(linear, linear, |a| {
+                a.area(nums(&[1.0]), &[1e301], AreaOptions::default())
+                    .map(|_| ())
+            }),
+            Some("y"),
+            None,
+        ),
+        (
+            "area, log y with zero",
+            on_axes(linear, LOG, |a| {
+                a.area(nums(&[1.0, 2.0]), &[1.0, 0.0], AreaOptions::default())
+                    .map(|_| ())
+            }),
+            Some("y"),
+            Some("use a linear axis, or remove values that are not positive."),
+        ),
+        (
+            "area, lengths differ",
+            on_axes(linear, linear, |a| {
+                a.area(nums(&[1.0, 2.0]), &[1.0], AreaOptions::default())
+                    .map(|_| ())
+            }),
+            None,
+            None,
+        ),
+        (
+            "area, numbers on a category x axis",
+            on_axes(cat, linear, |a| {
+                a.area(nums(&[1.0]), &[1.0], AreaOptions::default())
+                    .map(|_| ())
+            }),
+            None,
+            Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
+        ),
+        (
+            "area, category y axis",
+            on_axes(linear, cat, |a| {
+                a.area(nums(&[1.0]), &[1.0], AreaOptions::default())
+                    .map(|_| ())
+            }),
+            None,
+            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
+        ),
         (
             "line, infinite y",
             on_axes(linear, linear, |a| {
@@ -426,4 +489,31 @@ fn display_is_unchanged_by_the_parameter_and_hint() {
         err.to_string(),
         "Axes.line(): y[0] is inf; values must be finite."
     );
+}
+
+#[test]
+fn area_errors_name_the_area() {
+    for (y, message) in [
+        (
+            f64::INFINITY,
+            "Axes.area(): y[0] is inf; values must be finite.",
+        ),
+        (
+            -1e301,
+            "Axes.area(): y[0] is -1e301; magnitudes must not exceed 1e300.",
+        ),
+    ] {
+        let err = on_axes(ScaleKind::Linear, ScaleKind::Linear, |a| {
+            a.area(nums(&[1.0]), &[y], AreaOptions::default())
+                .map(|_| ())
+        });
+        assert_eq!(err.to_string(), message);
+        assert!(matches!(
+            err,
+            Error::Data {
+                context: "Axes.area()",
+                ..
+            }
+        ));
+    }
 }

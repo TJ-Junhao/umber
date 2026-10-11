@@ -4,9 +4,9 @@
 use super::axis_data::{AxisData, Series};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
 use super::hist::{HistMark, HistOptions};
-use super::mark::{LineOptions, Mark, ScatterOptions};
+use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::validation::{
-    LINE_GAP_HINT, SCATTER_GAP_HINT, X_SCALE_HINT, Y_SCALE_HINT, check_limits,
+    AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, X_SCALE_HINT, Y_SCALE_HINT, check_limits,
 };
 use crate::{ContinuousScale, LegendStyle, Result, ScaleKind};
 
@@ -418,6 +418,38 @@ impl Axes {
         Ok(self)
     }
 
+    /// Adds an area: the line through the points, drawn as [`Axes::line`] draws it, over the
+    /// region between the line and the baseline, filled in the line's color as the theme's
+    /// [`FillStyle`](crate::FillStyle) paints it. The fill is drawn first and the line over it.
+    /// Like bars, an area puts 0 into a linear y axis, so the filled region is proportional to
+    /// the values; on a log y axis it fills down to the baseline, at the lowest y tick (or the
+    /// explicit lower limit). Same rules as [`Axes::line`]: NaN breaks both the line and the
+    /// fill.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AreaOptions, AxisData};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let x = AxisData::Numbers(vec![0.0, 1.0, 2.0]);
+    /// axes.area(x, &[3.0, f64::NAN, 4.0], AreaOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // An infinite value is an error, and the axes keep their one mark.
+    /// assert!(axes
+    ///     .area(AxisData::Numbers(vec![0.0]), &[f64::INFINITY], AreaOptions::default())
+    ///     .is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn area(&mut self, x: AxisData, y: &[f64], options: AreaOptions) -> Result<&mut Axes> {
+        let series = Series::new("Axes.area()", self.x, self.y, x, y, AREA_GAP_HINT)?;
+        self.marks.push(Mark::area(series, options));
+        Ok(self)
+    }
+
     /// Adds bars: one bar per category, centered in the category's band, from the baseline to
     /// its height. On a linear y axis bars grow from 0 and negative heights grow downwards; on a
     /// log y axis they grow from the baseline, at the lowest y tick (or the explicit lower
@@ -567,7 +599,7 @@ impl Axes {
     /// midpoint `v`. The values are stored as given and binned when the figure is rendered.
     ///
     /// Neighbouring bars are the theme's [`hist_gap`](crate::Theme::hist_gap) apart, at most
-    /// half a bin, and have square corners. With [`AreaFill::Gradient`](crate::AreaFill), all
+    /// half a bin, and have square corners. With [`FillStyle::Gradient`](crate::FillStyle), all
     /// bars share one vertical gradient from the top of the tallest bar to the baseline, and
     /// each bar gets a solid top edge. On a linear y axis the bars grow from 0; on a log y axis
     /// they grow from the baseline, at the lowest y tick (or the explicit lower limit). Auto

@@ -9,7 +9,7 @@ use crate::binning::Histogram;
 use crate::geometry::Path;
 use crate::resolve::ResolvedAxis;
 use crate::scene::{FillRule, Item, Paint};
-use crate::{AreaFill, Rgba};
+use crate::{FillStyle, Rgba};
 
 /// The gradient's opacity at the top of the tallest bin, as a share of the color's own.
 const TOP_ALPHA: f32 = 0.95;
@@ -17,7 +17,7 @@ const TOP_ALPHA: f32 = 0.95;
 const TOP_EDGE_DEPTH: f64 = 1.6;
 
 /// The scene items of one histogram: a single `Fill` that holds every visible bin, followed,
-/// under [`AreaFill::Gradient`], by a single solid `Fill` that holds their top edges. Nothing
+/// under [`FillStyle::Gradient`], by a single solid `Fill` that holds their top edges. Nothing
 /// when no bin is visible.
 ///
 /// Each non-empty bin is a rectangle with square corners from the base of its [`BarFrame`] (0
@@ -28,12 +28,12 @@ const TOP_EDGE_DEPTH: f64 = 1.6;
 /// by the frame's margin, so a bin far outside narrow limits stays within a few points of the
 /// plot area.
 ///
-/// Without a gradient the fill is the solid `color`. With [`AreaFill::Gradient`] it is one
-/// vertical gradient for the whole histogram, from 0.95 of the color's opacity at the top of
-/// the tallest bin to transparent at the base, so shorter bins look dimmer (see [`ramp`]); and
-/// each bin whose top lies inside the clip range gets a top edge in the solid color over the
-/// fill, from its top down 1.6 pt or to its base, whichever is nearer, so the edge never paints
-/// beyond the bin.
+/// Under [`FillStyle::Solid`] the fill is the solid `color`. Under [`FillStyle::Gradient`] it is
+/// one vertical gradient for the whole histogram, from 0.95 of the color's opacity at the top of
+/// the tallest bin to transparent at the base, so shorter bins look dimmer (see [`ramp`]); and each
+/// bin whose top lies inside the clip range gets a top edge in the solid color over the fill, from
+/// its top down 1.6 pt or to its base, whichever is nearer, so the edge never paints beyond the
+/// bin.
 pub(super) fn hist_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
@@ -45,7 +45,7 @@ pub(super) fn hist_items(
     let Some(frame) = BarFrame::square(context.maps, y, context.baseline) else {
         return;
     };
-    let gradient = context.theme.area_fill() == AreaFill::Gradient;
+    let gradient = context.theme.fill_style() == FillStyle::Gradient;
     // `max` keeps a NaN gap from spreading; the theme only holds finite gaps of at least 0.
     let gap = context
         .maps
