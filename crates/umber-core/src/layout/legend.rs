@@ -21,7 +21,7 @@ use super::nudge::separate;
 use super::{Area, BODY_LINE, Label, PADDING, Styles, baseline_in_line, measure, metrics};
 use crate::legend::{Legend, RowStyle, Swatch};
 use crate::resolve::{Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis};
-use crate::{FontLibrary, Rgba, TextStyle, Theme, Weight};
+use crate::{FontLibrary, Rgba, SizeSpec, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
 const SWATCH_GAP: f64 = 4.0;
@@ -39,7 +39,7 @@ const CHIP_DOT: f64 = 0.6;
 const ROW_GAP: f64 = 4.0;
 /// The gap between the title or subtitle and the legend row.
 pub(super) const ROW_TOP_GAP: f64 = 6.0;
-/// The length of a line swatch, in line widths.
+/// The length of a line swatch, in line widths (the wider of the theme's and the series').
 const LINE_SWATCH_LENGTH: f64 = 10.0;
 /// The side of a square swatch, as a share of the label size.
 const SQUARE_SWATCH_SIDE: f64 = 0.8;
@@ -101,10 +101,12 @@ impl LegendRow {
     /// width of a `width` pt canvas, with the first row's top at 0.
     ///
     /// A plain entry is its swatch, a 4 pt gap and its label, and entries are 12 pt apart.
-    /// Swatches are sized as the marks are drawn: a line `10 ×` the drawn line width long and
-    /// that width tall, a dot of the drawn marker diameter, a square of `0.8 ×` the label size.
-    /// Plain rows are one body line tall (`1.35 ×` the label size), or as tall as the tallest
-    /// swatch.
+    /// Swatches are sized as their series are drawn: a line as tall as the series' drawn line
+    /// width, a dot of the series' drawn marker diameter, a square of `0.8 ×` the label size. A
+    /// line swatch is `10 ×` the theme's drawn line width long, so the swatches of lines at the
+    /// theme's width or thinner line up, and `10 ×` the series' width when that is wider, so a
+    /// thick dashed line still shows its dash pattern. Plain rows are one body line tall
+    /// (`1.35 ×` the label size), or as tall as the tallest swatch.
     ///
     /// A chip is a pill one body line plus `2 × 3` pt tall, holding a dot of `0.6 ×` the label
     /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
@@ -270,13 +272,14 @@ pub(crate) struct DirectLabels<'a> {
     ascent: f64,
     /// The descent of the label style's primary font.
     descent: f64,
-    /// The diameter of the end dots: the drawn marker diameter.
+    /// The diameter of the end dots: the theme's drawn marker diameter.
     dot: f64,
 }
 
 impl<'a> DirectLabels<'a> {
     /// The direct labels of `legend`, measured in the body font at `SemiBold` weight and the
-    /// body size, with end dots of the drawn marker diameter.
+    /// body size, with end dots of the theme's drawn marker diameter, whatever the size of the
+    /// line's own markers or width: an end dot marks where a line ends, alike for every line.
     pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &FontLibrary) -> DirectLabels<'a> {
         if legend.direct().is_empty() {
             return DirectLabels::default();
@@ -300,7 +303,7 @@ impl<'a> DirectLabels<'a> {
             size: f64::from(style.size),
             ascent,
             descent,
-            dot: f64::from(theme.drawn_marker_size()),
+            dot: f64::from(theme.drawn_marker_size(SizeSpec::Auto)),
         }
     }
 
@@ -453,9 +456,11 @@ fn entry_extent(
 /// The swatch a row of `row_style` draws for an entry with `swatch`, and its width and height
 /// for a label `size` pt tall.
 ///
-/// A plain row keeps the entry's swatch at its drawn size, so each box is exactly what the
-/// drawing fills or strokes; the drawn sizes are finite and capped, and so is the label size.
-/// A chips row always draws a dot of `0.6 ×` the label size.
+/// A plain row keeps the entry's swatch at the size its series is drawn at, so each box is
+/// exactly what the drawing fills or strokes; the drawn sizes are finite and capped, and so is
+/// the label size. A line swatch is `10 ×` the wider of the theme's and the series' drawn line
+/// width long (see [`LegendRow::measure`]). A chips row always draws a dot of `0.6 ×` the label
+/// size, whatever the series.
 fn swatch_size(
     theme: &Theme,
     row_style: RowStyle,
@@ -465,14 +470,15 @@ fn swatch_size(
     match (row_style, swatch) {
         (RowStyle::Chips, _) => {
             let d = CHIP_DOT * size;
-            (Swatch::Dot, d, d)
+            (Swatch::Dot { diameter: d as f32 }, d, d)
         }
-        (RowStyle::Plain, Swatch::Line { .. }) => {
-            let line_width = f64::from(theme.drawn_line_width());
-            (swatch, LINE_SWATCH_LENGTH * line_width, line_width)
+        (RowStyle::Plain, Swatch::Line { width, .. }) => {
+            let width = f64::from(width);
+            let theme_width = f64::from(theme.drawn_line_width(SizeSpec::Auto));
+            (swatch, LINE_SWATCH_LENGTH * theme_width.max(width), width)
         }
-        (RowStyle::Plain, Swatch::Dot) => {
-            let d = f64::from(theme.drawn_marker_size());
+        (RowStyle::Plain, Swatch::Dot { diameter }) => {
+            let d = f64::from(diameter);
             (swatch, d, d)
         }
         (RowStyle::Plain, Swatch::Square) => {
@@ -619,7 +625,7 @@ mod tests {
                 let chip = entry.chip.unwrap();
                 let top = row_top(entry.row, chips.row_height) + chips.entries()[0].chip.unwrap().y;
                 assert!((chip.y - top).abs() < 1e-9 && chip.height == chips.row_height);
-                assert_eq!(entry.swatch.kind, Swatch::Dot);
+                assert!(matches!(entry.swatch.kind, Swatch::Dot { .. }));
                 assert!((entry.swatch.width - CHIP_DOT * size).abs() < 1e-9);
                 assert!((entry.swatch.x - (chip.x + CHIP_PADDING_X)).abs() < 1e-9);
                 assert!(
@@ -732,6 +738,172 @@ mod tests {
         );
     }
 
+    /// A graphite figure with a thick dashed line, a thin solid area, a small and a large
+    /// scatter and a line at the theme's width, all labelled, its legend in `style`.
+    fn sized_series_figure(style: crate::LegendStyle) -> Figure {
+        use crate::model::ScatterOptions;
+        use crate::{Dash, SizeSpec};
+        let theme = Theme::graphite().with_legend_style(style).unwrap();
+        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        let line = |label: &str, dash: Dash, width: SizeSpec| LineOptions {
+            label: label.into(),
+            dash,
+            width,
+            ..LineOptions::default()
+        };
+        let scatter = |label: &str, size: SizeSpec| ScatterOptions {
+            label: label.into(),
+            size,
+            ..ScatterOptions::default()
+        };
+        let x = || AxisData::Numbers(vec![0.0, 1.0]);
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                x(),
+                &[1.0, 2.0],
+                line("Thick", Dash::Dashed, SizeSpec::times(2.5).unwrap()),
+            )
+            .unwrap()
+            .area(
+                x(),
+                &[0.5, 1.0],
+                line("Thin", Dash::Solid, SizeSpec::pt(0.5).unwrap()),
+            )
+            .unwrap()
+            .scatter(
+                x(),
+                &[1.5, 1.6],
+                scatter("Small", SizeSpec::times(0.5).unwrap()),
+            )
+            .unwrap()
+            .scatter(
+                x(),
+                &[1.2, 1.3],
+                scatter("Large", SizeSpec::pt(12.0).unwrap()),
+            )
+            .unwrap()
+            .line(x(), &[2.0, 3.0], line("Auto", Dash::Solid, SizeSpec::Auto))
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn header_swatches_follow_their_series() {
+        let f = sized_series_figure(crate::LegendStyle::Header);
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let boxes: Vec<(f64, f64)> = layout
+            .legend
+            .entries()
+            .iter()
+            .map(|e| (e.swatch.width, e.swatch.height))
+            .collect();
+        // Graphite lines are 1.8 pt wide and its markers 5.6 pt across. A line swatch is as tall
+        // as its series' stroke and 10 times the wider of that stroke and the theme's long.
+        let thick = f64::from(2.5_f32 * 1.8);
+        let theme_width = f64::from(1.8_f32);
+        assert_eq!(
+            boxes,
+            [
+                (10.0 * thick, thick),
+                (10.0 * theme_width, 0.5),
+                (f64::from(2.8_f32), f64::from(2.8_f32)),
+                (12.0, 12.0),
+                (10.0 * theme_width, theme_width),
+            ]
+        );
+        // The tallest swatch sets the row height.
+        assert_eq!(layout.legend.row_height, 12.0);
+
+        // The drawn swatches match the marks: each line swatch is stroked at its series' width,
+        // in its dash, and each dot is as wide as its scatter's markers.
+        let scene = f.to_scene(FontLibrary::global());
+        let [
+            _,
+            Item::Group { items: marks, .. },
+            Item::Group { items: legend, .. },
+            _,
+        ] = scene.items.as_slice()
+        else {
+            panic!("chrome, marks, legend and baseline groups");
+        };
+        let mark_strokes: Vec<_> = marks
+            .iter()
+            .filter_map(|item| match item {
+                Item::Stroke { style, .. } => Some((style.width, style.dash.clone())),
+                _ => None,
+            })
+            .collect();
+        let legend_strokes: Vec<_> = legend
+            .iter()
+            .filter_map(|item| match item {
+                Item::Stroke { style, .. } => Some((style.width, style.dash.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(mark_strokes.len(), 3);
+        assert_eq!(legend_strokes, mark_strokes);
+        let marker_widths: Vec<f64> = marks
+            .iter()
+            .filter_map(|item| match item {
+                Item::Markers { shape, .. } => {
+                    let (min, max) = shape.bounds().unwrap();
+                    Some(f64::from(max.x - min.x))
+                }
+                _ => None,
+            })
+            .collect();
+        let dot_widths: Vec<f64> = legend
+            .iter()
+            .filter_map(|item| match item {
+                Item::Fill { path, .. } => {
+                    let (min, max) = path.bounds().unwrap();
+                    Some(f64::from(max.x - min.x))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(marker_widths.len(), 2);
+        for (dot, marker) in dot_widths.iter().zip(&marker_widths) {
+            assert!((dot - marker).abs() < 1e-3, "{dot} vs {marker}");
+        }
+    }
+
+    #[test]
+    fn chips_and_end_dots_keep_their_fixed_sizes() {
+        // Chips draw the same dot for every series, whatever its width or size.
+        let f = sized_series_figure(crate::LegendStyle::Chips);
+        let theme = f.theme().clone();
+        let size = f64::from(theme.body_size() * theme.font_scale());
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        assert_eq!(layout.legend.entries().len(), 5);
+        for entry in layout.legend.entries() {
+            assert!(matches!(entry.swatch.kind, Swatch::Dot { .. }));
+            assert_eq!(
+                (entry.swatch.width, entry.swatch.height),
+                (CHIP_DOT * size, CHIP_DOT * size)
+            );
+        }
+
+        // Direct labels end in dots of the theme's marker size, thick and thin lines alike; the
+        // scatters go to the row with their own sizes.
+        let f = sized_series_figure(crate::LegendStyle::Direct);
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let theme_dot = f64::from(Theme::graphite().marker_size());
+        assert_eq!(layout.direct.len(), 3);
+        for label in &layout.direct {
+            let dot = label.dot.expect("each line ends inside the plot");
+            assert_eq!(dot.diameter, theme_dot);
+        }
+        let dots: Vec<f64> = layout
+            .legend
+            .entries()
+            .iter()
+            .map(|e| e.swatch.width)
+            .collect();
+        assert_eq!(dots, [f64::from(2.8_f32), 12.0]);
+    }
+
     #[test]
     fn many_entries_never_make_a_negative_plot() {
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
@@ -824,8 +996,8 @@ mod tests {
                 .with_marker_size(token)
                 .unwrap();
             let (stroke, diameter) = (
-                f64::from(theme.drawn_line_width()),
-                f64::from(theme.drawn_marker_size()),
+                f64::from(theme.drawn_line_width(SizeSpec::Auto)),
+                f64::from(theme.drawn_marker_size(SizeSpec::Auto)),
             );
             assert_eq!((stroke, diameter), (1.0e4, 1.0e4));
 
@@ -926,7 +1098,7 @@ mod tests {
         assert_eq!(direct.len(), 3);
         let plot = layout.plot;
         let size = f64::from(theme.body_size() * theme.font_scale());
-        let dot = f64::from(theme.drawn_marker_size());
+        let dot = f64::from(theme.drawn_marker_size(SizeSpec::Auto));
         let palette = theme.palette();
         for (k, (label, (text, x, y))) in direct
             .iter()
@@ -999,7 +1171,7 @@ mod tests {
                 .collect();
             let f = line_figure(Theme::graphite(), &lines);
             let axes = f.axes().unwrap();
-            let marks = crate::resolve::resolve_marks(axes.marks(), f.theme().palette());
+            let marks = crate::resolve::resolve_marks(axes.marks(), f.theme());
             let limits = crate::resolve::Limits::of(axes);
             let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits);
             DirectLabels::measure(f.theme(), &legend, FontLibrary::global()).reserve(cap)
@@ -1097,7 +1269,7 @@ mod tests {
         };
         assert!(cut.dot.is_none());
         let label = text_of(cut);
-        let dot = f64::from(Theme::graphite().drawn_marker_size());
+        let dot = f64::from(Theme::graphite().drawn_marker_size(SizeSpec::Auto));
         assert!((label.x - (plot.right() + dot / 2.0 + DIRECT_GAP)).abs() < 1e-9);
         let crossing = plot.y_at(NormalizedPos::new(0.25));
         assert!((center_of(label) - crossing).abs() < 1e-6);

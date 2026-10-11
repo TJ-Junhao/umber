@@ -9,25 +9,31 @@ use crate::resolve::{Anchor, Limits, ResolvedMark, SeriesKey, SeriesKind};
 use crate::{Dash, LegendStyle, Rgba};
 
 /// The small figure drawn before a legend label, showing how its series is drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Swatch {
-    /// A short line in the series dash.
+    /// A short line in the series dash and width.
     Line {
         /// The dash style.
         dash: Dash,
+        /// The stroke width the series is drawn at, in points.
+        width: f32,
     },
     /// A dot, for point series.
-    Dot,
+    Dot {
+        /// The marker diameter the series is drawn at, in points.
+        diameter: f32,
+    },
     /// A square, for filled bars.
     Square,
 }
 
 impl Swatch {
-    /// The swatch of a series drawn as `kind`.
+    /// The swatch of a series drawn as `kind`: a line in its dash and width, a dot of its
+    /// marker diameter, or a square.
     fn of(kind: SeriesKind) -> Swatch {
         match kind {
-            SeriesKind::Line { dash } => Swatch::Line { dash },
-            SeriesKind::Points { .. } => Swatch::Dot,
+            SeriesKind::Line { dash, width } => Swatch::Line { dash, width },
+            SeriesKind::Points { size, .. } => Swatch::Dot { diameter: size },
             SeriesKind::Bar => Swatch::Square,
         }
     }
@@ -220,7 +226,7 @@ mod tests {
 
     fn legend_of(f: &Figure, style: LegendStyle) -> Legend<'_> {
         let axes = f.axes().unwrap();
-        let marks = resolve_marks(axes.marks(), f.theme().palette());
+        let marks = resolve_marks(axes.marks(), f.theme());
         Legend::new(style, &marks, &Limits::of(axes))
     }
 
@@ -238,6 +244,14 @@ mod tests {
         assert!(!legend.is_empty());
     }
 
+    /// The line swatch of a pigment line in `dash` at the theme's width.
+    fn pigment_line(dash: Dash) -> Swatch {
+        Swatch::Line { dash, width: 2.0 }
+    }
+
+    /// The dot swatch of a pigment scatter at the theme's marker size.
+    const PIGMENT_DOT: Swatch = Swatch::Dot { diameter: 6.0 };
+
     #[test]
     fn swatch_follows_series_kind() {
         let f = figure();
@@ -246,17 +260,98 @@ mod tests {
         assert_eq!(
             swatches,
             [
-                Swatch::Line { dash: Dash::Solid },
-                Swatch::Dot,
-                Swatch::Line { dash: Dash::Dashed },
+                pigment_line(Dash::Solid),
+                PIGMENT_DOT,
+                pigment_line(Dash::Dashed),
             ]
         );
         assert_eq!(Swatch::of(SeriesKind::Bar), Swatch::Square);
         assert_eq!(
             Swatch::of(SeriesKind::Points {
-                marker: Marker::Cross
+                marker: Marker::Cross,
+                size: 4.5,
             }),
-            Swatch::Dot
+            Swatch::Dot { diameter: 4.5 }
+        );
+    }
+
+    #[test]
+    fn swatches_take_the_width_and_size_of_their_series() {
+        use crate::SizeSpec;
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                nums(&[0.0, 1.0]),
+                &[1.0, 2.0],
+                LineOptions {
+                    width: SizeSpec::times(2.5).unwrap(),
+                    ..line("Thick", Dash::Dashed)
+                },
+            )
+            .unwrap()
+            .area(
+                nums(&[0.0, 1.0]),
+                &[1.0, 2.0],
+                LineOptions {
+                    width: SizeSpec::pt(0.5).unwrap(),
+                    ..line("Thin area", Dash::Solid)
+                },
+            )
+            .unwrap()
+            .scatter(
+                nums(&[0.5]),
+                &[1.5],
+                ScatterOptions {
+                    size: SizeSpec::times(0.5).unwrap(),
+                    ..scatter("Small")
+                },
+            )
+            .unwrap()
+            .scatter(
+                nums(&[0.5]),
+                &[1.5],
+                ScatterOptions {
+                    size: SizeSpec::pt(12.0).unwrap(),
+                    ..scatter("Large")
+                },
+            )
+            .unwrap()
+            .line(nums(&[0.0, 1.0]), &[2.0, 3.0], line("Auto", Dash::Solid))
+            .unwrap();
+        // Graphite lines are 1.8 pt wide and its markers 5.6 pt across.
+        let header = legend_of(&f, LegendStyle::Header);
+        let swatches: Vec<Swatch> = header.row().iter().map(LegendEntry::swatch).collect();
+        assert_eq!(
+            swatches,
+            [
+                Swatch::Line {
+                    dash: Dash::Dashed,
+                    width: 2.5 * 1.8,
+                },
+                Swatch::Line {
+                    dash: Dash::Solid,
+                    width: 0.5,
+                },
+                Swatch::Dot { diameter: 2.8 },
+                Swatch::Dot { diameter: 12.0 },
+                Swatch::Line {
+                    dash: Dash::Solid,
+                    width: 1.8,
+                },
+            ]
+        );
+        // Chips show the same entries; the row layout draws them all as dots of one size.
+        assert_eq!(legend_of(&f, LegendStyle::Chips).row(), header.row());
+        // Direct labels carry no swatch; the scatters go to the row with their own sizes.
+        let direct = legend_of(&f, LegendStyle::Direct);
+        let row: Vec<Swatch> = direct.row().iter().map(LegendEntry::swatch).collect();
+        assert_eq!(
+            row,
+            [
+                Swatch::Dot { diameter: 2.8 },
+                Swatch::Dot { diameter: 12.0 }
+            ]
         );
     }
 
@@ -290,8 +385,8 @@ mod tests {
             assert_eq!(
                 entries,
                 [
-                    ("Load", palette[0], Swatch::Line { dash: Dash::Dashed }),
-                    ("Samples", palette[1], Swatch::Dot),
+                    ("Load", palette[0], pigment_line(Dash::Dashed)),
+                    ("Samples", palette[1], PIGMENT_DOT),
                 ]
             );
         }
@@ -402,7 +497,7 @@ mod tests {
         let header = legend_of(&f, LegendStyle::Header);
         assert_eq!(legend.row_style(), RowStyle::Plain);
         assert_eq!(legend.row(), &header.row()[1..2]);
-        assert_eq!(legend.row()[0].swatch(), Swatch::Dot);
+        assert_eq!(legend.row()[0].swatch(), PIGMENT_DOT);
         assert!(!legend.is_empty());
 
         // Bars go to the row too, with their square swatches, between the direct lines.
@@ -475,7 +570,13 @@ mod tests {
             assert!(legend.direct().is_empty());
             let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
             assert_eq!(labels, ["Line"]);
-            assert_eq!(legend.row()[0].swatch(), Swatch::Line { dash: Dash::Solid });
+            assert_eq!(
+                legend.row()[0].swatch(),
+                Swatch::Line {
+                    dash: Dash::Solid,
+                    width: 1.8
+                }
+            );
         }
     }
 

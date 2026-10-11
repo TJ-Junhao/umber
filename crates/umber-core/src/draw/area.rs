@@ -7,8 +7,8 @@ use super::clip::{clamp_polyline, crossing};
 use super::line::{LineClip, plot_subpaths, stroke};
 use super::mapping::PlotPoint;
 use crate::geometry::Path;
-use crate::scene::{FillRule, GradientStop, Item, LinearGradient, Paint};
-use crate::{Dash, FillStyle, Rgba};
+use crate::scene::{FillRule, GradientStop, Item, LinearGradient, Paint, StrokeStyle};
+use crate::{FillStyle, Rgba};
 
 /// The opacity of an area fill, as a share of the line's own opacity: all over under
 /// [`FillStyle::Solid`], at the line's extreme under [`FillStyle::Gradient`], from which the
@@ -18,9 +18,10 @@ const AREA_ALPHA: f32 = 0.32;
 /// gradient across it would have no length).
 const MIN_AREA_HEIGHT: f64 = 0.01;
 
-/// The scene items of one area mark, its line given in axis space: the fill of the region
-/// between the line and the baseline (see [`area_fills`]), then the line's stroke over it,
-/// exactly as a line mark of the same `color` and `dash` draws it.
+/// The scene items of one area mark, its line given in axis space and stroked with `style`:
+/// the fill of the region between the line and the baseline in the stroke's color (see
+/// [`area_fills`]), then the line's stroke over it, exactly as a line mark with the same stroke
+/// draws it.
 ///
 /// The fill and the stroke are clipped separately. The stroke is the line's visible part. The
 /// fill is bounded by the line clamped into the line's clip (see [`clamp_polyline`]), so the
@@ -31,16 +32,15 @@ pub(super) fn area_items(
     context: &MarkContext<'_>,
     xs: &[f64],
     ys: &[f64],
-    color: Rgba,
-    dash: Dash,
+    style: &StrokeStyle,
     items: &mut Vec<Item>,
 ) {
-    let style = context.theme.fill_style();
+    let fill_style = context.theme.fill_style();
     let baseline = Baseline {
         y: context.baseline_y,
         value: context.maps.y.at(context.baseline),
     };
-    let clip = LineClip::of(context);
+    let clip = LineClip::of(context, style.width);
     for piece in clamp_polyline(xs, ys, &clip.bounds) {
         let boundary: Vec<FillPoint> = piece
             .into_iter()
@@ -50,11 +50,11 @@ pub(super) fn area_items(
                 line_value: p.line_y,
             })
             .collect();
-        items.extend(area_fills(&boundary, baseline, color, style));
+        items.extend(area_fills(&boundary, baseline, style.color, fill_style));
     }
-    let subpaths = plot_subpaths(context, xs, ys);
+    let subpaths = plot_subpaths(context, style.width, xs, ys);
     if !subpaths.is_empty() {
-        items.push(stroke(context.theme, &subpaths, color, dash));
+        items.push(stroke(&subpaths, style));
     }
 }
 

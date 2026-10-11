@@ -31,7 +31,7 @@ pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
         if let Some(pill) = entry.chip {
             items.push(chip(pill, entry.swatch.color));
         }
-        items.push(swatch(theme, entry));
+        items.push(swatch(entry));
         items.push(text(&entry.label, theme.text_color()));
     }
     for label in direct {
@@ -73,12 +73,12 @@ fn chip_tint(color: Rgba) -> Rgba {
 }
 
 /// The swatch of `entry`, in its series color, inside its swatch box: a line in the series dash
-/// and the theme's line width, a filled dot, or a filled square.
-fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
+/// and width, a filled dot, or a filled square.
+fn swatch(entry: &RowEntry) -> Item {
     let b = entry.swatch;
     match b.kind {
-        Swatch::Line { dash } => {
-            let style = line_style(theme, b.color, dash);
+        Swatch::Line { dash, width } => {
+            let style = line_style(width, b.color, dash);
             // Round caps reach half the stroke width past the ends; keep them inside the box.
             let inset = match style.cap {
                 LineCap::Butt => 0.0,
@@ -94,7 +94,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 style,
             }
         }
-        Swatch::Dot => dot(b.x + b.width / 2.0, b.center_y, b.width, b.color),
+        Swatch::Dot { .. } => dot(b.x + b.width / 2.0, b.center_y, b.width, b.color),
         Swatch::Square => {
             let (top_left, bottom_right) = (
                 point(b.x, b.center_y - b.height / 2.0),
@@ -207,11 +207,11 @@ mod tests {
 
     #[test]
     fn square_swatch_fills_its_box() {
-        let (theme, layout) = layout(Theme::pigment());
+        let (_, layout) = layout(Theme::pigment());
         let mut entry = layout.legend.entries()[2].clone();
         entry.swatch.kind = Swatch::Square;
         entry.swatch.height = entry.swatch.width;
-        let item = swatch(&theme, &entry);
+        let item = swatch(&entry);
         assert!(
             matches!(&item, Item::Fill { paint: Paint::Solid(c), .. } if *c == entry.swatch.color)
         );
@@ -282,7 +282,7 @@ mod tests {
             assert_eq!(corners, 4);
             // Then the dot in the series color, inside the pill, and the label.
             let dot = entry.swatch;
-            assert_eq!(dot.kind, Swatch::Dot);
+            assert!(matches!(dot.kind, Swatch::Dot { .. }));
             assert!(
                 matches!(&triple[1], Item::Fill { paint: Paint::Solid(c), .. } if *c == dot.color)
             );
@@ -369,7 +369,12 @@ mod tests {
         };
         let row = layout.legend.entries();
         assert_eq!(row.len(), 1);
-        assert_eq!(row[0].swatch.kind, Swatch::Dot);
+        assert_eq!(
+            row[0].swatch.kind,
+            Swatch::Dot {
+                diameter: theme.marker_size()
+            }
+        );
         let direct = &layout.direct;
         assert_eq!(direct.len(), 2);
         // The row comes first, as in a header row, then a dot and a label per line.

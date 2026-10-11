@@ -136,6 +136,7 @@ fn scatter_figure(theme_name: &str) -> Figure {
                 label: format!("Cluster {}", i + 1),
                 color: ColorSpec::AUTO,
                 marker: Marker::Circle,
+                ..ScatterOptions::default()
             },
         )
         .unwrap();

@@ -4,7 +4,7 @@ use super::{line_figure, mark_group, nums, plot_of};
 use crate::model::{Figure, LineOptions, ScatterOptions};
 use crate::scene::{Item, Rect};
 use crate::test_support::scene::assert_scene_bounded;
-use crate::{FontLibrary, Rgba, ScaleKind, Theme};
+use crate::{FontLibrary, Rgba, ScaleKind, SizeSpec, Theme};
 
 #[test]
 fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
@@ -80,6 +80,65 @@ fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
         .line(nums(&[f64::NAN]), &[f64::NAN], LineOptions::default())
         .unwrap();
     assert_eq!(f.to_scene(FontLibrary::global()).items.len(), 2);
+}
+
+#[test]
+fn clip_widening_follows_the_widest_drawn_line_of_any_width() {
+    // Graphite lines are 1.8 pt wide; the area asks for 9 pt and is the widest line. The large
+    // scatter does not count: markers are culled by their own extent.
+    let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+    let line = |width: SizeSpec| LineOptions {
+        width,
+        ..LineOptions::default()
+    };
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(nums(&[0.0, 1.0]), &[0.0, 1.0], line(SizeSpec::Auto))
+        .unwrap()
+        .area(
+            nums(&[0.0, 1.0]),
+            &[0.5, 0.5],
+            line(SizeSpec::pt(9.0).unwrap()),
+        )
+        .unwrap()
+        .line(
+            nums(&[0.0, 1.0]),
+            &[1.0, 0.0],
+            line(SizeSpec::times(0.5).unwrap()),
+        )
+        .unwrap()
+        .scatter(
+            nums(&[0.5]),
+            &[0.5],
+            ScatterOptions {
+                size: SizeSpec::pt(40.0).unwrap(),
+                ..ScatterOptions::default()
+            },
+        )
+        .unwrap();
+    let scene = f.to_scene(FontLibrary::global());
+    let plot = plot_of(&f);
+    let (clip, _) = mark_group(&scene);
+    assert_eq!(
+        clip,
+        Rect {
+            x: (plot.x - 4.5) as f32,
+            y: plot.y as f32,
+            width: (plot.width + 9.0) as f32,
+            height: plot.height as f32,
+        }
+    );
+
+    // A thin line alone widens the clip by half its own width, not the theme's.
+    let f = line_figure(
+        Theme::graphite(),
+        &[0.0, 1.0],
+        &[0.0, 1.0],
+        line(SizeSpec::pt(0.5).unwrap()),
+    );
+    let scene = f.to_scene(FontLibrary::global());
+    let plot = plot_of(&f);
+    assert_eq!(mark_group(&scene).0.x, (plot.x - 0.25) as f32);
 }
 
 #[test]

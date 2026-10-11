@@ -7,7 +7,7 @@ use crate::model::LineOptions;
 use crate::resolve::NormalizedPos;
 use crate::scene::{LineCap, LineJoin};
 use crate::test_support::scene::assert_scene_bounded;
-use crate::{Dash, FontLibrary, Theme};
+use crate::{Dash, FontLibrary, SizeSpec, Theme};
 
 #[test]
 fn lines_far_outside_limits_are_clipped() {
@@ -189,6 +189,66 @@ fn dash_patterns_scale_with_width() {
                 (style.cap, style.join, style.width),
                 (cap, LineJoin::Round, w)
             );
+        }
+    }
+}
+
+#[test]
+fn per_series_width_sets_the_stroke_its_dashes_and_its_clip_margin() {
+    // Graphite lines are 1.8 pt wide by default.
+    for (spec, w) in [
+        (SizeSpec::times(3.0).unwrap(), 3.0 * 1.8_f32),
+        (SizeSpec::pt(8.0).unwrap(), 8.0),
+        (SizeSpec::times(0.5).unwrap(), 0.9),
+    ] {
+        for (dash, pattern) in [
+            (Dash::Solid, vec![]),
+            (Dash::Dashed, vec![4.0 * w, 3.0 * w]),
+            (Dash::Dotted, vec![0.0, 2.5 * w]),
+        ] {
+            let mut f = line_figure(
+                Theme::graphite(),
+                &[-1e9, 0.5, 1e9],
+                &[-1e9, 0.5, 1e9],
+                LineOptions {
+                    dash,
+                    width: spec,
+                    ..LineOptions::default()
+                },
+            );
+            f.axes_mut()
+                .unwrap()
+                .xlim(0.0, 1.0)
+                .unwrap()
+                .ylim(0.0, 1.0)
+                .unwrap();
+            let scene = f.to_scene(FontLibrary::global());
+            assert_scene_bounded(&scene);
+            let strokes = line_strokes(&scene);
+            let [(path, style)] = strokes.as_slice() else {
+                panic!("expected one stroke, got {strokes:?}")
+            };
+            assert_eq!(
+                (style.width, &style.dash),
+                (w, &pattern),
+                "{spec:?} {dash:?}"
+            );
+            // The axis-space clip reaches max(width, 2) pt past the plot: the line y = x is cut
+            // there, as with a theme of that line width.
+            let plot = plot_of(&f);
+            let m = f64::from(w).max(2.0);
+            let big = plot.width.max(plot.height);
+            let at = |v: f64| (plot.x + v * plot.width, plot.bottom() - v * plot.height);
+            let parts = subpaths(path);
+            let [got] = parts.as_slice() else {
+                panic!("expected one subpath")
+            };
+            for (p, (ex, ey)) in got.iter().zip([at(-m / big), at(0.5), at(1.0 + m / big)]) {
+                assert!(
+                    (f64::from(p.x) - ex).abs() < 1e-3 && (f64::from(p.y) - ey).abs() < 1e-3,
+                    "{spec:?}: {p:?} vs ({ex}, {ey})"
+                );
+            }
         }
     }
 }

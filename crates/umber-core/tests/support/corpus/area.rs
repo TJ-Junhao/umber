@@ -191,6 +191,7 @@ fn figures() -> Vec<(String, umber_core::Figure)> {
                 label: "Solar".into(),
                 color: ColorSpec::Auto(Alpha::new(0.6).unwrap()),
                 dash: Dash::Dotted,
+                ..AreaOptions::default()
             },
         )
         .unwrap();
@@ -347,6 +348,7 @@ fn area_errors() -> String {
                     alpha: Alpha::new(0.25).unwrap(),
                 },
                 dash: Dash::Dashed,
+                ..AreaOptions::default()
             },
         )
         .map(drop)

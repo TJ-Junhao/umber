@@ -10,7 +10,7 @@ use crate::m4_indices;
 use crate::model::LineMark;
 use crate::resolve::Resolved;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
-use crate::{Dash, Rgba, Theme};
+use crate::{Dash, Rgba};
 
 /// The smallest line clip margin, in points.
 const MIN_LINE_MARGIN: f64 = 2.0;
@@ -92,14 +92,10 @@ impl PlotLimit {
     }
 }
 
-/// The stroke width of a line mark, in points: the theme's line width, kept finite.
-pub(super) fn line_width(theme: &Theme) -> f32 {
-    theme.drawn_line_width()
-}
-
-/// The stroke of a line mark of `color` and `dash` at the theme's line width.
-pub(super) fn line_style(theme: &Theme, color: Rgba, dash: Dash) -> StrokeStyle {
-    let w = line_width(theme);
+/// The stroke of a line mark of `color` and `dash`, `w` pt wide (the mark's drawn width,
+/// see [`ResolvedMark::line_width`](crate::resolve::ResolvedMark::line_width)). Dashes scale
+/// with the width.
+pub(super) fn line_style(w: f32, color: Rgba, dash: Dash) -> StrokeStyle {
     let (dash, cap) = match dash {
         Dash::Solid => (Vec::new(), LineCap::Round),
         Dash::Dashed => (vec![4.0 * w, 3.0 * w], LineCap::Butt),
@@ -114,36 +110,36 @@ pub(super) fn line_style(theme: &Theme, color: Rgba, dash: Dash) -> StrokeStyle 
     }
 }
 
-/// The scene item of one line, given in axis space: its stroke, and nothing when no part of
-/// the line is visible. See [`plot_subpaths`] for the clipping.
+/// The scene item of one line, given in axis space and stroked with `style`: its stroke, and
+/// nothing when no part of the line is visible. See [`plot_subpaths`] for the clipping.
 pub(super) fn line_items(
     context: &MarkContext<'_>,
     xs: &[f64],
     ys: &[f64],
-    color: Rgba,
-    dash: Dash,
+    style: &StrokeStyle,
     items: &mut Vec<Item>,
 ) {
-    let subpaths = plot_subpaths(context, xs, ys);
+    let subpaths = plot_subpaths(context, style.width, xs, ys);
     if !subpaths.is_empty() {
-        items.push(stroke(context.theme, &subpaths, color, dash));
+        items.push(stroke(&subpaths, style));
     }
 }
 
-/// The visible runs of the axis-space line `(xs, ys)` in plot points, one subpath per run that
-/// NaN or the clip leaves. The line is clipped in axis space and only the clipped points are
-/// mapped to plot coordinates.
+/// The visible runs of the axis-space line `(xs, ys)`, stroked `width` pt wide, in plot points,
+/// one subpath per run that NaN or the clip leaves. The line is clipped in axis space and only
+/// the clipped points are mapped to plot coordinates.
 pub(super) fn plot_subpaths(
     context: &MarkContext<'_>,
+    width: f32,
     xs: &[f64],
     ys: &[f64],
 ) -> Vec<Vec<PlotPoint>> {
-    let clip = LineClip::of(context);
+    let clip = LineClip::of(context, width);
     clip.to_plot(clip_polyline(xs, ys, &clip.bounds))
 }
 
-/// The axis-space clip of a line, the domain expanded by `max(line width, 2)` pt, with the map
-/// of clipped pieces to plot points.
+/// The axis-space clip of a line stroked `width` pt wide, the domain expanded by
+/// `max(width, 2)` pt, with the map of clipped pieces to plot points.
 pub(super) struct LineClip {
     /// The clip rectangle in axis space.
     pub(super) bounds: Bounds,
@@ -154,12 +150,10 @@ pub(super) struct LineClip {
 }
 
 impl LineClip {
-    /// The line clip of `context`.
-    pub(super) fn of(context: &MarkContext<'_>) -> LineClip {
-        let MarkContext {
-            theme, maps, plot, ..
-        } = *context;
-        let margin = f64::from(line_width(theme)).max(MIN_LINE_MARGIN);
+    /// The clip in `context` of a line stroked `width` pt wide.
+    pub(super) fn of(context: &MarkContext<'_>, width: f32) -> LineClip {
+        let MarkContext { maps, plot, .. } = *context;
+        let margin = f64::from(width).max(MIN_LINE_MARGIN);
         let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
         LineClip {
             bounds: Bounds {
@@ -188,9 +182,8 @@ impl LineClip {
     }
 }
 
-/// The stroke through the plot-point `subpaths`, in `color` and `dash` at the theme's line
-/// width.
-pub(super) fn stroke(theme: &Theme, subpaths: &[Vec<PlotPoint>], color: Rgba, dash: Dash) -> Item {
+/// The stroke through the plot-point `subpaths`, in `style`.
+pub(super) fn stroke(subpaths: &[Vec<PlotPoint>], style: &StrokeStyle) -> Item {
     let mut path = Path::new();
     for subpath in subpaths {
         let mut points = subpath.iter().map(|p| p.to_scene());
@@ -209,6 +202,6 @@ pub(super) fn stroke(theme: &Theme, subpaths: &[Vec<PlotPoint>], color: Rgba, da
     }
     Item::Stroke {
         path,
-        style: line_style(theme, color, dash),
+        style: style.clone(),
     }
 }

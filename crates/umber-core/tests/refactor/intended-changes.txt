@@ -1,2 +1,1 @@
-# Cases whose committed outputs change on purpose in this change: error messages print extreme numbers in scientific form.
-errors/api
+# Cases whose committed outputs change on purpose in this change; none. Per-series widths and sizes only add outputs.

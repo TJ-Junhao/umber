@@ -54,6 +54,7 @@
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
+//! - per-series line widths and marker sizes: [`SizeSpec`], with its [`Factor`] and [`Points`];
 //! - scales: [`ScaleKind`] and [`LogBase`];
 //! - output: [`SvgText`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
@@ -71,8 +72,8 @@
 //!   [`Tick`], the numeric limits [`MAX_MAGNITUDE`] and [`MIN_LOG_VALUE`], and the M4
 //!   downsampling of [`m4_indices`].
 //!
-//! Everything else, such as scale resolution, layout, drawing and mark color resolution, is
-//! internal and may change in any release.
+//! Everything else, such as scale resolution, layout, drawing and the resolution of mark colors
+//! and sizes, is internal and may change in any release.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -95,6 +96,7 @@ mod resolve;
 pub mod scale;
 pub mod scene;
 mod scene_text;
+pub mod size;
 mod stacking;
 #[cfg(test)]
 mod test_support;
@@ -121,6 +123,7 @@ pub use scene::{
     FillRule, GradientStop, Item, LineCap, LineJoin, LinearGradient, Paint, Rect, Scene,
     StrokeStyle, TextItem,
 };
+pub use size::{Factor, Points, SizeSpec};
 pub use text::{FontLibrary, TextLayout, TextStyle};
 pub use theme::{Dash, FillStyle, GridLines, LegendStyle, Marker, Theme};
 pub use ticks::Tick;

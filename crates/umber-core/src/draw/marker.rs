@@ -1,7 +1,7 @@
-//! Marker shapes, centered at (0, 0), and the marker diameter drawn.
+//! Marker shapes, centered at (0, 0).
 
+use crate::Marker;
 use crate::geometry::{Path, Point};
-use crate::{Marker, Theme};
 
 /// The side of a square with the area of a unit-diameter circle: `sqrt(pi) / 2`.
 const SQUARE_SIDE: f32 = 0.886;
@@ -86,10 +86,4 @@ pub(super) fn extent(path: &Path) -> (f64, f64) {
             f64::from(min.y.abs().max(max.y.abs())),
         )
     })
-}
-
-/// The marker diameter as drawn: the theme's, finite and capped (see
-/// `Theme::drawn_marker_size`).
-pub(super) fn marker_size(theme: &Theme) -> f32 {
-    theme.drawn_marker_size()
 }
