@@ -26,7 +26,7 @@ pub use crate::model::{
     HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
 };
 
-use crate::render::{SvgText, render_png, render_svg};
+use crate::render::{SvgText, check_dpi, render_png, render_svg};
 use crate::scene::Scene;
 use crate::{FontLibrary, Result, pipeline};
 
@@ -59,8 +59,8 @@ impl Figure {
     }
 
     /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`]. Errors as
-    /// [`render_png`] does: `Error::Style` when `dpi` is outside `10..=2400` or the image would
-    /// be too large.
+    /// [`render_png`] does: `Error::Style` when `dpi` is outside `10..=2400` (the message names
+    /// the value however large or negative it is) or the image would be too large.
     ///
     /// # Examples
     ///
@@ -72,9 +72,11 @@ impl Figure {
     /// let png = figure.to_png(72)?;
     /// assert_eq!(&png[1..4], b"PNG");
     /// assert!(figure.to_png(1).is_err());
+    /// assert!(figure.to_png(-72).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn to_png(&self, dpi: u32) -> Result<Vec<u8>> {
+    pub fn to_png(&self, dpi: i64) -> Result<Vec<u8>> {
+        let dpi = check_dpi("Figure.to_png()", dpi)?;
         render_png(&self.to_scene(FontLibrary::global()), dpi)
     }
 

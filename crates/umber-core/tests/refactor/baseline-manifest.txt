@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 2ed253dbebd2484dea57661b849e8a5e158ed57f
+# revision: 11af58859604d6f02ae3dc33610df5b1c190d0a1
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -10,7 +10,8 @@ ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-
 f6cccb04feda2bfe07f90a63b6a89e30ebca2d0e6115141963221203417870b3  errors/api.txt
 2dcb81da9a93806e57ab17524d72fb1d64fb18a2e3bf3ea41e123d30274a0c73  errors/bars.txt
 f405bf20b5ad0b960c1d302858baaa70885eb3f14d9265d0a2d1e6e7cee52f6e  errors/grouped-bars.txt
-84e73f080d7ed33f6066b562a2469478761c900552b0d6930a3ad75a6a6f0c8f  errors/hist.txt
+155af6575d8162a5345f9c9f7208fc9adf089f5feb06259149ff595fc29b782c  errors/hist.txt
+68c88012613aa73c8361c3350f5b18d859fbcac8286a86260461b74abe8cbeba  errors/inputs.txt
 b710e3e007454e2777da6eec60c934545526878e132b512b1163d3a4fa892a26  png/fig-all-nan.dpi200.png
 9ac2df927f6a41e4d44387230417b4e09b9b0fa6a80f86fed8bc804c920a8c91  png/fig-all-nan.dpi72.png
 5329c8252bdb5c15c1e250d308ddb7d7100b3ddf8b7b68c50669d6d444b5e01b  png/fig-bars-graphite.dpi200.png
