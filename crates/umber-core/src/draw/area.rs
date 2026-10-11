@@ -1,5 +1,5 @@
 //! Area fills under lines: a gradient from the line to the baseline, split where the line
-//! crosses the baseline.
+//! crosses the baseline; and that vertical fade toward the baseline, which histogram bars share.
 
 use super::clip::crossing;
 use super::mapping::PlotPoint;
@@ -65,9 +65,6 @@ pub(super) fn area_fills(subpath: &[PlotPoint], baseline_y: f64, color: Rgba) ->
     }
     parts.push(current);
 
-    let top_alpha = (f32::from(color.a) * AREA_TOP_ALPHA)
-        .round()
-        .clamp(0.0, 255.0) as u8;
     parts
         .into_iter()
         .filter_map(|(side, part)| {
@@ -94,25 +91,33 @@ pub(super) fn area_fills(subpath: &[PlotPoint], baseline_y: f64, color: Rgba) ->
             path.close();
             Some(Item::Fill {
                 path,
-                paint: Paint::Linear(LinearGradient {
-                    start: PlotPoint { x: 0.0, y: extreme }.to_scene(),
-                    end: at_baseline(0.0),
-                    stops: vec![
-                        GradientStop {
-                            offset: 0.0,
-                            color: Rgba {
-                                a: top_alpha,
-                                ..color
-                            },
-                        },
-                        GradientStop {
-                            offset: 1.0,
-                            color: Rgba { a: 0, ..color },
-                        },
-                    ],
-                }),
+                paint: baseline_fade(color, AREA_TOP_ALPHA, extreme, baseline_y),
                 rule: FillRule::NonZero,
             })
         })
         .collect()
+}
+
+/// A vertical gradient that fades `color` toward the baseline: at plot y `top_y` it has
+/// `top_share` of the color's own opacity, at plot y `baseline_y` none. Beyond both ends the
+/// gradient keeps its end colors.
+pub(super) fn baseline_fade(color: Rgba, top_share: f32, top_y: f64, baseline_y: f64) -> Paint {
+    Paint::Linear(LinearGradient {
+        start: PlotPoint { x: 0.0, y: top_y }.to_scene(),
+        end: PlotPoint {
+            x: 0.0,
+            y: baseline_y,
+        }
+        .to_scene(),
+        stops: vec![
+            GradientStop {
+                offset: 0.0,
+                color: color.scale_alpha(top_share),
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Rgba { a: 0, ..color },
+            },
+        ],
+    })
 }

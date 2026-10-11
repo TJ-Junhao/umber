@@ -1661,6 +1661,14 @@ mod record {
             }
             Mark::GroupedBar(group) => bar_group("grouped-bar", group),
             Mark::StackedBar(group) => bar_group("stacked-bar", group),
+            Mark::Hist(hist) => format!(
+                "hist values={} bins={} options.bins={} label={} color={}",
+                floats64(hist.values()),
+                hist.bins(),
+                hist.options().bins,
+                text(&hist.options().label),
+                color_spec(hist.options().color)
+            ),
             _ => "unknown-mark".into(),
         }
     }

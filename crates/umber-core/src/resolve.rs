@@ -5,19 +5,20 @@
 //! log space on a log axis), so marks never sit on the plot edge and the outermost ticks sit
 //! just inside it. The ticks are not changed by the padding. The exception is the x axis of an
 //! axes whose marks are all lines, which keeps the exact data extent. Explicit limits replace
-//! the auto range as given and are never padded. A linear y axis that holds bars always
-//! includes 0, and a side of its nice domain that ends at 0 is not padded, so bars start on the
-//! plot edge. A category axis lists the marks' categories in order of first appearance. Tick
-//! positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch data
-//! values again.
+//! the auto range as given and are never padded. A linear y axis that holds bars or a histogram
+//! always includes 0, and a side of its nice domain that ends at 0 is not padded, so bars start
+//! on the plot edge. A category axis lists the marks' categories in order of first appearance.
+//! Tick positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch
+//! data values again.
 //!
 //! Marks are resolved here too, once per render: each mark becomes a [`ResolvedMark`], a typed
 //! record that carries the mark's data and its [`ColorSpec`] resolved against the theme's
 //! palette. Axes are resolved from these records, once per layout pass, and drawing reads them
 //! instead of the marks.
 
+use crate::binning::Histogram;
 use crate::model::{
-    Axes, AxisData, BarGroupMark, BarMark, BarSeriesView, LineMark, Mark, ScatterMark,
+    Axes, AxisData, BarGroupMark, BarMark, BarSeriesView, HistMark, LineMark, Mark, ScatterMark,
 };
 use crate::scale::{Padding, is_single_value};
 use crate::stacking::Stacks;
@@ -378,21 +379,36 @@ pub(crate) enum ResolvedMark<'a> {
         /// categories and series.
         stacks: Stacks,
     },
+    /// A histogram mark.
+    Hist {
+        /// The mark.
+        mark: &'a HistMark,
+        /// The mark's values binned; `None` when it has no finite value.
+        histogram: Option<Histogram>,
+        /// The bar color.
+        color: Rgba,
+    },
 }
 
 impl<'a> ResolvedMark<'a> {
     /// The values the mark contributes to a continuous x domain, in data order; none when its
     /// x values are categories. See [`ResolvedMark`] for the contract.
-    pub fn x_numbers(&self) -> impl Iterator<Item = f64> + '_ {
-        match self {
+    ///
+    /// A histogram yields the low and the high end of its binned range
+    /// ([`Histogram::range`]), and nothing when it has no finite value.
+    pub fn x_numbers(&self) -> Box<dyn Iterator<Item = f64> + '_> {
+        let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
             ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. } => &[],
-        }
-        .iter()
-        .copied()
+            ResolvedMark::Hist { histogram, .. } => {
+                let range = histogram.as_ref().map(Histogram::range);
+                return Box::new(range.into_iter().flat_map(|(lo, hi)| [lo, hi]));
+            }
+        };
+        Box::new(values.iter().copied())
     }
 
     /// The categories the mark contributes to a category x axis, in data order, repeats
@@ -405,6 +421,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Grouped { mark, .. } | ResolvedMark::Stacked { mark, .. } => {
                 mark.categories()
             }
+            ResolvedMark::Hist { .. } => &[],
         }
         .iter()
         .map(String::as_str)
@@ -417,7 +434,8 @@ impl<'a> ResolvedMark<'a> {
     /// 0 ([`Stacks::ends`]), never 0 itself: on a linear axis the bars put 0 into the domain
     /// anyway (see [`grows_from_baseline`](Self::grows_from_baseline)), and on a log axis, where
     /// every height is positive, these are the positive segment ends, which a log domain can
-    /// hold.
+    /// hold. Histograms yield the count of every non-empty bin, in bin order, and so never 0
+    /// either: on a log axis the domain spans the smallest positive count to the largest.
     pub fn y_values(&self) -> Box<dyn Iterator<Item = f64> + '_> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
@@ -431,18 +449,28 @@ impl<'a> ResolvedMark<'a> {
                 );
             }
             ResolvedMark::Stacked { stacks, .. } => return Box::new(stacks.ends()),
+            ResolvedMark::Hist { histogram, .. } => {
+                let counts = histogram.as_ref().map_or(&[][..], Histogram::counts);
+                return Box::new(
+                    counts
+                        .iter()
+                        .filter(|&&count| count > 0)
+                        .map(|&count| count as f64),
+                );
+            }
         };
         Box::new(values.iter().copied())
     }
 
-    /// Whether the mark grows from the baseline, as bars do: such a mark puts 0 into a linear y
-    /// domain.
+    /// Whether the mark grows from the baseline, as bars and histogram bins do: such a mark puts
+    /// 0 into a linear y domain.
     pub fn grows_from_baseline(&self) -> bool {
         match self {
             ResolvedMark::Line { .. } | ResolvedMark::Scatter { .. } => false,
             ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
-            | ResolvedMark::Stacked { .. } => true,
+            | ResolvedMark::Stacked { .. }
+            | ResolvedMark::Hist { .. } => true,
         }
     }
 
@@ -481,6 +509,11 @@ impl<'a> ResolvedMark<'a> {
                     kind: SeriesKind::Bar,
                 })
                 .collect(),
+            &ResolvedMark::Hist { mark, color, .. } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Bar,
+            }],
         }
     }
 }
@@ -530,9 +563,9 @@ pub(crate) enum SeriesKind {
 }
 
 /// Each mark resolved for drawing, in mark order, with its colors resolved against `palette`,
-/// and the stacks of stacked bars computed. Every series takes its color in series order, the
-/// series of a grouped or stacked mark one after another: `Auto` colors take palette slots in
-/// that order; `Palette` and `Fixed` colors do not consume a slot.
+/// the stacks of stacked bars computed and the values of histograms binned. Every series takes
+/// its color in series order, the series of a grouped or stacked mark one after another: `Auto`
+/// colors take palette slots in that order; `Palette` and `Fixed` colors do not consume a slot.
 pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<ResolvedMark<'a>> {
     let mut next_auto = 0_usize;
     let mut color_of = |spec: ColorSpec| {
@@ -576,6 +609,11 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
                     series,
                 }
             }
+            Mark::Hist(mark) => ResolvedMark::Hist {
+                mark,
+                histogram: Histogram::from_values(mark.values(), mark.bin_count()),
+                color: color_of(mark.options().color),
+            },
         })
         .collect()
 }
@@ -583,7 +621,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], palette: &[Rgba]) -> Vec<Reso
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{BarOptions, BarSeries, Figure, LineOptions, ScatterOptions};
+    use crate::model::{BarOptions, BarSeries, Figure, HistOptions, LineOptions, ScatterOptions};
     use crate::{LogBase, ScaleKind, Theme};
 
     fn nums(v: &[f64]) -> AxisData {
@@ -1441,5 +1479,128 @@ mod tests {
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(labels(&r.x), ["b", "c", "a", "d"]);
+    }
+
+    /// Linear axes holding one histogram of `values` in `bins` bins, on a y axis of `y`.
+    fn hist_figure(y: ScaleKind, values: &[f64], bins: usize) -> Figure {
+        let mut f = figure(LIN, y);
+        let options = HistOptions {
+            bins,
+            ..HistOptions::default()
+        };
+        axes(&mut f).hist(values, options).unwrap();
+        f
+    }
+
+    #[test]
+    fn hist_x_extent_is_nice_over_the_data() {
+        // The bins span the data, 12 to 88; x takes the nice limits 10..90, padded on both
+        // sides like any axes that is not all lines.
+        let f = hist_figure(LIN, &[12.0, 47.0, 88.0, 30.0, f64::NAN], 4);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let (x, _) = domains(&f);
+        assert!(close(x, pad(10.0, 90.0)), "{x:?}");
+        assert_eq!(labels(&r.x), ["10", "30", "50", "70", "90"]);
+        assert_end_ticks_inset(&r.x);
+
+        // Constant data is binned over v ± 0.5, which the x axis then encloses.
+        let f = hist_figure(LIN, &[3.0, 3.0], 2);
+        let (x, _) = domains(&f);
+        assert!(x.0 < 2.5 && x.1 > 3.5, "{x:?}");
+    }
+
+    #[test]
+    fn hist_y_extent_spans_zero_to_the_largest_count() {
+        // Counts 1, 0, 2, 5: on a linear axis the y domain starts at 0, on the plot edge, with
+        // the baseline, and reaches past the largest count.
+        let values = [0.0, 2.5, 2.6, 3.1, 3.2, 3.3, 3.4, 4.0];
+        let f = hist_figure(LIN, &values, 4);
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let (_, (lo, hi)) = domains(&f);
+        assert_eq!(lo, 0.0);
+        assert!(hi > 5.0, "{hi}");
+        assert_eq!(r.y.ticks[0].pos.get(), 0.0);
+        assert_eq!(r.baseline.get(), 0.0);
+        // The same domain as bars as high as the counts.
+        let g = bar_figure(LIN, &[1.0, 0.0, 2.0, 5.0]);
+        assert_eq!(y_domain(&f), y_domain(&g));
+    }
+
+    #[test]
+    fn hist_log_y_extent_comes_from_positive_counts() {
+        // Counts 1, 0, 0, 40: on a log axis the domain is fitted to the positive counts, 1..40,
+        // never to an extent that includes 0, which a log axis cannot hold (it would fall back
+        // to the unit range 1..10).
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let mut values = vec![0.0];
+        values.extend(std::iter::repeat_n(4.0, 40));
+        let f = hist_figure(log, &values, 4);
+        let domain = y_domain(&f);
+        assert!(close(domain, pad_log(1.0, 100.0)), "{domain:?}");
+        // The same domain as a line through exactly the smallest and largest positive count.
+        let mut g = figure(LIN, log);
+        axes(&mut g)
+            .line(nums(&[0.0, 1.0]), &[1.0, 40.0], LineOptions::default())
+            .unwrap();
+        assert_eq!(domain, y_domain(&g));
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert_eq!(r.baseline.get(), 0.0);
+    }
+
+    #[test]
+    fn hist_without_finite_values_falls_back_to_the_unit_range() {
+        for values in [&[][..], &[f64::NAN, f64::NAN][..]] {
+            let f = hist_figure(LIN, values, 30);
+            assert_eq!(domains(&f), ((0.0, 1.0), (0.0, 1.0)));
+            let marks = resolve_marks(f.axes().unwrap().marks(), &[]);
+            assert!(matches!(
+                marks.as_slice(),
+                [ResolvedMark::Hist {
+                    histogram: None,
+                    ..
+                }]
+            ));
+        }
+    }
+
+    #[test]
+    fn hist_is_binned_once_and_takes_one_auto_color() {
+        let mut f = figure(LIN, LIN);
+        let palette = f.theme().palette().to_vec();
+        axes(&mut f)
+            .scatter(nums(&[1.0]), &[1.0], ScatterOptions::default())
+            .unwrap()
+            .hist(
+                &[1.0, 2.0, 2.0, 3.0],
+                HistOptions {
+                    bins: 2,
+                    label: "sizes".into(),
+                    ..HistOptions::default()
+                },
+            )
+            .unwrap()
+            .line(nums(&[1.0]), &[1.0], LineOptions::default())
+            .unwrap();
+        let resolved = resolve_marks(f.axes().unwrap().marks(), &palette);
+        assert_eq!(
+            series_colors(&resolved),
+            [palette[0], palette[1], palette[2]]
+        );
+        let ResolvedMark::Hist {
+            histogram: Some(histogram),
+            ..
+        } = &resolved[1]
+        else {
+            panic!("expected a binned histogram, got {:?}", resolved[1]);
+        };
+        assert_eq!(histogram.counts(), &[1, 3]);
+        assert_eq!(
+            resolved[1].keys(),
+            [SeriesKey {
+                label: "sizes",
+                color: palette[1],
+                kind: SeriesKind::Bar,
+            }]
+        );
     }
 }

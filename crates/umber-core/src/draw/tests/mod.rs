@@ -6,6 +6,7 @@ mod area;
 mod bar;
 mod chrome;
 mod clip;
+mod hist;
 mod line;
 mod mapping;
 mod marker;
