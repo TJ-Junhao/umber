@@ -49,7 +49,7 @@ pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layo
     let theme = figure.theme();
     let axes = figure.axes().expect("the figure has axes");
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
-    let marks = resolve::resolve_marks(axes.marks(), theme.palette());
+    let marks = resolve::resolve_marks(axes.marks(), theme);
     let legend = measure_legend(width, theme, axes, &marks, lib);
     let input = LayoutInput {
         width,
@@ -78,7 +78,7 @@ pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
     let Some(axes) = figure.axes() else {
         return scene;
     };
-    let marks = resolve::resolve_marks(axes.marks(), theme.palette());
+    let marks = resolve::resolve_marks(axes.marks(), theme);
     let legend = measure_legend(width, theme, axes, &marks, library);
     let input = LayoutInput {
         width,

@@ -412,7 +412,9 @@ fn limited_area(
 
 /// The line margin of Midnight's line width, in points.
 fn margin() -> f32 {
-    Theme::midnight().drawn_line_width().max(2.0)
+    Theme::midnight()
+        .drawn_line_width(crate::SizeSpec::Auto)
+        .max(2.0)
 }
 
 #[test]

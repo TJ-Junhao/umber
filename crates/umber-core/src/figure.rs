@@ -112,7 +112,7 @@ mod tests {
         let Some(axes) = figure.axes() else {
             return Vec::new();
         };
-        resolve::resolve_marks(axes.marks(), figure.theme().palette())
+        resolve::resolve_marks(axes.marks(), figure.theme())
             .into_iter()
             .flat_map(|resolved| resolved.keys(&resolve::Limits::of(axes)))
             .map(|key| key.color)

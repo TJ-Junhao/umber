@@ -342,6 +342,39 @@ mod tests {
     }
 
     #[test]
+    fn marks_keep_their_width_and_size() {
+        use crate::SizeSpec;
+        let mut f = figure();
+        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let line = LineOptions {
+            width: SizeSpec::times(2.0).unwrap(),
+            ..LineOptions::default()
+        };
+        let area = AreaOptions {
+            width: SizeSpec::pt(0.5).unwrap(),
+            ..AreaOptions::default()
+        };
+        let scatter = ScatterOptions {
+            size: SizeSpec::pt(9.0).unwrap(),
+            ..ScatterOptions::default()
+        };
+        a.line(nums(&[0.0]), &[1.0], line.clone())
+            .unwrap()
+            .area(nums(&[0.0]), &[1.0], area.clone())
+            .unwrap()
+            .scatter(nums(&[0.0]), &[1.0], scatter.clone())
+            .unwrap();
+        match a.marks() {
+            [Mark::Line(l), Mark::Area(r), Mark::Scatter(s)] => {
+                assert_eq!(l.options(), &line);
+                assert_eq!(r.options(), &area);
+                assert_eq!(s.options(), &scatter);
+            }
+            other => panic!("unexpected marks {other:?}"),
+        }
+    }
+
+    #[test]
     fn failed_calls_change_nothing() {
         let mut f = figure();
         f.add_axes(ScaleKind::Linear, log_kind())
@@ -932,8 +965,7 @@ mod tests {
         };
         let bits = |v: &[f64]| v.iter().map(|h| h.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(hist.values()), bits(&values));
-        assert_eq!(hist.bins(), 7);
-        assert_eq!((hist.label(), hist.color()), ("latency", options.color));
+        assert_eq!(hist.options(), options);
         assert!(hist.shares_data_with(cloned));
     }
 

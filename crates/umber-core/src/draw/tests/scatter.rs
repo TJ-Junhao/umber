@@ -10,7 +10,7 @@ use crate::model::{Figure, ScatterOptions};
 use crate::resolve::NormalizedPos;
 use crate::scene::Item;
 use crate::test_support::scene::assert_scene_bounded;
-use crate::{FontLibrary, Marker, Rgba, ScaleKind, Theme};
+use crate::{FontLibrary, Marker, Rgba, ScaleKind, SizeSpec, Theme};
 
 #[test]
 fn scatter_drops_points_far_outside() {
@@ -140,6 +140,7 @@ fn identity_context(theme: &Theme, plot: Area) -> MarkContext<'_> {
         plot,
         baseline: NormalizedPos::LOW,
         baseline_y: plot.bottom(),
+        widest_line: 0.0,
     }
 }
 
@@ -166,6 +167,7 @@ fn markers_are_culled_by_their_true_extent() {
             &[y],
             Rgba::opaque(255, 0, 0),
             shape,
+            d as f32,
         );
         assert!(item.is_some(), "{shape:?} was dropped");
     }
@@ -198,8 +200,40 @@ fn markers_are_culled_by_their_true_extent() {
                 &[y],
                 Rgba::BLACK,
                 shape,
+                10.0,
             );
             assert_eq!(item.is_some(), kept, "{shape:?} at ({x}, {y})");
+        }
+    }
+}
+
+#[test]
+fn per_series_size_sets_the_marker_shape() {
+    // Graphite markers are 5.6 pt across by default.
+    for (spec, d) in [
+        (SizeSpec::Auto, 5.6_f32),
+        (SizeSpec::times(2.0).unwrap(), 2.0 * 5.6),
+        (SizeSpec::pt(12.0).unwrap(), 12.0),
+    ] {
+        for m in [Marker::Circle, Marker::Cross] {
+            let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+            f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .scatter(
+                    nums(&[0.5]),
+                    &[0.5],
+                    ScatterOptions {
+                        marker: m,
+                        size: spec,
+                        ..ScatterOptions::default()
+                    },
+                )
+                .unwrap();
+            let scene = f.to_scene(FontLibrary::global());
+            let [Item::Markers { shape, .. }] = mark_group(&scene).1 else {
+                panic!("expected one marker batch")
+            };
+            assert_eq!(shape, &marker_shape(m, d), "{spec:?} {m:?}");
         }
     }
 }
