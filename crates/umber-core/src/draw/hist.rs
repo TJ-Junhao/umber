@@ -21,7 +21,7 @@ const TOP_EDGE_DEPTH: f64 = 1.6;
 /// when no bin is visible.
 ///
 /// Each non-empty bin is a rectangle with square corners from the base of its [`BarFrame`] (0
-/// on a linear y axis, the bottom of the plot on a log one) to its count, across its edges inset
+/// on a linear y axis, the baseline on a log one) to its count, across its edges inset
 /// by half the theme's `hist_gap` on each side; the gap is at most half the bin's width. A bin
 /// with a count of 0 draws nothing. Both ends of a bin are clipped in axis space as the frame
 /// describes: the count against the y domain and the edges against the x domain, each expanded
@@ -42,7 +42,7 @@ pub(super) fn hist_items(
     color: Rgba,
     items: &mut Vec<Item>,
 ) {
-    let Some(frame) = BarFrame::square(context.maps, y) else {
+    let Some(frame) = BarFrame::square(context.maps, y, context.baseline) else {
         return;
     };
     let gradient = context.theme.area_fill() == AreaFill::Gradient;

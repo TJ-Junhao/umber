@@ -68,7 +68,13 @@ fn group_slots(group: f64, count: usize, gap: f64) -> (f64, f64) {
 /// category x axis an axis unit is the plot width. `None` on axes that cannot hold bars.
 fn frame(context: &MarkContext<'_>, y: &ResolvedAxis, width: f64) -> Option<BarFrame> {
     let radius = corner_radius(context.theme);
-    BarFrame::new(context.maps, y, radius, width * context.plot.width)
+    BarFrame::new(
+        context.maps,
+        y,
+        context.baseline,
+        radius,
+        width * context.plot.width,
+    )
 }
 
 /// Pushes the bar `outline`, if any, as a `Fill` in `color`.
@@ -154,7 +160,7 @@ pub(super) fn grouped_items(
 ///
 /// A stack takes the span of a plain bar. Each segment of `stacks` runs from its bottom to its
 /// top; a segment that starts at 0 starts at the base of its [`BarFrame`] instead, so on a log
-/// axis the first segment starts at the bottom of the plot. Neighbouring segments on one side of
+/// axis the first segment starts at the baseline. Neighbouring segments on one side of
 /// 0 are [`STACK_GAP`] apart (see [`inset_segment`]); segments on opposite sides meet at the
 /// base. Only the outermost segment on each side of 0 may have its end rounded. Clipping and
 /// rounding are as the frame describes.

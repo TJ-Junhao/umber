@@ -111,7 +111,7 @@ mod tests {
         };
         resolve::resolve_marks(axes.marks(), figure.theme().palette())
             .into_iter()
-            .flat_map(|resolved| resolved.keys(&resolve::Limits::of(axes).x))
+            .flat_map(|resolved| resolved.keys(&resolve::Limits::of(axes)))
             .map(|key| key.color)
             .collect()
     }
