@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: b07fa826b6bffab61c89815cc3fd55e3f466cb98
+# revision: 153292e415633b49ff964c7cc412997128fbb6a9
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 3559173b0af8be4cc8f8d204c35af532374def8dff403f7c21f2044d13b013d3  api/constants.txt
@@ -134,7 +134,7 @@ ce5398a095e66d1a990c541d764ba07398f49d77ef99232ccea48043b8dfaee2  scene/fig-pigm
 ce9537155cbdebf16d1e0c0db3c72fe8c39eaabc54269dcedb74ea3f7d309f3d  scene/fig-squeezed-layout.txt
 0e5599813e3ec14debcee8d9dbc3cdee21adc11c10b1409590efb39d23668df1  scene/fig-subtitle-only.txt
 70f66ab3f5a818a0b2aaaf2096213c2f60c105fff27bb3d01b9b6c7d0858a9fa  scene/fig-text-fallback.txt
-d630e49c365865fb838707db805d237f97c593705b8d2d530e9f127e1009c21c  scene/fig-text-truncated.txt
+ec1ed2b2eef83a225112dda020a788550bbdba0c4b744d09cbaaaa789258a177  scene/fig-text-truncated.txt
 c63be6bdf2ad7cd4efc178ce59f4a7d75fef9b9f00b73a257e59fb0143ec605b  scene/fig-theme-tokens-0.txt
 31c716d8084da1c97a9c84509e433c6e4e9e26655c2a4f317d43d441a2721987  scene/fig-theme-tokens-1.txt
 c4a19fcf1956fb6461c72d0990b652f772268540a230255219bfad55f9c01ddf  scene/fig-theme-tokens-2.txt
@@ -213,8 +213,8 @@ cea039996a692cc79d0ee7cb1fa458fc8249a031e611e69394cb9a75be945e56  svg/fig-single
 8e4bdb9a4bf846195a5ab0e741780306342bfc0dde2c7f7db9285a91c2f30d39  svg/fig-subtitle-only.outlines.svg
 056cf7be15f0d62efe618ab540a305ad2637e922bd592abbcfd22400069a845f  svg/fig-text-fallback.editable.svg
 10b5297cb09768dee354722ad895ec065597bcc76a5ceb876e3608623894b4c0  svg/fig-text-fallback.outlines.svg
-c1b878504a42915510add61ed777a12beae870efdeba580fde45f69735a8a470  svg/fig-text-truncated.editable.svg
-bee9163b59e42d05003fd516a9bc10fe0ccb859ea819e07ed3c802d5a717faf7  svg/fig-text-truncated.outlines.svg
+a23fa4d6f6b9e3500461d7ccfdccc016131dea0854ef4f89278cafc87fc4f15d  svg/fig-text-truncated.editable.svg
+18d0f35d3939feff6facab531d0b1555326479e492e861b0514f2d7a6f57e427  svg/fig-text-truncated.outlines.svg
 eb016f24266a22e56205d93259738fb63b8fd5fe3f43a09104498dbc794eb1c2  svg/fig-theme-tokens-0.editable.svg
 1cd1c47c229baffe6d895b588ac0e36435a69c9843b832afa59c563fe0e641d3  svg/fig-theme-tokens-0.outlines.svg
 1454a163890878b18ce83088000b024dcff317490561948c6195ab22add02133  svg/fig-theme-tokens-1.editable.svg

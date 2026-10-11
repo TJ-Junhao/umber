@@ -1,12 +1,13 @@
 //! Drawing: turns a [`Layout`] into scene items.
 //!
 //! The axes chrome (gridlines, tick labels, the header and the axis labels) is one unclipped
-//! group, drawn by [`chrome()`]. The marks follow in a second group, drawn in
-//! insertion order by [`marks()`] and clipped to the plot area. When the axes hold line marks,
-//! that clip is widened horizontally on each side by half of the widest line stroke, so the
-//! round end of a line that starts or ends on the left or right edge stays whole; the top and
-//! bottom of the clip are the plot area's. The baseline comes last, in an unclipped group of
-//! its own drawn by [`baseline()`], so marks never cover it.
+//! group, drawn by [`chrome()`]. The marks follow in a second group, drawn in insertion order by
+//! [`marks()`] and clipped to the plot area. When the axes hold line marks, that clip is widened
+//! horizontally on each side by half of the widest line stroke, as far as the room beside the
+//! plot area allows (see [`marks_clip`]), so the round end of a line that starts or ends on the
+//! left or right edge stays whole; the top and bottom of the clip are the plot area's. The
+//! baseline comes last, in an unclipped group of its own drawn by [`baseline()`], so marks never
+//! cover it.
 //!
 //! Marks are clipped in *axis space*, before they are mapped to plot coordinates: the raw value
 //! on a linear axis, `ln(value / lower limit)` on a log axis, the band center (in `0..=1`) on a
@@ -111,7 +112,7 @@ pub(crate) fn marks(
         return None;
     }
     Some(Item::Group {
-        clip: Some(marks_clip(theme, plot, marks)),
+        clip: Some(marks_clip(theme, layout, marks)),
         items,
     })
 }
@@ -119,20 +120,28 @@ pub(crate) fn marks(
 /// The clip rectangle of the marks: the plot area, widened horizontally on each side by half of
 /// the widest stroke among the line `marks`; the plot area itself when there is no line mark.
 ///
+/// The widening never takes more than the free room beside the plot area
+/// ([`Layout::room_left`], [`Layout::room_right`]): on the left it stops at the y tick labels
+/// (or the canvas edge without them), on the right at the canvas edge. The layout does not make
+/// room for the caps, so a line wide enough for half its stroke to exceed the gap between the
+/// plot and the y tick labels, or the outer padding on the right, still has its cap cut there.
+///
 /// Lines are clipped in axis space against a margin of at least their full stroke width (see
 /// the module documentation), so they always reach past this rectangle and its edge is the
 /// only cut.
-pub(super) fn marks_clip(theme: &Theme, plot: Area, marks: &[ResolvedMark<'_>]) -> Rect {
+pub(super) fn marks_clip(theme: &Theme, layout: &Layout, marks: &[ResolvedMark<'_>]) -> Rect {
+    let plot = layout.plot;
     let widest = marks
         .iter()
         .filter(|mark| matches!(mark, ResolvedMark::Line { .. }))
         .map(|_| f64::from(line::line_width(theme)))
         .fold(0.0, f64::max);
     let half = widest / 2.0;
+    let (left, right) = (half.min(layout.room_left()), half.min(layout.room_right()));
     Rect {
-        x: (plot.x - half) as f32,
+        x: (plot.x - left) as f32,
         y: plot.y as f32,
-        width: (plot.width + 2.0 * half) as f32,
+        width: (plot.width + (left + right)) as f32,
         height: plot.height as f32,
     }
 }

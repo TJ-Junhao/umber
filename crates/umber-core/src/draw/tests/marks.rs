@@ -83,6 +83,50 @@ fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
 }
 
 #[test]
+fn clip_widening_stops_at_the_y_labels_and_the_canvas() {
+    for width in [20.0, 30.0] {
+        let theme = Theme::graphite().with_line_width(width).unwrap();
+        let mut f = Figure::new(6.0, 3.0, theme).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xlim(0.0, 1.0)
+            .unwrap()
+            .ylim(0.0, 1.0)
+            .unwrap()
+            .line(nums(&[0.0, 1.0]), &[0.5, 0.5], LineOptions::default())
+            .unwrap();
+        let layout = crate::pipeline::plan_figure(&f, FontLibrary::global()).1;
+        let scene = f.to_scene(FontLibrary::global());
+        let (clip, _) = mark_group(&scene);
+        let (left, right) = (f64::from(clip.x), f64::from(clip.x + clip.width));
+        let half = width / 2.0;
+        // Half the stroke is wider than the 6 pt gap to the y tick labels: the clip stops there.
+        assert!(half > layout.room_left(), "{width}");
+        assert!(
+            (left - (layout.plot.x - layout.room_left())).abs() < 1e-3,
+            "{width}"
+        );
+        // On the right it reaches past the plot by half the stroke, but never past the canvas.
+        let expected_right = layout.plot.right() + half.min(layout.room_right());
+        assert!((right - expected_right).abs() < 1e-3, "{width}: {right}");
+        if width == 30.0 {
+            assert!(half > layout.room_right());
+        }
+        // No y tick label lies under the clip, and the clip stays on the canvas.
+        assert!(!layout.y_tick_labels.is_empty());
+        for label in &layout.y_tick_labels {
+            assert!(
+                label.x + label.width() <= left + 1e-3,
+                "{width}: {}",
+                label.text
+            );
+        }
+        assert!(left >= 0.0, "{width}: {left}");
+        assert!(right <= 6.0 * 72.0 + 1e-3, "{width}: {right}");
+    }
+}
+
+#[test]
 fn marks_follow_insertion_order_and_resolved_colors() {
     let theme = Theme::pigment();
     let fixed = Rgba::opaque(1, 2, 3);

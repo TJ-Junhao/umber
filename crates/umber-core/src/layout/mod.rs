@@ -147,6 +147,26 @@ pub(crate) struct Layout {
     pub x_grid: Vec<f64>,
     /// The y coordinate of the baseline.
     pub baseline_y: f64,
+    /// The canvas width.
+    pub canvas_width: f64,
+}
+
+impl Layout {
+    /// The free room left of the plot area: up to the right edge of the furthest-reaching y
+    /// tick label, or to the canvas left edge when there are no y tick labels. Never negative.
+    pub fn room_left(&self) -> f64 {
+        let edge = self
+            .y_tick_labels
+            .iter()
+            .map(|label| label.x + label.width())
+            .fold(0.0, f64::max);
+        (self.plot.x - edge).max(0.0)
+    }
+
+    /// The free room right of the plot area, up to the canvas right edge. Never negative.
+    pub fn room_right(&self) -> f64 {
+        (self.canvas_width - self.plot.right()).max(0.0)
+    }
 }
 
 /// `size * scale`, finite and within `0..=MAX_FONT_SIZE`.
@@ -479,6 +499,7 @@ pub(crate) fn lay_out(
         y_grid,
         x_grid,
         baseline_y,
+        canvas_width: width,
     }
 }
 
