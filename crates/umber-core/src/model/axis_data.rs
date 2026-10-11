@@ -89,7 +89,7 @@ impl fmt::Debug for Series {
 mod tests {
     use super::super::validation::LINE_GAP_HINT;
     use super::*;
-    use crate::model::{Figure, LineOptions, Mark, ScatterOptions};
+    use crate::model::{AreaOptions, Figure, LineOptions, Mark, ScatterOptions};
     use crate::{Error, LogBase, Theme};
 
     const LIN: ScaleKind = ScaleKind::Linear;
@@ -102,6 +102,7 @@ mod tests {
         match mark {
             Mark::Line(line) => line.series(),
             Mark::Scatter(scatter) => scatter.series(),
+            Mark::Area(area) => area.series(),
             other => panic!("{other:?} holds no series"),
         }
     }
@@ -239,5 +240,37 @@ mod tests {
         assert_eq!(axes.y_limits(), None);
         assert_eq!(axes.title_text(), "");
         assert_eq!(copy.axes().unwrap().marks().len(), 2);
+    }
+
+    #[test]
+    fn areas_store_their_series_as_lines_do() {
+        // Every bit, NaN payloads and signed zeros included, under the area's own context.
+        let gap = f64::from_bits(0xfff0_0000_dead_beef);
+        let x = vec![0.0, gap, -0.0];
+        let y = [gap, 1.0, -0.0];
+        let mut figure = Figure::new(6.0, 4.0, Theme::midnight()).unwrap();
+        let axes = figure.add_axes(LIN, LIN).unwrap();
+        axes.area(AxisData::Numbers(x.clone()), &y, AreaOptions::default())
+            .unwrap();
+        let [mark @ Mark::Area(area)] = axes.marks() else {
+            panic!("expected one area, got {:?}", axes.marks())
+        };
+        let series = series_of(mark);
+        match series.x() {
+            AxisData::Numbers(stored) => assert_eq!(bits(stored), bits(&x)),
+            other => panic!("unexpected x {other:?}"),
+        }
+        assert_eq!(bits(series.y()), bits(&y));
+        assert_eq!(area.options(), &AreaOptions::default());
+        // A failed call adds nothing.
+        let err = axes
+            .area(
+                AxisData::Numbers(vec![0.0]),
+                &[1.0, 2.0],
+                AreaOptions::default(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().starts_with("Axes.area(): x has 1 values"));
+        assert_eq!(axes.marks().len(), 1);
     }
 }

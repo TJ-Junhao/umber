@@ -22,8 +22,9 @@
 //! ```
 
 pub use crate::model::{
-    Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView, Figure, HistMark,
-    HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
+    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries,
+    BarSeriesView, Figure, HistMark, HistOptions, LineMark, LineOptions, Mark, ScatterMark,
+    ScatterOptions,
 };
 
 use crate::render::{SvgText, check_dpi, render_png, render_svg};
@@ -35,10 +36,10 @@ impl Figure {
     /// The scene is `width × 72` by `height × 72` pt on the theme background. It holds the
     /// axes chrome (gridlines, tick labels, header and axis labels) as one unclipped group,
     /// followed by the visible marks, in insertion order, as one group clipped to the plot area
-    /// (widened horizontally by half of the widest line stroke when the axes hold lines, as far
-    /// as the room beside the plot allows, so line ends stay whole), and last the baseline as
-    /// an unclipped group of its own, so marks never cover it. Without axes it holds the
-    /// background only. The same figure always gives the same scene.
+    /// (widened horizontally by half of the widest line stroke when the axes hold lines or
+    /// areas, as far as the room beside the plot allows, so line ends stay whole), and last the
+    /// baseline as an unclipped group of its own, so marks never cover it. Without axes it
+    /// holds the background only. The same figure always gives the same scene.
     ///
     /// # Examples
     ///

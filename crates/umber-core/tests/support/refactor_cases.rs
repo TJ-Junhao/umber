@@ -75,13 +75,14 @@ use umber_core::scene::{
     Scene, StrokeStyle,
 };
 use umber_core::{
-    Alpha, AreaFill, ColorSpec, ContinuousScale, Dash, Figure, Font, FontLibrary, GridLines,
+    Alpha, ColorSpec, ContinuousScale, Dash, Figure, FillStyle, Font, FontLibrary, GridLines,
     LegendStyle, LogBase, Marker, Path, Point, Rgba, ScaleKind, TextStyle, Theme, Transform,
     Weight,
 };
 
 /// Cases of the newer features, one module each, so that a feature edits only its own file.
 mod corpus {
+    pub mod area;
     pub mod bars;
     pub mod hist;
     pub mod inputs;
@@ -124,6 +125,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     text("api", "themes.txt", theme_cases());
     text("api", "constants.txt", constant_cases());
     text("api", "text-layout.txt", text_layout_cases(&lib));
+    corpus::area::cases(&lib, &mut sink);
     corpus::bars::cases(&lib, &mut sink);
     corpus::hist::cases(&lib, &mut sink);
     corpus::inputs::cases(&lib, &mut sink);
@@ -299,7 +301,7 @@ fn scene_cases(lib: &FontLibrary) -> Vec<(String, Scene)> {
             .unwrap()
             .with_grid_dash(Dash::Dotted)
             .unwrap()
-            .with_area_fill(AreaFill::Gradient)
+            .with_fill_style(FillStyle::Gradient)
             .unwrap(),
         Theme::graphite()
             .with_grid_lines(GridLines::Both)
@@ -1417,7 +1419,7 @@ mod record {
         FillRule, Item, LineCap, LineJoin, Paint, Rect, Scene, StrokeStyle, TextItem,
     };
     use umber_core::{
-        Alpha, AreaFill, Axes, ColorSpec, Dash, Error, Figure, Font, GridLines, LegendStyle,
+        Alpha, Axes, ColorSpec, Dash, Error, Figure, FillStyle, Font, GridLines, LegendStyle,
         Marker, Path, PathVerb, Point, Rgba, ScaleKind, TextStyle, Theme, Transform, Weight,
     };
 
@@ -1525,10 +1527,10 @@ mod record {
         }
     }
 
-    pub fn area_fill(a: AreaFill) -> &'static str {
-        match a {
-            AreaFill::None => "none",
-            AreaFill::Gradient => "gradient",
+    pub fn fill_style(f: FillStyle) -> &'static str {
+        match f {
+            FillStyle::Solid => "solid",
+            FillStyle::Gradient => "gradient",
         }
     }
 
@@ -1621,7 +1623,7 @@ mod record {
             ("body_size", f32(t.body_size())),
             ("font_scale", f32(t.font_scale())),
             ("legend_style", legend(t.legend_style()).into()),
-            ("area_fill", area_fill(t.area_fill()).into()),
+            ("fill_style", fill_style(t.fill_style()).into()),
             ("line_width", f32(t.line_width())),
             ("marker_size", f32(t.marker_size())),
             ("marker_alpha", f32(t.marker_alpha())),
@@ -1662,6 +1664,14 @@ mod record {
                 text(&scatter.options().label),
                 color_spec(scatter.options().color),
                 marker(scatter.options().marker)
+            ),
+            Mark::Area(area) => format!(
+                "area x={} y={} label={} color={} dash={}",
+                axis_data(area.x()),
+                floats64(area.y()),
+                text(&area.options().label),
+                color_spec(area.options().color),
+                dash(area.options().dash)
             ),
             Mark::Bar(bar) => {
                 let names: Vec<String> = bar.categories().iter().map(|s| text(s)).collect();
@@ -2596,8 +2606,8 @@ fn theme_errors(rec: &mut Log) {
         });
     }
     rec.result(
-        "with_area_fill",
-        base.with_area_fill(AreaFill::Gradient),
+        "with_fill_style",
+        base.with_fill_style(FillStyle::Gradient),
         |t| format!("\n{}", record::theme(&t).trim_end()),
     );
     rec.raw("unchanged base theme\n");

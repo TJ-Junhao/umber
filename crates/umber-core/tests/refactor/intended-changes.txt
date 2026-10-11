@@ -1,1 +1,24 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Lines never fill: the gradient fill that a theme with a gradient fill style drew under every
+# line is gone, and the fill under a line is the explicit area mark. Each of these figures draws
+# lines under Midnight (or, for fig-theme-tokens-0, under Pigment switched to the gradient), and
+# loses only those gradient fills.
+fig-category
+fig-extreme-clipping
+fig-legend-chips-20-wrapping
+fig-legend-chips-font-scale-max
+fig-legend-chips-long-label
+fig-legend-chips-midnight
+fig-legend-chips-text-fallback
+fig-legend-chips-tiny-50-entries
+fig-legend-midnight-header
+fig-midnight-line-scatter
+fig-theme-tokens-0
+fig-theme-tokens-2
+fig-wide-short
+# The theme's area fill becomes its fill style: the theme record's `area_fill none|gradient` row
+# reads `fill_style solid|gradient`, wherever a whole theme is recorded, and the setter row
+# `with_area_fill` is `with_fill_style`.
+api/themes
+api/legend
+errors/api

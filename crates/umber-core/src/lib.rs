@@ -47,12 +47,12 @@
 //!
 //! - the figure model: [`Figure`] (size, theme and axes getters, [`Figure::add_axes`],
 //!   [`Figure::to_png`], [`Figure::to_svg`]), [`Axes`] (text and limit setters, mark methods
-//!   and their getters), [`AxisData`], [`LineOptions`], [`ScatterOptions`], [`BarOptions`],
-//!   [`BarSeries`] and [`HistOptions`] with its bin limit [`MAX_BINS`], and the read-only
-//!   [`Mark`], [`LineMark`], [`ScatterMark`], [`BarMark`], [`BarGroupMark`], [`BarSeriesView`]
-//!   and [`HistMark`] that [`Axes::marks`] returns;
+//!   and their getters), [`AxisData`], [`LineOptions`], [`ScatterOptions`], [`AreaOptions`],
+//!   [`BarOptions`], [`BarSeries`] and [`HistOptions`] with its bin limit [`MAX_BINS`], and the
+//!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`BarMark`],
+//!   [`BarGroupMark`], [`BarSeriesView`] and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
-//!   [`Marker`], [`AreaFill`], [`GridLines`] and [`LegendStyle`];
+//!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
 //! - scales: [`ScaleKind`] and [`LogBase`];
 //! - output: [`SvgText`];
@@ -107,8 +107,9 @@ pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
 pub use figure::{
-    Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView, Figure, HistMark,
-    HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
+    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries,
+    BarSeriesView, Figure, HistMark, HistOptions, LineMark, LineOptions, Mark, ScatterMark,
+    ScatterOptions,
 };
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
@@ -121,7 +122,7 @@ pub use scene::{
     StrokeStyle, TextItem,
 };
 pub use text::{FontLibrary, TextLayout, TextStyle};
-pub use theme::{AreaFill, Dash, GridLines, LegendStyle, Marker, Theme};
+pub use theme::{Dash, FillStyle, GridLines, LegendStyle, Marker, Theme};
 pub use ticks::Tick;
 
 /// The version of this crate, as written in `Cargo.toml`.
