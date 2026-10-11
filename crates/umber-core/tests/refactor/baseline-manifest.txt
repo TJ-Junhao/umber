@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 83f74f587d483580e5cbc4ecafcfdb9a2e0d288b
+# revision: 5ad5b662b059a76ffbb8288a0fda82ba6ae7883b
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -51,14 +51,14 @@ dc85b20878c380771e166f333dd08ba0dbf8767ee020c76cf9fdf551e414838f  png/fig-direct
 333de57e24c6fcba114ac28ba4fdace727cdc1d64636cf4d2884eeb8730bb9a1  png/fig-direct-category.dpi72.png
 7a326910acf0dc506731d50dfc3245f6c9c19935845a73d8c2efdca1b918b9ad  png/fig-direct-crossing-2.dpi200.png
 d301136cc75daa6937bca1aa3a411f64ed9ec842a33185e452de006d12cd5c42  png/fig-direct-crossing-2.dpi72.png
-2b629a8d6a0762be5664a552a535b45d6432cc29e3342096754553fe0ebe4371  png/fig-direct-crossing-30.dpi200.png
-5a7c8a827ca6e8343042ae0ffa6edc1969a491877bc446c0f89c8860e78b093c  png/fig-direct-crossing-30.dpi72.png
+515f0d4a657f9b8dbca20635102ec556b18904aae18143ee5395e54f4a6c7668  png/fig-direct-crossing-30.dpi200.png
+a769782b4548b92e267c2645a81fac877f38f3cc83b1624da570521536e0e893  png/fig-direct-crossing-30.dpi72.png
 0fb8095c1e6211ed0779c80fedfdf6a5893e614760c07ff2ab974dbc89e6b4e2  png/fig-direct-crossing-8.dpi200.png
 a140189fb59999fa508f85b6956638bf4f99f1d3329cb85f357ebfb2c4333a83  png/fig-direct-crossing-8.dpi72.png
 0839a8810465aef81c11c0b231111765e0fba2d9008448fcdef9292a39c989e5  png/fig-direct-faded.dpi200.png
 644742809bcbc6d3c68c75892eab09120c01c281fd1680b14ab60e4125a63cda  png/fig-direct-faded.dpi72.png
-2053460d36fac57cb3799ead9ac9514b0d98afb8e4446e611df4ffca1ef98872  png/fig-direct-font-scale-max.dpi200.png
-720cd1cc466026dbc2ad01a3cfbe36e9ac1f5b05601659f80590a74387f11704  png/fig-direct-font-scale-max.dpi72.png
+c00886184220243824fff5461391a1c877577f89a91bd7d82aef00a20063f734  png/fig-direct-font-scale-max.dpi200.png
+82bdb84a70a88d418d3c2be59bc05869d5862baf7008e6fcc0cd3077a732b720  png/fig-direct-font-scale-max.dpi72.png
 45290058478e4b5ff3365442aafa2f3a0773e555d487d121d2bf8122fd1d52bc  png/fig-direct-line-and-scatter.dpi200.png
 de516c3259cb28d5a6ed834ce9f8eabb7e9dcbb2b845c983dd9e2893e5907bb7  png/fig-direct-line-and-scatter.dpi72.png
 19f0dc3ddcddaa211858024944a86abf6ce0f4b119ff9c2d155dd250859e300d  png/fig-direct-lines-ending-early.dpi200.png
@@ -67,8 +67,8 @@ caf28a9f707fb44162995843a86fc37272258defde498a5dae389a745dd4645c  png/fig-direct
 43665c5177b4fcd6cb6a0d03f31cc570f719027cf7345cff82cdc9b3d820141e  png/fig-direct-long-label.dpi72.png
 159152358cb91ed16979250d67b26949edecb3873bb0572850d70b9e390c1627  png/fig-direct-nan-tails.dpi200.png
 d728268dfaf3c3483776ff1907c54eade2cd09883f80f5d9a253b81ac054ad1c  png/fig-direct-nan-tails.dpi72.png
-5677587afdf76d2a4356ea86253a39011e9d8d20e3ebcf8a536d5639eeedd994  png/fig-direct-tiny-50-lines.dpi200.png
-06682ad2948a351de4ea6d07c9466f7f225bcac16aa2615502ee0258041f169e  png/fig-direct-tiny-50-lines.dpi72.png
+06769e7ad31cb49c023c23b6506eb275d681509b7ccda66c94c26ec342422673  png/fig-direct-tiny-50-lines.dpi200.png
+a547cf2081a84e6e35f9e168070fd71f32729f2240be2fca97facfd2d077f572  png/fig-direct-tiny-50-lines.dpi72.png
 2e3673db500a74c3b1ee4ae63c45c657d2b1dfb9af880c90eef7f52f0c526bd7  png/fig-direct-xlim-cuts-ends.dpi200.png
 b0296535261d6c0349ad30165739b8cbc7c45fef75818e319d6815e315d01069  png/fig-direct-xlim-cuts-ends.dpi72.png
 7cb2e2779d3b84b563b7180cde200f19f14863cb2cfa1b99252ab9c417c008d3  png/fig-direct-ylim-ends-off-plot.dpi200.png
@@ -325,15 +325,15 @@ efaf6a55ed450998bf72f108cc870d0802582e6752914d9b5fd571674850bfc2  scene/fig-dire
 fc96df9603189f0daff7e4f625cd538f82467412d8c7b06128ea19320e0f01c3  scene/fig-direct-bar-and-line.txt
 f3049996ea03f29842c6af57b98bfa2cdbfded191d79f38dd5529b865a45dee7  scene/fig-direct-category.txt
 5e5e4aab0a9884c6f35a8437b3629f6a358852add597f4399ff8c351fa172a13  scene/fig-direct-crossing-2.txt
-7165a5bd30ccbafb1e7ba4a8bcdc9845fb2b71d38693e32d2cc9a34d8677639c  scene/fig-direct-crossing-30.txt
+24c0969e01580edc4aafcc06cdf143b3ea0e3af640dcf46159040e630bd731af  scene/fig-direct-crossing-30.txt
 dc86f2d040d8b879d60b12b99852933bbf98e53e8aa08e92c4e7e3daafe246ff  scene/fig-direct-crossing-8.txt
 064974b81d6605aea4ba66fd7b75a8efebdfc5d11e3d2b2efdfd44592954ec17  scene/fig-direct-faded.txt
-99f92f5fda8017d00cd9c8e66d290e3cc7f16226612d720984429b860c4e70e3  scene/fig-direct-font-scale-max.txt
+849fa968f6b0b5fc116145ce24212bbd1ad2ca95968f74694e5b8424c98678df  scene/fig-direct-font-scale-max.txt
 8b321d14aadaaf49d341e19e9b8c25d26f732db6ce665237e46d534bc2b92fe8  scene/fig-direct-line-and-scatter.txt
 8443e966c83caf9f4907ad69dbfea4bf98f98c74b8f25b3a818d98ec5dd62958  scene/fig-direct-lines-ending-early.txt
 0bbe60fb793fcdef4a393d7674f6f5df80a81d96e5839e7ce5af877231f4d0dd  scene/fig-direct-long-label.txt
 b52e7969855bf3adec2700b848d4cdf8135646215dd67805ccd0ed5672fd122a  scene/fig-direct-nan-tails.txt
-3a086de73966109bd43053274ff4c414c45dc0b61f10352ca2ba2992c3a09390  scene/fig-direct-tiny-50-lines.txt
+b4f496f16be0bdd665a685e0de798f13c8ac661d3f3dd8c22e062f54afc51a85  scene/fig-direct-tiny-50-lines.txt
 5c67c55deb6422abba792c814327f4362e278edb7d2070373c2e46daf7ef36e6  scene/fig-direct-xlim-cuts-ends.txt
 4583c0d37c954f3f43cbfabf205f93d539ab7d15a3e2b0da67f3435bd7160504  scene/fig-direct-ylim-ends-off-plot.txt
 13656a4fca2ee91291b53384c8eed37f00898726cca219aa15c08b5c53058cf5  scene/fig-extreme-clipping.txt
@@ -492,14 +492,14 @@ e99c96f5792c6340af64ef79e526131d7c9450ddcafd2d6e08945cd0c59dbc5a  svg/fig-direct
 0ffd5a156a634c90068661c808dfe28a9af4f70495c7800e2ae083368103a7f0  svg/fig-direct-category.outlines.svg
 9016bdbce31e68566c77196bb607cc964519164d10477957bb4be2767e7d4729  svg/fig-direct-crossing-2.editable.svg
 58f5716d62274e42f86f2fcf81afe65b6c8cb501bf079b8ee4833172d593537d  svg/fig-direct-crossing-2.outlines.svg
-0ec140b984d77bd50fd2d34ae7ed28ed3e2c596c4667205059ef5373671cabaf  svg/fig-direct-crossing-30.editable.svg
-a9021ff5b460de6de746ca3f757309699ff5fb5912ba9018401413e6c729ddaa  svg/fig-direct-crossing-30.outlines.svg
+4d70613aca7b8ab63ef4afc2be8ef1e790b7c073d0e9459a4aa1f7d3378da0ea  svg/fig-direct-crossing-30.editable.svg
+fff2842771e82d6d7bbef8e6710dd8fb5d6c3821cb1aa40e1d397bca0f5b1ee8  svg/fig-direct-crossing-30.outlines.svg
 4b203526d44ee098ce4711c51baea4c6a6acae3ac671c0c97bb8dd0e3bcd87b9  svg/fig-direct-crossing-8.editable.svg
 dcbd7678254be19266e446bc132c89a6c6456eae348415a523a6390e6ce76ad3  svg/fig-direct-crossing-8.outlines.svg
 c743489604056249ea025582f69b2533a784c3ef1600ec3de17147e24cafbb59  svg/fig-direct-faded.editable.svg
 7efb0ff7ec76caf838b690c5c768f90dca32d06cc5d4a13ae6c8a0150144b0ed  svg/fig-direct-faded.outlines.svg
-f79fd1fe8e5b8dbb554d42776584b859eb9dc877e5f2c648139e300d79b953dd  svg/fig-direct-font-scale-max.editable.svg
-9baeddbd7bda238adf06329119b75b17aff42b5e379bdc837cdac34aa3096068  svg/fig-direct-font-scale-max.outlines.svg
+75ffd258889a2b0c05f0e2f33cf58b4a487db3ac06fb5dfc9d47efefd90d632e  svg/fig-direct-font-scale-max.editable.svg
+cb6af9db3b3d988ebcb50175245b555a4c0de2e3df5a2ee52251c0420891e337  svg/fig-direct-font-scale-max.outlines.svg
 1b8db64db186a26e63d2712e5fe317c6797e4d3ef495ea14dd63154743d73425  svg/fig-direct-line-and-scatter.editable.svg
 1f9808328ec2d202f0c88c6e6b80f74ad77aabfa192c1695632e617c27368fcf  svg/fig-direct-line-and-scatter.outlines.svg
 80d986006bb7092b6fd16569dbc933196dfcd5d70cd7783e66951706de42f1b7  svg/fig-direct-lines-ending-early.editable.svg
@@ -508,8 +508,8 @@ f79fd1fe8e5b8dbb554d42776584b859eb9dc877e5f2c648139e300d79b953dd  svg/fig-direct
 0f7f5ab1c45785af2c7f46c9e5818e35a606a848ba6cdebc55f9dfc7c3e46495  svg/fig-direct-long-label.outlines.svg
 d68cdcb8aa49e4164414263ecd8efed13bb682f90cab0a660e43b39e33ff7339  svg/fig-direct-nan-tails.editable.svg
 557a6acbca149cad3f78e302209f8d5ad77ef6ddfec5bdee684eccfc923c81ac  svg/fig-direct-nan-tails.outlines.svg
-ee2924b08389794622f2fba352274596436207888a86709d87fb62dd3ce4f83e  svg/fig-direct-tiny-50-lines.editable.svg
-db4ccc1cf180e3e46b641a4bd5bab577d9db68e27996bd003644f66881d2d0ee  svg/fig-direct-tiny-50-lines.outlines.svg
+d632e915dbe0fa6c9b77590a17cb1f1231f3f0eb5426d0681e18bc4b8406441a  svg/fig-direct-tiny-50-lines.editable.svg
+c1eec1de4e4b2561448df8f69467c0828cfc9bef8d13c8d494522bf1013d8f59  svg/fig-direct-tiny-50-lines.outlines.svg
 a9b8d35dde83c55a234114a8af4a6533fe3d318976d0708b359a19c3412d144a  svg/fig-direct-xlim-cuts-ends.editable.svg
 8c9d3a76fca851ee2dfbe037332f543e8bdf73e19749a40177e5b38a5020c5b6  svg/fig-direct-xlim-cuts-ends.outlines.svg
 b0c95266d9a858cfa674b73f3e8832f846aa5e4337f3d259639bbe264c0a4351  svg/fig-direct-ylim-ends-off-plot.editable.svg

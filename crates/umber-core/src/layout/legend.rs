@@ -18,8 +18,8 @@
 
 use super::nudge::separate;
 use super::{Area, BODY_LINE, Label, PADDING, Styles, baseline_in_line, measure, metrics};
-use crate::legend::{Anchor, AnchorX, Legend, RowStyle, Swatch};
-use crate::resolve::{AxisScale, NormalizedPos, Resolved, ResolvedAxis};
+use crate::legend::{Legend, RowStyle, Swatch};
+use crate::resolve::{Anchor, AnchorX, AxisScale, NormalizedPos, Resolved, ResolvedAxis};
 use crate::{FontLibrary, Rgba, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
@@ -325,7 +325,8 @@ impl<'a> DirectLabels<'a> {
     /// plot's vertical range and then moved apart from its neighbours by [`separate`], so that
     /// label centers are at least `1.2 ×` the label size apart. Labels that would not fit
     /// between the plot's top and bottom are stacked around their mean target instead; a label
-    /// whose line of text then lies wholly off the canvas is dropped with its dot.
+    /// whose line of text then lies wholly off the canvas is left out, and its dot is kept. An
+    /// entry with neither a dot nor a label is left out.
     pub(super) fn placed(
         &self,
         resolved: &Resolved,
@@ -351,21 +352,26 @@ impl<'a> DirectLabels<'a> {
         anchors
             .into_iter()
             .zip(centers)
-            .filter(|&(_, center)| center + line / 2.0 > 0.0 && center - line / 2.0 < canvas_height)
-            .map(|((entry, x, y), center)| {
+            .filter_map(|((entry, x, y), center)| {
                 let anchor_x = plot.x_at(NormalizedPos::new(x));
-                let mut label = entry.label.clone();
-                label.x = anchor_x + self.dot / 2.0 + DIRECT_GAP;
-                label.y = baseline_in_line(center - line / 2.0, line, self.ascent, self.descent);
-                DirectLabel {
+                let on_canvas = center + line / 2.0 > 0.0 && center - line / 2.0 < canvas_height;
+                let label = on_canvas.then(|| {
+                    let mut label = entry.label.clone();
+                    label.x = anchor_x + self.dot / 2.0 + DIRECT_GAP;
+                    label.y =
+                        baseline_in_line(center - line / 2.0, line, self.ascent, self.descent);
+                    label
+                });
+                let dot = (0.0..=1.0).contains(&y).then(|| EndDot {
+                    x: anchor_x,
+                    y: at(y),
+                    diameter: self.dot,
+                });
+                (label.is_some() || dot.is_some()).then_some(DirectLabel {
                     label,
                     color: entry.color,
-                    dot: (0.0..=1.0).contains(&y).then(|| EndDot {
-                        x: anchor_x,
-                        y: at(y),
-                        diameter: self.dot,
-                    }),
-                }
+                    dot,
+                })
             })
             .collect()
     }
@@ -391,11 +397,13 @@ fn y_position(axis: &ResolvedAxis, y: f64) -> f64 {
     }
 }
 
-/// A direct label, placed: its label in its line color, and the end dot at its anchor.
+/// A direct label, placed: its label in its line color, and the end dot at its anchor. At
+/// least one of the two is present.
 #[derive(Debug, Clone)]
 pub(crate) struct DirectLabel {
-    /// The label, right of the anchor, vertically centered on its nudged position.
-    pub label: Label,
+    /// The label, right of the anchor, vertically centered on its nudged position; `None` when
+    /// it would lie wholly off the canvas.
+    pub label: Option<Label>,
     /// The line color, alpha included, for the label and the dot.
     pub color: Rgba,
     /// The end dot; `None` when the anchor lies above or below the plot area.
@@ -879,6 +887,11 @@ mod tests {
         f
     }
 
+    /// The label of `d`, which must have one.
+    fn text_of(d: &DirectLabel) -> &Label {
+        d.label.as_ref().expect("a label on the canvas")
+    }
+
     /// The vertical center of the line of text whose baseline is `label.y`.
     fn center_of(label: &Label) -> f64 {
         let (ascent, descent) = (
@@ -915,10 +928,10 @@ mod tests {
             .zip([("North", 2.0, 9.0), ("South", 2.0, 1.0), ("West", 1.0, 5.0)])
             .enumerate()
         {
-            assert_eq!(label.label.text, text);
+            assert_eq!(text_of(label).text, text);
             assert_eq!(label.color, palette[k]);
-            assert_eq!(label.label.style.weight, Weight::SemiBold);
-            assert_eq!(f64::from(label.label.style.size), size);
+            assert_eq!(text_of(label).style.weight, Weight::SemiBold);
+            assert_eq!(f64::from(text_of(label).style.size), size);
             // The dot sits on the anchor, the label half a dot and 6 pt to its right, centered
             // on it: these ends are far apart, so nothing is nudged.
             let continuous = |axis: &ResolvedAxis, v: f64| match &axis.scale {
@@ -929,21 +942,24 @@ mod tests {
             let anchor_y = plot.y_at(NormalizedPos::new(continuous(&resolved.y, y)));
             let end = label.dot.unwrap();
             assert_eq!((end.x, end.y, end.diameter), (anchor_x, anchor_y, dot));
-            assert!((label.label.x - (anchor_x + dot / 2.0 + DIRECT_GAP)).abs() < 1e-9);
-            assert!((center_of(&label.label) - anchor_y).abs() < 1e-3);
+            assert!((text_of(label).x - (anchor_x + dot / 2.0 + DIRECT_GAP)).abs() < 1e-9);
+            assert!((center_of(text_of(label)) - anchor_y).abs() < 1e-3);
         }
         // The plot gives up the room of the widest label on its right.
-        let widest = direct.iter().map(|d| d.label.width()).fold(0.0, f64::max);
+        let widest = direct
+            .iter()
+            .map(|d| text_of(d).width())
+            .fold(0.0, f64::max);
         let reserve = dot / 2.0 + DIRECT_GAP + widest;
         assert!((plot.right() - (6.0 * 72.0 - PADDING - reserve)).abs() < 1e-9);
         // The widest label of a line ending on the plot's right edge ends on the inner edge.
         let end = direct[..2]
             .iter()
-            .map(|d| d.label.x + d.label.width())
+            .map(|d| text_of(d).x + text_of(d).width())
             .fold(0.0, f64::max);
         let widest_at_edge = direct[..2]
             .iter()
-            .map(|d| d.label.width())
+            .map(|d| text_of(d).width())
             .fold(0.0, f64::max);
         assert_eq!(widest_at_edge, widest);
         assert!((end - (6.0 * 72.0 - PADDING)).abs() < 1e-9);
@@ -965,7 +981,7 @@ mod tests {
         let layout = plan_figure(&f, FontLibrary::global()).1;
         assert!((layout.plot.right() - (width - PADDING - cap)).abs() < 1e-9);
         // The long label runs past the canvas, which clips it.
-        let long = &layout.direct[0].label;
+        let long = text_of(&layout.direct[0]);
         assert!(long.x + long.width() > width);
         assert_scene_bounded(&f.to_scene(FontLibrary::global()));
 
@@ -1005,7 +1021,11 @@ mod tests {
             ],
         );
         let layout = plan_figure(&f, FontLibrary::global()).1;
-        let centers: Vec<f64> = layout.direct.iter().map(|d| center_of(&d.label)).collect();
+        let centers: Vec<f64> = layout
+            .direct
+            .iter()
+            .map(|d| center_of(text_of(d)))
+            .collect();
         // Equal ends keep series order top down (y grows downwards); the higher end stays
         // above them.
         assert!(centers[3] < centers[0] && centers[0] < centers[1] && centers[1] < centers[2]);
@@ -1043,8 +1063,8 @@ mod tests {
         assert!(high.dot.is_none() && low.dot.is_none());
         assert!(inside.dot.is_some());
         // Their labels are clamped to the plot's vertical range.
-        assert!((center_of(&high.label) - plot.y).abs() < 1e-3);
-        assert!((center_of(&low.label) - plot.bottom()).abs() < 1e-3);
+        assert!((center_of(text_of(high)) - plot.y).abs() < 1e-3);
+        assert!((center_of(text_of(low)) - plot.bottom()).abs() < 1e-3);
         assert_scene_bounded(&f.to_scene(FontLibrary::global()));
     }
 
@@ -1071,14 +1091,66 @@ mod tests {
                 }
                 let layout = plan_figure(&f, FontLibrary::global()).1;
                 assert!(layout.plot.width >= 1.0 && layout.plot.height >= 1.0);
-                // Labels whose line of text is off the canvas are dropped.
-                assert!(layout.direct.len() <= n);
-                for d in &layout.direct {
-                    let c = center_of(&d.label);
+                // Labels whose line of text is off the canvas are left out; every end dot stays.
+                assert_eq!(layout.direct.len(), n);
+                assert!(layout.direct.iter().all(|d| d.dot.is_some()));
+                for d in layout.direct.iter().filter_map(|d| d.label.as_ref()) {
+                    let c = center_of(d);
                     assert!(c.is_finite() && c > -100.0 * 72.0 && c < 2.0 * h * 72.0 + 1e5);
                 }
                 assert_scene_bounded(&f.to_scene(FontLibrary::global()));
             }
         }
+    }
+
+    #[test]
+    fn off_canvas_labels_keep_their_end_dots() {
+        // Thirty lines ending inside the plot need far more height than the plot has, so the
+        // stack of labels runs off the canvas at both ends.
+        let theme = Theme::graphite();
+        let size = f64::from(theme.body_size() * theme.font_scale());
+        let lines: Vec<(String, Vec<f64>, Vec<f64>)> = (0..30)
+            .map(|k| {
+                (
+                    format!("Series {k}"),
+                    vec![0.0, 1.0],
+                    vec![f64::from(k), 5.0],
+                )
+            })
+            .collect();
+        let refs: Vec<(&str, Vec<f64>, Vec<f64>)> = lines
+            .iter()
+            .map(|(l, x, y)| (l.as_str(), x.clone(), y.clone()))
+            .collect();
+        let f = line_figure(theme, &refs);
+        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let height = 4.0 * 72.0;
+        let direct = &layout.direct;
+        assert_eq!(direct.len(), 30);
+        // Some labels are left out ...
+        let shown = direct.iter().filter(|d| d.label.is_some()).count();
+        assert!(shown < 30, "{shown} labels shown");
+        // ... but every line ending inside the plot keeps its dot.
+        for d in direct {
+            let dot = d.dot.expect("the anchor is inside the plot");
+            assert!(dot.y >= layout.plot.y && dot.y <= layout.plot.bottom());
+            // A label is shown only when its line of text reaches onto the canvas.
+            if let Some(label) = &d.label {
+                let (c, half) = (center_of(label), BODY_LINE * size / 2.0);
+                assert!(c + half > 0.0 && c - half < height, "{c}");
+            }
+        }
+        // Drawing follows: one dot per line, one label per shown label.
+        let scene = f.to_scene(FontLibrary::global());
+        assert_scene_bounded(&scene);
+        let Some(Item::Group { items, .. }) = scene.items.get(2) else {
+            panic!("a legend group");
+        };
+        let dots = items
+            .iter()
+            .filter(|i| matches!(i, Item::Fill { .. }))
+            .count();
+        let texts = items.iter().filter(|i| matches!(i, Item::Text(_))).count();
+        assert_eq!((dots, texts), (30, shown));
     }
 }

@@ -1,11 +1,14 @@
 //! Direct-label separation: moves labels apart along one dimension so that neighbours keep a
 //! minimum distance.
 
+use std::cmp::Ordering;
+
 /// The positions of labels that want to sit at `targets`, moved apart so that every two
 /// neighbours are at least `min_gap` apart, in the order of `targets`.
 ///
 /// The labels keep their order: they are sorted by target, ties broken by their index in
-/// `targets` (a stable sort), and the k-th label of that order gets the k-th smallest position.
+/// `targets` (a stable sort, see [`by_target`]), and the k-th label of that order gets the k-th
+/// smallest position.
 ///
 /// When the labels fit, that is when `(n - 1) × min_gap <= hi - lo`, every position lies in
 /// `[lo, hi]`: a forward pass puts each label at its target, but no lower than `lo` and at least
@@ -18,7 +21,7 @@
 pub(super) fn separate(targets: &[f64], min_gap: f64, lo: f64, hi: f64) -> Vec<f64> {
     let mut sorted: Vec<(usize, f64)> = targets.iter().copied().enumerate().collect();
     // A stable sort: equal targets keep their index order.
-    sorted.sort_by(|a, b| a.1.total_cmp(&b.1));
+    sorted.sort_by(|a, b| by_target(a.1, b.1));
     let n = sorted.len();
     let span = n.saturating_sub(1) as f64 * min_gap;
     if span > hi - lo {
@@ -48,6 +51,17 @@ pub(super) fn separate(targets: &[f64], min_gap: f64, lo: f64, hi: f64) -> Vec<f
     out
 }
 
+/// The order of two label targets: numerically equal targets, `0.0` and `-0.0` included, are
+/// equal, so a stable sort keeps their series order; other targets follow
+/// [`f64::total_cmp`].
+fn by_target(a: f64, b: f64) -> Ordering {
+    if a == b {
+        Ordering::Equal
+    } else {
+        a.total_cmp(&b)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,7 +70,7 @@ mod tests {
     /// The indices of `targets` in label order: by target, ties by index.
     fn label_order(targets: &[f64]) -> Vec<usize> {
         let mut order: Vec<usize> = (0..targets.len()).collect();
-        order.sort_by(|&a, &b| targets[a].total_cmp(&targets[b]));
+        order.sort_by(|&a, &b| by_target(targets[a], targets[b]));
         order
     }
 
@@ -79,8 +93,11 @@ mod tests {
         assert_eq!(separate(&[98.0, 99.0], 10.0, 0.0, 100.0), [90.0, 100.0]);
         // Two labels near the low end: the upper one is pushed on.
         assert_eq!(separate(&[1.0, 0.0], 10.0, 0.0, 100.0), [10.0, 0.0]);
-        // Equal targets: the first index comes first.
+        // Equal targets: the first index comes first, zeros of either sign included.
         assert_eq!(separate(&[50.0, 50.0], 10.0, 0.0, 100.0), [50.0, 60.0]);
+        assert_eq!(separate(&[0.0, 0.0], 10.0, 0.0, 100.0), [0.0, 10.0]);
+        assert_eq!(separate(&[0.0, -0.0], 10.0, 0.0, 100.0), [0.0, 10.0]);
+        assert_eq!(separate(&[-0.0, 0.0], 10.0, 0.0, 100.0), [0.0, 10.0]);
     }
 
     #[test]
@@ -99,7 +116,13 @@ mod tests {
         #[test]
         fn separate_keeps_order_and_min_gap(
             targets in prop::collection::vec(
-                prop_oneof![-100.0_f64..400.0, Just(0.0), Just(300.0), Just(150.0)],
+                prop_oneof![
+                    -100.0_f64..400.0,
+                    Just(0.0),
+                    Just(-0.0),
+                    Just(300.0),
+                    Just(150.0),
+                ],
                 0..40,
             ),
             min_gap in prop_oneof![0.0_f64..30.0, Just(10.2)],

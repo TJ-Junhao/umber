@@ -2,11 +2,10 @@
 //! style which entries go to the legend row and which become direct labels.
 //!
 //! The model reads series through [`SeriesKey`], never through the marks themselves, so a new
-//! mark kind reaches the legend through its keys alone. Direct labels are the one exception:
-//! they belong to line marks, whose data gives the point each label is attached to.
+//! mark kind reaches the legend through its keys alone. A key's anchor, the point a direct
+//! label is attached to, is found by resolve as well.
 
-use crate::model::{AxisData, LineMark};
-use crate::resolve::{AxisLimits, ResolvedMark, SeriesKey, SeriesKind};
+use crate::resolve::{Anchor, AxisLimits, ResolvedMark, SeriesKey, SeriesKind};
 use crate::{Dash, LegendStyle, Rgba};
 
 /// The small figure drawn before a legend label, showing how its series is drawn.
@@ -68,63 +67,6 @@ impl LegendEntry {
     }
 }
 
-/// The x value of a line's point, as the line holds it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum AnchorX<'a> {
-    /// A number on a linear or log axis; finite.
-    Number(f64),
-    /// A category name.
-    Category(&'a str),
-}
-
-/// The point of a line that its direct label is attached to: the last point whose x and y are
-/// finite and whose x lies inside the x domain.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Anchor<'a> {
-    /// The x value.
-    pub x: AnchorX<'a>,
-    /// The y value; finite.
-    pub y: f64,
-}
-
-impl<'a> Anchor<'a> {
-    /// The anchor of `line`: its last point with finite x and y whose x lies inside
-    /// `x_range` (both ends included), or inside the x domain when `x_range` is `None`. `None`
-    /// when the line has no such point.
-    ///
-    /// Only explicit limits can leave a finite point outside the x domain: auto limits always
-    /// contain every finite x value, and a category axis holds every category of its marks. So
-    /// `x_range` is the explicit limits when they are set, and the anchor is the same in every
-    /// layout pass.
-    fn of(line: &'a LineMark, x_range: Option<(f64, f64)>) -> Option<Anchor<'a>> {
-        let y = line.y();
-        match line.x() {
-            AxisData::Numbers(xs) => xs
-                .iter()
-                .zip(y)
-                .rev()
-                .find(|&(&x, &y)| {
-                    x.is_finite()
-                        && y.is_finite()
-                        && x_range.is_none_or(|(lo, hi)| lo <= x && x <= hi)
-                })
-                .map(|(&x, &y)| Anchor {
-                    x: AnchorX::Number(x),
-                    y,
-                }),
-            AxisData::Categories(names) => names
-                .iter()
-                .zip(y)
-                .rev()
-                .find(|&(_, &y)| y.is_finite())
-                .map(|(name, &y)| Anchor {
-                    x: AnchorX::Category(name),
-                    y,
-                }),
-        }
-    }
-}
-
 /// One direct label: a non-empty label, in its line's color, attached to an anchor of the line.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DirectEntry<'a> {
@@ -176,28 +118,34 @@ impl<'a> Legend<'a> {
     /// - `Header` gives one row entry per labelled series, in series order, drawn
     ///   [`RowStyle::Plain`]. Unlabelled series are skipped; duplicate labels are kept.
     /// - `Chips` gives the same entries, drawn [`RowStyle::Chips`].
-    /// - `Direct` gives a direct label to every labelled line that has an [`Anchor`], and puts
-    ///   every other labelled series, lines without an anchor included, into a row drawn
-    ///   [`RowStyle::Plain`], exactly as `Header` would show them. So every labelled series is
-    ///   labelled somewhere.
+    /// - `Direct` gives a direct label to every labelled series whose key has an [`Anchor`] (a
+    ///   line with a point to label), and puts every other labelled series, lines without an
+    ///   anchor included, into a row drawn [`RowStyle::Plain`], exactly as `Header` would show
+    ///   them. So every labelled series is labelled somewhere.
     /// - `None` gives nothing.
     pub fn new(style: LegendStyle, marks: &[ResolvedMark<'a>], x: &AxisLimits) -> Legend<'a> {
-        let entries = || {
-            marks
-                .iter()
-                .flat_map(ResolvedMark::keys)
-                .filter_map(|key| LegendEntry::of(&key))
-                .collect()
+        let keys = marks.iter().flat_map(|mark| mark.keys(x));
+        let (mut row, mut direct) = (Vec::new(), Vec::new());
+        let row_style = match style {
+            LegendStyle::Header | LegendStyle::Direct | LegendStyle::None => RowStyle::Plain,
+            LegendStyle::Chips => RowStyle::Chips,
         };
-        let (row, row_style, direct) = match style {
-            LegendStyle::Header => (entries(), RowStyle::Plain, Vec::new()),
-            LegendStyle::Chips => (entries(), RowStyle::Chips, Vec::new()),
-            LegendStyle::Direct => {
-                let (row, direct) = direct_split(marks, x);
-                (row, RowStyle::Plain, direct)
+        for key in keys {
+            let Some(entry) = LegendEntry::of(&key) else {
+                continue;
+            };
+            match (style, key.anchor) {
+                (LegendStyle::None, _) => {}
+                (LegendStyle::Direct, Some(anchor)) => direct.push(DirectEntry {
+                    label: entry.label,
+                    color: entry.color,
+                    anchor,
+                }),
+                (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
+                    row.push(entry);
+                }
             }
-            LegendStyle::None => (Vec::new(), RowStyle::Plain, Vec::new()),
-        };
+        }
         Legend {
             row,
             row_style,
@@ -224,41 +172,6 @@ impl<'a> Legend<'a> {
     pub fn is_empty(&self) -> bool {
         self.row.is_empty() && self.direct.is_empty()
     }
-}
-
-/// The row entries and the direct labels of `marks` in the `Direct` style, each in series
-/// order: a labelled line with an anchor inside the domain of an x axis limited by `x` becomes
-/// a direct label, and every other labelled series a row entry.
-fn direct_split<'a>(
-    marks: &[ResolvedMark<'a>],
-    x: &AxisLimits,
-) -> (Vec<LegendEntry>, Vec<DirectEntry<'a>>) {
-    let x_range = match x {
-        AxisLimits::Continuous {
-            explicit: Some(scale),
-            ..
-        } => Some(scale.domain()),
-        AxisLimits::Continuous { explicit: None, .. } | AxisLimits::Category => None,
-    };
-    let (mut row, mut direct) = (Vec::new(), Vec::new());
-    for mark in marks {
-        // Only a line mark can carry a direct label; it has a single series.
-        let anchor = match *mark {
-            ResolvedMark::Line { mark: line, .. } => Anchor::of(line, x_range),
-            _ => None,
-        };
-        for entry in mark.keys().iter().filter_map(LegendEntry::of) {
-            match anchor {
-                Some(anchor) => direct.push(DirectEntry {
-                    label: entry.label,
-                    color: entry.color,
-                    anchor,
-                }),
-                None => row.push(entry),
-            }
-        }
-    }
-    (row, direct)
 }
 
 #[cfg(test)]
@@ -414,6 +327,19 @@ mod tests {
     }
 
     #[test]
+    fn chips_show_the_header_entries_as_chips() {
+        let f = figure();
+        let (header, chips) = (
+            legend_of(&f, LegendStyle::Header),
+            legend_of(&f, LegendStyle::Chips),
+        );
+        assert_eq!(header.row_style(), RowStyle::Plain);
+        assert_eq!(chips.row_style(), RowStyle::Chips);
+        assert_eq!(chips.row(), header.row());
+        assert!(!chips.is_empty());
+    }
+
+    #[test]
     fn direct_falls_back_for_non_lines() {
         let f = figure();
         let palette = f.theme().palette();
@@ -470,7 +396,7 @@ mod tests {
             panic!("one direct label");
         };
         assert_eq!(target.label(), "Target");
-        assert_eq!(target.anchor().x, AnchorX::Category("B"));
+        assert_eq!(target.anchor().x, crate::resolve::AnchorX::Category("B"));
     }
 
     /// A figure with one labelled line with `x` and `y`, on an x axis limited to `xlim`.
@@ -486,49 +412,6 @@ mod tests {
             axes.xlim(lo, hi).unwrap();
         }
         f
-    }
-
-    /// The anchor of the one line of `f`, if it gets a direct label.
-    fn anchor_of(f: &Figure) -> Option<Anchor<'_>> {
-        let legend = legend_of(f, LegendStyle::Direct);
-        assert!(legend.direct().len() + legend.row().len() == 1);
-        legend.direct().first().map(DirectEntry::anchor)
-    }
-
-    fn at(x: f64, y: f64) -> Option<Anchor<'static>> {
-        Some(Anchor {
-            x: AnchorX::Number(x),
-            y,
-        })
-    }
-
-    #[test]
-    fn anchor_is_last_visible_finite_point() {
-        let nan = f64::NAN;
-        let xs = |v: &[f64]| AxisData::Numbers(v.to_vec());
-        // The last point.
-        let f = line_figure(xs(&[0.0, 1.0, 2.0]), &[5.0, 6.0, 7.0], None);
-        assert_eq!(anchor_of(&f), at(2.0, 7.0));
-        // A NaN tail in y, and a NaN x, are skipped.
-        let f = line_figure(xs(&[0.0, 1.0, 2.0, nan]), &[5.0, 6.0, nan, 8.0], None);
-        assert_eq!(anchor_of(&f), at(1.0, 6.0));
-        // Unsorted x: the last point in data order, not the largest x.
-        let f = line_figure(xs(&[3.0, 1.0]), &[5.0, 6.0], None);
-        assert_eq!(anchor_of(&f), at(1.0, 6.0));
-        // Explicit limits cut the end: the last point inside them, ends included.
-        let (x4, y4) = (xs(&[0.0, 1.0, 2.0, 3.0]), [5.0, 6.0, 7.0, 8.0]);
-        let f = line_figure(x4.clone(), &y4, Some((0.0, 2.0)));
-        assert_eq!(anchor_of(&f), at(2.0, 7.0));
-        let f = line_figure(x4, &y4, Some((0.5, 1.5)));
-        assert_eq!(anchor_of(&f), at(1.0, 6.0));
-        // A category line: the last category with a finite y.
-        let names = AxisData::Categories(["Jan", "Feb", "Mar"].map(String::from).to_vec());
-        let f = line_figure(names, &[1.0, 2.0, nan], None);
-        let feb = Anchor {
-            x: AnchorX::Category("Feb"),
-            y: 2.0,
-        };
-        assert_eq!(anchor_of(&f), Some(feb));
     }
 
     #[test]

@@ -19,7 +19,7 @@ const CHIP_TINT: f32 = 0.14;
 
 /// The legend of `layout` as one unclipped group: for each row entry in order, its chip when it
 /// has one, its swatch, and then its label in the theme's text color; then for each direct
-/// label in order, its end dot when it has one and its label, both in the line color. `None`
+/// label in order, its end dot and its label when it has them, both in the line color. `None`
 /// when the legend has neither, so a figure without a legend gets no group.
 pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
     let (entries, direct) = (layout.legend.entries(), &layout.direct);
@@ -36,7 +36,7 @@ pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
     }
     for label in direct {
         items.extend(label.dot.map(|d| end_dot(d, label.color)));
-        items.push(text(&label.label, label.color));
+        items.extend(label.label.as_ref().map(|l| text(l, label.color)));
     }
     Some(Item::Group { clip: None, items })
 }
@@ -386,7 +386,7 @@ mod tests {
             let Item::Text(text) = &pair[1] else {
                 panic!("a label after each dot");
             };
-            assert_eq!(text.text, label.label.text);
+            assert_eq!(Some(&text.text), label.label.as_ref().map(|l| &l.text));
             assert_eq!(text.color, label.color);
             assert_ne!(text.color, theme.text_color());
         }
