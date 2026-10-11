@@ -69,9 +69,10 @@ convention = "google"
 "tests/**" = ["D"]
 
 [tool.pyright]
-include = ["python", "tests"]
+include = ["python", "tests", "conftest.py"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
+enableTypeIgnoreComments = false
 reportUnnecessaryTypeIgnoreComment = "error"
 extraPaths = ["tests/python"]
 
@@ -79,5 +80,5 @@ extraPaths = ["tests/python"]
 python_version = "3.12"
 strict = true
 warn_unused_ignores = true
-files = ["python/umber", "tests"]
+files = ["python/umber", "tests", "conftest.py"]
 mypy_path = "tests/python"
