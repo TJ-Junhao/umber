@@ -23,18 +23,6 @@ pub(super) const ROW_TOP_GAP: f64 = 6.0;
 const LINE_SWATCH_LENGTH: f64 = 10.0;
 /// The side of a square swatch, as a share of the label size.
 const SQUARE_SWATCH_SIDE: f64 = 0.8;
-/// The largest swatch extent, whatever the theme says.
-const MAX_SWATCH: f64 = 1.0e5;
-
-/// `v` as a swatch extent: finite and within `0..=MAX_SWATCH`.
-fn swatch_extent(v: f64) -> f64 {
-    if v.is_finite() && v > 0.0 {
-        v.min(MAX_SWATCH)
-    } else {
-        0.0
-    }
-}
-
 /// The top of row `row` (counted from 0) of rows `row_height` tall, relative to the first
 /// row's top.
 fn row_top(row: usize, row_height: f64) -> f64 {
@@ -85,8 +73,9 @@ impl LegendRow {
     /// width of a `width` pt canvas, with the first row's top at 0.
     ///
     /// Each entry is its swatch, a 4 pt gap and its label; entries are 12 pt apart and rows
-    /// 4 pt apart. Swatches: a line `10 × line_width` long in the series dash, a dot of
-    /// `marker_size`, a square of `0.8 ×` the label size. Rows are one body line tall (`1.35 ×`
+    /// 4 pt apart. Swatches, sized as the marks are drawn: a line `10 ×` the drawn line width
+    /// long and that width tall, a dot of the drawn marker diameter, a square of `0.8 ×` the
+    /// label size. Rows are one body line tall (`1.35 ×`
     /// the label size), or as tall as the tallest swatch, and swatches and labels are centered
     /// in them.
     pub fn measure(width: f64, theme: &Theme, legend: &Legend, lib: &FontLibrary) -> LegendRow {
@@ -100,20 +89,19 @@ impl LegendRow {
             .row()
             .iter()
             .map(|entry| {
+                // The drawn sizes, so each box is exactly what the drawing fills or strokes.
+                // They are finite and capped, and so is the label size.
                 let (w, h) = match entry.swatch() {
                     Swatch::Line { .. } => {
-                        let line_width = f64::from(theme.line_width());
-                        (
-                            swatch_extent(LINE_SWATCH_LENGTH * line_width),
-                            swatch_extent(line_width),
-                        )
+                        let line_width = f64::from(theme.drawn_line_width());
+                        (LINE_SWATCH_LENGTH * line_width, line_width)
                     }
                     Swatch::Dot => {
-                        let d = swatch_extent(f64::from(theme.marker_size()));
+                        let d = f64::from(theme.drawn_marker_size());
                         (d, d)
                     }
                     Swatch::Square => {
-                        let side = swatch_extent(SQUARE_SWATCH_SIDE * size);
+                        let side = SQUARE_SWATCH_SIDE * size;
                         (side, side)
                     }
                 };
@@ -203,6 +191,7 @@ mod tests {
     use super::*;
     use crate::model::{AxisData, Figure, LineOptions};
     use crate::pipeline::plan_figure;
+    use crate::scene::Item;
     use crate::test_support::scene::assert_scene_bounded;
     use crate::{ScaleKind, Theme};
 
@@ -321,9 +310,6 @@ mod tests {
             row.row_height,
             BODY_LINE * f64::from(theme.body_size() * theme.font_scale())
         );
-        assert_eq!(swatch_extent(f64::NAN), 0.0);
-        assert_eq!(swatch_extent(-1.0), 0.0);
-        assert_eq!(swatch_extent(1e300), MAX_SWATCH);
     }
 
     #[test]
@@ -351,30 +337,116 @@ mod tests {
         }
     }
 
-    #[test]
-    fn huge_swatch_tokens_stay_bounded() {
-        let theme = Theme::pigment()
-            .with_line_width(1e30)
-            .unwrap()
-            .with_marker_size(1e30)
-            .unwrap();
-        let mut f = figure(6.0, 4.0, theme, &names(2));
-        f.axes_mut()
-            .unwrap()
-            .scatter(
-                AxisData::Numbers(vec![0.5]),
-                &[1.5],
-                crate::model::ScatterOptions {
-                    label: "Points".into(),
-                    ..crate::model::ScatterOptions::default()
-                },
-            )
-            .unwrap();
-        let layout = plan_figure(&f, FontLibrary::global()).1;
-        for entry in layout.legend.entries() {
-            assert!(entry.swatch.width <= MAX_SWATCH && entry.swatch.height <= MAX_SWATCH);
+    /// The bounds of a path item: `(left, top, right, bottom)`.
+    fn bounds(item: &Item) -> (f64, f64, f64, f64) {
+        let path = match item {
+            Item::Fill { path, .. } | Item::Stroke { path, .. } => path,
+            Item::Markers { shape, .. } => shape,
+            other => panic!("not a path item: {other:?}"),
+        };
+        let (min, max) = path.bounds().unwrap();
+        let f = f64::from;
+        (f(min.x), f(min.y), f(max.x), f(max.y))
+    }
+
+    /// A 6 by 4 in figure without a title, so its legend row starts at the top padding, with
+    /// one labelled dashed line or one labelled scatter.
+    fn huge_token_figure(theme: Theme, scatter: bool) -> Figure {
+        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let (x, y) = (AxisData::Numbers(vec![0.0, 1.0]), [1.0, 2.0]);
+        if scatter {
+            let options = crate::model::ScatterOptions {
+                label: "Points".into(),
+                ..crate::model::ScatterOptions::default()
+            };
+            axes.scatter(x, &y, options).unwrap();
+        } else {
+            let options = LineOptions {
+                label: "Dashed".into(),
+                dash: crate::Dash::Dashed,
+                ..LineOptions::default()
+            };
+            axes.line(x, &y, options).unwrap();
         }
-        assert!(layout.plot.width >= 1.0 && layout.plot.height >= 1.0);
-        assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+        f
+    }
+
+    /// The legend's one swatch box, and the marks and legend items of the scene, which must
+    /// hold chrome, marks, legend and baseline groups.
+    fn swatch_and_items(f: &Figure) -> (SwatchBox, Vec<Item>, Vec<Item>) {
+        let layout = plan_figure(f, FontLibrary::global()).1;
+        let [entry] = layout.legend.entries() else {
+            panic!("one legend entry");
+        };
+        let scene = f.to_scene(FontLibrary::global());
+        assert_scene_bounded(&scene);
+        let [
+            _,
+            Item::Group { items: marks, .. },
+            Item::Group { items: legend, .. },
+            _,
+        ] = scene.items.as_slice()
+        else {
+            panic!("chrome, marks, legend and baseline groups");
+        };
+        (entry.swatch, marks.clone(), legend.clone())
+    }
+
+    #[test]
+    fn huge_swatch_tokens_match_the_drawing() {
+        let (width, height) = (6.0 * 72.0, 4.0 * 72.0);
+        // 12 000 is above the drawn cap; f32::MAX is the largest token a theme accepts.
+        for token in [12_000.0, f64::from(f32::MAX)] {
+            let theme = Theme::pigment()
+                .with_line_width(token)
+                .unwrap()
+                .with_marker_size(token)
+                .unwrap();
+            let (stroke, diameter) = (
+                f64::from(theme.drawn_line_width()),
+                f64::from(theme.drawn_marker_size()),
+            );
+            assert_eq!((stroke, diameter), (1.0e4, 1.0e4));
+
+            // The line swatch is exactly as wide as the stroke of the line mark.
+            let (line, marks, legend) = swatch_and_items(&huge_token_figure(theme.clone(), false));
+            assert_eq!((line.width, line.height), (10.0 * stroke, stroke));
+            let stroke_of = |items: &[Item]| {
+                items.iter().find_map(|item| match item {
+                    Item::Stroke { style, .. } => Some(f64::from(style.width)),
+                    _ => None,
+                })
+            };
+            assert_eq!(stroke_of(&legend), Some(line.height));
+            assert_eq!(stroke_of(&marks), Some(line.height));
+            let (_, y0, _, y1) = bounds(&legend[0]);
+            assert!(y0 == y1 && (y0 - line.center_y).abs() < 1e-3);
+
+            // The dot swatch is exactly as wide as the scatter markers.
+            let (dot, marks, legend) = swatch_and_items(&huge_token_figure(theme, true));
+            assert_eq!((dot.width, dot.height), (diameter, diameter));
+            let (x0, y0, x1, y1) = bounds(&legend[0]);
+            assert!((x1 - x0 - dot.width).abs() < 1.0 && (y1 - y0 - dot.height).abs() < 1.0);
+            assert!(((y0 + y1) / 2.0 - dot.center_y).abs() < 1.0);
+            let markers = marks
+                .iter()
+                .find(|item| matches!(item, Item::Markers { .. }))
+                .unwrap();
+            let (x0, _, x1, _) = bounds(markers);
+            assert!(
+                (x1 - x0 - dot.width).abs() < 1.0,
+                "{} vs {}",
+                x1 - x0,
+                dot.width
+            );
+
+            // Each box starts on the canvas, at the row top.
+            for b in [line, dot] {
+                let top = b.center_y - b.height / 2.0;
+                assert!((top - PADDING).abs() < 1e-9, "{token}: {b:?}");
+                assert!(b.x < width && top < height, "{token}: {b:?}");
+            }
+        }
     }
 }

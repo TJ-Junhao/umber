@@ -5,7 +5,6 @@ use super::MarkContext;
 use super::area::area_fills;
 use super::clip::{Bounds, clip_polyline};
 use super::mapping::PlotPoint;
-use super::stroke::stroke_width;
 use crate::geometry::Path;
 use crate::layout::Area;
 use crate::m4_indices;
@@ -79,7 +78,7 @@ impl PlotLimit {
 
 /// The stroke width of a line mark, in points: the theme's line width, kept finite.
 pub(super) fn line_width(theme: &Theme) -> f32 {
-    stroke_width(theme.line_width())
+    theme.drawn_line_width()
 }
 
 /// The stroke of a line mark of `color` and `dash` at the theme's line width.
