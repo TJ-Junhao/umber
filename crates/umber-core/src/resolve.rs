@@ -103,13 +103,32 @@ impl ResolvedAxis {
     }
 }
 
+/// A resolved continuous axis: its scale and its ticks. The y axis is always one.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ResolvedContinuousAxis {
+    /// The scale.
+    pub scale: ContinuousScale,
+    /// The ticks, in increasing position.
+    pub ticks: Vec<AxisTick>,
+}
+
+impl ResolvedContinuousAxis {
+    /// This axis as a [`ResolvedAxis`], for the x axis, which may also be a category axis.
+    fn into_axis(self) -> ResolvedAxis {
+        ResolvedAxis {
+            scale: AxisScale::Continuous(self.scale),
+            ticks: self.ticks,
+        }
+    }
+}
+
 /// Both axes of an [`Axes`], resolved.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Resolved {
     /// The x axis.
     pub x: ResolvedAxis,
     /// The y axis.
-    pub y: ResolvedAxis,
+    pub y: ResolvedContinuousAxis,
     /// Where the baseline sits along the y axis, in `[0, 1]`: at y = 0 when 0 is inside the y
     /// domain of a linear axis, otherwise at the y axis's lower limit before padding (the
     /// lowest nice tick for auto limits, the explicit low limit, which is the plot bottom, for
@@ -208,9 +227,7 @@ fn extent(values: impl IntoIterator<Item = f64>) -> Option<(f64, f64)> {
 /// domain before padding.
 struct ContinuousAxis {
     /// The axis.
-    axis: ResolvedAxis,
-    /// The scale of the axis, as its [`AxisScale::Continuous`] holds it.
-    scale: ContinuousScale,
+    axis: ResolvedContinuousAxis,
     /// The lower limit before padding: the nice lower limit of a padded axis, the domain's own
     /// lower limit otherwise.
     unpadded_low: f64,
@@ -254,11 +271,10 @@ fn continuous(
         }
     };
     ContinuousAxis {
-        axis: ResolvedAxis {
+        axis: ResolvedContinuousAxis {
             ticks: positioned(&scale, ticks),
-            scale: AxisScale::Continuous(scale),
+            scale,
         },
-        scale,
         unpadded_low: unpadded.domain().0,
     }
 }
@@ -333,7 +349,9 @@ pub(crate) fn resolve(
             } else {
                 AutoLimits::Nice(Padding::BothSides)
             };
-            continuous(transform, explicit, data, auto, x_target).axis
+            continuous(transform, explicit, data, auto, x_target)
+                .axis
+                .into_axis()
         }
         AxisLimits::Category => {
             let scale = categories(marks);
@@ -360,10 +378,9 @@ pub(crate) fn resolve(
     let auto = AutoLimits::NiceBelowData(padding);
     let ContinuousAxis {
         axis: y,
-        scale,
         unpadded_low,
     } = continuous(transform, explicit, data, auto, y_target);
-    let baseline = baseline(&scale, transform, unpadded_low);
+    let baseline = baseline(&y.scale, transform, unpadded_low);
     Resolved { x, y, baseline }
 }
 
@@ -941,10 +958,7 @@ mod tests {
 
     fn domains(figure: &Figure) -> ((f64, f64), (f64, f64)) {
         let r = resolve_axes(figure.axes().unwrap(), 5, 4);
-        (
-            r.x.continuous().unwrap().domain(),
-            r.y.continuous().unwrap().domain(),
-        )
+        (r.x.continuous().unwrap().domain(), r.y.scale.domain())
     }
 
     const LIN: ScaleKind = ScaleKind::Linear;
@@ -966,15 +980,15 @@ mod tests {
         near(a.0, b.0) && near(a.1, b.1)
     }
 
-    fn labels(axis: &ResolvedAxis) -> Vec<&str> {
-        axis.ticks.iter().map(|t| t.label.as_str()).collect()
+    fn labels(ticks: &[AxisTick]) -> Vec<&str> {
+        ticks.iter().map(|t| t.label.as_str()).collect()
     }
 
     /// The position of the first and last tick on a padded nice axis: 0.05 / 1.1 of the axis
     /// in from each end.
-    fn assert_end_ticks_inset(axis: &ResolvedAxis) {
+    fn assert_end_ticks_inset(ticks: &[AxisTick]) {
         let inset = 0.05 / 1.1;
-        let (first, last) = (axis.ticks.first().unwrap(), axis.ticks.last().unwrap());
+        let (first, last) = (ticks.first().unwrap(), ticks.last().unwrap());
         assert!((first.pos.get() - inset).abs() < 1e-9, "{first:?}");
         assert!((last.pos.get() - (1.0 - inset)).abs() < 1e-9, "{last:?}");
     }
@@ -1008,7 +1022,7 @@ mod tests {
         let ((x0, x1), _) = domains(&f);
         assert!(close((x0, x1), pad(0.0, 10.0)), "{x0} {x1}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(labels(&r.x), ["0.0", "2.5", "5.0", "7.5", "10.0"]);
+        assert_eq!(labels(&r.x.ticks), ["0.0", "2.5", "5.0", "7.5", "10.0"]);
     }
 
     #[test]
@@ -1028,11 +1042,11 @@ mod tests {
         // The ticks are the set that produced the nice limits, so the outermost ones sit at the
         // nice limits, just inside the padded domain: x is 10, 30, ..., 90, not 25, 50, 75.
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        for axis in [&r.x, &r.y] {
-            assert_end_ticks_inset(axis);
+        for ticks in [&r.x.ticks, &r.y.ticks] {
+            assert_end_ticks_inset(ticks);
         }
-        assert_eq!(labels(&r.x), ["10", "30", "50", "70", "90"]);
-        assert_eq!(labels(&r.y), ["0", "10", "20", "30", "40"]);
+        assert_eq!(labels(&r.x.ticks), ["10", "30", "50", "70", "90"]);
+        assert_eq!(labels(&r.y.ticks), ["0", "10", "20", "30", "40"]);
 
         // The same on a log axis.
         let log = ScaleKind::Log { base: LogBase::TEN };
@@ -1043,8 +1057,8 @@ mod tests {
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         let domain = r.x.continuous().unwrap().domain();
         assert!(close(domain, pad_log(10.0, 100.0)), "{domain:?}");
-        assert_eq!(labels(&r.x), ["10", "100"]);
-        assert_end_ticks_inset(&r.x);
+        assert_eq!(labels(&r.x.ticks), ["10", "100"]);
+        assert_end_ticks_inset(&r.x.ticks);
     }
 
     #[test]
@@ -1147,7 +1161,10 @@ mod tests {
             "{:?}",
             r.baseline
         );
-        assert_eq!(labels(&r.y), ["1", "10", "100", "1000", "10000", "100000"]);
+        assert_eq!(
+            labels(&r.y.ticks),
+            ["1", "10", "100", "1000", "10000", "100000"]
+        );
         assert!(r.y.ticks.windows(2).all(|w| w[0].pos < w[1].pos));
 
         // Explicit log limits are used as given.
@@ -1456,8 +1473,8 @@ mod tests {
             .scatter(nums(&ys), &ys, ScatterOptions::default())
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 4, 4);
-        assert_eq!(labels(&r.x)[0], "35");
-        assert_eq!(labels(&r.y)[0], "25");
+        assert_eq!(labels(&r.x.ticks)[0], "35");
+        assert_eq!(labels(&r.y.ticks)[0], "25");
     }
 
     #[test]
@@ -1484,7 +1501,7 @@ mod tests {
             assert_eq!(r.baseline, r.y.ticks[0].pos, "base {base}");
             // At base 1 + EPSILON one step down is a factor of 1 + EPSILON, too small to move
             // any position; every other base moves the limit visibly below the data.
-            let data_low = r.y.continuous().unwrap().normalize(1.0);
+            let data_low = r.y.scale.normalize(1.0);
             if base > 1.0 + f64::EPSILON {
                 assert!(r.baseline.get() < data_low, "base {base}: {:?}", r.y.ticks);
             } else {
@@ -1516,14 +1533,14 @@ mod tests {
                 .line(nums(&[0.0, 1.0]), &[low, high], LineOptions::default())
                 .unwrap();
             let r = resolve_axes(f.axes().unwrap(), 5, 4);
-            let data_low = r.y.continuous().unwrap().normalize(low);
+            let data_low = r.y.scale.normalize(low);
             assert!(
                 r.baseline.get() < data_low,
                 "{low:e}..{high:e}: {:?}",
                 r.y.ticks
             );
             assert_eq!(r.baseline, r.y.ticks[0].pos);
-            let values: Vec<&str> = labels(&r.y);
+            let values: Vec<&str> = labels(&r.y.ticks);
             let unique: std::collections::HashSet<&&str> = values.iter().collect();
             assert_eq!(unique.len(), values.len(), "{values:?}");
         }
@@ -1537,7 +1554,7 @@ mod tests {
             .line(nums(&[0.0, 1.0]), &[-12.0, 36.5], LineOptions::default())
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        let scale = r.y.continuous().unwrap();
+        let scale = r.y.scale;
         assert_eq!(r.baseline.get(), scale.normalize(0.0));
         assert!(r.baseline.get() > r.y.ticks[0].pos.get());
         // Auto limits away from 0, above or below it: the baseline is at the lowest tick, the
@@ -1603,8 +1620,8 @@ mod tests {
         assert_ne!((y0, y1), (25.0, 65.0));
         assert!(close((y0, y1), (23.0, 67.0)), "{y0} {y1}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(labels(&r.y), ["25", "35", "45", "55", "65"]);
-        assert_end_ticks_inset(&r.y);
+        assert_eq!(labels(&r.y.ticks), ["25", "35", "45", "55", "65"]);
+        assert_end_ticks_inset(&r.y.ticks);
         // The x axis of an all-line axes keeps the exact extent, unpadded.
         assert_eq!((x0, x1), (0.0, 12.0));
         assert_eq!(r.x.ticks.first().map(|t| t.pos.get()), Some(0.0));
@@ -1632,9 +1649,9 @@ mod tests {
         let factor = 10f64.powf(0.15);
         assert!(close(y, (1.0 / factor, 1000.0 * factor)), "{y:?}");
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(labels(&r.x), ["10", "100", "1000"]);
-        assert_eq!(labels(&r.y), ["1", "10", "100", "1000"]);
-        assert_end_ticks_inset(&r.y);
+        assert_eq!(labels(&r.x.ticks), ["10", "100", "1000"]);
+        assert_eq!(labels(&r.y.ticks), ["1", "10", "100", "1000"]);
+        assert_end_ticks_inset(&r.y.ticks);
     }
 
     #[test]
@@ -1731,11 +1748,7 @@ mod tests {
     }
 
     fn y_domain(figure: &Figure) -> (f64, f64) {
-        resolve_axes(figure.axes().unwrap(), 5, 4)
-            .y
-            .continuous()
-            .unwrap()
-            .domain()
+        resolve_axes(figure.axes().unwrap(), 5, 4).y.scale.domain()
     }
 
     #[test]
@@ -1745,7 +1758,7 @@ mod tests {
         let f = bar_figure(LIN, &[12.0, 36.5]);
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(y_domain(&f), (0.0, 42.0));
-        assert_eq!(labels(&r.y), ["0", "10", "20", "30", "40"]);
+        assert_eq!(labels(&r.y.ticks), ["0", "10", "20", "30", "40"]);
         assert_eq!(r.y.ticks[0].pos.get(), 0.0);
         assert_eq!(r.baseline.get(), 0.0);
 
@@ -1758,8 +1771,8 @@ mod tests {
         // Bars on both sides of 0: both sides padded as usual.
         let f = bar_figure(LIN, &[-12.0, 36.5]);
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_end_ticks_inset(&r.y);
-        assert!(labels(&r.y).contains(&"0"));
+        assert_end_ticks_inset(&r.y.ticks);
+        assert!(labels(&r.y.ticks).contains(&"0"));
 
         // A line below 0 on the same axes moves the lower limit off 0, so it is padded.
         let mut f = bar_figure(LIN, &[12.0, 36.5]);
@@ -1771,7 +1784,7 @@ mod tests {
             )
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_end_ticks_inset(&r.y);
+        assert_end_ticks_inset(&r.y.ticks);
 
         // Without bars, data away from 0 keeps its own nice limits.
         let mut f = figure(ScaleKind::Category, LIN);
@@ -1819,7 +1832,7 @@ mod tests {
             .bar(names(&["f"]), &[1.0], BarOptions::default())
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(labels(&r.x), ["b", "a", "c", "d", "e", "f"]);
+        assert_eq!(labels(&r.x.ticks), ["b", "a", "c", "d", "e", "f"]);
     }
 
     #[test]
@@ -1947,8 +1960,8 @@ mod tests {
         );
         assert_ne!(nice.0, "0");
         assert_ne!(nice.1, "0");
-        assert_end_ticks_inset(&r.y);
-        assert!(labels(&r.y).contains(&"0"));
+        assert_end_ticks_inset(&r.y.ticks);
+        assert!(labels(&r.y.ticks).contains(&"0"));
         // The baseline sits at 0, inside the plot.
         assert!(r.baseline.get() > 0.0 && r.baseline.get() < 1.0);
     }
@@ -2038,7 +2051,7 @@ mod tests {
             .grouped_bar(names(&["d", "a"]), vec![auto(&[1.0, 2.0])])
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
-        assert_eq!(labels(&r.x), ["b", "c", "a", "d"]);
+        assert_eq!(labels(&r.x.ticks), ["b", "c", "a", "d"]);
     }
 
     /// Linear axes holding one histogram of `values` in `bins` bins, on a y axis of `y`.
@@ -2060,8 +2073,8 @@ mod tests {
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         let (x, _) = domains(&f);
         assert!(close(x, pad(10.0, 90.0)), "{x:?}");
-        assert_eq!(labels(&r.x), ["10", "30", "50", "70", "90"]);
-        assert_end_ticks_inset(&r.x);
+        assert_eq!(labels(&r.x.ticks), ["10", "30", "50", "70", "90"]);
+        assert_end_ticks_inset(&r.x.ticks);
 
         // Constant data is binned over v ± 0.5, which the x axis then encloses.
         let f = hist_figure(LIN, &[3.0, 3.0], 2);
@@ -2452,7 +2465,7 @@ mod tests {
         let r = resolve_axes(f.axes().unwrap(), 5, 4);
         assert_eq!(r.y.ticks[0].label, "1");
         assert_eq!(r.baseline, r.y.ticks[0].pos);
-        assert!(r.y.continuous().unwrap().domain().0 > 0.0);
+        assert!(r.y.scale.domain().0 > 0.0);
     }
 
     #[test]
