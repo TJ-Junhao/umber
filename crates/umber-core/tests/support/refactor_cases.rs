@@ -88,6 +88,7 @@ mod corpus {
     pub mod inputs;
     pub mod legend;
     pub mod size;
+    pub mod ticks;
 }
 
 /// PNG resolutions of every case.
@@ -132,6 +133,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::inputs::cases(&lib, &mut sink);
     corpus::legend::cases(&lib, &mut sink);
     corpus::size::cases(&lib, &mut sink);
+    corpus::ticks::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use crate::error::number;
-use crate::ticks::{self, Tick, TickCoverage};
+use crate::ticks::{self, AutoTicks, Tick, TickCoverage, TickValues};
 use crate::{Error, Result};
 
 /// How values along one axis map to positions.
@@ -699,8 +699,8 @@ impl ContinuousScale {
     /// both domain ends; more than `2 * target` powers are thinned to `target` evenly spaced
     /// exponents that keep the first and the last. Log labels use the value policy. A degenerate
     /// domain, or a loose set with fewer than two values inside the domain, falls back to
-    /// `ticks` of the nice scale.
-    pub(crate) fn nice_with_ticks(&self, target: usize) -> (ContinuousScale, Vec<Tick>) {
+    /// `ticks` of the nice scale. The ticks carry the step their labels were written for.
+    pub(crate) fn nice_with_ticks(&self, target: usize) -> (ContinuousScale, AutoTicks) {
         let target = ticks::clamp_target(target);
         let nice = self.nice(target);
         let (lo, hi) = nice.domain();
@@ -714,13 +714,19 @@ impl ContinuousScale {
             Transform::Log(base) => nice.log_values_with_ends(base.get(), target),
         };
         if let (Some(a), Some(b)) = (values.first(), values.get(1)) {
-            let labels = match self.transform {
-                Transform::Linear => ticks::format_ticks(&values, b - a),
-                Transform::Log(_) => ticks::format_values(&values),
+            let (labels, origin) = match self.transform {
+                Transform::Linear => {
+                    let step = b - a;
+                    (
+                        ticks::format_ticks(&values, step),
+                        TickValues::Grid { step },
+                    )
+                }
+                Transform::Log(_) => (ticks::format_values(&values), TickValues::Exact),
             };
-            return (nice, Self::pair(values, labels));
+            return (nice, Self::labelled(values, labels, origin));
         }
-        let ticks = nice.ticks(target);
+        let ticks = nice.auto_ticks(target);
         (nice, ticks)
     }
 
@@ -738,7 +744,8 @@ impl ContinuousScale {
     /// gap between the first two ticks, and the new tick goes in front of the others. On a log
     /// axis it moves to `lo / base`, and the ticks are chosen again for the wider domain as
     /// `nice_with_ticks` chooses them for about `target` ticks, so thinned powers stay evenly
-    /// spaced. All ticks are labelled as `nice_with_ticks` labels them. Everything else is
+    /// spaced. All ticks are labelled as `nice_with_ticks` labels them, and carry the step
+    /// their labels were written for. Everything else is
     /// returned unchanged: a linear domain that holds 0, where the baseline sits at 0 and a
     /// zero value on it is correct; data further above the lower limit; ticks that do not
     /// start at the limit or number fewer than two; a step that is not finite and positive;
@@ -746,14 +753,15 @@ impl ContinuousScale {
     /// Auto limits apply it before [`padded`](Self::padded).
     pub(crate) fn below_data(
         &self,
-        ticks: Vec<Tick>,
+        ticks: AutoTicks,
         data_low: f64,
         target: usize,
-    ) -> (ContinuousScale, Vec<Tick>) {
+    ) -> (ContinuousScale, AutoTicks) {
         let (lo, hi) = (self.lo, self.hi);
         let unchanged = (*self, ticks);
         let holds_zero = self.transform == Transform::Linear && lo <= 0.0 && 0.0 <= hi;
-        let (Some(first), Some(second)) = (unchanged.1.first(), unchanged.1.get(1)) else {
+        let (Some(first), Some(second)) = (unchanged.1.ticks.first(), unchanged.1.ticks.get(1))
+        else {
             return unchanged;
         };
         let rise = match self.transform {
@@ -778,14 +786,14 @@ impl ContinuousScale {
             lo: lowered,
             hi,
         };
-        let (values, labels) = match self.transform {
+        let (values, labels, origin) = match self.transform {
             // Ticks one step apart stay one step apart with one more in front.
             Transform::Linear => {
                 let values: Vec<f64> = std::iter::once(lowered)
-                    .chain(unchanged.1.iter().map(|tick| tick.value))
+                    .chain(unchanged.1.ticks.iter().map(|tick| tick.value))
                     .collect();
                 let labels = ticks::format_ticks(&values, step);
-                (values, labels)
+                (values, labels, TickValues::Grid { step })
             }
             // The powers are chosen again for the wider domain, so thinning stays even and no
             // power crowds the new end.
@@ -793,10 +801,10 @@ impl ContinuousScale {
                 let target = ticks::clamp_target(target);
                 let values = scale.log_values_with_ends(base.get(), target);
                 let labels = ticks::format_values(&values);
-                (values, labels)
+                (values, labels, TickValues::Exact)
             }
         };
-        (scale, Self::pair(values, labels))
+        (scale, Self::labelled(values, labels, origin))
     }
 
     /// This scale with its domain widened on each side by [`AUTO_LIMIT_PADDING`] of its span,
@@ -919,6 +927,11 @@ impl ContinuousScale {
     /// assert_eq!(labels, ["2.5", "5.0", "7.5"]);
     /// ```
     pub fn ticks(&self, target: usize) -> Vec<Tick> {
+        self.auto_ticks(target).ticks
+    }
+
+    /// [`ticks`](Self::ticks), with the step their labels were written for.
+    pub(crate) fn auto_ticks(&self, target: usize) -> AutoTicks {
         let target = ticks::clamp_target(target);
         match self.transform {
             Transform::Linear => self.linear_ticks(target),
@@ -934,13 +947,20 @@ impl ContinuousScale {
             .collect()
     }
 
-    fn end_ticks(&self) -> Vec<Tick> {
-        let values = vec![self.lo, self.hi];
-        let labels = ticks::format_values(&values);
-        Self::pair(values, labels)
+    fn labelled(values: Vec<f64>, labels: Vec<String>, origin: TickValues) -> AutoTicks {
+        AutoTicks {
+            ticks: Self::pair(values, labels),
+            values: origin,
+        }
     }
 
-    fn linear_ticks(&self, target: usize) -> Vec<Tick> {
+    fn end_ticks(&self) -> AutoTicks {
+        let values = vec![self.lo, self.hi];
+        let labels = ticks::format_values(&values);
+        Self::labelled(values, labels, TickValues::Exact)
+    }
+
+    fn linear_ticks(&self, target: usize) -> AutoTicks {
         let (lo, hi) = (self.lo, self.hi);
         if is_degenerate(lo, hi) {
             let values = strictly_increasing(
@@ -950,7 +970,7 @@ impl ContinuousScale {
                     .collect(),
             );
             let labels = ticks::format_values(&values);
-            return Self::pair(values, labels);
+            return Self::labelled(values, labels, TickValues::Exact);
         }
         let tol = 1e-9 * (hi - lo);
         let is_log = matches!(self.transform, Transform::Log(_));
@@ -994,14 +1014,18 @@ impl ContinuousScale {
                             *label = ticks::format_values(&[*value]).concat();
                         }
                     }
+                    // Every value on a log axis is positive, so none stands for zero.
+                    return Self::labelled(values, labels, TickValues::Exact);
                 }
-                return Self::pair(values, labels);
+                // The labels were written for `step`, measured before the ends were snapped
+                // onto the domain, so the snapped values carry it rather than their own gaps.
+                return Self::labelled(values, labels, TickValues::Grid { step });
             }
         }
         self.end_ticks()
     }
 
-    fn log_ticks(&self, base: f64, target: usize) -> Vec<Tick> {
+    fn log_ticks(&self, base: f64, target: usize) -> AutoTicks {
         // Fewer than two powers of the base inside the domain cannot form an axis; fall back to
         // ordinary linear ticks over the same domain.
         let (Some(first), Some(last)) = (ceil_exp(self.lo, base), floor_exp(self.hi, base)) else {
@@ -1034,7 +1058,7 @@ impl ContinuousScale {
             return self.linear_ticks(target);
         }
         let labels = ticks::format_values(&values);
-        Self::pair(values, labels)
+        Self::labelled(values, labels, TickValues::Exact)
     }
 }
 
@@ -1173,6 +1197,7 @@ mod tests {
                     for target in [2, 3, 4, 8] {
                         let (nice, ticks) = scale.nice_with_ticks(target);
                         let (lowered, ticks) = nice.below_data(ticks, low, target);
+                        let ticks = ticks.ticks;
                         let (lo, hi) = lowered.domain();
                         let context = format!("base {base}, {low:e}..{high:e}: {ticks:?}");
                         assert!(lo >= MIN_LOG_VALUE && lo < hi, "{context}");
@@ -1212,6 +1237,7 @@ mod tests {
     #[track_caller]
     fn assert_nice_ticks_agree(scale: ContinuousScale, target: usize) -> Vec<Tick> {
         let (nice, ticks) = scale.nice_with_ticks(target);
+        let ticks = ticks.ticks;
         assert_eq!(nice, scale.nice(target));
         let (lo, hi) = nice.domain();
         assert_eq!(ticks.first().map(|t| t.value), Some(lo), "{ticks:?}");
@@ -1281,6 +1307,7 @@ mod tests {
         let scale =
             ContinuousScale::new(Transform::Log(LogBase::TEN), 3.0, 4.2e12, "test").unwrap();
         let (nice, ticks) = scale.nice_with_ticks(5);
+        let ticks = ticks.ticks;
         assert_eq!(nice.domain(), (1.0, 1e13));
         let labels: Vec<&str> = ticks.iter().map(|t| t.label.as_str()).collect();
         // Scientific form applies to the whole axis.
@@ -1306,6 +1333,7 @@ mod tests {
                 return Ok(());
             };
             let (nice, ticks) = scale.nice_with_ticks(target);
+            let ticks = ticks.ticks;
             prop_assert_eq!(nice, scale.nice(target));
             let (dlo, dhi) = nice.domain();
             prop_assert_eq!(ticks.first().map(|t| t.value), Some(dlo));
@@ -1321,6 +1349,7 @@ mod tests {
             let scale = ContinuousScale::new(log, 1e-300, 1e300, "test").unwrap();
             for target in [3, 5, 8] {
                 let (nice, ticks) = scale.nice_with_ticks(target);
+                let ticks = ticks.ticks;
                 // Both ends are clamped, not powers, and are kept exactly.
                 assert_eq!(nice.domain(), (1e-300, 1e300));
                 assert_eq!(ticks.first().map(|t| t.value), Some(1e-300));
@@ -1401,6 +1430,7 @@ mod tests {
     fn nice_with_ticks_falls_back_on_degenerate_domains() {
         let scale = raw(1.0, 1.0 + 1e-14);
         let (nice, ticks) = scale.nice_with_ticks(5);
+        let ticks = ticks.ticks;
         assert_eq!(nice, scale);
         assert_eq!(ticks, scale.ticks(5));
     }

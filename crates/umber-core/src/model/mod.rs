@@ -2,7 +2,8 @@
 //!
 //! The model is data only. Every input is validated at the call that receives it, so a model
 //! that exists is always drawable. Marks hold copies of their data that never change, so clones
-//! of a figure share them. Explicit limits are kept as the scales they define. Colors stay as
+//! of a figure share them. Explicit limits are kept as the scales they define, and explicit
+//! ticks and tick formats as set, once per axis. Colors stay as
 //! [`ColorSpec`](crate::ColorSpec)s; resolving them and drawing are later stages that read the
 //! model.
 
@@ -12,6 +13,7 @@ mod bar;
 mod figure;
 mod hist;
 mod mark;
+mod ticks;
 mod validation;
 
 pub use axes::Axes;
@@ -20,6 +22,9 @@ pub use bar::{BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView};
 pub use figure::Figure;
 pub use hist::{HistMark, HistOptions};
 pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
+pub(crate) use ticks::AxisTicks;
+pub use ticks::ExplicitTicks;
+pub(crate) use validation::check_text;
 
 #[cfg(test)]
 mod tests {

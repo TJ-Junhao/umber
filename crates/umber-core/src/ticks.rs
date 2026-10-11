@@ -35,6 +35,30 @@ pub struct Tick {
     pub label: String,
 }
 
+/// Where tick values come from, which decides whether a value near zero means zero.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum TickValues {
+    /// Values computed on an evenly spaced linear grid with this step, as `start + i * step`: a
+    /// value within `step * 1e-9` of zero is a zero that missed by a rounding error.
+    Grid {
+        /// The grid step.
+        step: f64,
+    },
+    /// Exact values: positions a caller chose, and log ticks.
+    Exact,
+}
+
+/// Automatic ticks, with where their values come from: the step their labels were written for
+/// on a linear grid, so that another tick format decides zero exactly as the automatic labels
+/// did.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AutoTicks {
+    /// The ticks, with their automatic labels.
+    pub ticks: Vec<Tick>,
+    /// Where their values come from.
+    pub values: TickValues,
+}
+
 /// Largest number of ticks any function here aims for; larger targets are clamped to it.
 pub(crate) const MAX_TARGET: usize = 64;
 
@@ -316,19 +340,75 @@ fn unique_scientific(values: &[f64]) -> Vec<String> {
 /// label, the precision is raised until they do not.
 pub(crate) fn format_ticks(values: &[f64], step: f64) -> Vec<String> {
     let step = step.abs();
-    let tiny = step * 1e-9;
-    let snapped: Vec<f64> = values
+    grid_labels(&snapped_to_zero(values, step), decimals(step))
+}
+
+/// `values` with every value within `step * 1e-9` of zero set to an unsigned zero: ticks
+/// computed as `start + i * step` on a grid of that `step` can miss zero by a rounding error,
+/// and such a tick means zero. Only computed grid ticks are snapped; values a caller chose, and
+/// log ticks, are exact.
+pub(crate) fn snapped_to_zero(values: &[f64], step: f64) -> Vec<f64> {
+    let tiny = step.abs() * 1e-9;
+    values
         .iter()
         .map(|&v| if v == 0.0 || v.abs() < tiny { 0.0 } else { v })
-        .collect();
-    let use_scientific = snapped
+        .collect()
+}
+
+/// Grid-policy labels for `values` with `places` decimals: scientific form when a non-zero value
+/// is at least `1e6` or below `1e-4`, fixed-point otherwise, with the precision raised until
+/// distinct values get distinct labels.
+fn grid_labels(values: &[f64], places: usize) -> Vec<String> {
+    let use_scientific = values
         .iter()
         .any(|&v| v != 0.0 && (v.abs() >= 1e6 || v.abs() < 1e-4));
     if use_scientific {
-        unique_scientific(&snapped)
+        unique_scientific(values)
     } else {
-        unique_fixed(&snapped, decimals(step))
+        unique_fixed(values, places)
     }
+}
+
+/// Labels for tick values that a caller chose rather than a tick search, by the grid policy of
+/// [`format_ticks`], for the values exactly as given. Such values need not sit on a regular
+/// grid, so the decimals are the finest place any of them needs (`0.25` and `1.5` give two):
+/// `[0, 1.5, 3.25]` reads `0.00`, `1.50`, `3.25`. No value is snapped to zero, so tiny values
+/// such as `1e-24` choose the scientific form and keep labels of their own.
+pub(crate) fn format_given(values: &[f64]) -> Vec<String> {
+    let places = values
+        .iter()
+        .filter(|v| **v != 0.0)
+        .map(|v| decimals(v.abs()))
+        .max()
+        .unwrap_or(0);
+    // Only the sign of a zero changes.
+    let values: Vec<f64> = values
+        .iter()
+        .map(|&v| if v == 0.0 { 0.0 } else { v })
+        .collect();
+    grid_labels(&values, places)
+}
+
+/// Fixed-point labels with exactly `decimals` places for every value as given, even when two
+/// values then share a label. A value that rounds to zero prints without a sign, and negatives
+/// use U+2212.
+pub(crate) fn format_fixed(values: &[f64], decimals: usize) -> Vec<String> {
+    values.iter().map(|&v| fixed(v, Some(decimals))).collect()
+}
+
+/// Scientific labels (`2.5e6`, `1e−5`) with the default 12 significant digits, trailing zeros
+/// trimmed, for every value as given, even when two values then share a label. Zero is `0`.
+pub(crate) fn format_scientific(values: &[f64]) -> Vec<String> {
+    values
+        .iter()
+        .map(|&v| {
+            if v == 0.0 {
+                "0".to_string()
+            } else {
+                scientific(v, Some(*SCIENTIFIC_DIGITS.start()))
+            }
+        })
+        .collect()
 }
 
 /// `v` rounded to `digits` significant digits.
