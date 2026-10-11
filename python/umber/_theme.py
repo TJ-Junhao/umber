@@ -35,7 +35,7 @@ def _checked_element(context: str, index: int, value: object) -> tuple[int, int,
         raise new_error(
             TypeError,
             context,
-            f"{label} is {type_name(value)}; {label} must be a Color.",
+            f"{label} is {type_name(value)}; {label} must be of type Color.",
             parameter="colors",
             hint=_COLOR_HINT,
         )

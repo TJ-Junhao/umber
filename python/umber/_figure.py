@@ -13,7 +13,6 @@ from umber._report import api_call
 from umber._scale import Scale
 from umber._theme import Theme
 
-_CATEGORY: Final = Scale.category()
 _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
 _X_SCALE_HINT: Final = "use Scale.linear(), Scale.log() or Scale.category()."
 _Y_SCALE_HINT: Final = "use Scale.linear() or Scale.log()."
@@ -128,16 +127,7 @@ class Figure:
             context = "Figure.add_axes()"
             instance(context, "x", x, Scale, _X_SCALE_HINT)
             instance(context, "y", y, Scale, _Y_SCALE_HINT)
-            # The core reports a second axes before anything else, so this check waits for
-            # the first one.
-            if self._axes is None and y == _CATEGORY:
-                raise new_error(
-                    UsageError,
-                    context,
-                    "y is a category scale; the y axis must be linear or log.",
-                    parameter="y",
-                    hint="pass y=Scale.linear() or y=Scale.log().",
-                )
+            # The core refuses a second axes, then a category y scale.
             self._native.add_axes(*_scale.native(x), *_scale.native(y))
             axes = _axes.attach(self, self._native, x, y)
             self._axes = axes
