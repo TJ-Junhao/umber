@@ -3,7 +3,7 @@
 use super::mark_group;
 use crate::geometry::{Path, PathVerb, Point};
 use crate::layout::Layout;
-use crate::model::{BarOptions, Figure};
+use crate::model::{AxisData, BarOptions, Figure, LineOptions};
 use crate::render::{SvgText, render_png, render_svg};
 use crate::scene::{Item, Paint, Scene};
 use crate::test_support::scene::assert_scene_bounded;
@@ -76,7 +76,7 @@ fn plain_bars_take_their_share_of_the_band_from_the_baseline() {
     assert_scene_bounded(&scene);
     let layout = layout_of(&f);
     let plot = layout.plot;
-    // A zero and a NaN height draw nothing; the others draw one fill each, in data order.
+    // A zero and a NaN height draw nothing; the others draw one fill each, in category order.
     let fills = bars(&scene);
     assert_eq!(fills.len(), 2);
     for ((path, color), (index, height)) in fills.iter().zip([(0, 3.0), (3, -1.0)]) {
@@ -118,6 +118,34 @@ fn bar_marks_overlap_in_insertion_order() {
     let (b_first, b_second) = (bounds(fills[1].0), bounds(fills[2].0));
     assert_eq!((b_first.0.x, b_first.1.x), (b_second.0.x, b_second.1.x));
     assert_eq!(b_first.1.y, b_second.1.y);
+}
+
+#[test]
+fn bars_are_drawn_in_category_order() {
+    // An earlier all-NaN line sets the category order a, b, c; the bars list b, c, a.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            AxisData::Categories(names(&["a", "b", "c"])),
+            &[f64::NAN; 3],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .bar(
+            names(&["b", "c", "a"]),
+            &[2.0, 3.0, 1.0],
+            BarOptions::default(),
+        )
+        .unwrap();
+    let scene = f.to_scene(FontLibrary::global());
+    let plot = layout_of(&f).plot;
+    let fills = bars(&scene);
+    assert_eq!(fills.len(), 3);
+    for (i, (path, _)) in fills.iter().enumerate() {
+        let center = (i as f64 + 0.5) / 3.0;
+        assert_near(bounds(path).0.x, plot.x + (center - 0.12) * plot.width);
+    }
 }
 
 #[test]

@@ -44,8 +44,9 @@ fn bar_span(categories: &CategoryScale, index: usize) -> (f64, f64) {
     (center - half, center + half)
 }
 
-/// The scene items of one bar mark, in the mark's data order, one `Fill` per visible bar in
-/// `color`. Nothing is drawn on axes that cannot hold bars (the model rejects them).
+/// The scene items of one bar mark, one `Fill` per visible bar in `color`, in category order:
+/// the order of the categories along the x axis, whatever order the mark lists them in. Nothing
+/// is drawn on axes that cannot hold bars (the model rejects them).
 ///
 /// Each bar runs from the base of [`bar_base`] to its height. It is clipped in axis space
 /// against the y domain expanded by `max(r, 2)` pt, where `r` is the corner radius as
@@ -79,11 +80,16 @@ pub(super) fn bar_items(
     // `max` then `min` never panics, unlike `clamp`, and keeps finite values within the range.
     let clip = |v: f64| v.max(low).min(high);
 
+    // Each category appears once in a mark, so sorting by axis index gives a total order.
     let ends = axis_y(y, mark.heights());
-    for (name, &end) in mark.categories().iter().zip(&ends) {
-        let Some(index) = categories.index_of(name) else {
-            continue;
-        };
+    let mut bars: Vec<(usize, f64)> = mark
+        .categories()
+        .iter()
+        .zip(ends)
+        .filter_map(|(name, end)| categories.index_of(name).map(|index| (index, end)))
+        .collect();
+    bars.sort_unstable_by_key(|&(index, _)| index);
+    for (index, end) in bars {
         if end.is_nan() || end == base {
             continue;
         }
