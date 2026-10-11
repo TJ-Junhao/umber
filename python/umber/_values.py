@@ -68,6 +68,16 @@ def _data(context: str, name: str, values: object, *, str_hint: str, masked_hint
     Objects with ``__array__`` are converted with ``np.asarray``; other sequences are returned
     as they are. Text, scalars, masked arrays and containers without an order are refused.
     """
+    _check_container(context, name, values, str_hint=str_hint, masked_hint=masked_hint)
+    if hasattr(values, "__array__"):
+        return np.asarray(values)
+    return cast(Sequence[object], values)
+
+
+def _check_container(
+    context: str, name: str, values: object, *, str_hint: str, masked_hint: str
+) -> None:
+    """Refuse a data argument whose container type is not accepted, without converting it."""
     # Types are tested with ``issubclass`` where only an error follows, so that ``values``
     # keeps its declared type for the messages.
     kind = type(values)
@@ -78,10 +88,8 @@ def _data(context: str, name: str, values: object, *, str_hint: str, masked_hint
     if issubclass(kind, np.ma.MaskedArray):
         message = f"{name} is a masked array; masked values cannot be plotted."
         raise new_error(DataError, context, message, parameter=name, hint=masked_hint)
-    if hasattr(values, "__array__"):
-        return np.asarray(values)
-    if isinstance(values, Sequence):
-        return cast(Sequence[object], values)
+    if hasattr(values, "__array__") or isinstance(values, Sequence):
+        return
     if issubclass(kind, Iterator):
         hint = _ITERATOR_HINT
     elif issubclass(kind, Set):
@@ -91,6 +99,44 @@ def _data(context: str, name: str, values: object, *, str_hint: str, masked_hint
     else:
         hint = _OTHER_HINT
     raise _container_error(context, name, values, hint)
+
+
+def check_floats_type(context: str, name: str, values: object) -> None:
+    """Check the type of a numeric data argument without converting it.
+
+    Args:
+        context: The API call, such as ``"Axes.xticks_labeled()"``.
+        name: The parameter name.
+        values: The value passed.
+
+    Raises:
+        TypeError: The value is text, a single value, or a container without an order.
+        DataError: The value is a masked array.
+
+    Example:
+        >>> from umber._values import check_floats_type
+        >>> check_floats_type("Axes.xticks()", "positions", [1, 2])
+    """
+    _check_container(context, name, values, str_hint=_SINGLE_HINT, masked_hint=_MASKED_HINT)
+
+
+def check_names_type(context: str, name: str, values: object) -> None:
+    """Check the type of a names argument without converting it.
+
+    Args:
+        context: The API call, such as ``"Axes.xticks_labeled()"``.
+        name: The parameter name.
+        values: The value passed.
+
+    Raises:
+        TypeError: The value is text, a single value, or a container without an order.
+        DataError: The value is a masked array.
+
+    Example:
+        >>> from umber._values import check_names_type
+        >>> check_names_type("Axes.xticks_labeled()", "labels", ["a", "b"])
+    """
+    _check_container(context, name, values, str_hint=_NAMES_HINT, masked_hint=_MASKED_NAMES_HINT)
 
 
 def _container_error(context: str, name: str, values: object, hint: str) -> TypeError:

@@ -147,8 +147,11 @@ class TickFormat:
             TickFormat.fixed(2).affix(prefix='$')
         """
         with api_call():
-            before = _args.text("TickFormat.affix()", "prefix", prefix)
-            after = _args.text("TickFormat.affix()", "suffix", suffix)
+            context = "TickFormat.affix()"
+            _args.require_text(context, "prefix", prefix)
+            _args.require_text(context, "suffix", suffix)
+            before = _args.text(context, "prefix", prefix)
+            after = _args.text(context, "suffix", suffix)
             return _checked(self._kind, self._decimals, before, after)
 
     def _key(self) -> tuple[int, int, str, str]:

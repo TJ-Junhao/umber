@@ -23,7 +23,14 @@ from umber._series import BarSeries
 from umber._size import Size
 from umber._ticks import TickFormat
 from umber._types import Values
-from umber._values import FloatArray, axis_values, floats, names
+from umber._values import (
+    FloatArray,
+    axis_values,
+    check_floats_type,
+    check_names_type,
+    floats,
+    names,
+)
 
 # Old-style, invariant type variables with defaults: ``Figure().add_axes()`` is
 # ``Axes[float, float]`` without annotations, and ``Axes[str, float]`` is not assignable to
@@ -332,6 +339,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.xticks_labeled()"
+            check_floats_type(context, "positions", positions)
+            check_names_type(context, "labels", labels)
             places = floats(context, "positions", positions)
             texts = names(context, "labels", labels)
             self._native.xticks_labeled(places, texts)
@@ -369,6 +378,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.yticks_labeled()"
+            check_floats_type(context, "positions", positions)
+            check_names_type(context, "labels", labels)
             places = floats(context, "positions", positions)
             texts = names(context, "labels", labels)
             self._native.yticks_labeled(places, texts)

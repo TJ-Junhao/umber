@@ -52,6 +52,11 @@ def _marked(line: str, argument: str) -> str:
     return f"  {line}\n{' ' * (2 + line.index(argument))}{'^' * len(argument)}"
 
 
+def _parameter(err: BaseException) -> object:
+    """The parameter an error names."""
+    return vars(err)["_umber_parameter"]
+
+
 def _floats(*values: float) -> npt.NDArray[np.float64]:
     return np.array(values, dtype=np.float64)
 
@@ -743,3 +748,52 @@ def test_native_tick_methods_need_axes() -> None:
     for call in calls:
         with pytest.raises(RuntimeError, match="internal error: the figure has no axes"):
             call()
+
+
+# Check order: the types of all parameters, then conversion, then the native call.
+
+
+class _RecordsConversion:
+    """A positions object that notes whether it was converted to an array."""
+
+    def __init__(self) -> None:
+        self.converted = False
+
+    def __array__(self, dtype: object = None, copy: object = None) -> npt.NDArray[np.float64]:
+        self.converted = True
+        return _floats(0, 1)
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_labeled_types_are_checked_before_any_conversion(axis: str) -> None:
+    ax = _axes()
+    method = getattr(ax, f"{axis}ticks_labeled")
+    with pytest.raises(TypeError) as caught:
+        method([0, "bad"], None)
+    assert str(caught.value) == (
+        f"Axes.{axis}ticks_labeled(): labels is None; labels must be a sequence or an array."
+    )
+    assert _parameter(caught.value) == "labels"
+    recorder = _RecordsConversion()
+    with pytest.raises(TypeError) as caught:
+        method(recorder, 5)
+    assert _parameter(caught.value) == "labels"
+    assert not recorder.converted
+    # With valid types, a bad value still reports the first parameter.
+    with pytest.raises(ub.DataError) as data:
+        method([0, "bad"], ["a", "b"])
+    assert _parameter(data.value) == "positions"
+    # The types of positions come first when both are wrong.
+    with pytest.raises(TypeError) as first:
+        method(None, None)
+    assert _parameter(first.value) == "positions"
+
+
+def test_affix_types_are_checked_before_any_text_validation() -> None:
+    with pytest.raises(TypeError) as caught:
+        ub.TickFormat.AUTO.affix("x" * 1001, cast(str, None))
+    assert str(caught.value) == "TickFormat.affix(): suffix is None; suffix must be a str."
+    assert _parameter(caught.value) == "suffix"
+    with pytest.raises(ub.StyleError) as long:
+        ub.TickFormat.AUTO.affix("x" * 1001, "ok")
+    assert _parameter(long.value) == "prefix"
