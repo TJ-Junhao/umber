@@ -457,8 +457,9 @@ impl Axes {
 
     /// Adds stacked bars: in each category, one stack, as wide as a bar of [`Axes::bar`], with
     /// the series stacked in series order. Positive heights stack upward from the baseline and
-    /// negative ones downward, each side separately; NaN and 0 add no segment. Only the outermost
-    /// segment on each side has its end rounded. On a log y axis the first segment starts at
+    /// negative ones downward, each side separately; NaN and 0 add no segment. Neighbouring
+    /// segments on one side are 1 pt apart, and a segment too thin for that gap is not drawn.
+    /// Only the outermost segment on each side has its end rounded. On a log y axis the first segment starts at
     /// the bottom of the plot. Colors and categories work as in [`Axes::grouped_bar`].
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of

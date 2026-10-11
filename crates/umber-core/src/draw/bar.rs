@@ -16,6 +16,9 @@ const BAR_SHARE: f64 = 0.72;
 const MIN_BAR_MARGIN: f64 = 2.0;
 /// The gap between neighbouring bars of a group, in points.
 const GROUP_GAP: f64 = 2.0;
+/// The gap between neighbouring segments on one side of a stack, in points: the background
+/// shows through it, so adjacent fills never meet in an antialiased seam.
+const STACK_GAP: f64 = 1.0;
 
 /// Where bars start on the y axis `y`, in axis space: the value 0 on a linear axis, the low end
 /// of the domain (the bottom of the plot) on a log axis, which cannot show 0. `None` on a
@@ -236,8 +239,10 @@ pub(super) fn grouped_items(
 ///
 /// A stack takes the span of a plain bar. Each segment of `stacks` runs from its bottom to its
 /// top; a segment that starts at 0 starts at the base of [`bar_base`] instead, so on a log axis
-/// the first segment starts at the bottom of the plot. Only the outermost segment on each side
-/// of 0 may have its end rounded. Clipping and rounding are as [`Bars`] describes.
+/// the first segment starts at the bottom of the plot. Neighbouring segments on one side of 0
+/// are [`STACK_GAP`] apart (see [`inset_segment`]); segments on opposite sides meet at the
+/// base. Only the outermost segment on each side of 0 may have its end rounded. Clipping and
+/// rounding are as [`Bars`] describes.
 pub(super) fn stacked_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
@@ -254,6 +259,7 @@ pub(super) fn stacked_items(
     let Some(bars) = Bars::new(context, y, right - left) else {
         return;
     };
+    let half_gap = context.maps.y.length(STACK_GAP / 2.0);
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let span = bar_span(categories, index);
         for (j, (_, color)) in series.iter().enumerate() {
@@ -266,7 +272,27 @@ pub(super) fn stacked_items(
                 axis_y_value(y, segment.bottom)
             };
             let to = axis_y_value(y, segment.top);
+            let inner = (segment.bottom != 0.0, !segment.outermost);
+            let Some((from, to)) = inset_segment(from, to, inner, half_gap) else {
+                continue;
+            };
             bars.push(span, from, to, segment.outermost, *color, items);
         }
     }
+}
+
+/// The segment from `from` to `to` (y axis space) with each inner end, one shared with a
+/// neighbouring segment on the same side of 0, moved inwards by `half_gap` (axis units); `inner`
+/// says whether the `from` and the `to` end are inner. The base at 0 and the outermost end stay
+/// where they are. The insets are taken from the true ends, before clipping, so two neighbours
+/// are always exactly two half gaps apart. `None` when no height is left.
+fn inset_segment(from: f64, to: f64, inner: (bool, bool), half_gap: f64) -> Option<(f64, f64)> {
+    let away = (to - from).signum();
+    let from = if inner.0 {
+        from + away * half_gap
+    } else {
+        from
+    };
+    let to = if inner.1 { to - away * half_gap } else { to };
+    ((to - from) * away > 0.0).then_some((from, to))
 }

@@ -129,8 +129,14 @@ impl AxisMap {
     /// The axis-space range covered by the axis extended by `margin` points at both ends. The
     /// rounding of `lo - m` and `hi + m` is monotonic, so the range always contains the domain.
     pub(super) fn expanded(&self, margin: f64) -> (f64, f64) {
-        let m = margin / self.extent.abs() * (self.hi - self.lo);
+        let m = self.length(margin);
         (self.lo - m, self.hi + m)
+    }
+
+    /// The axis-space length of `points` plot points along the axis; the map is affine, so it
+    /// is the same everywhere on the axis.
+    pub(super) fn length(&self, points: f64) -> f64 {
+        points / self.extent.abs() * (self.hi - self.lo)
     }
 }
 

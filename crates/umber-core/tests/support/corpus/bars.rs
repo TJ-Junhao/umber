@@ -477,6 +477,15 @@ fn group_errors() -> String {
         rec.on_axes(&mut f, &format!("{kind} negative height"), |a| {
             group.add(a, names(&["a"]), list(&[&[-3.0]])).map(drop)
         });
+        rec.on_axes(
+            &mut f,
+            &format!("{kind} height below the log range in series[1]"),
+            |a| {
+                group
+                    .add(a, names(&["a", "b"]), list(&[&[1.0, 2.0], &[3.0, 1e-301]]))
+                    .map(drop)
+            },
+        );
 
         rec.section(&format!("Axes.{kind}_bar, category/category"));
         let mut f = rec.new_figure(

@@ -387,17 +387,19 @@ fn stacked_signs_stack_separately() {
     };
     let (up, down, top) = (*up, *down, *top);
     let base = layout.baseline_y;
-    // Points per unit, from the first segment, which runs from 0 to 3.
+    // Points per unit, from the outermost positive segment, whose end at 7 is not inset.
+    let (top_lo, top_hi) = bounds(top);
+    let unit = (base - f64::from(top_lo.y)) / 7.0;
+    // The first segment runs from the baseline to 3, less half the stack gap at its inner end.
     let (up_lo, up_hi) = bounds(up);
     assert_near(up_hi.y, base);
-    let unit = (base - f64::from(up_lo.y)) / 3.0;
-    // The negative segment grows down from the baseline; the third stacks on the first.
+    assert_near(up_lo.y, base - 3.0 * unit + 0.5);
+    // The negative segment grows down from the baseline, with no gap at 0; the third stacks on
+    // the first, half the gap above their shared boundary.
     let (down_lo, down_hi) = bounds(down);
     assert_near(down_lo.y, base);
     assert_near(down_hi.y, base + 2.0 * unit);
-    let (top_lo, top_hi) = bounds(top);
-    assert_eq!(top_hi.y, up_lo.y);
-    assert_near(top_lo.y, base - 7.0 * unit);
+    assert_near(top_hi.y, base - 3.0 * unit - 0.5);
     // One stack: every segment spans the same x range.
     assert_eq!((up_lo.x, up_hi.x), (top_lo.x, top_hi.x));
     assert_eq!((up_lo.x, up_hi.x), (down_lo.x, down_hi.x));
@@ -473,7 +475,8 @@ fn log_stacks_start_at_the_bottom_of_the_plot() {
     for pair in fills.chunks(2) {
         let (first, second) = (bounds(pair[0].0), bounds(pair[1].0));
         assert_near(first.1.y, layout.plot.bottom());
-        assert_eq!(second.1.y, first.0.y);
+        // One point apart: the stack gap.
+        assert_near(first.0.y - second.1.y, 1.0);
         assert!(second.0.y < first.0.y);
     }
     assert_near(layout.plot.bottom() as f32, layout.baseline_y);
@@ -504,4 +507,75 @@ fn stacks_and_groups_far_outside_limits_are_clipped() {
         assert!(render_png(&scene, 72).is_ok());
         assert!(!render_svg(&scene, SvgText::Outlines).is_empty());
     }
+}
+
+/// The segment fills of a one-category stack of `heights` on a linear y axis in `theme`, with
+/// the baseline y and the plot points per unit, measured from the stack's outermost positive
+/// end at `total`.
+fn one_stack(
+    theme: Theme,
+    heights: &[&[f64]],
+    total: f64,
+) -> (Vec<(Point, Point)>, Vec<usize>, f64, f64) {
+    let f = group_figure(theme, ScaleKind::Linear, true, &["a"], heights);
+    let scene = f.to_scene(FontLibrary::global());
+    assert_scene_bounded(&scene);
+    let base = layout_of(&f).baseline_y;
+    let fills = bars(&scene);
+    let spans: Vec<(Point, Point)> = fills.iter().map(|(path, _)| bounds(path)).collect();
+    let curves: Vec<usize> = fills.iter().map(|(path, _)| cubics(path)).collect();
+    let top = spans
+        .iter()
+        .map(|(lo, _)| f64::from(lo.y))
+        .fold(f64::INFINITY, f64::min);
+    (spans, curves, base, (base - top) / total)
+}
+
+#[test]
+fn stacked_segments_are_one_point_apart() {
+    let (spans, _, base, unit) = one_stack(Theme::graphite(), &[&[3.0], &[4.0], &[2.0]], 9.0);
+    assert_eq!(spans.len(), 3);
+    for pair in spans.windows(2) {
+        // The lower segment's top and the upper one's bottom, y down.
+        assert_near(pair[0].0.y - pair[1].1.y, 1.0);
+    }
+    // Each inner end moves half the gap from the true boundary; the base does not move.
+    assert_near(spans[0].1.y, base);
+    assert_near(spans[0].0.y, base - 3.0 * unit + 0.5);
+    assert_near(spans[1].1.y, base - 3.0 * unit - 0.5);
+    assert_near(spans[1].0.y, base - 7.0 * unit + 0.5);
+    assert_near(spans[2].1.y, base - 7.0 * unit - 0.5);
+}
+
+#[test]
+fn a_segment_thinner_than_the_gap_disappears_without_moving_its_neighbours() {
+    // About 9 pt per unit here, so 0.05 is under half a point.
+    let (spans, _, base, unit) = one_stack(Theme::graphite(), &[&[10.0], &[0.05], &[10.0]], 20.05);
+    assert!(0.05 * unit < 1.0, "{unit}");
+    assert_eq!(spans.len(), 2);
+    assert_near(spans[0].0.y, base - 10.0 * unit + 0.5);
+    assert_near(spans[1].1.y, base - 10.05 * unit - 0.5);
+    assert_near(spans[1].0.y, base - 20.05 * unit);
+}
+
+#[test]
+fn the_outermost_segment_keeps_its_rounding() {
+    // Midnight rounds bar ends by 3.5 pt; the inner ends stay square.
+    let (spans, curves, base, unit) =
+        one_stack(Theme::midnight(), &[&[3.0], &[4.0], &[-2.0], &[-1.0]], 7.0);
+    assert_eq!(curves, [0, 2, 0, 2]);
+    // The rounded ends lie at the true stack ends, not inset.
+    assert_near(spans[1].0.y, base - 7.0 * unit);
+    assert_near(spans[3].1.y, base + 3.0 * unit);
+}
+
+#[test]
+fn opposite_signs_meet_at_the_baseline() {
+    let (spans, _, base, unit) = one_stack(Theme::graphite(), &[&[3.0], &[-2.0]], 3.0);
+    assert_eq!(spans.len(), 2);
+    // Both start on the baseline: no gap at 0.
+    assert_near(spans[0].1.y, base);
+    assert_near(spans[1].0.y, base);
+    assert_near(spans[0].0.y, base - 3.0 * unit);
+    assert_near(spans[1].1.y, base + 2.0 * unit);
 }
