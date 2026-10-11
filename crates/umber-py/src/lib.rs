@@ -10,9 +10,11 @@
 mod color;
 mod enums;
 mod errors;
+mod figure;
 mod scale;
 #[cfg(test)]
 mod test_support;
+mod theme;
 mod values;
 
 use pyo3::prelude::*;
@@ -22,6 +24,8 @@ use pyo3::prelude::*;
 fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", umber_core::VERSION)?;
     m.add("MAX_BINS", umber_core::MAX_BINS)?;
+    m.add_class::<theme::Theme>()?;
+    m.add_class::<figure::Figure>()?;
     m.add_function(wrap_pyfunction!(enums::enum_members, m)?)?;
     m.add_function(wrap_pyfunction!(color::named_colors, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_hex, m)?)?;
