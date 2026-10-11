@@ -12,7 +12,7 @@
 mod legend;
 mod nudge;
 
-pub(crate) use legend::{LegendRow, RowEntry};
+pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry};
 
 use crate::model::Axes;
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, coincides};
@@ -134,6 +134,8 @@ pub(crate) struct Layout {
     pub subtitle: Option<Label>,
     /// The legend row, under the subtitle; empty when the legend has no row entries.
     pub legend: LegendRow,
+    /// The direct labels, right of the ends of their lines, in series order.
+    pub direct: Vec<DirectLabel>,
     /// The x axis label, if not empty.
     pub xlabel: Option<Label>,
     /// The y axis label, if not empty.
@@ -330,8 +332,8 @@ pub(crate) struct LayoutInput<'a> {
     pub theme: &'a Theme,
     /// The axes, for their texts.
     pub axes: &'a Axes,
-    /// The legend row, measured by [`LegendRow::measure`] for this canvas width.
-    pub legend: &'a LegendRow,
+    /// The legend, measured by [`MeasuredLegend::measure`] for this canvas width.
+    pub legend: &'a MeasuredLegend<'a>,
     /// The fonts.
     pub lib: &'a FontLibrary,
 }
@@ -376,18 +378,18 @@ pub(crate) fn lay_out(
         y += line;
         label
     });
-    let has_legend = !legend.is_empty();
-    let legend = if has_legend {
+    let has_row = !legend.row.is_empty();
+    let row = if has_row {
         if title.is_some() || subtitle.is_some() {
             y += legend::ROW_TOP_GAP;
         }
-        let placed = legend.placed(y, height);
-        y += legend.height();
+        let placed = legend.row.placed(y, height);
+        y += legend.row.height();
         placed
     } else {
         LegendRow::default()
     };
-    if title.is_some() || subtitle.is_some() || has_legend {
+    if title.is_some() || subtitle.is_some() || has_row {
         y += HEADER_GAP;
     }
     let header_bottom = y;
@@ -428,7 +430,8 @@ pub(crate) fn lay_out(
     // difference, so the label stays on the canvas. The tick's distance from the plot edge is
     // measured on `reference_width` (the previous pass's plot width). Each side's reservation
     // is capped at a quarter of the inner width; labels wider than that are clipped by the
-    // canvas.
+    // canvas. Direct labels reserve room on the right as well, under the same cap, and the
+    // larger of the two right reservations applies.
     let inner = (width - 2.0 * PADDING).max(0.0);
     let cap = END_LABEL_SHARE * inner;
     let reach = |label: Option<&(NormalizedPos, Label)>, from_left: bool| {
@@ -444,7 +447,7 @@ pub(crate) fn lay_out(
         })
     };
     let left_reserve = reach(x_labels.first(), true);
-    let right_reserve = reach(x_labels.last(), false);
+    let right_reserve = reach(x_labels.last(), false).max(legend.direct.reserve(cap));
     let plot_left = if y_labels.is_empty() {
         PADDING
     } else {
@@ -495,6 +498,7 @@ pub(crate) fn lay_out(
         label.y = plot.y - label_row_rise - AXIS_LABEL_GAP;
     }
 
+    let direct = legend.direct.placed(resolved, plot, height);
     let baseline_y = plot.y_at(baseline);
     let y_grid = if resolved.y.is_category() {
         Vec::new()
@@ -523,7 +527,8 @@ pub(crate) fn lay_out(
         header_bottom,
         title,
         subtitle,
-        legend,
+        legend: row,
+        direct,
         xlabel,
         ylabel,
         x_tick_labels: x_labels.into_iter().map(|(_, label)| label).collect(),

@@ -1,1 +1,2 @@
-fig-midnight-line-scatter
+fig-graphite-line-scatter
+fig-scatter-markers

@@ -4,7 +4,7 @@
 //! plot size depends on the tick label widths. [`plan`] settles them in two passes; [`scene`]
 //! then draws the axes chrome, the marks, the legend and the baseline.
 
-use crate::layout::{self, Layout, LayoutInput, LegendRow};
+use crate::layout::{self, Layout, LayoutInput, MeasuredLegend};
 use crate::legend::Legend;
 use crate::model::{Axes, Figure};
 use crate::resolve::{self, Limits, Resolved, ResolvedMark};
@@ -28,17 +28,18 @@ pub(crate) fn plan(input: &LayoutInput<'_>, marks: &[ResolvedMark<'_>]) -> (Reso
     (resolved, layout)
 }
 
-/// The legend row of `axes` with its resolved `marks`, measured once for a `width` pt canvas.
-/// The legend uses the style set on the axes, else the theme's.
-fn legend_row(
+/// The legend of `axes` with its resolved `marks`, its row and its direct labels, measured once
+/// for a `width` pt canvas. The legend uses the style set on the axes, else the theme's.
+fn measure_legend<'a>(
     width: f64,
     theme: &Theme,
     axes: &Axes,
-    marks: &[ResolvedMark<'_>],
+    marks: &[ResolvedMark<'a>],
     lib: &FontLibrary,
-) -> LegendRow {
+) -> MeasuredLegend<'a> {
     let style = axes.legend_style().unwrap_or(theme.legend_style());
-    LegendRow::measure(width, theme, &Legend::new(style, marks), lib)
+    let legend = Legend::new(style, marks, &Limits::of(axes).x);
+    MeasuredLegend::measure(width, theme, &legend, lib)
 }
 
 /// [`plan`] for the axes of `figure`, at the figure's size, with its marks resolved against
@@ -49,7 +50,7 @@ pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layo
     let axes = figure.axes().expect("the figure has axes");
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let marks = resolve::resolve_marks(axes.marks(), theme.palette());
-    let legend = legend_row(width, theme, axes, &marks, lib);
+    let legend = measure_legend(width, theme, axes, &marks, lib);
     let input = LayoutInput {
         width,
         height,
@@ -65,7 +66,7 @@ pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layo
 /// - the axes chrome without the baseline, as one unclipped group;
 /// - the visible marks, in insertion order, as one group clipped to the plot area (widened
 ///   horizontally for line ends, see `draw::marks_clip`);
-/// - the legend, when it has entries, as one unclipped group;
+/// - the legend, when it has row entries or direct labels, as one unclipped group;
 /// - the baseline, as an unclipped group of its own.
 ///
 /// Without axes it holds the background only. The marks are resolved and the legend is built
@@ -78,7 +79,7 @@ pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
         return scene;
     };
     let marks = resolve::resolve_marks(axes.marks(), theme.palette());
-    let legend = legend_row(width, theme, axes, &marks, library);
+    let legend = measure_legend(width, theme, axes, &marks, library);
     let input = LayoutInput {
         width,
         height,
@@ -199,14 +200,20 @@ mod tests {
 
     #[test]
     fn axes_style_replaces_the_theme_style_and_itself() {
-        // A theme with direct labels; the axes ask for the header row.
+        // A theme with direct labels: no row entries, both lines labelled directly, in a
+        // legend group.
         let mut f = labelled_figure(Theme::graphite());
-        assert_eq!(legend_and_groups(&f), (0, 3));
+        let direct = |f: &Figure| plan_figure(f, FontLibrary::global()).1.direct.len();
+        assert_eq!(legend_and_groups(&f), (0, 4));
+        assert_eq!(direct(&f), 2);
+        // The axes ask for the header row.
         f.axes_mut().unwrap().legend(LegendStyle::Header);
         assert_eq!(legend_and_groups(&f), (2, 4));
+        assert_eq!(direct(&f), 0);
         // Calling it again replaces the style.
         f.axes_mut().unwrap().legend(LegendStyle::None);
         assert_eq!(legend_and_groups(&f), (0, 3));
+        assert_eq!(direct(&f), 0);
     }
 
     #[test]
