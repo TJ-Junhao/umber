@@ -27,6 +27,7 @@ EXPECTED = [
     "SupportsArray",
     "SvgText",
     "Theme",
+    "TickFormat",
     "UmberError",
     "UsageError",
     "Values",
@@ -159,6 +160,7 @@ def _constant_docs() -> dict[str, str]:
         ("_color.py", "Color"),
         ("_size.py", "Size"),
         ("_theme.py", "Theme"),
+        ("_ticks.py", "TickFormat"),
     ):
         for stmt in ast.parse((package / module).read_text()).body:
             if isinstance(stmt, ast.ClassDef) and stmt.name == class_name:
@@ -168,7 +170,14 @@ def _constant_docs() -> dict[str, str]:
 
 def test_class_constant_and_attribute_examples_run() -> None:
     docs = _constant_docs()
-    assert {"MAX_BINS", "Color.AUTO", "Color.BLUE", "Color.BROWN", "Size.AUTO"} <= set(docs)
+    assert {
+        "MAX_BINS",
+        "Color.AUTO",
+        "Color.BLUE",
+        "Color.BROWN",
+        "Size.AUTO",
+        "TickFormat.AUTO",
+    } <= set(docs)
     assert {"Theme.PIGMENT", "Theme.GRAPHITE", "Theme.MIDNIGHT"} <= set(docs)
     failed = [name for name, doc in docs.items() if _run_examples(name, doc).failed]
     assert failed == []

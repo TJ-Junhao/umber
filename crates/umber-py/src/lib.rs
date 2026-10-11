@@ -16,6 +16,7 @@ mod size;
 #[cfg(test)]
 mod test_support;
 mod theme;
+mod ticks;
 mod values;
 
 use pyo3::prelude::*;
@@ -37,5 +38,6 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scale::check_log_base, m)?)?;
     m.add_function(wrap_pyfunction!(size::check_size_times, m)?)?;
     m.add_function(wrap_pyfunction!(size::check_size_points, m)?)?;
+    m.add_function(wrap_pyfunction!(ticks::check_tick_format, m)?)?;
     Ok(())
 }

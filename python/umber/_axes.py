@@ -12,7 +12,7 @@ from typing_extensions import TypeVar
 # so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
 # ``umber.Figure`` through the package once it has loaded.
 import umber
-from umber import _args, _color, _series, _size, _umber
+from umber import _args, _color, _series, _size, _ticks, _umber
 from umber._args import instance, integer, real, type_name
 from umber._color import Color
 from umber._enums import Dash, LegendStyle, Marker
@@ -21,6 +21,7 @@ from umber._report import api_call
 from umber._scale import Scale
 from umber._series import BarSeries
 from umber._size import Size
+from umber._ticks import TickFormat
 from umber._types import Values
 from umber._values import FloatArray, axis_values, floats, names
 
@@ -50,6 +51,9 @@ _SIZE_HINT: Final = (
     "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
 )
 _LEGEND_HINT: Final = _members_hint(LegendStyle)
+_FORMAT_HINT: Final = (
+    "use TickFormat.fixed(2), TickFormat.percent(), TickFormat.scientific() or TickFormat.AUTO."
+)
 
 
 @final
@@ -231,6 +235,201 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             lower = real("Axes.ylim()", "low", low)
             upper = real("Axes.ylim()", "high", high)
             self._native.ylim(lower, upper)
+            return self
+
+    def xticks(self: "Axes[float, Y]", positions: Values[float]) -> "Axes[float, Y]":
+        """Set the x ticks to ``positions``, replacing the automatic ones.
+
+        The positions are used in the order given. An empty list leaves the x axis without
+        ticks and gridlines. Calling any x tick method again replaces the ticks and drops
+        labels set with ``xticks_labeled()``. Without explicit limits, the x axis
+        covers both the data and the ticks; with explicit limits, ticks outside them are not
+        drawn.
+
+        Args:
+            positions: The tick positions: finite, within the supported magnitudes, positive
+                on a log axis, and strictly increasing.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``positions`` is not a sequence or an array.
+            DataError: If ``positions`` cannot be read as numbers.
+            StyleError: If a position is not finite, out of range, not positive on a log
+                axis, or not above the one before it.
+            UsageError: If the x axis is a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 12, 24], [1, 3, 2])
+            >>> ax = ax.xticks([0, 12, 24])
+        """
+        with api_call():
+            self._native.xticks(floats("Axes.xticks()", "positions", positions))
+            return self
+
+    def yticks(self: "Axes[X, float]", positions: Values[float]) -> "Axes[X, float]":
+        """Set the y ticks to ``positions``, replacing the automatic ones.
+
+        The positions are used in the order given. An empty list leaves the y axis without
+        ticks and gridlines. Calling any y tick method again replaces the ticks and drops
+        labels set with ``yticks_labeled()``. Without explicit limits, the y axis
+        covers both the data and the ticks; with explicit limits, ticks outside them are not
+        drawn.
+
+        Args:
+            positions: The tick positions: finite, within the supported magnitudes, positive
+                on a log axis, and strictly increasing.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``positions`` is not a sequence or an array.
+            DataError: If ``positions`` cannot be read as numbers.
+            StyleError: If a position is not finite, out of range, not positive on a log
+                axis, or not above the one before it.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 12, 24], [1, 3, 2])
+            >>> ax = ax.yticks([0, 12, 24])
+        """
+        with api_call():
+            self._native.yticks(floats("Axes.yticks()", "positions", positions))
+            return self
+
+    def xticks_labeled(
+        self: "Axes[float, Y]", positions: Values[float], labels: Values[str]
+    ) -> "Axes[float, Y]":
+        """Set the x ticks to ``positions``, each with the label at the same index of ``labels``.
+
+        The labels are drawn as given. The ticks follow the rules of ``Axes.xticks()``.
+        Labels cannot be combined with a tick format other than ``TickFormat.AUTO`` on the same
+        axis: whichever of ``xticks_labeled()`` and ``xtick_format()`` is called second
+        raises ``UsageError``.
+
+        Args:
+            positions: The tick positions, as for ``Axes.xticks()``.
+            labels: One label per position, each at most 1,000 characters.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``positions`` or ``labels`` has the wrong type.
+            DataError: If ``positions`` cannot be read as numbers or ``labels`` as names.
+            StyleError: If a position is not valid, the number of labels differs from the
+                number of positions, or a label is too long.
+            UsageError: If the x axis is a category axis, or the x tick format is not
+                ``TickFormat.AUTO``.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1, 3, 2])
+            >>> ax = ax.xticks_labeled([0, 1, 2], ["low", "mid", "high"])
+        """
+        with api_call():
+            context = "Axes.xticks_labeled()"
+            places = floats(context, "positions", positions)
+            texts = names(context, "labels", labels)
+            self._native.xticks_labeled(places, texts)
+            return self
+
+    def yticks_labeled(
+        self: "Axes[X, float]", positions: Values[float], labels: Values[str]
+    ) -> "Axes[X, float]":
+        """Set the y ticks to ``positions``, each with the label at the same index of ``labels``.
+
+        The labels are drawn as given. The ticks follow the rules of ``Axes.yticks()``.
+        Labels cannot be combined with a tick format other than ``TickFormat.AUTO`` on the same
+        axis: whichever of ``yticks_labeled()`` and ``ytick_format()`` is called second
+        raises ``UsageError``.
+
+        Args:
+            positions: The tick positions, as for ``Axes.yticks()``.
+            labels: One label per position, each at most 1,000 characters.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``positions`` or ``labels`` has the wrong type.
+            DataError: If ``positions`` cannot be read as numbers or ``labels`` as names.
+            StyleError: If a position is not valid, the number of labels differs from the
+                number of positions, or a label is too long.
+            UsageError: If the y tick format is not
+                ``TickFormat.AUTO``.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1, 3, 2])
+            >>> ax = ax.yticks_labeled([0, 1, 2], ["low", "mid", "high"])
+        """
+        with api_call():
+            context = "Axes.yticks_labeled()"
+            places = floats(context, "positions", positions)
+            texts = names(context, "labels", labels)
+            self._native.yticks_labeled(places, texts)
+            return self
+
+    def xtick_format(self: "Axes[float, Y]", format: TickFormat) -> "Axes[float, Y]":
+        """Set the format of the x tick labels.
+
+        The format applies to the automatic ticks and to positions set with ``Axes.xticks()``.
+        Calling it again replaces the format; the ticks stay as they are.
+
+        Args:
+            format: How the labels are written. Any format other than ``TickFormat.AUTO``,
+                including one with only a prefix or a suffix, conflicts with labels set by
+                ``Axes.xticks_labeled()``.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``format`` is not a ``TickFormat``.
+            UsageError: If the x axis is a category axis, or the x ticks have labels and
+                ``format`` is not ``TickFormat.AUTO``.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1], [0.1, 0.4])
+            >>> ax = ax.xtick_format(ub.TickFormat.percent())
+        """
+        with api_call():
+            checked = instance("Axes.xtick_format()", "format", format, TickFormat, _FORMAT_HINT)
+            self._native.xtick_format(_ticks.native(checked))
+            return self
+
+    def ytick_format(self: "Axes[X, float]", format: TickFormat) -> "Axes[X, float]":
+        """Set the format of the y tick labels.
+
+        The format applies to the automatic ticks and to positions set with ``Axes.yticks()``.
+        Calling it again replaces the format; the ticks stay as they are.
+
+        Args:
+            format: How the labels are written. Any format other than ``TickFormat.AUTO``,
+                including one with only a prefix or a suffix, conflicts with labels set by
+                ``Axes.yticks_labeled()``.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``format`` is not a ``TickFormat``.
+            UsageError: If the y ticks have labels and ``format`` is not
+                ``TickFormat.AUTO``.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1], [0.1, 0.4])
+            >>> ax = ax.ytick_format(ub.TickFormat.percent())
+        """
+        with api_call():
+            checked = instance("Axes.ytick_format()", "format", format, TickFormat, _FORMAT_HINT)
+            self._native.ytick_format(_ticks.native(checked))
             return self
 
     def legend(self, style: LegendStyle) -> Self:
