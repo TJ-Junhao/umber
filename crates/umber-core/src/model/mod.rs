@@ -45,6 +45,7 @@ mod tests {
             Err(Error::Data {
                 context: c,
                 message,
+                ..
             }) => {
                 assert_eq!(c, context);
                 assert!(message.contains(needle), "{message}");
@@ -122,7 +123,7 @@ mod tests {
                 LineOptions::default(),
             ),
             "Axes.line()",
-            "x[3] is inf; values must be finite (NaN marks a gap).",
+            "x[3] is inf; values must be finite.",
         );
         assert_data(
             a.scatter(
@@ -787,7 +788,9 @@ mod tests {
         for (bins, shown) in [(0, "0"), (crate::MAX_BINS + 1, "10001")] {
             // Before anything else, even an infinite value on a log x axis.
             match hist(a, &[f64::INFINITY], bins) {
-                Err(Error::Style { context, message }) => {
+                Err(Error::Style {
+                    context, message, ..
+                }) => {
                     assert_eq!(context, HIST);
                     assert_eq!(
                         message,
@@ -812,7 +815,9 @@ mod tests {
         let a = f.add_axes(log_kind(), ScaleKind::Linear).unwrap();
         // Before the values are checked.
         match hist(a, &[-1.0, f64::INFINITY], 30) {
-            Err(Error::Usage { context, message }) => {
+            Err(Error::Usage {
+                context, message, ..
+            }) => {
                 assert_eq!(context, HIST);
                 assert_eq!(
                     message,

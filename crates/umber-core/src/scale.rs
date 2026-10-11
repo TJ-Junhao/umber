@@ -105,7 +105,8 @@ impl LogBase {
             Err(Error::style(
                 "Scale.log()",
                 format!("base is {base}; a log base must be finite and greater than 1."),
-            ))
+            )
+            .with_parameter("base"))
         }
     }
 
@@ -311,6 +312,16 @@ fn strictly_increasing(values: Vec<f64>) -> Vec<f64> {
     out
 }
 
+/// Names `low` or `high` on `err` when exactly one of the limits breaks the rule; when both do,
+/// or neither does on its own (a relation between them), no single parameter is at fault.
+fn blame(err: Error, low_bad: bool, high_bad: bool) -> Error {
+    match (low_bad, high_bad) {
+        (true, false) => err.with_parameter("low"),
+        (false, true) => err.with_parameter("high"),
+        _ => err,
+    }
+}
+
 impl ContinuousScale {
     /// Creates a scale over `[lo, hi]`.
     ///
@@ -333,21 +344,29 @@ impl ContinuousScale {
     /// ```
     pub fn new(transform: Transform, lo: f64, hi: f64, context: &'static str) -> Result<Self> {
         if !(lo.is_finite() && hi.is_finite() && lo < hi) {
-            return Err(Error::style(
-                context,
-                format!(
-                    "the limits are {lo} and {hi}; both must be finite and the lower limit must be below the upper limit."
+            return Err(blame(
+                Error::style(
+                    context,
+                    format!(
+                        "the limits are {lo} and {hi}; both must be finite and the lower limit must be below the upper limit."
+                    ),
                 ),
+                !lo.is_finite(),
+                !hi.is_finite(),
             ));
         }
         match transform {
             Transform::Linear => {
                 if lo.abs() > MAX_MAGNITUDE || hi.abs() > MAX_MAGNITUDE {
-                    return Err(Error::style(
-                        context,
-                        format!(
-                            "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}."
+                    return Err(blame(
+                        Error::style(
+                            context,
+                            format!(
+                                "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}."
+                            ),
                         ),
+                        lo.abs() > MAX_MAGNITUDE,
+                        hi.abs() > MAX_MAGNITUDE,
                     ));
                 }
                 if too_narrow(lo, hi) {
@@ -366,14 +385,20 @@ impl ContinuousScale {
                         format!(
                             "the lower limit is {lo}; a log scale needs a positive lower limit."
                         ),
-                    ));
+                    )
+                    .with_parameter("low")
+                    .with_hint("use a linear axis if either limit is not positive."));
                 }
                 if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
-                    return Err(Error::style(
-                        context,
-                        format!(
-                            "the limits are {lo} and {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                    return Err(blame(
+                        Error::style(
+                            context,
+                            format!(
+                                "the limits are {lo} and {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                            ),
                         ),
+                        !(MIN_LOG_VALUE..=MAX_MAGNITUDE).contains(&lo),
+                        !(MIN_LOG_VALUE..=MAX_MAGNITUDE).contains(&hi),
                     ));
                 }
                 if hi / lo < MIN_LOG_RATIO {
@@ -449,7 +474,8 @@ impl ContinuousScale {
                         format!(
                             "the data range starts at {lo}; a log scale can only show positive values."
                         ),
-                    ));
+                    )
+                    .with_hint("use a linear axis, or remove values that are not positive."));
                 }
                 if lo < MIN_LOG_VALUE || hi > MAX_MAGNITUDE {
                     return Err(Error::data(
@@ -1165,7 +1191,9 @@ mod tests {
             (0.0, 1e-291),
         ] {
             match ContinuousScale::new(Transform::Linear, lo, hi, "Axes.xlim()") {
-                Err(Error::Style { context, message }) => {
+                Err(Error::Style {
+                    context, message, ..
+                }) => {
                     assert_eq!(context, "Axes.xlim()");
                     assert!(
                         message.contains("are too close") && message.contains("1e-10"),

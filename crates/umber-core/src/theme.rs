@@ -233,7 +233,8 @@ fn check_number(context: &'static str, name: &str, value: f64, bound: Bound) -> 
         Err(Error::style(
             context,
             format!("{name} is {value}; {name} must be {required}."),
-        ))
+        )
+        .with_parameter("value"))
     }
 }
 
@@ -701,7 +702,8 @@ impl Theme {
                     "palette has {} colors; a palette needs 1 to {MAX_PALETTE} colors.",
                     colors.len()
                 ),
-            ));
+            )
+            .with_parameter("colors"));
         }
         Ok(Theme {
             palette: colors.to_vec(),

@@ -48,15 +48,17 @@ impl Series {
     /// Validates `x` and `y` for axes with scale kinds `x_kind` and `y_kind`, then stores both
     /// unchanged: every bit, NaN gaps included, in the given order. The checks run in a fixed
     /// order (lengths, then x against its axis, then y against its axis) and the first failure
-    /// is the error, under `context`.
+    /// is the error, under `context`. An infinite value gets `gap_hint`, which says what to pass
+    /// instead.
     pub(super) fn new(
         context: &'static str,
         x_kind: ScaleKind,
         y_kind: ScaleKind,
         x: AxisData,
         y: &[f64],
+        gap_hint: &'static str,
     ) -> Result<Series> {
-        check_series(context, x_kind, y_kind, &x, y)?;
+        check_series(context, x_kind, y_kind, &x, y, gap_hint)?;
         Ok(Series {
             x: Arc::new(x),
             y: Arc::from(y),
@@ -85,6 +87,7 @@ impl fmt::Debug for Series {
 
 #[cfg(test)]
 mod tests {
+    use super::super::validation::LINE_GAP_HINT;
     use super::*;
     use crate::model::{Figure, LineOptions, Mark, ScatterOptions};
     use crate::{Error, LogBase, Theme};
@@ -114,7 +117,15 @@ mod tests {
         ];
         let x = vec![3.0, gaps[0], -0.0, gaps[1], 1.0];
         let y = [gaps[2], 0.0, 2.0, -0.0, gaps[3]];
-        let series = Series::new("t", LIN, LIN, AxisData::Numbers(x.clone()), &y).unwrap();
+        let series = Series::new(
+            "t",
+            LIN,
+            LIN,
+            AxisData::Numbers(x.clone()),
+            &y,
+            LINE_GAP_HINT,
+        )
+        .unwrap();
         match series.x() {
             AxisData::Numbers(stored) => assert_eq!(bits(stored), bits(&x)),
             other => panic!("unexpected x {other:?}"),
@@ -123,7 +134,15 @@ mod tests {
 
         let names: Vec<String> = ["b", "a", "b"].iter().map(|s| (*s).to_owned()).collect();
         let cats = AxisData::Categories(names.clone());
-        let series = Series::new("t", ScaleKind::Category, LIN, cats, &[1.0, 2.0, 3.0]).unwrap();
+        let series = Series::new(
+            "t",
+            ScaleKind::Category,
+            LIN,
+            cats,
+            &[1.0, 2.0, 3.0],
+            LINE_GAP_HINT,
+        )
+        .unwrap();
         assert_eq!(series.x(), &AxisData::Categories(names));
     }
 
@@ -131,7 +150,9 @@ mod tests {
     fn series_checks_run_in_order() {
         let log = ScaleKind::Log { base: LogBase::TEN };
         let message = |r: Result<Series>| match r {
-            Err(Error::Data { context, message }) => {
+            Err(Error::Data {
+                context, message, ..
+            }) => {
                 assert_eq!(context, "t");
                 message
             }
@@ -140,12 +161,26 @@ mod tests {
         let nums = |v: &[f64]| AxisData::Numbers(v.to_vec());
         // Lengths before values, x before y, the first bad index within an axis.
         assert!(
-            message(Series::new("t", LIN, LIN, nums(&[f64::INFINITY]), &[]))
-                .starts_with("x has 1 values but y has 0")
+            message(Series::new(
+                "t",
+                LIN,
+                LIN,
+                nums(&[f64::INFINITY]),
+                &[],
+                LINE_GAP_HINT
+            ))
+            .starts_with("x has 1 values but y has 0")
         );
         assert!(
-            message(Series::new("t", log, log, nums(&[1.0, -1.0]), &[0.0, 1.0]))
-                .starts_with("x[1] is -1 on a log axis")
+            message(Series::new(
+                "t",
+                log,
+                log,
+                nums(&[1.0, -1.0]),
+                &[0.0, 1.0],
+                LINE_GAP_HINT
+            ))
+            .starts_with("x[1] is -1 on a log axis")
         );
         assert!(
             message(Series::new(
@@ -153,7 +188,8 @@ mod tests {
                 LIN,
                 LIN,
                 nums(&[0.0, 1.0]),
-                &[1e301, f64::INFINITY]
+                &[1e301, f64::INFINITY],
+                LINE_GAP_HINT
             ))
             .starts_with("y[0] is 1e301")
         );
