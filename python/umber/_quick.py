@@ -15,6 +15,7 @@ from umber._enums import Dash, Marker
 from umber._figure import Figure
 from umber._report import api_call
 from umber._scale import Scale
+from umber._size import Size
 from umber._theme import Theme
 from umber._types import Values
 
@@ -28,6 +29,7 @@ def line(
     label: str = "",
     color: Color = Color.AUTO,
     dash: Dash = Dash.SOLID,
+    width: Size = Size.AUTO,
     theme: Theme = Theme.PIGMENT,
 ) -> Axes[float, float]:
     """Plot a line on a new figure and return its axes.
@@ -41,6 +43,7 @@ def line(
         label: The name shown in the legend; an empty string leaves the line out of it.
         color: The line color. ``Color.AUTO`` takes the first color of the theme palette.
         dash: How the line is stroked.
+        width: The line width. ``Size.AUTO`` is the line width of the theme.
         theme: The theme of the new figure.
 
     Returns:
@@ -59,7 +62,7 @@ def line(
     with api_call():
         instance("line()", "theme", theme, Theme, _THEME_HINT)
         axes = Figure(theme=theme).add_axes()
-        return axes.line(x, y, label=label, color=color, dash=dash)
+        return axes.line(x, y, label=label, color=color, dash=dash, width=width)
 
 
 def scatter(
@@ -69,6 +72,7 @@ def scatter(
     label: str = "",
     color: Color = Color.AUTO,
     marker: Marker = Marker.CIRCLE,
+    size: Size = Size.AUTO,
     theme: Theme = Theme.PIGMENT,
 ) -> Axes[float, float]:
     """Plot a marker at each point on a new figure and return its axes.
@@ -82,6 +86,7 @@ def scatter(
         label: The name shown in the legend; an empty string leaves the series out of it.
         color: The marker color. ``Color.AUTO`` takes the first color of the theme palette.
         marker: The marker shape.
+        size: The marker size. ``Size.AUTO`` is the marker size of the theme.
         theme: The theme of the new figure.
 
     Returns:
@@ -101,7 +106,7 @@ def scatter(
     with api_call():
         instance("scatter()", "theme", theme, Theme, _THEME_HINT)
         axes = Figure(theme=theme).add_axes()
-        return axes.scatter(x, y, label=label, color=color, marker=marker)
+        return axes.scatter(x, y, label=label, color=color, marker=marker, size=size)
 
 
 def bar(
