@@ -304,24 +304,24 @@ impl TickFormat {
     }
 
     /// `ticks` labelled in this format. [`NumberStyle::Auto`] keeps the labels the ticks carry,
-    /// which are the automatic ones; the other styles write each tick's value. The prefix and
-    /// suffix then go around every label.
-    pub(crate) fn relabel(&self, ticks: Vec<Tick>) -> Vec<Tick> {
+    /// which are the automatic ones; the other styles write each tick's value, which on a
+    /// computed grid is first snapped to zero as `values` says. The prefix and suffix then go
+    /// around every label.
+    pub(crate) fn relabel(&self, ticks: Vec<Tick>, values: TickValues) -> Vec<Tick> {
+        let exact: Vec<f64> = ticks.iter().map(|tick| tick.value).collect();
+        let written = || match values {
+            TickValues::Grid { step } => ticks::snapped_to_zero(&exact, step),
+            TickValues::Exact => exact.clone(),
+        };
         let numbers = match self.style {
             NumberStyle::Auto => None,
-            NumberStyle::Fixed(decimals) => {
-                let values: Vec<f64> = ticks.iter().map(|tick| tick.value).collect();
-                Some(ticks::format_fixed(&values, decimals.get()))
-            }
+            NumberStyle::Fixed(decimals) => Some(ticks::format_fixed(&written(), decimals.get())),
             NumberStyle::Percent(decimals) => {
-                let values: Vec<f64> = ticks.iter().map(|tick| tick.value * 100.0).collect();
-                let labels = ticks::format_fixed(&values, decimals.get());
+                let percents: Vec<f64> = written().iter().map(|v| v * 100.0).collect();
+                let labels = ticks::format_fixed(&percents, decimals.get());
                 Some(labels.into_iter().map(|label| label + "%").collect())
             }
-            NumberStyle::Scientific => {
-                let values: Vec<f64> = ticks.iter().map(|tick| tick.value).collect();
-                Some(ticks::format_scientific(&values))
-            }
+            NumberStyle::Scientific => Some(ticks::format_scientific(&written())),
         };
         let ticks: Vec<Tick> = match numbers {
             None => ticks,
@@ -342,6 +342,19 @@ impl TickFormat {
             })
             .collect()
     }
+}
+
+/// Where tick values come from, which decides whether a value near zero means zero.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum TickValues {
+    /// Values computed on an evenly spaced linear grid with this step, as `start + i * step`: a
+    /// value within `step * 1e-9` of zero is a zero that missed by a rounding error.
+    Grid {
+        /// The grid step.
+        step: f64,
+    },
+    /// Exact values: positions a caller chose, and log ticks.
+    Exact,
 }
 
 /// `decimals` as [`Decimals`], or `Error::Style` under `context` unless it is between 0 and 12.
@@ -370,9 +383,14 @@ mod tests {
             .collect()
     }
 
+    /// The labels of ticks at the exact `values`.
     fn labels(format: &TickFormat, values: &[f64]) -> Vec<String> {
+        relabelled(format, values, TickValues::Exact)
+    }
+
+    fn relabelled(format: &TickFormat, values: &[f64], origin: TickValues) -> Vec<String> {
         format
-            .relabel(ticks_of(values))
+            .relabel(ticks_of(values), origin)
             .into_iter()
             .map(|tick| tick.label)
             .collect()
@@ -464,10 +482,18 @@ mod tests {
         assert_eq!(fixed(1, &[-0.0, -0.04, 1.0]), ["0.0", "0.0", "1.0"]);
         // No precision escalation: ticks may share a label.
         assert_eq!(fixed(0, &[1.0, 1.25, 1.5]), ["1", "1", "2"]);
-        // A tick that misses zero by a rounding error is zero.
+        // On a computed grid, a tick that misses zero by a rounding error is zero.
+        let grid = TickValues::Grid { step: 0.1 };
+        let format = TickFormat::fixed(1).unwrap();
         assert_eq!(
-            fixed(1, &[-0.1, 2.7e-17, 0.1]),
+            relabelled(&format, &[-0.1, 2.7e-17, 0.1], grid),
             ["\u{2212}0.1", "0.0", "0.1"]
+        );
+        // Exact values are written as they are, however far from their neighbours.
+        let twelve = TickFormat::fixed(12).unwrap();
+        assert_eq!(
+            labels(&twelve, &[1e-10, 1.0]),
+            ["0.000000000100", "1.000000000000"]
         );
         // Large values stay in fixed form.
         assert_eq!(fixed(0, &[0.0, 5e6]), ["0", "5000000"]);
@@ -499,9 +525,21 @@ mod tests {
             ["\u{2212}2.5e3", "0", "5e\u{2212}1", "1.5e2", "1e6"]
         );
         assert_eq!(labels(&scientific, &[-0.0]), ["0"]);
+        // Only computed grid ticks are snapped to zero; exact values keep their own labels.
+        let grid = TickValues::Grid { step: 1.0 };
         assert_eq!(
-            labels(&scientific, &[-1e-17, 1.0, 2.0]),
+            relabelled(&scientific, &[-1e-17, 1.0, 2.0], grid),
             ["0", "1e0", "2e0"]
+        );
+        assert_eq!(labels(&scientific, &[1e-12, 1.0]), ["1e\u{2212}12", "1e0"]);
+        let percent = TickFormat::percent(0).unwrap();
+        assert_eq!(
+            relabelled(
+                &percent,
+                &[-0.1, -1e-18, 0.1],
+                TickValues::Grid { step: 0.1 }
+            ),
+            ["\u{2212}10%", "0%", "10%"]
         );
         // No escalation beyond 12 significant digits.
         assert_eq!(labels(&scientific, &[1.0, 1.0 + 1e-13]), ["1e0", "1e0"]);

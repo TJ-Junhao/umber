@@ -8,7 +8,9 @@
 //! scientific) on a linear and on a log y axis, applied to the automatic ticks and, on x, to
 //! explicit positions; a percent axis with a suffix; ticks that extend the domain beyond the
 //! data on both axes, with bars that keep 0; ticks clipped by explicit limits; and empty tick
-//! lists, which leave the axes without ticks and gridlines. Also: every error branch of
+//! lists, which leave the axes without ticks and gridlines. Once each: tiny and sparse explicit
+//! positions, which are labelled as given and never snapped to zero, and explicit ticks over
+//! bars without a finite height, which keep 0 in the domain. Also: every error branch of
 //! `TickFormat::fixed`, `TickFormat::percent`, `TickFormat::affix` and the six tick setters of
 //! `Axes`, including which fault is reported when an input has several, both orders of the
 //! conflict between given labels and a format, the replacement of one tick setting by the next,
@@ -212,6 +214,43 @@ fn figures() -> Vec<(String, Figure)> {
         a.xticks(&[]).unwrap().yticks(&[]).unwrap();
         out.push((format!("fig-ticks-empty-{theme_name}"), f));
     }
+
+    // Exact values are never snapped to zero: tiny positions on a linear axis get labels of
+    // their own, and sparse positions on a log axis keep their scientific and fixed labels.
+    let mut f = figure(6.0, 4.0, umber_core::Theme::pigment(), linear(), log(10.0));
+    labelled(&mut f, "Tiny and sparse positions");
+    let x: Vec<f64> = (-3..=3).map(|i| f64::from(i) * 1e-24).collect();
+    let y: Vec<f64> = [1e-11, 1e-8, 1e-5, 1e-2, 1e1, 1e2, 5e2].to_vec();
+    axes(&mut f)
+        .scatter(numbers(x), &y, ScatterOptions::default())
+        .unwrap()
+        .xticks(&[-2e-24, 0.0, 2e-24])
+        .unwrap()
+        .yticks(&[1e-12, 1.0, 1e3])
+        .unwrap()
+        .ytick_format(TickFormat::scientific())
+        .unwrap();
+    out.push(("fig-ticks-tiny-sparse".to_owned(), f));
+
+    // Bars without a finite height keep 0 in the domain that explicit ticks set.
+    let mut f = figure(
+        6.0,
+        4.0,
+        umber_core::Theme::graphite(),
+        ScaleKind::Category,
+        linear(),
+    );
+    labelled(&mut f, "Ticks over missing bars");
+    axes(&mut f)
+        .bar(
+            strings(&["a", "b"]),
+            &[f64::NAN, f64::NAN],
+            BarOptions::default(),
+        )
+        .unwrap()
+        .yticks(&[2.0, 4.0])
+        .unwrap();
+    out.push(("fig-ticks-nan-bars".to_owned(), f));
     out
 }
 

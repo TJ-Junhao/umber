@@ -34,6 +34,7 @@ use crate::model::{
 };
 use crate::scale::{Padding, is_single_value, log_offset};
 use crate::stacking::Stacks;
+use crate::tick_format::TickValues;
 use crate::{
     CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Theme, Tick,
     Transform, ticks,
@@ -272,7 +273,8 @@ fn continuous(
     let (scale, unpadded, ticks) = match settings.explicit() {
         None => {
             let (scale, unpadded, ticks) = automatic(transform, explicit, data, auto, target);
-            (scale, unpadded, settings.format().relabel(ticks))
+            let values = automatic_values(transform, &ticks);
+            (scale, unpadded, settings.format().relabel(ticks, values))
         }
         Some(given) => {
             let (scale, unpadded) = match explicit {
@@ -281,7 +283,9 @@ fn continuous(
             };
             let ticks = match explicit_ticks(given, transform, &scale) {
                 ExplicitLabels::Given(ticks) => ticks,
-                ExplicitLabels::Automatic(ticks) => settings.format().relabel(ticks),
+                ExplicitLabels::Automatic(ticks) => {
+                    settings.format().relabel(ticks, TickValues::Exact)
+                }
             };
             (scale, unpadded, ticks)
         }
@@ -292,6 +296,19 @@ fn continuous(
             scale,
         },
         unpadded_low: unpadded.domain().0,
+    }
+}
+
+/// Where the values of the automatic `ticks` of an axis of `transform` come from: on a linear
+/// axis an evenly spaced grid, whose step is the gap between the first two ticks; on a log axis
+/// exact values (powers of the base, or positive values of a fallback grid that never stands for
+/// zero).
+fn automatic_values(transform: Transform, ticks: &[Tick]) -> TickValues {
+    match (transform, ticks) {
+        (Transform::Linear, [first, second, ..]) => TickValues::Grid {
+            step: second.value - first.value,
+        },
+        _ => TickValues::Exact,
     }
 }
 
@@ -338,9 +355,11 @@ fn automatic(
 /// The domain and the domain before padding of a continuous axis with explicit ticks and no
 /// explicit limits: the extent of the `data` and the tick positions together, as it is (no
 /// rounding to nice limits, and the lowest tick is never moved below the data), then padded
-/// as `auto` pads a nice domain. An exact axis is not padded, and an extent that counts as a
-/// single value is padded by [`ContinuousScale::from_extent`] alone. Without data and without
-/// ticks it is the empty-data range, which is not padded either.
+/// as `auto` pads a nice domain. A linear axis padded with [`Padding::KeepZero`] holds bars,
+/// a histogram or an area, so its extent includes 0 even when the marks have no finite value.
+/// An exact axis is not padded, and an extent that counts as a single value is padded by
+/// [`ContinuousScale::from_extent`] alone. Without data and without ticks it is the empty-data
+/// range, which is not padded either.
 fn enclosing(
     transform: Transform,
     data: Option<(f64, f64)>,
@@ -355,6 +374,15 @@ fn enclosing(
     let Some((lo, hi)) = extent(ends.chain(positions)) else {
         let unit = ContinuousScale::unit(transform);
         return (unit, unit);
+    };
+    let keeps_zero = matches!(
+        auto,
+        AutoLimits::Nice(Padding::KeepZero) | AutoLimits::NiceBelowData(Padding::KeepZero)
+    );
+    let (lo, hi) = if keeps_zero && transform == Transform::Linear {
+        (lo.min(0.0), hi.max(0.0))
+    } else {
+        (lo, hi)
     };
     let scale = ContinuousScale::from_extent(transform, Some((lo, hi)), CONTEXT)
         .unwrap_or_else(|_| ContinuousScale::unit(transform));
@@ -2885,5 +2913,75 @@ mod tests {
             .unwrap();
         let r = resolve_axes(f.axes().unwrap(), 5, 5);
         assert_eq!(labels(&r.y.ticks), ["0", "0", "0", "1", "1"]);
+    }
+
+    /// The y tick labels of an axes without marks whose y axis of `y` has ticks at `positions`
+    /// and the tick format `format`.
+    fn y_labels_of(y: ScaleKind, positions: &[f64], format: TickFormat) -> Vec<String> {
+        let mut f = figure(LIN, y);
+        axes(&mut f)
+            .yticks(positions)
+            .unwrap()
+            .ytick_format(format)
+            .unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        r.y.ticks.into_iter().map(|t| t.label).collect()
+    }
+
+    #[test]
+    fn tiny_explicit_positions_keep_labels_of_their_own() {
+        assert_eq!(
+            y_labels_of(LIN, &[0.0, 1e-24], TickFormat::AUTO),
+            ["0", "1e\u{2212}24"]
+        );
+        assert_eq!(
+            y_labels_of(LIN, &[-1e-24, 0.0, 1e-24], TickFormat::AUTO),
+            ["\u{2212}1e\u{2212}24", "0", "1e\u{2212}24"]
+        );
+        // Positions far from their neighbours are exact values, never snapped to zero.
+        for y in [LIN, log10()] {
+            assert_eq!(
+                y_labels_of(y, &[1e-12, 1.0], TickFormat::scientific()),
+                ["1e\u{2212}12", "1e0"],
+                "{y:?}"
+            );
+            assert_eq!(
+                y_labels_of(y, &[1e-10, 1.0], TickFormat::fixed(12).unwrap()),
+                ["0.000000000100", "1.000000000000"],
+                "{y:?}"
+            );
+            assert_eq!(
+                y_labels_of(y, &[1e-12, 1.0], TickFormat::AUTO),
+                ["1e\u{2212}12", "1e0"],
+                "{y:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_ticks_keep_zero_for_marks_without_finite_values() {
+        // Bars and a histogram with no finite value still keep 0 in a linear y domain.
+        let mut bars = bar_figure(LIN, &[f64::NAN]);
+        let mut hist = hist_figure(LIN, &[f64::NAN, f64::NAN], 3);
+        for f in [&mut bars, &mut hist] {
+            axes(f).yticks(&[2.0, 4.0]).unwrap();
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            assert!(close(r.y.scale.domain(), (0.0, 4.2)), "{:?}", r.y.scale);
+            assert_eq!(r.baseline, NormalizedPos::LOW);
+            assert_eq!(labels(&r.y.ticks), ["2", "4"]);
+            // Without ticks either, the empty-data range stays.
+            axes(f).yticks(&[]).unwrap();
+            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            assert_eq!(r.y.scale.domain(), (0.0, 1.0));
+        }
+        // On a log axis there is no 0 to keep.
+        let mut f = bar_figure(log10(), &[f64::NAN]);
+        axes(&mut f).yticks(&[2.0, 4.0]).unwrap();
+        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        assert!(
+            close(r.y.scale.domain(), pad_log(2.0, 4.0)),
+            "{:?}",
+            r.y.scale
+        );
     }
 }
