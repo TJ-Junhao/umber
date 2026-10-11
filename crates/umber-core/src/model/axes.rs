@@ -5,7 +5,7 @@ use super::axis_data::{AxisData, Series};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
 use super::hist::{HistMark, HistOptions};
 use super::mark::{LineOptions, Mark, ScatterOptions};
-use super::validation::check_limits;
+use super::validation::{LINE_GAP_HINT, SCATTER_GAP_HINT, check_limits};
 use crate::{ContinuousScale, LegendStyle, Result, ScaleKind};
 
 /// A plotting area with its scales, texts, limits and marks.
@@ -374,7 +374,7 @@ impl Axes {
     ///
     /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
     pub fn line(&mut self, x: AxisData, y: &[f64], options: LineOptions) -> Result<&mut Axes> {
-        let series = Series::new("Axes.line()", self.x, self.y, x, y)?;
+        let series = Series::new("Axes.line()", self.x, self.y, x, y, LINE_GAP_HINT)?;
         self.marks.push(Mark::line(series, options));
         Ok(self)
     }
@@ -399,7 +399,7 @@ impl Axes {
         y: &[f64],
         options: ScatterOptions,
     ) -> Result<&mut Axes> {
-        let series = Series::new("Axes.scatter()", self.x, self.y, x, y)?;
+        let series = Series::new("Axes.scatter()", self.x, self.y, x, y, SCATTER_GAP_HINT)?;
         self.marks.push(Mark::scatter(series, options));
         Ok(self)
     }

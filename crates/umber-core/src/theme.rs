@@ -213,12 +213,7 @@ enum Bound {
 }
 
 /// Validate a numeric token and narrow it to `f32`.
-fn check_number(
-    context: &'static str,
-    name: &'static str,
-    value: f64,
-    bound: Bound,
-) -> Result<f32> {
+fn check_number(context: &'static str, name: &str, value: f64, bound: Bound) -> Result<f32> {
     let narrowed = value as f32;
     let (ok, required) = match bound {
         Bound::Positive => (narrowed > 0.0, "a finite number greater than 0"),
@@ -239,7 +234,7 @@ fn check_number(
             context,
             format!("{name} is {value}; {name} must be {required}."),
         )
-        .with_parameter(name))
+        .with_parameter("value"))
     }
 }
 

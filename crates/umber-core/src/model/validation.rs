@@ -11,6 +11,15 @@ use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
 use crate::stacking::Totals;
 use crate::{ContinuousScale, Error, Result, ScaleKind};
 
+/// The hint for data that meets a category y axis.
+const Y_SCALE_HINT: &str = "create the axes with a linear or log y scale.";
+
+/// The hint for an infinite line value.
+pub(super) const LINE_GAP_HINT: &str = "use NaN to leave a gap in the line.";
+
+/// The hint for an infinite scatter value.
+pub(super) const SCATTER_GAP_HINT: &str = "use NaN to leave a point out.";
+
 /// The hint for an infinite bar height.
 const BAR_GAP_HINT: &str = "use NaN to leave a category without a bar.";
 
@@ -72,19 +81,15 @@ fn check_numbers(
 }
 
 /// Validates a whole series for axes with scale kinds `x_kind` and `y_kind`, before it is
-/// stored, so a failed call changes nothing.
+/// stored, so a failed call changes nothing. An infinite value gets `gap_hint`.
 pub(super) fn check_series(
     context: &'static str,
     x_kind: ScaleKind,
     y_kind: ScaleKind,
     x: &AxisData,
     y: &[f64],
+    gap_hint: &'static str,
 ) -> Result<()> {
-    let gap_hint = if context == "Axes.scatter()" {
-        "use NaN to leave a point out."
-    } else {
-        "use NaN to leave a gap in the line."
-    };
     if x.len() != y.len() {
         return Err(Error::data(
             context,
@@ -105,7 +110,6 @@ pub(super) fn check_series(
                 context,
                 "x holds numbers but the x axis is a category axis; pass category names.",
             )
-            .with_parameter("x")
             .with_hint("to plot numbers, use a linear or log x axis."));
         }
         (AxisData::Categories(_), _) => {
@@ -113,7 +117,6 @@ pub(super) fn check_series(
                 context,
                 "x holds category names but the x axis is not a category axis; pass numbers.",
             )
-            .with_parameter("x")
             .with_hint("to plot category names, use a category x axis."));
         }
     }
@@ -122,7 +125,7 @@ pub(super) fn check_series(
             context,
             "y holds numbers but the y axis is a category axis; use a linear or log y axis.",
         )
-        .with_parameter("y"));
+        .with_hint(Y_SCALE_HINT));
     }
     check_numbers(context, ("y", "y"), y, y_kind, gap_hint)
 }
@@ -161,7 +164,7 @@ pub(super) fn check_bars(
         y_kind,
         BAR_GAP_HINT,
     )?;
-    check_bar_y_axis(context, y_kind, "heights holds numbers", Some("heights"))
+    check_bar_y_axis(context, y_kind, "heights holds numbers")
 }
 
 /// Validates the categories and series of a grouped or stacked bar mark for axes with scale
@@ -216,7 +219,7 @@ pub(super) fn check_bar_group(
     if arrangement == Arrangement::Stacked {
         check_stacked_totals(context, categories, series)?;
     }
-    check_bar_y_axis(context, y_kind, "the series hold numbers", Some("series"))
+    check_bar_y_axis(context, y_kind, "the series hold numbers")
 }
 
 /// Validates the values and bin count of a histogram for axes with scale kinds `x_kind` and
@@ -250,14 +253,14 @@ pub(super) fn check_hist(
                 context,
                 "values holds numbers but the x axis is a category axis; use a linear x axis.",
             )
-            .with_parameter("values"));
+            .with_hint("create the axes with a linear x scale."));
         }
         ScaleKind::Log { .. } => {
             return Err(Error::usage(
                 context,
                 "the x axis is a log axis, which histograms do not support; use a linear x axis.",
             )
-            .with_parameter("values"));
+            .with_hint("create the axes with a linear x scale; histograms do not support log x."));
         }
     }
     check_numbers(
@@ -267,7 +270,7 @@ pub(super) fn check_hist(
         x_kind,
         "a histogram ignores NaN, so use it to leave a value out.",
     )?;
-    check_bar_y_axis(context, y_kind, "a histogram counts values", None)?;
+    check_bar_y_axis(context, y_kind, "a histogram counts values")?;
     Ok(count)
 }
 
@@ -279,7 +282,7 @@ fn check_categories(context: &'static str, x_kind: ScaleKind, categories: &[Stri
             context,
             "categories holds names but the x axis is not a category axis; use a category x axis.",
         )
-        .with_parameter("categories"));
+        .with_hint("create the axes with a category x scale."));
     }
     let mut first_index: HashMap<&str, usize> = HashMap::with_capacity(categories.len());
     for (i, name) in categories.iter().enumerate() {
@@ -327,21 +330,13 @@ fn check_stacked_totals(
 
 /// Checks that bar heights or histogram counts, described by `subject`, can be placed on the y
 /// axis: it must be a linear or log axis.
-fn check_bar_y_axis(
-    context: &'static str,
-    y_kind: ScaleKind,
-    subject: &str,
-    parameter: Option<&'static str>,
-) -> Result<()> {
+fn check_bar_y_axis(context: &'static str, y_kind: ScaleKind, subject: &str) -> Result<()> {
     if y_kind == ScaleKind::Category {
-        let err = Error::data(
+        return Err(Error::data(
             context,
             format!("{subject} but the y axis is a category axis; use a linear or log y axis."),
-        );
-        return Err(match parameter {
-            Some(name) => err.with_parameter(name),
-            None => err,
-        });
+        )
+        .with_hint(Y_SCALE_HINT));
     }
     Ok(())
 }

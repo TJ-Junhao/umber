@@ -74,6 +74,66 @@ fn errors_carry_their_parameter_and_hint() {
             None,
         ),
         (
+            "line, numbers on a category x axis",
+            on_axes(cat, linear, |a| {
+                a.line(nums(&[1.0]), &[1.0], LineOptions::default())
+                    .map(|_| ())
+            }),
+            None,
+            Some("to plot numbers, use a linear or log x axis."),
+        ),
+        (
+            "line, category y axis",
+            on_axes(linear, cat, |a| {
+                a.line(nums(&[1.0]), &[1.0], LineOptions::default())
+                    .map(|_| ())
+            }),
+            None,
+            Some("create the axes with a linear or log y scale."),
+        ),
+        (
+            "bar, non-category x axis",
+            on_axes(linear, linear, |a| {
+                a.bar(names(&["a"]), &[1.0], BarOptions::default())
+                    .map(|_| ())
+            }),
+            None,
+            Some("create the axes with a category x scale."),
+        ),
+        (
+            "stacked bar, category y axis",
+            on_axes(cat, cat, |a| {
+                a.stacked_bar(names(&["a"]), vec![series(&[1.0])])
+                    .map(|_| ())
+            }),
+            None,
+            Some("create the axes with a linear or log y scale."),
+        ),
+        (
+            "hist, category x axis",
+            on_axes(cat, linear, |a| {
+                a.hist(&[1.0], HistOptions::default()).map(|_| ())
+            }),
+            None,
+            Some("create the axes with a linear x scale."),
+        ),
+        (
+            "hist, log x axis",
+            on_axes(LOG, linear, |a| {
+                a.hist(&[1.0], HistOptions::default()).map(|_| ())
+            }),
+            None,
+            Some("create the axes with a linear x scale; histograms do not support log x."),
+        ),
+        (
+            "hist, category y axis",
+            on_axes(linear, cat, |a| {
+                a.hist(&[1.0], HistOptions::default()).map(|_| ())
+            }),
+            None,
+            Some("create the axes with a linear or log y scale."),
+        ),
+        (
             "scatter, infinite x",
             on_axes(linear, linear, |a| {
                 a.scatter(nums(&[inf]), &[1.0], ScatterOptions::default())
@@ -214,7 +274,7 @@ fn errors_carry_their_parameter_and_hint() {
             Theme::pigment()
                 .with_line_width(-1.0)
                 .expect_err("a negative width"),
-            Some("line_width"),
+            Some("value"),
             None,
         ),
         (
