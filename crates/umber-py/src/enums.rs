@@ -93,10 +93,6 @@ int_enum!("SvgText", SvgText {
 });
 
 /// The variant of `E` with integer value `value`; an unknown value is an internal `ValueError`.
-#[allow(
-    dead_code,
-    reason = "the figure and theme methods convert enum arguments through it"
-)]
 pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
     E::from_value(value)
         .ok_or_else(|| internal_value(format!("{value} is not a value of {}", E::PY_NAME)))
