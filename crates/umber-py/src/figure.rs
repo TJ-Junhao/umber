@@ -107,6 +107,7 @@ impl Figure {
     }
 
     /// Adds the axes with the x scale `(x_kind, x_base)` and the y scale `(y_kind, y_base)`.
+    /// The core refuses a second axes and a category y scale, and a refused call adds nothing.
     fn add_axes(&mut self, x_kind: i64, x_base: f64, y_kind: i64, y_base: f64) -> PyResult<()> {
         let x = scale_kind(x_kind, x_base)?;
         let y = scale_kind(y_kind, y_base)?;

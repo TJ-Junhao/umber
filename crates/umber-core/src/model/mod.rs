@@ -238,15 +238,53 @@ mod tests {
         assert!(b.marks().is_empty());
     }
 
+    /// Asserts the error of a category y axis passed to `Figure::add_axes`.
+    #[track_caller]
+    fn assert_category_y<T: std::fmt::Debug>(r: Result<T>) {
+        match r {
+            Err(
+                ref err @ Error::Usage {
+                    context,
+                    ref message,
+                    ..
+                },
+            ) => {
+                assert_eq!(context, "Figure.add_axes()");
+                assert_eq!(
+                    message,
+                    "y is a category scale; the y axis must be linear or log."
+                );
+                assert_eq!(err.parameter(), Some("y"));
+                assert_eq!(err.hint(), Some("pass y=Scale.linear() or y=Scale.log()."));
+            }
+            other => panic!("expected Usage error, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn numeric_y_on_a_category_y_axis_is_a_data_error() {
+    fn category_y_is_rejected_before_any_mark() {
+        for x in [ScaleKind::Linear, log_kind(), ScaleKind::Category] {
+            let mut f = figure();
+            assert_category_y(f.add_axes(x, ScaleKind::Category));
+            // The failed call added no axes, so the figure can still take its axes.
+            assert!(f.axes().is_none());
+            let a = f.add_axes(x, ScaleKind::Linear).unwrap();
+            assert_eq!(a.y_scale(), ScaleKind::Linear);
+        }
+    }
+
+    #[test]
+    fn a_second_axes_is_reported_before_a_category_y() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Category).unwrap();
-        assert_data(
-            a.line(nums(&[0.0]), &[1.0], LineOptions::default()),
-            "Axes.line()",
-            "y axis is a category axis",
-        );
+        f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
+        match f.add_axes(ScaleKind::Linear, ScaleKind::Category) {
+            Err(Error::Usage { message, .. }) => assert!(
+                message.starts_with("the figure already has axes"),
+                "{message}"
+            ),
+            other => panic!("expected Usage error, got {other:?}"),
+        }
+        assert_eq!(f.axes().map(Axes::y_scale), Some(log_kind()));
     }
 
     #[test]
@@ -300,13 +338,13 @@ mod tests {
     #[test]
     fn limits_on_a_category_axis_are_usage_errors() {
         let mut f = figure();
-        let a = f
-            .add_axes(ScaleKind::Category, ScaleKind::Category)
-            .unwrap();
+        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         assert_usage(a.xlim(0.0, 1.0), "Axes.xlim()");
-        assert_usage(a.ylim(0.0, 1.0), "Axes.ylim()");
         // Usage wins over invalid values.
         assert_usage(a.xlim(1.0, 0.0), "Axes.xlim()");
+        assert_eq!(a.x_limits(), None);
+        // The y axis of the same axes is linear, so it takes limits.
+        a.ylim(0.0, 1.0).unwrap();
     }
 
     #[test]
@@ -508,22 +546,8 @@ mod tests {
             "categories holds names but the x axis is not a category axis; use a category x axis.",
         );
 
-        // Heights before the y axis kind.
-        let mut h = figure();
-        let c = h
-            .add_axes(ScaleKind::Category, ScaleKind::Category)
-            .unwrap();
-        assert_data(
-            bars(c, &["a"], &[f64::NEG_INFINITY]),
-            BAR,
-            "heights[0] is -inf",
-        );
-        assert_data(
-            bars(c, &["a"], &[1.0]),
-            BAR,
-            "heights holds numbers but the y axis is a category axis; use a linear or log y axis.",
-        );
-        assert!(c.marks().is_empty());
+        // Bars cannot meet a category y axis: the axes refuse it.
+        assert_category_y(figure().add_axes(ScaleKind::Category, ScaleKind::Category));
     }
 
     #[test]
@@ -692,23 +716,6 @@ mod tests {
             );
             assert!(a.marks().is_empty());
 
-            // Heights before the y axis kind.
-            let mut f = figure();
-            let a = f
-                .add_axes(ScaleKind::Category, ScaleKind::Category)
-                .unwrap();
-            assert_data(
-                call(a, &["a"], &[&[f64::NEG_INFINITY]]),
-                context,
-                "series[0].heights[0] is -inf",
-            );
-            assert_data(
-                call(a, &["a"], &[&[1.0]]),
-                context,
-                "the series hold numbers but the y axis is a category axis; use a linear or log y axis.",
-            );
-            assert!(a.marks().is_empty());
-
             // A log y axis needs positive heights.
             let mut f = figure();
             let a = f.add_axes(ScaleKind::Category, log_kind()).unwrap();
@@ -744,16 +751,6 @@ mod tests {
             stacked(a, &["a"], &[&[-1e300], &[5.0], &[-1e300]]),
             STACKED,
             "the heights of categories[0] (\"a\") stack to -2e300",
-        );
-        // Totals are checked before the y axis kind.
-        let mut g = figure();
-        let b = g
-            .add_axes(ScaleKind::Category, ScaleKind::Category)
-            .unwrap();
-        assert_data(
-            stacked(b, &["a"], &[&[1e300], &[1e300]]),
-            STACKED,
-            "stack to 2e300",
         );
         // Grouped bars do not add up, so they have no such limit.
         let mut h = figure();
@@ -921,17 +918,6 @@ mod tests {
             "values[1] is -inf; values must be finite",
         );
         assert!(b.marks().is_empty());
-
-        // Values before the y axis kind.
-        let mut h = figure();
-        let c = h.add_axes(ScaleKind::Linear, ScaleKind::Category).unwrap();
-        assert_data(hist(c, &[f64::INFINITY], 30), HIST, "values[0] is inf");
-        assert_data(
-            hist(c, &[1.0], 30),
-            HIST,
-            "a histogram counts values but the y axis is a category axis; use a linear or log y axis.",
-        );
-        assert!(c.marks().is_empty());
 
         // A log y axis is fine: the counts are positive, whatever the values.
         let mut k = figure();

@@ -487,23 +487,12 @@ fn group_errors() -> String {
             },
         );
 
+        // The y axis is never a category axis: the axes refuse it, so no bars meet one.
         rec.section(&format!("Axes.{kind}_bar, category/category"));
-        let mut f = rec.new_figure(
+        rec.new_figure(
             "category/category",
             ScaleKind::Category,
             ScaleKind::Category,
-        );
-        rec.on_axes(&mut f, &format!("{kind} on a category y axis"), |a| {
-            group.add(a, names(&["a"]), list(&[&[1.0]])).map(drop)
-        });
-        rec.on_axes(
-            &mut f,
-            &format!("{kind} heights summing past the bound on a category y axis"),
-            |a| {
-                group
-                    .add(a, names(&["a"]), list(&[&[1e300], &[1e300]]))
-                    .map(drop)
-            },
         );
     }
     rec.out
@@ -620,17 +609,12 @@ fn bar_errors() -> String {
         a.bar(names(&["a", "a"]), &[0.0, 0.0], bar()).map(drop)
     });
 
+    // The y axis is never a category axis: the axes refuse it, so no bars meet one.
     rec.section("Axes.bar, category/category");
-    let mut f = rec.new_figure(
+    rec.new_figure(
         "category/category",
         ScaleKind::Category,
         ScaleKind::Category,
     );
-    rec.on_axes(&mut f, "bar on a category y axis", |a| {
-        a.bar(names(&["a"]), &[1.0], bar()).map(drop)
-    });
-    rec.on_axes(&mut f, "bar on a category y axis, infinite height", |a| {
-        a.bar(names(&["a"]), &[inf], bar()).map(drop)
-    });
     rec.out
 }

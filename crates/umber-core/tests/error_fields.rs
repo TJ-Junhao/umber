@@ -101,15 +101,6 @@ fn errors_carry_their_parameter_and_hint() {
             Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
         ),
         (
-            "area, category y axis",
-            on_axes(linear, cat, |a| {
-                a.area(nums(&[1.0]), &[1.0], AreaOptions::default())
-                    .map(|_| ())
-            }),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
-        ),
-        (
             "line, infinite y",
             on_axes(linear, linear, |a| {
                 a.line(nums(&[1.0, 2.0]), &[1.0, inf], LineOptions::default())
@@ -146,15 +137,6 @@ fn errors_carry_their_parameter_and_hint() {
             Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
         ),
         (
-            "line, category y axis",
-            on_axes(linear, cat, |a| {
-                a.line(nums(&[1.0]), &[1.0], LineOptions::default())
-                    .map(|_| ())
-            }),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
-        ),
-        (
             "bar, non-category x axis",
             on_axes(linear, linear, |a| {
                 a.bar(names(&["a"]), &[1.0], BarOptions::default())
@@ -162,15 +144,6 @@ fn errors_carry_their_parameter_and_hint() {
             }),
             None,
             Some("pass x=Scale.category() to Figure.add_axes()."),
-        ),
-        (
-            "stacked bar, category y axis",
-            on_axes(cat, cat, |a| {
-                a.stacked_bar(names(&["a"]), vec![series(&[1.0])])
-                    .map(|_| ())
-            }),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "hist, category x axis",
@@ -187,14 +160,6 @@ fn errors_carry_their_parameter_and_hint() {
             }),
             None,
             Some("pass x=Scale.linear() to Figure.add_axes()."),
-        ),
-        (
-            "hist, category y axis",
-            on_axes(linear, cat, |a| {
-                a.hist(&[1.0], HistOptions::default()).map(|_| ())
-            }),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "scatter, infinite x",
@@ -289,12 +254,6 @@ fn errors_carry_their_parameter_and_hint() {
             on_axes(cat, linear, |a| a.xlim(0.0, 1.0).map(|_| ())),
             None,
             Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
-        ),
-        (
-            "ylim, category axis",
-            on_axes(linear, cat, |a| a.ylim(0.0, 1.0).map(|_| ())),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "grouped bar, repeated category",
@@ -394,6 +353,15 @@ fn errors_carry_their_parameter_and_hint() {
             on_axes(linear, LOG, |a| a.ylim(1e-302, 1e-301).map(|_| ())),
             None,
             None,
+        ),
+        (
+            "add_axes, category y",
+            figure()
+                .add_axes(linear, cat)
+                .map(|_| ())
+                .expect_err("a category y axis"),
+            Some("y"),
+            Some("pass y=Scale.linear() or y=Scale.log()."),
         ),
         (
             "second add_axes",

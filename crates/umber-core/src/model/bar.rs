@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use super::validation::{check_bar_group, check_bars};
-use crate::{ColorSpec, Result, ScaleKind};
+use crate::{ColorSpec, Result, ScaleKind, Transform};
 
 /// Options of a bar mark.
 ///
@@ -91,18 +91,18 @@ pub struct BarMark {
 }
 
 impl BarMark {
-    /// Validates `categories` and `heights` for axes with scale kinds `x_kind` and `y_kind`
-    /// (see [`check_bars`] for the checks and their order), then stores both unchanged, every
+    /// Validates `categories` and `heights` for axes with an x axis of scale kind `x_kind` and
+    /// a y axis of transform `y` (see [`check_bars`] for the checks and their order), then stores both unchanged, every
     /// bit of the heights included. The first failure is the error, under `context`.
     pub(super) fn new(
         context: &'static str,
         x_kind: ScaleKind,
-        y_kind: ScaleKind,
+        y: Transform,
         categories: Vec<String>,
         heights: &[f64],
         options: BarOptions,
     ) -> Result<BarMark> {
-        check_bars(context, x_kind, y_kind, &categories, heights)?;
+        check_bars(context, x_kind, y, &categories, heights)?;
         Ok(BarMark {
             categories: Arc::from(categories),
             heights: Arc::from(heights),
@@ -284,19 +284,19 @@ pub struct BarGroupMark {
 }
 
 impl BarGroupMark {
-    /// Validates `categories` and `series` for axes with scale kinds `x_kind` and `y_kind`,
-    /// arranged as `arrangement` (see [`check_bar_group`] for the checks and their order), then
+    /// Validates `categories` and `series` for axes with an x axis of scale kind `x_kind` and a
+    /// y axis of transform `y`, arranged as `arrangement` (see [`check_bar_group`] for the checks and their order), then
     /// stores them unchanged, every bit of the heights included. The first failure is the
     /// error, under `context`.
     pub(super) fn new(
         context: &'static str,
         arrangement: Arrangement,
         x_kind: ScaleKind,
-        y_kind: ScaleKind,
+        y: Transform,
         categories: Vec<String>,
         series: Vec<BarSeries>,
     ) -> Result<BarGroupMark> {
-        check_bar_group(context, arrangement, x_kind, y_kind, &categories, &series)?;
+        check_bar_group(context, arrangement, x_kind, y, &categories, &series)?;
         let series: Vec<StoredBarSeries> = series
             .into_iter()
             .map(|s| StoredBarSeries {

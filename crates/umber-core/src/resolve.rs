@@ -138,49 +138,57 @@ enum AutoLimits {
     NiceBelowData(Padding),
 }
 
-/// What an axis fixes before any data is seen: whether it lists categories, and for a
-/// continuous axis its transform and its explicit limits, if set.
+/// What a linear or log axis fixes before any data is seen: its transform and its explicit
+/// limits, if set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ContinuousLimits {
+    /// The transform of the axis.
+    pub transform: Transform,
+    /// The scale of the explicit limits; `None` to fit the data.
+    pub explicit: Option<ContinuousScale>,
+}
+
+/// What an x axis fixes before any data is seen: whether it lists categories, and for a
+/// continuous axis its transform and its explicit limits.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum AxisLimits {
     /// A category axis: its categories come from the marks.
     Category,
     /// A linear or log axis.
-    Continuous {
-        /// The transform of the axis.
-        transform: Transform,
-        /// The scale of the explicit limits; `None` to fit the data.
-        explicit: Option<ContinuousScale>,
-    },
+    Continuous(ContinuousLimits),
 }
 
 impl AxisLimits {
     /// The limits of an axis of scale `kind` with the explicit limits `explicit`.
     fn new(kind: ScaleKind, explicit: Option<ContinuousScale>) -> AxisLimits {
         match kind.transform() {
-            Some(transform) => AxisLimits::Continuous {
+            Some(transform) => AxisLimits::Continuous(ContinuousLimits {
                 transform,
                 explicit,
-            },
+            }),
             None => AxisLimits::Category,
         }
     }
 }
 
-/// The limits of both axes of an [`Axes`].
+/// The limits of both axes of an [`Axes`]. The y axis is always linear or log.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Limits {
     /// The x axis.
     pub x: AxisLimits,
     /// The y axis.
-    pub y: AxisLimits,
+    pub y: ContinuousLimits,
 }
 
 impl Limits {
-    /// The scale kinds and explicit limits of `axes`.
+    /// The scales and explicit limits of `axes`.
     pub fn of(axes: &Axes) -> Limits {
         Limits {
             x: AxisLimits::new(axes.x_scale(), axes.x_limit_scale()),
-            y: AxisLimits::new(axes.y_scale(), axes.y_limit_scale()),
+            y: ContinuousLimits {
+                transform: axes.y_transform(),
+                explicit: axes.y_limit_scale(),
+            },
         }
     }
 }
@@ -196,11 +204,13 @@ fn extent(values: impl IntoIterator<Item = f64>) -> Option<(f64, f64)> {
         })
 }
 
-/// A continuous axis resolved by [`continuous`], with the lower limit of its domain before
-/// padding.
+/// A continuous axis resolved by [`continuous`], with its scale and the lower limit of its
+/// domain before padding.
 struct ContinuousAxis {
     /// The axis.
     axis: ResolvedAxis,
+    /// The scale of the axis, as its [`AxisScale::Continuous`] holds it.
+    scale: ContinuousScale,
     /// The lower limit before padding: the nice lower limit of a padded axis, the domain's own
     /// lower limit otherwise.
     unpadded_low: f64,
@@ -248,6 +258,7 @@ fn continuous(
             ticks: positioned(&scale, ticks),
             scale: AxisScale::Continuous(scale),
         },
+        scale,
         unpadded_low: unpadded.domain().0,
     }
 }
@@ -311,10 +322,10 @@ pub(crate) fn resolve(
     y_target: usize,
 ) -> Resolved {
     let x = match limits.x {
-        AxisLimits::Continuous {
+        AxisLimits::Continuous(ContinuousLimits {
             transform,
             explicit,
-        } => {
+        }) => {
             let data = extent(marks.iter().flat_map(|mark| mark.x_numbers()));
             let all_lines = marks.iter().all(|mark| mark.line_width().is_some());
             let auto = if all_lines {
@@ -332,40 +343,27 @@ pub(crate) fn resolve(
             }
         }
     };
-    let (y, baseline) = match limits.y {
-        AxisLimits::Continuous {
-            transform,
-            explicit,
-        } => {
-            let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
-            // Bars and areas grow from 0 on a linear axis, so the axis shows 0 and keeps it on
-            // the plot edge when it is a limit. On a log axis they grow from the baseline.
-            let bars = marks.iter().any(ResolvedMark::grows_from_baseline);
-            let (data, padding) = if bars && transform == Transform::Linear {
-                let with_zero = data.map(|(lo, hi)| (lo.min(0.0), hi.max(0.0)));
-                (with_zero, Padding::KeepZero)
-            } else {
-                (data, Padding::BothSides)
-            };
-            let auto = AutoLimits::NiceBelowData(padding);
-            let ContinuousAxis { axis, unpadded_low } =
-                continuous(transform, explicit, data, auto, y_target);
-            let baseline = match &axis.scale {
-                AxisScale::Continuous(scale) => baseline(scale, transform, unpadded_low),
-                AxisScale::Category(_) => NormalizedPos::LOW,
-            };
-            (axis, baseline)
-        }
-        AxisLimits::Category => {
-            // Marks always hold numeric y, so a category y axis never has categories.
-            let scale = CategoryScale::from_first_appearance(std::iter::empty());
-            let axis = ResolvedAxis {
-                ticks: category_ticks(&scale),
-                scale: AxisScale::Category(scale),
-            };
-            (axis, NormalizedPos::LOW)
-        }
+    let ContinuousLimits {
+        transform,
+        explicit,
+    } = limits.y;
+    let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
+    // Bars and areas grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
+    // edge when it is a limit. On a log axis they grow from the baseline.
+    let bars = marks.iter().any(ResolvedMark::grows_from_baseline);
+    let (data, padding) = if bars && transform == Transform::Linear {
+        let with_zero = data.map(|(lo, hi)| (lo.min(0.0), hi.max(0.0)));
+        (with_zero, Padding::KeepZero)
+    } else {
+        (data, Padding::BothSides)
     };
+    let auto = AutoLimits::NiceBelowData(padding);
+    let ContinuousAxis {
+        axis: y,
+        scale,
+        unpadded_low,
+    } = continuous(transform, explicit, data, auto, y_target);
+    let baseline = baseline(&scale, transform, unpadded_low);
     Resolved { x, y, baseline }
 }
 
@@ -701,11 +699,12 @@ impl<'a> Anchor<'a> {
         match line.x() {
             AxisData::Numbers(xs) => {
                 let range = match limits.x {
-                    AxisLimits::Continuous {
+                    AxisLimits::Continuous(ContinuousLimits {
                         transform,
                         explicit: Some(scale),
-                    } => Some((transform, scale.domain())),
-                    AxisLimits::Continuous { explicit: None, .. } | AxisLimits::Category => None,
+                    }) => Some((transform, scale.domain())),
+                    AxisLimits::Continuous(ContinuousLimits { explicit: None, .. })
+                    | AxisLimits::Category => None,
                 };
                 let inside = |x: f64| range.is_none_or(|(_, (lo, hi))| lo <= x && x <= hi);
                 let last = xs
@@ -726,12 +725,8 @@ impl<'a> Anchor<'a> {
                 if !(leaves && next_x.is_finite() && next_y.is_finite()) {
                     return Some(point);
                 }
-                let y_transform = match limits.y {
-                    AxisLimits::Continuous { transform, .. } => transform,
-                    AxisLimits::Category => Transform::Linear,
-                };
                 let crossing = crossing_at(
-                    (x_transform, y_transform),
+                    (x_transform, limits.y.transform),
                     (xs[last], y[last]),
                     (next_x, next_y),
                     hi,
@@ -922,7 +917,10 @@ mod tests {
             resolved,
             &Limits {
                 x: AxisLimits::Category,
-                y: AxisLimits::Category,
+                y: ContinuousLimits {
+                    transform: Transform::Linear,
+                    explicit: None,
+                },
             },
         )
         .iter()

@@ -199,12 +199,20 @@ fn x_end_labels_stay_on_the_canvas() {
 
 #[test]
 fn end_label_inset_grows_only_for_the_first_x_label() {
-    // A category y axis has no tick labels, so only the first x label can inset the plot.
-    let plot_left = |lo: f64| {
+    // The y tick labels ("0" to "1") are narrow, so a wide enough first x label decides the
+    // left inset, and a wide last x label leaves it alone.
+    let long = "A category name far wider than its band and the y tick labels together";
+    let plot_left = |first: &str, last: &str| {
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-        f.add_axes(ScaleKind::Linear, ScaleKind::Category)
+        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
             .unwrap()
-            .xlim(lo, 100_000.0)
+            .ylim(0.0, 1.0)
+            .unwrap()
+            .line(
+                AxisData::Categories(vec![first.into(), "b".into(), last.into()]),
+                &[0.2, 0.5, 0.8],
+                LineOptions::default(),
+            )
             .unwrap();
         let scene = f.to_scene(FontLibrary::global());
         let all = strokes(&scene);
@@ -214,9 +222,10 @@ fn end_label_inset_grows_only_for_the_first_x_label() {
             _ => panic!("baseline must start with a move"),
         }
     };
-    // "0" fits in the padding; "−100000" does not.
-    assert_eq!(plot_left(0.0), 12.0);
-    assert!(plot_left(-100_000.0) > 12.0);
+    let narrow = plot_left("a", "c");
+    assert!(narrow > 12.0, "the y tick labels inset the plot");
+    assert!(plot_left(long, "c") > narrow);
+    assert_eq!(plot_left("a", long), narrow);
 }
 
 #[test]
