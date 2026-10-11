@@ -147,6 +147,20 @@ def test_pickling_is_refused(protocol: int) -> None:
         None,
         "rebuild it from a preset: Theme.PIGMENT.with_line_width(3.0).",
     )
+    assert _notes(caught.value) == [
+        "hint: rebuild it from a preset: Theme.PIGMENT.with_line_width(3.0)."
+    ]
+    frames = [entry.name for entry in traceback.extract_tb(caught.value.__traceback__)]
+    assert frames == ["test_pickling_is_refused"]
+
+
+@pytest.mark.parametrize("name", ["PIGMENT", "GRAPHITE", "MIDNIGHT"])
+def test_repr_of_a_preset_names_it(name: str) -> None:
+    assert repr(getattr(ub.Theme, name)) == f"Theme.{name}"
+
+
+def test_repr_of_a_custom_theme() -> None:
+    assert repr(ub.Theme.PIGMENT.with_line_width(3.0)) == "<umber.Theme (customized)>"
 
 
 def test_class_annotations_resolve_with_the_package_as_module() -> None:

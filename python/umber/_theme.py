@@ -50,6 +50,7 @@ class Theme:
     the ``with_*`` methods. Each one returns a new theme and leaves this one unchanged. Theme
     colors must be concrete: ``Color.AUTO`` and ``Color.palette()`` refer to a theme palette
     and are refused. Themes compare equal when every setting is equal; they are not hashable.
+    Unlike a ``Color``, a theme cannot be pickled, because the native theme has no serialization.
 
     Example:
         >>> import umber as ub
@@ -531,7 +532,10 @@ class Theme:
     __hash__ = None  # type: ignore[assignment]  # pyright: ignore[reportAssignmentType]
 
     def __repr__(self) -> str:
-        return "Theme()"
+        for name in ("PIGMENT", "GRAPHITE", "MIDNIGHT"):
+            if self == getattr(Theme, name):
+                return f"Theme.{name}"
+        return "<umber.Theme (customized)>"
 
     def __copy__(self) -> Self:
         return self
@@ -540,13 +544,14 @@ class Theme:
         return self
 
     def __reduce__(self) -> Never:
-        raise new_error(
-            TypeError,
-            "Theme",
-            "a Theme cannot be pickled.",
-            parameter=None,
-            hint="rebuild it from a preset: Theme.PIGMENT.with_line_width(3.0).",
-        )
+        with api_call():
+            raise new_error(
+                TypeError,
+                "Theme",
+                "a Theme cannot be pickled.",
+                parameter=None,
+                hint="rebuild it from a preset: Theme.PIGMENT.with_line_width(3.0).",
+            )
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("a Theme is immutable")
