@@ -1,5 +1,9 @@
 # pyright: reportPrivateUsage=false
+import copy
 import math
+import pickle
+import traceback
+import typing
 from typing import cast
 
 import pytest
@@ -114,3 +118,39 @@ def test_log_accepts_numpy_numbers() -> None:
 
     assert ub.Scale.log(cast(float, np.int64(2))) == ub.Scale.log(2.0)
     assert ub.Scale.log(cast(float, np.float32(4.0))) == ub.Scale.log(4.0)
+
+
+def test_direct_construction_is_reported_with_a_hint_and_no_package_frame() -> None:
+    with pytest.raises(TypeError) as caught:
+        ub.Scale()
+    assert _notes(caught.value) == ["hint: use Scale.linear(), Scale.log() or Scale.category()."]
+    frames = [entry.name for entry in traceback.extract_tb(caught.value.__traceback__)]
+    assert frames == ["test_direct_construction_is_reported_with_a_hint_and_no_package_frame"]
+
+
+SCALES: list[ub.Scale[float] | ub.Scale[str]] = [
+    ub.Scale.linear(),
+    ub.Scale.log(),
+    ub.Scale.log(2),
+    ub.Scale.category(),
+]
+
+
+@pytest.mark.parametrize("scale", SCALES, ids=repr)
+def test_copy_and_deepcopy_return_the_same_value(scale: ub.Scale[float] | ub.Scale[str]) -> None:
+    assert copy.copy(scale) is scale
+    assert copy.deepcopy(scale) is scale
+
+
+@pytest.mark.parametrize("scale", SCALES, ids=repr)
+def test_pickle_round_trip_gives_an_equal_scale(scale: ub.Scale[float] | ub.Scale[str]) -> None:
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        restored: object = pickle.loads(pickle.dumps(scale, protocol))
+        assert restored == scale
+        assert repr(restored) == repr(scale)
+
+
+def test_annotations_resolve_with_the_package_as_module() -> None:
+    assert typing.get_type_hints(ub.Scale.linear)["return"] == ub.Scale[float]
+    assert typing.get_type_hints(ub.Scale.category)["return"] == ub.Scale[str]
+    assert typing.get_type_hints(ub.Scale.log)["base"] is float

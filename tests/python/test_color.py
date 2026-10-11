@@ -1,5 +1,9 @@
 # pyright: reportPrivateUsage=false
+import copy
 import math
+import pickle
+import traceback
+import typing
 from collections.abc import Callable
 from typing import cast
 
@@ -76,7 +80,6 @@ def test_rgb_builds_an_opaque_color() -> None:
 def test_palette_color_wraps_at_resolution_time() -> None:
     assert ub.Color.palette(2)._argument() == (1, 2, 1.0)
     assert ub.Color.palette(2**63 - 1)._argument() == (1, 2**63 - 1, 1.0)
-    assert ub.Color.palette(10**30)._argument() == (1, 2**63 - 1, 1.0)
 
 
 def test_alpha_replaces_the_alpha_of_a_fixed_color() -> None:
@@ -265,3 +268,91 @@ def test_numpy_numbers_are_accepted() -> None:
     assert ub.Color.palette(cast(int, np.int64(3))) == ub.Color.palette(3)
     assert ub.Color.BLUE.alpha(cast(float, np.float32(0.5))) == ub.Color.BLUE.alpha(0.5)
     assert ub.Color.BLUE.alpha(cast(float, np.int64(1))) == ub.Color.BLUE
+
+
+@pytest.mark.parametrize("index", [2**63, 10**30, 2**64 - 1])
+def test_palette_rejects_an_index_above_the_largest(index: int) -> None:
+    with pytest.raises(ub.StyleError) as caught:
+        ub.Color.palette(index)
+    assert str(caught.value) == (
+        f"Color.palette(): index is {index}; a palette index must be at most 9223372036854775807."
+    )
+    assert details(caught.value) == (
+        "index",
+        "indexes wrap around the palette, so a smaller one picks the same color.",
+    )
+    assert _notes(caught.value)[0] == _marked("ub.Color.palette(index)", "index")
+
+
+@pytest.mark.parametrize(
+    ("channels", "parameter", "shown"),
+    [
+        ((2**63, 0, 0), "r", 2**63),
+        ((0, 2**64, 0), "g", 2**64),
+        ((0, 0, -(2**63) - 1), "b", -(2**63) - 1),
+        ((0, 0, -(10**30)), "b", -(10**30)),
+        ((2**63, 2**64, 0), "r", 2**63),
+    ],
+)
+def test_rgb_channels_beyond_the_native_range_are_style_errors(
+    channels: tuple[int, int, int], parameter: str, shown: int
+) -> None:
+    with pytest.raises(ub.StyleError) as caught:
+        ub.Color.rgb(*channels)
+    assert details(caught.value) == (parameter, None)
+    assert str(caught.value).startswith(f"Color.rgb(): {parameter} is ")
+    assert str(caught.value).endswith("each channel must be between 0 and 255.")
+
+
+def test_rgb_accepts_the_largest_numpy_integer_as_a_range_error() -> None:
+    with pytest.raises(ub.StyleError) as caught:
+        ub.Color.rgb(0, cast(int, np.uint64(2**64 - 1)), 0)
+    assert details(caught.value) == ("g", None)
+
+
+def test_rgb_overflow_highlights_the_argument() -> None:
+    with pytest.raises(ub.StyleError) as caught:
+        ub.Color.rgb(0, 2**63, 0)
+    assert _notes(caught.value) == [_marked("ub.Color.rgb(0, 2**63, 0)", "2**63")]
+
+
+def test_direct_construction_is_reported_with_a_hint_and_no_package_frame() -> None:
+    with pytest.raises(TypeError) as caught:
+        ub.Color()
+    assert _notes(caught.value) == [
+        'hint: use Color.hex("#3366B8"), Color.rgb(), Color.palette() or a named color.'
+    ]
+    frames = [entry.name for entry in traceback.extract_tb(caught.value.__traceback__)]
+    assert frames == ["test_direct_construction_is_reported_with_a_hint_and_no_package_frame"]
+
+
+COLORS = [
+    ub.Color.AUTO,
+    ub.Color.BLUE,
+    ub.Color.hex("#11223344"),
+    ub.Color.palette(3),
+    ub.Color.palette(3).alpha(0.5),
+    ub.Color.AUTO.alpha(0.25),
+]
+
+
+@pytest.mark.parametrize("color", COLORS, ids=repr)
+def test_copy_and_deepcopy_return_the_same_value(color: ub.Color) -> None:
+    assert copy.copy(color) is color
+    assert copy.deepcopy(color) is color
+
+
+@pytest.mark.parametrize("color", COLORS, ids=repr)
+def test_pickle_round_trip_gives_an_equal_color(color: ub.Color) -> None:
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        restored = pickle.loads(pickle.dumps(color, protocol))
+        assert isinstance(restored, ub.Color)
+        assert restored == color
+        assert repr(restored) == repr(color)
+
+
+def test_class_annotations_resolve_with_the_package_as_module() -> None:
+    hints = typing.get_type_hints(ub.Color)
+    assert hints["AUTO"] == typing.ClassVar[ub.Color]
+    assert typing.get_type_hints(ub.Color.hex)["return"] is ub.Color
+    assert typing.get_type_hints(ub.Color.alpha)["return"] is ub.Color

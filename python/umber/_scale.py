@@ -1,10 +1,9 @@
 """``Scale``: how data values map to positions along an axis."""
 
-from __future__ import annotations
-
 import math
 import numbers
-from typing import Generic, TypeVar, cast, final
+from collections.abc import Callable
+from typing import Generic, Self, TypeVar, cast, final
 
 from umber import _umber
 from umber._errors import new_error
@@ -42,16 +41,17 @@ class Scale(Generic[T]):  # noqa: UP046
 
     def __init__(self) -> None:
         """Refuse construction; use ``Scale.linear()``, ``Scale.log()`` or ``Scale.category()``."""
-        raise new_error(
-            TypeError,
-            "Scale()",
-            "Scale has no public constructor; use one of its constructors.",
-            parameter=None,
-            hint="use Scale.linear(), Scale.log() or Scale.category().",
-        )
+        with api_call():
+            raise new_error(
+                TypeError,
+                "Scale()",
+                "Scale has no public constructor; use one of its constructors.",
+                parameter=None,
+                hint="use Scale.linear(), Scale.log() or Scale.category().",
+            )
 
     @staticmethod
-    def linear() -> Scale[float]:
+    def linear() -> "Scale[float]":
         """Return the linear scale, the default for numeric axes.
 
         Returns:
@@ -66,7 +66,7 @@ class Scale(Generic[T]):  # noqa: UP046
             return cast(Scale[float], _new(_LINEAR, 10.0))
 
     @staticmethod
-    def log(base: float = 10.0) -> Scale[float]:
+    def log(base: float = 10.0) -> "Scale[float]":
         """Return the logarithmic scale with the given base.
 
         Args:
@@ -102,7 +102,7 @@ class Scale(Generic[T]):  # noqa: UP046
             return cast(Scale[float], _new(_LOG, value))
 
     @staticmethod
-    def category() -> Scale[str]:
+    def category() -> "Scale[str]":
         """Return the scale of named categories, used for bar charts.
 
         Returns:
@@ -137,6 +137,15 @@ class Scale(Generic[T]):  # noqa: UP046
         if self._kind == _CATEGORY:
             return "Scale.category()"
         return f"Scale.log({self._base!r})"
+
+    def __copy__(self) -> Self:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, object]) -> Self:
+        return self
+
+    def __reduce__(self) -> tuple[Callable[[int, float], "Scale[object]"], tuple[int, float]]:
+        return _new, (self._kind, self._base)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("a Scale is immutable")
