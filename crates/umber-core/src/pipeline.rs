@@ -51,8 +51,10 @@ pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layo
 }
 
 /// The scene of `figure`: `width × 72` by `height × 72` pt on the theme background, holding
-/// the axes chrome as one unclipped group, followed by the visible marks, in insertion order,
-/// as one group clipped to the plot area. Without axes it holds the background only. The marks
+/// the axes chrome without the baseline as one unclipped group, followed by the visible marks,
+/// in insertion order, as one group clipped to the plot area (widened horizontally for line
+/// ends, see `draw::marks_clip`), and then the baseline as an unclipped group of its own.
+/// Without axes it holds the background only. The marks
 /// are resolved once, before layout, and the same records serve layout and drawing.
 pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
     let theme = figure.theme();
@@ -67,6 +69,7 @@ pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
     if let Some(marks) = draw::marks(theme, &resolved, &layout, &marks) {
         scene.push(marks);
     }
+    scene.push(draw::baseline(theme, &layout));
     scene
 }
 

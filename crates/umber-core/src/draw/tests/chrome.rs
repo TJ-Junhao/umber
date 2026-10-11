@@ -198,10 +198,14 @@ fn x_end_labels_stay_on_the_canvas() {
 }
 
 #[test]
-fn above_gridline_inset_grows_only_for_the_first_x_label() {
+fn end_label_inset_grows_only_for_the_first_x_label() {
+    // A category y axis has no tick labels, so only the first x label can inset the plot.
     let plot_left = |lo: f64| {
-        let mut f = chrome_figure(Theme::pigment());
-        f.axes_mut().unwrap().xlim(lo, 100_000.0).unwrap();
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Category)
+            .unwrap()
+            .xlim(lo, 100_000.0)
+            .unwrap();
         let scene = f.to_scene(FontLibrary::global());
         let all = strokes(&scene);
         let (path, _) = all.last().copied().unwrap();
@@ -220,4 +224,69 @@ fn scenes_are_deterministic() {
     let a = chrome_figure(Theme::pigment()).to_scene(FontLibrary::global());
     let b = chrome_figure(Theme::pigment()).to_scene(FontLibrary::global());
     assert_eq!(a, b);
+}
+
+#[test]
+fn baseline_is_drawn_last_over_the_marks() {
+    use crate::draw::mapping::point;
+    use crate::scene::Item;
+    let theme = Theme::pigment();
+    let mut f = chrome_figure(theme.clone());
+    f.axes_mut()
+        .unwrap()
+        .line(
+            AxisData::Numbers(vec![0.0, 100.0]),
+            &[0.0, 1.0],
+            LineOptions::default(),
+        )
+        .unwrap();
+    let layout = crate::pipeline::plan_figure(&f, FontLibrary::global()).1;
+    let scene = f.to_scene(FontLibrary::global());
+    let is_baseline = |item: &Item| match item {
+        Item::Stroke { path, style } => {
+            style.color == theme.baseline_color()
+                && style.width == theme.baseline_width()
+                && path.verbs()
+                    == [
+                        PathVerb::MoveTo(point(layout.plot.x, layout.baseline_y)),
+                        PathVerb::LineTo(point(layout.plot.right(), layout.baseline_y)),
+                    ]
+        }
+        _ => false,
+    };
+    // Chrome, then the clipped marks, then the baseline alone and unclipped.
+    let [
+        Item::Group {
+            clip: None,
+            items: chrome,
+        },
+        Item::Group {
+            clip: Some(_),
+            items: marks,
+        },
+        Item::Group {
+            clip: None,
+            items: baseline,
+        },
+    ] = scene.items.as_slice()
+    else {
+        panic!("unexpected scene order: {:?}", scene.items);
+    };
+    assert!(!chrome.iter().any(is_baseline));
+    assert!(!marks.is_empty() && !marks.iter().any(is_baseline));
+    assert!(matches!(baseline.as_slice(), [only] if is_baseline(only)));
+
+    // Without visible marks the baseline still follows the chrome.
+    let scene = chrome_figure(theme.clone()).to_scene(FontLibrary::global());
+    let [
+        Item::Group { clip: None, .. },
+        Item::Group {
+            clip: None,
+            items: baseline,
+        },
+    ] = scene.items.as_slice()
+    else {
+        panic!("unexpected scene order: {:?}", scene.items);
+    };
+    assert!(matches!(baseline.as_slice(), [only] if is_baseline(only)));
 }

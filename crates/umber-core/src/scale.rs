@@ -183,6 +183,20 @@ fn too_narrow(lo: f64, hi: f64) -> bool {
     hi - lo < (MIN_LINEAR_RELATIVE_WIDTH * magnitude).max(MIN_LINEAR_WIDTH)
 }
 
+/// Whether the data extent `lo..=hi` (finite, `lo <= hi`) counts as a single value: a linear
+/// extent narrower than [`ContinuousScale::new`] allows, or a log extent narrower than a factor
+/// of `1 + 1e-9`. [`ContinuousScale::from_extent`] pads such an extent on its own terms.
+pub(crate) fn is_single_value(transform: Transform, lo: f64, hi: f64) -> bool {
+    match transform {
+        Transform::Linear => lo == hi || too_narrow(lo, hi),
+        Transform::Log(_) => hi / lo < MIN_LOG_RATIO,
+    }
+}
+
+/// The share of a nice domain's span that auto limits add on each side, so that marks never
+/// sit on the plot edge.
+const AUTO_LIMIT_PADDING: f64 = 0.05;
+
 /// `ln(v / lo)` for positive `v` and `lo`: the log-axis position of `v` measured from the
 /// lower limit, in natural-log units. Measuring from `lo` keeps narrow log domains at large
 /// magnitudes resolvable: `ln(1e200 * (1 + 1e-8))` and `ln(1e200)` are only about 175 000 ulps
@@ -435,11 +449,7 @@ impl ContinuousScale {
                 }
             }
         }
-        let singleton = match transform {
-            Transform::Linear => lo == hi || too_narrow(lo, hi),
-            Transform::Log(_) => hi / lo < MIN_LOG_RATIO,
-        };
-        if !singleton {
+        if !is_single_value(transform, lo, hi) {
             return Self::new(transform, lo, hi, context);
         }
         let (mut lo, mut hi) = match transform {
@@ -639,6 +649,30 @@ impl ContinuousScale {
         }
         let ticks = nice.ticks(target);
         (nice, ticks)
+    }
+
+    /// This scale with its domain widened on each side by [`AUTO_LIMIT_PADDING`] of its span,
+    /// measured in log space on a log axis, and kept within the supported magnitudes
+    /// (`|v| <= MAX_MAGNITUDE` linear, `[MIN_LOG_VALUE, MAX_MAGNITUDE]` log). Auto limits apply
+    /// it to a nice domain, after its ticks are chosen, so the ticks stay on round values and
+    /// the outermost ones sit just inside the plot edge. Never narrower than `self`.
+    pub(crate) fn padded(&self) -> ContinuousScale {
+        let (lo, hi) = (self.lo, self.hi);
+        let padded = match self.transform {
+            Transform::Linear => {
+                // Both limits are at most MAX_MAGNITUDE in magnitude, so the span is finite.
+                let pad = AUTO_LIMIT_PADDING * (hi - lo);
+                (lo - pad, hi + pad)
+            }
+            Transform::Log(_) => {
+                // A share of the span in log space is the same factor in every base, so natural
+                // logarithms serve all of them.
+                let factor = (AUTO_LIMIT_PADDING * log_offset(hi, lo)).exp();
+                (lo / factor, hi * factor)
+            }
+        };
+        // `widened` keeps the result within the supported magnitudes.
+        self.widened(Some(padded))
     }
 
     /// Powers of `base` inside a log domain, with the domain ends always first and last.
@@ -1414,6 +1448,91 @@ mod tests {
                 .iter()
                 .all(|t| t.value.is_finite() && t.value > 0.0)
         );
+    }
+
+    #[test]
+    fn padded_adds_five_percent_of_the_span() {
+        for ((lo, hi), (want_lo, want_hi)) in [
+            ((35.0, 65.0), (33.5, 66.5)),
+            ((-10.0, 10.0), (-11.0, 11.0)),
+            ((1e-5, 3e-5), (0.9e-5, 3.1e-5)),
+        ] {
+            let (plo, phi) = raw(lo, hi).padded().domain();
+            assert!(
+                rel_close(plo, want_lo) && rel_close(phi, want_hi),
+                "{plo} {phi}"
+            );
+        }
+        // Log: 5 % of the span in log space, the same factor at both ends and in every base.
+        for base in [2.0, 10.0, 999.0] {
+            let log = Transform::Log(LogBase::new(base).unwrap());
+            let (lo, hi) = ContinuousScale::new(log, 10.0, 1000.0, "t")
+                .unwrap()
+                .padded()
+                .domain();
+            let factor = 10f64.powf(0.1);
+            assert!(rel_close(lo, 10.0 / factor), "base {base}: {lo}");
+            assert!(rel_close(hi, 1000.0 * factor), "base {base}: {hi}");
+        }
+    }
+
+    #[test]
+    fn padded_is_clamped_to_the_supported_magnitudes() {
+        let lin = Transform::Linear;
+        let log = Transform::Log(LogBase::TEN);
+        let padded = |t: Transform, lo: f64, hi: f64| {
+            ContinuousScale::new(t, lo, hi, "t")
+                .unwrap()
+                .padded()
+                .domain()
+        };
+        assert_eq!(
+            padded(lin, -MAX_MAGNITUDE, MAX_MAGNITUDE),
+            (-MAX_MAGNITUDE, MAX_MAGNITUDE)
+        );
+        let (lo, hi) = padded(lin, 0.0, MAX_MAGNITUDE);
+        assert_eq!(hi, MAX_MAGNITUDE);
+        assert!(rel_close(lo, -0.05 * MAX_MAGNITUDE), "{lo}");
+        assert_eq!(
+            padded(log, MIN_LOG_VALUE, MAX_MAGNITUDE),
+            (MIN_LOG_VALUE, MAX_MAGNITUDE)
+        );
+        // About 100 decades pad by about 5 decades, past 1e-300 and 1e300.
+        let (lo, hi) = padded(log, 2e-300, 1e-200);
+        assert_eq!(lo, MIN_LOG_VALUE);
+        assert!(hi > 1e-196 && hi < 1e-195, "{hi}");
+        let (lo, hi) = padded(log, 1e200, 5e299);
+        assert_eq!(hi, MAX_MAGNITUDE);
+        assert!(lo < 1e196, "{lo}");
+        // The padded domains are valid domains.
+        for (t, lo, hi) in [
+            (lin, -MAX_MAGNITUDE, MAX_MAGNITUDE),
+            (lin, 0.0, MAX_MAGNITUDE),
+            (log, MIN_LOG_VALUE, MAX_MAGNITUDE),
+            (log, 2e-300, 1e-200),
+            (log, 1e200, 5e299),
+        ] {
+            let (lo, hi) = padded(t, lo, hi);
+            assert!(ContinuousScale::new(t, lo, hi, "t").is_ok(), "{lo} {hi}");
+        }
+    }
+
+    #[test]
+    fn single_values_are_recognized_like_from_extent() {
+        let lin = Transform::Linear;
+        let log = Transform::Log(LogBase::TEN);
+        for (t, lo, hi) in [
+            (lin, 20.0, 20.0),
+            (lin, 0.0, 0.0),
+            (lin, 1e9, 1e9 + 1e-3),
+            (log, 5.0, 5.0),
+            (log, 1e9, next_up(1e9)),
+        ] {
+            assert!(is_single_value(t, lo, hi), "{lo} {hi}");
+        }
+        for (t, lo, hi) in [(lin, 0.0, 1.0), (lin, 35.0, 65.0), (log, 1.0, 1.1)] {
+            assert!(!is_single_value(t, lo, hi), "{lo} {hi}");
+        }
     }
 
     #[test]

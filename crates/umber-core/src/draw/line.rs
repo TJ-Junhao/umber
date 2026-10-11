@@ -77,9 +77,14 @@ impl PlotLimit {
     }
 }
 
+/// The stroke width of a line mark, in points: the theme's line width, kept finite.
+pub(super) fn line_width(theme: &Theme) -> f32 {
+    stroke_width(theme.line_width())
+}
+
 /// The stroke of a line mark of `color` and `dash` at the theme's line width.
 fn line_style(theme: &Theme, color: Rgba, dash: Dash) -> StrokeStyle {
-    let w = stroke_width(theme.line_width());
+    let w = line_width(theme);
     let (dash, cap) = match dash {
         Dash::Solid => (Vec::new(), LineCap::Round),
         Dash::Dashed => (vec![4.0 * w, 3.0 * w], LineCap::Butt),
@@ -111,7 +116,7 @@ pub(super) fn line_items(
         plot,
         baseline_y,
     } = *context;
-    let margin = f64::from(stroke_width(theme.line_width())).max(MIN_LINE_MARGIN);
+    let margin = f64::from(line_width(theme)).max(MIN_LINE_MARGIN);
     let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
     let bounds = Bounds {
         left,

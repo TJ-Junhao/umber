@@ -50,7 +50,7 @@
 //!   and their getters), [`AxisData`], [`LineOptions`] and [`ScatterOptions`], and the
 //!   read-only [`Mark`], [`LineMark`] and [`ScatterMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
-//!   [`Marker`], [`AreaFill`], [`GridLines`], [`LegendStyle`] and [`TickLabelPlacement`];
+//!   [`Marker`], [`AreaFill`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
 //! - scales: [`ScaleKind`] and [`LogBase`];
 //! - output: [`SvgText`];
@@ -117,7 +117,7 @@ pub use scene::{
     StrokeStyle, TextItem,
 };
 pub use text::{FontLibrary, TextLayout, TextStyle};
-pub use theme::{AreaFill, Dash, GridLines, LegendStyle, Marker, Theme, TickLabelPlacement};
+pub use theme::{AreaFill, Dash, GridLines, LegendStyle, Marker, Theme};
 pub use ticks::Tick;
 
 /// The version of this crate, as written in `Cargo.toml`.
