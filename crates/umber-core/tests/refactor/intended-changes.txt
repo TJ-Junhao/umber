@@ -1,1 +1,8 @@
-# Cases whose committed outputs change on purpose in this change; none. Per-series widths and sizes only add outputs.
+# Cases whose committed outputs change on purpose in this change.
+# Figure.add_axes() now refuses a category y axis, so the corpus sections that built one record
+# that refusal once instead of the mark and limit errors a category y axis used to produce.
+errors/api
+errors/area
+errors/bars
+errors/grouped-bars
+errors/hist

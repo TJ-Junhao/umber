@@ -2102,13 +2102,8 @@ fn figure_errors(rec: &mut Log) {
     }
 
     rec.section("Axes limits, category");
-    let mut f = rec.new_figure(
-        "category/category",
-        ScaleKind::Category,
-        ScaleKind::Category,
-    );
+    let mut f = rec.new_figure("category/linear", ScaleKind::Category, linear());
     rec.on_axes(&mut f, "xlim(1, 2)", |a| a.xlim(1.0, 2.0).map(drop));
-    rec.on_axes(&mut f, "ylim(1, 2)", |a| a.ylim(1.0, 2.0).map(drop));
     rec.on_axes(&mut f, "xlim(NaN, NaN)", |a| {
         a.xlim(f64::NAN, f64::NAN).map(drop)
     });
@@ -2324,26 +2319,9 @@ fn series_errors(rec: &mut Log) {
         });
     }
 
+    // The y axis is never a category axis: the axes refuse it, so no series meets one.
     rec.section("Axes.line and Axes.scatter, category y");
-    for (label, x_kind) in [
-        ("category/category", ScaleKind::Category),
-        ("linear/category", linear()),
-    ] {
-        let mut f = rec.new_figure(label, x_kind, ScaleKind::Category);
-        for (name, x, y) in [
-            ("numbers", nums(&[1.0]), vec![1.0]),
-            ("categories", cats(&["a"]), vec![1.0]),
-            ("categories, length mismatch", cats(&["a"]), vec![]),
-            ("numbers, infinite x", nums(&[inf]), vec![1.0]),
-        ] {
-            rec.on_axes(&mut f, &format!("line {name}"), |a| {
-                a.line(x.clone(), &y, line()).map(drop)
-            });
-            rec.on_axes(&mut f, &format!("scatter {name}"), |a| {
-                a.scatter(x, &y, scatter()).map(drop)
-            });
-        }
-    }
+    rec.new_figure("linear/category", linear(), ScaleKind::Category);
 
     rec.section("Axes.line and Axes.scatter, log2/linear");
     let mut f = rec.new_figure("log2/linear", log(2.0), linear());

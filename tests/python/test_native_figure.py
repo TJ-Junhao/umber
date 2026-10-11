@@ -32,7 +32,6 @@ LINEAR, LOG, CATEGORY = 0, 1, 2
 OUTLINES, EDITABLE = 0, 1
 CONCRETE_HINT = "use Color.hex(), Color.rgb() or a named color."
 X_SCALE_HINT = "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."
-Y_SCALE_HINT = "pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."
 CATEGORY_X_HINT = "pass x=Scale.category() to Figure.add_axes()."
 LINEAR_X_HINT = "pass x=Scale.linear() to Figure.add_axes()."
 
@@ -292,6 +291,23 @@ def test_a_figure_has_one_axes() -> None:
     )
 
 
+def test_a_category_y_axis_is_refused() -> None:
+    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
+    for x in (LINEAR, LOG, CATEGORY):
+
+        def call(x: int = x) -> None:
+            fig.add_axes(x, 10.0, CATEGORY, 10.0)
+
+        assert_reported(
+            call,
+            ub.UsageError,
+            "Figure.add_axes(): y is a category scale; the y axis must be linear or log.",
+            "y",
+            "pass y=Scale.linear() or y=Scale.log().",
+        )
+    fig.add_axes(CATEGORY, 0.0, LOG, 2.0)  # the failed calls added nothing
+
+
 def test_unknown_scale_kinds_are_internal_errors() -> None:
     fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
     assert_internal(
@@ -300,7 +316,7 @@ def test_unknown_scale_kinds_are_internal_errors() -> None:
     assert_internal(
         lambda: fig.add_axes(LINEAR, 10.0, -1, 10.0), ValueError, "-1 is not a scale kind"
     )
-    fig.add_axes(LOG, 2.0, CATEGORY, 0.0)  # the failed calls added nothing
+    fig.add_axes(LOG, 2.0, LINEAR, 0.0)  # the failed calls added nothing
 
 
 AXES_CALLS: dict[str, Callable[[_umber.Figure], object]] = {
@@ -436,15 +452,6 @@ LIMIT_ERRORS: list[ErrorCase] = [
         None,
         X_SCALE_HINT,
     ),
-    (
-        "category y limits",
-        lambda: figure(y=CATEGORY),
-        lambda f: f.ylim(0.0, 1.0),
-        ub.UsageError,
-        "Axes.ylim(): this is a category axis; limits apply to linear and log axes only.",
-        None,
-        Y_SCALE_HINT,
-    ),
 ]
 
 
@@ -515,7 +522,6 @@ SERIES_GAP = "use NaN to omit that height."
 HIST_NAN = "a histogram ignores NaN, so use it to leave a value out."
 REPEAT = "combine repeated categories and sum their heights."
 REPEAT_IN_SERIES = "combine repeated categories and sum their heights within each series."
-BAR_Y = "but the y axis is a category axis; use a linear or log y axis."
 FINITE = "values must be finite."
 
 MARK_ERRORS: list[ErrorCase] = [
@@ -593,16 +599,6 @@ MARK_ERRORS: list[ErrorCase] = [
         CATEGORY_X_HINT,
     ),
     (
-        "line category y",
-        lambda: figure(y=CATEGORY),
-        lambda f: f.line(floats(1), floats(1), "", AUTO, 0),
-        ub.DataError,
-        "Axes.line(): y holds numbers but the y axis is a category axis; "
-        "use a linear or log y axis.",
-        None,
-        Y_SCALE_HINT,
-    ),
-    (
         "scatter length",
         figure,
         lambda f: f.scatter(floats(1, 2), floats(1), "", AUTO, 0),
@@ -659,15 +655,6 @@ MARK_ERRORS: list[ErrorCase] = [
         "heights",
         BAR_GAP,
     ),
-    (
-        "bar category y",
-        lambda: figure(x=CATEGORY, y=CATEGORY),
-        lambda f: f.bar(["a"], floats(1), "", AUTO),
-        ub.DataError,
-        f"Axes.bar(): heights holds numbers {BAR_Y}",
-        None,
-        Y_SCALE_HINT,
-    ),
     # grouped and stacked bars
     (
         "grouped no series",
@@ -716,15 +703,6 @@ MARK_ERRORS: list[ErrorCase] = [
         "use a category x axis.",
         None,
         CATEGORY_X_HINT,
-    ),
-    (
-        "grouped category y",
-        lambda: figure(x=CATEGORY, y=CATEGORY),
-        lambda f: f.grouped_bar(["a"], [series(1)]),
-        ub.DataError,
-        f"Axes.grouped_bar(): the series hold numbers {BAR_Y}",
-        None,
-        Y_SCALE_HINT,
     ),
     (
         "stacked no series",
@@ -800,15 +778,6 @@ MARK_ERRORS: list[ErrorCase] = [
         f"Axes.hist(): values[1] is inf; {FINITE}",
         "values",
         HIST_NAN,
-    ),
-    (
-        "hist category y",
-        lambda: figure(y=CATEGORY),
-        lambda f: f.hist(floats(1), 3, "", AUTO),
-        ub.DataError,
-        f"Axes.hist(): a histogram counts values {BAR_Y}",
-        None,
-        Y_SCALE_HINT,
     ),
 ]
 

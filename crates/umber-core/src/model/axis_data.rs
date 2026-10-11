@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::validation::check_series;
-use crate::{Result, ScaleKind};
+use crate::{Result, ScaleKind, Transform};
 
 /// The x values of a mark: numbers for a continuous axis, names for a category axis.
 ///
@@ -45,7 +45,8 @@ pub(super) struct Series {
 }
 
 impl Series {
-    /// Validates `x` and `y` for axes with scale kinds `x_kind` and `y_kind`, then stores both
+    /// Validates `x` and `y` for axes with an x axis of scale kind `x_kind` and a y axis of
+    /// transform `y_transform`, then stores both
     /// unchanged: every bit, NaN gaps included, in the given order. The checks run in a fixed
     /// order (lengths, then x against its axis, then y against its axis) and the first failure
     /// is the error, under `context`. An infinite value gets `gap_hint`, which says what to pass
@@ -53,12 +54,12 @@ impl Series {
     pub(super) fn new(
         context: &'static str,
         x_kind: ScaleKind,
-        y_kind: ScaleKind,
+        y_transform: Transform,
         x: AxisData,
         y: &[f64],
         gap_hint: &'static str,
     ) -> Result<Series> {
-        check_series(context, x_kind, y_kind, &x, y, gap_hint)?;
+        check_series(context, x_kind, y_transform, &x, y, gap_hint)?;
         Ok(Series {
             x: Arc::new(x),
             y: Arc::from(y),
@@ -93,6 +94,7 @@ mod tests {
     use crate::{Error, LogBase, Theme};
 
     const LIN: ScaleKind = ScaleKind::Linear;
+    const LIN_Y: Transform = Transform::Linear;
 
     fn bits(values: &[f64]) -> Vec<u64> {
         values.iter().map(|v| v.to_bits()).collect()
@@ -121,7 +123,7 @@ mod tests {
         let series = Series::new(
             "t",
             LIN,
-            LIN,
+            LIN_Y,
             AxisData::Numbers(x.clone()),
             &y,
             LINE_GAP_HINT,
@@ -138,7 +140,7 @@ mod tests {
         let series = Series::new(
             "t",
             ScaleKind::Category,
-            LIN,
+            LIN_Y,
             cats,
             &[1.0, 2.0, 3.0],
             LINE_GAP_HINT,
@@ -165,7 +167,7 @@ mod tests {
             message(Series::new(
                 "t",
                 LIN,
-                LIN,
+                LIN_Y,
                 nums(&[f64::INFINITY]),
                 &[],
                 LINE_GAP_HINT
@@ -176,7 +178,7 @@ mod tests {
             message(Series::new(
                 "t",
                 log,
-                log,
+                Transform::Log(LogBase::TEN),
                 nums(&[1.0, -1.0]),
                 &[0.0, 1.0],
                 LINE_GAP_HINT
@@ -187,7 +189,7 @@ mod tests {
             message(Series::new(
                 "t",
                 LIN,
-                LIN,
+                LIN_Y,
                 nums(&[0.0, 1.0]),
                 &[1e301, f64::INFINITY],
                 LINE_GAP_HINT

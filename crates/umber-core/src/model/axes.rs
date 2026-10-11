@@ -1,14 +1,12 @@
-//! The axes: scale kinds, texts, explicit limits and marks, with the mutators that validate
+//! The axes: scales, texts, explicit limits and marks, with the mutators that validate
 //! every input before storing it.
 
 use super::axis_data::{AxisData, Series};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
-use super::validation::{
-    AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, X_SCALE_HINT, Y_SCALE_HINT, check_limits,
-};
-use crate::{ContinuousScale, LegendStyle, Result, ScaleKind};
+use super::validation::{AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, check_x_limits};
+use crate::{ContinuousScale, LegendStyle, Result, ScaleKind, Transform};
 
 /// A plotting area with its scales, texts, limits and marks.
 ///
@@ -28,7 +26,8 @@ use crate::{ContinuousScale, LegendStyle, Result, ScaleKind};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Axes {
     x: ScaleKind,
-    y: ScaleKind,
+    /// The y axis is always linear or log, so it is stored as its transform.
+    y: Transform,
     title: String,
     subtitle: String,
     xlabel: String,
@@ -43,8 +42,8 @@ pub struct Axes {
 }
 
 impl Axes {
-    /// Empty axes with the given scale kinds.
-    pub(super) fn new(x: ScaleKind, y: ScaleKind) -> Axes {
+    /// Empty axes with an x axis of scale kind `x` and a y axis of transform `y`.
+    pub(super) fn new(x: ScaleKind, y: Transform) -> Axes {
         Axes {
             x,
             y,
@@ -76,7 +75,7 @@ impl Axes {
         self.x
     }
 
-    /// The kind of the y scale.
+    /// The kind of the y scale: linear or log, never a category scale.
     ///
     /// # Examples
     ///
@@ -90,6 +89,11 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn y_scale(&self) -> ScaleKind {
+        self.y.kind()
+    }
+
+    /// The transform of the y axis.
+    pub(crate) fn y_transform(&self) -> Transform {
         self.y
     }
 
@@ -296,17 +300,11 @@ impl Axes {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Axes> {
-        self.xlim = Some(check_limits(
-            "Axes.xlim()",
-            self.x,
-            low,
-            high,
-            X_SCALE_HINT,
-        )?);
+        self.xlim = Some(check_x_limits(self.x, low, high)?);
         Ok(self)
     }
 
-    /// Sets the y limits. Same rules as [`Axes::xlim`].
+    /// Sets the y limits. Same rules as [`Axes::xlim`]; the y axis is never a category axis.
     ///
     /// # Examples
     ///
@@ -320,13 +318,7 @@ impl Axes {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Axes> {
-        self.ylim = Some(check_limits(
-            "Axes.ylim()",
-            self.y,
-            low,
-            high,
-            Y_SCALE_HINT,
-        )?);
+        self.ylim = Some(ContinuousScale::new(self.y, low, high, "Axes.ylim()")?);
         Ok(self)
     }
 
@@ -460,8 +452,7 @@ impl Axes {
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order:
     /// `categories` and `heights` of different lengths; an x axis that is not a category axis;
     /// a category that appears twice; a height that is infinite, beyond [`MAX_MAGNITUDE`], or
-    /// outside the log range on a log y axis; a category y axis. NaN is allowed and draws no
-    /// bar.
+    /// outside the log range on a log y axis. NaN is allowed and draws no bar.
     ///
     /// # Examples
     ///
@@ -500,8 +491,8 @@ impl Axes {
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: an empty
     /// `series`; a series whose heights are not one per category (the message names the
-    /// series' index); then the categories and each series' heights as in [`Axes::bar`]; a
-    /// category y axis. NaN is allowed and draws no bar.
+    /// series' index); then the categories and each series' heights as in [`Axes::bar`]. NaN is
+    /// allowed and draws no bar.
     ///
     /// # Examples
     ///
@@ -552,8 +543,8 @@ impl Axes {
     /// Colors and categories work as in [`Axes::grouped_bar`].
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
-    /// [`Axes::grouped_bar`], with one more check before the y axis kind: in each category, the
-    /// positive heights and the negative heights must each add up to at most
+    /// [`Axes::grouped_bar`], with one more check at the end: in each category, the positive
+    /// heights and the negative heights must each add up to at most
     /// [`MAX_MAGNITUDE`] in magnitude (the message names the category).
     ///
     /// # Examples
@@ -608,7 +599,7 @@ impl Axes {
     /// Errors leave the axes unchanged. They are checked in this order: `Error::Style` for
     /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and
     /// `Error::Usage` for a log x axis, which histograms do not support; `Error::Data` for a
-    /// value that is infinite or beyond [`MAX_MAGNITUDE`]; `Error::Data` for a category y axis.
+    /// value that is infinite or beyond [`MAX_MAGNITUDE`].
     ///
     /// # Examples
     ///
@@ -629,7 +620,7 @@ impl Axes {
     /// [`MAX_BINS`]: crate::MAX_BINS
     /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
     pub fn hist(&mut self, values: &[f64], options: HistOptions) -> Result<&mut Axes> {
-        let mark = HistMark::new("Axes.hist()", self.x, self.y, values, options)?;
+        let mark = HistMark::new("Axes.hist()", self.x, values, options)?;
         self.marks.push(Mark::Hist(mark));
         Ok(self)
     }

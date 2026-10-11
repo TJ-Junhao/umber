@@ -1,5 +1,5 @@
-//! Input validation of the model: series, bar and histogram data against their axes' scale
-//! kinds, stacked bar totals, histogram bin counts, explicit limits and figure sizes. Every check
+//! Input validation of the model: series, bar and histogram data against their axes' scales,
+//! stacked bar totals, histogram bin counts, explicit limits and figure sizes. Every check
 //! runs before anything is stored, so a failed call changes nothing.
 
 use std::collections::HashMap;
@@ -10,15 +10,10 @@ use crate::binning::{BinCount, MAX_BINS};
 use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
 use crate::stacking::Totals;
-use crate::{ContinuousScale, Error, Result, ScaleKind};
+use crate::{ContinuousScale, Error, Result, ScaleKind, Transform};
 
 /// The hint for an x axis of the wrong kind for limits or numeric data.
-pub(super) const X_SCALE_HINT: &str =
-    "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes().";
-
-/// The hint for data that meets a category y axis.
-pub(super) const Y_SCALE_HINT: &str =
-    "pass y=Scale.linear() or y=Scale.log() to Figure.add_axes().";
+const X_SCALE_HINT: &str = "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes().";
 
 /// The hint for an infinite line value.
 pub(super) const LINE_GAP_HINT: &str = "use NaN to leave a gap in the line.";
@@ -35,17 +30,17 @@ const BAR_GAP_HINT: &str = "use NaN to leave a category without a bar.";
 /// The largest accepted figure side, in inches.
 const MAX_FIGURE_IN: f64 = 200.0;
 
-/// Checks `values`, shown as `name` in messages (`"y"`, `"series[1].heights"`), against the scale
-/// kind of their axis. An error names `parameter`, the Python parameter that holds them, and an
-/// infinite value gets `infinite_hint`, which says what to pass instead.
+/// Checks `values`, shown as `name` in messages (`"y"`, `"series[1].heights"`), against the
+/// transform of their axis. An error names `parameter`, the Python parameter that holds them, and
+/// an infinite value gets `infinite_hint`, which says what to pass instead.
 fn check_numbers(
     context: &'static str,
     (name, parameter): (&str, &'static str),
     values: &[f64],
-    kind: ScaleKind,
+    transform: Transform,
     infinite_hint: &'static str,
 ) -> Result<()> {
-    let log = matches!(kind, ScaleKind::Log { .. });
+    let log = matches!(transform, Transform::Log(_));
     for (i, &v) in values.iter().enumerate() {
         if v.is_nan() {
             continue;
@@ -95,12 +90,13 @@ fn check_numbers(
     Ok(())
 }
 
-/// Validates a whole series for axes with scale kinds `x_kind` and `y_kind`, before it is
-/// stored, so a failed call changes nothing. An infinite value gets `gap_hint`.
+/// Validates a whole series for axes with an x axis of scale kind `x_kind` and a y axis of
+/// transform `y_transform`, before it is stored, so a failed call changes nothing. An infinite
+/// value gets `gap_hint`.
 pub(super) fn check_series(
     context: &'static str,
     x_kind: ScaleKind,
-    y_kind: ScaleKind,
+    y_transform: Transform,
     x: &AxisData,
     y: &[f64],
     gap_hint: &'static str,
@@ -115,19 +111,19 @@ pub(super) fn check_series(
             ),
         ));
     }
-    match (x, x_kind) {
-        (AxisData::Categories(_), ScaleKind::Category) => {}
-        (AxisData::Numbers(values), kind) if kind != ScaleKind::Category => {
-            check_numbers(context, ("x", "x"), values, kind, gap_hint)?;
+    match (x, x_kind.transform()) {
+        (AxisData::Categories(_), None) => {}
+        (AxisData::Numbers(values), Some(x_transform)) => {
+            check_numbers(context, ("x", "x"), values, x_transform, gap_hint)?;
         }
-        (AxisData::Numbers(_), _) => {
+        (AxisData::Numbers(_), None) => {
             return Err(Error::data(
                 context,
                 "x holds numbers but the x axis is a category axis; pass category names.",
             )
-            .with_hint("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."));
+            .with_hint(X_SCALE_HINT));
         }
-        (AxisData::Categories(_), _) => {
+        (AxisData::Categories(_), Some(_)) => {
             return Err(Error::data(
                 context,
                 "x holds category names but the x axis is not a category axis; pass numbers.",
@@ -135,29 +131,22 @@ pub(super) fn check_series(
             .with_hint("pass x=Scale.category() to Figure.add_axes()."));
         }
     }
-    if y_kind == ScaleKind::Category {
-        return Err(Error::data(
-            context,
-            "y holds numbers but the y axis is a category axis; use a linear or log y axis.",
-        )
-        .with_hint(Y_SCALE_HINT));
-    }
-    check_numbers(context, ("y", "y"), y, y_kind, gap_hint)
+    check_numbers(context, ("y", "y"), y, y_transform, gap_hint)
 }
 
-/// Validates the categories and heights of a bar mark for axes with scale kinds `x_kind` and
-/// `y_kind`, before it is stored, so a failed call changes nothing. The checks run in a fixed
-/// order and the first failure is the error, under `context`:
+/// Validates the categories and heights of a bar mark for axes with an x axis of scale kind
+/// `x_kind` and a y axis of transform `y_transform`, before it is stored, so a failed call
+/// changes nothing. The checks run in a fixed order and the first failure is the error, under
+/// `context`:
 ///
 /// 1. `categories` and `heights` have the same length;
 /// 2. the categories, by [`check_categories`];
 /// 3. every height is finite (NaN is allowed and draws no bar), within the supported
-///    magnitudes, and within the log range on a log y axis;
-/// 4. the y axis is a linear or log axis.
+///    magnitudes, and within the log range on a log y axis.
 pub(super) fn check_bars(
     context: &'static str,
     x_kind: ScaleKind,
-    y_kind: ScaleKind,
+    y_transform: Transform,
     categories: &[String],
     heights: &[f64],
 ) -> Result<()> {
@@ -181,15 +170,15 @@ pub(super) fn check_bars(
         context,
         ("heights", "heights"),
         heights,
-        y_kind,
+        y_transform,
         BAR_GAP_HINT,
-    )?;
-    check_bar_y_axis(context, y_kind, "heights holds numbers")
+    )
 }
 
-/// Validates the categories and series of a grouped or stacked bar mark for axes with scale
-/// kinds `x_kind` and `y_kind`, before it is stored, so a failed call changes nothing. The
-/// checks run in a fixed order and the first failure is the error, under `context`:
+/// Validates the categories and series of a grouped or stacked bar mark for axes with an x axis
+/// of scale kind `x_kind` and a y axis of transform `y_transform`, before it is stored, so a
+/// failed call changes nothing. The checks run in a fixed order and the first failure is the
+/// error, under `context`:
 ///
 /// 1. there is at least one series;
 /// 2. every series has one height per category, checked in series order;
@@ -197,13 +186,12 @@ pub(super) fn check_bars(
 /// 4. the heights of each series, in series order, as for a bar mark;
 /// 5. for stacked series only: in every category, in category order, the positive heights and
 ///    the negative heights each add up to at most [`MAX_MAGNITUDE`] in magnitude, summed in
-///    series order as the stacks are;
-/// 6. the y axis is a linear or log axis.
+///    series order as the stacks are.
 pub(super) fn check_bar_group(
     context: &'static str,
     arrangement: Arrangement,
     x_kind: ScaleKind,
-    y_kind: ScaleKind,
+    y_transform: Transform,
     categories: &[String],
     series: &[BarSeries],
 ) -> Result<()> {
@@ -237,30 +225,29 @@ pub(super) fn check_bar_group(
             context,
             (&format!("series[{i}].heights"), "series"),
             &s.heights,
-            y_kind,
+            y_transform,
             "use NaN to omit that height.",
         )?;
     }
     if arrangement == Arrangement::Stacked {
         check_stacked_totals(context, categories, series)?;
     }
-    check_bar_y_axis(context, y_kind, "the series hold numbers")
+    Ok(())
 }
 
-/// Validates the values and bin count of a histogram for axes with scale kinds `x_kind` and
-/// `y_kind`, before it is stored, so a failed call changes nothing, and returns the bin count.
-/// The checks run in a fixed order and the first failure is the error, under `context`:
+/// Validates the values and bin count of a histogram for axes with an x axis of scale kind
+/// `x_kind`, before it is stored, so a failed call changes nothing, and returns the bin count.
+/// The y axis, linear or log, takes any count. The checks run in a fixed order and the first
+/// failure is the error, under `context`:
 ///
 /// 1. `bins` is within `1..=MAX_BINS` (`Error::Style`);
 /// 2. the x axis is a linear axis: a category x axis is `Error::Data`, and a log x axis, which
 ///    histograms do not support, is `Error::Usage`;
 /// 3. every value is finite (NaN is allowed and ignored) and within the supported magnitudes
-///    (`Error::Data`);
-/// 4. the y axis is a linear or log axis (`Error::Data`).
+///    (`Error::Data`).
 pub(super) fn check_hist(
     context: &'static str,
     x_kind: ScaleKind,
-    y_kind: ScaleKind,
     values: &[f64],
     bins: i64,
 ) -> Result<BinCount> {
@@ -297,10 +284,9 @@ pub(super) fn check_hist(
         context,
         ("values", "values"),
         values,
-        x_kind,
+        Transform::Linear,
         "a histogram ignores NaN, so use it to leave a value out.",
     )?;
-    check_bar_y_axis(context, y_kind, "a histogram counts values")?;
     Ok(count)
 }
 
@@ -363,36 +349,19 @@ fn check_stacked_totals(
     Ok(())
 }
 
-/// Checks that bar heights or histogram counts, described by `subject`, can be placed on the y
-/// axis: it must be a linear or log axis.
-fn check_bar_y_axis(context: &'static str, y_kind: ScaleKind, subject: &str) -> Result<()> {
-    if y_kind == ScaleKind::Category {
-        return Err(Error::data(
-            context,
-            format!("{subject} but the y axis is a category axis; use a linear or log y axis."),
-        )
-        .with_hint(Y_SCALE_HINT));
-    }
-    Ok(())
-}
-
-/// Checks explicit limits for an axis of `kind` and returns the scale they define, with the
-/// limits unchanged as its domain.
-pub(super) fn check_limits(
-    context: &'static str,
-    kind: ScaleKind,
-    low: f64,
-    high: f64,
-    category_hint: &'static str,
-) -> Result<ContinuousScale> {
+/// Checks explicit limits for an x axis of `kind` and returns the scale they define, with the
+/// limits unchanged as its domain. The y axis is always linear or log, so its limits need no
+/// such check.
+pub(super) fn check_x_limits(kind: ScaleKind, low: f64, high: f64) -> Result<ContinuousScale> {
+    const CONTEXT: &str = "Axes.xlim()";
     let Some(transform) = kind.transform() else {
         return Err(Error::usage(
-            context,
+            CONTEXT,
             "this is a category axis; limits apply to linear and log axes only.",
         )
-        .with_hint(category_hint));
+        .with_hint(X_SCALE_HINT));
     };
-    ContinuousScale::new(transform, low, high, context)
+    ContinuousScale::new(transform, low, high, CONTEXT)
 }
 
 /// Checks the sides of a figure, in inches: each must be finite, above 0 and at most 200.
