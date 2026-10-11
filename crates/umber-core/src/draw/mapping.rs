@@ -129,8 +129,14 @@ impl AxisMap {
     /// The axis-space range covered by the axis extended by `margin` points at both ends. The
     /// rounding of `lo - m` and `hi + m` is monotonic, so the range always contains the domain.
     pub(super) fn expanded(&self, margin: f64) -> (f64, f64) {
-        let m = margin / self.extent.abs() * (self.hi - self.lo);
+        let m = self.length(margin);
         (self.lo - m, self.hi + m)
+    }
+
+    /// The axis-space length of `points` plot points along the axis; the map is affine, so it
+    /// is the same everywhere on the axis.
+    pub(super) fn length(&self, points: f64) -> f64 {
+        points / self.extent.abs() * (self.hi - self.lo)
     }
 }
 
@@ -175,18 +181,30 @@ pub(super) fn axis_y(axis: &ResolvedAxis, y: &[f64]) -> Vec<f64> {
     }
 }
 
-/// `values` in the axis space of `scale`: the values on a linear axis, `ln(v / lo)` on a log
-/// axis. Log values are positive (validated), so those are finite; anything else maps to NaN,
-/// a gap.
+/// The axis-space y value of `v`, as [`axis_y`] maps it.
+pub(super) fn axis_y_value(axis: &ResolvedAxis, v: f64) -> f64 {
+    match &axis.scale {
+        AxisScale::Continuous(scale) => continuous_value(scale, v),
+        AxisScale::Category(_) => f64::NAN,
+    }
+}
+
+/// `values` in the axis space of `scale`, each as [`continuous_value`] maps it.
 fn continuous_values(scale: &ContinuousScale, values: &[f64]) -> Vec<f64> {
+    values.iter().map(|&v| continuous_value(scale, v)).collect()
+}
+
+/// `v` in the axis space of `scale`: the value on a linear axis, `ln(v / lo)` on a log axis.
+/// Log values are positive (validated), so those are finite; anything else maps to NaN, a gap.
+fn continuous_value(scale: &ContinuousScale, v: f64) -> f64 {
     match scale.transform() {
-        Transform::Linear => values.to_vec(),
+        Transform::Linear => v,
         Transform::Log(_) => {
-            let lo = scale.domain().0;
-            values
-                .iter()
-                .map(|&v| if v > 0.0 { log_offset(v, lo) } else { f64::NAN })
-                .collect()
+            if v > 0.0 {
+                log_offset(v, scale.domain().0)
+            } else {
+                f64::NAN
+            }
         }
     }
 }

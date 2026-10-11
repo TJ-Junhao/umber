@@ -1,11 +1,13 @@
-//! Input validation of the model: series and bar data against their axes' scale kinds, explicit
-//! limits and figure sizes. Every check runs before anything is stored, so a failed call
-//! changes nothing.
+//! Input validation of the model: series and bar data against their axes' scale kinds, stacked
+//! bar totals, explicit limits and figure sizes. Every check runs before anything is stored, so
+//! a failed call changes nothing.
 
 use std::collections::HashMap;
 
 use super::axis_data::AxisData;
+use super::bar::{Arrangement, BarSeries};
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
+use crate::stacking::Totals;
 use crate::{ContinuousScale, Error, Result, ScaleKind};
 
 /// The largest accepted figure side, in inches.
@@ -101,11 +103,10 @@ pub(super) fn check_series(
 /// order and the first failure is the error, under `context`:
 ///
 /// 1. `categories` and `heights` have the same length;
-/// 2. the x axis is a category axis;
-/// 3. no category appears twice;
-/// 4. every height is finite (NaN is allowed and draws no bar), within the supported
+/// 2. the categories, by [`check_categories`];
+/// 3. every height is finite (NaN is allowed and draws no bar), within the supported
 ///    magnitudes, and within the log range on a log y axis;
-/// 5. the y axis is a linear or log axis.
+/// 4. the y axis is a linear or log axis.
 pub(super) fn check_bars(
     context: &'static str,
     x_kind: ScaleKind,
@@ -123,6 +124,62 @@ pub(super) fn check_bars(
             ),
         ));
     }
+    check_categories(context, x_kind, categories)?;
+    check_numbers(context, "heights", heights, y_kind)?;
+    check_bar_y_axis(context, y_kind, "heights holds numbers")
+}
+
+/// Validates the categories and series of a grouped or stacked bar mark for axes with scale
+/// kinds `x_kind` and `y_kind`, before it is stored, so a failed call changes nothing. The
+/// checks run in a fixed order and the first failure is the error, under `context`:
+///
+/// 1. there is at least one series;
+/// 2. every series has one height per category, checked in series order;
+/// 3. the categories, by [`check_categories`];
+/// 4. the heights of each series, in series order, as for a bar mark;
+/// 5. for stacked series only: in every category, in category order, the positive heights and
+///    the negative heights each add up to at most [`MAX_MAGNITUDE`] in magnitude, summed in
+///    series order as the stacks are;
+/// 6. the y axis is a linear or log axis.
+pub(super) fn check_bar_group(
+    context: &'static str,
+    arrangement: Arrangement,
+    x_kind: ScaleKind,
+    y_kind: ScaleKind,
+    categories: &[String],
+    series: &[BarSeries],
+) -> Result<()> {
+    if series.is_empty() {
+        return Err(Error::data(
+            context,
+            "series is empty; pass at least one series.",
+        ));
+    }
+    for (i, s) in series.iter().enumerate() {
+        if s.heights.len() != categories.len() {
+            return Err(Error::data(
+                context,
+                format!(
+                    "categories has {} values but series[{i}].heights has {}; each series must have one height per category.",
+                    categories.len(),
+                    s.heights.len()
+                ),
+            ));
+        }
+    }
+    check_categories(context, x_kind, categories)?;
+    for (i, s) in series.iter().enumerate() {
+        check_numbers(context, &format!("series[{i}].heights"), &s.heights, y_kind)?;
+    }
+    if arrangement == Arrangement::Stacked {
+        check_stacked_totals(context, categories, series)?;
+    }
+    check_bar_y_axis(context, y_kind, "the series hold numbers")
+}
+
+/// Checks the categories of a bar mark: the x axis is a category axis, and no category appears
+/// twice.
+fn check_categories(context: &'static str, x_kind: ScaleKind, categories: &[String]) -> Result<()> {
     if x_kind != ScaleKind::Category {
         return Err(Error::data(
             context,
@@ -140,11 +197,43 @@ pub(super) fn check_bars(
             ));
         }
     }
-    check_numbers(context, "heights", heights, y_kind)?;
+    Ok(())
+}
+
+/// Checks that the positive and the negative heights of every category, stacked in series
+/// order with [`Totals`], stay within [`MAX_MAGNITUDE`]. The heights are finite already.
+fn check_stacked_totals(
+    context: &'static str,
+    categories: &[String],
+    series: &[BarSeries],
+) -> Result<()> {
+    for (i, name) in categories.iter().enumerate() {
+        let mut totals = Totals::default();
+        for s in series {
+            totals.push(s.heights.get(i).copied().unwrap_or(f64::NAN));
+        }
+        for total in [totals.positive(), totals.negative()] {
+            // The heights are finite, so a total is a number, and an overflow is infinite.
+            if total.abs() > MAX_MAGNITUDE {
+                return Err(Error::data(
+                    context,
+                    format!(
+                        "the heights of categories[{i}] ({name:?}) stack to {total:e}; each stack must stay within {MAX_MAGNITUDE:e} on both sides of 0."
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Checks that bar heights, described by `subject`, can be placed on the y axis: it must be a
+/// linear or log axis.
+fn check_bar_y_axis(context: &'static str, y_kind: ScaleKind, subject: &str) -> Result<()> {
     if y_kind == ScaleKind::Category {
         return Err(Error::data(
             context,
-            "heights holds numbers but the y axis is a category axis; use a linear or log y axis.",
+            format!("{subject} but the y axis is a category axis; use a linear or log y axis."),
         ));
     }
     Ok(())

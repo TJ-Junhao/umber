@@ -1660,8 +1660,30 @@ mod record {
                     color_spec(bar.options().color)
                 )
             }
+            Mark::GroupedBar(group) => bar_group("grouped-bar", group),
+            Mark::StackedBar(group) => bar_group("stacked-bar", group),
             _ => "unknown-mark".into(),
         }
+    }
+
+    fn bar_group(kind: &str, group: &umber_core::BarGroupMark) -> String {
+        let names: Vec<String> = group.categories().iter().map(|s| text(s)).collect();
+        let series: Vec<String> = group
+            .series()
+            .map(|s| {
+                format!(
+                    "label={} heights={} color={}",
+                    text(s.label()),
+                    floats64(s.heights()),
+                    color_spec(s.color())
+                )
+            })
+            .collect();
+        format!(
+            "{kind} categories=[{}] series=[{}]",
+            names.join(","),
+            series.join("; ")
+        )
     }
 
     fn limits(l: Option<(f64, f64)>) -> String {
