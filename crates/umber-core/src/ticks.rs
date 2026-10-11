@@ -331,6 +331,61 @@ pub(crate) fn format_ticks(values: &[f64], step: f64) -> Vec<String> {
     }
 }
 
+/// Labels for tick values that a caller chose rather than a tick search, by the grid policy of
+/// [`format_ticks`]. Such values need not sit on a regular grid, so the step is the finest
+/// decimal place any of them needs (`0.25` and `1.5` give two decimals), and every value is
+/// written exactly to that place: `[0, 1.5, 3.25]` reads `0.00`, `1.50`, `3.25`.
+pub(crate) fn format_given(values: &[f64]) -> Vec<String> {
+    let places = values
+        .iter()
+        .filter(|v| **v != 0.0)
+        .map(|v| decimals(v.abs()))
+        .max()
+        .unwrap_or(0);
+    // `decimals` returns at most 12, so the cast is exact.
+    format_ticks(values, 10f64.powi(-(places as i32)))
+}
+
+/// `values` with every value closer to zero than `1e-9` of the smallest gap between neighbours
+/// set to zero, as [`format_ticks`] does with its step: ticks computed as `start + i * step`
+/// can miss zero by a rounding error, and such a tick means zero.
+fn snapped_to_zero(values: &[f64]) -> Vec<f64> {
+    let gap = values
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .filter(|gap| *gap > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    let tiny = if gap.is_finite() { gap * 1e-9 } else { 0.0 };
+    values
+        .iter()
+        .map(|&v| if v.abs() < tiny { 0.0 } else { v })
+        .collect()
+}
+
+/// Fixed-point labels with exactly `decimals` places for every value, even when two values then
+/// share a label. A value that rounds to zero prints without a sign, and negatives use U+2212.
+pub(crate) fn format_fixed(values: &[f64], decimals: usize) -> Vec<String> {
+    snapped_to_zero(values)
+        .into_iter()
+        .map(|v| fixed(v, Some(decimals)))
+        .collect()
+}
+
+/// Scientific labels (`2.5e6`, `1e−5`) with the default 12 significant digits, trailing zeros
+/// trimmed, for every value, even when two values then share a label. Zero is `0`.
+pub(crate) fn format_scientific(values: &[f64]) -> Vec<String> {
+    snapped_to_zero(values)
+        .into_iter()
+        .map(|v| {
+            if v == 0.0 {
+                "0".to_string()
+            } else {
+                scientific(v, Some(*SCIENTIFIC_DIGITS.start()))
+            }
+        })
+        .collect()
+}
+
 /// `v` rounded to `digits` significant digits.
 fn round_significant(v: f64, digits: usize) -> f64 {
     format!("{v:.prec$e}", prec = digits.saturating_sub(1))
