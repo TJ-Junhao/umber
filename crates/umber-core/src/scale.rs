@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 
+use crate::error::number;
 use crate::ticks::{self, Tick, TickCoverage};
 use crate::{Error, Result};
 
@@ -104,7 +105,10 @@ impl LogBase {
         } else {
             Err(Error::style(
                 "Scale.log()",
-                format!("base is {base}; a log base must be finite and greater than 1."),
+                format!(
+                    "base is {base}; a log base must be finite and greater than 1.",
+                    base = number(base)
+                ),
             )
             .with_parameter("base"))
         }
@@ -348,7 +352,9 @@ impl ContinuousScale {
                 Error::style(
                     context,
                     format!(
-                        "the limits are {lo} and {hi}; both must be finite and the lower limit must be below the upper limit."
+                        "the limits are {lo} and {hi}; both must be finite and the lower limit must be below the upper limit.",
+                        lo = number(lo),
+                        hi = number(hi),
                     ),
                 ),
                 !lo.is_finite(),
@@ -362,7 +368,9 @@ impl ContinuousScale {
                         Error::style(
                             context,
                             format!(
-                                "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}."
+                                "the limits are {lo} and {hi}; their magnitude must not exceed {MAX_MAGNITUDE:e}.",
+                                lo = number(lo),
+                                hi = number(hi),
                             ),
                         ),
                         lo.abs() > MAX_MAGNITUDE,
@@ -373,7 +381,9 @@ impl ContinuousScale {
                     return Err(Error::style(
                         context,
                         format!(
-                            "the limits {lo} and {hi} are too close; the range must be at least 1e-10 of their magnitude (and at least 1e-290)."
+                            "the limits {lo} and {hi} are too close; the range must be at least 1e-10 of their magnitude (and at least 1e-290).",
+                            lo = number(lo),
+                            hi = number(hi),
                         ),
                     ));
                 }
@@ -383,7 +393,8 @@ impl ContinuousScale {
                     return Err(Error::style(
                         context,
                         format!(
-                            "the lower limit is {lo}; a log scale needs a positive lower limit."
+                            "the lower limit is {lo}; a log scale needs a positive lower limit.",
+                            lo = number(lo),
                         ),
                     )
                     .with_parameter("low")
@@ -394,7 +405,9 @@ impl ContinuousScale {
                         Error::style(
                             context,
                             format!(
-                                "the limits are {lo} and {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                                "the limits are {lo} and {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}.",
+                                lo = number(lo),
+                                hi = number(hi),
                             ),
                         ),
                         !(MIN_LOG_VALUE..=MAX_MAGNITUDE).contains(&lo),
@@ -405,7 +418,9 @@ impl ContinuousScale {
                     return Err(Error::style(
                         context,
                         format!(
-                            "the limits are {lo} and {hi}; the upper limit must be at least a factor of 1.000000001 above the lower limit."
+                            "the limits are {lo} and {hi}; the upper limit must be at least a factor of 1.000000001 above the lower limit.",
+                            lo = number(lo),
+                            hi = number(hi),
                         ),
                     ));
                 }
@@ -445,14 +460,20 @@ impl ContinuousScale {
         if !(lo.is_finite() && hi.is_finite()) {
             return Err(Error::data(
                 context,
-                format!("the data range is {lo} to {hi}; it must be finite."),
+                format!(
+                    "the data range is {lo} to {hi}; it must be finite.",
+                    lo = number(lo),
+                    hi = number(hi)
+                ),
             ));
         }
         if lo > hi {
             return Err(Error::data(
                 context,
                 format!(
-                    "the data range is {lo} to {hi}; the lower bound must not exceed the upper bound."
+                    "the data range is {lo} to {hi}; the lower bound must not exceed the upper bound.",
+                    lo = number(lo),
+                    hi = number(hi),
                 ),
             ));
         }
@@ -462,7 +483,9 @@ impl ContinuousScale {
                     return Err(Error::data(
                         context,
                         format!(
-                            "the data range is {lo} to {hi}; values must not exceed {MAX_MAGNITUDE:e} in magnitude."
+                            "the data range is {lo} to {hi}; values must not exceed {MAX_MAGNITUDE:e} in magnitude.",
+                            lo = number(lo),
+                            hi = number(hi),
                         ),
                     ));
                 }
@@ -472,7 +495,7 @@ impl ContinuousScale {
                     return Err(Error::data(
                         context,
                         format!(
-                            "the data range starts at {lo}; a log scale can only show positive values."
+                            "the data range starts at {lo}; a log scale can only show positive values.", lo = number(lo),
                         ),
                     )
                     .with_hint("use a linear axis, or remove values that are not positive."));
@@ -481,7 +504,9 @@ impl ContinuousScale {
                     return Err(Error::data(
                         context,
                         format!(
-                            "the data range is {lo} to {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                            "the data range is {lo} to {hi}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}.",
+                            lo = number(lo),
+                            hi = number(hi),
                         ),
                     ));
                 }

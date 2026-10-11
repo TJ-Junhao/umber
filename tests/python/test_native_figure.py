@@ -381,9 +381,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
         figure,
         lambda f: f.xlim(0.0, 1e301),
         ub.StyleError,
-        range_message(
-            "Axes.xlim()", f"0 and 1{'0' * 301}", "their magnitude must not exceed 1e300"
-        ),
+        range_message("Axes.xlim()", "0 and 1e301", "their magnitude must not exceed 1e300"),
         "high",
         None,
     ),
@@ -413,7 +411,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
         ub.StyleError,
         range_message(
             "Axes.xlim()",
-            f"0.{'0' * 300}1 and 1",
+            "1e-301 and 1",
             "a log scale supports values from 1e-300 to 1e300",
         ),
         "low",
