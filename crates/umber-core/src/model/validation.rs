@@ -1,6 +1,6 @@
 //! Input validation of the model: series, bar and histogram data against their axes' scales,
-//! stacked bar totals, histogram bin counts, explicit limits and figure sizes. Every check
-//! runs before anything is stored, so a failed call changes nothing.
+//! stacked bar totals, histogram bin counts, explicit limits, explicit ticks, text and figure
+//! sizes. Every check runs before anything is stored, so a failed call changes nothing.
 
 use std::collections::HashMap;
 
@@ -362,6 +362,155 @@ pub(super) fn check_x_limits(kind: ScaleKind, low: f64, high: f64) -> Result<Con
         .with_hint(X_SCALE_HINT));
     };
     ContinuousScale::new(transform, low, high, CONTEXT)
+}
+
+/// The longest text, in characters, of a tick label or of a tick format's prefix or suffix.
+const MAX_TEXT_CHARS: usize = 1000;
+
+/// `n` with a comma between groups of three digits, as `1,000`.
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Checks a text argument, shown as `name` in the message (`"prefix"`, `"labels[2]"`), that the
+/// Python parameter `parameter` holds: at most 1,000 characters, or `Error::Style` under
+/// `context`. Longer text could not fit a figure.
+pub(crate) fn check_text(
+    context: &'static str,
+    parameter: &'static str,
+    name: &str,
+    text: &str,
+) -> Result<()> {
+    let count = text.chars().count();
+    if count <= MAX_TEXT_CHARS {
+        return Ok(());
+    }
+    Err(Error::style(
+        context,
+        format!(
+            "{name} has {count} characters; text must be at most {max} characters.",
+            count = grouped(count),
+            max = grouped(MAX_TEXT_CHARS),
+        ),
+    )
+    .with_parameter(parameter)
+    .with_hint("shorten the text; it would not fit the figure."))
+}
+
+/// The transform of an x axis of `kind` for the tick setter `context`, or `Error::Usage` on a
+/// category axis, whose ticks are its categories. `what` names what the setter sets, as
+/// `"ticks"` or `"tick formats"`.
+pub(super) fn check_x_tick_axis(
+    context: &'static str,
+    kind: ScaleKind,
+    what: &str,
+) -> Result<Transform> {
+    kind.transform().ok_or_else(|| {
+        Error::usage(
+            context,
+            format!("this is a category axis; {what} apply to linear and log axes only."),
+        )
+        .with_hint(X_SCALE_HINT)
+    })
+}
+
+/// Checks explicit tick `positions` for an axis of `transform`, index by index, and reports the
+/// first bad one as `Error::Style` under `context`: each position must be finite, within the
+/// supported magnitudes (positive and at least [`MIN_LOG_VALUE`] on a log axis), and above the
+/// one before it. The positions are used in the order given, never sorted.
+pub(super) fn check_tick_positions(
+    context: &'static str,
+    transform: Transform,
+    positions: &[f64],
+) -> Result<()> {
+    let log = matches!(transform, Transform::Log(_));
+    let fault = |i: usize, message: String| {
+        Error::style(context, format!("positions[{i}] is {message}")).with_parameter("positions")
+    };
+    for (i, &v) in positions.iter().enumerate() {
+        if !v.is_finite() {
+            return Err(fault(
+                i,
+                format!("{}; tick positions must be finite.", number(v)),
+            ));
+        }
+        if log && v <= 0.0 {
+            return Err(fault(
+                i,
+                format!(
+                    "{} on a log axis; tick positions must be positive.",
+                    number(v)
+                ),
+            )
+            .with_hint("use a linear axis, or remove positions that are not positive."));
+        }
+        if log && !(MIN_LOG_VALUE..=MAX_MAGNITUDE).contains(&v) {
+            return Err(fault(
+                i,
+                format!(
+                    "{} on a log axis; tick positions must lie from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}.",
+                    number(v)
+                ),
+            ));
+        }
+        if v.abs() > MAX_MAGNITUDE {
+            return Err(fault(
+                i,
+                format!(
+                    "{}; tick positions must not exceed {MAX_MAGNITUDE:e} in magnitude.",
+                    number(v)
+                ),
+            ));
+        }
+        if let Some(&before) = i.checked_sub(1).and_then(|j| positions.get(j))
+            && v <= before
+        {
+            return Err(fault(
+                i,
+                format!(
+                    "{} but positions[{}] is {}; tick positions must be strictly increasing.",
+                    number(v),
+                    i - 1,
+                    number(before)
+                ),
+            )
+            .with_hint(
+                "sort the positions and remove repeats; they are used in the order given.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks the `labels` given with `count` tick positions under `context`: one label per
+/// position, each at most 1,000 characters, else `Error::Style`.
+pub(super) fn check_tick_labels(
+    context: &'static str,
+    count: usize,
+    labels: &[String],
+) -> Result<()> {
+    if labels.len() != count {
+        return Err(Error::style(
+            context,
+            format!(
+                "positions has {count} values but labels has {}; pass one label per position.",
+                labels.len()
+            ),
+        )
+        .with_parameter("labels"));
+    }
+    for (i, label) in labels.iter().enumerate() {
+        check_text(context, "labels", &format!("labels[{i}]"), label)?;
+    }
+    Ok(())
 }
 
 /// Checks the sides of a figure, in inches: each must be finite, above 0 and at most 200.

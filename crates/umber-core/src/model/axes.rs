@@ -1,12 +1,15 @@
-//! The axes: scales, texts, explicit limits and marks, with the mutators that validate
-//! every input before storing it.
+//! The axes: scales, texts, explicit limits, tick settings and marks, with the mutators that
+//! validate every input before storing it.
 
 use super::axis_data::{AxisData, Series};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
-use super::validation::{AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, check_x_limits};
-use crate::{ContinuousScale, LegendStyle, Result, ScaleKind, Transform};
+use super::ticks::{AxisTicks, ExplicitTicks};
+use super::validation::{
+    AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, check_x_limits, check_x_tick_axis,
+};
+use crate::{ContinuousScale, LegendStyle, Result, ScaleKind, TickFormat, Transform};
 
 /// A plotting area with its scales, texts, limits and marks.
 ///
@@ -36,6 +39,10 @@ pub struct Axes {
     xlim: Option<ContinuousScale>,
     /// The explicit y limits, validated as a scale for the y axis.
     ylim: Option<ContinuousScale>,
+    /// The explicit ticks and the tick format of the x axis; always unset on a category axis.
+    xticks: AxisTicks,
+    /// The explicit ticks and the tick format of the y axis.
+    yticks: AxisTicks,
     /// The legend style set for these axes; the theme's applies when unset.
     legend: Option<LegendStyle>,
     marks: Vec<Mark>,
@@ -53,6 +60,8 @@ impl Axes {
             ylabel: String::new(),
             xlim: None,
             ylim: None,
+            xticks: AxisTicks::default(),
+            yticks: AxisTicks::default(),
             legend: None,
             marks: Vec::new(),
         }
@@ -320,6 +329,260 @@ impl Axes {
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Axes> {
         self.ylim = Some(ContinuousScale::new(self.y, low, high, "Axes.ylim()")?);
         Ok(self)
+    }
+
+    /// Replaces the automatic x ticks with ticks at `positions`, labelled by the x tick format
+    /// ([`Axes::xtick_format`]). The positions are used in the order given and never sorted;
+    /// an empty list leaves the x axis without ticks and gridlines. Calling any x tick setter
+    /// again replaces the ticks, and drops labels set with [`Axes::xticks_labeled`].
+    ///
+    /// Without explicit x limits, the x domain covers both the data and the ticks, with no
+    /// rounding to round values, and is then padded as auto limits are; the lowest tick is not
+    /// moved below the data. With explicit limits, ticks outside them are not drawn.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis. `Error::Style`
+    /// naming the first bad index, unless every position is finite, within the supported
+    /// magnitudes (positive on a log axis) and above the one before it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ExplicitTicks, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.xticks(&[0.0, 12.0, 24.0])?;
+    /// assert_eq!(axes.x_ticks(), Some(&ExplicitTicks::Positions(vec![0.0, 12.0, 24.0])));
+    /// let err = axes.xticks(&[0.0, 24.0, 12.0]).unwrap_err();
+    /// assert_eq!(
+    ///     err.to_string(),
+    ///     "Axes.xticks(): positions[2] is 12 but positions[1] is 24; tick positions must be strictly increasing."
+    /// );
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xticks(&mut self, positions: &[f64]) -> Result<&mut Axes> {
+        const CONTEXT: &str = "Axes.xticks()";
+        let transform = check_x_tick_axis(CONTEXT, self.x, "ticks")?;
+        self.xticks.set_positions(CONTEXT, transform, positions)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic y ticks with ticks at `positions`. Same rules as
+    /// [`Axes::xticks`]; the y axis is never a category axis. Bars and histograms keep 0 in a
+    /// linear y domain.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Style` as for [`Axes::xticks`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LogBase, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let log = ScaleKind::Log { base: LogBase::TEN };
+    /// let axes = figure.add_axes(ScaleKind::Linear, log)?;
+    /// assert!(axes.yticks(&[1.0, 3.0, 10.0, 30.0]).is_ok());
+    /// assert!(axes.yticks(&[0.0, 1.0]).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn yticks(&mut self, positions: &[f64]) -> Result<&mut Axes> {
+        self.yticks
+            .set_positions("Axes.yticks()", self.y, positions)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic x ticks with ticks at `positions`, each labelled with the label
+    /// at the same index of `labels`, drawn as given. Otherwise the same as [`Axes::xticks`].
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. They are checked in this order: `Error::Usage` on a
+    /// category x axis; the positions as for [`Axes::xticks`]; `Error::Style` unless there is
+    /// one label per position, each at most 1,000 characters; `Error::Usage` when the x tick
+    /// format is not plain [`TickFormat::AUTO`], since given labels take no format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, TickFormat};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let labels = vec!["start".to_owned(), "launch".to_owned()];
+    /// axes.xticks_labeled(&[0.0, 7.0], labels.clone())?;
+    /// assert!(axes.xticks_labeled(&[0.0], labels.clone()).is_err());
+    /// // Given labels and a format other than AUTO conflict, in either order.
+    /// assert!(axes.xtick_format(TickFormat::fixed(1)?).is_err());
+    /// axes.xticks(&[0.0, 7.0])?.xtick_format(TickFormat::fixed(1)?)?;
+    /// assert!(axes.xticks_labeled(&[0.0, 7.0], labels).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Axes> {
+        const CONTEXT: &str = "Axes.xticks_labeled()";
+        let transform = check_x_tick_axis(CONTEXT, self.x, "ticks")?;
+        self.xticks
+            .set_labeled(CONTEXT, transform, positions, labels)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic y ticks with ticks at `positions`, each labelled with the label
+    /// at the same index of `labels`, drawn as given. Same rules as [`Axes::xticks_labeled`];
+    /// the y axis is never a category axis.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: as for [`Axes::xticks_labeled`], against the y tick
+    /// format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.yticks_labeled(&[0.0, 50.0, 100.0], vec!["low".into(), "mid".into(), "high".into()])?;
+    /// assert!(axes.yticks_labeled(&[f64::NAN], vec!["x".into()]).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn yticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Axes> {
+        self.yticks
+            .set_labeled("Axes.yticks_labeled()", self.y, positions, labels)?;
+        Ok(self)
+    }
+
+    /// Sets the format of the x tick labels: of the automatic ticks, and of positions set with
+    /// [`Axes::xticks`]. Calling it again replaces the format; the ticks stay as they are.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis, and when the x
+    /// ticks have labels given with [`Axes::xticks_labeled`] and `format` is not plain
+    /// [`TickFormat::AUTO`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, TickFormat};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.xtick_format(TickFormat::fixed(2)?.affix("", " s")?)?;
+    /// assert_eq!(axes.x_tick_format().suffix(), " s");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xtick_format(&mut self, format: TickFormat) -> Result<&mut Axes> {
+        const CONTEXT: &str = "Axes.xtick_format()";
+        check_x_tick_axis(CONTEXT, self.x, "tick formats")?;
+        self.xticks.set_format(CONTEXT, format)?;
+        Ok(self)
+    }
+
+    /// Sets the format of the y tick labels. Same rules as [`Axes::xtick_format`]; the y axis
+    /// is never a category axis.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` when the y ticks have labels given with
+    /// [`Axes::yticks_labeled`] and `format` is not plain [`TickFormat::AUTO`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, TickFormat};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.ytick_format(TickFormat::percent(0)?)?;
+    /// assert_eq!(axes.y_tick_format(), &TickFormat::percent(0)?);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ytick_format(&mut self, format: TickFormat) -> Result<&mut Axes> {
+        self.yticks.set_format("Axes.ytick_format()", format)?;
+        Ok(self)
+    }
+
+    /// The explicit x ticks; `None` when the x axis uses the automatic ticks.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert_eq!(axes.x_ticks(), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_ticks(&self) -> Option<&ExplicitTicks> {
+        self.xticks.explicit()
+    }
+
+    /// The explicit y ticks; `None` when the y axis uses the automatic ticks.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ExplicitTicks, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.yticks(&[])?;
+    /// assert_eq!(axes.y_ticks(), Some(&ExplicitTicks::Positions(Vec::new())));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn y_ticks(&self) -> Option<&ExplicitTicks> {
+        self.yticks.explicit()
+    }
+
+    /// The format of the x tick labels; [`TickFormat::AUTO`] when unset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, TickFormat};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert_eq!(axes.x_tick_format(), &TickFormat::AUTO);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_tick_format(&self) -> &TickFormat {
+        self.xticks.format()
+    }
+
+    /// The format of the y tick labels; [`TickFormat::AUTO`] when unset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, TickFormat};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert_eq!(axes.y_tick_format(), &TickFormat::AUTO);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn y_tick_format(&self) -> &TickFormat {
+        self.yticks.format()
+    }
+
+    /// The tick settings of the x axis.
+    pub(crate) fn x_tick_settings(&self) -> &AxisTicks {
+        &self.xticks
+    }
+
+    /// The tick settings of the y axis.
+    pub(crate) fn y_tick_settings(&self) -> &AxisTicks {
+        &self.yticks
     }
 
     /// Sets the legend style of these axes, overriding the theme's style.

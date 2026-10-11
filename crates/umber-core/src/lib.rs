@@ -46,15 +46,17 @@
 //! Rust:
 //!
 //! - the figure model: [`Figure`] (size, theme and axes getters, [`Figure::add_axes`],
-//!   [`Figure::to_png`], [`Figure::to_svg`]), [`Axes`] (text and limit setters, mark methods
-//!   and their getters), [`AxisData`], [`LineOptions`], [`ScatterOptions`], [`AreaOptions`],
-//!   [`BarOptions`], [`BarSeries`] and [`HistOptions`] with its bin limit [`MAX_BINS`], and the
+//!   [`Figure::to_png`], [`Figure::to_svg`]), [`Axes`] (text, limit and tick setters, mark
+//!   methods and their getters), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
+//!   [`ScatterOptions`], [`AreaOptions`], [`BarOptions`], [`BarSeries`] and [`HistOptions`]
+//!   with its bin limit [`MAX_BINS`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`BarMark`],
 //!   [`BarGroupMark`], [`BarSeriesView`] and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
 //! - per-series line widths and marker sizes: [`SizeSpec`], with its [`Factor`] and [`Points`];
+//! - tick labels: [`TickFormat`], with its [`NumberStyle`] and [`Decimals`];
 //! - scales: [`ScaleKind`] and [`LogBase`];
 //! - output: [`SvgText`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
@@ -102,6 +104,7 @@ mod stacking;
 mod test_support;
 pub mod text;
 pub mod theme;
+pub mod tick_format;
 pub mod ticks;
 
 pub use binning::MAX_BINS;
@@ -110,8 +113,8 @@ pub use downsample::m4_indices;
 pub use error::{Error, Result};
 pub use figure::{
     AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries,
-    BarSeriesView, Figure, HistMark, HistOptions, LineMark, LineOptions, Mark, ScatterMark,
-    ScatterOptions,
+    BarSeriesView, ExplicitTicks, Figure, HistMark, HistOptions, LineMark, LineOptions, Mark,
+    ScatterMark, ScatterOptions,
 };
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
@@ -126,6 +129,7 @@ pub use scene::{
 pub use size::{Factor, Points, SizeSpec};
 pub use text::{FontLibrary, TextLayout, TextStyle};
 pub use theme::{Dash, FillStyle, GridLines, LegendStyle, Marker, Theme};
+pub use tick_format::{Decimals, NumberStyle, TickFormat};
 pub use ticks::Tick;
 
 /// The version of this crate, as written in `Cargo.toml`.

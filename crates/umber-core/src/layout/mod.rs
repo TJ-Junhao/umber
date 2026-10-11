@@ -861,4 +861,60 @@ mod tests {
         assert!(xlabel.y <= 4.0 * 72.0 - PADDING);
         assert!(plot.right() <= 6.0 * 72.0 - PADDING);
     }
+
+    #[test]
+    fn custom_tick_labels_are_measured_like_automatic_ones() {
+        let plot_with = |set: &dyn Fn(&mut Axes)| {
+            let mut f = figure(Theme::graphite());
+            let axes = f.axes_mut().unwrap();
+            axes.scatter(
+                AxisData::Numbers(vec![0.0, 10.0]),
+                &[0.0, 10.0],
+                ScatterOptions::default(),
+            )
+            .unwrap();
+            set(axes);
+            plan_of(&f).1
+        };
+        let short = plot_with(&|a: &mut Axes| {
+            a.xticks_labeled(&[0.0, 10.0], vec!["a".into(), "b".into()])
+                .unwrap()
+                .yticks_labeled(&[0.0, 10.0], vec!["a".into(), "b".into()])
+                .unwrap();
+        });
+        let long = plot_with(&|a: &mut Axes| {
+            let wide = "a rather long label".to_owned();
+            a.xticks_labeled(&[0.0, 10.0], vec!["a".into(), wide.clone()])
+                .unwrap()
+                .yticks_labeled(&[0.0, 10.0], vec!["a".into(), wide])
+                .unwrap();
+        });
+        // The y label column grows to the widest label.
+        let widest = long
+            .y_tick_labels
+            .iter()
+            .map(Label::width)
+            .fold(0.0, f64::max);
+        assert!((long.plot.x - (PADDING + widest + Y_LABEL_GAP)).abs() < 1e-9);
+        assert!(long.plot.x > short.plot.x + 20.0);
+        // The last x label, centered near the right end, insets the plot so that it stays on
+        // the canvas, up to the difference between the two layout passes' plot widths.
+        let last = long.x_tick_labels.last().unwrap();
+        assert!(long.plot.right() < short.plot.right() - 1.0);
+        assert!(last.x + last.width() <= 6.0 * 72.0 + 0.5, "{last:?}");
+        // A suffix from the tick format is measured the same way.
+        let suffixed = plot_with(&|a: &mut Axes| {
+            let format = crate::TickFormat::AUTO
+                .affix("", " a rather long label")
+                .unwrap();
+            a.ytick_format(format).unwrap();
+        });
+        assert!(suffixed.plot.x > short.plot.x + 20.0);
+        assert!(
+            suffixed
+                .y_tick_labels
+                .iter()
+                .all(|l| l.text.ends_with(" a rather long label"))
+        );
+    }
 }

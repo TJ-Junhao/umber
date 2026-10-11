@@ -86,6 +86,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/inputs.rs
   crates/umber-core/tests/support/corpus/legend.rs
   crates/umber-core/tests/support/corpus/size.rs
+  crates/umber-core/tests/support/corpus/ticks.rs
 )
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/umber-refactor-gate.XXXXXX")"
