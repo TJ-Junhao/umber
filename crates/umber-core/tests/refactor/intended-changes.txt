@@ -1,1 +1,43 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+#
+# Every x tick label now keeps half the outer padding (6 pt) from the canvas edges, and the plot
+# inset that keeps it there is exact.
+#
+# The last x tick label ended on or within a fraction of a point of the canvas edge; it now ends
+# 6 pt from it.
+fig-font-scale-max
+fig-hist-extreme-values
+fig-hist-huge-narrow-limits
+fig-log-extreme-limits
+fig-narrow-limits-huge
+fig-narrow-limits-offset
+fig-narrow-limits-tiny
+fig-ticks-auto-affix-linear-midnight
+fig-ticks-auto-affix-linear-pigment
+fig-ticks-fixed-linear-midnight
+fig-ticks-fixed-linear-pigment
+fig-ticks-labeled-midnight
+fig-ticks-labeled-pigment
+fig-ticks-percent-linear-midnight
+fig-ticks-percent-linear-pigment
+fig-ticks-scientific-linear-midnight
+fig-ticks-scientific-linear-pigment
+#
+# A short end label ("1.00", "5.25") reached 6 to 12 pt past the plot's right edge, closer than
+# 6 pt to the canvas edge; it now ends 6 pt from it.
+fig-graphite-empty-axes
+fig-midnight-empty-axes
+fig-pigment-empty-axes
+fig-hist-all-nan
+fig-hist-empty
+fig-size-wide-line-ends
+fig-single-point
+#
+# The last label's tick sits inside the plot (font scale 10): the inset was estimated from the
+# previous layout pass and is now exact; in the second case the exact first-pass width also
+# changes the x ticks to 0/5/10.
+fig-legend-chips-font-scale-max
+fig-legend-font-scale-max
+#
+# Records a PNG of a figure whose last x tick label now ends 6 pt from the edge.
+errors/api

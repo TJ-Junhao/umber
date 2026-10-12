@@ -21,10 +21,10 @@ pub(crate) fn plan(input: &LayoutInput<'_>, marks: &[ResolvedMark<'_>]) -> (Reso
     let guess = layout::initial_plot_size(input.width, input.height);
     let (tx, ty) = layout::tick_targets(guess);
     let first = resolve::resolve(marks, &limits, tx, ty);
-    let first = layout::lay_out(input, &first, guess.width);
+    let first = layout::lay_out(input, &first);
     let (tx, ty) = layout::tick_targets(first.plot.size());
     let resolved = resolve::resolve(marks, &limits, tx, ty);
-    let layout = layout::lay_out(input, &resolved, first.plot.width);
+    let layout = layout::lay_out(input, &resolved);
     (resolved, layout)
 }
 
