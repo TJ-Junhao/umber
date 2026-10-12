@@ -1,1 +1,6 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# The last x tick label sits inside the plot and needs an inset: the inset is now exact, so
+# the label ends on the canvas edge (it used to be estimated from the previous layout pass).
+fig-legend-chips-font-scale-max
+# Same cause; the exact first-pass inset changes the plot width, so the x ticks become 0/5/10.
+fig-legend-font-scale-max
