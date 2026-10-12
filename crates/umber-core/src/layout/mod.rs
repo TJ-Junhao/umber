@@ -456,7 +456,12 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Layout {
             half: label.width() / 2.0,
         })
         .collect();
-    let (plot_left, plot_right) = inset::fit_x_labels(&room, &spans);
+    let (plot_left, plot_right) = match inset::fit_x_labels(&room, &spans) {
+        inset::XInset::Contained { left, right } => (left, right),
+        // Labels too wide for the room the caps leave keep the capped edges: they reach past
+        // the edge gap and may be clipped by the canvas.
+        inset::XInset::Overflowing { left, right } => (left, right),
+    };
     let x_band = if x_labels.is_empty() {
         0.0
     } else {
@@ -1089,5 +1094,78 @@ mod tests {
                 "{last:?}"
             );
         }
+    }
+
+    /// A `width` by 4 in midnight figure whose x axis has explicit `limits` and two ticks at
+    /// `ticks`, each labelled with `chars` W's.
+    fn close_ticks(
+        width: f64,
+        x: ScaleKind,
+        limits: (f64, f64),
+        ticks: [f64; 2],
+        chars: usize,
+    ) -> Figure {
+        let mut f = Figure::new(width, 4.0, Theme::midnight()).unwrap();
+        let label = "W".repeat(chars);
+        f.add_axes(x, ScaleKind::Linear)
+            .unwrap()
+            .xlim(limits.0, limits.1)
+            .unwrap()
+            .xticks_labeled(&ticks, vec![label.clone(), label])
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn close_interior_ticks_with_wide_labels_stay_inside() {
+        // Each edge moves the other edge's label almost as far as its own, so the edges settle
+        // only where both bounds hold at once. The labels, about 413 pt wide on 6 in and 4218 pt
+        // on 60 in, are wide enough that both bounds bind, and narrow enough that the edges
+        // stay within the caps.
+        let log = ScaleKind::Log {
+            base: crate::LogBase::new(10.0).unwrap(),
+        };
+        let at = |share: f64| 10f64.powf(3.0 * share);
+        for (f, width) in [
+            (
+                close_ticks(6.0, ScaleKind::Linear, (0.0, 1.0), [0.485, 0.515], 81),
+                432.0,
+            ),
+            (
+                close_ticks(6.0, log, (1.0, 1000.0), [at(0.485), at(0.515)], 81),
+                432.0,
+            ),
+            (
+                close_ticks(60.0, ScaleKind::Linear, (0.0, 1.0), [0.485, 0.515], 827),
+                4320.0,
+            ),
+        ] {
+            let layout = assert_x_labels_inside(&f);
+            let (first, last) = (&layout.x_tick_labels[0], &layout.x_tick_labels[1]);
+            assert!((first.x - X_LABEL_EDGE_GAP).abs() < 1e-6, "{first:?}");
+            assert!(
+                (last.x + last.width() - (width - X_LABEL_EDGE_GAP)).abs() < 1e-6,
+                "{last:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn labels_wider_than_the_capped_room_keep_the_capped_edge() {
+        // The last label needs more inset than a quarter of the inner width: the right edge
+        // stops at the cap and the label reaches past the edge gap.
+        let mut f = Figure::new(6.0, 4.0, Theme::midnight()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xlim(0.0, 1.0)
+            .unwrap()
+            .xticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])
+            .unwrap();
+        let (_, layout) = plan_of(&f);
+        let width = 6.0 * 72.0;
+        let cap = END_LABEL_SHARE * (width - 2.0 * PADDING);
+        assert_eq!(layout.plot.right(), width - PADDING - cap);
+        let last = layout.x_tick_labels.last().unwrap();
+        assert!(last.x + last.width() > width, "{last:?}");
     }
 }
