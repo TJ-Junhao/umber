@@ -139,6 +139,25 @@ def check_names_type(context: str, name: str, values: object) -> None:
     _check_container(context, name, values, str_hint=_NAMES_HINT, masked_hint=_MASKED_NAMES_HINT)
 
 
+def check_axis_type(context: str, name: str, values: object) -> None:
+    """Check the type of x values, which are names or numbers, without converting them.
+
+    Args:
+        context: The API call, such as ``"Axes.line()"``.
+        name: The parameter name.
+        values: The value passed.
+
+    Raises:
+        TypeError: The value is text, a single value, or a container without an order.
+        DataError: The value is a masked array.
+
+    Example:
+        >>> from umber._values import check_axis_type
+        >>> check_axis_type("Axes.line()", "x", ["Q1", "Q2"])
+    """
+    _check_container(context, name, values, str_hint=_AXIS_HINT, masked_hint=_MASKED_HINT)
+
+
 def _container_error(context: str, name: str, values: object, hint: str) -> TypeError:
     message = f"{name} is {type_name(values)}; {name} must be a sequence or an array."
     return new_error(TypeError, context, message, parameter=name, hint=hint)
