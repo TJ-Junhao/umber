@@ -430,15 +430,15 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
         label
     });
     let has_row = !legend.row.is_empty();
-    let row = if has_row {
+    let row_top = if has_row {
         if title.is_some() || subtitle.is_some() {
             y += legend::ROW_TOP_GAP;
         }
-        let placed = legend.row.placed(y, height);
+        let top = y;
         y += legend.row.height();
-        placed
+        top
     } else {
-        LegendRow::default()
+        y
     };
     if title.is_some() || subtitle.is_some() || has_row {
         y += HEADER_GAP;
@@ -541,6 +541,11 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
             hint,
         ));
     }
+    let row = if has_row {
+        legend.row.placed(row_top)
+    } else {
+        LegendRow::default()
+    };
     let (x, plot_width) = fit_span(plot_left, plot_right, width);
     let plot = Area {
         x,
