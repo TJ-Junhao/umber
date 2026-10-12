@@ -36,7 +36,7 @@ fn lines_never_fill() {
                 &[10.0, 40.0, 25.0, 30.0],
                 LineOptions::default(),
             );
-            let scene = f.to_scene(FontLibrary::global());
+            let scene = f.to_scene(FontLibrary::global()).unwrap();
             assert!(
                 matches!(mark_group(&scene).1, [Item::Stroke { .. }]),
                 "{style:?}: {:?}",
@@ -55,7 +55,7 @@ fn gradient_area_sits_under_its_line() {
         &[0.0, 1.0, 2.0, 3.0],
         &[10.0, 40.0, 25.0, 30.0],
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let (_, items) = mark_group(&scene);
     let [
@@ -121,7 +121,7 @@ fn an_area_is_drawn_as_its_line_over_the_fill() {
                 .unwrap()
                 .ylim(0.0, 50.0)
                 .unwrap();
-            f.to_scene(FontLibrary::global())
+            f.to_scene(FontLibrary::global()).unwrap()
         };
         let area = limited(area_figure(theme.clone(), ScaleKind::Linear, &x, &y));
         let line = limited(line_figure(theme, &x, &y, LineOptions::default()));
@@ -148,7 +148,7 @@ fn solid_area_is_flat_at_the_area_alpha() {
         assert_eq!(theme.fill_style(), FillStyle::Solid);
         let color = theme.palette()[0];
         let f = area_figure(theme, ScaleKind::Linear, &[0.0, 1.0, 2.0], &[3.0, 5.0, 4.0]);
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let [
             Item::Fill {
@@ -177,7 +177,7 @@ fn solid_area_is_flat_at_the_area_alpha() {
             },
         )
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let [
         Item::Fill {
             paint: Paint::Solid(fill),
@@ -209,7 +209,7 @@ fn areas_include_zero_on_a_linear_y_axis() {
         assert_eq!(resolved.baseline, lowest.pos);
         assert_eq!(resolved.y.scale.domain().0, 0.0);
         assert!((layout.baseline_y - layout.plot.bottom()).abs() < 1e-9);
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         let Some(Item::Fill { path, .. }) = mark_group(&scene).1.first() else {
             panic!("expected an area fill")
         };
@@ -238,7 +238,7 @@ fn areas_fill_down_to_the_baseline_on_a_log_y_axis() {
         assert_eq!(lowest.label, "1");
         assert_eq!(resolved.baseline, lowest.pos);
         assert!(layout.baseline_y < layout.plot.bottom() - 1.0);
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         let [
             Item::Fill {
                 path: area, paint, ..
@@ -269,7 +269,7 @@ fn nan_breaks_the_line_and_the_fill() {
         &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
         &[1.0, 2.0, f64::NAN, 3.0, 2.0, 4.0],
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let [
         Item::Fill { path: first, .. },
         Item::Fill { path: second, .. },
@@ -353,7 +353,7 @@ fn areas_crossing_the_baseline_fill_both_sides() {
         &[0.0, 0.5, 1.0],
         &[1.0, 0.0, -1.0],
     ));
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let plot = plot_of(&f);
     let baseline = plot.y_at(NormalizedPos::new(0.5)) as f32;
@@ -407,7 +407,7 @@ fn limited_area(
         .ylim(ylim.0, ylim.1)
         .unwrap();
     let (_, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
-    (f.to_scene(FontLibrary::global()), layout)
+    (f.to_scene(FontLibrary::global()).unwrap(), layout)
 }
 
 /// The line margin of Midnight's line width, in points.

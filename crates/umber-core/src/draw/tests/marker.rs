@@ -60,8 +60,9 @@ fn marker_shapes_have_expected_bounds() {
         Marker::Cross,
     ] {
         let theme = Theme::graphite();
-        let scene =
-            scatter_figure(theme.clone(), &[0.5], &[0.5], m).to_scene(FontLibrary::global());
+        let scene = scatter_figure(theme.clone(), &[0.5], &[0.5], m)
+            .to_scene(FontLibrary::global())
+            .unwrap();
         let [Item::Markers { shape, .. }] = mark_group(&scene).1 else {
             panic!("expected one marker batch")
         };

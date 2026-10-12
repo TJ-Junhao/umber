@@ -59,7 +59,7 @@ fn narrow_limits_stay_bounded_on_every_axis_combination() {
                 } else {
                     axes.ylim(1.0, 1.0 + 1e-8).unwrap();
                 }
-                let scene = f.to_scene(FontLibrary::global());
+                let scene = f.to_scene(FontLibrary::global()).unwrap();
                 assert_scene_bounded(&scene);
                 if scene.items.len() == 3 {
                     visible += 1;
@@ -131,7 +131,7 @@ fn axis_value(kind: ScaleKind, v: f64, lo: f64) -> f64 {
 /// it is visible.
 #[track_caller]
 fn check_against_oracle(figure: &Figure, a: AxisPoint, b: AxisPoint) -> Option<f64> {
-    let scene = figure.to_scene(FontLibrary::global());
+    let scene = figure.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let (maps, bounds) = axis_clip(figure);
     let want = oracle::exact_plot(a, b, &bounds, maps);

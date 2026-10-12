@@ -79,7 +79,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
         labelled(&mut f, "Histogram");
         axes(&mut f).hist(&values, HistOptions::default()).unwrap();
-        emit_scene(&format!("fig-hist-{theme_name}"), &f.to_scene(lib), sink);
+        emit_scene(
+            &format!("fig-hist-{theme_name}"),
+            &f.to_scene(lib).unwrap(),
+            sink,
+        );
     }
 
     // The gradient switched on where the theme has none, and off where it has one.
@@ -92,13 +96,13 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
         labelled(&mut f, "Area fill");
         axes(&mut f).hist(&values, HistOptions::default()).unwrap();
-        emit_scene(&format!("fig-hist-{name}"), &f.to_scene(lib), sink);
+        emit_scene(&format!("fig-hist-{name}"), &f.to_scene(lib).unwrap(), sink);
     }
 
     // One bin holds every value.
     let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
     axes(&mut f).hist(&values, bins(1)).unwrap();
-    emit_scene("fig-hist-one-bin", &f.to_scene(lib), sink);
+    emit_scene("fig-hist-one-bin", &f.to_scene(lib).unwrap(), sink);
 
     // The most bins, far narrower than the gap, which shrinks to half a bin; the gradient
     // anchors at the tallest bin.
@@ -113,7 +117,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("fig-hist-max-bins-{theme_name}"),
-            &f.to_scene(lib),
+            &f.to_scene(lib).unwrap(),
             sink,
         );
     }
@@ -123,22 +127,22 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     axes(&mut f)
         .hist(&bell(200_000, 3), HistOptions::default())
         .unwrap();
-    emit_scene("fig-hist-200k-values", &f.to_scene(lib), sink);
+    emit_scene("fig-hist-200k-values", &f.to_scene(lib).unwrap(), sink);
 
     // Constant data: binned over v ± 0.5.
     let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
     axes(&mut f).hist(&[7.0; 20], bins(5)).unwrap();
-    emit_scene("fig-hist-constant", &f.to_scene(lib), sink);
+    emit_scene("fig-hist-constant", &f.to_scene(lib).unwrap(), sink);
 
     // No finite value: no bins, and the axes fall back to the unit range.
     let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
     axes(&mut f)
         .hist(&[f64::NAN, f64::NAN], HistOptions::default())
         .unwrap();
-    emit_scene("fig-hist-all-nan", &f.to_scene(lib), sink);
+    emit_scene("fig-hist-all-nan", &f.to_scene(lib).unwrap(), sink);
     let mut f = figure(6.0, 4.0, Theme::pigment(), linear(), linear());
     axes(&mut f).hist(&[], HistOptions::default()).unwrap();
-    emit_scene("fig-hist-empty", &f.to_scene(lib), sink);
+    emit_scene("fig-hist-empty", &f.to_scene(lib).unwrap(), sink);
 
     // Values at the largest magnitudes, with NaN between them.
     let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
@@ -148,7 +152,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             bins(10),
         )
         .unwrap();
-    emit_scene("fig-hist-extreme-values", &f.to_scene(lib), sink);
+    emit_scene("fig-hist-extreme-values", &f.to_scene(lib).unwrap(), sink);
 
     // A narrow x range: bins are cut at both sides of the plot, in axis space.
     for (theme_name, theme) in [
@@ -164,7 +168,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("fig-hist-narrow-xlim-{theme_name}"),
-            &f.to_scene(lib),
+            &f.to_scene(lib).unwrap(),
             sink,
         );
     }
@@ -178,7 +182,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .unwrap()
         .ylim(1e-11, 1e-10)
         .unwrap();
-    emit_scene("fig-hist-huge-narrow-limits", &f.to_scene(lib), sink);
+    emit_scene(
+        "fig-hist-huge-narrow-limits",
+        &f.to_scene(lib).unwrap(),
+        sink,
+    );
 
     // Log y: bins grow from the baseline, the y axis spans the positive counts, and
     // empty bins draw nothing.
@@ -193,7 +201,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("fig-hist-log-y-{theme_name}"),
-            &f.to_scene(lib),
+            &f.to_scene(lib).unwrap(),
             sink,
         );
     }

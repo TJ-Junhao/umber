@@ -9,23 +9,30 @@ use crate::legend::Legend;
 use crate::model::{Axes, Figure};
 use crate::resolve::{self, Limits, Resolved, ResolvedMark};
 use crate::scene::Scene;
-use crate::{FontLibrary, Theme, draw};
+use crate::{FontLibrary, Result, Theme, draw};
 
 /// Resolves and lays out the axes of `input` in two passes: ticks depend on the plot size, and
 /// the plot size depends on the tick label widths. The first pass assumes the plot fills the
 /// figure inside the padding; the second uses the plot size of the first, and is final.
 /// `marks` are the axes' marks, resolved once by the caller; each pass resolves the axes from
 /// them.
-pub(crate) fn plan(input: &LayoutInput<'_>, marks: &[ResolvedMark<'_>]) -> (Resolved, Layout) {
+///
+/// # Errors
+///
+/// As [`layout::lay_out`], from either pass: the second pass needs the plot size of the first.
+pub(crate) fn plan(
+    input: &LayoutInput<'_>,
+    marks: &[ResolvedMark<'_>],
+) -> Result<(Resolved, Layout)> {
     let limits = Limits::of(input.axes);
     let guess = layout::initial_plot_size(input.width, input.height);
     let (tx, ty) = layout::tick_targets(guess);
     let first = resolve::resolve(marks, &limits, tx, ty);
-    let first = layout::lay_out(input, &first);
+    let first = layout::lay_out(input, &first)?;
     let (tx, ty) = layout::tick_targets(first.plot.size());
     let resolved = resolve::resolve(marks, &limits, tx, ty);
-    let layout = layout::lay_out(input, &resolved);
-    (resolved, layout)
+    let layout = layout::lay_out(input, &resolved)?;
+    Ok((resolved, layout))
 }
 
 /// The legend of `axes` with its resolved `marks`, its row and its direct labels, measured once
@@ -43,9 +50,16 @@ fn measure_legend<'a>(
 }
 
 /// [`plan`] for the axes of `figure`, at the figure's size, with its marks resolved against
-/// its theme. Panics when the figure has no axes.
+/// its theme. Panics when the figure has no axes or cannot be laid out.
 #[cfg(test)]
 pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layout) {
+    try_plan_figure(figure, lib).expect("the figure lays out")
+}
+
+/// [`plan`] for the axes of `figure`, as [`plan_figure`], with layout errors reported in
+/// `"Figure.to_scene()"`. Panics when the figure has no axes.
+#[cfg(test)]
+pub(crate) fn try_plan_figure(figure: &Figure, lib: &FontLibrary) -> Result<(Resolved, Layout)> {
     let theme = figure.theme();
     let axes = figure.axes().expect("the figure has axes");
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
@@ -58,6 +72,7 @@ pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layo
         axes,
         legend: &legend,
         lib,
+        context: "Figure.to_scene()",
     };
     plan(&input, &marks)
 }
@@ -71,12 +86,20 @@ pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layo
 ///
 /// Without axes it holds the background only. The marks are resolved and the legend is built
 /// and measured once, before layout, and the same records serve layout and drawing.
-pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
+///
+/// # Errors
+///
+/// As [`plan`], reported in `context`, the API call that renders.
+pub(crate) fn scene(
+    figure: &Figure,
+    library: &FontLibrary,
+    context: &'static str,
+) -> Result<Scene> {
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
     let Some(axes) = figure.axes() else {
-        return scene;
+        return Ok(scene);
     };
     let marks = resolve::resolve_marks(axes.marks(), theme);
     let legend = measure_legend(width, theme, axes, &marks, library);
@@ -87,8 +110,9 @@ pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
         axes,
         legend: &legend,
         lib: library,
+        context,
     };
-    let (resolved, layout) = plan(&input, &marks);
+    let (resolved, layout) = plan(&input, &marks)?;
     scene.push(draw::chrome(theme, &layout));
     if let Some(marks) = draw::marks(theme, &resolved, &layout, &marks) {
         scene.push(marks);
@@ -97,7 +121,7 @@ pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
         scene.push(legend);
     }
     scene.push(draw::baseline(theme, &layout));
-    scene
+    Ok(scene)
 }
 
 #[cfg(test)]
@@ -131,7 +155,8 @@ mod tests {
     fn legend_and_groups(f: &Figure) -> (usize, usize) {
         let lib = FontLibrary::global();
         let entries = plan_figure(f, lib).1.legend.entries().len();
-        let groups = scene(f, lib)
+        let groups = scene(f, lib, "Figure.to_scene()")
+            .unwrap()
             .items
             .iter()
             .filter(|item| matches!(item, Item::Group { .. }))
@@ -143,7 +168,7 @@ mod tests {
     fn header_theme_shows_the_legend_between_marks_and_baseline() {
         let f = labelled_figure(Theme::pigment());
         assert_eq!(legend_and_groups(&f), (2, 4));
-        let s = scene(&f, FontLibrary::global());
+        let s = scene(&f, FontLibrary::global(), "Figure.to_scene()").unwrap();
         // Chrome, marks, legend (unclipped), baseline.
         assert!(
             matches!(s.items.get(2), Some(Item::Group { clip: None, items }) if items.len() == 4)
@@ -179,7 +204,8 @@ mod tests {
             .unwrap();
         }
         let lib = FontLibrary::global();
-        assert_eq!(scene(&f, lib), scene(&unlabelled, lib));
+        let scene_of = |f: &Figure| scene(f, lib, "Figure.to_scene()").unwrap();
+        assert_eq!(scene_of(&f), scene_of(&unlabelled));
     }
 
     #[test]
@@ -191,11 +217,8 @@ mod tests {
         f.axes_mut().unwrap().legend(LegendStyle::Header);
         assert_eq!(legend_and_groups(&f), (2, 4));
         // The same scene as under a theme whose own style is the header row.
-        let lib = FontLibrary::global();
-        assert_eq!(
-            scene(&f, lib),
-            scene(&labelled_figure(Theme::pigment()), lib)
-        );
+        let scene_of = |f: &Figure| scene(f, FontLibrary::global(), "Figure.to_scene()").unwrap();
+        assert_eq!(scene_of(&f), scene_of(&labelled_figure(Theme::pigment())));
     }
 
     #[test]

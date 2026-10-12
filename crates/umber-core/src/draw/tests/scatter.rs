@@ -28,7 +28,7 @@ fn scatter_drops_points_far_outside() {
         &[0.5, 0.5, 0.5, 0.5, f64::NAN, 0.5, 0.5, -1e12],
         Marker::Circle,
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let (_, items) = mark_group(&scene);
     let [
@@ -54,7 +54,7 @@ fn scatter_drops_points_far_outside() {
 
     // Every point outside: no marks group at all.
     let f = scatter_figure(theme, &[5.0, -5.0], &[0.5, 0.5], Marker::Circle);
-    assert_eq!(f.to_scene(FontLibrary::global()).items.len(), 2);
+    assert_eq!(f.to_scene(FontLibrary::global()).unwrap().items.len(), 2);
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn scatter_alpha_multiplies_the_color_alpha() {
             },
         )
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let [
         Item::Markers {
             fill: Some(fill), ..
@@ -229,7 +229,7 @@ fn per_series_size_sets_the_marker_shape() {
                     },
                 )
                 .unwrap();
-            let scene = f.to_scene(FontLibrary::global());
+            let scene = f.to_scene(FontLibrary::global()).unwrap();
             let [Item::Markers { shape, .. }] = mark_group(&scene).1 else {
                 panic!("expected one marker batch")
             };

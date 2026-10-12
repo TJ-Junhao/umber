@@ -151,7 +151,8 @@ class Figure:
 
         Raises:
             TypeError: If ``dpi`` is not an int.
-            StyleError: If ``dpi`` is out of range, or the image would be too large.
+            StyleError: If ``dpi`` is out of range, the x tick labels cannot fit the figure, or
+                the image would be too large.
 
         Example:
             >>> import umber as ub
@@ -175,6 +176,7 @@ class Figure:
 
         Raises:
             TypeError: If ``text`` is not an ``SvgText``.
+            StyleError: If the x tick labels cannot fit the figure.
 
         Example:
             >>> import umber as ub
@@ -196,7 +198,8 @@ class Figure:
         Raises:
             TypeError: If ``path`` is not a ``str`` or path-like object, or ``dpi`` is not
                 an int.
-            StyleError: If ``dpi`` is out of range, or the image would be too large.
+            StyleError: If ``dpi`` is out of range, the x tick labels cannot fit the figure, or
+                the image would be too large.
             OSError: If the file cannot be written.
 
         Example:
@@ -219,6 +222,7 @@ class Figure:
         Raises:
             TypeError: If ``path`` is not a ``str`` or path-like object, or ``text`` is not
                 an ``SvgText``.
+            StyleError: If the x tick labels cannot fit the figure.
             OSError: If the file cannot be written.
 
         Example:

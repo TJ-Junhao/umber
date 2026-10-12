@@ -41,27 +41,48 @@ impl Figure {
     /// baseline as an unclipped group of its own, so marks never cover it. Without axes it
     /// holds the background only. The same figure always gives the same scene.
     ///
+    /// # Errors
+    ///
+    /// `Error::Style` with context `"Figure.to_scene()"` when the x tick labels cannot fit:
+    /// every x tick label keeps half the outer padding from the canvas edges, and the plot area
+    /// moves in for them by at most a quarter of the width inside the padding on each side.
+    /// The message names the widest label; the hint suggests shortening the labels or widening
+    /// the figure.
+    ///
     /// # Examples
     ///
     /// ```
     /// use umber_core::{Figure, FontLibrary, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// assert!(figure.to_scene(FontLibrary::global()).items.is_empty());
+    /// assert!(figure.to_scene(FontLibrary::global())?.items.is_empty());
     /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Growth");
-    /// let scene = figure.to_scene(FontLibrary::global());
+    /// let scene = figure.to_scene(FontLibrary::global())?;
     /// assert_eq!((scene.width, scene.height), (432.0, 288.0));
     /// assert!(scene.leaf_count() > 0);
+    ///
+    /// // A tick label far wider than the figure cannot fit.
+    /// figure
+    ///     .axes_mut()
+    ///     .expect("the figure has axes")
+    ///     .xticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])?;
+    /// let err = figure.to_scene(FontLibrary::global()).unwrap_err();
+    /// assert!(err.to_string().starts_with("Figure.to_scene(): x tick label \"WWW"));
+    /// assert_eq!(err.hint(), Some("shorten the labels or widen the figure."));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    #[must_use]
-    pub fn to_scene(&self, library: &FontLibrary) -> Scene {
-        pipeline::scene(self, library)
+    pub fn to_scene(&self, library: &FontLibrary) -> Result<Scene> {
+        pipeline::scene(self, library, "Figure.to_scene()")
     }
 
-    /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`]. Errors as
-    /// [`render_png`] does: `Error::Style` when `dpi` is outside `10..=2400` (the message names
-    /// the value however large or negative it is) or the image would be too large.
+    /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`].
+    ///
+    /// # Errors
+    ///
+    /// `Error::Style` with context `"Figure.to_png()"` when `dpi` is outside `10..=2400` (the
+    /// message names the value however large or negative it is), when the x tick labels cannot
+    /// fit (see [`Figure::to_scene`]) or when the image would be too large (see
+    /// [`render_png`]).
     ///
     /// # Examples
     ///
@@ -78,10 +99,16 @@ impl Figure {
     /// ```
     pub fn to_png(&self, dpi: i64) -> Result<Vec<u8>> {
         let dpi = check_dpi("Figure.to_png()", dpi)?;
-        render_png(&self.to_scene(FontLibrary::global()), dpi)
+        let scene = pipeline::scene(self, FontLibrary::global(), "Figure.to_png()")?;
+        render_png(&scene, dpi)
     }
 
     /// Renders the figure as an SVG document, with the global [`FontLibrary`].
+    ///
+    /// # Errors
+    ///
+    /// `Error::Style` with context `"Figure.to_svg()"` when the x tick labels cannot fit (see
+    /// [`Figure::to_scene`]).
     ///
     /// # Examples
     ///
@@ -90,14 +117,14 @@ impl Figure {
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
     /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Signal");
-    /// let svg = figure.to_svg(SvgText::Editable);
+    /// let svg = figure.to_svg(SvgText::Editable)?;
     /// assert!(svg.contains(r#"width="432pt" height="288pt""#));
     /// assert!(svg.contains(">Signal</text>"));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    #[must_use]
-    pub fn to_svg(&self, text: SvgText) -> String {
-        render_svg(&self.to_scene(FontLibrary::global()), text)
+    pub fn to_svg(&self, text: SvgText) -> Result<String> {
+        let scene = pipeline::scene(self, FontLibrary::global(), "Figure.to_svg()")?;
+        Ok(render_svg(&scene, text))
     }
 }
 
@@ -125,6 +152,41 @@ mod tests {
 
     fn nums(v: &[f64]) -> AxisData {
         AxisData::Numbers(v.to_vec())
+    }
+
+    #[test]
+    fn labels_that_cannot_fit_fail_every_render_in_its_context() {
+        let mut f = Figure::new(6.0, 4.0, Theme::midnight()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xlim(0.0, 1.0)
+            .unwrap()
+            .xticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])
+            .unwrap();
+        let message = format!(
+            "x tick label \"{}…\" is 306 pt wide; at most 216 pt fits this figure.",
+            "W".repeat(39)
+        );
+        for (context, err) in [
+            (
+                "Figure.to_scene()",
+                f.to_scene(FontLibrary::global()).unwrap_err(),
+            ),
+            ("Figure.to_png()", f.to_png(72).unwrap_err()),
+            ("Figure.to_svg()", f.to_svg(SvgText::Outlines).unwrap_err()),
+        ] {
+            assert_eq!(err.to_string(), format!("{context}: {message}"));
+            assert!(matches!(
+                err,
+                crate::Error::Style {
+                    parameter: None,
+                    ..
+                }
+            ));
+            assert_eq!(err.hint(), Some("shorten the labels or widen the figure."));
+        }
+        // An out-of-range dpi is reported first.
+        assert_eq!(f.to_png(1).unwrap_err().parameter(), Some("dpi"));
     }
 
     #[test]

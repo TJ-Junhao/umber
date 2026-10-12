@@ -314,6 +314,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Set the x ticks to ``positions``, each with the label at the same index of ``labels``.
 
         The labels are drawn as given. The ticks follow the rules of ``Axes.xticks()``.
+        Labels too wide to stay inside the figure make rendering raise ``StyleError``.
         Labels cannot be combined with a tick format other than ``TickFormat.AUTO`` on the same
         axis: whichever of ``xticks_labeled()`` and ``xtick_format()`` is called second
         raises ``UsageError``.
