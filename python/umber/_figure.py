@@ -198,8 +198,9 @@ class Figure:
             >>> ub.Figure(3, 2).save_png("empty.png", dpi=100)
         """
         with api_call():
-            target = _args.path("Figure.save_png()", "path", path)
+            _args.require_path("Figure.save_png()", "path", path)
             resolution = integer("Figure.save_png()", "dpi", dpi)
+            target = _args.path("Figure.save_png()", "path", path)
             Path(target).write_bytes(self._native.png_for_file(resolution))
 
     def save_svg(self, path: str | os.PathLike[str], *, text: SvgText = SvgText.OUTLINES) -> None:
@@ -219,8 +220,9 @@ class Figure:
             >>> ub.Figure(3, 2).save_svg("empty.svg")
         """
         with api_call():
-            target = _args.path("Figure.save_svg()", "path", path)
+            _args.require_path("Figure.save_svg()", "path", path)
             mode = instance("Figure.save_svg()", "text", text, SvgText, _SVG_TEXT_HINT)
+            target = _args.path("Figure.save_svg()", "path", path)
             svg = self._native.svg_for_file(mode.value)
             # ``newline=""`` writes the document's line ends as they are, on every platform.
             Path(target).write_text(svg, encoding="utf-8", newline="")

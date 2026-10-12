@@ -75,9 +75,19 @@ def _data(context: str, name: str, values: object, *, str_hint: str, masked_hint
 
 
 def _check_container(
-    context: str, name: str, values: object, *, str_hint: str, masked_hint: str
+    context: str,
+    name: str,
+    values: object,
+    *,
+    str_hint: str,
+    masked_hint: str,
+    refuse_masked: bool = True,
 ) -> None:
-    """Refuse a data argument whose container type is not accepted, without converting it."""
+    """Refuse a data argument whose container type is not accepted, without converting it.
+
+    A masked array is a value problem, not a type problem: with ``refuse_masked`` false it
+    passes, and the conversion refuses it later.
+    """
     # Types are tested with ``issubclass`` where only an error follows, so that ``values``
     # keeps its declared type for the messages.
     kind = type(values)
@@ -85,7 +95,7 @@ def _check_container(
         raise _container_error(context, name, values, str_hint)
     if issubclass(kind, numbers.Number | np.generic):
         raise _container_error(context, name, values, _SINGLE_HINT)
-    if issubclass(kind, np.ma.MaskedArray):
+    if refuse_masked and issubclass(kind, np.ma.MaskedArray):
         message = f"{name} is a masked array; masked values cannot be plotted."
         raise new_error(DataError, context, message, parameter=name, hint=masked_hint)
     if hasattr(values, "__array__") or isinstance(values, Sequence):
@@ -104,6 +114,8 @@ def _check_container(
 def check_floats_type(context: str, name: str, values: object) -> None:
     """Check the type of a numeric data argument without converting it.
 
+    A masked array passes; the conversion refuses it.
+
     Args:
         context: The API call, such as ``"Axes.xticks_labeled()"``.
         name: The parameter name.
@@ -111,13 +123,14 @@ def check_floats_type(context: str, name: str, values: object) -> None:
 
     Raises:
         TypeError: The value is text, a single value, or a container without an order.
-        DataError: The value is a masked array.
 
     Example:
         >>> from umber._values import check_floats_type
         >>> check_floats_type("Axes.xticks()", "positions", [1, 2])
     """
-    _check_container(context, name, values, str_hint=_SINGLE_HINT, masked_hint=_MASKED_HINT)
+    _check_container(
+        context, name, values, str_hint=_SINGLE_HINT, masked_hint=_MASKED_HINT, refuse_masked=False
+    )
 
 
 def check_names_type(context: str, name: str, values: object) -> None:
@@ -130,13 +143,19 @@ def check_names_type(context: str, name: str, values: object) -> None:
 
     Raises:
         TypeError: The value is text, a single value, or a container without an order.
-        DataError: The value is a masked array.
 
     Example:
         >>> from umber._values import check_names_type
         >>> check_names_type("Axes.xticks_labeled()", "labels", ["a", "b"])
     """
-    _check_container(context, name, values, str_hint=_NAMES_HINT, masked_hint=_MASKED_NAMES_HINT)
+    _check_container(
+        context,
+        name,
+        values,
+        str_hint=_NAMES_HINT,
+        masked_hint=_MASKED_NAMES_HINT,
+        refuse_masked=False,
+    )
 
 
 def check_axis_type(context: str, name: str, values: object) -> None:
@@ -149,13 +168,14 @@ def check_axis_type(context: str, name: str, values: object) -> None:
 
     Raises:
         TypeError: The value is text, a single value, or a container without an order.
-        DataError: The value is a masked array.
 
     Example:
         >>> from umber._values import check_axis_type
         >>> check_axis_type("Axes.line()", "x", ["Q1", "Q2"])
     """
-    _check_container(context, name, values, str_hint=_AXIS_HINT, masked_hint=_MASKED_HINT)
+    _check_container(
+        context, name, values, str_hint=_AXIS_HINT, masked_hint=_MASKED_HINT, refuse_masked=False
+    )
 
 
 def _container_error(context: str, name: str, values: object, hint: str) -> TypeError:

@@ -622,3 +622,15 @@ def test_failed_setters_leave_the_figure_unchanged(call: Callable[[AnyAxes], obj
     with pytest.raises((TypeError, ub.StyleError)):
         call(ax)
     assert ax.figure.to_svg(text=ub.SvgText.EDITABLE) == before
+
+
+@pytest.mark.parametrize("name", ["line", "scatter"])
+def test_masked_x_is_a_value_error_after_the_types(name: str) -> None:
+    method = _method(_axes(), name)
+    masked = np.ma.array([1.0, 2.0])
+    with pytest.raises(TypeError) as caught:
+        method(masked, None)
+    assert _parameter(caught.value) == "y"
+    with pytest.raises(ub.DataError) as data:
+        method(masked, [1.0, 2.0])
+    assert _parameter(data.value) == "x"

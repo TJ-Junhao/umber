@@ -821,3 +821,17 @@ def test_grouped_error_output_shows_the_series_and_the_hint(tmp_path: Path) -> N
     err = _raised(tmp_path, call, SETUP)
     assert str(err) == f"Axes.grouped_bar(): series[1].heights[1] is inf; {FINITE}"
     assert _notes(err) == [_marked(call, "[good, bad]"), f"hint: {SERIES_GAP}"]
+
+
+def test_masked_heights_are_a_value_error_after_the_types() -> None:
+    masked = np.ma.array([1.0, 2.0])
+    series = cast(Callable[..., object], ub.BarSeries)
+    with pytest.raises(TypeError) as caught:
+        series("s", masked, color="red")
+    assert _parameter(caught.value) == "color"
+    with pytest.raises(ub.DataError) as data:
+        series("s", masked)
+    assert _parameter(data.value) == "heights"
+    with pytest.raises(TypeError) as caught:
+        cast(Callable[..., object], _bars().bar)(masked, None)
+    assert _parameter(caught.value) == "heights"

@@ -356,3 +356,13 @@ def test_max_bins_is_exported() -> None:
     with pytest.raises(ub.StyleError) as caught:
         _axes().hist(VALUES, bins=ub.MAX_BINS + 1)
     assert str(ub.MAX_BINS) in str(caught.value)
+
+
+def test_masked_array_is_a_value_error_after_the_types() -> None:
+    masked = np.ma.array([1.0, 2.0])
+    with pytest.raises(TypeError) as caught:
+        cast(Any, _axes()).hist(masked, bins="bad")
+    assert _parameter(caught.value) == "bins"
+    with pytest.raises(ub.DataError) as data:
+        _axes().hist(masked)
+    assert _parameter(data.value) == "values"
