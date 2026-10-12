@@ -632,54 +632,120 @@ impl Sprites {
     /// Composites the queued sprites over `pixmap` in queue order and empties the queue.
     ///
     /// With enough sprites queued, the image is cut into bands of [`BAND_ROWS`] rows, dealt out
-    /// to up to [`MAX_THREADS`] threads; each band belongs to one thread, which composites every
-    /// queued sprite over it in queue order. Every pixel therefore sees the same sprites in the
-    /// same order whatever the number of threads, and the output is the same.
+    /// to up to [`MAX_THREADS`] threads; each band belongs to one thread, which composites the
+    /// queued sprites that reach it in queue order. Every pixel therefore sees the same sprites
+    /// in the same order whatever the number of threads, and the output is the same.
     fn flush(&self, pixmap: &mut sk::Pixmap, queue: &mut Vec<Placement>) {
-        let width = pixmap.width() as usize;
+        let (width, height) = (pixmap.width() as usize, pixmap.height() as usize);
         let threads = compositing_threads(queue.len());
         let image = pixmap.data_mut();
-        if threads <= 1 {
+        let visits = if threads <= 1 {
             self.composite(
                 Band {
                     top: 0,
                     data: image,
                 },
                 width,
-                queue,
-            );
+                queue.iter(),
+            )
         } else {
-            let mut shares: Vec<Vec<Band<'_>>> = (0..threads).map(|_| Vec::new()).collect();
-            let bands = image.chunks_mut(BAND_ROWS * width * 4).enumerate();
-            for (i, data) in bands {
-                if let Some(share) = shares.get_mut(i % threads) {
-                    share.push(Band {
-                        top: i * BAND_ROWS,
-                        data,
-                    });
-                }
-            }
-            let queue = &*queue;
-            std::thread::scope(|scope| {
-                for share in shares {
-                    scope.spawn(move || {
-                        for band in share {
-                            self.composite(band, width, queue);
-                        }
-                    });
-                }
-            });
-        }
+            self.composite_in_bands(image, (width, height), queue, threads)
+        };
+        #[cfg(test)]
+        VISITS.with(|v| v.set(v.get() + visits));
+        #[cfg(not(test))]
+        let _ = visits;
         queue.clear();
     }
 
-    /// Composites every sprite of `queue`, in order, over `band` of a `width`-pixel image.
-    fn composite(&self, mut band: Band<'_>, width: usize, queue: &[Placement]) {
+    /// Composites `queue` over `image`, `width` x `height` pixels, in bands of [`BAND_ROWS`]
+    /// rows on up to `threads` threads. Each band visits only the placements that reach it, in
+    /// queue order, and bands that no placement reaches are skipped. Returns how many
+    /// placements were visited, once per band they reach.
+    fn composite_in_bands(
+        &self,
+        image: &mut [u8],
+        (width, height): (usize, usize),
+        queue: &[Placement],
+        threads: usize,
+    ) -> usize {
+        let mut reaching: Vec<Vec<&Placement>> = (0..height.div_ceil(BAND_ROWS))
+            .map(|_| Vec::new())
+            .collect();
+        let (band_rows, sprite_rows) = (BAND_ROWS as i64, i64::from(self.size.1));
+        let last = reaching.len() as i64 - 1;
         for placement in queue {
+            let top = i64::from(placement.top);
+            let first = top.max(0) / band_rows;
+            let end = ((top + sprite_rows - 1).max(0) / band_rows).min(last);
+            for band in first..=end {
+                if let Some(placements) = reaching.get_mut(band as usize) {
+                    placements.push(placement);
+                }
+            }
+        }
+        let work: Vec<(Band<'_>, Vec<&Placement>)> = image
+            .chunks_mut(BAND_ROWS * width * 4)
+            .zip(reaching)
+            .enumerate()
+            .filter(|(_, (_, placements))| !placements.is_empty())
+            .map(|(i, (data, placements))| {
+                let band = Band {
+                    top: i * BAND_ROWS,
+                    data,
+                };
+                (band, placements)
+            })
+            .collect();
+        let threads = threads.min(work.len());
+        let run = |share: Vec<(Band<'_>, Vec<&Placement>)>| -> usize {
+            share
+                .into_iter()
+                .map(|(band, placements)| self.composite(band, width, placements.into_iter()))
+                .sum()
+        };
+        if threads <= 1 {
+            return run(work);
+        }
+        let mut shares: Vec<Vec<(Band<'_>, Vec<&Placement>)>> =
+            (0..threads).map(|_| Vec::new()).collect();
+        for (i, item) in work.into_iter().enumerate() {
+            if let Some(share) = shares.get_mut(i % threads) {
+                share.push(item);
+            }
+        }
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = shares
+                .into_iter()
+                .map(|share| scope.spawn(move || run(share)))
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| {
+                    worker
+                        .join()
+                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                })
+                .sum()
+        })
+    }
+
+    /// Composites `placements`, in order, over `band` of a `width`-pixel image. Returns how
+    /// many placements were visited.
+    fn composite<'q>(
+        &self,
+        mut band: Band<'_>,
+        width: usize,
+        placements: impl Iterator<Item = &'q Placement>,
+    ) -> usize {
+        let mut visits = 0;
+        for placement in placements {
+            visits += 1;
             if let Some(Some(sprite)) = self.phases.get(placement.phase) {
                 blit_over(&mut band, width, sprite, placement.left, placement.top);
             }
         }
+        visits
     }
 }
 
@@ -694,10 +760,12 @@ const MAX_THREADS: usize = 8;
 /// cut the time of 100,000 by a third.
 const MIN_SPRITES_PER_THREAD: usize = 1024;
 
-// Lets tests choose the number of compositing threads.
+// Lets tests choose the number of compositing threads, and count the placements composited
+// over each band.
 #[cfg(test)]
 thread_local! {
     static FORCE_THREADS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// How many threads composite `queued` sprites: one per [`MIN_SPRITES_PER_THREAD`] sprites, at
@@ -2079,6 +2147,37 @@ mod tests {
         let (queued, reference, as_paths) = queued_and_reference(Some(FRACTIONAL_CLIP), &positions);
         assert_eq!(as_paths, 2);
         assert_same_pixels(&queued, &reference);
+    }
+
+    #[test]
+    fn each_band_composites_only_the_sprites_that_reach_it() {
+        // A tall, narrow image with every marker in one place: one or two of its 2,048 bands
+        // hold sprites, and only those visit the queue.
+        let count = 2048;
+        let mut scene = Scene::new(17.0, 32_767.0, WHITE);
+        scene.push(Item::Markers {
+            shape: rect_path(-0.5, -0.5, 1.0, 1.0),
+            fill: Some(BLACK),
+            stroke: None,
+            positions: vec![pt(8.0, 16_384.0); count],
+        });
+        let render = |threads| {
+            on_threads(threads, || {
+                VISITS.with(|v| v.set(0));
+                let png = render_png(&scene, 72).unwrap();
+                (png, VISITS.with(std::cell::Cell::get))
+            })
+        };
+        let (single, visits) = render(1);
+        assert_eq!(visits, count);
+        for threads in [2, 3, 8] {
+            let (png, visits) = render(threads);
+            assert!(png == single, "{threads} threads change the PNG");
+            assert!(
+                (count..=2 * count).contains(&visits),
+                "{threads} threads visit {visits} placements"
+            );
+        }
     }
 
     #[test]
