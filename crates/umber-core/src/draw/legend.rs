@@ -301,13 +301,14 @@ mod tests {
         use crate::geometry::PathVerb;
 
         // No title, a one-character label and a large font scale: the chip's dot and label
-        // are narrower than the chip is tall.
+        // are narrower than the chip is tall. At this font scale the figure needs to be about
+        // 4.5 in tall to leave room for the plot.
         let theme = Theme::pigment()
             .with_legend_style(crate::LegendStyle::Chips)
             .unwrap()
             .with_font_scale(10.0)
             .unwrap();
-        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        let mut f = Figure::new(6.0, 6.0, theme).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap()
             .line(

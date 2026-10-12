@@ -3,13 +3,15 @@
 //! Layout also sets how many ticks a plot area of a given size asks for.
 //!
 //! Every derived value is finite: font sizes are clamped, text wider than
-//! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least 1 by 1 pt and
-//! lies on the canvas (unless the canvas itself is shorter than 1 pt). Text that does not fit,
-//! such as a title wider than the figure, is clipped by the canvas.
+//! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least [`MIN_PLOT`]
+//! by [`MIN_PLOT`] and lies on the canvas. Text that does not fit, such as a title wider than
+//! the figure, is clipped by the canvas.
 //! A figure whose y tick labels and padding leave the plot less than [`MIN_PLOT`] wide fails the
 //! layout with `Error::Style`. Every x tick label keeps [`X_LABEL_EDGE_GAP`] from the canvas
 //! edges; x tick labels that would need a larger plot inset than [`END_LABEL_SHARE`] allows, or
-//! a plot narrower than [`MIN_PLOT`], fail the layout with `Error::Style` too.
+//! a plot narrower than [`MIN_PLOT`], fail the layout with `Error::Style` too. So does a figure
+//! whose header, x tick labels, axis labels and padding leave the plot less than [`MIN_PLOT`]
+//! tall.
 //! With figures of at most 200 in a side this keeps every coordinate far below the renderers'
 //! `MAX_COORD`.
 
@@ -42,8 +44,9 @@ const Y_LABEL_CENTER: f64 = 0.35;
 const X_LABEL_GAP: f64 = 4.0;
 /// The gap between the tick labels and an axis label.
 const AXIS_LABEL_GAP: f64 = 4.0;
-/// The smallest plot side. [`fit_span`] keeps the plot at least this wide and tall, and the x
-/// tick label solve in [`inset`] places x tick labels for a plot at least this wide.
+/// The smallest plot side. Layout fails for a figure that leaves the plot less room than this
+/// in either direction; [`fit_span`] keeps the plot at least this wide against rounding, and
+/// the x tick label solve in [`inset`] places x tick labels for a plot at least this wide.
 const MIN_PLOT: f64 = 1.0;
 /// The smallest gap between an x tick label and the left or right canvas edge: half the outer
 /// padding, so an end label may reach into the padding but never ends flush with the edge.
@@ -65,7 +68,7 @@ pub(crate) struct Area {
     pub y: f64,
     /// Width, at least [`MIN_PLOT`] for the plot area.
     pub width: f64,
-    /// Height, at least [`MIN_PLOT`] for the plot area.
+    /// Height, at least [`MIN_PLOT`] for the plot area (layout fails otherwise).
     pub height: f64,
 }
 
@@ -359,6 +362,21 @@ const Y_LABEL_HINT: &str = "shorten the y tick labels or widen the figure.";
 /// The hint of the error for a figure too narrow for the plot area.
 const FIGURE_WIDTH_HINT: &str = "widen the figure.";
 
+/// The hint of the error for a figure too short for the plot area, naming only the header
+/// parts it has: whether it has a title, a subtitle and a legend row.
+fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str {
+    match (title, subtitle, legend) {
+        (false, false, false) => "make the figure taller.",
+        (true, false, false) => "make the figure taller, or remove the title.",
+        (false, true, false) => "make the figure taller, or remove the subtitle.",
+        (false, false, true) => "make the figure taller, or remove the legend.",
+        (true, true, false) => "make the figure taller, or remove the title or subtitle.",
+        (true, false, true) => "make the figure taller, or remove the title or legend.",
+        (false, true, true) => "make the figure taller, or remove the subtitle or legend.",
+        (true, true, true) => "make the figure taller, or remove the title, subtitle or legend.",
+    }
+}
+
 /// Lays out the axes of `input` for already resolved scales.
 ///
 /// # Errors
@@ -371,7 +389,11 @@ const FIGURE_WIDTH_HINT: &str = "widen the figure.";
 /// - the x tick labels cannot all keep [`X_LABEL_EDGE_GAP`] from the canvas edges on a plot at
 ///   least [`MIN_PLOT`] wide, with each side of the plot inset by at most [`END_LABEL_SHARE`] of
 ///   the inner width: the message names the widest x tick label, its width and the width up to
-///   which labels fit.
+///   which labels fit;
+/// - the room between the header (title, subtitle and legend row), the y label and the y tick
+///   label rising above the top tick, and the x tick labels, the x label and the bottom padding
+///   is shorter than [`MIN_PLOT`]: the message names the height the figure needs, and the hint
+///   names only the header parts the figure has (see [`figure_too_short`]).
 pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<Layout> {
     let LayoutInput {
         width,
@@ -506,12 +528,23 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
     } else {
         0.0
     };
-    let plot_bottom = height - PADDING - x_band - xlabel_band;
+    // Everything under the plot: the x tick labels, the x label and the bottom padding.
+    let below = x_band + xlabel_band + PADDING;
+    let plot_bottom = height - below;
+    let plot_height = plot_bottom - plot_top;
+    if plot_height < MIN_PLOT {
+        let hint = figure_height_hint(title.is_some(), subtitle.is_some(), has_row);
+        return Err(figure_too_short(
+            context,
+            height,
+            plot_top + MIN_PLOT + below,
+            hint,
+        ));
+    }
     let (x, plot_width) = fit_span(plot_left, plot_right, width);
-    let (y, plot_height) = fit_span(plot_top, plot_bottom, height);
     let plot = Area {
         x,
-        y,
+        y: plot_top,
         width: plot_width,
         height: plot_height,
     };
@@ -643,18 +676,57 @@ fn min_canvas_width(column: f64, direct: f64) -> f64 {
 
 /// The error for a canvas `width` pt wide that leaves no room for the plot area next to a y
 /// tick label column `column` pt wide (0 without y tick labels) and direct labels that would
-/// reserve `direct` pt. The widths are in whole points: the figure's rounded down and the one
-/// needed rounded up, so the two never look equal.
+/// reserve `direct` pt (see [`figure_too_small`]).
 fn figure_too_narrow(context: &'static str, width: f64, column: f64, direct: f64) -> Error {
+    figure_too_small(
+        context,
+        Direction::Width,
+        width,
+        min_canvas_width(column, direct),
+        FIGURE_WIDTH_HINT,
+    )
+}
+
+/// The error for a canvas `height` pt tall that leaves no room for the plot area: it needs
+/// `needed` pt, the plot's top edge plus [`MIN_PLOT`] plus everything under the plot (see
+/// [`figure_too_small`]).
+fn figure_too_short(context: &'static str, height: f64, needed: f64, hint: &'static str) -> Error {
+    figure_too_small(context, Direction::Height, height, needed, hint)
+}
+
+/// A direction in which a figure can be too small for its plot area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    /// Across: the figure's width.
+    Width,
+    /// Down: the figure's height.
+    Height,
+}
+
+/// The error for a canvas whose side in `direction` is `side` pt but needs at least `needed`
+/// pt for the plot area. The sides are in whole points: the figure's rounded down and the one
+/// needed rounded up, and at least one point more, so the two never look equal.
+fn figure_too_small(
+    context: &'static str,
+    direction: Direction,
+    side: f64,
+    needed: f64,
+    hint: &'static str,
+) -> Error {
+    let along = match direction {
+        Direction::Width => "wide",
+        Direction::Height => "tall",
+    };
+    let shown = side.floor();
     Error::style(
         context,
         format!(
-            "the figure is {} pt wide; at least {} pt is needed for the plot area.",
-            number(width.floor()),
-            number(min_canvas_width(column, direct).ceil()),
+            "the figure is {} pt {along}; at least {} pt is needed for the plot area.",
+            number(shown),
+            number(needed.ceil().max(shown + 1.0)),
         ),
     )
-    .with_hint(FIGURE_WIDTH_HINT)
+    .with_hint(hint)
 }
 
 /// The error for the y tick `label`, the widest, that leaves no room for the plot area: y tick
@@ -705,6 +777,7 @@ mod tests {
     use crate::ScaleKind;
     use crate::model::{AxisData, Figure, LineOptions, ScatterOptions};
     use crate::pipeline::plan_figure;
+    use crate::test_support::named_height;
     use crate::test_support::scene::assert_scene_bounded;
 
     fn lib() -> &'static FontLibrary {
@@ -829,25 +902,32 @@ mod tests {
                 // (see `labels_wider_than_the_capped_room_fail_naming_the_widest`), and y tick
                 // labels leave no room for the plot (see
                 // `y_labels_that_leave_no_room_for_the_plot_fail_naming_the_widest`).
-                let mut f = Figure::new(1.0, 1.0, theme).unwrap();
-                f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
-                    .unwrap()
-                    .xticks(&[])
-                    .unwrap()
-                    .yticks(&[])
-                    .unwrap()
-                    .title(&long)
-                    .subtitle(&long)
-                    .xlabel(&long)
-                    .ylabel(&long)
-                    .ylim(100_000.0, 900_000.0)
-                    .unwrap()
-                    .line(
-                        AxisData::Numbers(vec![0.0, 1.0]),
-                        &[200_000.0, 300_000.0],
-                        LineOptions::default(),
-                    )
-                    .unwrap();
+                let build = |height: f64| {
+                    let mut f = Figure::new(1.0, height, theme.clone()).unwrap();
+                    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                        .unwrap()
+                        .xticks(&[])
+                        .unwrap()
+                        .yticks(&[])
+                        .unwrap()
+                        .title(&long)
+                        .subtitle(&long)
+                        .xlabel(&long)
+                        .ylabel(&long)
+                        .ylim(100_000.0, 900_000.0)
+                        .unwrap()
+                        .line(
+                            AxisData::Numbers(vec![0.0, 1.0]),
+                            &[200_000.0, 300_000.0],
+                            LineOptions::default(),
+                        )
+                        .unwrap();
+                    f
+                };
+                // A 1 in square has no room for the header and the axis labels; a figure as tall
+                // as the error names has.
+                let need = named_height(&overflow(&build(1.0))).unwrap();
+                let f = build(need / 72.0);
                 let (_, layout) = plan_of(&f);
                 assert!(layout.plot.width >= 1.0 && layout.plot.height >= 1.0);
                 for v in [
@@ -866,20 +946,24 @@ mod tests {
         // Text far wider than any figure is cut to a prefix that fits.
         let huge = "W".repeat(20_000);
         let theme = Theme::pigment().with_font_scale(10.0).unwrap();
-        let mut f = Figure::new(1.0, 1.0, theme.clone()).unwrap();
-        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
-            .unwrap()
-            .xticks(&[])
-            .unwrap()
-            .yticks(&[])
-            .unwrap()
-            .title(&huge)
-            .line(
-                AxisData::Numbers(vec![0.0, 1.0]),
-                &[1.0, 2.0],
-                LineOptions::default(),
-            )
-            .unwrap();
+        let build = |height: f64| {
+            let mut f = Figure::new(1.0, height, theme.clone()).unwrap();
+            f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .xticks(&[])
+                .unwrap()
+                .yticks(&[])
+                .unwrap()
+                .title(&huge)
+                .line(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[1.0, 2.0],
+                    LineOptions::default(),
+                )
+                .unwrap();
+            f
+        };
+        let f = build(named_height(&overflow(&build(1.0))).unwrap() / 72.0);
         let (_, layout) = plan_of(&f);
         let title = layout.title.as_ref().unwrap();
         assert!(title.width() <= MAX_TEXT_WIDTH && title.width() > MAX_TEXT_WIDTH * 0.9);
@@ -1604,5 +1688,362 @@ mod tests {
                 .to_string()
                 .contains(&format!("x tick label \"{}\" is 61 pt", "W".repeat(12)))
         );
+    }
+
+    /// A `width` by `height` in midnight figure without ticks, with the header parts asked for:
+    /// a title, a subtitle, and a header legend row of one labelled line.
+    fn bare(width: f64, height: f64, title: bool, subtitle: bool, legend: bool) -> Figure {
+        let mut f = Figure::new(width, height, Theme::midnight()).unwrap();
+        let axes = f
+            .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .yticks(&[])
+            .unwrap()
+            .legend(crate::LegendStyle::Header);
+        if title {
+            axes.title("Load");
+        }
+        if subtitle {
+            axes.subtitle("Daily mean");
+        }
+        if legend {
+            axes.line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1.0, 2.0],
+                LineOptions {
+                    label: "North".into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+        f
+    }
+
+    #[test]
+    fn a_figure_too_short_for_the_plot_fails_naming_the_height_it_needs() {
+        // 0.3 in is 21.6 pt; without tick labels or a header the plot needs 2 × 12 + 1 = 25 pt.
+        let err = overflow(&bare(1.0, 0.3, false, false, false));
+        assert_eq!(
+            err.to_string(),
+            "Figure.to_scene(): the figure is 21 pt tall; at least 25 pt is needed for the plot \
+             area."
+        );
+        assert!(matches!(err, crate::Error::Style { .. }));
+        assert_eq!(err.parameter(), None);
+        assert_eq!(err.hint(), Some("make the figure taller."));
+        // 25 pt is enough: the plot is exactly `MIN_PLOT` tall, between the paddings.
+        let (_, layout) = plan_of(&bare(1.0, 25.0 / 72.0, false, false, false));
+        assert!(
+            (layout.plot.height - MIN_PLOT).abs() < 1e-9,
+            "{:?}",
+            layout.plot
+        );
+        assert!((layout.plot.y - PADDING).abs() < 1e-9, "{:?}", layout.plot);
+    }
+
+    #[test]
+    fn the_height_hint_names_only_the_header_parts_the_figure_has() {
+        let cases = [
+            ((false, false, false), "make the figure taller."),
+            (
+                (true, false, false),
+                "make the figure taller, or remove the title.",
+            ),
+            (
+                (false, true, false),
+                "make the figure taller, or remove the subtitle.",
+            ),
+            (
+                (false, false, true),
+                "make the figure taller, or remove the legend.",
+            ),
+            (
+                (true, true, false),
+                "make the figure taller, or remove the title or subtitle.",
+            ),
+            (
+                (true, false, true),
+                "make the figure taller, or remove the title or legend.",
+            ),
+            (
+                (false, true, true),
+                "make the figure taller, or remove the subtitle or legend.",
+            ),
+            (
+                (true, true, true),
+                "make the figure taller, or remove the title, subtitle or legend.",
+            ),
+        ];
+        for ((title, subtitle, legend), hint) in cases {
+            let err = overflow(&bare(2.0, 0.3, title, subtitle, legend));
+            assert!(
+                err.to_string()
+                    .starts_with("Figure.to_scene(): the figure is 21 pt tall; at least "),
+                "{err}"
+            );
+            assert_eq!(err.hint(), Some(hint), "{title} {subtitle} {legend}");
+        }
+        // Direct labels and no legend take no header room, and the hint does not name them.
+        for style in [crate::LegendStyle::Direct, crate::LegendStyle::None] {
+            let mut f = bare(2.0, 0.3, true, false, true);
+            f.axes_mut().unwrap().legend(style);
+            assert_eq!(
+                overflow(&f).hint(),
+                Some("make the figure taller, or remove the title.")
+            );
+        }
+    }
+
+    /// A 6 in wide figure `height` in tall in `theme` with every part that takes height: a title,
+    /// a subtitle, axis labels, automatic ticks and three labelled lines shown in `style`.
+    fn full(theme: &Theme, style: crate::LegendStyle, height: f64) -> Figure {
+        let mut f = Figure::new(6.0, height, theme.clone()).unwrap();
+        let axes = f
+            .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .title("Station output")
+            .subtitle("Daily mean, MW")
+            .xlabel("Day")
+            .ylabel("MW")
+            .legend(style);
+        for (i, label) in ["North", "South", "East"].into_iter().enumerate() {
+            axes.line(
+                AxisData::Numbers(vec![0.0, 30.0]),
+                &[i as f64, 100.0 - i as f64],
+                LineOptions {
+                    label: label.to_owned(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+        f
+    }
+
+    /// The height, in points, that a figure laid out as `layout` on a canvas `height` pt tall
+    /// needs: everything above and below the plot, and a plot `MIN_PLOT` tall.
+    fn needed_height(layout: &Layout, height: f64) -> f64 {
+        layout.plot.y + MIN_PLOT + (height - layout.plot.bottom())
+    }
+
+    #[test]
+    fn figures_just_tall_enough_lay_out_and_just_shorter_ones_fail() {
+        use crate::LegendStyle;
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            for style in [
+                LegendStyle::Header,
+                LegendStyle::Chips,
+                LegendStyle::Direct,
+                LegendStyle::None,
+            ] {
+                let (_, roomy) = plan_of(&full(&theme, style, 4.0));
+                let need = needed_height(&roomy, 4.0 * 72.0);
+                // Just fits: the plot is 0.01 pt taller than its minimum.
+                let (_, fits) = plan_of(&full(&theme, style, (need + 0.01) / 72.0));
+                assert!(
+                    (fits.plot.height - (MIN_PLOT + 0.01)).abs() < 1e-6,
+                    "{style:?}: {:?}",
+                    fits.plot
+                );
+                // Just fails, naming the height needed.
+                let short = need - 0.01;
+                let err = overflow(&full(&theme, style, short / 72.0));
+                assert_eq!(
+                    err.to_string(),
+                    format!(
+                        "Figure.to_scene(): the figure is {} pt tall; at least {} pt is needed \
+                         for the plot area.",
+                        short.floor(),
+                        need.ceil().max(short.floor() + 1.0),
+                    )
+                );
+                let hint = match style {
+                    LegendStyle::Header | LegendStyle::Chips => {
+                        "make the figure taller, or remove the title, subtitle or legend."
+                    }
+                    LegendStyle::Direct | LegendStyle::None => {
+                        "make the figure taller, or remove the title or subtitle."
+                    }
+                };
+                assert_eq!(err.hint(), Some(hint));
+            }
+        }
+    }
+
+    #[test]
+    fn the_height_a_full_header_needs_is_named_exactly() {
+        // A 6 in figure with a title, a subtitle, axis labels, automatic ticks and three
+        // labelled lines in the theme's own legend style: a header row in pigment, direct
+        // labels in graphite and chips in midnight. Under the header row or the chips, the
+        // three entries fit one row.
+        for (theme, need) in [
+            (Theme::pigment(), 132.0),
+            (Theme::graphite(), 114.0),
+            (Theme::midnight(), 137.0),
+        ] {
+            let style = theme.legend_style();
+            let err = overflow(&full(&theme, style, 1.0));
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "Figure.to_scene(): the figure is 72 pt tall; at least {need} pt is needed \
+                     for the plot area."
+                )
+            );
+            assert!(plan_of(&full(&theme, style, need / 72.0)).1.plot.height >= MIN_PLOT);
+            assert_eq!(
+                named_height(&overflow(&full(&theme, style, (need - 1.0) / 72.0))),
+                Some(need)
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_figures_two_inches_tall_lay_out() {
+        use crate::LegendStyle;
+        // (width in inches, a title and a subtitle, labelled lines): with the header, three
+        // lines on a 6 in figure fit one legend row; without it, six lines on a 3 in figure
+        // wrap onto two or three rows.
+        let cases = [(6.0, true, 3), (3.0, false, 6), (6.0, false, 12)];
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            for style in [
+                LegendStyle::Header,
+                LegendStyle::Chips,
+                LegendStyle::Direct,
+                LegendStyle::None,
+            ] {
+                for (width, header, lines) in cases {
+                    let mut f = Figure::new(width, 2.0, theme.clone()).unwrap();
+                    let axes = f
+                        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                        .unwrap()
+                        .xlabel("Day")
+                        .ylabel("MW")
+                        .legend(style);
+                    if header {
+                        axes.title("Station output").subtitle("Daily mean, MW");
+                    }
+                    for i in 0..lines {
+                        axes.line(
+                            AxisData::Numbers(vec![0.0, 30.0]),
+                            &[i as f64, 100.0 - i as f64],
+                            LineOptions {
+                                label: format!("Station {i}"),
+                                ..LineOptions::default()
+                            },
+                        )
+                        .unwrap();
+                    }
+                    let (_, layout) = plan_of(&f);
+                    assert!(layout.plot.height >= MIN_PLOT, "{:?}", layout.plot);
+                    if matches!(style, LegendStyle::Header | LegendStyle::Chips) && !header {
+                        // At least two rows: taller than two body lines.
+                        let line = BODY_LINE * f64::from(theme.body_size());
+                        assert!(layout.legend.height() > 2.0 * line, "{style:?} wraps");
+                    }
+                }
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(256))]
+
+        /// End to end: a figure either renders with a plot at least `MIN_PLOT` tall that lies
+        /// between the paddings, or fails; when it fails for its height, a figure as tall as the
+        /// height it names does not.
+        #[test]
+        fn no_successful_layout_has_a_plot_shorter_than_its_minimum(
+            theme in 0_usize..3,
+            scale in proptest::sample::select(vec![0.5_f64, 1.0, 2.0, 4.0]),
+            width in 1.0..8.0_f64,
+            height in 0.05..3.0_f64,
+            parts in proptest::collection::vec(proptest::bool::ANY, 6),
+            entries in 0_usize..16,
+            style in 0_usize..5,
+            chars in 1_usize..30,
+        ) {
+            use crate::LegendStyle;
+            let build = |height: f64| {
+                let theme = [Theme::pigment(), Theme::graphite(), Theme::midnight()][theme]
+                    .with_font_scale(scale)
+                    .unwrap();
+                let mut f = Figure::new(width, height, theme).unwrap();
+                let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                if parts[0] {
+                    axes.title("Station output");
+                }
+                if parts[1] {
+                    axes.subtitle("Daily mean, MW");
+                }
+                if parts[2] {
+                    axes.xlabel("Day");
+                }
+                if parts[3] {
+                    axes.ylabel("MW");
+                }
+                if parts[4] {
+                    axes.xticks(&[]).unwrap();
+                }
+                if parts[5] {
+                    axes.yticks(&[]).unwrap();
+                }
+                let styles = [
+                    LegendStyle::Header,
+                    LegendStyle::Chips,
+                    LegendStyle::Direct,
+                    LegendStyle::None,
+                ];
+                if let Some(&style) = styles.get(style) {
+                    axes.legend(style);
+                }
+                for i in 0..entries {
+                    axes.line(
+                        AxisData::Numbers(vec![0.0, 1.0]),
+                        &[i as f64, 1.0],
+                        LineOptions {
+                            label: "W".repeat(chars),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                f
+            };
+            let f = build(height);
+            let canvas = height * 72.0;
+            let planned = crate::pipeline::try_plan_figure(&f, lib());
+            let scene = f.to_scene(lib());
+            proptest::prop_assert_eq!(planned.is_ok(), scene.is_ok());
+            match planned {
+                Ok((_, layout)) => {
+                    proptest::prop_assert!(layout.plot.height >= MIN_PLOT, "{:?}", layout.plot);
+                    proptest::prop_assert!(layout.plot.y >= PADDING, "{:?}", layout.plot);
+                    proptest::prop_assert!(
+                        layout.plot.bottom() <= canvas - PADDING + 1e-9,
+                        "{:?}",
+                        layout.plot
+                    );
+                    assert_scene_bounded(&scene.unwrap());
+                }
+                Err(err) => {
+                    proptest::prop_assert!(matches!(err, crate::Error::Style { .. }), "{}", err);
+                    let message = err.to_string();
+                    if let Some(needed) = named_height(&err) {
+                        proptest::prop_assert!(needed > canvas.floor(), "{message}");
+                        let taller = crate::pipeline::try_plan_figure(&build(needed / 72.0), lib());
+                        if let Err(again) = taller {
+                            proptest::prop_assert!(
+                                !again.to_string().contains(" pt tall; "),
+                                "{message} then {again}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }
