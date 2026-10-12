@@ -36,6 +36,10 @@ pub(crate) fn floats(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
 /// Collecting `n` zeros from `repeat_n`, whose length is known exactly, allocates the slice
 /// once, with room for the reference counts. Reading the buffer with `PyBuffer::to_vec` and
 /// then converting the vector with `Arc::from` would allocate twice and copy the values twice.
+///
+/// Keep it that way: build the `Arc` straight from the buffer, never through [`floats`] or any
+/// other `Vec`, which would add a second copy as large as the data. No test counts the
+/// allocations here, so a second copy would not fail any test.
 pub(crate) fn shared_floats(obj: &Bound<'_, PyAny>) -> PyResult<Arc<[f64]>> {
     let buffer = float_buffer(obj)?;
     let mut values: Arc<[f64]> = iter::repeat_n(0.0, buffer.item_count()).collect();

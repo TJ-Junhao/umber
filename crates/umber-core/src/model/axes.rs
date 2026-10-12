@@ -628,6 +628,9 @@ impl Axes {
     /// infinite value, a magnitude beyond [`MAX_MAGNITUDE`], a value outside the log range on a
     /// log axis, or `x` of the wrong kind for the axis. NaN is allowed and breaks the line.
     ///
+    /// The mark stores its own copy of `y`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`Axes::line_shared`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -681,6 +684,9 @@ impl Axes {
     }
 
     /// Adds a scatter series. Same rules as [`Axes::line`]; NaN skips a point.
+    ///
+    /// The mark stores its own copy of `y`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`Axes::scatter_shared`].
     ///
     /// # Examples
     ///
@@ -741,6 +747,9 @@ impl Axes {
     /// the values; on a log y axis it fills down to the baseline, at the lowest y tick (or the
     /// explicit lower limit). Same rules as [`Axes::line`]: NaN breaks both the line and the
     /// fill.
+    ///
+    /// The mark stores its own copy of `y`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`Axes::area_shared`].
     ///
     /// # Examples
     ///
@@ -805,6 +814,9 @@ impl Axes {
     /// `categories` and `heights` of different lengths; an x axis that is not a category axis;
     /// a category that appears twice; a height that is infinite, beyond [`MAX_MAGNITUDE`], or
     /// outside the log range on a log y axis. NaN is allowed and draws no bar.
+    ///
+    /// The mark stores its own copy of `heights`, made once. To store heights already held in
+    /// an `Arc<[f64]>` without copying them, use [`Axes::bar_shared`].
     ///
     /// # Examples
     ///
@@ -980,6 +992,9 @@ impl Axes {
     /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and
     /// `Error::Usage` for a log x axis, which histograms do not support; `Error::Data` for a
     /// value that is infinite or beyond [`MAX_MAGNITUDE`].
+    ///
+    /// The mark stores its own copy of `values`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`Axes::hist_shared`].
     ///
     /// # Examples
     ///
