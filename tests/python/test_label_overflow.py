@@ -1,4 +1,4 @@
-"""Tick labels that leave no room for the plot or its x tick labels raise ``StyleError``."""
+"""Figures or tick labels that leave no room for the plot or its x tick labels fail to render."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -133,3 +133,57 @@ def test_a_figure_too_narrow_for_the_plot_raises_style_error() -> None:
         "Figure.to_png(): the figure is 21 pt wide; at least 25 pt is needed for the plot area."
     )
     assert details(caught.value) == (None, "widen the figure.")
+
+
+@pytest.mark.parametrize(("context", "render"), RENDERS, ids=[c for c, _ in RENDERS])
+def test_a_figure_too_short_for_the_plot_raises_style_error(
+    tmp_path: Path, context: str, render: Callable[[ub.Figure, Path], object]
+) -> None:
+    # 0.3 in is 21.6 pt; without tick labels, the paddings, the title line, the gap under the
+    # header and the plot need 12 + 1.25 x 14.5 + 8 + 1 + 12 = 51.125 pt.
+    fig = ub.Figure(1, 0.3, theme=ub.Theme.MIDNIGHT)
+    fig.add_axes().xticks([]).yticks([]).title("Load")
+    with pytest.raises(ub.StyleError) as caught:
+        render(fig, tmp_path)
+    assert str(caught.value) == (
+        f"{context}: the figure is 21 pt tall; at least 52 pt is needed for the plot area."
+    )
+    hint = "make the figure taller, or remove the title."
+    assert details(caught.value) == (None, hint)
+    assert _notes(caught.value) == [f"hint: {hint}"]
+    assert not (tmp_path / "out.png").exists()
+    assert not (tmp_path / "out.svg").exists()
+
+
+def _bare(height_in: float) -> ub.Figure:
+    fig = ub.Figure(1, height_in, theme=ub.Theme.MIDNIGHT)
+    fig.add_axes().xticks([]).yticks([])
+    return fig
+
+
+def test_a_figure_just_tall_enough_for_the_plot_renders() -> None:
+    # Without tick labels or a header the plot needs 2 x 12 + 1 = 25 pt.
+    assert _bare(25 / 72).to_svg().startswith("<svg")
+    with pytest.raises(ub.StyleError) as caught:
+        _bare(24.5 / 72).to_svg()
+    assert str(caught.value) == (
+        "Figure.to_svg(): the figure is 24 pt tall; at least 25 pt is needed for the plot area."
+    )
+    assert details(caught.value) == (None, "make the figure taller.")
+
+
+def test_the_height_hint_names_only_the_header_parts_the_figure_has() -> None:
+    fig = ub.Figure(2, 0.3, theme=ub.Theme.MIDNIGHT)
+    axes = fig.add_axes().xticks([]).yticks([]).subtitle("Daily mean")
+    axes.legend(ub.LegendStyle.HEADER).line([0, 1], [1, 2], label="North")
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    assert details(caught.value) == (
+        None,
+        "make the figure taller, or remove the subtitle or legend.",
+    )
+    # Direct labels take no header room, and the hint does not name them.
+    axes.legend(ub.LegendStyle.DIRECT)
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    assert details(caught.value) == (None, "make the figure taller, or remove the subtitle.")
