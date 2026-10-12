@@ -72,4 +72,4 @@ jobs:
       - name: Write the comparison to the job summary
         run: |
           python3 scripts/bench/compare.py ../base/target/criterion target/criterion \
-            "$RUNNER_TEMP/py/base.json" "$RUNNER_TEMP/py/head.json" >> "$GITHUB_STEP_SUMMARY"
+            "$RUNNER_TEMP/py/base.json" "$RUNNER_TEMP/py/head.json" | tee -a "$GITHUB_STEP_SUMMARY"

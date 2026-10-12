@@ -7,10 +7,10 @@ Run it with the interpreter that has `umber` installed; it prints one JSON objec
     build_line_5m_rss_mib   peak RSS growth while ub.line builds a 5M float64 point series
     render_line_5m_rss_mib  peak RSS growth above the built figure while it renders to PNG
 
-The memory numbers come from the process's peak RSS (ru_maxrss), which never decreases, so each
-one is measured in a fresh child process. The script guards the single-copy data path: building
-a 5M point line must grow RSS by about the stored series (40 MiB for y, 40 MiB for x if x is a
-float64 array too), not a multiple of it.
+The memory numbers come from the process's peak RSS (ru_maxrss), which never decreases, so they are
+measured in a fresh child process whose input arrays are the only large allocation
+before the measurement. The script guards the single-copy data path: building a 5M point line
+stores x and y once each, so RSS should grow by about 80 MiB (two 40 MiB series), not a multiple.
 """
 
 from __future__ import annotations
@@ -34,8 +34,11 @@ def _maxrss_mib() -> float:
 
 
 def _data(n: int) -> tuple[np.ndarray, np.ndarray]:
+    """Two float64 arrays of `n` values, made in place so the peak RSS stays at their size."""
     t = np.linspace(0.0, 100.0, n)
-    y = np.sin(t * 0.01) * 10.0 + np.cos(t * 7.0)
+    y = np.empty_like(t)
+    np.sin(t, out=y)
+    y *= 10.0
     return t, y
 
 
