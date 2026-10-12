@@ -1,0 +1,75 @@
+name: Bench
+
+# Informational: builds the base and the head revision in one job, runs the same benchmarks on
+# both and writes a ratio table to the job summary. The job fails only when a benchmark itself
+# errors, never on a time or a ratio.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "python/**"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Git revision to compare this ref against
+        required: true
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Check out the base revision next to the head
+        id: base
+        run: |
+          git worktree add ../base "$BASE"
+          # A base that predates the benchmarks has nothing to compare with: only the head runs.
+          if [ -f ../base/crates/umber-core/benches/render.rs ]; then
+            echo "trees=base head" >> "$GITHUB_OUTPUT"
+          else
+            echo "trees=head" >> "$GITHUB_OUTPUT"
+            echo "Base revision has no benchmarks; head results only." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Run the Rust benchmarks
+        run: |
+          for name in ${{ steps.base.outputs.trees }}; do
+            tree=.; [ "$name" = base ] && tree=../base
+            (cd "$tree" && cargo bench -p umber-core --bench render)
+          done
+
+      - name: Build and time the Python package
+        run: |
+          mkdir -p "$RUNNER_TEMP/py"
+          for name in ${{ steps.base.outputs.trees }}; do
+            tree=.; [ "$name" = base ] && tree=../base
+            uv venv "$RUNNER_TEMP/py/$name"
+            uv pip install --python "$RUNNER_TEMP/py/$name" "numpy>=2.0" "typing_extensions>=4.12" "maturin>=1.15,<2"
+            (cd "$tree" && VIRTUAL_ENV="$RUNNER_TEMP/py/$name" "$RUNNER_TEMP/py/$name/bin/maturin" develop --release --uv)
+            # The head's script runs against both builds, so the cases are identical.
+            "$RUNNER_TEMP/py/$name/bin/python" scripts/bench/python_e2e.py > "$RUNNER_TEMP/py/$name.json"
+            cat "$RUNNER_TEMP/py/$name.json"
+          done
+
+      - name: Write the comparison to the job summary
+        run: |
+          python3 scripts/bench/compare.py ../base/target/criterion target/criterion \
+            "$RUNNER_TEMP/py/base.json" "$RUNNER_TEMP/py/head.json" | tee -a "$GITHUB_STEP_SUMMARY"
