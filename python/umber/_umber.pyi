@@ -15,6 +15,16 @@ Text arguments (titles, labels) must not hold lone surrogates either; PyO3 refus
 Enum arguments are the integer values that ``enum_members()`` lists. The ``Figure`` methods other
 than ``add_axes``, ``clone`` and the rendering methods need the figure's axes; without them they
 raise the internal ``RuntimeError``.
+
+The native objects are not shareable across threads while a call is in progress. A ``Figure`` is
+a mutable PyO3 object: a call that needs it while another call holds a conflicting borrow raises
+``RuntimeError`` (PyO3's "Already borrowed" or "Already mutably borrowed") instead of waiting.
+The native side never holds a borrow while it releases the interpreter: rendering copies the
+figure under a brief borrow, then renders the copy with the interpreter released, so other
+threads keep running and the figure stays usable. Every other call runs with the interpreter
+held, so on a regular (GIL) build calls on one figure from several threads are serialized
+without a conflict. The Python façade adds no locking of its own, and free-threaded builds are
+not verified: use one figure per thread there.
 """
 
 from typing import ClassVar, final
