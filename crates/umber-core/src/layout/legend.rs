@@ -501,9 +501,10 @@ fn swatch_size(
 mod tests {
     use super::*;
     use crate::model::{AxisData, Figure, LineOptions};
-    use crate::pipeline::plan_figure;
+    use crate::pipeline::{plan_figure, try_plan_figure};
     use crate::resolve::AxisScale;
     use crate::scene::Item;
+    use crate::test_support::named_height;
     use crate::test_support::scene::assert_scene_bounded;
     use crate::{ScaleKind, Theme};
 
@@ -613,15 +614,17 @@ mod tests {
             .with_legend_style(crate::LegendStyle::Header)
             .unwrap();
         let size = f64::from(chips_theme.body_size() * chips_theme.font_scale());
+        // 8 in tall, so that 60 entries leave room for the plot; the rows depend only on the
+        // width.
         for n in [1, 3, 20, 60] {
             let chips = plan_figure(
-                &figure(6.0, 4.0, chips_theme.clone(), &names(n)),
+                &figure(6.0, 8.0, chips_theme.clone(), &names(n)),
                 FontLibrary::global(),
             )
             .1
             .legend;
             let header = plan_figure(
-                &figure(6.0, 4.0, header_theme.clone(), &names(n)),
+                &figure(6.0, 8.0, header_theme.clone(), &names(n)),
                 FontLibrary::global(),
             )
             .1
@@ -691,8 +694,9 @@ mod tests {
             .unwrap()
             .with_font_scale(10.0)
             .unwrap();
-        // No title, so the row starts at the top padding and stays on the canvas.
-        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        // No title, so the row starts at the top padding and stays on the canvas. At this font
+        // scale the figure needs to be about 4.5 in tall to leave room for the plot.
+        let mut f = Figure::new(6.0, 6.0, theme).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap()
             .line(
@@ -1008,24 +1012,58 @@ mod tests {
                     // Without ticks: x tick labels too wide for these figures, and y tick labels
                     // that leave no room for the plot, fail the layout, which `layout::tests`
                     // covers.
-                    let mut f = figure(w, h, theme.clone(), &names(n));
-                    f.axes_mut()
-                        .unwrap()
-                        .xticks(&[])
-                        .unwrap()
-                        .yticks(&[])
-                        .unwrap();
+                    let build = |height: f64| {
+                        let mut f = Figure::new(w, height, theme.clone()).ok()?;
+                        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                        axes.title("Station output")
+                            .subtitle("Daily mean, MW")
+                            .ylabel("MW")
+                            .xticks(&[])
+                            .unwrap()
+                            .yticks(&[])
+                            .unwrap();
+                        for label in names(n) {
+                            axes.line(
+                                AxisData::Numbers(vec![0.0, 1.0]),
+                                &[1.0, 2.0],
+                                LineOptions {
+                                    label,
+                                    ..LineOptions::default()
+                                },
+                            )
+                            .unwrap();
+                        }
+                        Some(f)
+                    };
+                    // A figure too short for its legend rows fails naming the height it needs,
+                    // and one as tall lays out with every row on the canvas, unless it would be
+                    // taller than a figure can be.
+                    let f = match try_plan_figure(&build(h).unwrap(), FontLibrary::global()) {
+                        Ok(_) => build(h).unwrap(),
+                        Err(err) => {
+                            let need = named_height(&err).unwrap_or_else(|| panic!("{err}"));
+                            assert!(need.is_finite() && need > h * 72.0, "{err}");
+                            let Some(f) = build(need / 72.0) else {
+                                assert!(need > 200.0 * 72.0, "{need}");
+                                continue;
+                            };
+                            f
+                        }
+                    };
+                    let canvas = f.height_in() * 72.0;
                     let layout = plan_figure(&f, FontLibrary::global()).1;
                     let plot = layout.plot;
                     assert!(plot.width >= 1.0 && plot.height >= 1.0, "{plot:?}");
-                    assert!(
-                        plot.y >= 0.0 && plot.bottom() <= h * 72.0 + 1e-9,
-                        "{plot:?}"
-                    );
+                    assert!(plot.y >= 0.0 && plot.bottom() <= canvas + 1e-9, "{plot:?}");
                     assert!(layout.legend.height().is_finite());
-                    // Only rows that start on the canvas are kept.
+                    // Every row entry is kept; graphite labels its lines directly instead.
+                    let row_entries = match theme.legend_style() {
+                        crate::LegendStyle::Direct => 0,
+                        _ => n,
+                    };
+                    assert_eq!(layout.legend.entries().len(), row_entries);
                     for entry in layout.legend.entries() {
-                        assert!(entry.swatch.center_y - layout.legend.row_height / 2.0 < h * 72.0);
+                        assert!(entry.swatch.center_y + layout.legend.row_height / 2.0 < plot.y);
                     }
                     assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
                 }
@@ -1045,10 +1083,14 @@ mod tests {
         (f(min.x), f(min.y), f(max.x), f(max.y))
     }
 
-    /// A 6 by 4 in figure without a title, so its legend row starts at the top padding, with
-    /// one labelled dashed line or one labelled scatter.
+    /// The height, in inches, of [`huge_token_figure`]: a dot swatch 10 000 pt tall makes the
+    /// legend row as tall, and the plot needs room under it.
+    const HUGE_TOKEN_HEIGHT: f64 = 150.0;
+
+    /// A 6 by [`HUGE_TOKEN_HEIGHT`] in figure without a title, so its legend row starts at the
+    /// top padding, with one labelled dashed line or one labelled scatter.
     fn huge_token_figure(theme: Theme, scatter: bool) -> Figure {
-        let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+        let mut f = Figure::new(6.0, HUGE_TOKEN_HEIGHT, theme).unwrap();
         let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         let (x, y) = (AxisData::Numbers(vec![0.0, 1.0]), [1.0, 2.0]);
         if scatter {
@@ -1091,7 +1133,7 @@ mod tests {
 
     #[test]
     fn huge_swatch_tokens_match_the_drawing() {
-        let (width, height) = (6.0 * 72.0, 4.0 * 72.0);
+        let (width, height) = (6.0 * 72.0, HUGE_TOKEN_HEIGHT * 72.0);
         // 12 000 is above the drawn cap; f32::MAX is the largest token a theme accepts.
         for token in [12_000.0, f64::from(f32::MAX)] {
             let theme = Theme::pigment()
@@ -1451,26 +1493,37 @@ mod tests {
             Theme::graphite().with_font_scale(10.0).unwrap(),
         ] {
             for (w, h, n) in [(1.0, 1.0, 50), (6.0, 4.0, 400)] {
-                let mut f = Figure::new(w, h, theme.clone()).unwrap();
-                let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-                // Without ticks: x tick labels too wide for these figures, and y tick labels that
-                // leave no room for the plot, fail the layout, which `layout::tests` covers.
-                axes.title("Crowded")
-                    .xticks(&[])
-                    .unwrap()
-                    .yticks(&[])
-                    .unwrap();
-                for k in 0..n {
-                    axes.line(
-                        AxisData::Numbers(vec![0.0, 1.0]),
-                        &[0.0, (k % 7) as f64],
-                        LineOptions {
-                            label: format!("Line {k}"),
-                            ..LineOptions::default()
-                        },
-                    )
-                    .unwrap();
-                }
+                let build = |height: f64| {
+                    let mut f = Figure::new(w, height, theme.clone()).unwrap();
+                    let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                    // Without ticks: x tick labels too wide for these figures, and y tick labels
+                    // that leave no room for the plot, fail the layout, which `layout::tests`
+                    // covers.
+                    axes.title("Crowded")
+                        .xticks(&[])
+                        .unwrap()
+                        .yticks(&[])
+                        .unwrap();
+                    for k in 0..n {
+                        axes.line(
+                            AxisData::Numbers(vec![0.0, 1.0]),
+                            &[0.0, (k % 7) as f64],
+                            LineOptions {
+                                label: format!("Line {k}"),
+                                ..LineOptions::default()
+                            },
+                        )
+                        .unwrap();
+                    }
+                    f
+                };
+                // The figures too short for the title are drawn as tall as they need, so the
+                // plot is as short as it can be and the labels crowd it all the more.
+                let f = match try_plan_figure(&build(h), FontLibrary::global()) {
+                    Ok(_) => build(h),
+                    Err(err) => build(named_height(&err).unwrap_or_else(|| panic!("{err}")) / 72.0),
+                };
+                let height = f.height_in() * 72.0;
                 let layout = plan_figure(&f, FontLibrary::global()).1;
                 assert!(layout.plot.width >= 1.0 && layout.plot.height >= 1.0);
                 // Labels whose line of text is off the canvas are left out; every end dot stays.
@@ -1478,7 +1531,7 @@ mod tests {
                 assert!(layout.direct.iter().all(|d| d.dot.is_some()));
                 for d in layout.direct.iter().filter_map(|d| d.label.as_ref()) {
                     let c = center_of(d);
-                    assert!(c.is_finite() && c > -100.0 * 72.0 && c < 2.0 * h * 72.0 + 1e5);
+                    assert!(c.is_finite() && c > -100.0 * 72.0 && c < 2.0 * height + 1e5);
                 }
                 assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
             }

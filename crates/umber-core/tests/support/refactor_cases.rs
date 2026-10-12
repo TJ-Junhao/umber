@@ -88,6 +88,7 @@ mod corpus {
     pub mod hist;
     pub mod inputs;
     pub mod legend;
+    pub mod plot_height;
     pub mod size;
     pub mod ticks;
     pub mod x_end_label;
@@ -137,6 +138,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::size::cases(&lib, &mut sink);
     corpus::ticks::cases(&lib, &mut sink);
     corpus::x_end_label::cases(&lib, &mut sink);
+    corpus::plot_height::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1327,22 +1329,30 @@ fn label_cases(lib: &FontLibrary, add: &mut impl FnMut(&str, Scene)) {
         add(name, to_scene(&f, lib));
     }
 
-    for (name, scale) in [
-        ("fig-font-scale-max", 10.0),
-        ("fig-font-scale-tiny", 1.0e-30),
+    // At the largest font scale the header, the tick labels and the axis labels take about
+    // 10 in, so that figure is 12 in tall.
+    for (name, scale, height) in [
+        ("fig-font-scale-max", 10.0, 12.0),
+        ("fig-font-scale-tiny", 1.0e-30, 4.0),
     ] {
-        let theme = Theme::graphite().with_font_scale(scale).unwrap();
-        let mut f = figure(6.0, 4.0, theme, linear(), log(10.0));
-        labelled(&mut f, "Font scale");
-        axes(&mut f)
-            .line(
-                numbers(vec![0.0, 1.0, 2.0, 3.0]),
-                &[1.0, 30.0, 5.0, 900.0],
-                line(),
-            )
-            .unwrap();
-        add(name, to_scene(&f, lib));
+        add(name, to_scene(&font_scale_figure(scale, height), lib));
     }
+}
+
+/// A 6 in wide graphite figure `height` in tall at font `scale`, on a linear x and a log y
+/// axis, with a title, a subtitle, axis labels and one line.
+fn font_scale_figure(scale: f64, height: f64) -> Figure {
+    let theme = Theme::graphite().with_font_scale(scale).unwrap();
+    let mut f = figure(6.0, height, theme, linear(), log(10.0));
+    labelled(&mut f, "Font scale");
+    axes(&mut f)
+        .line(
+            numbers(vec![0.0, 1.0, 2.0, 3.0]),
+            &[1.0, 30.0, 5.0, 900.0],
+            line(),
+        )
+        .unwrap();
+    f
 }
 
 /// Text in every bundled font and weight, with and without tabular figures.
