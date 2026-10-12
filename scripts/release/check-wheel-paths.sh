@@ -22,8 +22,12 @@ for wheel in "$@"; do
     unzip -q "$wheel" -d "$scan"
     clean=1
     for needle in "${needles[@]}"; do
-        if grep -rIl -a -F -- "$needle" "$scan" || grep -rl -a -F -- "$needle" "$scan"; then
+        hits="$(grep -rl -a -F -- "$needle" "$scan" || true)"
+        if [[ -n "$hits" ]]; then
             echo "error: $(basename "$wheel") contains build-machine path: $needle" >&2
+            while IFS= read -r hit; do
+                echo "  in ${hit#"$scan"/}" >&2
+            done <<< "$hits"
             clean=0
             status=1
         fi

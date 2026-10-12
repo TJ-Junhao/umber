@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Install a wheel into a clean virtual environment and test it there: the smoke script, then
+# Install a wheel or the sdist into a clean virtual environment and test it there: the smoke script, then
 # the font and license tests run against the installed package, never the source tree.
 #
-# Usage: scripts/release/test-wheel.sh WHEEL PYTHON_VERSION
-# Requires uv. Works under Git Bash on Windows.
+# Usage: scripts/release/test-wheel.sh DISTRIBUTION PYTHON_VERSION
+# Requires uv; installing the sdist also needs a Rust toolchain. Works under Git Bash on Windows.
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-    echo "usage: $0 WHEEL PYTHON_VERSION" >&2
+    echo "usage: $0 DISTRIBUTION PYTHON_VERSION" >&2
     exit 2
 fi
 wheel="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
