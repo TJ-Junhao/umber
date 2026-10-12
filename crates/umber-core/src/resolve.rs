@@ -530,6 +530,46 @@ pub(crate) fn resolve(
     Resolved { x, y, baseline }
 }
 
+/// The values one mark contributes to an axis domain, in order (see [`ResolvedMark`]).
+///
+/// Raw data is a slice, and folding over it, as the extent does, runs as a plain loop over the
+/// slice; a boxed iterator would make one dynamic call per value. Values computed from what a
+/// record owns are few and stay boxed.
+pub(crate) enum DomainValues<'a> {
+    /// The mark's own data, in data order.
+    Data(std::iter::Copied<std::slice::Iter<'a, f64>>),
+    /// Values computed from the record.
+    Computed(Box<dyn Iterator<Item = f64> + 'a>),
+}
+
+impl Iterator for DomainValues<'_> {
+    type Item = f64;
+
+    fn next(&mut self) -> Option<f64> {
+        match self {
+            DomainValues::Data(values) => values.next(),
+            DomainValues::Computed(values) => values.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            DomainValues::Data(values) => values.size_hint(),
+            DomainValues::Computed(values) => values.size_hint(),
+        }
+    }
+
+    fn fold<B, F>(self, init: B, f: F) -> B
+    where
+        F: FnMut(B, f64) -> B,
+    {
+        match self {
+            DomainValues::Data(values) => values.fold(init, f),
+            DomainValues::Computed(values) => values.fold(init, f),
+        }
+    }
+}
+
 /// A mark resolved for drawing: one variant per mark kind, each holding the mark and its color
 /// resolved against the theme's palette, and for lines, areas and scatters the stroke width or
 /// marker diameter they are drawn at, resolved against the theme. Axes, the legend and drawing
@@ -616,7 +656,7 @@ impl<'a> ResolvedMark<'a> {
     ///
     /// A histogram yields the low and the high end of its binned range
     /// ([`Histogram::range`]), and nothing when it has no finite value.
-    pub fn x_numbers(&self) -> Box<dyn Iterator<Item = f64> + '_> {
+    pub fn x_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
@@ -626,10 +666,12 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { .. } => &[],
             ResolvedMark::Hist { histogram, .. } => {
                 let range = histogram.as_ref().map(Histogram::range);
-                return Box::new(range.into_iter().flat_map(|(lo, hi)| [lo, hi]));
+                return DomainValues::Computed(Box::new(
+                    range.into_iter().flat_map(|(lo, hi)| [lo, hi]),
+                ));
             }
         };
-        Box::new(values.iter().copied())
+        DomainValues::Data(values.iter().copied())
     }
 
     /// The categories the mark contributes to a category x axis, in data order, repeats
@@ -658,31 +700,33 @@ impl<'a> ResolvedMark<'a> {
     /// every height is positive, these are the positive segment ends, which a log domain can hold.
     /// Histograms yield the count of every non-empty bin, in bin order, and so never 0 either: on a
     /// log axis the domain spans the smallest positive count to the largest.
-    pub fn y_values(&self) -> Box<dyn Iterator<Item = f64> + '_> {
+    pub fn y_values(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
             ResolvedMark::Area { mark, .. } => mark.y(),
             ResolvedMark::Bar { mark, .. } => mark.heights(),
             ResolvedMark::Grouped { series, .. } => {
-                return Box::new(
+                return DomainValues::Computed(Box::new(
                     series
                         .iter()
                         .flat_map(|(view, _)| view.heights().iter().copied()),
-                );
+                ));
             }
-            ResolvedMark::Stacked { stacks, .. } => return Box::new(stacks.ends()),
+            ResolvedMark::Stacked { stacks, .. } => {
+                return DomainValues::Computed(Box::new(stacks.ends()));
+            }
             ResolvedMark::Hist { histogram, .. } => {
                 let counts = histogram.as_ref().map_or(&[][..], Histogram::counts);
-                return Box::new(
+                return DomainValues::Computed(Box::new(
                     counts
                         .iter()
                         .filter(|&&count| count > 0)
                         .map(|&count| count as f64),
-                );
+                ));
             }
         };
-        Box::new(values.iter().copied())
+        DomainValues::Data(values.iter().copied())
     }
 
     /// Whether the mark grows from the baseline, as bars, histogram bins and the fill of an
