@@ -13,7 +13,7 @@ figure
 std::fs::write("signal.png", figure.to_png(144)?)?;
 ```
 
-The API is `0.x` and may change between minor versions; patch releases within a minor version are compatible.
+The API is `0.x` and not yet stable; it may change or be removed without a deprecation period.
 
 ## License
 

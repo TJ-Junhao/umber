@@ -2,15 +2,15 @@
 
 umber is a plotting library for Python with a rendering core written in Rust. It draws line, scatter, area, bar and histogram charts with careful typography, three built-in themes, and PNG or SVG output.
 
-[简体中文](README-ZH.md)
+[简体中文](https://github.com/TJ-Junhao/umber/blob/main/README-ZH.md)
 
 ![A line chart of daily temperature at two stations, in the Graphite theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
 
-- **Fast on large data.** All per-point work happens in Rust: a 1,000,000-point line renders to PNG in about 55 ms, and a 100,000-point scatter in about 50 ms (see [Performance](#performance)).
+- **Fast on large data.** Rendering runs in Rust: a 1,000,000-point line renders to PNG in about 55 ms, and a 100,000-point scatter in about 50 ms (see [Performance](#performance)).
 - **Explicit.** Every option is a typed value (`Color`, `Size`, `Dash`, `TickFormat`, …). There are no format strings, no positional style arguments and no silent conversions.
 - **Fails fast, pointing at the problem.** Invalid input raises at the call that caused it, with a message, a hint and the offending argument highlighted in the traceback.
 - **Statically typed.** Category and numeric axes are distinct types: calling `bar` on a numeric axes is reported by pyright and mypy before the code runs.
-- **Self-contained.** Fonts are bundled, so a figure looks the same on every machine.
+- **Bundled fonts.** Text in the bundled fonts' coverage looks the same on every machine; other characters fall back to system fonts.
 
 ## Installation
 
@@ -76,7 +76,11 @@ Bar charts need a category x axis: `fig.add_axes(x=ub.Scale.category())`. Log ax
 Three themes are built in: `Theme.PIGMENT` (warm paper, serif titles), `Theme.GRAPHITE` (neutral, sans-serif) and `Theme.MIDNIGHT` (dark, monospaced figures). A theme is an immutable value; derive a variant with its `with_*` methods:
 
 ```python
-theme = ub.Theme.MIDNIGHT.with_fill_style(ub.FillStyle.SOLID).with_legend_style(ub.LegendStyle.HEADER)
+import umber as ub
+
+theme = ub.Theme.MIDNIGHT.with_fill_style(ub.FillStyle.SOLID).with_legend_style(
+    ub.LegendStyle.HEADER
+)
 fig = ub.Figure(theme=theme)
 ```
 
@@ -111,6 +115,8 @@ In a terminal that supports it, the hint and the highlight are shown in color; s
 The package ships type information (`py.typed`) and is checked with pyright and mypy in strict mode. `Figure().add_axes()` is `Axes[float, float]`; `add_axes(x=Scale.category())` is `Axes[str, float]`. Methods that only make sense on one kind of axis are typed accordingly:
 
 ```python
+import umber as ub
+
 ax = ub.Figure().add_axes()
 ax.bar(["a", "b"], [1, 2])  # pyright and mypy: bar() needs Axes[str, float]
 ```
@@ -126,7 +132,7 @@ Medians from the [criterion](https://github.com/criterion-rs/criterion.rs) suite
 | 100,000-point scatter → PNG | 47 ms |
 | Histogram of 1,000,000 values → PNG | 20 ms |
 
-Lines with more points than the plot has pixel columns are downsampled per column, keeping the first, last, minimum and maximum point, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads.
+Lines with sorted numeric x values are downsampled when they have more than four points per pixel column of the plot (counted at a nominal 300 dpi), keeping the first, last, minimum and maximum point in each column, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads.
 
 ## Rust
 
@@ -145,7 +151,7 @@ std::fs::write("signal.png", figure.to_png(144)?)?;
 
 ## Status
 
-umber is at version 0.x. The API may change between minor versions; patch releases within a minor version are compatible. More examples are in [`examples/`](examples).
+umber is at version 0.x. The API is not yet stable and may change or be removed without a deprecation period. More examples are in [`examples/`](https://github.com/TJ-Junhao/umber/tree/main/examples).
 
 ## License
 

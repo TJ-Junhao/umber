@@ -2,15 +2,15 @@
 
 umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、散点图、面积图、柱状图和直方图，排版考究，内置三套主题，输出 PNG 或 SVG。
 
-[English](README.md)
+[English](https://github.com/TJ-Junhao/umber/blob/main/README.md)
 
 ![Graphite 主题下两个站点的每日气温折线图](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
 
-- **大数据量也快。** 所有逐点计算都在 Rust 中完成：100 万个点的折线渲染成 PNG 约 55 ms，10 万个点的散点图约 50 ms（见[性能](#性能)）。
+- **大数据量也快。** 渲染在 Rust 中完成：100 万个点的折线渲染成 PNG 约 55 ms，10 万个点的散点图约 50 ms（见[性能](#性能)）。
 - **显式。** 每个选项都是有类型的值（`Color`、`Size`、`Dash`、`TickFormat` 等）。没有格式字符串，没有位置式的样式参数，也没有隐式转换。
 - **尽早报错，并指出问题所在。** 非法输入在引发它的那次调用处就报错，附带说明、提示，并在 traceback 中高亮出错的参数。
 - **静态类型。** 类别轴和数值轴是不同的类型：在数值轴上调用 `bar`，pyright 和 mypy 在运行前就会报错。
-- **自包含。** 字体随包内置，同一张图在任何机器上看起来都一样。
+- **内置字体。** 内置字体覆盖的字符在任何机器上都显示一致；未覆盖的字符会回退到系统字体。
 
 ## 安装
 
@@ -76,7 +76,11 @@ fig.save_svg("temperature.svg")
 内置三套主题：`Theme.PIGMENT`（暖色纸张底，衬线标题）、`Theme.GRAPHITE`（中性色，无衬线）和 `Theme.MIDNIGHT`（深色底，等宽数字）。主题是不可变的值，用它的 `with_*` 方法派生变体：
 
 ```python
-theme = ub.Theme.MIDNIGHT.with_fill_style(ub.FillStyle.SOLID).with_legend_style(ub.LegendStyle.HEADER)
+import umber as ub
+
+theme = ub.Theme.MIDNIGHT.with_fill_style(ub.FillStyle.SOLID).with_legend_style(
+    ub.LegendStyle.HEADER
+)
 fig = ub.Figure(theme=theme)
 ```
 
@@ -111,6 +115,8 @@ hint: use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.
 包内附带类型信息（`py.typed`），并在严格模式下通过 pyright 和 mypy 检查。`Figure().add_axes()` 的类型是 `Axes[float, float]`；`add_axes(x=Scale.category())` 是 `Axes[str, float]`。只适用于某一类轴的方法也有相应的类型约束：
 
 ```python
+import umber as ub
+
 ax = ub.Figure().add_axes()
 ax.bar(["a", "b"], [1, 2])  # pyright 和 mypy 报错：bar() 需要 Axes[str, float]
 ```
@@ -126,7 +132,7 @@ ax.bar(["a", "b"], [1, 2])  # pyright 和 mypy 报错：bar() 需要 Axes[str, f
 | 10 万点散点图 → PNG | 47 ms |
 | 100 万个值的直方图 → PNG | 20 ms |
 
-当折线的点数多于绘图区的像素列数时，会按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。
+对于 x 值有序的数值折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。
 
 ## Rust
 
@@ -145,7 +151,7 @@ std::fs::write("signal.png", figure.to_png(144)?)?;
 
 ## 状态
 
-umber 目前处于 0.x 版本。次版本之间 API 可能变化；同一次版本内的补丁版本保持兼容。更多示例见 [`examples/`](examples)。
+umber 目前处于 0.x 版本。API 尚未稳定，可能变更或移除，且不保证提供弃用期。更多示例见 [`examples/`](https://github.com/TJ-Junhao/umber/tree/main/examples)。
 
 ## 许可证
 
