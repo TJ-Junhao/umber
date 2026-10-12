@@ -1,4 +1,4 @@
-"""X tick labels that cannot fit the figure make every render method raise ``StyleError``."""
+"""Tick labels that leave no room for the plot or its x tick labels raise ``StyleError``."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -105,7 +105,31 @@ def test_x_labels_need_a_plot_at_least_one_point_wide() -> None:
     )
     # 21 W's leave room for END.
     assert _end_after_wide_y_labels(21).to_svg().startswith("<svg")
-    # Without x ticks, the wide y tick labels render on a 1 pt plot.
-    fig = _end_after_wide_y_labels(100)
-    fig.axes.xticks([])
-    assert fig.to_svg().startswith("<svg")
+
+
+def test_y_labels_fail_the_same_way_without_x_ticks_or_with_an_empty_label() -> None:
+    with pytest.raises(ub.StyleError) as caught:
+        _end_after_wide_y_labels(100).to_svg()
+    expected = str(caught.value)
+    assert expected.startswith('Figure.to_svg(): y tick label "W')
+    no_ticks = _end_after_wide_y_labels(100)
+    no_ticks.axes.xticks([])
+    empty = _end_after_wide_y_labels(100)
+    empty.axes.xticks_labeled([0.5], [""])
+    for fig in (no_ticks, empty):
+        with pytest.raises(ub.StyleError) as caught:
+            fig.to_svg()
+        assert str(caught.value) == expected
+        assert details(caught.value) == (None, "shorten the y tick labels or widen the figure.")
+
+
+def test_a_figure_too_narrow_for_the_plot_raises_style_error() -> None:
+    # 0.3 in is 21.6 pt; without tick labels the plot needs 2 x 12 + 1 = 25 pt.
+    fig = ub.Figure(0.3, 1, theme=ub.Theme.MIDNIGHT)
+    fig.add_axes().xticks([]).yticks([])
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_png(dpi=72)
+    assert str(caught.value) == (
+        "Figure.to_png(): the figure is 21 pt wide; at least 25 pt is needed for the plot area."
+    )
+    assert details(caught.value) == (None, "widen the figure.")

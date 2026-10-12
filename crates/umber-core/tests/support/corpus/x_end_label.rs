@@ -16,17 +16,20 @@
 //! `fig-x-end-label-near-cap`). The section "former scene cases" holds the three figures whose
 //! x tick labels were clipped before rendering failed for them: `fig-category-crowded-log`,
 //! `fig-squeezed-layout` and `fig-text-truncated`. The last two covered more than their tick
-//! labels, so each is also drawn without x ticks, as `fig-squeezed-layout-no-x-ticks` and
-//! `fig-text-truncated-no-x-ticks`: a 1 in figure with every text far too wide, and a title,
+//! labels, so each is also drawn without ticks, as `fig-squeezed-layout-no-x-ticks` (without x
+//! ticks) and `fig-text-truncated-no-ticks` (without x or y ticks): a 1 in figure with every
+//! text far too wide, and a title,
 //! subtitle and axis labels far wider than any figure, cut to the longest prefix that fits on
 //! a character boundary (ASCII, two-byte characters, and characters drawn by the fallback
 //! font).
 //!
 //! The plot's minimum width, in `errors/x-label-min-width.txt`: y tick labels that leave no room
-//! for the plot, which name the widest y tick label; y tick labels that leave room for the plot
-//! but not for an end label on a plot at least 1 pt wide; and both figures without x ticks,
-//! which render. The figure whose end label just fits is also the scene
-//! `fig-x-end-label-min-width`.
+//! for the plot, which name the widest y tick label whether there are x ticks or not; y tick
+//! labels that leave room for the plot but not for an end label on a plot at least 1 pt wide;
+//! figures too narrow for the plot whatever their labels; and `fig-text-truncated-no-x-ticks`,
+//! whose y tick labels at font scale 10 leave no room for the plot. Its long texts are drawn
+//! without ticks as `fig-text-truncated-no-ticks`. The figure whose end label just fits is also
+//! the scene `fig-x-end-label-min-width`.
 
 use umber_core::figure::{AxisData, BarOptions, LineOptions, ScatterOptions};
 use umber_core::{Figure, FontLibrary, LegendStyle, ScaleKind, Theme, TickFormat};
@@ -62,14 +65,20 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         &end_after_wide_y_labels(21).to_scene(lib).unwrap(),
         sink,
     );
-    for (name, no_x_ticks) in [
-        ("fig-squeezed-layout-no-x-ticks", squeezed()),
-        ("fig-text-truncated-no-x-ticks", truncated_text(false)),
-    ] {
-        let mut f = no_x_ticks;
-        axes(&mut f).xticks(&[]).unwrap();
-        emit_scene(name, &f.to_scene(lib).unwrap(), sink);
-    }
+    let mut f = squeezed();
+    axes(&mut f).xticks(&[]).unwrap();
+    emit_scene(
+        "fig-squeezed-layout-no-x-ticks",
+        &f.to_scene(lib).unwrap(),
+        sink,
+    );
+    let mut f = truncated_text(false);
+    axes(&mut f).xticks(&[]).unwrap().yticks(&[]).unwrap();
+    emit_scene(
+        "fig-text-truncated-no-ticks",
+        &f.to_scene(lib).unwrap(),
+        sink,
+    );
 }
 
 /// Fourteen long category names on a 3 in figure with a log y axis, which crowd each other.
@@ -244,12 +253,43 @@ fn min_width_errors(lib: &FontLibrary) -> String {
         let f = end_after_wide_y_labels(y_chars);
         render(&mut rec, &format!("{y_chars} W y tick labels"), &f, lib);
     }
-    rec.section("Figure::to_scene, the same without x ticks");
+    rec.section("Figure::to_scene, the same without x ticks, or with one empty x tick label");
     for y_chars in [100, 22] {
         let mut f = end_after_wide_y_labels(y_chars);
         axes(&mut f).xticks(&[]).unwrap();
         render(&mut rec, &format!("{y_chars} W y tick labels"), &f, lib);
+        let mut f = end_after_wide_y_labels(y_chars);
+        axes(&mut f)
+            .xticks_labeled(&[0.5], vec![String::new()])
+            .unwrap();
+        render(
+            &mut rec,
+            &format!("{y_chars} W y tick labels, empty x tick label"),
+            &f,
+            lib,
+        );
     }
+
+    rec.section("Figure::to_scene, figures too narrow for the plot");
+    for (label, width_in, y_ticks) in [
+        ("0.3 in, no ticks", 0.3, false),
+        ("0.4 in, one W y tick label", 0.4, true),
+    ] {
+        let mut f = figure(width_in, 1.0, Theme::midnight(), linear(), linear());
+        let a = axes(&mut f);
+        a.xticks(&[]).unwrap();
+        if y_ticks {
+            a.yticks_labeled(&[0.5], vec!["W".into()]).unwrap();
+        } else {
+            a.yticks(&[]).unwrap();
+        }
+        render(&mut rec, label, &f, lib);
+    }
+
+    rec.section("Figure::to_scene, former scene case");
+    let mut f = truncated_text(false);
+    axes(&mut f).xticks(&[]).unwrap();
+    render(&mut rec, "fig-text-truncated-no-x-ticks", &f, lib);
     rec.out
 }
 

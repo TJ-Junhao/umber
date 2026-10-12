@@ -43,14 +43,15 @@ impl Figure {
     ///
     /// # Errors
     ///
-    /// `Error::Style` with context `"Figure.to_scene()"` when the x tick labels cannot fit:
-    /// every x tick label keeps half the outer padding from the canvas edges, the plot area
-    /// moves in for them by at most a quarter of the width inside the padding on each side, and
-    /// it stays at least 1 pt wide. The message names the widest x tick label; the hint
-    /// suggests shortening the labels or widening the figure. When the y tick labels alone
-    /// leave the plot area less than 1 pt, the message names the widest y tick label instead,
-    /// and the hint suggests shortening the y tick labels or widening the figure. A figure
-    /// without x tick labels does not fail.
+    /// `Error::Style` with context `"Figure.to_scene()"` when the plot area does not fit or its
+    /// x tick labels cannot fit. The plot area is at least 1 pt wide, with or without x tick
+    /// labels: when the y tick labels leave it less, the message names the widest y tick label
+    /// and the hint suggests shortening the y tick labels or widening the figure; when even
+    /// y tick labels of no width would, the message names the width the figure needs and the
+    /// hint suggests widening it. Every x tick label keeps half the outer padding from the
+    /// canvas edges, and the plot area moves in for them by at most a quarter of the width
+    /// inside the padding on each side; labels that need more name the widest x tick label,
+    /// and the hint suggests shortening the labels or widening the figure.
     ///
     /// # Examples
     ///
@@ -83,9 +84,9 @@ impl Figure {
     /// # Errors
     ///
     /// `Error::Style` with context `"Figure.to_png()"` when `dpi` is outside `10..=2400` (the
-    /// message names the value however large or negative it is), when the x tick labels cannot
-    /// fit (see [`Figure::to_scene`]) or when the image would be too large (see
-    /// [`render_png`]).
+    /// message names the value however large or negative it is), when the plot area or its x
+    /// tick labels cannot fit (see [`Figure::to_scene`]) or when the image would be too large
+    /// (see [`render_png`]).
     ///
     /// # Examples
     ///
@@ -110,8 +111,8 @@ impl Figure {
     ///
     /// # Errors
     ///
-    /// `Error::Style` with context `"Figure.to_svg()"` when the x tick labels cannot fit (see
-    /// [`Figure::to_scene`]).
+    /// `Error::Style` with context `"Figure.to_svg()"` when the plot area or its x tick labels
+    /// cannot fit (see [`Figure::to_scene`]).
     ///
     /// # Examples
     ///
