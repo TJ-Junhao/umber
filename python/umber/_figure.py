@@ -101,6 +101,7 @@ class Figure:
     def add_axes(
         self,
         *,
+        # mypy rejects ``Scale[float]`` as the default of ``Scale[X]``; pyright accepts it.
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
         y: Scale[float] = Scale.linear(),  # noqa: B008
     ) -> Axes[X, float]:
@@ -118,6 +119,11 @@ class Figure:
         Raises:
             TypeError: If ``x`` or ``y`` is not a ``Scale``.
             UsageError: If ``y`` is ``Scale.category()``, or the figure already has axes.
+
+        Note:
+            A wrong explicit annotation, such as ``Axes[str, float]`` on the result of
+            ``add_axes()``, is accepted by mypy but rejected by pyright; the runtime still
+            raises when a category-only method is called on numeric axes.
 
         Example:
             >>> import umber as ub
@@ -145,7 +151,8 @@ class Figure:
 
         Raises:
             TypeError: If ``dpi`` is not an int.
-            StyleError: If ``dpi`` is out of range, or the image would be too large.
+            StyleError: If ``dpi`` is out of range, the x tick labels cannot fit the figure, or
+                the image would be too large.
 
         Example:
             >>> import umber as ub
@@ -169,6 +176,7 @@ class Figure:
 
         Raises:
             TypeError: If ``text`` is not an ``SvgText``.
+            StyleError: If the x tick labels cannot fit the figure.
 
         Example:
             >>> import umber as ub
@@ -190,7 +198,8 @@ class Figure:
         Raises:
             TypeError: If ``path`` is not a ``str`` or path-like object, or ``dpi`` is not
                 an int.
-            StyleError: If ``dpi`` is out of range, or the image would be too large.
+            StyleError: If ``dpi`` is out of range, the x tick labels cannot fit the figure, or
+                the image would be too large.
             OSError: If the file cannot be written.
 
         Example:
@@ -213,6 +222,7 @@ class Figure:
         Raises:
             TypeError: If ``path`` is not a ``str`` or path-like object, or ``text`` is not
                 an ``SvgText``.
+            StyleError: If the x tick labels cannot fit the figure.
             OSError: If the file cannot be written.
 
         Example:

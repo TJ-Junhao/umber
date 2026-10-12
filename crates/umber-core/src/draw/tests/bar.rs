@@ -73,7 +73,7 @@ fn plain_bars_take_their_share_of_the_band_from_the_baseline() {
         &["a", "b", "c", "d"],
         &heights,
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let layout = layout_of(&f);
     let plot = layout.plot;
@@ -110,7 +110,7 @@ fn bar_marks_overlap_in_insertion_order() {
         .unwrap()
         .bar(names(&["b"]), &[1.0], BarOptions::default())
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let fills = bars(&scene);
     let colors: Vec<Rgba> = fills.iter().map(|(_, c)| *c).collect();
     let palette = theme.palette();
@@ -139,7 +139,7 @@ fn bars_are_drawn_in_category_order() {
             BarOptions::default(),
         )
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let plot = layout_of(&f).plot;
     let fills = bars(&scene);
     assert_eq!(fills.len(), 3);
@@ -152,7 +152,7 @@ fn bars_are_drawn_in_category_order() {
 #[test]
 fn bars_stay_solid_in_a_gradient_theme() {
     let f = bar_figure(Theme::midnight(), ScaleKind::Linear, &["a"], &[2.0]);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     // `bars` panics on anything but a solid fill.
     assert_eq!(bars(&scene).len(), 1);
 }
@@ -169,7 +169,7 @@ fn rounded_end_only_when_visible() {
         &[5.0, 1000.0, 10.0 + 1e-3],
     );
     f.axes_mut().unwrap().ylim(0.0, 10.0).unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let plot = layout_of(&f).plot;
     let fills = bars(&scene);
@@ -188,7 +188,7 @@ fn rounded_end_only_when_visible() {
 #[test]
 fn negative_bar_rounds_its_bottom() {
     let f = bar_figure(Theme::midnight(), ScaleKind::Linear, &["a"], &[-4.0]);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let layout = layout_of(&f);
     let fills = bars(&scene);
     let [(path, _)] = fills.as_slice() else {
@@ -221,7 +221,7 @@ fn bars_far_outside_limits_are_clipped() {
             &[1e300, -1e300, 5e-11, -1e300],
         );
         f.axes_mut().unwrap().ylim(1e-11, 1e-10).unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = layout_of(&f).plot;
         let fills = bars(&scene);
@@ -241,7 +241,7 @@ fn bars_far_outside_limits_are_clipped() {
     let log = ScaleKind::Log { base: LogBase::TEN };
     let mut f = bar_figure(Theme::midnight(), log, &["huge", "tiny"], &[1e300, 1e-300]);
     f.axes_mut().unwrap().ylim(1.0, 10.0).unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let plot = layout_of(&f).plot;
     let fills = bars(&scene);
@@ -261,7 +261,7 @@ fn log_bars_grow_from_the_baseline() {
     // The nice limits are 1..1000: the baseline sits at 1, the lowest tick, above the padded
     // plot bottom, and both bars grow from it.
     let f = bar_figure(Theme::graphite(), log, &["a", "b"], &[3.0, 1000.0]);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let layout = layout_of(&f);
     assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
     let fills = bars(&scene);
@@ -272,7 +272,7 @@ fn log_bars_grow_from_the_baseline() {
     // A bar as high as the nice lower limit, 10, moves that limit a decade down, to 1: the
     // bar rises above the baseline and is drawn.
     let f = bar_figure(Theme::graphite(), log, &["a", "b"], &[10.0, 1000.0]);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let layout = layout_of(&f);
     let fills = bars(&scene);
     assert_eq!(fills.len(), 2);
@@ -284,7 +284,7 @@ fn log_bars_grow_from_the_baseline() {
     // Explicit limits are not padded: the baseline, and the bars, start at the plot bottom.
     let mut f = bar_figure(Theme::graphite(), log, &["a", "b"], &[10.0, 1000.0]);
     f.axes_mut().unwrap().ylim(5.0, 2000.0).unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let layout = layout_of(&f);
     let fills = bars(&scene);
     assert_eq!(fills.len(), 2);
@@ -330,7 +330,7 @@ fn group_fills_72_percent_of_band() {
         &["a", "b"],
         &[&[3.0, 1.0], &[2.0, -1.0], &[4.0, 2.0]],
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let plot = layout_of(&f).plot;
     let fills = bars(&scene);
@@ -374,7 +374,7 @@ fn group_gap_closes_when_bars_would_be_thinner_than_it() {
         &categories,
         &heights,
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let plot = layout_of(&f).plot;
     let fills = bars(&scene);
     assert_eq!(fills.len(), 144);
@@ -401,7 +401,7 @@ fn stacked_signs_stack_separately() {
         &["a"],
         &[&[3.0], &[-2.0], &[f64::NAN], &[4.0], &[0.0]],
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let layout = layout_of(&f);
     let fills = bars(&scene);
@@ -452,7 +452,7 @@ fn grouped_and_stacked_bars_are_drawn_by_category_then_series() {
         } else {
             axes.grouped_bar(names(&["b", "a"]), list).unwrap();
         }
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         let plot = layout_of(&f).plot;
         let palette = Theme::pigment().palette().to_vec();
         let fills = bars(&scene);
@@ -489,7 +489,7 @@ fn log_stacks_start_at_the_baseline() {
         &["a", "b"],
         &[&[10.0, 3.0], &[90.0, 300.0]],
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let layout = layout_of(&f);
     let fills = bars(&scene);
@@ -518,7 +518,7 @@ fn stacks_and_groups_far_outside_limits_are_clipped() {
             &[&[5e299, -5e299, 2e-11], &[5e299, -5e299, 3e-11]],
         );
         f.axes_mut().unwrap().ylim(1e-11, 1e-10).unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = layout_of(&f).plot;
         let fills = bars(&scene);
@@ -542,7 +542,7 @@ fn one_stack(
     total: f64,
 ) -> (Vec<(Point, Point)>, Vec<usize>, f64, f64) {
     let f = group_figure(theme, ScaleKind::Linear, true, &["a"], heights);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let base = layout_of(&f).baseline_y;
     let fills = bars(&scene);

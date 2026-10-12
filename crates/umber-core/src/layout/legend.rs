@@ -826,7 +826,7 @@ mod tests {
 
         // The drawn swatches match the marks: each line swatch is stroked at its series' width,
         // in its dash, and each dot is as wide as its scatter's markers.
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         let [
             _,
             Item::Group { items: marks, .. },
@@ -1005,7 +1005,10 @@ mod tests {
             for scale in [1.0, 10.0] {
                 let theme = theme.with_font_scale(scale).unwrap();
                 for (w, h, n) in [(1.0, 1.0, 50), (6.0, 4.0, 400), (2.0, 1.0, 2000)] {
-                    let f = figure(w, h, theme.clone(), &names(n));
+                    // Without x ticks: x tick labels too wide for these figures fail the
+                    // layout, which `layout::tests` covers.
+                    let mut f = figure(w, h, theme.clone(), &names(n));
+                    f.axes_mut().unwrap().xticks(&[]).unwrap();
                     let layout = plan_figure(&f, FontLibrary::global()).1;
                     let plot = layout.plot;
                     assert!(plot.width >= 1.0 && plot.height >= 1.0, "{plot:?}");
@@ -1018,7 +1021,7 @@ mod tests {
                     for entry in layout.legend.entries() {
                         assert!(entry.swatch.center_y - layout.legend.row_height / 2.0 < h * 72.0);
                     }
-                    assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+                    assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
                 }
             }
         }
@@ -1066,7 +1069,7 @@ mod tests {
         let [entry] = layout.legend.entries() else {
             panic!("one legend entry");
         };
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let [
             _,
@@ -1265,7 +1268,7 @@ mod tests {
         // The long label runs past the canvas, which clips it.
         let long = text_of(&layout.direct[0]);
         assert!(long.x + long.width() > width);
-        assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+        assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
 
         // A reservation below the cap is the room the labels need, and none is made without
         // direct labels.
@@ -1347,7 +1350,7 @@ mod tests {
         // Their labels are clamped to the plot's vertical range.
         assert!((center_of(text_of(high)) - plot.y).abs() < 1e-3);
         assert!((center_of(text_of(low)) - plot.bottom()).abs() < 1e-3);
-        assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+        assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
     }
 
     #[test]
@@ -1381,7 +1384,7 @@ mod tests {
         let end = ends.dot.expect("the line ends inside, so it keeps its dot");
         assert!((end.x - plot.x_at(NormalizedPos::new(1.0 / 1.5))).abs() < 1e-9);
         assert!((end.y - plot.y_at(NormalizedPos::new(0.9))).abs() < 1e-9);
-        assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+        assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
 
         // A line whose last point inside lies on the high end goes on past it, but that point
         // is data the plot shows: it keeps its dot, on the right edge.
@@ -1444,7 +1447,9 @@ mod tests {
             for (w, h, n) in [(1.0, 1.0, 50), (6.0, 4.0, 400)] {
                 let mut f = Figure::new(w, h, theme.clone()).unwrap();
                 let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-                axes.title("Crowded");
+                // Without x ticks: x tick labels too wide for these figures fail the layout,
+                // which `layout::tests` covers.
+                axes.title("Crowded").xticks(&[]).unwrap();
                 for k in 0..n {
                     axes.line(
                         AxisData::Numbers(vec![0.0, 1.0]),
@@ -1465,7 +1470,7 @@ mod tests {
                     let c = center_of(d);
                     assert!(c.is_finite() && c > -100.0 * 72.0 && c < 2.0 * h * 72.0 + 1e5);
                 }
-                assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+                assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
             }
         }
     }
@@ -1508,7 +1513,7 @@ mod tests {
             }
         }
         // Drawing follows: one dot per line, one label per shown label.
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let Some(Item::Group { items, .. }) = scene.items.get(2) else {
             panic!("a legend group");

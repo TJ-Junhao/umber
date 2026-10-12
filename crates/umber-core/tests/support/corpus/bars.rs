@@ -84,7 +84,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         axes(&mut f)
             .bar(regions.clone(), &[12.0, 31.5, 22.0, 8.25, 27.0], bar())
             .unwrap();
-        emit_scene(&format!("fig-bars-{theme_name}"), &f.to_scene(lib), sink);
+        emit_scene(
+            &format!("fig-bars-{theme_name}"),
+            &f.to_scene(lib).unwrap(),
+            sink,
+        );
     }
 
     // Every bar below 0: the domain ends at 0, the bars grow downwards from the baseline at the
@@ -100,7 +104,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("fig-bars-negative-{theme_name}"),
-            &f.to_scene(lib),
+            &f.to_scene(lib).unwrap(),
             sink,
         );
     }
@@ -115,7 +119,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             bar(),
         )
         .unwrap();
-    emit_scene("fig-bars-mixed-nan-zero", &f.to_scene(lib), sink);
+    emit_scene("fig-bars-mixed-nan-zero", &f.to_scene(lib).unwrap(), sink);
 
     // A huge height under limits 1e-10 wide: clipped in axis space, cut square above the plot.
     let mut f = figure(6.0, 4.0, Theme::midnight(), ScaleKind::Category, linear());
@@ -128,7 +132,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .unwrap()
         .ylim(1e-11, 1e-10)
         .unwrap();
-    emit_scene("fig-bars-huge-narrow-limits", &f.to_scene(lib), sink);
+    emit_scene(
+        "fig-bars-huge-narrow-limits",
+        &f.to_scene(lib).unwrap(),
+        sink,
+    );
 
     // Log y: bars grow from the baseline, at the lowest y tick.
     for (theme_name, theme) in [
@@ -142,7 +150,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("fig-bars-log-y-{theme_name}"),
-            &f.to_scene(lib),
+            &f.to_scene(lib).unwrap(),
             sink,
         );
     }
@@ -156,7 +164,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .unwrap()
         .ylim(1.0, 10.0)
         .unwrap();
-    emit_scene("fig-bars-log-y-limits", &f.to_scene(lib), sink);
+    emit_scene("fig-bars-log-y-limits", &f.to_scene(lib).unwrap(), sink);
 
     // Categories shared with lines and between two bar marks, which overlap in insertion
     // order. The first line sets the category order; the bars miss Q1 and Q3 and add Q5. The
@@ -187,7 +195,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .unwrap()
         .line(quarters(&["Q2", "Q3", "Q5"]), &[4.0, 11.0, 14.0], line())
         .unwrap();
-    emit_scene("fig-bars-with-category-lines", &f.to_scene(lib), sink);
+    emit_scene(
+        "fig-bars-with-category-lines",
+        &f.to_scene(lib).unwrap(),
+        sink,
+    );
 
     sink(Output {
         kind: "errors",
@@ -216,7 +228,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             group.add(axes(&mut f), regions.clone(), three()).unwrap();
             emit_scene(
                 &format!("fig-{kind}-bars-{theme_name}"),
-                &f.to_scene(lib),
+                &f.to_scene(lib).unwrap(),
                 sink,
             );
         }
@@ -242,7 +254,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                 .unwrap();
             emit_scene(
                 &format!("fig-{kind}-bars-mixed-signs-{theme_name}"),
-                &f.to_scene(lib),
+                &f.to_scene(lib).unwrap(),
                 sink,
             );
         }
@@ -258,7 +270,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("fig-{kind}-bars-one-series"),
-            &f.to_scene(lib),
+            &f.to_scene(lib).unwrap(),
             sink,
         );
 
@@ -276,7 +288,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("fig-{kind}-bars-12-series"),
-            &f.to_scene(lib),
+            &f.to_scene(lib).unwrap(),
             sink,
         );
 
@@ -301,7 +313,11 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                 ],
             )
             .unwrap();
-        emit_scene(&format!("fig-{kind}-bars-colors"), &f.to_scene(lib), sink);
+        emit_scene(
+            &format!("fig-{kind}-bars-colors"),
+            &f.to_scene(lib).unwrap(),
+            sink,
+        );
 
         // Log y: bars and the first segment of each stack grow from the baseline.
         for (theme_name, theme) in [
@@ -322,7 +338,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                 .unwrap();
             emit_scene(
                 &format!("fig-{kind}-bars-log-y-{theme_name}"),
-                &f.to_scene(lib),
+                &f.to_scene(lib).unwrap(),
                 sink,
             );
         }
@@ -343,7 +359,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("fig-{kind}-bars-huge-narrow-limits"),
-            &f.to_scene(lib),
+            &f.to_scene(lib).unwrap(),
             sink,
         );
     }
@@ -356,7 +372,11 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             vec![series(&[6e299, -7.5e299]), series(&[4e299, -2.5e299])],
         )
         .unwrap();
-    emit_scene("fig-stacked-bars-totals-at-bound", &f.to_scene(lib), sink);
+    emit_scene(
+        "fig-stacked-bars-totals-at-bound",
+        &f.to_scene(lib).unwrap(),
+        sink,
+    );
 
     sink(Output {
         kind: "errors",

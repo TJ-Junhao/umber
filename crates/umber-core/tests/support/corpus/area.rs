@@ -45,7 +45,7 @@ fn lifted(n: usize, seed: u32, lift: f64) -> (Vec<f64>, Vec<f64>) {
 /// Passes every output of this area to `sink`, in a fixed order.
 pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     for (name, figure) in figures() {
-        emit_scene(&name, &figure.to_scene(lib), sink);
+        emit_scene(&name, &figure.to_scene(lib).unwrap(), sink);
     }
     sink(Output {
         kind: "errors",

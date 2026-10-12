@@ -16,7 +16,7 @@ fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
         &[0.0, 1.0],
         LineOptions::default(),
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let plot = plot_of(&f);
     let (clip, items) = mark_group(&scene);
     let half = f64::from(Theme::graphite().line_width()) / 2.0;
@@ -42,7 +42,7 @@ fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
         .unwrap()
         .line(nums(&[0.0, 1.0]), &[1.0, 0.0], LineOptions::default())
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let plot = plot_of(&f);
     let (clip, _) = mark_group(&scene);
     assert_eq!(
@@ -61,7 +61,7 @@ fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
         .unwrap()
         .scatter(nums(&[0.0, 1.0]), &[0.0, 1.0], ScatterOptions::default())
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let plot = plot_of(&f);
     let (clip, _) = mark_group(&scene);
     assert_eq!(
@@ -79,7 +79,7 @@ fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
         .unwrap()
         .line(nums(&[f64::NAN]), &[f64::NAN], LineOptions::default())
         .unwrap();
-    assert_eq!(f.to_scene(FontLibrary::global()).items.len(), 2);
+    assert_eq!(f.to_scene(FontLibrary::global()).unwrap().items.len(), 2);
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn clip_widening_follows_the_widest_drawn_line_of_any_width() {
             },
         )
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let plot = plot_of(&f);
     let (clip, _) = mark_group(&scene);
     assert_eq!(
@@ -136,7 +136,7 @@ fn clip_widening_follows_the_widest_drawn_line_of_any_width() {
         &[0.0, 1.0],
         line(SizeSpec::pt(0.5).unwrap()),
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let plot = plot_of(&f);
     assert_eq!(mark_group(&scene).0.x, (plot.x - 0.25) as f32);
 }
@@ -164,7 +164,7 @@ fn thin_lines_and_areas_next_to_a_thick_line_reach_the_widened_clip() {
             a.line(nums(&[-1.0, 2.0]), &[0.25, 0.25], thin).unwrap();
         }
         a.line(nums(&[0.0, 1.0]), &[0.75, 0.75], thick).unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = plot_of(&f);
         let (clip, items) = mark_group(&scene);
@@ -210,7 +210,7 @@ fn clip_widening_stops_at_the_y_labels_and_the_canvas() {
             .line(nums(&[0.0, 1.0]), &[0.5, 0.5], LineOptions::default())
             .unwrap();
         let layout = crate::pipeline::plan_figure(&f, FontLibrary::global()).1;
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         let (clip, _) = mark_group(&scene);
         let (left, right) = (f64::from(clip.x), f64::from(clip.x + clip.width));
         let half = width / 2.0;
@@ -260,7 +260,7 @@ fn marks_follow_insertion_order_and_resolved_colors() {
             },
         )
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let (_, items) = mark_group(&scene);
     let palette = theme.palette();
     match items {
@@ -293,8 +293,8 @@ fn mark_scenes_are_deterministic() {
         f
     };
     assert_eq!(
-        build().to_scene(FontLibrary::global()),
-        build().to_scene(FontLibrary::global())
+        build().to_scene(FontLibrary::global()).unwrap(),
+        build().to_scene(FontLibrary::global()).unwrap()
     );
     assert_eq!(build().to_png(72).unwrap(), build().to_png(72).unwrap());
 }

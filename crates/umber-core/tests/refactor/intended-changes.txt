@@ -1,1 +1,11 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+#
+# Rendering now fails with a StyleError when the x tick labels cannot fit under the per-side
+# inset cap, instead of drawing them past the edge gap. These figures had such labels; their
+# scene, SVG and PNG outputs are removed and their errors are recorded in
+# errors/x-label-overflow.txt. The two that covered more than their tick labels are also drawn
+# without x ticks, as the new cases fig-squeezed-layout-no-x-ticks and
+# fig-text-truncated-no-x-ticks.
+fig-category-crowded-log
+fig-squeezed-layout
+fig-text-truncated

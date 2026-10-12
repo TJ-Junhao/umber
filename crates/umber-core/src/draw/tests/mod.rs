@@ -79,7 +79,9 @@ fn chrome_figure(theme: Theme) -> Figure {
 
 #[test]
 fn chrome_snapshot() {
-    let scene = chrome_figure(Theme::pigment()).to_scene(FontLibrary::global());
+    let scene = chrome_figure(Theme::pigment())
+        .to_scene(FontLibrary::global())
+        .unwrap();
     assert_scene_bounded(&scene);
     // The snapshot file is kept in `src/snapshots`, under the name of this module path.
     let snapshot_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/snapshots");

@@ -23,10 +23,14 @@
 //! to a scatter and bars (the header row fallback), a long label hitting the reservation cap,
 //! a faded line color, the largest font scale, a 1 by 1 in figure with 50 lines, and direct
 //! labels set on the axes under a header theme.
+//!
+//! Labelled bars, grouped bars, stacked bars and a histogram in each of the three legend
+//! styles: the square swatch of the header row, the dot of a chip, and the header row that
+//! stands in for direct labels, which no bar or bin can take.
 
 use std::fmt::Write as _;
 
-use umber_core::figure::{AxisData, BarOptions, LineOptions, ScatterOptions};
+use umber_core::figure::{AxisData, BarOptions, HistOptions, LineOptions, ScatterOptions};
 use umber_core::{BarSeries, ColorSpec, Dash, Figure, FontLibrary, LegendStyle, ScaleKind, Theme};
 
 use super::super::{Output, axes, emit_scene, figure, labelled, linear, numbers, record, wobble};
@@ -34,7 +38,7 @@ use super::super::{Output, axes, emit_scene, figure, labelled, linear, numbers, 
 /// Passes every output of this area to `sink`, in a fixed order.
 pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     for (name, figure) in figures() {
-        emit_scene(name, &figure.to_scene(lib), sink);
+        emit_scene(name, &figure.to_scene(lib).unwrap(), sink);
     }
     sink(Output {
         kind: "api",
@@ -261,6 +265,106 @@ fn figures() -> Vec<(&'static str, Figure)> {
 
     out.extend(chips_figures());
     out.extend(direct_figures());
+    out.extend(bar_legend_figures());
+    out
+}
+
+/// Labelled bars, grouped bars, stacked bars and a histogram, once in each legend style.
+fn bar_legend_figures() -> Vec<(&'static str, Figure)> {
+    let mut out = Vec::new();
+    let quarters: Vec<String> = ["Q1", "Q2", "Q3", "Q4"].map(String::from).to_vec();
+    let series = || {
+        [
+            ("2024", [12.0, 18.0, 15.0, 22.0]),
+            ("2025", [9.0, 14.0, 19.0, 17.0]),
+            ("2026", [5.0, 8.0, 11.0, 14.0]),
+        ]
+        .map(|(label, heights)| BarSeries {
+            label: label.into(),
+            heights: heights.to_vec(),
+            color: ColorSpec::AUTO,
+        })
+        .to_vec()
+    };
+    let values: Vec<f64> = (0..200)
+        .map(|k| {
+            let t = f64::from(k) / 200.0;
+            (3.0 + 2.0 * (t - 0.5).abs().sqrt() * (t * 40.0).sin().abs()).exp()
+        })
+        .collect();
+    for (style, [bar_name, grouped_name, stacked_name, hist_name]) in [
+        (
+            LegendStyle::Header,
+            [
+                "fig-legend-header-bar",
+                "fig-legend-header-grouped-bar",
+                "fig-legend-header-stacked-bar",
+                "fig-legend-header-hist",
+            ],
+        ),
+        (
+            LegendStyle::Direct,
+            [
+                "fig-legend-direct-bar",
+                "fig-legend-direct-grouped-bar",
+                "fig-legend-direct-stacked-bar",
+                "fig-legend-direct-hist",
+            ],
+        ),
+        (
+            LegendStyle::Chips,
+            [
+                "fig-legend-chips-bar",
+                "fig-legend-chips-grouped-bar-labelled",
+                "fig-legend-chips-stacked-bar",
+                "fig-legend-chips-hist",
+            ],
+        ),
+    ] {
+        let themed = || Theme::pigment().with_legend_style(style).unwrap();
+        let category = || figure(6.0, 4.0, themed(), ScaleKind::Category, linear());
+
+        let mut bar = category();
+        labelled(&mut bar, "Labelled bar");
+        axes(&mut bar)
+            .bar(
+                quarters.clone(),
+                &[12.0, -6.0, 15.0, 22.0],
+                BarOptions {
+                    label: "Revenue".into(),
+                    ..BarOptions::default()
+                },
+            )
+            .unwrap();
+        out.push((bar_name, bar));
+
+        let mut grouped = category();
+        labelled(&mut grouped, "Labelled grouped bar");
+        axes(&mut grouped)
+            .grouped_bar(quarters.clone(), series())
+            .unwrap();
+        out.push((grouped_name, grouped));
+
+        let mut stacked = category();
+        labelled(&mut stacked, "Labelled stacked bar");
+        axes(&mut stacked)
+            .stacked_bar(quarters.clone(), series())
+            .unwrap();
+        out.push((stacked_name, stacked));
+
+        let mut hist = figure(6.0, 4.0, themed(), linear(), linear());
+        labelled(&mut hist, "Labelled histogram");
+        axes(&mut hist)
+            .hist(
+                &values,
+                HistOptions {
+                    label: "Response time".into(),
+                    ..HistOptions::default()
+                },
+            )
+            .unwrap();
+        out.push((hist_name, hist));
+    }
     out
 }
 

@@ -32,7 +32,7 @@
 //!         },
 //!     )?;
 //!
-//! let svg = figure.to_svg(SvgText::Editable);
+//! let svg = figure.to_svg(SvgText::Editable)?;
 //! assert!(svg.starts_with("<svg") && svg.contains(">Signal</text>"));
 //!
 //! let png = figure.to_png(144)?;
