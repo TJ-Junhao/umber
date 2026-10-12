@@ -38,28 +38,28 @@ jobs:
           python-version: "3.12"
 
       - name: Check out the base revision next to the head
+        id: base
         run: |
           git worktree add ../base "$BASE"
-          # A base that predates the benchmarks gets the head's benchmark target, so both
-          # revisions run the same cases. Only the benchmark files and manifests are copied.
-          if [ ! -f ../base/crates/umber-core/benches/render.rs ]; then
-            mkdir -p ../base/crates/umber-core/benches
-            cp crates/umber-core/benches/render.rs ../base/crates/umber-core/benches/render.rs
-            cp crates/umber-core/Cargo.toml ../base/crates/umber-core/Cargo.toml
-            cp Cargo.lock ../base/Cargo.lock
-            echo "The base revision has no benchmarks; the head's benchmark target was copied onto it." >> "$GITHUB_STEP_SUMMARY"
+          # A base that predates the benchmarks has nothing to compare with: only the head runs.
+          if [ -f ../base/crates/umber-core/benches/render.rs ]; then
+            echo "trees=base head" >> "$GITHUB_OUTPUT"
+          else
+            echo "trees=head" >> "$GITHUB_OUTPUT"
+            echo "Base revision has no benchmarks; head results only." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Run the Rust benchmarks on base, then head
+      - name: Run the Rust benchmarks
         run: |
-          for tree in ../base .; do
+          for name in ${{ steps.base.outputs.trees }}; do
+            tree=.; [ "$name" = base ] && tree=../base
             (cd "$tree" && cargo bench -p umber-core --bench render)
           done
 
-      - name: Build and time the Python package on base, then head
+      - name: Build and time the Python package
         run: |
           mkdir -p "$RUNNER_TEMP/py"
-          for name in base head; do
+          for name in ${{ steps.base.outputs.trees }}; do
             tree=.; [ "$name" = base ] && tree=../base
             uv venv "$RUNNER_TEMP/py/$name"
             uv pip install --python "$RUNNER_TEMP/py/$name" "numpy>=2.0" "typing_extensions>=4.12" "maturin>=1.15,<2"

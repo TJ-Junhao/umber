@@ -24,19 +24,25 @@ def criterion_medians_ms(root: Path) -> dict[str, float]:
     return medians
 
 
-def cell(value: float | None, unit: str) -> str:
+def cell(value: float | None, unit: str, digits: int) -> str:
     """A table cell: the value with its unit, or `n/a` when the revision has none."""
-    return "n/a" if value is None else f"{value:.2f}{unit}"
+    return "n/a" if value is None else f"{value:.{digits}f}{unit}"
 
 
-def row(name: str, base: float | None, head: float | None, unit: str) -> str:
+def row(name: str, base: float | None, head: float | None, unit: str, digits: int) -> str:
     """One table row: the name, both values and head / base."""
     ratio = "n/a" if base is None or head is None or base == 0 else f"{head / base:.2f}x"
-    return f"| `{name}` | {cell(base, unit)} | {cell(head, unit)} | {ratio} |"
+    return f"| `{name}` | {cell(base, unit, digits)} | {cell(head, unit, digits)} | {ratio} |"
 
 
-def table(title: str, base: dict[str, float], head: dict[str, float], unit: str) -> list[str]:
-    """A Markdown table of every name in either run."""
+def table(
+    title: str, base: dict[str, float], head: dict[str, float], unit: str, digits: int
+) -> list[str]:
+    """A Markdown table of every name in either run; head only when `base` is empty."""
+    if not base:
+        lines = [f"### {title}", "", "| benchmark | head |", "| --- | ---: |"]
+        lines += [f"| `{n}` | {cell(head[n], unit, digits)} |" for n in sorted(head)]
+        return [*lines, ""]
     lines = [
         f"### {title}",
         "",
@@ -44,23 +50,31 @@ def table(title: str, base: dict[str, float], head: dict[str, float], unit: str)
         "| --- | ---: | ---: | ---: |",
     ]
     for name in sorted(base.keys() | head.keys()):
-        lines.append(row(name, base.get(name), head.get(name), unit))
+        lines.append(row(name, base.get(name), head.get(name), unit, digits))
     return [*lines, ""]
 
 
 def main() -> None:
-    """Print the comparison of the two runs named on the command line."""
+    """Print the comparison of the two runs named on the command line.
+
+    A base path that does not exist stands for a base without benchmarks; the tables then hold
+    the head only.
+    """
     base_dir, head_dir, base_py, head_py = (Path(a) for a in sys.argv[1:5])
-    out = ["## Benchmarks, base vs head", ""]
+    has_base = base_dir.is_dir() and base_py.is_file()
+    out = ["## Benchmarks, base vs head" if has_base else "## Benchmarks, head only", ""]
+    if not has_base:
+        out += ["Base revision has no benchmarks; head results only.", ""]
     out += table(
         "Rust (criterion, median)",
-        criterion_medians_ms(base_dir),
+        criterion_medians_ms(base_dir) if has_base else {},
         criterion_medians_ms(head_dir),
         " ms",
+        2,
     )
-    py_base = json.loads(base_py.read_text())
+    py_base = json.loads(base_py.read_text()) if has_base else {}
     py_head = json.loads(head_py.read_text())
-    out += table("Python end to end (seconds, MiB of RSS)", py_base, py_head, "")
+    out += table("Python end to end (seconds, MiB of RSS)", py_base, py_head, "", 4)
     out.append(
         "Both revisions ran in the same job on the same runner, one after the other. "
         "Shared runners are noisy: read ratios as hints and look for large, repeatable "

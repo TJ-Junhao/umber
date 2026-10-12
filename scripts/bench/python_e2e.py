@@ -74,13 +74,16 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--memory-child":
         print(json.dumps(memory_child()))
         return
-    result: dict[str, float] = {"time_line_1m_png_s": round(time_line_1m_png(), 4)}
+    # The memory child starts before this process renders anything: on Linux a child keeps the
+    # parent's peak RSS across fork and exec, so a parent that had rendered 1M points would
+    # raise the child's starting peak above the memory it is about to measure.
     child = subprocess.run(
         [sys.executable, __file__, "--memory-child"],
         check=True,
         capture_output=True,
         text=True,
     )
+    result: dict[str, float] = {"time_line_1m_png_s": round(time_line_1m_png(), 4)}
     result.update(json.loads(child.stdout))
     print(json.dumps(result, indent=2))
 
