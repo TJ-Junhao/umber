@@ -37,7 +37,8 @@ FIXTURE = CORE / "tests" / "fixtures" / "fallback-only.ttf"
 
 BUDGET = 3 * 1024 * 1024
 
-# Inclusive ranges; keep both lists in sync with `crates/umber-core/src/fonts.rs`.
+# Inclusive ranges; keep both lists in sync with `crates/umber-core/src/fonts.rs`
+# (`tests/python/test_font_codepoints.py` checks that they match).
 # Every bundled font must cover these (U+00AD, the soft hyphen, is deliberately excluded).
 REQUIRED_CODEPOINTS = [
     (0x0020, 0x007E),
@@ -392,8 +393,10 @@ def main() -> None:
         "Fonts under the SIL Open Font License 1.1. A family whose license header declares a",
         "Reserved Font Name is shipped unmodified; other families are subset.",
         "",
-        "Every font covers all `REQUIRED_CODEPOINTS`. `EXTENDED_CODEPOINTS` are kept when a font",
-        "has them, and each is covered by at least one bundled font.",
+        "Every font covers all required code points (Basic Latin, Latin-1 Supplement without the",
+        "soft hyphen, and common punctuation); the ranges are listed in this script. Extended",
+        "code points are kept when a font has them, and each is covered by at least one bundled",
+        "font.",
         "",
         *sections,
         "## Test fixture",
