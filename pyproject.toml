@@ -18,7 +18,7 @@ license-files = [
 dependencies = ["numpy>=2.0", "typing_extensions>=4.12"]
 dynamic = ["version"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",

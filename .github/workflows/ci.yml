@@ -30,6 +30,8 @@ jobs:
       # The packaged crate must compile and pass its own unit tests with only the files it ships.
       - name: Test the packaged crate
         run: |
+          # The cache may hold the package of an earlier version; keep only this one.
+          rm -rf target/package
           cargo package -p umber-core --allow-dirty --no-verify
           # --no-verify leaves only the .crate archive, so unpack it before testing.
           tar -xzf target/package/umber-core-*.crate -C target/package
