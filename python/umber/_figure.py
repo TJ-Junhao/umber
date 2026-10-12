@@ -101,6 +101,7 @@ class Figure:
     def add_axes(
         self,
         *,
+        # mypy rejects ``Scale[float]`` as the default of ``Scale[X]``; pyright accepts it.
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
         y: Scale[float] = Scale.linear(),  # noqa: B008
     ) -> Axes[X, float]:
@@ -118,6 +119,11 @@ class Figure:
         Raises:
             TypeError: If ``x`` or ``y`` is not a ``Scale``.
             UsageError: If ``y`` is ``Scale.category()``, or the figure already has axes.
+
+        Note:
+            A wrong explicit annotation, such as ``Axes[str, float]`` on the result of
+            ``add_axes()``, is accepted by mypy but rejected by pyright; the runtime still
+            raises when a category-only method is called on numeric axes.
 
         Example:
             >>> import umber as ub
