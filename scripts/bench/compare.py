@@ -25,8 +25,12 @@ def criterion_medians_ms(root: Path) -> dict[str, float]:
 
 
 def cell(value: float | None, unit: str, digits: int) -> str:
-    """A table cell: the value with its unit, or `n/a` when the revision has none."""
-    return "n/a" if value is None else f"{value:.{digits}f}{unit}"
+    """A table cell: the value with its unit, or `n/a` when the revision has none.
+
+    `digits` is the number of significant digits, so seconds keep their precision and MiB do not
+    grow trailing zeros.
+    """
+    return "n/a" if value is None else f"{value:.{digits}g}{unit}"
 
 
 def row(name: str, base: float | None, head: float | None, unit: str, digits: int) -> str:
@@ -70,13 +74,14 @@ def main() -> None:
         criterion_medians_ms(base_dir) if has_base else {},
         criterion_medians_ms(head_dir),
         " ms",
-        2,
+        4,
     )
     py_base = json.loads(base_py.read_text()) if has_base else {}
     py_head = json.loads(head_py.read_text())
-    out += table("Python end to end (seconds, MiB of RSS)", py_base, py_head, "", 4)
+    out += table("Python end to end (seconds, MiB of RSS)", py_base, py_head, "", 3)
+    if has_base:
+        out.append("Both revisions ran in the same job on the same runner, one after the other. ")
     out.append(
-        "Both revisions ran in the same job on the same runner, one after the other. "
         "Shared runners are noisy: read ratios as hints and look for large, repeatable "
         "changes. Times are never a pass/fail gate."
     )
