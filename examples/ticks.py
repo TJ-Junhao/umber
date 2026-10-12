@@ -13,7 +13,7 @@ fig = ub.Figure()
 (
     fig.add_axes()
     .line(hours, load, label="load")
-    .xticks_labeled([0, 6, 12, 18], ["12 am", "6 am", "noon", "6 pm"])
+    .xticks_labeled([0, 6, 12, 18, 24], ["midnight", "6 am", "noon", "6 pm", "midnight"])
     .ytick_format(ub.TickFormat.percent())
     .title("Server load over a day")
     .ylabel("utilization")
