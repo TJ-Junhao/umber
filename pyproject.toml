@@ -28,6 +28,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.urls]
+Homepage = "https://github.com/TJ-Junhao/umber"
+Source = "https://github.com/TJ-Junhao/umber"
+Issues = "https://github.com/TJ-Junhao/umber/issues"
+
 [dependency-groups]
 dev = [
     "maturin>=1.15,<2",

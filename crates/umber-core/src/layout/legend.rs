@@ -85,6 +85,7 @@ pub(crate) struct RowEntry {
     /// The box of the pill, as tall as the row, in a chips row; `None` in a plain row.
     pub chip: Option<Area>,
     /// The row the entry is on, counted from 0.
+    #[cfg(test)]
     row: usize,
 }
 
@@ -149,6 +150,7 @@ impl LegendRow {
                     },
                     label: measure(lib, entry.label(), style),
                     chip: None,
+                    #[cfg(test)]
                     row: 0,
                 }
             })
@@ -167,7 +169,10 @@ impl LegendRow {
                 x = PADDING;
             }
             let top = row_top(row, row_height);
-            entry.row = row;
+            #[cfg(test)]
+            {
+                entry.row = row;
+            }
             entry.swatch.x = x + inset;
             entry.swatch.center_y = top + row_height / 2.0;
             entry.label.x = entry.swatch.x + entry.swatch.width + SWATCH_GAP;
@@ -188,15 +193,11 @@ impl LegendRow {
         }
     }
 
-    /// This row moved down so that its first row's top is at `top`. Entries on rows whose top
-    /// would be at or below `canvas_height` are dropped: they could not be seen, and dropping
-    /// them keeps every coordinate near the canvas however many entries there are. The height
-    /// stays that of all rows.
-    pub(super) fn placed(&self, top: f64, canvas_height: f64) -> LegendRow {
+    /// This row moved down so that its first row's top is at `top`.
+    pub(super) fn placed(&self, top: f64) -> LegendRow {
         let entries = self
             .entries
             .iter()
-            .filter(|entry| top + row_top(entry.row, self.row_height) < canvas_height)
             .map(|entry| {
                 let mut entry = entry.clone();
                 entry.swatch.center_y += top;
