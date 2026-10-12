@@ -5,26 +5,26 @@ expression: "render_svg(&scene, SvgText::Editable)"
 <svg xmlns="http://www.w3.org/2000/svg" width="432pt" height="288pt" viewBox="0 0 432 288">
 <rect width="432" height="288" fill="#FAF6F0"/>
 <g>
-<path d="M35.612 202.094 L420 202.094" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
-<path d="M35.612 158.288 L420 158.288" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
-<path d="M35.612 114.481 L420 114.481" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
-<path d="M35.612 70.675 L420 70.675" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
+<path d="M35.612 202.094 L418.35 202.094" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
+<path d="M35.612 158.288 L418.35 158.288" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
+<path d="M35.612 114.481 L418.35 114.481" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
+<path d="M35.612 70.675 L418.35 70.675" fill="none" stroke="#DDD3C7" stroke-width="0.75" stroke-linecap="round" stroke-dasharray="0 3.2"/>
 <text xml:space="preserve" x="12" y="248.875" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0.00</text>
 <text xml:space="preserve" x="12" y="205.069" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0.25</text>
 <text xml:space="preserve" x="12" y="161.262" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0.50</text>
 <text xml:space="preserve" x="12" y="117.456" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0.75</text>
 <text xml:space="preserve" x="12" y="73.65" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">1.00</text>
 <text xml:space="preserve" x="33.062" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">0</text>
-<text xml:space="preserve" x="126.609" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">25</text>
-<text xml:space="preserve" x="222.706" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">50</text>
-<text xml:space="preserve" x="318.803" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">75</text>
-<text xml:space="preserve" x="412.35" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">100</text>
+<text xml:space="preserve" x="126.197" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">25</text>
+<text xml:space="preserve" x="221.881" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">50</text>
+<text xml:space="preserve" x="317.565" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">75</text>
+<text xml:space="preserve" x="410.7" y="258.612" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" font-variant-numeric="tabular-nums" fill="#8C8076">100</text>
 <text xml:space="preserve" x="12" y="26.632" font-family="'Source Serif 4', serif" font-size="15" font-weight="600" fill="#2B211B">Station output</text>
 <text xml:space="preserve" x="12" y="41.675" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" fill="#8C8076">Daily mean, MW</text>
 <text xml:space="preserve" x="12" y="60.938" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" fill="#2B211B">MW</text>
-<text xml:space="preserve" x="220.585" y="273.663" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" fill="#2B211B">Day</text>
+<text xml:space="preserve" x="219.76" y="273.663" font-family="'IBM Plex Sans', sans-serif" font-size="8.5" font-weight="400" fill="#2B211B">Day</text>
 </g>
 <g>
-<path d="M35.612 245.9 L420 245.9" fill="none" stroke="#2B211B" stroke-width="1.3"/>
+<path d="M35.612 245.9 L418.35 245.9" fill="none" stroke="#2B211B" stroke-width="1.3"/>
 </g>
 </svg>
