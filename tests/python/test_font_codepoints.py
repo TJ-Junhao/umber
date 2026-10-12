@@ -32,12 +32,20 @@ def script_ranges(name: str, text: str) -> list[tuple[int, int]]:
 
 
 def rust_ranges(name: str, text: str) -> list[tuple[int, int]]:
-    """Return the inclusive ranges of the Rust constant ``name`` declared as ``&[(u32, u32)]``."""
+    """Return the inclusive ranges of the Rust constant ``name`` declared as ``&[(u32, u32)]``.
+
+    Fails on any content it cannot parse, so valid Rust syntax is never silently ignored.
+    """
     match = re.search(rf"const {name}: &\[\(u32, u32\)\] = &\[(.*?)\];", text, re.DOTALL)
     assert match is not None, f"{name} is not declared in {FONTS_RS}"
-    pairs = re.findall(r"\(\s*0x([0-9A-Fa-f]+)\s*,\s*0x([0-9A-Fa-f]+)\s*\)", match.group(1))
+    body = match.group(1)
+    hex_literal = r"0x([0-9A-Fa-f][0-9A-Fa-f_]*)"
+    pair = rf"\(\s*{hex_literal}\s*,\s*{hex_literal}\s*\)"
+    pairs = re.findall(pair, body)
     assert pairs, f"{name} in {FONTS_RS} holds no ranges"
-    return [(int(lo, 16), int(hi, 16)) for lo, hi in pairs]
+    unparsed = re.sub(pair, "", body).replace(",", "").strip()
+    assert not unparsed, f"{name} in {FONTS_RS} contains unparsed range syntax: {unparsed}"
+    return [(int(lo.replace("_", ""), 16), int(hi.replace("_", ""), 16)) for lo, hi in pairs]
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -55,3 +63,13 @@ def test_the_check_notices_an_edited_list() -> None:
     assert edited != text
     rust = rust_ranges("REQUIRED_CODEPOINTS", FONTS_RS.read_text(encoding="utf-8"))
     assert script_ranges("REQUIRED_CODEPOINTS", edited) != rust
+
+
+def test_rust_ranges_parse_underscores_and_reject_unknown_syntax() -> None:
+    header = "const REQUIRED_CODEPOINTS: &[(u32, u32)] = &["
+    assert rust_ranges("REQUIRED_CODEPOINTS", header + "(0x1_0000, 0x1_0000), (0x20, 0x7E)];") == [
+        (0x10000, 0x10000),
+        (0x20, 0x7E),
+    ]
+    with pytest.raises(AssertionError, match="unparsed"):
+        rust_ranges("REQUIRED_CODEPOINTS", header + "(0x20, 0x7E), (65, 66)];")

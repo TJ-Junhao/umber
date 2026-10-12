@@ -16,15 +16,19 @@ Enum arguments are the integer values that ``enum_members()`` lists. The ``Figur
 than ``add_axes``, ``clone`` and the rendering methods need the figure's axes; without them they
 raise the internal ``RuntimeError``.
 
-The native objects are not shareable across threads while a call is in progress. A ``Figure`` is
-a mutable PyO3 object: a call that needs it while another call holds a conflicting borrow raises
-``RuntimeError`` (PyO3's "Already borrowed" or "Already mutably borrowed") instead of waiting.
-The native side never holds a borrow while it releases the interpreter: rendering copies the
-figure under a brief borrow, then renders the copy with the interpreter released, so other
-threads keep running and the figure stays usable. Every other call runs with the interpreter
-held, so on a regular (GIL) build calls on one figure from several threads are serialized
-without a conflict. The Python façade adds no locking of its own, and free-threaded builds are
-not verified: use one figure per thread there.
+The native objects are not shareable across threads while a call is in progress. A ``Figure`` is a
+mutable PyO3 object: a call that needs it while another call holds a
+conflicting borrow raises ``RuntimeError`` (PyO3's "Already borrowed" or "Already mutably
+borrowed") instead of waiting. Rendering copies the figure under a brief borrow, then renders
+the copy with the interpreter released, so other threads keep running and the figure stays
+usable.
+
+Other native methods do not explicitly release the interpreter. The Python façade converts
+data before entering those methods and adds no locking of its own. On a regular (GIL) build,
+non-rendering calls with the façade's normalized arguments are serialized. Direct native calls
+can invoke Python buffer callbacks while borrowing the figure; those callbacks can release the
+interpreter or re-enter the figure, causing a borrow conflict even on a GIL build.
+Free-threaded builds are not verified: use one figure per thread there.
 """
 
 from typing import ClassVar, final

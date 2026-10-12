@@ -43,19 +43,21 @@ const BUNDLED_COUNT: usize = Font::ALL.len() * Weight::ALL.len();
 ///
 /// # System fonts and memory mapping
 ///
-/// A library made by [`FontLibrary::bundled`] (and the shared [`FontLibrary::global`]) falls
-/// back to the fonts installed on the machine. The operating system's font files are
-/// memory-mapped whenever they are read. If such a file is truncated or replaced in place
-/// while it is mapped, reading it can crash the process with `SIGBUS` on some platforms;
-/// no library can guard against that. Prefer [`FontLibrary::global`]: it shares one set of lookup
-/// and shaping caches across the process, so each system font file is read as rarely as possible.
-/// To avoid system fonts altogether, use [`FontLibrary::with_fallbacks`], which reads nothing
-/// from the machine.
+/// Libraries made by [`FontLibrary::bundled`] and [`FontLibrary::global`] fall back to
+/// installed system fonts. fontdb memory-maps these font files when reading them. If a file is
+/// truncated or modified in place while mapped, a read can crash the process with `SIGBUS` on
+/// some platforms; the library's panic guards cannot catch this. Prefer
+/// [`FontLibrary::global`], which shares lookup and shaping caches and reduces repeated reads.
+/// [`FontLibrary::with_fallbacks`] performs no system font lookup.
 ///
-/// To limit the exposure, the library reads a system font file only to confirm a candidate
-/// glyph, to copy the shaping tables of a face it chose and to outline glyphs, and it bounds
-/// the number of faces indexed, the file sizes and the confirmations per layout. A file that
-/// disappears or changes between layout and outline degrades to missing glyphs, never a panic.
+/// System font files are read during discovery and coverage indexing, and later to confirm
+/// candidate glyphs, copy shaping tables, obtain glyph bounds during shaping and outline glyphs.
+/// The coverage index limits indexed faces and accepted file sizes, and layout calls limit
+/// candidate confirmations. These limits do not cover fontdb's initial discovery.
+///
+/// If a file disappears before outlining, its glyphs are omitted. If it changes, glyphs may
+/// come from the new file or be omitted. Parsing and outlining are guarded against unwinding
+/// panics, subject to the memory-mapping caveat above.
 ///
 /// # Examples
 ///
