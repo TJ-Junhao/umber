@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: cfd3027974889a2517f00b91f325152b85984c0b
+# revision: 5b083884e009d1f350dc6c364e8b0324332d5231
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -15,7 +15,8 @@ f5570630344f0834c355bafc5594c3d4df960728f63559772a50696dc9ecbe3b  errors/area.tx
 68c88012613aa73c8361c3350f5b18d859fbcac8286a86260461b74abe8cbeba  errors/inputs.txt
 6dc255e39c0bda6a0dd8abc27c5bb9e497f257490d3cc71753dddbd2067984ac  errors/size.txt
 9f092226f038e09dd89086790418571a9c629e23a10291de7551bd25dce729fb  errors/ticks.txt
-c236c777ef63863c2963bb68ca7bce89fb356e5add798f1fdcac7ccaa8e89936  errors/x-label-overflow.txt
+536e085cacafb9eeddca5edaf5a5157f3e46157fda428c003ac4fc6ad164f2ad  errors/x-label-min-width.txt
+00b63e61773bbce1ec3718530241986c7ca444bff5316c534df15e3724de2d0e  errors/x-label-overflow.txt
 fb05525cae7bbe8a100fe91f00fd4491c44548b2ed974b5caedeab733d7282ba  png/fig-all-nan.dpi200.png
 7fe26f164912a3c1d4d62e6d048423ee4929960a325148a375051ca564bfab69  png/fig-all-nan.dpi72.png
 0f3150acef9d6887298e4ab03853cfcabb125a3662f40bb4010767db7a1c163e  png/fig-area-200k-points.dpi200.png
@@ -352,8 +353,8 @@ adfef6fe18004e5befb6658ecf06d6597e742d133a84a24af729682819031cea  png/fig-subtit
 83bdf587dc7e4cba7a223456288f9f8228cf4ac0ad7849d9d0595494a278b191  png/fig-subtitle-only.dpi72.png
 7fd6686887cf17f3def09890f721d6bc14cf2ec61f4386f72c3873c9a084bf9f  png/fig-text-fallback.dpi200.png
 6ce98faa00547e93a0af17167270f71c826b08502b7e2e64220739bbcd9708da  png/fig-text-fallback.dpi72.png
-3bdd90e3d7d5e1ee969a83135ff1fefd7f27a14309c3e75fd4df133c8380d90a  png/fig-text-truncated-no-x-ticks.dpi200.png
-2881e3562841d9bbbde51daa4b470fcc4469c3a6edb867116b401f05739d9ea8  png/fig-text-truncated-no-x-ticks.dpi72.png
+e5cb7bfee5ebac083180d1bbbf62e8f0640ea1fc24eca98f3a7c329f221d4cfd  png/fig-text-truncated-no-ticks.dpi200.png
+1e71fb92a14c30dbe1c674c93a176a1420007c2e6120d5a93d44334e50327f18  png/fig-text-truncated-no-ticks.dpi72.png
 f02c566f676e1024318be916af8681a2ca2f0f48df404685a45e11c0dee507cc  png/fig-theme-tokens-0.dpi200.png
 31baa79f1557013df913d409931d93f8068583ef3ca0e3dc3f1808726aa55701  png/fig-theme-tokens-0.dpi72.png
 b9e0b8af7c5d3b2c3c70b79746429e1a5565751964b6111afba945b26534822a  png/fig-theme-tokens-1.dpi200.png
@@ -482,6 +483,8 @@ fa467a22a22df32b8401e59605ee13f72401e5fa09a9ccc59781eccb7e97013c  png/fig-x-end-
 aa1a838fa15d45196ef627a380109fe3f6f19cbd00b2e58b2201eba0a0c7490b  png/fig-x-end-label-hours-midnight.dpi72.png
 eca70f6b91765a33aea4fd3c82bbc5c61d4a4170e6d72443fd3789c454d9443b  png/fig-x-end-label-hours-pigment.dpi200.png
 38297f3edd192f8a44eef5135bc852966844c1729c0f737e0a429889dcdc497a  png/fig-x-end-label-hours-pigment.dpi72.png
+3e36f0d10f5bd3d186ecbc4dabb00755663ef5a85cb9ffb6478603210c8670a3  png/fig-x-end-label-min-width.dpi200.png
+997f7ae5efb411b367b5f51016ed4f1a7ad437a00ad50d83a4cbe051aa6ad329  png/fig-x-end-label-min-width.dpi72.png
 ac07aafcd43dc6050dc75135a35683bf1a3a27326564cd8b8d473e9fc3b0eac3  png/fig-x-end-label-near-cap.dpi200.png
 5153dcb11e9efc5fa6972fc579422dc309aaf9b5448da633f34bcaeab627d126  png/fig-x-end-label-near-cap.dpi72.png
 543e2efbfaa2e48c846fb1b905fe6df3e612838c8d566eb7d0e62ad38c420257  png/fig-xlabel-only.dpi200.png
@@ -678,7 +681,7 @@ ee1f99a1da5843cd863f577f7f673841232fa4524b306ec71066652f1a0718dd  scene/fig-stac
 1a845370bc8e076f74ed2c7feff4147b75079064f91ed0059f3f3ea63a662c56  scene/fig-stacked-bars-totals-at-bound.txt
 0e5599813e3ec14debcee8d9dbc3cdee21adc11c10b1409590efb39d23668df1  scene/fig-subtitle-only.txt
 6b3904b5bba1bb1e117301433db65475ea618083183a3cf2018067a7eb438bea  scene/fig-text-fallback.txt
-91978db38ff0eaf438e18d0681e179a88a9737e8137c799cd9eee46f7c4c6dc7  scene/fig-text-truncated-no-x-ticks.txt
+a0e8b832feb6d844e039136e7571f35b94e9c2c6373b25cfaaeffa81fccc8123  scene/fig-text-truncated-no-ticks.txt
 bc6ec9c6d06fa0521a1a67da859ebf973fd5dd2830586560963f9ce4481eebf2  scene/fig-theme-tokens-0.txt
 f08157ebd8b5a4b3e989fed307b54b582d6432ce8a24c37ee47766525f17d48a  scene/fig-theme-tokens-1.txt
 95a2d7aaf170174343c4b48c72ef78eb80c354157c4c94d1a989394cc19242e7  scene/fig-theme-tokens-2.txt
@@ -743,6 +746,7 @@ e57fd429c2038bdfc6a98eb82a8471292a3ddaa708100a7d7b7d223ceb63a40e  scene/fig-x-en
 edc00b7a0d72451c388a5f957f859890b97c7f0ff505e6d4d69c7f3bc303267e  scene/fig-x-end-label-hours-graphite.txt
 51997a79efed0e8128a456d604537e74b618d7d94e90de59ba963cc171efba94  scene/fig-x-end-label-hours-midnight.txt
 0f107f5ceb5682b31f00b6aed0177a5d1e95e2b34ed509ab36e2790427086d7c  scene/fig-x-end-label-hours-pigment.txt
+11c95a898f032ac5c65afa45d8f15777e5df83607da47612e679a9eaccc4ada9  scene/fig-x-end-label-min-width.txt
 ed3afb63d4743d3f1c33dc3022a87876f1bceebeafff86360f05c49d896c486f  scene/fig-x-end-label-near-cap.txt
 5f99a34c9a882eff8b6d5036a01cadae3ec0083dddc9f06f914eddca25f51d56  scene/fig-xlabel-only.txt
 0388d8a6d2ec591700c10ea3cb48edaa32012f61f7bcd49fc0e6415037631832  scene/fig-ylabel-only.txt
@@ -1093,8 +1097,8 @@ d47802335ad37b2b165ee8831e691101c019fcbcb82493b1fc701b19fa6346aa  svg/fig-stacke
 8e4bdb9a4bf846195a5ab0e741780306342bfc0dde2c7f7db9285a91c2f30d39  svg/fig-subtitle-only.outlines.svg
 442fa1d16b4b52c72ce28bb19bc3044028a30434a26b36294861e0de43e2a904  svg/fig-text-fallback.editable.svg
 811a2cbe9737151f3d86ff6b1da6f24ff52966a5c526415a05846a5ff94ed19e  svg/fig-text-fallback.outlines.svg
-bb77d893523eb1f9affcca6d404468416d44c727824f26685ab3201626d19391  svg/fig-text-truncated-no-x-ticks.editable.svg
-a71977a1fb6da9c618b77afc9d57789dc9ef1c8f1f956b6bb40dfa49830b9a4a  svg/fig-text-truncated-no-x-ticks.outlines.svg
+4b743abd50bff38f2c226a5d7b794a6426e9cad0d74a64532f2392a8d41dee5d  svg/fig-text-truncated-no-ticks.editable.svg
+6bdd9ace9b76bfb9d6b04cd7e71b51a43cd22d7604d4a07542ebe7f5a2808fd3  svg/fig-text-truncated-no-ticks.outlines.svg
 cb40f38a247f133540ee74d3e4e553a18a6dce3ba8b5901244b217c78e5c33f8  svg/fig-theme-tokens-0.editable.svg
 cd5cb74a3bf2a6676ac7025176a4c89869adcd19bf1bf1c84639b70d51eb78bd  svg/fig-theme-tokens-0.outlines.svg
 cb3302a15a42afd3c46710becc8d3544c775adb3dbf27eaf88636c5d99561d9b  svg/fig-theme-tokens-1.editable.svg
@@ -1223,6 +1227,8 @@ b15ef2ee3964d240e8402298646628f092b0e251183cf62be3d240596d1ab57e  svg/fig-x-end-
 0b87f2606ee4536a6d7988c721ee7975298ab9c939a0defe331bebd9690f0749  svg/fig-x-end-label-hours-midnight.outlines.svg
 4c97c2b4636c4897924528dbca54350b4e1f8d77af670a6a906b9f4fc72e1369  svg/fig-x-end-label-hours-pigment.editable.svg
 a40c05687ad95e784cc5598260de56992bdadcd49eceb3b5f83455d755c408e9  svg/fig-x-end-label-hours-pigment.outlines.svg
+8fa78842268c930f84c9265ce52e797f66da5b1fb0edd4c8848ef8f26724c0da  svg/fig-x-end-label-min-width.editable.svg
+c288f8485adc31af6129c7177aeb19facb0639d69987b63dc9f1d54433b145c9  svg/fig-x-end-label-min-width.outlines.svg
 ce7dbed5008bd4e99b8d33a2bee9fc29d244df196b981250291565edaa6b76d4  svg/fig-x-end-label-near-cap.editable.svg
 4c956690cb61988e7e594867dcb01a22357b1fafdc9050bd76fefbf48f244217  svg/fig-x-end-label-near-cap.outlines.svg
 842da93a6a4963798b65937177ab7df6a545fb35ab6e0099d86d89b51a54fec3  svg/fig-xlabel-only.editable.svg

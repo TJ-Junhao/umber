@@ -1005,10 +1005,16 @@ mod tests {
             for scale in [1.0, 10.0] {
                 let theme = theme.with_font_scale(scale).unwrap();
                 for (w, h, n) in [(1.0, 1.0, 50), (6.0, 4.0, 400), (2.0, 1.0, 2000)] {
-                    // Without x ticks: x tick labels too wide for these figures fail the
-                    // layout, which `layout::tests` covers.
+                    // Without ticks: x tick labels too wide for these figures, and y tick labels
+                    // that leave no room for the plot, fail the layout, which `layout::tests`
+                    // covers.
                     let mut f = figure(w, h, theme.clone(), &names(n));
-                    f.axes_mut().unwrap().xticks(&[]).unwrap();
+                    f.axes_mut()
+                        .unwrap()
+                        .xticks(&[])
+                        .unwrap()
+                        .yticks(&[])
+                        .unwrap();
                     let layout = plan_figure(&f, FontLibrary::global()).1;
                     let plot = layout.plot;
                     assert!(plot.width >= 1.0 && plot.height >= 1.0, "{plot:?}");
@@ -1447,9 +1453,13 @@ mod tests {
             for (w, h, n) in [(1.0, 1.0, 50), (6.0, 4.0, 400)] {
                 let mut f = Figure::new(w, h, theme.clone()).unwrap();
                 let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-                // Without x ticks: x tick labels too wide for these figures fail the layout,
-                // which `layout::tests` covers.
-                axes.title("Crowded").xticks(&[]).unwrap();
+                // Without ticks: x tick labels too wide for these figures, and y tick labels that
+                // leave no room for the plot, fail the layout, which `layout::tests` covers.
+                axes.title("Crowded")
+                    .xticks(&[])
+                    .unwrap()
+                    .yticks(&[])
+                    .unwrap();
                 for k in 0..n {
                     axes.line(
                         AxisData::Numbers(vec![0.0, 1.0]),

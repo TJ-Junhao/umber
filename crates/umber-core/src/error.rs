@@ -87,26 +87,26 @@ pub(crate) fn number(v: f64) -> impl std::fmt::Display {
     Number(v)
 }
 
-/// The most characters of user text an error message quotes; the Python layer's `short_repr`
-/// uses the same limit.
+/// The most characters an error message shows of user text, quotes and escapes included; the
+/// Python layer's `short_repr` uses the same limit.
 const QUOTED_CHARS: usize = 40;
 
 /// Quotes user `text` for an error message, as Rust string literal syntax (`"North"`, with
-/// control characters escaped). Text longer than [`QUOTED_CHARS`] characters is cut to its
-/// first `QUOTED_CHARS - 1` characters followed by `…`.
-pub(crate) fn quoted(text: &str) -> impl std::fmt::Display {
-    struct Quoted(String);
-    impl std::fmt::Display for Quoted {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{:?}", self.0)
-        }
-    }
-    if text.chars().count() <= QUOTED_CHARS {
-        Quoted(text.to_owned())
+/// quotes, backslashes and control characters escaped). A quotation longer than
+/// [`QUOTED_CHARS`] characters is cut to its first `QUOTED_CHARS - 1` characters followed by
+/// `…`, so it has no closing quote, and may end inside an escape. This is how the Python
+/// layer's `short_repr` cuts its representation.
+pub(crate) fn quoted(text: &str) -> String {
+    // Every character quotes to at least one, so the first `QUOTED_CHARS` characters decide
+    // the first `QUOTED_CHARS - 1` of the quotation, and whether it is cut at all.
+    let head: String = text.chars().take(QUOTED_CHARS).collect();
+    let full = format!("{head:?}");
+    if full.chars().count() <= QUOTED_CHARS {
+        full
     } else {
-        let mut cut: String = text.chars().take(QUOTED_CHARS - 1).collect();
+        let mut cut: String = full.chars().take(QUOTED_CHARS - 1).collect();
         cut.push('…');
-        Quoted(cut)
+        cut
     }
 }
 
@@ -356,15 +356,102 @@ mod tests {
     }
 
     #[test]
-    fn quoted_text_is_escaped_and_cut_to_forty_characters() {
-        let shown = |text: &str| quoted(text).to_string();
-        assert_eq!(shown("North"), "\"North\"");
-        assert_eq!(shown("a\"b\n"), "\"a\\\"b\\n\"");
-        let forty = "é".repeat(40);
-        assert_eq!(shown(&forty), format!("\"{forty}\""));
-        let cut = shown(&"é".repeat(41));
-        assert_eq!(cut, format!("\"{}…\"", "é".repeat(39)));
-        assert_eq!(cut.chars().count(), 42);
+    fn quoted_text_is_escaped_then_cut_to_forty_characters_as_in_python() {
+        // (text, Python's `short_repr(text)`, `quoted(text)`). Python quotes with `'` unless
+        // the text holds `'` but no `"`; otherwise the two escape alike, so the quotations are
+        // equally long and cut at the same character.
+        let rows: [(String, &str, &str); 18] = [
+            ("North".into(), "'North'", "\"North\""),
+            (String::new(), "''", "\"\""),
+            (
+                "W".repeat(38),
+                "'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW'",
+                "\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\"",
+            ),
+            (
+                "W".repeat(39),
+                "'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW…",
+                "\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW…",
+            ),
+            (
+                "W".repeat(41),
+                "'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW…",
+                "\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW…",
+            ),
+            (
+                "W".repeat(100),
+                "'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW…",
+                "\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW…",
+            ),
+            (
+                "é".repeat(38),
+                "'éééééééééééééééééééééééééééééééééééééé'",
+                "\"éééééééééééééééééééééééééééééééééééééé\"",
+            ),
+            (
+                "é".repeat(41),
+                "'éééééééééééééééééééééééééééééééééééééé…",
+                "\"éééééééééééééééééééééééééééééééééééééé…",
+            ),
+            (
+                "日本".repeat(30),
+                "'日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本…",
+                "\"日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本日本…",
+            ),
+            (
+                "\\".repeat(19),
+                r"'\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'",
+                r#""\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\""#,
+            ),
+            (
+                "\\".repeat(41),
+                r"'\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…",
+                r#""\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…"#,
+            ),
+            (
+                "\n".repeat(19),
+                r"'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n'",
+                r#""\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n""#,
+            ),
+            (
+                "\n".repeat(41),
+                r"'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n…",
+                r#""\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n…"#,
+            ),
+            ("a\tb".into(), r"'a\tb'", r#""a\tb""#),
+            ("a'b".into(), r#""a'b""#, r#""a'b""#),
+            // Python needs no escape here; the Rust quotation is one character longer.
+            ("a\"b".into(), r#"'a"b'"#, r#""a\"b""#),
+            (
+                "\"'".repeat(25),
+                r#"'"\'"\'"\'"\'"\'"\'"\'"\'"\'"\'"\'"\'"\…"#,
+                r#""\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"…"#,
+            ),
+            (
+                format!("{}\u{7}", "W".repeat(30)),
+                r"'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\x07'",
+                r#""WWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\u{7}""#,
+            ),
+        ];
+        for (text, python, want) in &rows {
+            let got = quoted(text);
+            assert_eq!(&got, want, "{text:?}");
+            assert!(got.chars().count() <= QUOTED_CHARS, "{got}");
+            let python_escapes_alike = !text.contains('"') || text.contains('\'');
+            let same_escapes = !text.contains('\u{7}');
+            if python_escapes_alike && same_escapes {
+                assert_eq!(
+                    got.chars().count(),
+                    python.chars().count(),
+                    "{got} vs {python}"
+                );
+                assert_eq!(
+                    got.ends_with('…'),
+                    python.ends_with('…'),
+                    "{got} vs {python}"
+                );
+            }
+        }
     }
 
     #[test]

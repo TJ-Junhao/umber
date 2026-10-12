@@ -169,7 +169,7 @@ fig-stacked-bars-pigment
 fig-stacked-bars-totals-at-bound
 fig-subtitle-only
 fig-text-fallback
-fig-text-truncated-no-x-ticks
+fig-text-truncated-no-ticks
 fig-theme-tokens-0
 fig-theme-tokens-1
 fig-theme-tokens-2
@@ -234,6 +234,7 @@ fig-x-end-label-direct-pigment
 fig-x-end-label-hours-graphite
 fig-x-end-label-hours-midnight
 fig-x-end-label-hours-pigment
+fig-x-end-label-min-width
 fig-x-end-label-near-cap
 fig-xlabel-only
 fig-ylabel-only
