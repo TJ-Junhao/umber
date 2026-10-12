@@ -6,8 +6,8 @@
 //! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least 1 by 1 pt and
 //! lies on the canvas (unless the canvas itself is narrower than 1 pt). Text that does not fit,
 //! such as a tick label wider than the space reserved for it, is clipped by the canvas.
-//! Every x tick label lies on the canvas unless it needs a larger plot inset than
-//! [`END_LABEL_SHARE`] allows.
+//! Every x tick label keeps [`X_LABEL_EDGE_GAP`] from the canvas edges unless it needs a larger
+//! plot inset than [`END_LABEL_SHARE`] allows.
 //! With figures of at most 200 in a side this keeps every coordinate far below the renderers'
 //! `MAX_COORD`.
 
@@ -41,6 +41,9 @@ const X_LABEL_GAP: f64 = 4.0;
 const AXIS_LABEL_GAP: f64 = 4.0;
 /// The smallest plot side.
 const MIN_PLOT: f64 = 1.0;
+/// The smallest gap between an x tick label and the left or right canvas edge: half the outer
+/// padding, so an end label may reach into the padding but never ends flush with the edge.
+const X_LABEL_EDGE_GAP: f64 = PADDING / 2.0;
 /// The largest share of the inner width (inside the outer padding) by which x tick labels may
 /// inset one side of the plot area, and that direct labels may reserve on the right.
 const END_LABEL_SHARE: f64 = 0.25;
@@ -425,10 +428,11 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Layout {
     let plot_top = header_bottom + ylabel_band + label_row_rise;
     // The plot starts right of the y tick labels and ends left of the room direct labels
     // reserve. The x tick labels are centered on their ticks and may reach into the outer
-    // padding; where one would reach past the canvas edge, the plot edge on that side moves
-    // in by exactly the overflow. Each side moves in by at most a quarter of the inner width
-    // beyond the padding; labels that need more are clipped by the canvas. Direct labels
-    // reserve room under the same cap.
+    // padding, up to `X_LABEL_EDGE_GAP` from the canvas edge; where one would reach further,
+    // the plot edge on that side moves in by exactly the overflow. Each side moves in by at
+    // most a quarter of the inner width beyond the padding; labels that need more reach closer
+    // to the edge and may be clipped by the canvas. Direct labels reserve room under the same
+    // cap.
     let inner = (width - 2.0 * PADDING).max(0.0);
     let cap = END_LABEL_SHARE * inner;
     let left = if y_labels.is_empty() {
@@ -442,8 +446,8 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Layout {
         right,
         left_max: left.max(PADDING + cap),
         right_min: right.min(width - PADDING - cap),
-        lo: 0.0,
-        hi: width,
+        lo: X_LABEL_EDGE_GAP,
+        hi: width - X_LABEL_EDGE_GAP,
     };
     let spans: Vec<inset::TickSpan> = x_labels
         .iter()
@@ -895,12 +899,12 @@ mod tests {
             .fold(0.0, f64::max);
         assert!((long.plot.x - (PADDING + widest + Y_LABEL_GAP)).abs() < 1e-9);
         assert!(long.plot.x > short.plot.x + 20.0);
-        // The last x label, centered near the right end, insets the plot so that it ends on
-        // the canvas edge.
+        // The last x label, centered near the right end, insets the plot so that it ends
+        // `X_LABEL_EDGE_GAP` from the canvas edge.
         let last = long.x_tick_labels.last().unwrap();
         assert!(long.plot.right() < short.plot.right() - 1.0);
         assert!(
-            (last.x + last.width() - 6.0 * 72.0).abs() < 1e-9,
+            (last.x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
             "{last:?}"
         );
         // A suffix from the tick format is measured the same way.
@@ -932,15 +936,18 @@ mod tests {
             .collect()
     }
 
-    /// Lays out `f` and asserts that every x tick label lies on the canvas, both in the layout
-    /// and as drawn in the scene. Returns the layout.
+    /// Lays out `f` and asserts that every x tick label keeps `X_LABEL_EDGE_GAP` from the
+    /// canvas edges, both in the layout and as drawn in the scene. Returns the layout.
     fn assert_x_labels_inside(f: &Figure) -> Layout {
         let (_, layout) = plan_of(f);
         let width = f.width_in() * 72.0;
         assert!(!layout.x_tick_labels.is_empty());
         for label in &layout.x_tick_labels {
-            assert!(label.x >= -1e-9, "{label:?}");
-            assert!(label.x + label.width() <= width + 1e-9, "{label:?}");
+            assert!(label.x >= X_LABEL_EDGE_GAP - 1e-9, "{label:?}");
+            assert!(
+                label.x + label.width() <= width - X_LABEL_EDGE_GAP + 1e-9,
+                "{label:?}"
+            );
         }
         let scene = f.to_scene(lib());
         let drawn = texts(&scene.items);
@@ -957,7 +964,10 @@ mod tests {
                 f64::from(item.origin.x),
                 f64::from(item.origin.x + item.width),
             );
-            assert!(left >= -1e-3 && right <= width + 1e-3, "{item:?}");
+            assert!(
+                left >= X_LABEL_EDGE_GAP - 1e-3 && right <= width - X_LABEL_EDGE_GAP + 1e-3,
+                "{item:?}"
+            );
         }
         layout
     }
@@ -990,10 +1000,14 @@ mod tests {
                 theme,
                 ["midnight", "6 am", "noon", "6 pm", "midnight"],
             ));
-            // The last tick sits on the plot's right edge, so its label ends exactly on the
-            // canvas edge. The first label fits left of the y tick labels' column.
+            // The last tick sits on the plot's right edge, so its label ends exactly
+            // `X_LABEL_EDGE_GAP` from the canvas edge. The first label fits left of the y tick
+            // labels' column.
             let last = wide.x_tick_labels.last().unwrap();
-            assert!((last.x + last.width() - width).abs() < 1e-9, "{last:?}");
+            assert!(
+                (last.x + last.width() - (width - X_LABEL_EDGE_GAP)).abs() < 1e-9,
+                "{last:?}"
+            );
             assert!(wide.plot.right() < narrow.plot.right() - 1.0);
             assert_eq!(wide.plot.x, narrow.plot.x);
             // The labels stay centered on their ticks.
@@ -1010,6 +1024,10 @@ mod tests {
                 .iter()
                 .map(Label::width)
                 .fold(0.0, f64::max);
+            // "24" reaches past the plot's right edge by half its width, less than the padding
+            // minus the edge gap, so the plot keeps its full width.
+            let last = layout.x_tick_labels.last().unwrap();
+            assert!(last.x + last.width() > layout.plot.right());
             assert_eq!(layout.plot.right(), 6.0 * 72.0 - PADDING);
             assert_eq!(layout.plot.x, PADDING + widest + Y_LABEL_GAP);
         }
@@ -1039,7 +1057,7 @@ mod tests {
             let last = layout.x_tick_labels.last().unwrap();
             assert!(last.text.ends_with(" thousand units"));
             assert!(
-                (last.x + last.width() - 6.0 * 72.0).abs() < 1e-9,
+                (last.x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
                 "{last:?}"
             );
         }
@@ -1067,7 +1085,7 @@ mod tests {
             assert!(layout.plot.right() < 6.0 * 72.0 - PADDING - 1.0);
             let last = layout.x_tick_labels.last().unwrap();
             assert!(
-                (last.x + last.width() - 6.0 * 72.0).abs() < 1e-9,
+                (last.x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
                 "{last:?}"
             );
         }
