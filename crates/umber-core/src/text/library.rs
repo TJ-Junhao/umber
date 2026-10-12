@@ -41,6 +41,22 @@ const BUNDLED_COUNT: usize = Font::ALL.len() * Weight::ALL.len();
 /// `FontLibrary` is `Send + Sync`; one library can lay out text from several threads at once,
 /// with deterministic results.
 ///
+/// # System fonts and memory mapping
+///
+/// A library made by [`FontLibrary::bundled`] (and the shared [`FontLibrary::global`]) falls
+/// back to the fonts installed on the machine. The operating system's font files are
+/// memory-mapped whenever they are read. If such a file is truncated or replaced in place
+/// while it is mapped, reading it can crash the process with `SIGBUS` on some platforms;
+/// no library can guard against that. Prefer [`FontLibrary::global`]: it shares one set of lookup
+/// and shaping caches across the process, so each system font file is read as rarely as possible.
+/// To avoid system fonts altogether, use [`FontLibrary::with_fallbacks`], which reads nothing
+/// from the machine.
+///
+/// To limit the exposure, the library reads a system font file only to confirm a candidate
+/// glyph, to copy the shaping tables of a face it chose and to outline glyphs, and it bounds
+/// the number of faces indexed, the file sizes and the confirmations per layout. A file that
+/// disappears or changes between layout and outline degrades to missing glyphs, never a panic.
+///
 /// # Examples
 ///
 /// ```
@@ -166,6 +182,10 @@ impl FontLibrary {
     /// default limits. Prefer [`FontLibrary::global`], which shares one
     /// library and its caches.
     ///
+    /// System font files are memory-mapped when read; a file truncated or replaced while mapped
+    /// can crash the process (`SIGBUS`) on some platforms. See
+    /// [System fonts and memory mapping](FontLibrary#system-fonts-and-memory-mapping).
+    ///
     /// # Examples
     ///
     /// ```
@@ -211,6 +231,10 @@ impl FontLibrary {
     }
 
     /// A process-wide [`FontLibrary::bundled`] library, created on first use.
+    ///
+    /// This is the recommended way to get a library with system font fallback: one library, one
+    /// set of lookup and shaping caches for the whole process. The memory-mapping caveat
+    /// of [system fonts](FontLibrary#system-fonts-and-memory-mapping) applies.
     ///
     /// # Examples
     ///
