@@ -7,7 +7,7 @@ import traceback
 import typing
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -495,3 +495,29 @@ def test_figure_reports_the_package_as_its_module() -> None:
     assert ub.Figure.__module__ == "umber"
     for name in ("add_axes", "to_png", "to_svg", "save_png", "save_svg"):
         assert getattr(ub.Figure, name).__module__ == "umber"
+
+
+class _RecordsFspath:
+    """A path-like object that notes whether its path was read."""
+
+    def __init__(self) -> None:
+        self.read = False
+
+    def __fspath__(self) -> str:
+        self.read = True
+        return "chart.out"
+
+
+def test_save_checks_other_types_before_reading_the_path() -> None:
+    recorder = _RecordsFspath()
+    with pytest.raises(TypeError) as caught:
+        cast(Any, ub.Figure()).save_png(recorder, dpi="bad")
+    found = details(caught.value)
+    assert found is not None
+    assert found[0] == "dpi"
+    with pytest.raises(TypeError) as caught:
+        cast(Any, ub.Figure()).save_svg(recorder, text="bad")
+    found = details(caught.value)
+    assert found is not None
+    assert found[0] == "text"
+    assert not recorder.read

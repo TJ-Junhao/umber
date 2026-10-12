@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import pytest
 
@@ -274,21 +275,55 @@ def test_hist_errors_leave_the_figure_unchanged(
     assert ax.figure.to_svg(text=ub.SvgText.EDITABLE) == before
 
 
+class _RecordsConversion:
+    """A data object that notes whether it was converted to an array."""
+
+    def __init__(self) -> None:
+        self.converted = False
+
+    def __array__(self, dtype: object = None, copy: object = None) -> npt.NDArray[np.float64]:
+        self.converted = True
+        return np.array([1.0, 2.0])
+
+
+def _parameter(err: BaseException) -> object:
+    found = details(err)
+    assert found is not None
+    return found[0]
+
+
 def test_type_checks_follow_parameter_order() -> None:
+    hist = cast(Callable[..., object], _axes().hist)
     with pytest.raises(TypeError) as caught:
-        _axes().hist(
-            cast(list[float], "abc"),
-            bins=cast(int, "3"),
-            label=cast(str, 1),
-            color=cast(ub.Color, "red"),
-        )
+        hist("abc", bins="3", label=1, color="red")
+    assert _parameter(caught.value) == "values"
+    with pytest.raises(TypeError) as caught:
+        hist([1.0], bins="3", label=1, color="red")
     assert details(caught.value) == ("bins", INTEGER_HINT)
     with pytest.raises(TypeError) as caught:
-        _axes().hist(cast(list[float], "abc"), label=cast(str, 1), color=cast(ub.Color, "red"))
+        hist([1.0], label=1, color="red")
     assert details(caught.value) == ("label", TEXT_HINT)
     with pytest.raises(TypeError) as caught:
-        _axes().hist(cast(list[float], "abc"), color=cast(ub.Color, "red"))
+        hist([1.0], color="red")
     assert details(caught.value) == ("color", COLOR_HINT)
+
+
+def test_types_are_checked_before_any_conversion() -> None:
+    hist = cast(Callable[..., object], _axes().hist)
+    with pytest.raises(TypeError) as caught:
+        hist([0, "bad"], bins="3")
+    assert _parameter(caught.value) == "bins"
+    with pytest.raises(TypeError) as caught:
+        hist([0, "bad"], label="x" * 1001, color="red")
+    assert _parameter(caught.value) == "color"
+    recorder = _RecordsConversion()
+    with pytest.raises(TypeError) as caught:
+        hist(recorder, bins="3")
+    assert _parameter(caught.value) == "bins"
+    assert not recorder.converted
+    with pytest.raises(ub.DataError) as data:
+        hist([0, "bad"])
+    assert _parameter(data.value) == "values"
 
 
 @pytest.mark.parametrize(
@@ -321,3 +356,13 @@ def test_max_bins_is_exported() -> None:
     with pytest.raises(ub.StyleError) as caught:
         _axes().hist(VALUES, bins=ub.MAX_BINS + 1)
     assert str(ub.MAX_BINS) in str(caught.value)
+
+
+def test_masked_array_is_a_value_error_after_the_types() -> None:
+    masked = np.ma.array([1.0, 2.0])
+    with pytest.raises(TypeError) as caught:
+        cast(Any, _axes()).hist(masked, bins="bad")
+    assert _parameter(caught.value) == "bins"
+    with pytest.raises(ub.DataError) as data:
+        _axes().hist(masked)
+    assert _parameter(data.value) == "values"

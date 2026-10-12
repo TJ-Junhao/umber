@@ -312,3 +312,30 @@ def test_frames_of_a_failed_quick_call_are_the_users() -> None:
     with pytest.raises(ub.DataError) as caught:
         ub.hist([np.inf])
     assert _frames(caught.value) == ["test_frames_of_a_failed_quick_call_are_the_users"]
+
+
+# (function, value-invalid first data argument, type-invalid later argument, its parameter)
+ORDER_CASES: list[tuple[str, tuple[object, ...], dict[str, object], str]] = [
+    ("line", ([0, "bad"], None), {}, "y"),
+    ("scatter", ([0, "bad"], None), {}, "y"),
+    ("bar", ([1, 2], None), {}, "heights"),
+    ("hist", ([0, "bad"],), {"bins": "3"}, "bins"),
+]
+
+
+@pytest.mark.parametrize(("name", "args", "kwargs", "parameter"), ORDER_CASES)
+def test_mark_types_are_checked_before_the_data_is_converted(
+    name: str, args: tuple[object, ...], kwargs: dict[str, object], parameter: str
+) -> None:
+    function = cast(Callable[..., object], getattr(ub, name))
+    with pytest.raises(TypeError) as caught:
+        function(*args, **kwargs)
+    found = details(caught.value)
+    assert found is not None
+    assert found[0] == parameter
+    # The theme is still checked first.
+    with pytest.raises(TypeError) as first:
+        function(*args, **kwargs, theme="midnight")
+    found = details(first.value)
+    assert found is not None
+    assert found[0] == "theme"

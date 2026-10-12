@@ -2,7 +2,7 @@
 import copy
 import pickle
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,6 +27,7 @@ NOT_POSITIVE = "use a linear axis, or remove values that are not positive."
 REPEAT = "combine repeated categories and sum their heights."
 REPEAT_IN_SERIES = "combine repeated categories and sum their heights within each series."
 FINITE = "values must be finite."
+CATEGORIES_HINT = 'pass a list of names, e.g. ["A", "B"].'
 
 type Bars = ub.Axes[str, float]
 
@@ -257,10 +258,45 @@ def test_series_checks_type_shape_and_dtype(
     assert _package_frames(caught.value) == []
 
 
-def test_series_type_checks_come_before_the_heights() -> None:
+class _RecordsConversion:
+    """A data object that notes whether it was converted to an array."""
+
+    def __init__(self) -> None:
+        self.converted = False
+
+    def __array__(self, dtype: object = None, copy: object = None) -> npt.NDArray[np.float64]:
+        self.converted = True
+        return np.array([1.0, 2.0])
+
+
+def _parameter(err: BaseException) -> object:
+    found = details(err)
+    assert found is not None
+    return found[0]
+
+
+def test_series_types_are_checked_before_any_conversion() -> None:
+    series = cast(Callable[..., object], ub.BarSeries)
     with pytest.raises(TypeError) as caught:
-        ub.BarSeries("s", cast(list[float], "abc"), color=cast(ub.Color, "red"))
-    assert details(caught.value) == ("color", COLOR_HINT)
+        series("s", ["a"], color="red")
+    assert _parameter(caught.value) == "color"
+    with pytest.raises(TypeError) as caught:
+        series("x" * 1001, None)
+    assert _parameter(caught.value) == "heights"
+    with pytest.raises(TypeError) as caught:
+        series(3, "abc", color="red")
+    assert _parameter(caught.value) == "label"
+    recorder = _RecordsConversion()
+    with pytest.raises(TypeError) as caught:
+        series("s", recorder, color="red")
+    assert _parameter(caught.value) == "color"
+    assert not recorder.converted
+    with pytest.raises(ub.StyleError) as long:
+        series("x" * 1001, [1.0])
+    assert _parameter(long.value) == "label"
+    with pytest.raises(ub.StyleError) as first:
+        series("x" * 1001, ["a"])
+    assert _parameter(first.value) == "label"
 
 
 def test_series_leaves_finite_and_log_checks_to_the_chart() -> None:
@@ -374,10 +410,41 @@ def test_series_items_must_be_bar_series(name: str, item: object) -> None:
     assert details(caught.value) == ("series", SERIES_ITEM_HINT)
 
 
-def test_series_type_is_checked_before_the_categories() -> None:
+@pytest.mark.parametrize("name", ["grouped_bar", "stacked_bar"])
+def test_categories_type_is_checked_before_series(name: str) -> None:
+    method = cast(Callable[..., object], getattr(_bars(), name))
     with pytest.raises(TypeError) as caught:
-        _bars().grouped_bar(cast(list[str], "abc"), cast(Sequence[ub.BarSeries], "xyz"))
+        method("abc", "xyz")
+    assert details(caught.value) == ("categories", CATEGORIES_HINT)
+    with pytest.raises(TypeError) as caught:
+        method([1, 2], None)
     assert details(caught.value) == ("series", SERIES_HINT)
+    recorder = _RecordsConversion()
+    with pytest.raises(TypeError) as caught:
+        method(recorder, None)
+    assert _parameter(caught.value) == "series"
+    assert not recorder.converted
+    with pytest.raises(ub.DataError) as data:
+        method([1, 2], [ub.BarSeries("s", [1.0, 2.0])])
+    assert _parameter(data.value) == "categories"
+
+
+def test_bar_types_are_checked_before_any_conversion() -> None:
+    bar = cast(Callable[..., object], _bars().bar)
+    with pytest.raises(TypeError) as caught:
+        bar([1, 2], None)
+    assert _parameter(caught.value) == "heights"
+    with pytest.raises(TypeError) as caught:
+        bar([1, 2], [1.0, 2.0], label="x" * 1001, color="red")
+    assert _parameter(caught.value) == "color"
+    recorder = _RecordsConversion()
+    with pytest.raises(TypeError) as caught:
+        bar(recorder, None)
+    assert _parameter(caught.value) == "heights"
+    assert not recorder.converted
+    with pytest.raises(ub.DataError) as data:
+        bar([1, 2], [1.0, 2.0])
+    assert _parameter(data.value) == "categories"
 
 
 # (method, axes factory, call, error class, message, parameter, hint)
@@ -754,3 +821,17 @@ def test_grouped_error_output_shows_the_series_and_the_hint(tmp_path: Path) -> N
     err = _raised(tmp_path, call, SETUP)
     assert str(err) == f"Axes.grouped_bar(): series[1].heights[1] is inf; {FINITE}"
     assert _notes(err) == [_marked(call, "[good, bad]"), f"hint: {SERIES_GAP}"]
+
+
+def test_masked_heights_are_a_value_error_after_the_types() -> None:
+    masked = np.ma.array([1.0, 2.0])
+    series = cast(Callable[..., object], ub.BarSeries)
+    with pytest.raises(TypeError) as caught:
+        series("s", masked, color="red")
+    assert _parameter(caught.value) == "color"
+    with pytest.raises(ub.DataError) as data:
+        series("s", masked)
+    assert _parameter(data.value) == "heights"
+    with pytest.raises(TypeError) as caught:
+        cast(Callable[..., object], _bars().bar)(masked, None)
+    assert _parameter(caught.value) == "heights"

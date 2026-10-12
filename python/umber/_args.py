@@ -356,6 +356,28 @@ def instance[T](context: str, name: str, value: object, cls: type[T], hint: str)
     return value
 
 
+def require_path(context: str, name: str, value: object) -> None:
+    """Check that a path argument is a ``str`` or path-like object, without calling it.
+
+    A path-like object whose path is ``bytes`` is refused later, by ``path``.
+
+    Args:
+        context: The API call, such as ``"Figure.save_png()"``.
+        name: The parameter name.
+        value: The value passed.
+
+    Raises:
+        TypeError: The value is neither a ``str`` nor a path-like object.
+
+    Example:
+        >>> from umber._args import require_path
+        >>> require_path("Figure.save_png()", "path", "sales.png")
+    """
+    if not isinstance(value, str | os.PathLike):
+        hint = _BYTES_PATH_HINT if isinstance(value, bytes) else _PATH_HINT
+        raise _wrong_type(context, name, value, "a str or a path-like object", hint)
+
+
 def path(context: str, name: str, value: object) -> str:
     """Check a file path argument and return it as a ``str``.
 

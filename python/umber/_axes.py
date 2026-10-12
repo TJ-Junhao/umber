@@ -26,6 +26,7 @@ from umber._types import Values
 from umber._values import (
     FloatArray,
     axis_values,
+    check_axis_type,
     check_floats_type,
     check_names_type,
     floats,
@@ -507,12 +508,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.line()"
-            name = _args.text(context, "label", label)
+            check_axis_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
             xs = self._x_values(context, x)
             ys = floats(context, "y", y)
+            name = _args.text(context, "label", label)
             self._native.line(xs, ys, name, spec, style.value, extent)
             return self
 
@@ -556,12 +560,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.area()"
-            name = _args.text(context, "label", label)
+            check_axis_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
             xs = self._x_values(context, x)
             ys = floats(context, "y", y)
+            name = _args.text(context, "label", label)
             self._native.area(xs, ys, name, spec, style.value, extent)
             return self
 
@@ -604,12 +611,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.scatter()"
-            name = _args.text(context, "label", label)
+            check_axis_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             extent = _size_argument(context, "size", size)
             xs = self._x_values(context, x)
             ys = floats(context, "y", y)
+            name = _args.text(context, "label", label)
             self._native.scatter(xs, ys, name, spec, shape.value, extent)
             return self
 
@@ -649,10 +659,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.bar()"
-            name = _args.text(context, "label", label)
+            check_names_type(context, "categories", categories)
+            check_floats_type(context, "heights", heights)
+            _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             category_names = names(context, "categories", categories)
             values = floats(context, "heights", heights)
+            name = _args.text(context, "label", label)
             self._native.bar(category_names, values, name, spec)
             return self
 
@@ -687,6 +700,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.grouped_bar()"
+            check_names_type(context, "categories", categories)
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
             self._native.grouped_bar(category_names, arguments)
@@ -726,6 +740,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.stacked_bar()"
+            check_names_type(context, "categories", categories)
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
             self._native.stacked_bar(category_names, arguments)
@@ -766,10 +781,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.hist()"
+            check_floats_type(context, "values", values)
             count = integer(context, "bins", bins)
-            name = _args.text(context, "label", label)
+            _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             data = floats(context, "values", values)
+            name = _args.text(context, "label", label)
             self._native.hist(data, count, name, spec)
             return self
 

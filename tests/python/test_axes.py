@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import pytest
 
@@ -381,10 +382,46 @@ def test_labels_are_capped(name: str) -> None:
     assert details(caught.value) == ("label", TOO_LONG_HINT)
 
 
-def test_style_arguments_are_checked_before_the_data() -> None:
+def test_x_type_is_checked_before_the_style_arguments() -> None:
     with pytest.raises(TypeError) as caught:
         _axes().line(cast(list[float], "abc"), [1.0], color=cast(ub.Color, "red"))
-    assert details(caught.value) == ("color", COLOR_HINT)
+    assert _parameter(caught.value) == "x"
+
+
+class _RecordsConversion:
+    """A data object that notes whether it was converted to an array."""
+
+    def __init__(self) -> None:
+        self.converted = False
+
+    def __array__(self, dtype: object = None, copy: object = None) -> npt.NDArray[np.float64]:
+        self.converted = True
+        return np.array([0.0, 1.0])
+
+
+def _parameter(err: BaseException) -> object:
+    found = details(err)
+    assert found is not None
+    return found[0]
+
+
+@pytest.mark.parametrize("name", ["line", "scatter"])
+def test_types_are_checked_before_any_conversion(name: str) -> None:
+    method = _method(_axes(), name)
+    with pytest.raises(TypeError) as caught:
+        method([0, "bad"], None)
+    assert _parameter(caught.value) == "y"
+    with pytest.raises(TypeError) as caught:
+        method([0, "bad"], [1, 2], label="x" * 1001, color="red")
+    assert _parameter(caught.value) == "color"
+    recorder = _RecordsConversion()
+    with pytest.raises(TypeError) as caught:
+        method(recorder, None)
+    assert _parameter(caught.value) == "y"
+    assert not recorder.converted
+    with pytest.raises(ub.DataError) as data:
+        method([0, "bad"], [1, 2])
+    assert _parameter(data.value) == "x"
 
 
 def test_x_is_converted_before_y() -> None:
@@ -585,3 +622,15 @@ def test_failed_setters_leave_the_figure_unchanged(call: Callable[[AnyAxes], obj
     with pytest.raises((TypeError, ub.StyleError)):
         call(ax)
     assert ax.figure.to_svg(text=ub.SvgText.EDITABLE) == before
+
+
+@pytest.mark.parametrize("name", ["line", "scatter"])
+def test_masked_x_is_a_value_error_after_the_types(name: str) -> None:
+    method = _method(_axes(), name)
+    masked = np.ma.array([1.0, 2.0])
+    with pytest.raises(TypeError) as caught:
+        method(masked, None)
+    assert _parameter(caught.value) == "y"
+    with pytest.raises(ub.DataError) as data:
+        method(masked, [1.0, 2.0])
+    assert _parameter(data.value) == "x"

@@ -7,11 +7,11 @@ from typing import Final, Self, cast, final
 import numpy as np
 
 from umber import _color
-from umber._args import instance, text
+from umber._args import instance, require_text, text
 from umber._color import Color
 from umber._report import api_call
 from umber._types import Values
-from umber._values import FloatArray, floats
+from umber._values import FloatArray, check_floats_type, floats
 
 _COLOR_HINT: Final = 'use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.'
 
@@ -65,8 +65,10 @@ class BarSeries:
             raise AttributeError("a BarSeries is immutable")
         with api_call():
             context = "BarSeries()"
-            name = text(context, "label", label)
+            require_text(context, "label", label)
+            check_floats_type(context, "heights", heights)
             shade = instance(context, "color", color, Color, _COLOR_HINT)
+            name = text(context, "label", label)
             values = floats(context, "heights", heights)
             _fill(self, name, values, shade)
 

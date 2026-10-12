@@ -170,24 +170,59 @@ def test_labels_are_capped() -> None:
     assert details(caught.value) == ("label", TOO_LONG_HINT)
 
 
-def test_check_order_is_label_color_dash_width_then_x_then_y() -> None:
+def test_check_order_is_x_y_label_color_dash_width() -> None:
     order = ["label", "color", "dash", "width"]
     bad: dict[str, Any] = {"label": 3, "color": "red", "dash": "--", "width": 2.0}
-    data: dict[str, Any] = {"x": cast(list[float], "abc"), "y": cast(list[float], "def")}
     ax = _axes()
     for keyword in order:
         remaining = {k: bad[k] for k in order[order.index(keyword) :]}
         with pytest.raises(TypeError) as caught:
-            _area(ax)(**data, **remaining)
+            _area(ax)([0.0, 1.0], [1.0, 2.0], **remaining)
         found = details(caught.value)
         assert found is not None
         assert found[0] == keyword
+    both = {"x": cast(list[float], "abc"), "y": cast(list[float], "def")}
     with pytest.raises(TypeError) as caught:
-        _area(ax)(**data)
+        _area(ax)(**both, **bad)
     assert str(caught.value) == "Axes.area(): x is str; x must be a sequence or an array."
     with pytest.raises(TypeError) as caught:
-        ax.area([0.0, 1.0], cast(list[float], "def"))
+        _area(ax)([0.0, 1.0], cast(list[float], "def"), **bad)
     assert str(caught.value) == "Axes.area(): y is str; y must be a sequence or an array."
+
+
+class _RecordsConversion:
+    """A data object that notes whether it was converted to an array."""
+
+    def __init__(self) -> None:
+        self.converted = False
+
+    def __array__(self, dtype: object = None, copy: object = None) -> npt.NDArray[np.float64]:
+        self.converted = True
+        return np.array([0.0, 1.0])
+
+
+def _parameter(err: BaseException) -> object:
+    found = details(err)
+    assert found is not None
+    return found[0]
+
+
+def test_types_are_checked_before_any_conversion() -> None:
+    area = _area(_axes())
+    with pytest.raises(TypeError) as caught:
+        area([0, "bad"], None)
+    assert _parameter(caught.value) == "y"
+    with pytest.raises(TypeError) as caught:
+        area([0, "bad"], [1, 2], label="x" * 1001, color="red")
+    assert _parameter(caught.value) == "color"
+    recorder = _RecordsConversion()
+    with pytest.raises(TypeError) as caught:
+        area(recorder, None)
+    assert _parameter(caught.value) == "y"
+    assert not recorder.converted
+    with pytest.raises(ub.DataError) as data:
+        area([0, "bad"], [1, 2])
+    assert _parameter(data.value) == "x"
 
 
 # (axes factory, x, y, error class, message, parameter, hint)
