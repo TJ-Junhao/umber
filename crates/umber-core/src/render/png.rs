@@ -37,6 +37,10 @@ const PHASES: usize = 8;
 /// degenerate clips and gradients) are skipped; the output is always a valid PNG. The same scene
 /// gives the same bytes.
 ///
+/// Scenes with thousands of markers are composited on up to 8 threads, bounded by
+/// [`std::thread::available_parallelism`]; the threads end before this returns, and the bytes
+/// do not depend on how many there were.
+///
 /// # Errors
 ///
 /// Returns [`Error::Style`] when `dpi` is outside `10..=2400`, when the scene size is not
@@ -626,19 +630,102 @@ impl Sprites {
     }
 
     /// Composites the queued sprites over `pixmap` in queue order and empties the queue.
+    ///
+    /// With enough sprites queued, the image is cut into bands of [`BAND_ROWS`] rows, dealt out
+    /// to up to [`MAX_THREADS`] threads; each band belongs to one thread, which composites every
+    /// queued sprite over it in queue order. Every pixel therefore sees the same sprites in the
+    /// same order whatever the number of threads, and the output is the same.
     fn flush(&self, pixmap: &mut sk::Pixmap, queue: &mut Vec<Placement>) {
-        for placement in queue.drain(..) {
+        let width = pixmap.width() as usize;
+        let threads = compositing_threads(queue.len());
+        let image = pixmap.data_mut();
+        if threads <= 1 {
+            self.composite(
+                Band {
+                    top: 0,
+                    data: image,
+                },
+                width,
+                queue,
+            );
+        } else {
+            let mut shares: Vec<Vec<Band<'_>>> = (0..threads).map(|_| Vec::new()).collect();
+            let bands = image.chunks_mut(BAND_ROWS * width * 4).enumerate();
+            for (i, data) in bands {
+                if let Some(share) = shares.get_mut(i % threads) {
+                    share.push(Band {
+                        top: i * BAND_ROWS,
+                        data,
+                    });
+                }
+            }
+            let queue = &*queue;
+            std::thread::scope(|scope| {
+                for share in shares {
+                    scope.spawn(move || {
+                        for band in share {
+                            self.composite(band, width, queue);
+                        }
+                    });
+                }
+            });
+        }
+        queue.clear();
+    }
+
+    /// Composites every sprite of `queue`, in order, over `band` of a `width`-pixel image.
+    fn composite(&self, mut band: Band<'_>, width: usize, queue: &[Placement]) {
+        for placement in queue {
             if let Some(Some(sprite)) = self.phases.get(placement.phase) {
-                blit_over(pixmap, sprite, placement.left, placement.top);
+                blit_over(&mut band, width, sprite, placement.left, placement.top);
             }
         }
     }
 }
 
+/// Rows of the image per band when sprites are composited on several threads.
+const BAND_ROWS: usize = 16;
+
+/// The most threads that composite sprites.
+const MAX_THREADS: usize = 8;
+
+/// The fewest queued sprites per thread for which an extra thread pays for starting. Measured
+/// with 6 x 4 in, 200 dpi scatters: threads make no difference below about 8,000 markers and
+/// cut the time of 100,000 by a third.
+const MIN_SPRITES_PER_THREAD: usize = 1024;
+
+// Lets tests choose the number of compositing threads.
+#[cfg(test)]
+thread_local! {
+    static FORCE_THREADS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// How many threads composite `queued` sprites: one per [`MIN_SPRITES_PER_THREAD`] sprites, at
+/// most the available parallelism and at most [`MAX_THREADS`], and at least one.
+fn compositing_threads(queued: usize) -> usize {
+    #[cfg(test)]
+    if let Some(threads) = FORCE_THREADS.with(std::cell::Cell::get) {
+        return threads;
+    }
+    static AVAILABLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let available = *AVAILABLE.get_or_init(|| {
+        std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+    });
+    let most = available.clamp(1, MAX_THREADS);
+    (queued / MIN_SPRITES_PER_THREAD).clamp(1, most)
+}
+
+/// The rows `top..` of an image, as many as `data` holds.
+struct Band<'a> {
+    top: usize,
+    data: &'a mut [u8],
+}
+
 /// The most sprite placements queued before they are composited. Queuing separates finding
 /// positions from compositing, which keeps the compositing loop tight; the limit bounds the
-/// queue's memory for any number of markers.
-const QUEUE_LIMIT: usize = 4096;
+/// queue's memory for any number of markers (16 bytes a placement) and leaves enough sprites in
+/// a full queue for [`MAX_THREADS`] threads.
+const QUEUE_LIMIT: usize = 32_768;
 
 /// A sprite at the whole pixel (`left`, `top`) that needs no clip mask: there is no clip, or
 /// every pixel of the sprite is one the clip mask covers fully, so masking would change
@@ -766,49 +853,62 @@ fn div255(x: u32) -> u32 {
     (x + (x >> 8)) >> 8
 }
 
-/// Composites the premultiplied `sprite` over `pixmap` with its top-left corner at (`left`,
-/// `top`), source-over, without a clip mask (see [`Placement`]).
+/// Composites the premultiplied `sprite` over the rows of `band` of a `width`-pixel image, with
+/// the sprite's top-left corner at (`left`, `top`) of the image, source-over, without a clip
+/// mask (see [`Placement`]).
 ///
 /// This is `draw_pixmap` without the per-call shader setup, which dominates when drawing
 /// hundreds of thousands of small sprites. Each row visits only its span of non-transparent
 /// pixels and copies opaque ones. All arithmetic is integer, so output is exact.
-fn blit_over(pixmap: &mut sk::Pixmap, sprite: &Sprite, left: i32, top: i32) {
-    let (dw, dh) = (pixmap.width() as i32, pixmap.height() as i32);
-    let sw = sprite.pixmap.width() as i32;
+fn blit_over(band: &mut Band<'_>, width: usize, sprite: &Sprite, left: i32, top: i32) {
+    let (width, sw) = (width as i64, i64::from(sprite.pixmap.width()));
+    let (left, top) = (i64::from(left), i64::from(top));
+    let band_top = band.top as i64;
+    let band_bottom = band_top + (band.data.len() as i64) / (width * 4).max(1);
     let src = sprite.pixmap.data();
-    let dst = pixmap.data_mut();
-    for (sy, span) in sprite.spans.iter().enumerate() {
-        let sy = sy as i32;
-        let y = top + sy;
-        if y < 0 {
+    let y0 = top.max(band_top);
+    let y1 = (top + sprite.spans.len() as i64).min(band_bottom);
+    for y in y0..y1 {
+        let sy = y - top;
+        let Some(span) = sprite.spans.get(sy as usize) else {
             continue;
-        }
-        if y >= dh {
-            break;
-        }
-        let x0 = (left + span.start as i32).max(0);
-        let x1 = (left + span.end as i32).min(dw);
+        };
+        let x0 = (left + span.start as i64).max(0);
+        let x1 = (left + span.end as i64).min(width);
         if x0 >= x1 {
             continue;
         }
         let si = ((sy * sw + (x0 - left)) * 4) as usize;
-        let di = ((y * dw + x0) * 4) as usize;
+        let di = (((y - band_top) * width + x0) * 4) as usize;
         let n = ((x1 - x0) * 4) as usize;
         // Both ranges are inside their images by the clamping above.
-        let (Some(src_row), Some(dst_row)) = (src.get(si..si + n), dst.get_mut(di..di + n)) else {
+        let (Some(src_row), Some(dst_row)) = (src.get(si..si + n), band.data.get_mut(di..di + n))
+        else {
             continue;
         };
-        for (d, s) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
-            match s.get(3).copied().unwrap_or(0) {
-                0 => {}
-                255 => d.copy_from_slice(s),
-                alpha => {
-                    let inv = 255 - u32::from(alpha);
-                    for (dc, &sc) in d.iter_mut().zip(s) {
-                        *dc = (u32::from(sc) + div255(u32::from(*dc) * inv)).min(255) as u8;
-                    }
-                }
-            }
+        blend_row(dst_row, src_row);
+    }
+}
+
+/// Composites the premultiplied pixels `src` over `dst`, source-over: transparent pixels are
+/// skipped, opaque ones copied.
+///
+/// Kept out of line: inlined into [`blit_over`], the per-pixel blend is no longer vectorized,
+/// which made compositing a 100,000-marker scatter about 25 ms slower.
+#[inline(never)]
+fn blend_row(dst: &mut [u8], src: &[u8]) {
+    for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+        let alpha = u32::from(s[3]);
+        if alpha == 0 {
+            continue;
+        }
+        if alpha == 255 {
+            d.copy_from_slice(s);
+            continue;
+        }
+        let inv = 255 - alpha;
+        for (dc, &sc) in d.iter_mut().zip(s) {
+            *dc = (u32::from(sc) + div255(u32::from(*dc) * inv)).min(255) as u8;
         }
     }
 }
@@ -1808,11 +1908,26 @@ mod tests {
         path
     }
 
-    /// Draws translucent outlined circles at `positions` with [`draw_markers`] and with
-    /// [`reference_draw_markers`], each onto the same non-uniform 200 x 140 px background at
-    /// 100 dpi, clipped to `clip` (in points) when given. Returns both pixel buffers and how
-    /// many markers the reference drew as paths.
-    fn queued_and_reference(clip: Option<Rect>, positions: &[Point]) -> (Vec<u8>, Vec<u8>, usize) {
+    /// The numbers of compositing threads every byte-identity test runs with.
+    const THREAD_COUNTS: [usize; 4] = [1, 2, 3, 8];
+
+    /// Runs `f` with sprite compositing forced onto `threads` threads.
+    fn on_threads<T>(threads: usize, f: impl FnOnce() -> T) -> T {
+        FORCE_THREADS.with(|t| t.set(Some(threads)));
+        let out = f();
+        FORCE_THREADS.with(|t| t.set(None));
+        out
+    }
+
+    /// Draws translucent outlined circles at `positions` with [`draw_markers`] on each of
+    /// [`THREAD_COUNTS`] threads and with [`reference_draw_markers`], each onto the same
+    /// non-uniform 200 x 140 px background at 100 dpi, clipped to `clip` (in points) when given.
+    /// Returns the pixel buffers of `draw_markers`, one per thread count, the reference buffer
+    /// and how many markers the reference drew as paths.
+    fn queued_and_reference(
+        clip: Option<Rect>,
+        positions: &[Point],
+    ) -> (Vec<Vec<u8>>, Vec<u8>, usize) {
         let (width, height) = (200, 140);
         let scale = DeviceScale::new(100);
         let root = sk::Transform::from_scale(scale.get(), scale.get());
@@ -1851,17 +1966,25 @@ mod tests {
             },
             ..stroke_style(1.2, vec![])
         };
-        let mut queued = background.clone();
-        draw_markers(
-            &mut queued,
-            scale,
-            root,
-            clip,
-            &shape,
-            Some(fill),
-            Some(&stroke),
-            positions,
-        );
+        let queued = THREAD_COUNTS
+            .iter()
+            .map(|&threads| {
+                let mut queued = background.clone();
+                on_threads(threads, || {
+                    draw_markers(
+                        &mut queued,
+                        scale,
+                        root,
+                        clip,
+                        &shape,
+                        Some(fill),
+                        Some(&stroke),
+                        positions,
+                    );
+                });
+                queued.take()
+            })
+            .collect();
         let mut reference = background;
         let as_paths = reference_draw_markers(
             &mut reference,
@@ -1873,13 +1996,18 @@ mod tests {
             Some(&stroke),
             positions,
         );
-        (queued.take(), reference.take(), as_paths)
+        (queued, reference.take(), as_paths)
     }
 
-    fn assert_same_pixels(queued: &[u8], reference: &[u8]) {
-        assert_eq!(queued.len(), reference.len());
-        let first = queued.iter().zip(reference).position(|(a, b)| a != b);
-        assert!(first.is_none(), "first differing byte at {first:?}");
+    fn assert_same_pixels(queued: &[Vec<u8>], reference: &[u8]) {
+        for (queued, threads) in queued.iter().zip(THREAD_COUNTS) {
+            assert_eq!(queued.len(), reference.len());
+            let first = queued.iter().zip(reference).position(|(a, b)| a != b);
+            assert!(
+                first.is_none(),
+                "{threads} threads: first differing byte at {first:?}"
+            );
+        }
     }
 
     /// A clip with fractional edges, 30.3 to 110.3 pt across and 20.6 to 70.6 pt down.
@@ -1934,12 +2062,12 @@ mod tests {
 
     #[test]
     fn queued_markers_match_the_reference_past_the_queue_limit() {
-        // Long runs of interior markers fill the queue to its limit between the occasional
-        // marker on the clip edge.
-        let count = QUEUE_LIMIT * 2 + 500;
+        // A run of interior markers longer than the queue limit between two markers on the clip
+        // edge.
+        let count = QUEUE_LIMIT + 3000;
         let positions: Vec<Point> = (0..count)
             .map(|i| {
-                if i % 3001 == 1000 {
+                if i == 1000 || i == QUEUE_LIMIT + 1500 {
                     // Reaches past the clip interior and overlaps the markers that follow.
                     pt(37.0, 45.0)
                 } else {
@@ -1949,8 +2077,38 @@ mod tests {
             })
             .collect();
         let (queued, reference, as_paths) = queued_and_reference(Some(FRACTIONAL_CLIP), &positions);
-        assert_eq!(as_paths, 3);
+        assert_eq!(as_paths, 2);
         assert_same_pixels(&queued, &reference);
+    }
+
+    #[test]
+    fn png_bytes_do_not_depend_on_the_number_of_compositing_threads() {
+        // Translucent markers inside a fractional clip, many of them on its edges and drawn as
+        // paths between batches of sprites.
+        let mut markers = markers_scene(3000, false);
+        if let Some(Item::Markers { fill, .. }) = markers.items.first_mut() {
+            *fill = Some(Rgba {
+                r: 40,
+                g: 120,
+                b: 190,
+                a: 150,
+            });
+        }
+        let mut scene = Scene::new(120.0, 80.0, WHITE);
+        scene.push(Item::Group {
+            clip: Some(Rect {
+                x: 20.3,
+                y: 15.7,
+                width: 60.0,
+                height: 30.0,
+            }),
+            items: std::mem::take(&mut markers.items),
+        });
+        let single = on_threads(1, || render_png(&scene, 150).unwrap());
+        for threads in THREAD_COUNTS {
+            let png = on_threads(threads, || render_png(&scene, 150).unwrap());
+            assert!(png == single, "{threads} threads change the PNG");
+        }
     }
 
     #[test]
