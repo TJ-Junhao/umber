@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::validation::check_series;
-use crate::{Result, ScaleKind};
+use crate::{Result, ScaleKind, Transform};
 
 /// The x values of a mark: numbers for a continuous axis, names for a category axis.
 ///
@@ -45,24 +45,23 @@ pub(super) struct Series {
 }
 
 impl Series {
-    /// Validates `x` and `y` for axes with scale kinds `x_kind` and `y_kind`, then stores both
-    /// unchanged: every bit, NaN gaps included, in the given order. The checks run in a fixed
-    /// order (lengths, then x against its axis, then y against its axis) and the first failure
-    /// is the error, under `context`. An infinite value gets `gap_hint`, which says what to pass
-    /// instead.
+    /// Validates `x` and `y` for axes with an x axis of scale kind `x_kind` and a y axis of
+    /// transform `y_transform`, then stores both
+    /// unchanged: every bit, NaN gaps included, in the given order. Both are stored as given,
+    /// without a copy: `x` is moved, and the stored y shares the allocation of `y`. The checks
+    /// run in a fixed order (lengths, then x against its axis, then y against its axis) and the
+    /// first failure is the error, under `context`. An infinite value gets `gap_hint`, which
+    /// says what to pass instead.
     pub(super) fn new(
         context: &'static str,
         x_kind: ScaleKind,
-        y_kind: ScaleKind,
+        y_transform: Transform,
         x: AxisData,
-        y: &[f64],
+        y: Arc<[f64]>,
         gap_hint: &'static str,
     ) -> Result<Series> {
-        check_series(context, x_kind, y_kind, &x, y, gap_hint)?;
-        Ok(Series {
-            x: Arc::new(x),
-            y: Arc::from(y),
-        })
+        check_series(context, x_kind, y_transform, &x, &y, gap_hint)?;
+        Ok(Series { x: Arc::new(x), y })
     }
 
     /// The x values.
@@ -89,10 +88,13 @@ impl fmt::Debug for Series {
 mod tests {
     use super::super::validation::LINE_GAP_HINT;
     use super::*;
-    use crate::model::{AreaOptions, Figure, LineOptions, Mark, ScatterOptions};
+    use crate::model::{
+        AreaOptions, BarOptions, Figure, HistOptions, LineOptions, Mark, ScatterOptions,
+    };
     use crate::{Error, LogBase, Theme};
 
     const LIN: ScaleKind = ScaleKind::Linear;
+    const LIN_Y: Transform = Transform::Linear;
 
     fn bits(values: &[f64]) -> Vec<u64> {
         values.iter().map(|v| v.to_bits()).collect()
@@ -121,9 +123,9 @@ mod tests {
         let series = Series::new(
             "t",
             LIN,
-            LIN,
+            LIN_Y,
             AxisData::Numbers(x.clone()),
-            &y,
+            Arc::from(y),
             LINE_GAP_HINT,
         )
         .unwrap();
@@ -138,9 +140,9 @@ mod tests {
         let series = Series::new(
             "t",
             ScaleKind::Category,
-            LIN,
+            LIN_Y,
             cats,
-            &[1.0, 2.0, 3.0],
+            Arc::from([1.0, 2.0, 3.0]),
             LINE_GAP_HINT,
         )
         .unwrap();
@@ -165,9 +167,9 @@ mod tests {
             message(Series::new(
                 "t",
                 LIN,
-                LIN,
+                LIN_Y,
                 nums(&[f64::INFINITY]),
-                &[],
+                Arc::from([]),
                 LINE_GAP_HINT
             ))
             .starts_with("x has 1 values but y has 0")
@@ -176,9 +178,9 @@ mod tests {
             message(Series::new(
                 "t",
                 log,
-                log,
+                Transform::Log(LogBase::TEN),
                 nums(&[1.0, -1.0]),
-                &[0.0, 1.0],
+                Arc::from([0.0, 1.0]),
                 LINE_GAP_HINT
             ))
             .starts_with("x[1] is -1 on a log axis")
@@ -187,9 +189,9 @@ mod tests {
             message(Series::new(
                 "t",
                 LIN,
-                LIN,
+                LIN_Y,
                 nums(&[0.0, 1.0]),
-                &[1e301, f64::INFINITY],
+                Arc::from([1e301, f64::INFINITY]),
                 LINE_GAP_HINT
             ))
             .starts_with("y[0] is 1e301")
@@ -272,5 +274,75 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().starts_with("Axes.area(): x has 1 values"));
         assert_eq!(axes.marks().len(), 1);
+    }
+
+    #[test]
+    fn shared_values_are_stored_without_a_copy() {
+        let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let axes = figure.add_axes(LIN, LIN).unwrap();
+        let x = || AxisData::Numbers(vec![0.0, 1.0]);
+        let y: Arc<[f64]> = Arc::from([2.0, f64::NAN]);
+        axes.line_shared(x(), Arc::clone(&y), LineOptions::default())
+            .unwrap()
+            .scatter_shared(x(), Arc::clone(&y), ScatterOptions::default())
+            .unwrap()
+            .area_shared(x(), Arc::clone(&y), AreaOptions::default())
+            .unwrap();
+        // Each mark holds the caller's allocation, not a copy of it.
+        assert_eq!(Arc::strong_count(&y), 4);
+        for mark in axes.marks() {
+            assert!(Arc::ptr_eq(&series_of(mark).y, &y), "{mark:?}");
+        }
+        // A failed call keeps no reference to the values and adds no mark.
+        let err = axes
+            .line_shared(
+                AxisData::Numbers(vec![0.0]),
+                Arc::clone(&y),
+                LineOptions::default(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().starts_with("Axes.line(): x has 1 values"));
+        assert_eq!((Arc::strong_count(&y), axes.marks().len()), (4, 3));
+
+        let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let axes = figure.add_axes(ScaleKind::Category, LIN).unwrap();
+        let heights: Arc<[f64]> = Arc::from([3.0, -1.0]);
+        axes.bar_shared(
+            vec!["a".into(), "b".into()],
+            Arc::clone(&heights),
+            BarOptions::default(),
+        )
+        .unwrap();
+        let [Mark::Bar(bar)] = axes.marks() else {
+            panic!("expected one bar mark, got {:?}", axes.marks())
+        };
+        assert!(std::ptr::eq(bar.heights(), &*heights));
+        assert_eq!(Arc::strong_count(&heights), 2);
+        assert!(
+            axes.bar_shared(
+                vec!["a".into()],
+                Arc::clone(&heights),
+                BarOptions::default()
+            )
+            .is_err()
+        );
+        assert_eq!((Arc::strong_count(&heights), axes.marks().len()), (2, 1));
+
+        let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let axes = figure.add_axes(LIN, LIN).unwrap();
+        let values: Arc<[f64]> = Arc::from([1.0, 2.5, f64::NAN]);
+        axes.hist_shared(Arc::clone(&values), HistOptions::default())
+            .unwrap();
+        let [Mark::Hist(hist)] = axes.marks() else {
+            panic!("expected one histogram, got {:?}", axes.marks())
+        };
+        assert!(std::ptr::eq(hist.values(), &*values));
+        assert_eq!(Arc::strong_count(&values), 2);
+        let bad = HistOptions {
+            bins: 0,
+            ..HistOptions::default()
+        };
+        assert!(axes.hist_shared(Arc::clone(&values), bad).is_err());
+        assert_eq!((Arc::strong_count(&values), axes.marks().len()), (2, 1));
     }
 }

@@ -308,13 +308,8 @@ fn hist_errors() -> String {
         a.hist(&[inf], HistOptions::default()).map(drop)
     });
 
+    // The y axis is never a category axis: the axes refuse it, so no histogram meets one.
     rec.section("Axes.hist, linear/category");
-    let mut f = rec.new_figure("linear/category", linear(), ScaleKind::Category);
-    rec.on_axes(&mut f, "hist on a category y axis", |a| {
-        a.hist(&[1.0], HistOptions::default()).map(drop)
-    });
-    rec.on_axes(&mut f, "hist on a category y axis, infinite value", |a| {
-        a.hist(&[inf], HistOptions::default()).map(drop)
-    });
+    rec.new_figure("linear/category", linear(), ScaleKind::Category);
     rec.out
 }

@@ -24,10 +24,6 @@ pub(crate) fn check_log_base(base: f64) -> PyResult<()> {
 
 /// Converts a scale argument `(kind, base)` to a [`ScaleKind`]. An unknown kind is an internal
 /// `ValueError`.
-#[allow(
-    dead_code,
-    reason = "Figure.add_axes() converts its scale arguments through it"
-)]
 pub(crate) fn scale_kind(kind: i64, base: f64) -> PyResult<ScaleKind> {
     match kind {
         LINEAR => Ok(ScaleKind::Linear),

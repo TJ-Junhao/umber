@@ -5,12 +5,15 @@
 //! two forms and convert nothing else; any other input is an internal `TypeError`. All checks on
 //! the values themselves (finiteness, lengths, duplicates) belong to the core.
 
+use std::iter;
+use std::sync::Arc;
+
 use pyo3::buffer::PyBuffer;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyString};
 use umber_core::AxisData;
 
-use crate::errors::internal_type;
+use crate::errors::{internal_state, internal_type};
 
 /// Copies a float64 buffer, such as a NumPy `float64` array, into a vector, in logical order.
 ///
@@ -22,11 +25,32 @@ use crate::errors::internal_type;
 /// `np.require(values, dtype="=f8", requirements=["A"]).view(np.float64)`: `np.require` makes the
 /// data aligned float64 in native order, and the view drops an explicit byte order that NumPy
 /// keeps for arrays made from such buffers, without copying.
-#[allow(
-    dead_code,
-    reason = "the figure methods convert data arguments through it"
-)]
 pub(crate) fn floats(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
+    float_buffer(obj)?.to_vec(obj.py())
+}
+
+/// Copies a float64 buffer into a new shared slice, in logical order, for values the core
+/// stores as they are: the slice is allocated once, at its final size, and the buffer is copied
+/// into it once. Accepts the buffers [`floats`] accepts, with the same errors.
+///
+/// Collecting `n` zeros from `repeat_n`, whose length is known exactly, allocates the slice
+/// once, with room for the reference counts. Reading the buffer with `PyBuffer::to_vec` and
+/// then converting the vector with `Arc::from` would allocate twice and copy the values twice.
+///
+/// Keep it that way: build the `Arc` straight from the buffer, never through [`floats`] or any
+/// other `Vec`, which would add a second copy as large as the data. No test counts the
+/// allocations here, so a second copy would not fail any test.
+pub(crate) fn shared_floats(obj: &Bound<'_, PyAny>) -> PyResult<Arc<[f64]>> {
+    let buffer = float_buffer(obj)?;
+    let mut values: Arc<[f64]> = iter::repeat_n(0.0, buffer.item_count()).collect();
+    let slice = Arc::get_mut(&mut values)
+        .ok_or_else(|| internal_state("a new shared slice is already shared"))?;
+    buffer.copy_to_slice(obj.py(), slice)?;
+    Ok(values)
+}
+
+/// The buffer of `obj`, checked against the contract of [`floats`].
+fn float_buffer(obj: &Bound<'_, PyAny>) -> PyResult<PyBuffer<f64>> {
     let unexpected = || {
         internal_type(format!(
             "expected a one-dimensional float64 buffer, got {}",
@@ -39,15 +63,11 @@ pub(crate) fn floats(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     if buffer.dimensions() != 1 || !aligned_strides || !is_native_f64(buffer.format().to_bytes()) {
         return Err(unexpected());
     }
-    buffer.to_vec(obj.py())
+    Ok(buffer)
 }
 
 /// Copies a `list` of `str` into a vector. A bare `str`, a tuple or a list holding anything but
 /// strings is refused.
-#[allow(
-    dead_code,
-    reason = "the figure methods convert name arguments through it"
-)]
 pub(crate) fn names(obj: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     let list = obj
         .cast::<PyList>()
@@ -70,10 +90,6 @@ pub(crate) fn names(obj: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
 
 /// Converts x values: a `list` becomes [`AxisData::Categories`], anything else is read as a
 /// float64 buffer and becomes [`AxisData::Numbers`].
-#[allow(
-    dead_code,
-    reason = "the figure methods convert x arguments through it"
-)]
 pub(crate) fn axis_data(obj: &Bound<'_, PyAny>) -> PyResult<AxisData> {
     if obj.is_instance_of::<PyList>() {
         names(obj).map(AxisData::Categories)
@@ -171,6 +187,31 @@ mod tests {
                     message.starts_with("internal error: expected a one-dimensional float64"),
                     "{expression}: {message}"
                 );
+            }
+        });
+    }
+
+    #[test]
+    fn shared_floats_reads_what_floats_reads_into_an_unshared_slice() {
+        with_python(|py| {
+            let bits = |values: &[f64]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+            for expression in [
+                DATA.to_owned(),
+                format!("{DATA}[::-1]"),
+                "np.arange(6.0).reshape(2, 3)[:, 1]".to_owned(),
+                "np.array([np.nan, -0.0, 1e300])".to_owned(),
+                "np.empty(0)".to_owned(),
+            ] {
+                let obj = eval(py, &expression);
+                let shared = shared_floats(&obj).unwrap();
+                assert_eq!(Arc::strong_count(&shared), 1, "{expression}");
+                assert_eq!(bits(&shared), bits(&floats(&obj).unwrap()), "{expression}");
+            }
+            for expression in ["np.zeros((2, 2))", "np.zeros(3, dtype='>f8')", "[1.0, 2.0]"] {
+                let obj = eval(py, expression);
+                let shared = internal_type_message(&shared_floats(&obj).unwrap_err(), py);
+                let copied = internal_type_message(&floats(&obj).unwrap_err(), py);
+                assert_eq!(shared, copied, "{expression}");
             }
         });
     }

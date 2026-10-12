@@ -5,7 +5,7 @@
 
 use umber_core::{
     Alpha, AreaOptions, AxisData, BarOptions, BarSeries, Error, Figure, HistOptions, LineOptions,
-    LogBase, Result, Rgba, ScaleKind, ScatterOptions, Theme,
+    LogBase, Result, Rgba, ScaleKind, ScatterOptions, SizeSpec, Theme,
 };
 
 const LOG: ScaleKind = ScaleKind::Log { base: LogBase::TEN };
@@ -101,15 +101,6 @@ fn errors_carry_their_parameter_and_hint() {
             Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
         ),
         (
-            "area, category y axis",
-            on_axes(linear, cat, |a| {
-                a.area(nums(&[1.0]), &[1.0], AreaOptions::default())
-                    .map(|_| ())
-            }),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
-        ),
-        (
             "line, infinite y",
             on_axes(linear, linear, |a| {
                 a.line(nums(&[1.0, 2.0]), &[1.0, inf], LineOptions::default())
@@ -146,15 +137,6 @@ fn errors_carry_their_parameter_and_hint() {
             Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
         ),
         (
-            "line, category y axis",
-            on_axes(linear, cat, |a| {
-                a.line(nums(&[1.0]), &[1.0], LineOptions::default())
-                    .map(|_| ())
-            }),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
-        ),
-        (
             "bar, non-category x axis",
             on_axes(linear, linear, |a| {
                 a.bar(names(&["a"]), &[1.0], BarOptions::default())
@@ -162,15 +144,6 @@ fn errors_carry_their_parameter_and_hint() {
             }),
             None,
             Some("pass x=Scale.category() to Figure.add_axes()."),
-        ),
-        (
-            "stacked bar, category y axis",
-            on_axes(cat, cat, |a| {
-                a.stacked_bar(names(&["a"]), vec![series(&[1.0])])
-                    .map(|_| ())
-            }),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "hist, category x axis",
@@ -187,14 +160,6 @@ fn errors_carry_their_parameter_and_hint() {
             }),
             None,
             Some("pass x=Scale.linear() to Figure.add_axes()."),
-        ),
-        (
-            "hist, category y axis",
-            on_axes(linear, cat, |a| {
-                a.hist(&[1.0], HistOptions::default()).map(|_| ())
-            }),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "scatter, infinite x",
@@ -289,12 +254,6 @@ fn errors_carry_their_parameter_and_hint() {
             on_axes(cat, linear, |a| a.xlim(0.0, 1.0).map(|_| ())),
             None,
             Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
-        ),
-        (
-            "ylim, category axis",
-            on_axes(linear, cat, |a| a.ylim(0.0, 1.0).map(|_| ())),
-            None,
-            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes()."),
         ),
         (
             "grouped bar, repeated category",
@@ -396,6 +355,15 @@ fn errors_carry_their_parameter_and_hint() {
             None,
         ),
         (
+            "add_axes, category y",
+            figure()
+                .add_axes(linear, cat)
+                .map(|_| ())
+                .expect_err("a category y axis"),
+            Some("y"),
+            Some("pass y=Scale.linear() or y=Scale.log()."),
+        ),
+        (
             "second add_axes",
             {
                 let mut f = figure();
@@ -468,6 +436,36 @@ fn errors_carry_their_parameter_and_hint() {
             None,
             None,
         ),
+        (
+            "Size.times, zero",
+            SizeSpec::times(0.0).expect_err("a zero factor"),
+            Some("factor"),
+            Some("use Size.AUTO for the theme's size, or a factor below 1 for a smaller one."),
+        ),
+        (
+            "Size.times, above 10",
+            SizeSpec::times(10.000_001).expect_err("a factor above 10"),
+            Some("factor"),
+            Some("use Size.pt() for a size in points."),
+        ),
+        (
+            "Size.times, NaN",
+            SizeSpec::times(f64::NAN).expect_err("a NaN factor"),
+            Some("factor"),
+            None,
+        ),
+        (
+            "Size.pt, negative",
+            SizeSpec::pt(-1.0).expect_err("negative points"),
+            Some("points"),
+            Some("use Size.AUTO for the theme's size."),
+        ),
+        (
+            "Size.pt, above 72",
+            SizeSpec::pt(72.1).expect_err("points above 72"),
+            Some("points"),
+            None,
+        ),
     ];
     for (name, err, parameter, hint) in cases {
         assert_eq!(err.parameter(), parameter, "{name}: {err}");
@@ -515,5 +513,35 @@ fn area_errors_name_the_area() {
                 ..
             }
         ));
+    }
+}
+
+#[test]
+fn size_errors_name_the_bound() {
+    for (err, message) in [
+        (
+            SizeSpec::times(0.0),
+            "Size.times(): factor is 0; a size factor must be greater than 0 and at most 10.",
+        ),
+        (
+            SizeSpec::times(-2.5),
+            "Size.times(): factor is -2.5; a size factor must be greater than 0 and at most 10.",
+        ),
+        (
+            SizeSpec::times(1e301),
+            "Size.times(): factor is 1e301; a size factor must be greater than 0 and at most 10.",
+        ),
+        (
+            SizeSpec::pt(0.0),
+            "Size.pt(): points is 0; a size in points must be greater than 0 and at most 72.",
+        ),
+        (
+            SizeSpec::pt(f64::INFINITY),
+            "Size.pt(): points is inf; a size in points must be greater than 0 and at most 72.",
+        ),
+    ] {
+        let err = err.expect_err("out of range");
+        assert_eq!(err.to_string(), message);
+        assert!(matches!(err, Error::Style { .. }));
     }
 }

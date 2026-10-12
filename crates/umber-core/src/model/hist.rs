@@ -56,8 +56,8 @@ impl Default for HistOptions {
 /// axes.hist(&[1.0, 2.5, f64::NAN, 2.0], HistOptions { bins: 4, ..HistOptions::default() })?;
 /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(hist.values().len(), 4);
-/// assert_eq!(hist.bins(), 4);
-/// assert!(hist.label().is_empty());
+/// assert_eq!(hist.options().bins, 4);
+/// assert!(hist.options().label.is_empty());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 ///
@@ -83,19 +83,19 @@ pub struct HistMark {
 }
 
 impl HistMark {
-    /// Validates `options.bins` and `values` for axes with scale kinds `x_kind` and `y_kind`
+    /// Validates `options.bins` and `values` for axes with an x axis of scale kind `x_kind`
     /// (see [`check_hist`] for the checks and their order), then stores the values unchanged,
-    /// every bit included. The first failure is the error, under `context`.
+    /// every bit included; the stored values share the allocation of `values`. The first
+    /// failure is the error, under `context`.
     pub(super) fn new(
         context: &'static str,
         x_kind: ScaleKind,
-        y_kind: ScaleKind,
-        values: &[f64],
+        values: Arc<[f64]>,
         options: HistOptions,
     ) -> Result<HistMark> {
-        let bins = check_hist(context, x_kind, y_kind, values, options.bins)?;
+        let bins = check_hist(context, x_kind, &values, options.bins)?;
         Ok(HistMark {
-            values: Arc::from(values),
+            values,
             bins,
             label: options.label,
             color: options.color,
@@ -123,48 +123,9 @@ impl HistMark {
         &self.values
     }
 
-    /// The number of bins, from 1 to [`MAX_BINS`](crate::MAX_BINS).
+    /// Bin count, label and color, as given: the [`HistOptions`] the mark was made with.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::figure::{HistOptions, Mark};
-    /// use umber_core::{Figure, ScaleKind, Theme};
-    ///
-    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// axes.hist(&[1.0, 2.0], HistOptions::default())?;
-    /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
-    /// assert_eq!(hist.bins(), 30);
-    /// # Ok::<(), umber_core::Error>(())
-    /// ```
-    #[must_use]
-    pub fn bins(&self) -> usize {
-        self.bins.get()
-    }
-
-    /// The legend label; empty for none.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::figure::{HistOptions, Mark};
-    /// use umber_core::{Figure, ScaleKind, Theme};
-    ///
-    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let options = HistOptions { label: "latency".into(), ..HistOptions::default() };
-    /// axes.hist(&[1.0, 2.0], options)?;
-    /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
-    /// assert_eq!(hist.label(), "latency");
-    /// # Ok::<(), umber_core::Error>(())
-    /// ```
-    #[must_use]
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-
-    /// The color as given, before it is resolved against a palette.
+    /// The mark stores these values once; each call builds a new [`HistOptions`] from them.
     ///
     /// # Examples
     ///
@@ -174,14 +135,33 @@ impl HistMark {
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let color = ColorSpec::Fixed(Rgba::opaque(10, 20, 30));
-    /// axes.hist(&[1.0, 2.0], HistOptions { color, ..HistOptions::default() })?;
+    /// let options = HistOptions {
+    ///     bins: 12,
+    ///     label: "latency".into(),
+    ///     color: ColorSpec::Fixed(Rgba::opaque(10, 20, 30)),
+    /// };
+    /// axes.hist(&[1.0, 2.0], options.clone())?;
     /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
-    /// assert_eq!(hist.color(), color);
+    /// assert_eq!(hist.options(), options);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
-    pub fn color(&self) -> ColorSpec {
+    pub fn options(&self) -> HistOptions {
+        HistOptions {
+            // At most `MAX_BINS`, so the count fits an `i64`.
+            bins: self.bins.get() as i64,
+            label: self.label.clone(),
+            color: self.color,
+        }
+    }
+
+    /// The legend label; empty for none.
+    pub(crate) fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// The color as given, before it is resolved against a palette.
+    pub(crate) fn color(&self) -> ColorSpec {
         self.color
     }
 

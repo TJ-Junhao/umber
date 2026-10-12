@@ -3,7 +3,7 @@
 use super::MarkContext;
 use super::clip::Bounds;
 use super::mapping::AxisPoint;
-use super::marker::{extent, marker_shape, marker_size};
+use super::marker::{extent, marker_shape};
 use crate::geometry::Point;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
 use crate::{Marker, Rgba};
@@ -14,19 +14,20 @@ const MARKER_OUTLINE: f32 = 0.8;
 /// outside the plot area are dropped.
 const MARKER_SLACK: f64 = 1.0;
 
-/// The scene item of one scatter: one batch of `shape` markers, filled with `color` at the
-/// theme's marker alpha times the color's own, outlined 0.8 pt in the background color. Points
-/// whose marker cannot reach the plot area are dropped.
+/// The scene item of one scatter: one batch of `shape` markers of diameter `size` (the mark's
+/// drawn size, see [`ResolvedMark::Scatter`](crate::resolve::ResolvedMark::Scatter)), filled
+/// with `color` at the theme's marker alpha times the color's own, outlined 0.8 pt in the
+/// background color. Points whose marker cannot reach the plot area are dropped.
 pub(super) fn scatter_item(
     context: &MarkContext<'_>,
     xs: &[f64],
     ys: &[f64],
     color: Rgba,
     shape: Marker,
+    size: f32,
 ) -> Option<Item> {
     let MarkContext { theme, maps, .. } = *context;
-    let d = marker_size(theme);
-    let shape_path = marker_shape(shape, d);
+    let shape_path = marker_shape(shape, size);
     // Cull in axis space by the shape's own extent on each axis, plus the outline (whose miter
     // joins reach at most its width beyond the path for these shapes) and the slack.
     let (half_w, half_h) = extent(&shape_path);

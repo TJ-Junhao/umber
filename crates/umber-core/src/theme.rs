@@ -15,7 +15,8 @@
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
-use crate::{Error, Font, Result, Rgba};
+use crate::error::number;
+use crate::{Error, Font, Result, Rgba, SizeSpec};
 
 /// The largest accepted `font_scale`.
 const MAX_FONT_SCALE: f64 = 10.0;
@@ -238,7 +239,10 @@ fn check_number(context: &'static str, name: &str, value: f64, bound: Bound) -> 
     } else {
         Err(Error::style(
             context,
-            format!("{name} is {value}; {name} must be {required}."),
+            format!(
+                "{name} is {value}; {name} must be {required}.",
+                value = number(value)
+            ),
         )
         .with_parameter("value"))
     }
@@ -629,16 +633,18 @@ impl Theme {
         self.marker_size
     }
 
-    /// The stroke width of line marks as drawn, and of their legend swatches: the line width,
-    /// finite and within `0..=MAX_STROKE_WIDTH`.
-    pub(crate) fn drawn_line_width(&self) -> f32 {
-        drawn_stroke_width(self.line_width)
+    /// The stroke width, as drawn, of a line mark (or the line of an area) that asks for
+    /// `width`, and of its legend swatch: `width` resolved against the line width (see
+    /// [`SizeSpec`]), finite and within `0..=MAX_STROKE_WIDTH`.
+    pub(crate) fn drawn_line_width(&self, width: SizeSpec) -> f32 {
+        drawn_stroke_width(width.resolve(self.line_width))
     }
 
-    /// The marker diameter as drawn, for scatter points and legend dots: the marker size,
-    /// finite and within `0..=MAX_MARKER_SIZE`.
-    pub(crate) fn drawn_marker_size(&self) -> f32 {
-        drawn_size(self.marker_size, MAX_MARKER_SIZE)
+    /// The marker diameter, as drawn, of a scatter mark that asks for `size`, and of its legend
+    /// dot: `size` resolved against the marker size (see [`SizeSpec`]), finite and within
+    /// `0..=MAX_MARKER_SIZE`. The end dots of direct labels take [`SizeSpec::Auto`].
+    pub(crate) fn drawn_marker_size(&self, size: SizeSpec) -> f32 {
+        drawn_size(size.resolve(self.marker_size), MAX_MARKER_SIZE)
     }
 
     /// The marker opacity, from 0.0 to 1.0.
@@ -1162,6 +1168,15 @@ mod tests {
 
     fn hexes(theme: &Theme) -> Vec<String> {
         theme.palette().iter().map(|c| c.to_hex()).collect()
+    }
+
+    #[test]
+    fn extreme_values_print_in_scientific_form() {
+        let err = Theme::pigment().with_line_width(1e-50).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Theme.with_line_width(): line_width is 1e-50; line_width must be a finite number greater than 0."
+        );
     }
 
     #[test]

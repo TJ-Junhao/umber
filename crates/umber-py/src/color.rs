@@ -95,13 +95,12 @@ pub(crate) fn check_palette_index(index: i64) -> PyResult<()> {
         .map_err(core_error)
 }
 
+/// A color argument `(kind, payload, alpha)`, as the module documentation describes.
+pub(crate) type ColorArg = (i64, i64, f64);
+
 /// Converts a color argument `(kind, payload, alpha)` to a [`ColorSpec`]. An unknown kind or a
 /// payload out of range is an internal `ValueError`.
-#[allow(
-    dead_code,
-    reason = "the figure and theme methods convert color arguments through it"
-)]
-pub(crate) fn color_spec((kind, payload, alpha): (i64, i64, f64)) -> PyResult<ColorSpec> {
+pub(crate) fn color_spec((kind, payload, alpha): ColorArg) -> PyResult<ColorSpec> {
     let opacity = || Alpha::new(alpha).map_err(core_error);
     match kind {
         AUTO => Ok(ColorSpec::Auto(opacity()?)),
@@ -114,7 +113,6 @@ pub(crate) fn color_spec((kind, payload, alpha): (i64, i64, f64)) -> PyResult<Co
 /// The concrete color of `spec`, for a theme color. `Color.AUTO` and `Color.palette()` refer to
 /// a theme palette, so a theme cannot use them: they are a `Style` error in `context` about
 /// `parameter`, whose message names the offending argument as `what` (such as `colors[2]`).
-#[allow(dead_code, reason = "the theme color setters check through it")]
 pub(crate) fn concrete(
     spec: ColorSpec,
     context: &'static str,

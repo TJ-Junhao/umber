@@ -7,7 +7,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use umber_core::{Dash, Font, GridLines, LegendStyle, Marker, SvgText};
+use umber_core::{Dash, FillStyle, Font, GridLines, LegendStyle, Marker, SvgText};
 
 use crate::errors::internal_value;
 
@@ -80,6 +80,11 @@ int_enum!("LegendStyle", LegendStyle {
     "NONE" => LegendStyle::None = 3,
 });
 
+int_enum!("FillStyle", FillStyle {
+    "SOLID" => FillStyle::Solid = 0,
+    "GRADIENT" => FillStyle::Gradient = 1,
+});
+
 int_enum!("GridLines", GridLines {
     "HORIZONTAL" => GridLines::Horizontal = 0,
     "VERTICAL" => GridLines::Vertical = 1,
@@ -93,21 +98,18 @@ int_enum!("SvgText", SvgText {
 });
 
 /// The variant of `E` with integer value `value`; an unknown value is an internal `ValueError`.
-#[allow(
-    dead_code,
-    reason = "the figure and theme methods convert enum arguments through it"
-)]
 pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
     E::from_value(value)
         .ok_or_else(|| internal_value(format!("{value} is not a value of {}", E::PY_NAME)))
 }
 
 /// Every bound enum: its Python name and its `(member name, value)` pairs.
-const TABLES: [(&str, &[(&str, i64)]); 6] = [
+const TABLES: [(&str, &[(&str, i64)]); 7] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (Font::PY_NAME, Font::MEMBERS),
     (LegendStyle::PY_NAME, LegendStyle::MEMBERS),
+    (FillStyle::PY_NAME, FillStyle::MEMBERS),
     (GridLines::PY_NAME, GridLines::MEMBERS),
     (SvgText::PY_NAME, SvgText::MEMBERS),
 ];
@@ -150,6 +152,7 @@ mod tests {
         round_trips::<Marker>();
         round_trips::<Font>();
         round_trips::<LegendStyle>();
+        round_trips::<FillStyle>();
         round_trips::<GridLines>();
         round_trips::<SvgText>();
     }
@@ -164,6 +167,7 @@ mod tests {
                 "Marker",
                 "Font",
                 "LegendStyle",
+                "FillStyle",
                 "GridLines",
                 "SvgText"
             ]

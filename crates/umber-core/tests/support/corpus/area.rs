@@ -191,6 +191,7 @@ fn figures() -> Vec<(String, umber_core::Figure)> {
                 label: "Solar".into(),
                 color: ColorSpec::Auto(Alpha::new(0.6).unwrap()),
                 dash: Dash::Dotted,
+                ..AreaOptions::default()
             },
         )
         .unwrap();
@@ -347,6 +348,7 @@ fn area_errors() -> String {
                     alpha: Alpha::new(0.25).unwrap(),
                 },
                 dash: Dash::Dashed,
+                ..AreaOptions::default()
             },
         )
         .map(drop)
@@ -367,22 +369,9 @@ fn area_errors() -> String {
         });
     }
 
+    // The y axis is never a category axis: the axes refuse it, so no area meets one.
     rec.section("Axes.area, category y");
-    for (label, x_kind) in [
-        ("category/category", ScaleKind::Category),
-        ("linear/category", linear()),
-    ] {
-        let mut f = rec.new_figure(label, x_kind, ScaleKind::Category);
-        for (name, x, y) in [
-            ("numbers", nums(&[1.0]), vec![1.0]),
-            ("categories", cats(&["a"]), vec![1.0]),
-            ("numbers, infinite x", nums(&[inf]), vec![1.0]),
-        ] {
-            rec.on_axes(&mut f, &format!("area {name}"), |a| {
-                a.area(x, &y, area()).map(drop)
-            });
-        }
-    }
+    rec.new_figure("linear/category", linear(), ScaleKind::Category);
 
     rec.section("Axes.area, log2/linear");
     let mut f = rec.new_figure("log2/linear", log(2.0), linear());

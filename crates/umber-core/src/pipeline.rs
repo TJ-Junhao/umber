@@ -21,10 +21,10 @@ pub(crate) fn plan(input: &LayoutInput<'_>, marks: &[ResolvedMark<'_>]) -> (Reso
     let guess = layout::initial_plot_size(input.width, input.height);
     let (tx, ty) = layout::tick_targets(guess);
     let first = resolve::resolve(marks, &limits, tx, ty);
-    let first = layout::lay_out(input, &first, guess.width);
+    let first = layout::lay_out(input, &first);
     let (tx, ty) = layout::tick_targets(first.plot.size());
     let resolved = resolve::resolve(marks, &limits, tx, ty);
-    let layout = layout::lay_out(input, &resolved, first.plot.width);
+    let layout = layout::lay_out(input, &resolved);
     (resolved, layout)
 }
 
@@ -49,7 +49,7 @@ pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layo
     let theme = figure.theme();
     let axes = figure.axes().expect("the figure has axes");
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
-    let marks = resolve::resolve_marks(axes.marks(), theme.palette());
+    let marks = resolve::resolve_marks(axes.marks(), theme);
     let legend = measure_legend(width, theme, axes, &marks, lib);
     let input = LayoutInput {
         width,
@@ -78,7 +78,7 @@ pub(crate) fn scene(figure: &Figure, library: &FontLibrary) -> Scene {
     let Some(axes) = figure.axes() else {
         return scene;
     };
-    let marks = resolve::resolve_marks(axes.marks(), theme.palette());
+    let marks = resolve::resolve_marks(axes.marks(), theme);
     let legend = measure_legend(width, theme, axes, &marks, library);
     let input = LayoutInput {
         width,
