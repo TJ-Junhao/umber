@@ -9,14 +9,15 @@
 //! upper(D) = min(left_max, right - D, hi - half_j - pos_j × D)   ≥ L
 //! ```
 //!
-//! Each pair of a lower and an upper constraint bounds `D` on its own, so the widest plot that
-//! fits is the smallest of those bounds, found without iterating, and its left edge is
-//! `lower(D)`. The widest plot is also the least inset: no other fit has a smaller left edge or
+//! Each pair of a lower and an upper constraint bounds `D` on its own, and the plot must be at
+//! least `min_width` wide, so the widest plot that fits is the smallest of those bounds, found
+//! without iterating, provided it is at least `min_width` and every pair holds there; its left
+//! edge is `lower(D)`. The widest plot is also the least inset: no other fit has a smaller left edge or
 //! a larger right edge.
 
 /// The largest distance, in points, by which a label may miss its bound and still count as
 /// contained: far below anything visible, and far above the rounding of the solve.
-const CONTAINMENT_TOLERANCE: f64 = 1e-6;
+pub(super) const CONTAINMENT_TOLERANCE: f64 = 1e-6;
 
 /// The rounding, in points, allowed when deciding whether a pair of constraints is compatible
 /// and whether an edge moved at all.
@@ -66,6 +67,8 @@ pub(super) struct Room {
     pub lo: f64,
     /// The largest x a label may reach.
     pub hi: f64,
+    /// The narrowest plot allowed.
+    pub min_width: f64,
 }
 
 /// The plot edges [`fit_x_labels`] settles on, or that no edges keep every label in bounds.
@@ -84,12 +87,13 @@ pub(super) enum XInset {
 
 /// The left and right edges of the plot area, inset from those of `room` just enough that
 /// every label of `labels` lies in `room.lo..=room.hi`, within the caps `room.left_max` and
-/// `room.right_min`.
+/// `room.right_min`, with the plot at least `room.min_width` wide.
 ///
 /// When no edges within the caps can do that, the result is [`XInset::Overflowing`]: either the
 /// labels need more inset than the caps allow, or a label at position 0 is wider than the room
 /// between the left edge and `hi` (or one at position 1 than the room between `lo` and the right
-/// edge), which no inset changes.
+/// edge), which no inset changes, or the room is narrower than `room.min_width` even without
+/// labels.
 ///
 /// When no label reaches past `lo` or `hi`, the edges are those of `room`, unchanged to the bit.
 pub(super) fn fit_x_labels(room: &Room, labels: &[TickSpan]) -> XInset {
@@ -199,14 +203,15 @@ fn bounds(room: &Room, labels: &[TickSpan]) -> (Vec<Bound>, Vec<Bound>) {
     (lower, upper)
 }
 
-/// The width of the widest plot that keeps every bound, or `None` when no width does.
+/// The width of the widest plot, at least `room.min_width` wide, that keeps every bound, or
+/// `None` when no width does.
 ///
 /// A lower bound `a - b × D` and an upper bound `c - e × D` hold together when
 /// `(e - b) × D <= c - a`: an upper limit on `D` when `e > b`, a lower one when `e < b`, and a
 /// condition on the constants alone when `e == b`, so equal positions never divide.
 fn widest_plot(room: &Room, labels: &[TickSpan]) -> Option<f64> {
     let (lower, upper) = bounds(room, labels);
-    let (mut widest, mut narrowest) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut widest, mut narrowest) = (f64::INFINITY, room.min_width);
     for low in &lower {
         for up in &upper {
             let (slope, gap) = (up.b - low.b, up.a - low.a);
@@ -275,6 +280,7 @@ fn right_edge(left: f64, max: f64, min: f64, hi: f64, labels: &[TickSpan]) -> f6
 
 #[cfg(test)]
 mod tests {
+    use super::super::{MIN_PLOT, fit_span};
     use super::*;
     use proptest::prelude::*;
 
@@ -285,6 +291,7 @@ mod tests {
         right_min: 318.0,
         lo: 12.0,
         hi: 420.0,
+        min_width: MIN_PLOT,
     };
 
     fn span(pos: f64, half: f64) -> TickSpan {
@@ -363,6 +370,7 @@ mod tests {
             right_min: 318.0,
             lo: 6.0,
             hi: 426.0,
+            min_width: MIN_PLOT,
         };
         let labels = [span(0.485, 206.55), span(0.515, 206.55)];
         let (left, right) = assert_fits(&room, &labels, (true, true));
@@ -396,6 +404,66 @@ mod tests {
             fit_x_labels(&narrow, &[span(0.0, 15.0)]),
             XInset::Overflowing
         );
+    }
+
+    #[test]
+    fn the_plot_keeps_its_minimum_width() {
+        // A room whose right edge lies left of its left edge, as when wide y tick labels push
+        // the left edge past the right one: no plot fits, with or without labels.
+        let crossed = Room {
+            left: 528.0,
+            right: 132.0,
+            left_max: 528.0,
+            right_min: 132.0,
+            lo: 6.0,
+            hi: 138.0,
+            min_width: MIN_PLOT,
+        };
+        assert_eq!(fit_x_labels(&crossed, &[]), XInset::Overflowing);
+        assert_eq!(
+            fit_x_labels(&crossed, &[span(1.0, 7.5)]),
+            XInset::Overflowing
+        );
+        assert_eq!(widest_label_that_fits(&crossed, &[span(1.0, 7.5)]), 0.0);
+        // A room just as wide as the minimum fits a plot of exactly that width; a narrower one
+        // does not.
+        let tight = Room {
+            left: 100.0,
+            right: 100.0 + MIN_PLOT,
+            left_max: 100.0,
+            right_min: 100.0,
+            lo: 6.0,
+            hi: 138.0,
+            min_width: MIN_PLOT,
+        };
+        assert_eq!(
+            contained(&tight, &[span(1.0, 5.0)]),
+            (100.0, 100.0 + MIN_PLOT)
+        );
+        let narrower = Room {
+            right: 100.0 + 0.5 * MIN_PLOT,
+            ..tight
+        };
+        assert_eq!(fit_x_labels(&narrower, &[]), XInset::Overflowing);
+        // A label that would need the plot narrower than the minimum overflows: its tick at
+        // the right edge may move in to `left + MIN_PLOT` and no further.
+        let room = Room {
+            right_min: 0.0,
+            left_max: 100.0,
+            right: 130.0,
+            ..tight
+        };
+        let at_minimum = 2.0 * (room.hi - (room.left + MIN_PLOT));
+        assert_eq!(
+            contained(&room, &[span(1.0, at_minimum / 2.0)]),
+            (100.0, 100.0 + MIN_PLOT)
+        );
+        assert_eq!(
+            fit_x_labels(&room, &[span(1.0, at_minimum / 2.0 + 1e-3)]),
+            XInset::Overflowing
+        );
+        let widest = widest_label_that_fits(&room, &[span(1.0, 100.0)]);
+        assert!((widest - at_minimum).abs() < 1e-6, "{widest}");
     }
 
     /// The labels of `labels` cut to at most `width` wide.
@@ -450,6 +518,7 @@ mod tests {
             right_min: 79.5,
             lo: 6.0,
             hi: 108.0,
+            min_width: MIN_PLOT,
         };
         for pos in [0.5001, 0.515] {
             let (left, right) = contained(&room, &[span(pos, 51.0)]);
@@ -491,8 +560,9 @@ mod tests {
             (lower, upper)
         }
 
-        /// The width `num / den` (with `den > 0`) of the widest plot that keeps every bound and
-        /// the smallest left edge for it, both rounded to `f64`; `None` when no width does.
+        /// The width `num / den` (with `den > 0`) of the widest plot, at least `min_width` wide,
+        /// that keeps every bound and the smallest left edge for it, both rounded to `f64`;
+        /// `None` when no width does.
         pub fn widest(room: &Room, labels: &[TickSpan]) -> Option<(f64, f64)> {
             let (lower, upper) = bounds(room, labels);
             // The smallest of the upper limits gap / slope over pairs with slope > 0.
@@ -514,6 +584,10 @@ mod tests {
                 }
             }
             let (num, den) = best?;
+            // The plot is at least `min_width` wide: num >= min_width den.
+            if sign(&num.sub(&d(room.min_width).mul(&den))) == Ordering::Less {
+                return None;
+            }
             // Every pair must hold at that width: (e - b) num <= (c - a) den.
             for low in &lower {
                 for up in &upper {
@@ -580,26 +654,66 @@ mod tests {
             })
     }
 
+    /// The width of a room: mostly roomy, sometimes about [`MIN_PLOT`] or less, down to a right
+    /// edge left of the left one, as when wide y tick labels push the left edge past it.
+    fn room_width() -> impl Strategy<Value = f64> {
+        prop_oneof![
+            6 => 1.0..500.0_f64,
+            1 => Just(MIN_PLOT),
+            1 => (0.0..=2.0_f64).prop_map(|k| k * MIN_PLOT),
+            1 => -400.0..0.0_f64,
+        ]
+    }
+
     fn room_and_labels() -> impl Strategy<Value = (Room, Vec<TickSpan>)> {
         (
             0.0..60.0_f64,
-            1.0..500.0_f64,
+            room_width(),
             0.0..=0.5_f64,
             0.0..=0.5_f64,
             0.0..20.0_f64,
             0.0..20.0_f64,
         )
             .prop_flat_map(|(left, width, cap_left, cap_right, pad_lo, pad_hi)| {
+                let right = left + width;
+                // Caps and labels scale with the room's extent, whichever way it points.
+                let extent = width.abs().max(MIN_PLOT);
                 let room = Room {
                     left,
-                    right: left + width,
-                    left_max: left + cap_left * width,
-                    right_min: left + width - cap_right * width,
+                    right,
+                    left_max: left + cap_left * extent,
+                    right_min: right - cap_right * extent,
                     lo: left - pad_lo,
-                    hi: left + width + pad_hi,
+                    hi: left.max(right) + pad_hi,
+                    min_width: MIN_PLOT,
                 };
-                labels(width).prop_map(move |labels| (room, labels))
+                labels(extent).prop_map(move |labels| (room, labels))
             })
+    }
+
+    /// Asserts what layout relies on for a contained fit `left..right` of `labels` in `room`:
+    /// the plot is at least `room.min_width` wide, and once [`fit_span`] has kept it on a canvas
+    /// that ends at the room's right edge or `hi`, every label still lies within the bounds.
+    fn assert_placeable(
+        room: &Room,
+        labels: &[TickSpan],
+        left: f64,
+        right: f64,
+    ) -> Result<(), TestCaseError> {
+        prop_assert!(
+            right - left >= room.min_width - ROUNDING_TOLERANCE,
+            "{left} {right}"
+        );
+        let (x, width) = fit_span(left, right, room.right.max(room.hi));
+        for l in labels {
+            let (lo, hi) = l.ends(x, x + width);
+            prop_assert!(
+                lo >= room.lo - CONTAINMENT_TOLERANCE && hi <= room.hi + CONTAINMENT_TOLERANCE,
+                "{l:?} on {x}..{}: {lo}..{hi}",
+                x + width
+            );
+        }
+        Ok(())
     }
 
     proptest! {
@@ -613,6 +727,7 @@ mod tests {
                 (XInset::Contained { left, right }, Some((width, least_left))) => {
                     prop_assert!(((right - left) - width).abs() <= 1e-6, "{left} {right} {width}");
                     prop_assert!((left - least_left).abs() <= 1e-6, "{left} vs {least_left}");
+                    assert_placeable(&room, &labels, left, right)?;
                 }
                 (XInset::Overflowing, Some(want)) => {
                     prop_assert!(false, "overflowing, but {want:?} fits");
@@ -623,12 +738,17 @@ mod tests {
                         let (lo, hi) = l.ends(left, right);
                         prop_assert!(lo >= room.lo - 1e-6 && hi <= room.hi + 1e-6);
                     }
+                    assert_placeable(&room, &labels, left, right)?;
                 }
-                // The labels cut to the widest width that fits do fit, and no label that
-                // fits is cut.
+                // The labels cut to the widest width that fits do fit, unless not even labels
+                // of no width fit, and no label that fits is cut.
                 (XInset::Overflowing, None) => {
                     let widest = widest_label_that_fits(&room, &labels);
-                    prop_assert!(fits(&room, &cut(&labels, widest)), "{widest}");
+                    prop_assert!(
+                        fits(&room, &cut(&labels, widest))
+                            || (widest == 0.0 && !fits(&room, &cut(&labels, 0.0))),
+                        "{widest}"
+                    );
                     let widest_half = labels.iter().map(|l| l.half).fold(0.0, f64::max);
                     prop_assert!(widest == 0.0 || widest < 2.0 * widest_half, "{widest}");
                 }

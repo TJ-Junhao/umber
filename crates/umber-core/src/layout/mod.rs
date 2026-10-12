@@ -4,11 +4,12 @@
 //!
 //! Every derived value is finite: font sizes are clamped, text wider than
 //! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least 1 by 1 pt and
-//! lies on the canvas (unless the canvas itself is narrower than 1 pt). Text that does not fit,
+//! lies on the canvas (unless the canvas itself is shorter than 1 pt). Text that does not fit,
 //! such as a title wider than the figure, is clipped by the canvas.
-//! Every x tick label keeps [`X_LABEL_EDGE_GAP`] from the canvas edges; x tick labels that would
-//! need a larger plot inset than [`END_LABEL_SHARE`] allows fail the layout with
-//! `Error::Style`.
+//! A figure whose y tick labels and padding leave the plot less than [`MIN_PLOT`] wide fails the
+//! layout with `Error::Style`. Every x tick label keeps [`X_LABEL_EDGE_GAP`] from the canvas
+//! edges; x tick labels that would need a larger plot inset than [`END_LABEL_SHARE`] allows, or
+//! a plot narrower than [`MIN_PLOT`], fail the layout with `Error::Style` too.
 //! With figures of at most 200 in a side this keeps every coordinate far below the renderers'
 //! `MAX_COORD`.
 
@@ -41,7 +42,8 @@ const Y_LABEL_CENTER: f64 = 0.35;
 const X_LABEL_GAP: f64 = 4.0;
 /// The gap between the tick labels and an axis label.
 const AXIS_LABEL_GAP: f64 = 4.0;
-/// The smallest plot side.
+/// The smallest plot side. [`fit_span`] keeps the plot at least this wide and tall, and the x
+/// tick label solve in [`inset`] places x tick labels for a plot at least this wide.
 const MIN_PLOT: f64 = 1.0;
 /// The smallest gap between an x tick label and the left or right canvas edge: half the outer
 /// padding, so an end label may reach into the padding but never ends flush with the edge.
@@ -351,14 +353,25 @@ pub(crate) struct LayoutInput<'a> {
 /// The hint of the error for x tick labels that cannot fit.
 const X_LABEL_HINT: &str = "shorten the labels or widen the figure.";
 
+/// The hint of the error for y tick labels that leave no room for the plot area.
+const Y_LABEL_HINT: &str = "shorten the y tick labels or widen the figure.";
+
+/// The hint of the error for a figure too narrow for the plot area.
+const FIGURE_WIDTH_HINT: &str = "widen the figure.";
+
 /// Lays out the axes of `input` for already resolved scales.
 ///
 /// # Errors
 ///
-/// `Error::Style` in `input.context` when the x tick labels cannot all keep
-/// [`X_LABEL_EDGE_GAP`] from the canvas edges with each side of the plot inset by at most
-/// [`END_LABEL_SHARE`] of the inner width. The message names the widest label, its width and
-/// the width up to which labels fit.
+/// `Error::Style` in `input.context`, checked in this order:
+/// - the room between the y tick labels and the right padding (less what direct labels
+///   reserve) is narrower than [`MIN_PLOT`], with or without x tick labels: the message names
+///   the widest y tick label when narrower ones would leave room, and otherwise the width the
+///   figure needs (see [`no_room_for_plot`]);
+/// - the x tick labels cannot all keep [`X_LABEL_EDGE_GAP`] from the canvas edges on a plot at
+///   least [`MIN_PLOT`] wide, with each side of the plot inset by at most [`END_LABEL_SHARE`] of
+///   the inner width: the message names the widest x tick label, its width and the width up to
+///   which labels fit.
 pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<Layout> {
     let LayoutInput {
         width,
@@ -462,6 +475,7 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
         right_min: right.min(width - PADDING - cap),
         lo: X_LABEL_EDGE_GAP,
         hi: width - X_LABEL_EDGE_GAP,
+        min_width: MIN_PLOT,
     };
     let spans: Vec<inset::TickSpan> = x_labels
         .iter()
@@ -470,6 +484,12 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
             half: label.width() / 2.0,
         })
         .collect();
+    // Every layout first needs a plot at least `MIN_PLOT` wide between the y tick labels and
+    // the right padding, x tick labels or not; only then are the x tick labels fitted.
+    if matches!(inset::fit_x_labels(&room, &[]), inset::XInset::Overflowing) {
+        let direct = legend.direct.reserve(f64::INFINITY);
+        return Err(no_room_for_plot(context, width, &y_labels, &room, direct));
+    }
     let (plot_left, plot_right) = match inset::fit_x_labels(&room, &spans) {
         inset::XInset::Contained { left, right } => (left, right),
         inset::XInset::Overflowing => {
@@ -504,6 +524,15 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
     for (pos, label) in &mut x_labels {
         label.x = plot.x_at(*pos) - label.width() / 2.0;
         label.y = plot.bottom() + X_LABEL_GAP + tick_ascent;
+    }
+    // The solve keeps the labels within the bounds for a plot at least `MIN_PLOT` wide, which
+    // `fit_span` leaves in place; this holds the final placement to the same bounds.
+    let outside = x_labels.iter().any(|(_, label)| {
+        label.x < room.lo - inset::CONTAINMENT_TOLERANCE
+            || label.x + label.width() > room.hi + inset::CONTAINMENT_TOLERANCE
+    });
+    if outside {
+        return Err(x_labels_overflow(context, &x_labels, &room, &spans));
     }
     if let Some(label) = &mut xlabel {
         label.x = plot.x + plot.width / 2.0 - label.width() / 2.0;
@@ -557,6 +586,94 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
     })
 }
 
+/// The widest of `labels`, the first of equally wide ones; `None` when there are none.
+fn widest(labels: &[(NormalizedPos, Label)]) -> Option<&Label> {
+    labels
+        .iter()
+        .map(|(_, label)| label)
+        .reduce(|widest, label| {
+            if label.width() > widest.width() {
+                label
+            } else {
+                widest
+            }
+        })
+}
+
+/// The error for a `room` that leaves the plot less than [`MIN_PLOT`] on a canvas `width` pt
+/// wide, whose direct labels would reserve `direct` pt without the cap.
+///
+/// If y tick labels no wider than some width would leave the plot [`MIN_PLOT`], they are the
+/// cause: the error names the widest y tick label (see [`y_labels_leave_no_room`]). Otherwise
+/// the canvas is too narrow even for y tick labels of no width, or without y tick labels, and
+/// the error names the width the figure needs (see [`figure_too_narrow`]).
+fn no_room_for_plot(
+    context: &'static str,
+    width: f64,
+    y_labels: &[(NormalizedPos, Label)],
+    room: &inset::Room,
+    direct: f64,
+) -> Error {
+    // The widest y tick label column that leaves the plot `MIN_PLOT` wide.
+    let y_room = room.right - MIN_PLOT - PADDING - Y_LABEL_GAP;
+    match widest(y_labels) {
+        Some(label) if y_room >= 0.0 => y_labels_leave_no_room(context, label, y_room),
+        _ => figure_too_narrow(context, width, room.left - PADDING, direct),
+    }
+}
+
+/// The narrowest canvas, in points, that leaves the plot [`MIN_PLOT`] wide next to a y tick
+/// label column `column` pt wide (its gap included) and direct labels that would reserve
+/// `direct` pt without the cap.
+///
+/// The plot gets the inner width `I` (the canvas inside the outer padding) less the column and
+/// the reserve, which is capped at [`END_LABEL_SHARE`] of `I`. That is increasing in `I`, so the
+/// narrowest canvas solves `I - column - min(direct, END_LABEL_SHARE × I) = MIN_PLOT`.
+fn min_canvas_width(column: f64, direct: f64) -> f64 {
+    let need = MIN_PLOT + column;
+    // With the reserve capped: (1 - share) I = need, valid when the cap is at most `direct`.
+    let capped = need / (1.0 - END_LABEL_SHARE);
+    let inner = if END_LABEL_SHARE * capped <= direct {
+        capped
+    } else {
+        need + direct
+    };
+    2.0 * PADDING + inner
+}
+
+/// The error for a canvas `width` pt wide that leaves no room for the plot area next to a y
+/// tick label column `column` pt wide (0 without y tick labels) and direct labels that would
+/// reserve `direct` pt. The widths are in whole points: the figure's rounded down and the one
+/// needed rounded up, so the two never look equal.
+fn figure_too_narrow(context: &'static str, width: f64, column: f64, direct: f64) -> Error {
+    Error::style(
+        context,
+        format!(
+            "the figure is {} pt wide; at least {} pt is needed for the plot area.",
+            number(width.floor()),
+            number(min_canvas_width(column, direct).ceil()),
+        ),
+    )
+    .with_hint(FIGURE_WIDTH_HINT)
+}
+
+/// The error for the y tick `label`, the widest, that leaves no room for the plot area: y tick
+/// labels up to `y_room` wide would. The widths are in whole points, as in
+/// [`x_labels_overflow`].
+fn y_labels_leave_no_room(context: &'static str, label: &Label, y_room: f64) -> Error {
+    let fits = y_room.floor();
+    Error::style(
+        context,
+        format!(
+            "y tick label {} is {} pt wide; at most {} pt leaves room for the plot area.",
+            quoted(&label.text),
+            number(label.width().round().max(fits + 1.0)),
+            number(fits),
+        ),
+    )
+    .with_hint(Y_LABEL_HINT)
+}
+
 /// The error for x tick `labels` that cannot fit `room`. It names the widest label (the first
 /// of equally wide ones), which is always wider than the labels that fit, and gives the widths
 /// in whole points: the width up to which labels fit rounded down, and the label's width
@@ -567,19 +684,8 @@ fn x_labels_overflow(
     room: &inset::Room,
     spans: &[inset::TickSpan],
 ) -> Error {
-    let widest = labels
-        .iter()
-        .map(|(_, label)| label)
-        .reduce(|widest, label| {
-            if label.width() > widest.width() {
-                label
-            } else {
-                widest
-            }
-        });
-    // Labels overflow only when there is at least one: without labels, the room's own edges
-    // always fit.
-    let (text, label_width) = widest.map_or(("", 0.0), |l| (l.text.as_str(), l.width()));
+    // Without labels the room's own edges fit: layout checks that first.
+    let (text, label_width) = widest(labels).map_or(("", 0.0), |l| (l.text.as_str(), l.width()));
     let fits = inset::widest_label_that_fits(room, spans).floor();
     Error::style(
         context,
@@ -719,12 +825,16 @@ mod tests {
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
             for scale in [1.0, 10.0] {
                 let theme = theme.with_font_scale(scale).unwrap();
-                // Without x ticks: their labels do not fit a 1 in figure at these font scales
-                // (see `labels_wider_than_the_capped_room_fail_naming_the_widest`).
+                // Without ticks: x tick labels do not fit a 1 in figure at these font scales
+                // (see `labels_wider_than_the_capped_room_fail_naming_the_widest`), and y tick
+                // labels leave no room for the plot (see
+                // `y_labels_that_leave_no_room_for_the_plot_fail_naming_the_widest`).
                 let mut f = Figure::new(1.0, 1.0, theme).unwrap();
                 f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
                     .unwrap()
                     .xticks(&[])
+                    .unwrap()
+                    .yticks(&[])
                     .unwrap()
                     .title(&long)
                     .subtitle(&long)
@@ -761,6 +871,8 @@ mod tests {
             .unwrap()
             .xticks(&[])
             .unwrap()
+            .yticks(&[])
+            .unwrap()
             .title(&huge)
             .line(
                 AxisData::Numbers(vec![0.0, 1.0]),
@@ -773,9 +885,13 @@ mod tests {
         assert!(title.width() <= MAX_TEXT_WIDTH && title.width() > MAX_TEXT_WIDTH * 0.9);
         assert!(huge.starts_with(&title.text));
         assert_scene_bounded(&f.to_scene(lib()).unwrap());
-        // A tick label as wide is cut the same way, and then named in the error.
+        // A tick label as wide is cut the same way, and then named in the error. Without y
+        // ticks: their labels at this font scale leave no room for the plot, and the error would
+        // name them (see `y_labels_that_leave_no_room_for_the_plot_fail_naming_the_widest`).
         let mut f = Figure::new(1.0, 1.0, theme).unwrap();
         f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .yticks(&[])
             .unwrap()
             .line(
                 AxisData::Categories(vec![huge.clone()]),
@@ -784,7 +900,7 @@ mod tests {
             )
             .unwrap();
         let message = overflow(&f).to_string();
-        let shown = format!("x tick label \"{}…\" is ", "W".repeat(39));
+        let shown = format!("x tick label \"{}… is ", "W".repeat(38));
         assert!(message.contains(&shown), "{message}");
         let width: f64 = message
             .split(" is ")
@@ -872,8 +988,8 @@ mod tests {
             let message = overflow(&f).to_string();
             assert!(
                 message.starts_with(&format!(
-                    "Figure.to_scene(): x tick label \"{}…\" is ",
-                    "W".repeat(39)
+                    "Figure.to_scene(): x tick label \"{}… is ",
+                    "W".repeat(38)
                 )),
                 "{message}"
             );
@@ -1269,7 +1385,7 @@ mod tests {
         // in to 318 pt, and the label may reach 426 pt, so it fits up to 2 × 108 pt wide.
         let f = end_labels(6.0, ["0".into(), "W".repeat(60)], None);
         let err = overflow(&f);
-        let shown = format!("\"{}…\"", "W".repeat(39));
+        let shown = format!("\"{}…", "W".repeat(38));
         assert_eq!(
             err.to_string(),
             format!(
@@ -1316,6 +1432,167 @@ mod tests {
                 .to_string()
                 .ends_with("is 219 pt wide; at most 216 pt fits this figure.")
         );
+    }
+
+    /// A 2 in midnight figure on x 0..1 whose only x tick, at 1, is labelled `END`, and whose
+    /// two y ticks are labelled with `y_chars` W's each.
+    fn end_after_wide_y_labels(y_chars: usize) -> Figure {
+        let mut f = Figure::new(2.0, 2.0, Theme::midnight()).unwrap();
+        let wide = "W".repeat(y_chars);
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xlim(0.0, 1.0)
+            .unwrap()
+            .xticks_labeled(&[1.0], vec!["END".into()])
+            .unwrap()
+            .yticks_labeled(&[0.0, 1.0], vec![wide.clone(), wide])
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn y_labels_that_leave_no_room_for_the_plot_fail_naming_the_widest() {
+        // The y tick labels, 510 pt wide, push the plot's left edge to 528 pt, past its right
+        // edge at 132 pt. Labels up to 132 - 1 - 12 - 6 = 113 pt wide leave the plot 1 pt.
+        let err = overflow(&end_after_wide_y_labels(100));
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Figure.to_scene(): y tick label \"{}… is 510 pt wide; at most 113 pt leaves \
+                 room for the plot area.",
+                "W".repeat(38)
+            )
+        );
+        assert!(matches!(err, crate::Error::Style { .. }));
+        assert_eq!(err.parameter(), None);
+        assert_eq!(
+            err.hint(),
+            Some("shorten the y tick labels or widen the figure.")
+        );
+        // The y tick labels fail the layout whatever the x ticks: without any, or with one
+        // empty label.
+        let mut none = end_after_wide_y_labels(100);
+        none.axes_mut().unwrap().xticks(&[]).unwrap();
+        let mut empty = end_after_wide_y_labels(100);
+        empty
+            .axes_mut()
+            .unwrap()
+            .xticks_labeled(&[0.5], vec![String::new()])
+            .unwrap();
+        for f in [none, empty] {
+            let other = overflow(&f);
+            assert_eq!(other.to_string(), err.to_string());
+            assert_eq!(other.hint(), err.hint());
+        }
+    }
+
+    #[test]
+    fn a_figure_too_narrow_for_the_plot_fails_naming_the_width_it_needs() {
+        // 0.3 in is 21.6 pt; without tick labels the plot needs 2 × 12 + 1 = 25 pt.
+        let mut f = Figure::new(0.3, 1.0, Theme::midnight()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .yticks(&[])
+            .unwrap();
+        let err = overflow(&f);
+        assert_eq!(
+            err.to_string(),
+            "Figure.to_scene(): the figure is 21 pt wide; at least 25 pt is needed for the plot \
+             area."
+        );
+        assert!(matches!(err, crate::Error::Style { .. }));
+        assert_eq!(err.parameter(), None);
+        assert_eq!(err.hint(), Some("widen the figure."));
+        // 0.4 in is 28.8 pt. A y tick label of one W, 5.1 pt, and its 6 pt gap need 25 + 11.1
+        // = 36.1 pt; even a y tick label of no width would need 31 pt, so the figure is named.
+        let mut f = Figure::new(0.4, 1.0, Theme::midnight()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .yticks_labeled(&[0.5], vec!["W".into()])
+            .unwrap();
+        assert_eq!(
+            overflow(&f).to_string(),
+            "Figure.to_scene(): the figure is 28 pt wide; at least 37 pt is needed for the plot \
+             area."
+        );
+        // 25 pt is enough without tick labels.
+        let mut f = Figure::new(25.0 / 72.0, 1.0, Theme::midnight()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .yticks(&[])
+            .unwrap();
+        let (_, layout) = plan_of(&f);
+        assert!(
+            (layout.plot.width - MIN_PLOT).abs() < 1e-9,
+            "{:?}",
+            layout.plot
+        );
+    }
+
+    #[test]
+    fn the_narrowest_canvas_counts_the_capped_direct_label_reserve() {
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        // Without a reserve: the padding, the column and the plot.
+        assert!(close(min_canvas_width(0.0, 0.0), 25.0));
+        assert!(close(min_canvas_width(11.1, 0.0), 36.1));
+        // A small reserve is taken whole: 1 + 0.1 inside the padding.
+        assert!(close(min_canvas_width(0.0, 0.1), 25.1));
+        // A large one is capped at a quarter of the inner width: 0.75 I = 1.
+        assert!(close(min_canvas_width(0.0, 100.0), 24.0 + 4.0 / 3.0));
+        // At the boundary both readings agree.
+        assert!(close(min_canvas_width(2.0, 1.0), 28.0));
+    }
+
+    #[test]
+    fn x_labels_need_the_plot_at_least_its_minimum_width() {
+        // 22 W's, 112.2 pt, leave the plot room (130.2..132 pt), but END, 15.3 pt wide, may
+        // reach 138 pt only if its tick, on the right edge, is at most 130.35 pt: a plot 0.15 pt
+        // wide. On a plot 1 pt wide END fits up to 2 × (138 - 131.2) = 13.6 pt.
+        let err = overflow(&end_after_wide_y_labels(22));
+        assert_eq!(
+            err.to_string(),
+            "Figure.to_scene(): x tick label \"END\" is 15 pt wide; at most 13 pt fits this \
+             figure."
+        );
+        assert_eq!(err.hint(), Some("shorten the labels or widen the figure."));
+        // 21 W's, 107.1 pt, leave END room on a plot about 5 pt wide.
+        let layout = assert_x_labels_inside(&end_after_wide_y_labels(21));
+        assert!(layout.plot.width >= MIN_PLOT, "{:?}", layout.plot);
+        let end = layout.x_tick_labels.first().unwrap();
+        assert!(
+            (end.x + end.width() - (2.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
+            "{end:?}"
+        );
+    }
+
+    #[test]
+    fn long_y_labels_that_fit_still_render() {
+        // 40 W's, 204 pt, leave the plot of a 6 in figure 198 pt wide.
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            let mut f = figure(theme);
+            let wide = "W".repeat(40);
+            f.axes_mut()
+                .unwrap()
+                .xlim(0.0, 30.0)
+                .unwrap()
+                .yticks_labeled(&[0.0, 1.0], vec![wide.clone(), wide])
+                .unwrap();
+            let layout = assert_x_labels_inside(&f);
+            let widest = layout
+                .y_tick_labels
+                .iter()
+                .map(Label::width)
+                .fold(0.0, f64::max);
+            assert!(widest > 150.0, "{widest}");
+            assert_eq!(layout.plot.x, PADDING + widest + Y_LABEL_GAP);
+            assert_eq!(layout.plot.right(), 6.0 * 72.0 - PADDING);
+        }
     }
 
     #[test]

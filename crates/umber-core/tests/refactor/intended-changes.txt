@@ -1,1 +1,12 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+#
+# Error messages now cut quoted text after quoting it, to at most 40 characters in all as
+# Python's short_repr does: a long x tick label shows 38 characters and "…" after the opening
+# quote, without a closing quote. Every layout now needs the plot at least 1 pt wide, with or
+# without x tick labels; when the y tick labels alone leave it less, the error names the widest
+# y tick label. fig-text-truncated now fails that way, and so does
+# fig-text-truncated-no-x-ticks, whose scene, SVG and PNG outputs are removed; its error is
+# recorded in errors/x-label-min-width.txt and its long texts are drawn without ticks as the new
+# case fig-text-truncated-no-ticks.
+errors/x-label-overflow
+fig-text-truncated-no-x-ticks
