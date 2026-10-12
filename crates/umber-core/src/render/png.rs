@@ -4,6 +4,8 @@
 //! backend draws exactly what the SVG backend draws. If `tiny-skia` still refuses a shape the
 //! shared layer accepted, the item is skipped.
 
+use std::ops::Range;
+
 use tiny_skia as sk;
 
 use super::normalize::{
@@ -538,12 +540,37 @@ impl Marker {
     }
 }
 
-/// Pre-rendered copies of one marker at 4 x 4 sub-pixel phases.
+/// One marker pre-rendered at one sub-pixel phase.
+struct Sprite {
+    pixmap: sk::Pixmap,
+    /// For each row, the columns `start..end` outside which every pixel is fully transparent
+    /// (an empty range for a transparent row).
+    spans: Vec<Range<usize>>,
+}
+
+impl Sprite {
+    fn new(pixmap: sk::Pixmap) -> Sprite {
+        let width = pixmap.width() as usize;
+        let spans = pixmap
+            .data()
+            .chunks_exact(width.max(1) * 4)
+            .map(|row| {
+                let ink = |pixel: &[u8]| pixel.get(3).is_some_and(|&a| a != 0);
+                let start = row.chunks_exact(4).position(ink).unwrap_or(width);
+                let end = row.chunks_exact(4).rposition(ink).map_or(start, |i| i + 1);
+                start..end
+            })
+            .collect();
+        Sprite { pixmap, spans }
+    }
+}
+
+/// Pre-rendered copies of one marker at [`PHASES`] x [`PHASES`] sub-pixel phases.
 struct Sprites {
     /// Where the marker origin sits inside each sprite, in pixels.
     origin: (i32, i32),
     size: (u32, u32),
-    phases: Vec<Option<sk::Pixmap>>,
+    phases: Vec<Option<Sprite>>,
 }
 
 impl Sprites {
@@ -580,26 +607,77 @@ impl Sprites {
         })
     }
 
-    fn phase(
-        &mut self,
-        marker: &Marker,
-        scale: DeviceScale,
-        px: usize,
-        py: usize,
-    ) -> Option<&sk::Pixmap> {
-        let slot = self.phases.get_mut(py * PHASES + px)?;
+    /// Renders the sprite at `index` in `phases` unless it exists: the phase
+    /// (`index % PHASES`, `index / PHASES`). `None` when it cannot be allocated.
+    fn prepare(&mut self, marker: &Marker, scale: DeviceScale, index: usize) -> Option<()> {
+        let (px, py) = (index % PHASES, index / PHASES);
+        let slot = self.phases.get_mut(index)?;
         if slot.is_none() {
-            let mut sprite = sk::Pixmap::new(self.size.0, self.size.1)?;
+            let mut pixmap = sk::Pixmap::new(self.size.0, self.size.1)?;
             let step = 1.0 / PHASES as f32;
             let at = sk::Transform::from_scale(scale.get(), scale.get()).post_translate(
                 self.origin.0 as f32 + px as f32 * step,
                 self.origin.1 as f32 + py as f32 * step,
             );
-            marker.draw(&mut sprite, at, None);
-            *slot = Some(sprite);
+            marker.draw(&mut pixmap, at, None);
+            *slot = Some(Sprite::new(pixmap));
         }
-        slot.as_ref()
+        Some(())
     }
+
+    /// Composites the queued sprites over `pixmap` in queue order and empties the queue.
+    fn flush(&self, pixmap: &mut sk::Pixmap, queue: &mut Vec<Placement>) {
+        for placement in queue.drain(..) {
+            if let Some(Some(sprite)) = self.phases.get(placement.phase) {
+                blit_over(pixmap, sprite, placement.left, placement.top);
+            }
+        }
+    }
+}
+
+/// The most sprite placements queued before they are composited. Queuing separates finding
+/// positions from compositing, which keeps the compositing loop tight; the limit bounds the
+/// queue's memory for any number of markers.
+const QUEUE_LIMIT: usize = 4096;
+
+/// A sprite at the whole pixel (`left`, `top`) that needs no clip mask: there is no clip, or
+/// every pixel of the sprite is one the clip mask covers fully, so masking would change
+/// nothing. [`Placement::unmasked`] is the only way to make one.
+#[derive(Debug, Clone, Copy)]
+struct Placement {
+    /// The sprite's index in [`Sprites::phases`].
+    phase: usize,
+    left: i32,
+    top: i32,
+}
+
+impl Placement {
+    /// The placement of a `size` sprite at (`left`, `top`), or `None` when part of it lies
+    /// outside `interior`, the whole pixels the clip mask covers fully (`None` for no clip).
+    fn unmasked(
+        interior: Option<(i32, i32, i32, i32)>,
+        phase: usize,
+        (left, top): (i32, i32),
+        (w, h): (i32, i32),
+    ) -> Option<Placement> {
+        if let Some((il, it, ir, ib)) = interior
+            && (left < il || top < it || left + w > ir || top + h > ib)
+        {
+            return None;
+        }
+        Some(Placement { phase, left, top })
+    }
+}
+
+/// Whether `mask` is 255 at every pixel of the rectangle at (`left`, `top`) of size `w` x `h`
+/// that lies inside the mask. Checks the invariant of [`Placement`] in debug builds.
+fn mask_is_full(mask: &sk::Mask, (left, top): (i32, i32), (w, h): (i32, i32)) -> bool {
+    let (mw, mh) = (mask.width() as i32, mask.height() as i32);
+    let data = mask.data();
+    (top.max(0)..(top + h).min(mh)).all(|y| {
+        (left.max(0)..(left + w).min(mw))
+            .all(|x| data.get((y * mw + x) as usize).copied() == Some(255))
+    })
 }
 
 /// Splits a device coordinate into a whole pixel and the nearest 1/8-pixel phase.
@@ -610,6 +688,13 @@ fn split_phase(d: DevicePixels) -> (i32, usize) {
     (whole as i32, phase as usize)
 }
 
+/// Draws `shape` at every one of `positions`, in order.
+///
+/// Markers are composited from cached sprites where the clip mask, if any, covers the whole
+/// sprite. A marker that reaches the clip edge is drawn as paths through the mask, because a
+/// sprite is a composited fill and stroke, which is only equal to masking fill and stroke
+/// separately where the mask is 255. Sprite placements are queued and composited in batches;
+/// the queue is flushed before every marker drawn as paths, so markers keep their order.
 #[allow(clippy::too_many_arguments)]
 fn draw_markers(
     pixmap: &mut sk::Pixmap,
@@ -642,9 +727,8 @@ fn draw_markers(
     };
     let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
     let mask = clip.map(|(m, _)| m);
-    // Pixels certainly fully covered by the clip. A sprite is a composited fill+stroke, which
-    // is only equal to masking fill and stroke separately where the mask is 255.
     let interior = clip.map(|(_, c)| c.interior(pixmap.width(), pixmap.height()));
+    let mut queue = Vec::new();
     for p in positions.iter().filter(|p| valid_point(**p)) {
         let Some(sprites) = sprites.as_mut() else {
             marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
@@ -657,76 +741,73 @@ fn draw_markers(
         if left >= width || top >= height || left + w <= 0 || top + h <= 0 {
             continue;
         }
-        if let Some((il, it, ir, ib)) = interior
-            && (left < il || top < it || left + w > ir || top + h > ib)
-        {
+        let phase = py * PHASES + px;
+        let Some(placement) = Placement::unmasked(interior, phase, (left, top), (w, h)) else {
+            sprites.flush(pixmap, &mut queue);
             marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
             continue;
+        };
+        if sprites.prepare(&marker, scale, phase).is_none() {
+            continue;
         }
-        if let Some(sprite) = sprites.phase(&marker, scale, px, py) {
-            blit_over(pixmap, sprite, left, top, mask);
+        debug_assert!(mask.is_none_or(|m| mask_is_full(m, (left, top), (w, h))));
+        queue.push(placement);
+        if queue.len() == QUEUE_LIMIT {
+            sprites.flush(pixmap, &mut queue);
         }
+    }
+    if let Some(sprites) = &sprites {
+        sprites.flush(pixmap, &mut queue);
     }
 }
 
-/// Composites a premultiplied `sprite` over `pixmap` with its top-left corner at (`left`, `top`),
-/// source-over, scaled by `mask` coverage when there is one.
+fn div255(x: u32) -> u32 {
+    let x = x + 128;
+    (x + (x >> 8)) >> 8
+}
+
+/// Composites the premultiplied `sprite` over `pixmap` with its top-left corner at (`left`,
+/// `top`), source-over, without a clip mask (see [`Placement`]).
 ///
 /// This is `draw_pixmap` without the per-call shader setup, which dominates when drawing
-/// hundreds of thousands of small sprites. All arithmetic is integer, so output is exact.
-fn blit_over(
-    pixmap: &mut sk::Pixmap,
-    sprite: &sk::Pixmap,
-    left: i32,
-    top: i32,
-    mask: Option<&sk::Mask>,
-) {
-    fn div255(x: u32) -> u32 {
-        let x = x + 128;
-        (x + (x >> 8)) >> 8
-    }
+/// hundreds of thousands of small sprites. Each row visits only its span of non-transparent
+/// pixels and copies opaque ones. All arithmetic is integer, so output is exact.
+fn blit_over(pixmap: &mut sk::Pixmap, sprite: &Sprite, left: i32, top: i32) {
     let (dw, dh) = (pixmap.width() as i32, pixmap.height() as i32);
-    let (sw, sh) = (sprite.width() as i32, sprite.height() as i32);
-    let (x0, x1) = (left.max(0), (left + sw).min(dw));
-    let (y0, y1) = (top.max(0), (top + sh).min(dh));
-    if x0 >= x1 || y0 >= y1 {
-        return;
-    }
-    let mask_data = mask.map(sk::Mask::data);
-    let src = sprite.data();
+    let sw = sprite.pixmap.width() as i32;
+    let src = sprite.pixmap.data();
     let dst = pixmap.data_mut();
-    for y in y0..y1 {
-        for x in x0..x1 {
-            // All indices are inside both images by the clamping above.
-            let si = (((y - top) * sw + (x - left)) * 4) as usize;
-            let di = ((y * dw + x) * 4) as usize;
-            let Some(s) = src.get(si..si + 4) else {
-                continue;
-            };
-            let mut s = [
-                u32::from(s[0]),
-                u32::from(s[1]),
-                u32::from(s[2]),
-                u32::from(s[3]),
-            ];
-            if s[3] == 0 {
-                continue;
-            }
-            if let Some(data) = mask_data {
-                let m = u32::from(data.get((y * dw + x) as usize).copied().unwrap_or(0));
-                if m == 0 {
-                    continue;
+    for (sy, span) in sprite.spans.iter().enumerate() {
+        let sy = sy as i32;
+        let y = top + sy;
+        if y < 0 {
+            continue;
+        }
+        if y >= dh {
+            break;
+        }
+        let x0 = (left + span.start as i32).max(0);
+        let x1 = (left + span.end as i32).min(dw);
+        if x0 >= x1 {
+            continue;
+        }
+        let si = ((sy * sw + (x0 - left)) * 4) as usize;
+        let di = ((y * dw + x0) * 4) as usize;
+        let n = ((x1 - x0) * 4) as usize;
+        // Both ranges are inside their images by the clamping above.
+        let (Some(src_row), Some(dst_row)) = (src.get(si..si + n), dst.get_mut(di..di + n)) else {
+            continue;
+        };
+        for (d, s) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+            match s.get(3).copied().unwrap_or(0) {
+                0 => {}
+                255 => d.copy_from_slice(s),
+                alpha => {
+                    let inv = 255 - u32::from(alpha);
+                    for (dc, &sc) in d.iter_mut().zip(s) {
+                        *dc = (u32::from(sc) + div255(u32::from(*dc) * inv)).min(255) as u8;
+                    }
                 }
-                if m != 255 {
-                    s = s.map(|c| div255(c * m));
-                }
-            }
-            let Some(d) = dst.get_mut(di..di + 4) else {
-                continue;
-            };
-            let inv = 255 - s[3];
-            for (dc, sc) in d.iter_mut().zip(s) {
-                *dc = (sc + div255(u32::from(*dc) * inv)).min(255) as u8;
             }
         }
     }
@@ -1621,6 +1702,255 @@ mod tests {
         let image = raster(&scene, 72);
         assert_eq!(image.at(17, 10), [255, 0, 0, 255]);
         assert_eq!(image.at(12, 10), [0, 0, 0, 255]);
+    }
+
+    /// The marker loop as it was before sprite placements were queued, kept as the reference the
+    /// queued loop must match byte for byte: each marker is composited as soon as it is reached,
+    /// and every sprite pixel goes through the clip mask. Returns how many markers were drawn
+    /// as paths because they reach the clip edge.
+    #[allow(clippy::too_many_arguments)]
+    fn reference_draw_markers(
+        pixmap: &mut sk::Pixmap,
+        scale: DeviceScale,
+        root: sk::Transform,
+        clip: Option<(&sk::Mask, ClipRect)>,
+        shape: &Path,
+        fill: Option<Rgba>,
+        stroke: Option<&StrokeStyle>,
+        positions: &[Point],
+    ) -> usize {
+        let normalized = normalize_path(shape).unwrap();
+        let path = convert_path(&normalized).unwrap();
+        let marker = Marker {
+            fill: fill.filter(|c| c.a > 0).map(solid_paint),
+            stroke: stroke.and_then(|s| prepare_stroke(&normalized, &path, s, root)),
+            path,
+        };
+        let mut sprites = Sprites::new(&marker, scale).unwrap();
+        let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
+        let mask = clip.map(|(m, _)| m);
+        let interior = clip.map(|(_, c)| c.interior(pixmap.width(), pixmap.height()));
+        let mut as_paths = 0;
+        for p in positions.iter().filter(|p| valid_point(**p)) {
+            let (x, px) = split_phase(scale.to_device(p.x));
+            let (y, py) = split_phase(scale.to_device(p.y));
+            let (left, top) = (x - sprites.origin.0, y - sprites.origin.1);
+            let (w, h) = (sprites.size.0 as i32, sprites.size.1 as i32);
+            if left >= width || top >= height || left + w <= 0 || top + h <= 0 {
+                continue;
+            }
+            if let Some((il, it, ir, ib)) = interior
+                && (left < il || top < it || left + w > ir || top + h > ib)
+            {
+                marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
+                as_paths += 1;
+                continue;
+            }
+            let phase = py * PHASES + px;
+            sprites.prepare(&marker, scale, phase).unwrap();
+            let sprite = sprites.phases[phase].as_ref().unwrap();
+            reference_blit(pixmap, &sprite.pixmap, left, top, mask);
+        }
+        as_paths
+    }
+
+    /// The sprite compositing as it was before row spans: every sprite pixel, scaled by the
+    /// mask coverage when there is a mask.
+    fn reference_blit(
+        pixmap: &mut sk::Pixmap,
+        sprite: &sk::Pixmap,
+        left: i32,
+        top: i32,
+        mask: Option<&sk::Mask>,
+    ) {
+        let (dw, dh) = (pixmap.width() as i32, pixmap.height() as i32);
+        let (sw, sh) = (sprite.width() as i32, sprite.height() as i32);
+        let (x0, x1) = (left.max(0), (left + sw).min(dw));
+        let (y0, y1) = (top.max(0), (top + sh).min(dh));
+        let mask_data = mask.map(sk::Mask::data);
+        let src = sprite.data();
+        let dst = pixmap.data_mut();
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let si = (((y - top) * sw + (x - left)) * 4) as usize;
+                let di = ((y * dw + x) * 4) as usize;
+                let s = &src[si..si + 4];
+                let mut s = [s[0], s[1], s[2], s[3]].map(u32::from);
+                if s[3] == 0 {
+                    continue;
+                }
+                if let Some(data) = mask_data {
+                    let m = u32::from(data[(y * dw + x) as usize]);
+                    if m == 0 {
+                        continue;
+                    }
+                    if m != 255 {
+                        s = s.map(|c| div255(c * m));
+                    }
+                }
+                let inv = 255 - s[3];
+                for (dc, sc) in dst[di..di + 4].iter_mut().zip(s) {
+                    *dc = (sc + div255(u32::from(*dc) * inv)).min(255) as u8;
+                }
+            }
+        }
+    }
+
+    fn circle(r: f32) -> Path {
+        let k = 0.552_284_8 * r;
+        let mut path = Path::new();
+        path.move_to(pt(r, 0.0));
+        path.cubic_to(pt(r, k), pt(k, r), pt(0.0, r));
+        path.cubic_to(pt(-k, r), pt(-r, k), pt(-r, 0.0));
+        path.cubic_to(pt(-r, -k), pt(-k, -r), pt(0.0, -r));
+        path.cubic_to(pt(k, -r), pt(r, -k), pt(r, 0.0));
+        path.close();
+        path
+    }
+
+    /// Draws translucent outlined circles at `positions` with [`draw_markers`] and with
+    /// [`reference_draw_markers`], each onto the same non-uniform 200 x 140 px background at
+    /// 100 dpi, clipped to `clip` (in points) when given. Returns both pixel buffers and how
+    /// many markers the reference drew as paths.
+    fn queued_and_reference(clip: Option<Rect>, positions: &[Point]) -> (Vec<u8>, Vec<u8>, usize) {
+        let (width, height) = (200, 140);
+        let scale = DeviceScale::new(100);
+        let root = sk::Transform::from_scale(scale.get(), scale.get());
+        let mut background = sk::Pixmap::new(width, height).unwrap();
+        for (i, pixel) in background.data_mut().chunks_exact_mut(4).enumerate() {
+            let (x, y) = (i as u32 % width, i as u32 / width);
+            pixel.copy_from_slice(&[
+                (x * 255 / width) as u8,
+                (y * 255 / height) as u8,
+                ((x * 7 + y * 3) % 256) as u8,
+                255,
+            ]);
+        }
+        let clip = clip.map(|r| ClipRect::from_rect(&r, scale, width, height).unwrap());
+        let mut canvas = Canvas {
+            pixmap: background.clone(),
+            scale,
+            root,
+            mask: None,
+        };
+        assert!(canvas.use_clip(clip));
+        let clip = canvas.mask.as_ref().map(|(c, m)| (m, *c));
+        let shape = circle(4.0);
+        let fill = Rgba {
+            r: 200,
+            g: 40,
+            b: 90,
+            a: 140,
+        };
+        let stroke = StrokeStyle {
+            color: Rgba {
+                r: 20,
+                g: 90,
+                b: 200,
+                a: 190,
+            },
+            ..stroke_style(1.2, vec![])
+        };
+        let mut queued = background.clone();
+        draw_markers(
+            &mut queued,
+            scale,
+            root,
+            clip,
+            &shape,
+            Some(fill),
+            Some(&stroke),
+            positions,
+        );
+        let mut reference = background;
+        let as_paths = reference_draw_markers(
+            &mut reference,
+            scale,
+            root,
+            clip,
+            &shape,
+            Some(fill),
+            Some(&stroke),
+            positions,
+        );
+        (queued.take(), reference.take(), as_paths)
+    }
+
+    fn assert_same_pixels(queued: &[u8], reference: &[u8]) {
+        assert_eq!(queued.len(), reference.len());
+        let first = queued.iter().zip(reference).position(|(a, b)| a != b);
+        assert!(first.is_none(), "first differing byte at {first:?}");
+    }
+
+    /// A clip with fractional edges, 30.3 to 110.3 pt across and 20.6 to 70.6 pt down.
+    const FRACTIONAL_CLIP: Rect = Rect {
+        x: 30.3,
+        y: 20.6,
+        width: 80.0,
+        height: 50.0,
+    };
+
+    #[test]
+    fn queued_markers_keep_their_order_across_clip_edges() {
+        // Overlapping markers alternate between straddling the left or top clip edge (drawn as
+        // paths through the mask) and lying just inside it (composited from sprites).
+        let positions: Vec<Point> = (0..400)
+            .map(|i| {
+                let jitter = (i % 5) as f32 * 1.3 - 2.6;
+                let along = 25.0 + (i * 37 % 400) as f32 * 0.1;
+                match i % 4 {
+                    0 => pt(30.3 + jitter, along),
+                    1 => pt(30.3 + 10.0 + jitter, along),
+                    2 => pt(along + 10.0, 20.6 + jitter),
+                    _ => pt(along + 10.0, 20.6 + 10.0 + jitter),
+                }
+            })
+            .collect();
+        let (queued, reference, as_paths) = queued_and_reference(Some(FRACTIONAL_CLIP), &positions);
+        assert!(
+            as_paths > 100 && as_paths < 300,
+            "{as_paths} markers drawn as paths"
+        );
+        assert_same_pixels(&queued, &reference);
+    }
+
+    #[test]
+    fn queued_markers_match_the_reference_without_a_clip() {
+        // Markers partly off every side of the image, interleaved with markers inside it.
+        let positions: Vec<Point> = (0..300)
+            .map(|i| {
+                let t = (i * 53 % 300) as f32 / 300.0;
+                match i % 3 {
+                    0 => pt(t * 144.0, -1.0 + (i % 4) as f32 * 1.5),
+                    1 => pt(143.0 + (i % 4) as f32, t * 100.8),
+                    _ => pt(20.0 + t * 100.0, 20.0 + t * 60.0),
+                }
+            })
+            .collect();
+        let (queued, reference, as_paths) = queued_and_reference(None, &positions);
+        assert_eq!(as_paths, 0);
+        assert_same_pixels(&queued, &reference);
+    }
+
+    #[test]
+    fn queued_markers_match_the_reference_past_the_queue_limit() {
+        // Long runs of interior markers fill the queue to its limit between the occasional
+        // marker on the clip edge.
+        let count = QUEUE_LIMIT * 2 + 500;
+        let positions: Vec<Point> = (0..count)
+            .map(|i| {
+                if i % 3001 == 1000 {
+                    // Reaches past the clip interior and overlaps the markers that follow.
+                    pt(37.0, 45.0)
+                } else {
+                    let (u, v) = ((i * 7919 % 1000) as f32, (i * 104_729 % 1000) as f32);
+                    pt(40.0 + u * 0.06, 30.0 + v * 0.03)
+                }
+            })
+            .collect();
+        let (queued, reference, as_paths) = queued_and_reference(Some(FRACTIONAL_CLIP), &positions);
+        assert_eq!(as_paths, 3);
+        assert_same_pixels(&queued, &reference);
     }
 
     #[test]
