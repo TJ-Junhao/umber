@@ -81,6 +81,8 @@ impl Figure {
 
     /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`].
     ///
+    /// Rendering may use up to 8 threads (see [`render_png`]).
+    ///
     /// # Errors
     ///
     /// `Error::Style` with context `"Figure.to_png()"` when `dpi` is outside `10..=2400` (the
