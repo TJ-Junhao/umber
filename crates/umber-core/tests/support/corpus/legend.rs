@@ -4,7 +4,7 @@
 //! `scripts/check-refactor-output.sh`.
 //!
 //! Covered: the header row with 1, 3 and 20 entries (wrapping), with and without a title and
-//! subtitle, at the largest font scale, in a 1 by 1 in figure with 50 entries, in every theme;
+//! subtitle, at the largest font scale, in a 1 in wide figure with 50 entries, in every theme;
 //! a 300-character label; labels drawn by the in-memory fallback font and labels with
 //! characters no font draws; unlabelled series mixed in; line swatches in every dash, dot
 //! swatches, the square swatch of a bar next to a line and of every series of a stacked bar;
@@ -13,7 +13,7 @@
 //!
 //! Chips: 3 and 20 entries (wrapping), a 300-character label, fallback and undrawable labels,
 //! a faded series color, lines, points and bars (every chip holds a dot), the largest font
-//! scale and a 1 by 1 in figure with 50 entries, on the dark Midnight background and on the
+//! scale and a 1 in wide figure with 50 entries, on the dark Midnight background and on the
 //! light Pigment and Graphite backgrounds.
 //!
 //! Direct labels: 2, 8 and 30 lines crossing into nearby ends (nudging), lines ending early,
@@ -21,7 +21,7 @@
 //! row), explicit x limits cutting the line ends and leaving one line wholly outside, y limits
 //! leaving ends above and below the plot (no end dot), lines on a category x axis, lines next
 //! to a scatter and bars (the header row fallback), a long label hitting the reservation cap,
-//! a faded line color, the largest font scale, a 1 by 1 in figure with 50 lines, and direct
+//! a faded line color, the largest font scale, a 1 by 1.6 in figure with 50 lines, and direct
 //! labels set on the axes under a header theme.
 //!
 //! Labelled bars, grouped bars, stacked bars and a histogram in each of the three legend
@@ -83,6 +83,47 @@ fn add_lines(f: &mut Figure, labels: &[String]) {
 
 fn names(prefix: &str, n: usize) -> Vec<String> {
     (1..=n).map(|i| format!("{prefix} {i}")).collect()
+}
+
+/// The height, in inches, of the header-row and chips figures at the largest font scale: their
+/// header and axis labels take about 15 in, and the plot gets the rest.
+const FONT_SCALE_MAX_HEIGHT: f64 = 17.0;
+
+/// The height, in inches, of the direct-label figure at the largest font scale, which has no
+/// legend row: its header and axis labels take about 10 in.
+const DIRECT_FONT_SCALE_MAX_HEIGHT: f64 = 12.0;
+
+/// The height, in inches, of the 1 in wide figures with 50 header-row or chips entries: each
+/// entry takes a row of its own, and with the header and axis labels they take about 12.5 in
+/// as header rows and 16.5 in as chips.
+const NARROW_HEIGHT: f64 = 18.0;
+
+/// The height, in inches, of the 1 in wide figure with 50 directly labelled lines: just tall
+/// enough for its header and axis labels, so the labels crowd a plot about 2 pt tall.
+const DIRECT_TINY_HEIGHT: f64 = 1.6;
+
+/// Three labelled lines on a 6 in figure `height` in tall in `theme` at the largest font
+/// scale, with a title, a subtitle and axis labels.
+pub(super) fn font_scale_max(theme: Theme, height: f64) -> Figure {
+    let mut f = figure(
+        6.0,
+        height,
+        theme.with_font_scale(10.0).unwrap(),
+        linear(),
+        linear(),
+    );
+    labelled(&mut f, "Scaled");
+    add_lines(&mut f, &names("Series", 3));
+    f
+}
+
+/// Fifty lines labelled `prefix 1` to `prefix 50` on a 1 in wide figure `height` in tall in
+/// `theme`, with a title, a subtitle and axis labels.
+pub(super) fn fifty_lines(theme: Theme, prefix: &str, height: f64) -> Figure {
+    let mut f = figure(1.0, height, theme, linear(), linear());
+    labelled(&mut f, "Tiny");
+    add_lines(&mut f, &names(prefix, 50));
+    f
 }
 
 /// Every legend figure, by name, in a fixed order.
@@ -159,18 +200,14 @@ fn figures() -> Vec<(&'static str, Figure)> {
     add_lines(&mut bare, &names("Series", 3));
     out.push(("fig-legend-without-title", bare));
 
-    let mut tiny = figure(1.0, 1.0, Theme::pigment(), linear(), linear());
-    labelled(&mut tiny, "Tiny");
-    add_lines(&mut tiny, &names("Entry", 50));
-    out.push(("fig-legend-tiny-50-entries", tiny));
+    out.push((
+        "fig-legend-narrow-50-entries",
+        fifty_lines(Theme::pigment(), "Entry", NARROW_HEIGHT),
+    ));
 
     out.push((
         "fig-legend-font-scale-max",
-        lines(
-            Theme::pigment().with_font_scale(10.0).unwrap(),
-            "Scaled",
-            &names("Series", 3),
-        ),
+        font_scale_max(Theme::pigment(), FONT_SCALE_MAX_HEIGHT),
     ));
 
     // The legend switch.
@@ -434,17 +471,13 @@ fn chips_figures() -> Vec<(&'static str, Figure)> {
 
     out.push((
         "fig-legend-chips-font-scale-max",
-        lines(
-            Theme::midnight().with_font_scale(10.0).unwrap(),
-            "Scaled",
-            &names("Series", 3),
-        ),
+        font_scale_max(Theme::midnight(), FONT_SCALE_MAX_HEIGHT),
     ));
 
-    let mut tiny = figure(1.0, 1.0, Theme::midnight(), linear(), linear());
-    labelled(&mut tiny, "Tiny");
-    add_lines(&mut tiny, &names("Entry", 50));
-    out.push(("fig-legend-chips-tiny-50-entries", tiny));
+    out.push((
+        "fig-legend-chips-narrow-50-entries",
+        fifty_lines(Theme::midnight(), "Entry", NARROW_HEIGHT),
+    ));
 
     // A grouped bar: bars get a dot in a chip, not a square.
     let series = [("North", 1.0), ("South", 2.0), ("East", 3.0)]
@@ -665,21 +698,15 @@ fn direct_figures() -> Vec<(&'static str, Figure)> {
         .unwrap();
     out.push(("fig-direct-faded", faded));
 
-    let mut scaled = figure(
-        6.0,
-        4.0,
-        Theme::graphite().with_font_scale(10.0).unwrap(),
-        linear(),
-        linear(),
-    );
-    labelled(&mut scaled, "Scaled");
-    add_lines(&mut scaled, &names("Series", 3));
-    out.push(("fig-direct-font-scale-max", scaled));
+    out.push((
+        "fig-direct-font-scale-max",
+        font_scale_max(Theme::graphite(), DIRECT_FONT_SCALE_MAX_HEIGHT),
+    ));
 
-    let mut tiny = figure(1.0, 1.0, Theme::graphite(), linear(), linear());
-    labelled(&mut tiny, "Tiny");
-    add_lines(&mut tiny, &names("Line", 50));
-    out.push(("fig-direct-tiny-50-lines", tiny));
+    out.push((
+        "fig-direct-tiny-50-lines",
+        fifty_lines(Theme::graphite(), "Line", DIRECT_TINY_HEIGHT),
+    ));
 
     // Direct labels set on the axes under a header theme.
     let mut on_axes = lines(Theme::pigment(), "Direct on the axes", &names("Series", 3));

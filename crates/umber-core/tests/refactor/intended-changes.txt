@@ -1,12 +1,21 @@
 # Cases whose committed outputs change on purpose in this change.
 #
-# Error messages now cut quoted text after quoting it, to at most 40 characters in all as
-# Python's short_repr does: a long x tick label shows 38 characters and "…" after the opening
-# quote, without a closing quote. Every layout now needs the plot at least 1 pt wide, with or
-# without x tick labels; when the y tick labels alone leave it less, the error names the widest
-# y tick label. fig-text-truncated now fails that way, and so does
-# fig-text-truncated-no-x-ticks, whose scene, SVG and PNG outputs are removed; its error is
-# recorded in errors/x-label-min-width.txt and its long texts are drawn without ticks as the new
-# case fig-text-truncated-no-ticks.
-errors/x-label-overflow
-fig-text-truncated-no-x-ticks
+# Every layout now needs the plot at least 1 pt tall: a figure whose header, x tick labels,
+# axis labels and padding leave it less fails, naming the height it needs, where it used to
+# draw the plot clamped to 1 pt. These scene cases did; their former sizes now fail, and their
+# errors are recorded in errors/plot-min-height.txt. Each is drawn as tall as its header and
+# labels need, keeping what it covers: the largest font scale (fig-font-scale-max,
+# fig-legend-font-scale-max, fig-legend-chips-font-scale-max, fig-direct-font-scale-max), a
+# 1 in wide figure crowded with direct labels (fig-direct-tiny-50-lines, now 1.6 in tall), and
+# texts far too wide (fig-squeezed-layout-no-x-ticks, fig-text-truncated-no-ticks). The 1 by
+# 1 in figures with 50 legend entries are now 1 in wide and 18 in tall, and are renamed
+# fig-legend-narrow-50-entries and fig-legend-chips-narrow-50-entries.
+fig-font-scale-max
+fig-legend-font-scale-max
+fig-legend-chips-font-scale-max
+fig-direct-font-scale-max
+fig-direct-tiny-50-lines
+fig-squeezed-layout-no-x-ticks
+fig-text-truncated-no-ticks
+fig-legend-tiny-50-entries
+fig-legend-chips-tiny-50-entries

@@ -51,7 +51,11 @@ impl Figure {
     /// hint suggests widening it. Every x tick label keeps half the outer padding from the
     /// canvas edges, and the plot area moves in for them by at most a quarter of the width
     /// inside the padding on each side; labels that need more name the widest x tick label,
-    /// and the hint suggests shortening the labels or widening the figure.
+    /// and the hint suggests shortening the labels or widening the figure. The plot area is at
+    /// least 1 pt tall too: when the header (title, subtitle and legend row), the axis labels,
+    /// the x tick labels and the padding leave it less, the message names the height the
+    /// figure needs, and the hint suggests making the figure taller or removing whichever of
+    /// the title, subtitle and legend it has.
     ///
     /// # Examples
     ///
@@ -190,6 +194,44 @@ mod tests {
                 }
             ));
             assert_eq!(err.hint(), Some("shorten the labels or widen the figure."));
+        }
+        // An out-of-range dpi is reported first.
+        assert_eq!(f.to_png(1).unwrap_err().parameter(), Some("dpi"));
+    }
+
+    #[test]
+    fn a_figure_too_short_for_the_plot_fails_every_render_in_its_context() {
+        // 0.3 in is 21.6 pt; without tick labels, the paddings, the title line, the gap under
+        // the header and the plot need 12 + 1.25 × 14.5 + 8 + 1 + 12 = 51.125 pt.
+        let mut f = Figure::new(1.0, 0.3, Theme::midnight()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .yticks(&[])
+            .unwrap()
+            .title("Load");
+        let message = "the figure is 21 pt tall; at least 52 pt is needed for the plot area.";
+        for (context, err) in [
+            (
+                "Figure.to_scene()",
+                f.to_scene(FontLibrary::global()).unwrap_err(),
+            ),
+            ("Figure.to_png()", f.to_png(72).unwrap_err()),
+            ("Figure.to_svg()", f.to_svg(SvgText::Outlines).unwrap_err()),
+        ] {
+            assert_eq!(err.to_string(), format!("{context}: {message}"));
+            assert!(matches!(
+                err,
+                crate::Error::Style {
+                    parameter: None,
+                    ..
+                }
+            ));
+            assert_eq!(
+                err.hint(),
+                Some("make the figure taller, or remove the title.")
+            );
         }
         // An out-of-range dpi is reported first.
         assert_eq!(f.to_png(1).unwrap_err().parameter(), Some("dpi"));

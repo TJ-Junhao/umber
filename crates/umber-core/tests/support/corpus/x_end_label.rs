@@ -65,14 +65,14 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         &end_after_wide_y_labels(21).to_scene(lib).unwrap(),
         sink,
     );
-    let mut f = squeezed();
+    let mut f = squeezed(SQUEEZED_NO_X_TICKS_HEIGHT);
     axes(&mut f).xticks(&[]).unwrap();
     emit_scene(
         "fig-squeezed-layout-no-x-ticks",
         &f.to_scene(lib).unwrap(),
         sink,
     );
-    let mut f = truncated_text(false);
+    let mut f = truncated_text(false, TRUNCATED_NO_TICKS_HEIGHT);
     axes(&mut f).xticks(&[]).unwrap().yticks(&[]).unwrap();
     emit_scene(
         "fig-text-truncated-no-ticks",
@@ -99,11 +99,19 @@ fn crowded_category() -> Figure {
     f
 }
 
-/// A 1 in figure at font scale 3 whose every text is far too wide.
-fn squeezed() -> Figure {
+/// The height, in inches, of `fig-squeezed-layout-no-x-ticks`: its header and axis labels take
+/// about 3 in.
+const SQUEEZED_NO_X_TICKS_HEIGHT: f64 = 3.5;
+
+/// The height, in inches, of `fig-text-truncated-no-ticks`: its header and axis labels take
+/// about 7.5 in.
+const TRUNCATED_NO_TICKS_HEIGHT: f64 = 9.0;
+
+/// A 1 in wide figure `height` in tall at font scale 3 whose every text is far too wide.
+pub(super) fn squeezed(height: f64) -> Figure {
     let mut f = figure(
         1.0,
-        1.0,
+        height,
         Theme::pigment().with_font_scale(3.0).unwrap(),
         linear(),
         linear(),
@@ -119,16 +127,17 @@ fn squeezed() -> Figure {
     f
 }
 
-/// Texts far wider than any figure on a 2 in figure at font scale 10. With `categories`, the
-/// x axis is a category axis whose first name is as wide; otherwise it is linear.
-fn truncated_text(categories: bool) -> Figure {
+/// Texts far wider than any figure on a 2 in wide figure `height` in tall at font scale 10.
+/// With `categories`, the x axis is a category axis whose first name is as wide; otherwise it
+/// is linear.
+pub(super) fn truncated_text(categories: bool, height: f64) -> Figure {
     let theme = Theme::pigment().with_font_scale(10.0).unwrap();
     let x = if categories {
         ScaleKind::Category
     } else {
         linear()
     };
-    let mut f = figure(2.0, 2.0, theme, x, linear());
+    let mut f = figure(2.0, height, theme, x, linear());
     axes(&mut f)
         .title(&"W".repeat(20_000))
         .subtitle(&"\u{fc}".repeat(6_000))
@@ -222,8 +231,8 @@ fn overflow_errors(lib: &FontLibrary) -> (String, Figure) {
     rec.section("Figure::to_scene, former scene cases");
     for (name, f) in [
         ("fig-category-crowded-log", crowded_category()),
-        ("fig-squeezed-layout", squeezed()),
-        ("fig-text-truncated", truncated_text(true)),
+        ("fig-squeezed-layout", squeezed(1.0)),
+        ("fig-text-truncated", truncated_text(true, 2.0)),
     ] {
         render(&mut rec, name, &f, lib);
     }
@@ -287,7 +296,7 @@ fn min_width_errors(lib: &FontLibrary) -> String {
     }
 
     rec.section("Figure::to_scene, former scene case");
-    let mut f = truncated_text(false);
+    let mut f = truncated_text(false, 2.0);
     axes(&mut f).xticks(&[]).unwrap();
     render(&mut rec, "fig-text-truncated-no-x-ticks", &f, lib);
     rec.out
