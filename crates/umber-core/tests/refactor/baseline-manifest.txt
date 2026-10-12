@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 8d4895c0c410910b74bf2aa6231a18fe68df25c5
+# revision: fb767b55c78225c562f0b830f1112b6e01831d87
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -15,7 +15,8 @@ f5570630344f0834c355bafc5594c3d4df960728f63559772a50696dc9ecbe3b  errors/area.tx
 68c88012613aa73c8361c3350f5b18d859fbcac8286a86260461b74abe8cbeba  errors/inputs.txt
 6dc255e39c0bda6a0dd8abc27c5bb9e497f257490d3cc71753dddbd2067984ac  errors/size.txt
 9f092226f038e09dd89086790418571a9c629e23a10291de7551bd25dce729fb  errors/ticks.txt
-c236c777ef63863c2963bb68ca7bce89fb356e5add798f1fdcac7ccaa8e89936  errors/x-label-overflow.txt
+bd65458485fe5fd59b313ce6bbeb71e80ebcefd51df73b00f8ac46d6986182f4  errors/x-label-min-width.txt
+00b63e61773bbce1ec3718530241986c7ca444bff5316c534df15e3724de2d0e  errors/x-label-overflow.txt
 b710e3e007454e2777da6eec60c934545526878e132b512b1163d3a4fa892a26  png/fig-all-nan.dpi200.png
 9ac2df927f6a41e4d44387230417b4e09b9b0fa6a80f86fed8bc804c920a8c91  png/fig-all-nan.dpi72.png
 8f4d10c6e19fc5c3651bb5a4739f0bc9590656acd1f32658c5e9348f35bc3c78  png/fig-area-200k-points.dpi200.png
@@ -482,6 +483,8 @@ e7e49a7c7258dc2c2abb1cf1f15c74f99a72069e005b153059d292ab8fb12a05  png/fig-x-end-
 ff19f2f3b21821b65bb8094ac181e78686806e78686be6011eba917d8ece025d  png/fig-x-end-label-hours-midnight.dpi72.png
 8270f9ba5965c9ca9240a3e9ded860e3f5fc53f0ee3b7bbda829c471b2f9f20f  png/fig-x-end-label-hours-pigment.dpi200.png
 f7f2a3e7e71c81fb4e26f5e183229820e394ef990dc9cc8b21335538688621d3  png/fig-x-end-label-hours-pigment.dpi72.png
+553dd09569f28a6e6a17971afdd4130e03b67e5b5a23e27d731672b96c383f41  png/fig-x-end-label-min-width.dpi200.png
+2715cdb5a7c4aa2e5acf921e868265381dffe3e7e4a637879d6920363cb759d7  png/fig-x-end-label-min-width.dpi72.png
 f9b092e3268fcbfeff06de1ea22e85e2ecebc7d42c06bbddedfad33ec38be4d7  png/fig-x-end-label-near-cap.dpi200.png
 af6a1c53af379e895aa8614cc4e76268e9b4f2d7e367d534397865cd9c0b14cf  png/fig-x-end-label-near-cap.dpi72.png
 8637072f6990377a53b12933ce5144910e62097a6e3d633f5ca24e5373ad95ac  png/fig-xlabel-only.dpi200.png
@@ -743,6 +746,7 @@ e57fd429c2038bdfc6a98eb82a8471292a3ddaa708100a7d7b7d223ceb63a40e  scene/fig-x-en
 edc00b7a0d72451c388a5f957f859890b97c7f0ff505e6d4d69c7f3bc303267e  scene/fig-x-end-label-hours-graphite.txt
 51997a79efed0e8128a456d604537e74b618d7d94e90de59ba963cc171efba94  scene/fig-x-end-label-hours-midnight.txt
 0f107f5ceb5682b31f00b6aed0177a5d1e95e2b34ed509ab36e2790427086d7c  scene/fig-x-end-label-hours-pigment.txt
+11c95a898f032ac5c65afa45d8f15777e5df83607da47612e679a9eaccc4ada9  scene/fig-x-end-label-min-width.txt
 ed3afb63d4743d3f1c33dc3022a87876f1bceebeafff86360f05c49d896c486f  scene/fig-x-end-label-near-cap.txt
 5f99a34c9a882eff8b6d5036a01cadae3ec0083dddc9f06f914eddca25f51d56  scene/fig-xlabel-only.txt
 0388d8a6d2ec591700c10ea3cb48edaa32012f61f7bcd49fc0e6415037631832  scene/fig-ylabel-only.txt
@@ -1223,6 +1227,8 @@ b15ef2ee3964d240e8402298646628f092b0e251183cf62be3d240596d1ab57e  svg/fig-x-end-
 0b87f2606ee4536a6d7988c721ee7975298ab9c939a0defe331bebd9690f0749  svg/fig-x-end-label-hours-midnight.outlines.svg
 4c97c2b4636c4897924528dbca54350b4e1f8d77af670a6a906b9f4fc72e1369  svg/fig-x-end-label-hours-pigment.editable.svg
 a40c05687ad95e784cc5598260de56992bdadcd49eceb3b5f83455d755c408e9  svg/fig-x-end-label-hours-pigment.outlines.svg
+8fa78842268c930f84c9265ce52e797f66da5b1fb0edd4c8848ef8f26724c0da  svg/fig-x-end-label-min-width.editable.svg
+c288f8485adc31af6129c7177aeb19facb0639d69987b63dc9f1d54433b145c9  svg/fig-x-end-label-min-width.outlines.svg
 ce7dbed5008bd4e99b8d33a2bee9fc29d244df196b981250291565edaa6b76d4  svg/fig-x-end-label-near-cap.editable.svg
 4c956690cb61988e7e594867dcb01a22357b1fafdc9050bd76fefbf48f244217  svg/fig-x-end-label-near-cap.outlines.svg
 842da93a6a4963798b65937177ab7df6a545fb35ab6e0099d86d89b51a54fec3  svg/fig-xlabel-only.editable.svg

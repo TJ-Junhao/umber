@@ -44,10 +44,13 @@ impl Figure {
     /// # Errors
     ///
     /// `Error::Style` with context `"Figure.to_scene()"` when the x tick labels cannot fit:
-    /// every x tick label keeps half the outer padding from the canvas edges, and the plot area
-    /// moves in for them by at most a quarter of the width inside the padding on each side.
-    /// The message names the widest label; the hint suggests shortening the labels or widening
-    /// the figure.
+    /// every x tick label keeps half the outer padding from the canvas edges, the plot area
+    /// moves in for them by at most a quarter of the width inside the padding on each side, and
+    /// it stays at least 1 pt wide. The message names the widest x tick label; the hint
+    /// suggests shortening the labels or widening the figure. When the y tick labels alone
+    /// leave the plot area less than 1 pt, the message names the widest y tick label instead,
+    /// and the hint suggests shortening the y tick labels or widening the figure. A figure
+    /// without x tick labels does not fail.
     ///
     /// # Examples
     ///
@@ -164,8 +167,8 @@ mod tests {
             .xticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])
             .unwrap();
         let message = format!(
-            "x tick label \"{}…\" is 306 pt wide; at most 216 pt fits this figure.",
-            "W".repeat(39)
+            "x tick label \"{}… is 306 pt wide; at most 216 pt fits this figure.",
+            "W".repeat(38)
         );
         for (context, err) in [
             (

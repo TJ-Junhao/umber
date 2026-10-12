@@ -21,6 +21,12 @@
 //! subtitle and axis labels far wider than any figure, cut to the longest prefix that fits on
 //! a character boundary (ASCII, two-byte characters, and characters drawn by the fallback
 //! font).
+//!
+//! The plot's minimum width, in `errors/x-label-min-width.txt`: y tick labels that leave no room
+//! for the plot, which name the widest y tick label; y tick labels that leave room for the plot
+//! but not for an end label on a plot at least 1 pt wide; and both figures without x ticks,
+//! which render. The figure whose end label just fits is also the scene
+//! `fig-x-end-label-min-width`.
 
 use umber_core::figure::{AxisData, BarOptions, LineOptions, ScatterOptions};
 use umber_core::{Figure, FontLibrary, LegendStyle, ScaleKind, Theme, TickFormat};
@@ -44,6 +50,16 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     emit_scene(
         "fig-x-end-label-near-cap",
         &near_cap.to_scene(lib).unwrap(),
+        sink,
+    );
+    sink(Output {
+        kind: "errors",
+        file: "x-label-min-width.txt".into(),
+        bytes: min_width_errors(lib).into_bytes(),
+    });
+    emit_scene(
+        "fig-x-end-label-min-width",
+        &end_after_wide_y_labels(21).to_scene(lib).unwrap(),
         sink,
     );
     for (name, no_x_ticks) in [
@@ -203,6 +219,38 @@ fn overflow_errors(lib: &FontLibrary) -> (String, Figure) {
         render(&mut rec, name, &f, lib);
     }
     (rec.out, f)
+}
+
+/// A 2 in midnight figure on x 0..1 whose only x tick, at 1, is labelled `END`, and whose two y
+/// ticks are labelled with `y_chars` W's each.
+fn end_after_wide_y_labels(y_chars: usize) -> Figure {
+    let mut f = figure(2.0, 2.0, Theme::midnight(), linear(), linear());
+    let wide = "W".repeat(y_chars);
+    axes(&mut f)
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .xticks_labeled(&[1.0], vec!["END".into()])
+        .unwrap()
+        .yticks_labeled(&[0.0, 1.0], vec![wide.clone(), wide])
+        .unwrap();
+    f
+}
+
+/// The results of figures whose x tick labels need the plot at least 1 pt wide.
+fn min_width_errors(lib: &FontLibrary) -> String {
+    let mut rec = Log::default();
+    rec.section("Figure::to_scene, an end label after wide y tick labels");
+    for y_chars in [100, 22, 21] {
+        let f = end_after_wide_y_labels(y_chars);
+        render(&mut rec, &format!("{y_chars} W y tick labels"), &f, lib);
+    }
+    rec.section("Figure::to_scene, the same without x ticks");
+    for y_chars in [100, 22] {
+        let mut f = end_after_wide_y_labels(y_chars);
+        axes(&mut f).xticks(&[]).unwrap();
+        render(&mut rec, &format!("{y_chars} W y tick labels"), &f, lib);
+    }
+    rec.out
 }
 
 fn strings(labels: &[&str]) -> Vec<String> {
