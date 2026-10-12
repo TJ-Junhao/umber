@@ -61,7 +61,7 @@ pythonpath = ["tests/python"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["python", "tests/python"]
+src = ["python", "tests/python", "examples"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "D"]
@@ -73,7 +73,7 @@ convention = "google"
 "tests/**" = ["D"]
 
 [tool.pyright]
-include = ["python", "tests", "conftest.py"]
+include = ["python", "tests", "examples", "conftest.py"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 enableTypeIgnoreComments = false
@@ -84,5 +84,5 @@ extraPaths = ["tests/python"]
 python_version = "3.12"
 strict = true
 warn_unused_ignores = true
-files = ["python/umber", "tests", "conftest.py"]
+files = ["python/umber", "tests", "examples", "conftest.py"]
 mypy_path = "tests/python"
