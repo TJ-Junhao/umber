@@ -146,7 +146,7 @@ fn encode(width: u32, height: u32, data: &[u8]) -> Vec<u8> {
 fn benches(c: &mut Criterion) {
     let library = FontLibrary::global();
     // Touch the font library once so no case pays for loading it.
-    black_box(line_figure(10).to_scene(library));
+    black_box(line_figure(10).to_scene(library).unwrap());
 
     let mut group = c.benchmark_group("render");
     group.sample_size(10);
@@ -170,9 +170,9 @@ fn benches(c: &mut Criterion) {
         b.iter(|| black_box(scatter_figure(100_000)));
     });
     group.bench_function("scatter_100k_scene", |b| {
-        b.iter(|| black_box(scatter.to_scene(library)));
+        b.iter(|| black_box(scatter.to_scene(library).unwrap()));
     });
-    let scene = scatter.to_scene(library);
+    let scene = scatter.to_scene(library).unwrap();
     group.bench_function("scatter_100k_rasterize_and_encode", |b| {
         b.iter(|| black_box(render_png(&scene, DPI).unwrap()));
     });
@@ -186,15 +186,15 @@ fn benches(c: &mut Criterion) {
     });
     // The same split for the line case.
     group.bench_function("line_1m_scene", |b| {
-        b.iter(|| black_box(line.to_scene(library)));
+        b.iter(|| black_box(line.to_scene(library).unwrap()));
     });
-    let line_scene = line.to_scene(library);
+    let line_scene = line.to_scene(library).unwrap();
     group.bench_function("line_1m_rasterize_and_encode", |b| {
         b.iter(|| black_box(render_png(&line_scene, DPI).unwrap()));
     });
 
     group.bench_function("line_1m_svg", |b| {
-        b.iter(|| black_box(line.to_svg(SvgText::Outlines)));
+        b.iter(|| black_box(line.to_svg(SvgText::Outlines).unwrap()));
     });
     group.bench_function("line_1m_svg_from_scene", |b| {
         b.iter(|| black_box(render_svg(&line_scene, SvgText::Outlines)));
