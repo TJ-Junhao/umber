@@ -30,7 +30,7 @@ use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
 use crate::ticks::{TickFormatArg, tick_format};
-use crate::values::{axis_data, floats, names};
+use crate::values::{axis_data, floats, names, shared_floats};
 
 /// The series of a grouped or stacked bar chart: `(label, heights, color)` for each series.
 type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
@@ -229,7 +229,7 @@ impl Figure {
         dash: i64,
         width: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, floats(y)?);
+        let (x, y) = (axis_data(x)?, shared_floats(y)?);
         let options = LineOptions {
             label,
             color: color_spec(color)?,
@@ -238,7 +238,7 @@ impl Figure {
             ..Default::default()
         };
         self.axes()?
-            .line(x, &y, options)
+            .line_shared(x, y, options)
             .map(drop)
             .map_err(core_error)
     }
@@ -253,7 +253,7 @@ impl Figure {
         dash: i64,
         width: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, floats(y)?);
+        let (x, y) = (axis_data(x)?, shared_floats(y)?);
         let options = AreaOptions {
             label,
             color: color_spec(color)?,
@@ -262,7 +262,7 @@ impl Figure {
             ..Default::default()
         };
         self.axes()?
-            .area(x, &y, options)
+            .area_shared(x, y, options)
             .map(drop)
             .map_err(core_error)
     }
@@ -277,7 +277,7 @@ impl Figure {
         marker: i64,
         size: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, floats(y)?);
+        let (x, y) = (axis_data(x)?, shared_floats(y)?);
         let options = ScatterOptions {
             label,
             color: color_spec(color)?,
@@ -286,7 +286,7 @@ impl Figure {
             ..Default::default()
         };
         self.axes()?
-            .scatter(x, &y, options)
+            .scatter_shared(x, y, options)
             .map(drop)
             .map_err(core_error)
     }
@@ -299,14 +299,14 @@ impl Figure {
         label: String,
         color: ColorArg,
     ) -> PyResult<()> {
-        let (categories, heights) = (names(categories)?, floats(heights)?);
+        let (categories, heights) = (names(categories)?, shared_floats(heights)?);
         let options = BarOptions {
             label,
             color: color_spec(color)?,
             ..Default::default()
         };
         self.axes()?
-            .bar(categories, &heights, options)
+            .bar_shared(categories, heights, options)
             .map(drop)
             .map_err(core_error)
     }
@@ -345,7 +345,7 @@ impl Figure {
         label: String,
         color: ColorArg,
     ) -> PyResult<()> {
-        let values = floats(values)?;
+        let values = shared_floats(values)?;
         let options = HistOptions {
             bins,
             label,
@@ -353,7 +353,7 @@ impl Figure {
             ..Default::default()
         };
         self.axes()?
-            .hist(&values, options)
+            .hist_shared(values, options)
             .map(drop)
             .map_err(core_error)
     }

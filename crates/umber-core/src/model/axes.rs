@@ -1,6 +1,8 @@
 //! The axes: scales, texts, explicit limits, tick settings and marks, with the mutators that
 //! validate every input before storing it.
 
+use std::sync::Arc;
+
 use super::axis_data::{AxisData, Series};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
 use super::hist::{HistMark, HistOptions};
@@ -643,6 +645,36 @@ impl Axes {
     ///
     /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
     pub fn line(&mut self, x: AxisData, y: &[f64], options: LineOptions) -> Result<&mut Axes> {
+        self.line_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds a line as [`Axes::line`] does, but stores `y` itself rather than a copy of it: the
+    /// mark, and every clone of the figure, share the allocation of `y`. Use it for values
+    /// that are already in an `Arc<[f64]>`, so they are not copied again. Same rules and errors
+    /// as [`Axes::line`]; a failed call stores nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AxisData, LineOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([1.0, f64::NAN]);
+    /// axes.line_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), LineOptions::default())?;
+    /// let Some(Mark::Line(line)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(line.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn line_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: LineOptions,
+    ) -> Result<&mut Axes> {
         let series = Series::new("Axes.line()", self.x, self.y, x, y, LINE_GAP_HINT)?;
         self.marks.push(Mark::line(series, options));
         Ok(self)
@@ -666,6 +698,35 @@ impl Axes {
         &mut self,
         x: AxisData,
         y: &[f64],
+        options: ScatterOptions,
+    ) -> Result<&mut Axes> {
+        self.scatter_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds a scatter series as [`Axes::scatter`] does, but stores `y` itself rather than a
+    /// copy of it, as [`Axes::line_shared`] does. Same rules and errors as [`Axes::scatter`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AxisData, Mark, ScatterOptions};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([1.0, 2.0]);
+    /// let x = AxisData::Numbers(vec![0.0, 1.0]);
+    /// axes.scatter_shared(x, Arc::clone(&y), ScatterOptions::default())?;
+    /// let Some(Mark::Scatter(scatter)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(scatter.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn scatter_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
         options: ScatterOptions,
     ) -> Result<&mut Axes> {
         let series = Series::new("Axes.scatter()", self.x, self.y, x, y, SCATTER_GAP_HINT)?;
@@ -700,6 +761,34 @@ impl Axes {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn area(&mut self, x: AxisData, y: &[f64], options: AreaOptions) -> Result<&mut Axes> {
+        self.area_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds an area as [`Axes::area`] does, but stores `y` itself rather than a copy of it, as
+    /// [`Axes::line_shared`] does. Same rules and errors as [`Axes::area`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AreaOptions, AxisData, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([3.0, 4.0]);
+    /// axes.area_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), AreaOptions::default())?;
+    /// let Some(Mark::Area(area)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(area.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn area_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: AreaOptions,
+    ) -> Result<&mut Axes> {
         let series = Series::new("Axes.area()", self.x, self.y, x, y, AREA_GAP_HINT)?;
         self.marks.push(Mark::area(series, options));
         Ok(self)
@@ -738,6 +827,34 @@ impl Axes {
         &mut self,
         categories: Vec<String>,
         heights: &[f64],
+        options: BarOptions,
+    ) -> Result<&mut Axes> {
+        self.bar_shared(categories, Arc::from(heights), options)
+    }
+
+    /// Adds bars as [`Axes::bar`] does, but stores `heights` itself rather than a copy of it,
+    /// as [`Axes::line_shared`] does. Same rules and errors as [`Axes::bar`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{BarOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let heights: Arc<[f64]> = Arc::from([3.0, -1.0]);
+    /// axes.bar_shared(vec!["a".into(), "b".into()], Arc::clone(&heights), BarOptions::default())?;
+    /// let Some(Mark::Bar(bar)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(bar.heights(), &*heights));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn bar_shared(
+        &mut self,
+        categories: Vec<String>,
+        heights: Arc<[f64]>,
         options: BarOptions,
     ) -> Result<&mut Axes> {
         let mark = BarMark::new("Axes.bar()", self.x, self.y, categories, heights, options)?;
@@ -883,6 +1000,29 @@ impl Axes {
     /// [`MAX_BINS`]: crate::MAX_BINS
     /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
     pub fn hist(&mut self, values: &[f64], options: HistOptions) -> Result<&mut Axes> {
+        self.hist_shared(Arc::from(values), options)
+    }
+
+    /// Adds a histogram as [`Axes::hist`] does, but stores `values` itself rather than a copy
+    /// of it, as [`Axes::line_shared`] does. Same rules and errors as [`Axes::hist`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{HistOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let values: Arc<[f64]> = Arc::from([1.2, 3.4, f64::NAN]);
+    /// axes.hist_shared(Arc::clone(&values), HistOptions::default())?;
+    /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(hist.values(), &*values));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hist_shared(&mut self, values: Arc<[f64]>, options: HistOptions) -> Result<&mut Axes> {
         let mark = HistMark::new("Axes.hist()", self.x, values, options)?;
         self.marks.push(Mark::Hist(mark));
         Ok(self)

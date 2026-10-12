@@ -93,19 +93,20 @@ pub struct BarMark {
 impl BarMark {
     /// Validates `categories` and `heights` for axes with an x axis of scale kind `x_kind` and
     /// a y axis of transform `y` (see [`check_bars`] for the checks and their order), then stores both unchanged, every
-    /// bit of the heights included. The first failure is the error, under `context`.
+    /// bit of the heights included; the stored heights share the allocation of `heights`. The
+    /// first failure is the error, under `context`.
     pub(super) fn new(
         context: &'static str,
         x_kind: ScaleKind,
         y: Transform,
         categories: Vec<String>,
-        heights: &[f64],
+        heights: Arc<[f64]>,
         options: BarOptions,
     ) -> Result<BarMark> {
-        check_bars(context, x_kind, y, &categories, heights)?;
+        check_bars(context, x_kind, y, &categories, &heights)?;
         Ok(BarMark {
             categories: Arc::from(categories),
-            heights: Arc::from(heights),
+            heights,
             options,
         })
     }

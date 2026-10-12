@@ -85,16 +85,17 @@ pub struct HistMark {
 impl HistMark {
     /// Validates `options.bins` and `values` for axes with an x axis of scale kind `x_kind`
     /// (see [`check_hist`] for the checks and their order), then stores the values unchanged,
-    /// every bit included. The first failure is the error, under `context`.
+    /// every bit included; the stored values share the allocation of `values`. The first
+    /// failure is the error, under `context`.
     pub(super) fn new(
         context: &'static str,
         x_kind: ScaleKind,
-        values: &[f64],
+        values: Arc<[f64]>,
         options: HistOptions,
     ) -> Result<HistMark> {
-        let bins = check_hist(context, x_kind, values, options.bins)?;
+        let bins = check_hist(context, x_kind, &values, options.bins)?;
         Ok(HistMark {
-            values: Arc::from(values),
+            values,
             bins,
             label: options.label,
             color: options.color,
