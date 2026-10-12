@@ -29,6 +29,7 @@ use crate::errors::{core_error, internal_state};
 use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
+use crate::ticks::{TickFormatArg, tick_format};
 use crate::values::{axis_data, floats, names};
 
 /// The series of a grouped or stacked bar chart: `(label, heights, color)` for each series.
@@ -147,6 +148,68 @@ impl Figure {
     /// Sets the y limits.
     fn ylim(&mut self, low: f64, high: f64) -> PyResult<()> {
         self.axes()?.ylim(low, high).map(drop).map_err(core_error)
+    }
+
+    /// Replaces the x ticks with ticks at `positions`.
+    fn xticks(&mut self, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+        let positions = floats(positions)?;
+        self.axes()?
+            .xticks(&positions)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Replaces the y ticks with ticks at `positions`.
+    fn yticks(&mut self, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+        let positions = floats(positions)?;
+        self.axes()?
+            .yticks(&positions)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Replaces the x ticks with ticks at `positions`, each with the label at its index.
+    fn xticks_labeled(
+        &mut self,
+        positions: &Bound<'_, PyAny>,
+        labels: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let (positions, labels) = (floats(positions)?, names(labels)?);
+        self.axes()?
+            .xticks_labeled(&positions, labels)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Replaces the y ticks with ticks at `positions`, each with the label at its index.
+    fn yticks_labeled(
+        &mut self,
+        positions: &Bound<'_, PyAny>,
+        labels: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let (positions, labels) = (floats(positions)?, names(labels)?);
+        self.axes()?
+            .yticks_labeled(&positions, labels)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Sets the format of the x tick labels.
+    fn xtick_format(&mut self, format: TickFormatArg) -> PyResult<()> {
+        let format = tick_format(format)?;
+        self.axes()?
+            .xtick_format(format)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Sets the format of the y tick labels.
+    fn ytick_format(&mut self, format: TickFormatArg) -> PyResult<()> {
+        let format = tick_format(format)?;
+        self.axes()?
+            .ytick_format(format)
+            .map(drop)
+            .map_err(core_error)
     }
 
     /// Sets the legend style (a `LegendStyle` value).

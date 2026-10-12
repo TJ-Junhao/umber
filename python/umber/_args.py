@@ -205,6 +205,27 @@ def checked_text(
     return plain
 
 
+def require_text(context: str, name: str, value: object) -> None:
+    """Check that a text argument is a ``str``, without checking its length or encoding.
+
+    Use it to run the type checks of all parameters before any value check.
+
+    Args:
+        context: The API call, such as ``"TickFormat.affix()"``.
+        name: The parameter name.
+        value: The value passed.
+
+    Raises:
+        TypeError: The value is not a ``str``.
+
+    Example:
+        >>> from umber._args import require_text
+        >>> require_text("TickFormat.affix()", "prefix", "$")
+    """
+    if not isinstance(value, str):
+        raise _wrong_type(context, name, value, "a str", _TEXT_HINT)
+
+
 def text(context: str, name: str, value: object) -> str:
     """Check a text argument, such as a title or a label, and return it as a plain ``str``.
 

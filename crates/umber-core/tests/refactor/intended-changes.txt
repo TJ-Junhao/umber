@@ -1,1 +1,1 @@
-# Explicit ticks and tick formats only add outputs; no committed output changes.
+# Cases whose committed outputs change on purpose in this change; none.

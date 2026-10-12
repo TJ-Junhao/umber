@@ -128,7 +128,8 @@ def test_axes_have_no_instance_dictionary() -> None:
 def test_axes_report_the_package_as_their_module() -> None:
     assert ub.Axes.__module__ == "umber"
     marks = ["line", "area", "scatter", "bar", "grouped_bar", "stacked_bar", "hist"]
-    for name in [*TEXTS, "xlim", "ylim", "legend", *marks]:
+    ticks = ["xticks", "yticks", "xticks_labeled", "yticks_labeled", "xtick_format", "ytick_format"]
+    for name in [*TEXTS, "xlim", "ylim", "legend", *marks, *ticks]:
         assert getattr(ub.Axes, name).__module__ == "umber"
     figure = cast(property, vars(ub.Axes)["figure"])
     assert figure.fget is not None

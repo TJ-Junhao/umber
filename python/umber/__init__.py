@@ -20,6 +20,7 @@ from umber._scale import Scale
 from umber._series import BarSeries
 from umber._size import Size
 from umber._theme import Theme
+from umber._ticks import TickFormat
 from umber._types import SupportsArray, Values
 from umber._umber import MAX_BINS as _MAX_BINS
 from umber._umber import __version__
@@ -52,6 +53,7 @@ __all__ = [
     "SupportsArray",
     "SvgText",
     "Theme",
+    "TickFormat",
     "UmberError",
     "UsageError",
     "Values",
@@ -93,6 +95,7 @@ _report_package_as_module(
     SupportsArray,
     SvgText,
     Theme,
+    TickFormat,
     DataError,
     StyleError,
     UmberError,
