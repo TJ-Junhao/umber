@@ -47,7 +47,7 @@ const IMAGES: [(&str, &str); 10] = [
 /// Renders with the bundled fonts only: no system fallback, so output is machine independent.
 fn render(figure: &Figure) -> Vec<u8> {
     let library = FontLibrary::with_fallbacks(Vec::new());
-    render_png(&figure.to_scene(&library), DPI).unwrap()
+    render_png(&figure.to_scene(&library).unwrap(), DPI).unwrap()
 }
 
 fn check(name: &str, figure: &Figure) {

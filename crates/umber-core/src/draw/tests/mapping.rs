@@ -20,7 +20,7 @@ fn category_lines_map_to_band_centers() {
             LineOptions::default(),
         )
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let plot = plot_of(&f);
     let parts = subpaths(line_strokes(&scene)[0].0);
     let xs: Vec<f64> = parts[0].iter().map(|p| f64::from(p.x)).collect();
@@ -57,7 +57,7 @@ fn too_close_limits_are_rejected_and_too_narrow_data_is_padded() {
         // vertical through the middle of the plot.
         axes.line(nums(&[lo, hi]), &[0.0, 1.0], LineOptions::default())
             .unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = plot_of(&f);
         let parts = subpaths(line_strokes(&scene)[0].0);
@@ -92,7 +92,7 @@ fn log_mark_and_grid(width_in: f64, lo: f64, hi: f64, v: f64) -> (f64, f64, Area
     .unwrap()
     .line(nums(&[v, v]), &[0.0, 1.0], LineOptions::default())
     .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let mark = f64::from(subpaths(line_strokes(&scene)[0].0)[0][0].x);
     let grid = strokes(&scene)
         .iter()

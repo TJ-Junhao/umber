@@ -68,11 +68,14 @@ impl Figure {
         Ok(PyBytes::new(py, &png))
     }
 
-    /// Renders the figure as an SVG document with the interpreter released.
-    fn svg(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
+    /// Renders the figure as an SVG document with the interpreter released. Errors are
+    /// reported in `context`.
+    fn svg(slf: &Bound<'_, Self>, text: i64, context: &'static str) -> PyResult<String> {
         let text = enum_value::<SvgText>(text)?;
         let figure = Self::snapshot(slf)?;
-        Ok(slf.py().detach(move || figure.to_svg(text)))
+        slf.py()
+            .detach(move || figure.to_svg(text))
+            .map_err(|err| core_error(err.with_context(context)))
     }
 
     /// The core bar series of a grouped or stacked bar chart.
@@ -365,7 +368,7 @@ impl Figure {
 
     /// Renders the figure as an SVG document, with text as `text` (an `SvgText` value).
     fn to_svg(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
-        Self::svg(slf, text)
+        Self::svg(slf, text, "Figure.to_svg()")
     }
 
     /// Renders the figure as a PNG at `dpi` for `Figure.save_png()`, which reports its errors.
@@ -373,9 +376,8 @@ impl Figure {
         Self::png(slf, dpi, "Figure.save_png()")
     }
 
-    /// Renders the figure as an SVG document for `Figure.save_svg()`. Rendering an SVG cannot
-    /// fail, so this gives the same document as `to_svg`.
+    /// Renders the figure as an SVG document for `Figure.save_svg()`, which reports its errors.
     fn svg_for_file(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
-        Self::svg(slf, text)
+        Self::svg(slf, text, "Figure.save_svg()")
     }
 }

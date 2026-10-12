@@ -399,6 +399,8 @@ impl Axes {
 
     /// Replaces the automatic x ticks with ticks at `positions`, each labelled with the label
     /// at the same index of `labels`, drawn as given. Otherwise the same as [`Axes::xticks`].
+    /// Labels too wide to stay inside the figure make rendering fail (see
+    /// [`Figure::to_scene`](crate::Figure::to_scene)).
     ///
     /// # Errors
     ///

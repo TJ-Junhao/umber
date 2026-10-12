@@ -24,7 +24,7 @@ fn lines_far_outside_limits_are_clipped() {
             .unwrap()
             .ylim(0.0, 1.0)
             .unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = plot_of(&f);
         // The line is y = x. In plot coordinates it is (x + v w, bottom - v h); inside the
@@ -65,7 +65,7 @@ fn lines_leaving_and_reentering_start_new_subpaths() {
         .unwrap()
         .ylim(0.0, 1.0)
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let plot = plot_of(&f);
     let top = plot.y - f64::from(Theme::graphite().line_width()).max(2.0);
@@ -90,7 +90,7 @@ fn lines_leaving_and_reentering_start_new_subpaths() {
         .unwrap()
         .ylim(-1e-290, 1e-290)
         .unwrap();
-    assert_scene_bounded(&f.to_scene(FontLibrary::global()));
+    assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn nan_breaks_lines() {
         &[1.0, 2.0, f64::NAN, 3.0, 4.0, 2.0, 1.0, 3.0],
         LineOptions::default(),
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let strokes = line_strokes(&scene);
     let parts = subpaths(strokes[0].0);
@@ -129,7 +129,7 @@ fn downsampling_kicks_in_above_threshold() {
         ys[g] = f64::NAN;
     }
     let f = line_figure(Theme::graphite(), &xs, &ys, LineOptions::default());
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let columns = downsample_columns(plot_of(&f).width);
     let strokes = line_strokes(&scene);
@@ -154,7 +154,7 @@ fn downsampling_kicks_in_above_threshold() {
         &ys[..m].iter().map(|y| y.max(0.0)).collect::<Vec<_>>(),
         LineOptions::default(),
     );
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let points: usize = subpaths(line_strokes(&scene)[0].0)
         .iter()
         .map(Vec::len)
@@ -181,7 +181,7 @@ fn dash_patterns_scale_with_width() {
                     ..LineOptions::default()
                 },
             );
-            let scene = f.to_scene(FontLibrary::global());
+            let scene = f.to_scene(FontLibrary::global()).unwrap();
             let strokes = line_strokes(&scene);
             let style = strokes[0].1;
             assert_eq!(style.dash, pattern, "{dash:?}");
@@ -222,7 +222,7 @@ fn per_series_width_sets_the_stroke_its_dashes_and_its_clip_margin() {
                 .unwrap()
                 .ylim(0.0, 1.0)
                 .unwrap();
-            let scene = f.to_scene(FontLibrary::global());
+            let scene = f.to_scene(FontLibrary::global()).unwrap();
             assert_scene_bounded(&scene);
             let strokes = line_strokes(&scene);
             let [(path, style)] = strokes.as_slice() else {
@@ -301,7 +301,7 @@ fn huge_horizontal_lines_keep_their_visible_width() {
             .unwrap()
             .ylim(0.0, 1.0)
             .unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = plot_of(&f);
         let m = f64::from(Theme::graphite().line_width()).max(2.0);
@@ -336,7 +336,7 @@ fn huge_to_inside_segments_keep_the_inside_end() {
             .unwrap()
             .ylim(0.0, 1.0)
             .unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = plot_of(&f);
         let m = f64::from(Theme::midnight().line_width()).max(2.0);

@@ -22,8 +22,9 @@ const CONTAINMENT_TOLERANCE: f64 = 1e-6;
 /// and whether an edge moved at all.
 const ROUNDING_TOLERANCE: f64 = 1e-9;
 
-/// The most rounds the edges of labels that cannot fit take to settle; see [`capped_edges`].
-const MAX_ROUNDS: usize = 16;
+/// The bisection steps that find the widest label that fits; see [`widest_label_that_fits`].
+/// Each halves the interval, so 64 steps reach the resolution of `f64` for any label width.
+const BISECTION_STEPS: usize = 64;
 
 /// One x tick label as the inset sees it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,7 +68,7 @@ pub(super) struct Room {
     pub hi: f64,
 }
 
-/// The plot edges [`fit_x_labels`] settles on, and whether they keep every label in bounds.
+/// The plot edges [`fit_x_labels`] settles on, or that no edges keep every label in bounds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum XInset {
     /// Every label lies within the bounds.
@@ -77,14 +78,8 @@ pub(super) enum XInset {
         /// The right edge.
         right: f64,
     },
-    /// No edges within the caps keep every label within the bounds. The edges are the least
-    /// inset the capped bounds settle on; some labels reach past the bounds.
-    Overflowing {
-        /// The left edge.
-        left: f64,
-        /// The right edge.
-        right: f64,
-    },
+    /// No edges within the caps keep every label within the bounds.
+    Overflowing,
 }
 
 /// The left and right edges of the plot area, inset from those of `room` just enough that
@@ -94,14 +89,12 @@ pub(super) enum XInset {
 /// When no edges within the caps can do that, the result is [`XInset::Overflowing`]: either the
 /// labels need more inset than the caps allow, or a label at position 0 is wider than the room
 /// between the left edge and `hi` (or one at position 1 than the room between `lo` and the right
-/// edge), which no inset changes. Those edges are the ones [`capped_edges`] settles on: an edge
-/// whose labels need more than its cap stops at the cap.
+/// edge), which no inset changes.
 ///
 /// When no label reaches past `lo` or `hi`, the edges are those of `room`, unchanged to the bit.
 pub(super) fn fit_x_labels(room: &Room, labels: &[TickSpan]) -> XInset {
     let Some(width) = widest_plot(room, labels) else {
-        let (left, right) = capped_edges(room, labels);
-        return XInset::Overflowing { left, right };
+        return XInset::Overflowing;
     };
     let (left, right) = edges_for_width(room, labels, width);
     let contained = labels.iter().all(|l| {
@@ -111,8 +104,49 @@ pub(super) fn fit_x_labels(room: &Room, labels: &[TickSpan]) -> XInset {
     if contained {
         XInset::Contained { left, right }
     } else {
-        XInset::Overflowing { left, right }
+        XInset::Overflowing
     }
+}
+
+/// The largest width `w` such that the labels of `labels`, each cut to at most `w` wide (and
+/// kept centered on its tick), all fit `room`: [`fit_x_labels`] gives [`XInset::Contained`] for
+/// them. Labels no wider than the result therefore always fit. It is 0 when not even labels of
+/// no width fit, and at most the widest label's width.
+///
+/// Cutting labels only relaxes the bounds, so whether they fit is monotonic in `w`, and
+/// bisection finds the result.
+pub(super) fn widest_label_that_fits(room: &Room, labels: &[TickSpan]) -> f64 {
+    let fits = |half_max: f64| {
+        let cut: Vec<TickSpan> = labels
+            .iter()
+            .map(|l| TickSpan {
+                pos: l.pos,
+                half: l.half.min(half_max),
+            })
+            .collect();
+        matches!(fit_x_labels(room, &cut), XInset::Contained { .. })
+    };
+    let widest = labels.iter().map(|l| l.half).fold(0.0, f64::max);
+    if fits(widest) {
+        return 2.0 * widest;
+    }
+    if !fits(0.0) {
+        return 0.0;
+    }
+    // Invariant: half widths up to `lo` fit, up to `hi` do not.
+    let (mut lo, mut hi) = (0.0, widest);
+    for _ in 0..BISECTION_STEPS {
+        let mid = lo + (hi - lo) / 2.0;
+        if mid <= lo || mid >= hi {
+            break;
+        }
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    2.0 * lo
 }
 
 /// A constraint `L >= a - b × D` (a lower one) or `L <= a - b × D` (an upper one) on the left
@@ -210,24 +244,6 @@ fn edges_for_width(room: &Room, labels: &[TickSpan], width: f64) -> (f64, f64) {
         (true, false) => (left_of(room, labels, room.right), room.right),
         (true, true) => (left, right),
     }
-}
-
-/// The edges of labels that cannot fit: starting from the room's edges, the right edge the
-/// labels allow for the current left edge, clamped to its cap, then the left edge for that
-/// right edge, clamped to its cap, until neither changes, for at most [`MAX_ROUNDS`] rounds.
-/// An edge whose labels need more than its cap stops at the cap.
-fn capped_edges(room: &Room, labels: &[TickSpan]) -> (f64, f64) {
-    let (mut left, mut right) = (room.left, room.right);
-    for _ in 0..MAX_ROUNDS {
-        let next_right = right_of(room, labels, left);
-        let next_left = left_of(room, labels, next_right);
-        let settled = next_left == left && next_right == right;
-        (left, right) = (next_left, next_right);
-        if settled {
-            break;
-        }
-    }
-    (left, right)
 }
 
 /// The largest right edge, between `room.right_min` and `room.right`, that keeps the right end
@@ -369,33 +385,58 @@ mod tests {
     }
 
     #[test]
-    fn labels_that_do_not_fit_stop_at_the_caps_and_overflow() {
-        // Wider than the room the caps leave: the edges stop at the caps.
+    fn labels_that_do_not_fit_overflow() {
+        // Wider than the room the caps leave.
         let labels = [span(0.0, 500.0), span(0.5, 1000.0), span(1.0, 500.0)];
-        assert_eq!(
-            fit_x_labels(&ROOM, &labels),
-            XInset::Overflowing {
-                left: ROOM.left_max,
-                right: ROOM.right_min,
-            }
-        );
-        // A right edge already left of its cap does not move.
-        let room = Room {
-            right: 300.0,
-            right_min: 300.0,
-            ..ROOM
-        };
-        assert!(matches!(
-            fit_x_labels(&room, &labels),
-            XInset::Overflowing { right: 300.0, .. }
-        ));
+        assert_eq!(fit_x_labels(&ROOM, &labels), XInset::Overflowing);
         // A label at position 0 does not move with the right edge: when the room between the
         // left edge and `hi` is narrower than the label, no inset helps.
         let narrow = Room { hi: 40.0, ..ROOM };
-        assert!(matches!(
+        assert_eq!(
             fit_x_labels(&narrow, &[span(0.0, 15.0)]),
-            XInset::Overflowing { .. }
-        ));
+            XInset::Overflowing
+        );
+    }
+
+    /// The labels of `labels` cut to at most `width` wide.
+    fn cut(labels: &[TickSpan], width: f64) -> Vec<TickSpan> {
+        labels
+            .iter()
+            .map(|l| span(l.pos, l.half.min(width / 2.0)))
+            .collect()
+    }
+
+    fn fits(room: &Room, labels: &[TickSpan]) -> bool {
+        matches!(fit_x_labels(room, labels), XInset::Contained { .. })
+    }
+
+    #[test]
+    fn the_widest_label_that_fits_is_the_largest_cut_that_fits() {
+        // A single label at the right end: it may reach from its tick at the capped right edge
+        // to `hi`, so it fits up to 2 × (hi - right_min) = 204 wide.
+        let widest = widest_label_that_fits(&ROOM, &[span(1.0, 500.0)]);
+        assert!(
+            (widest - 2.0 * (ROOM.hi - ROOM.right_min)).abs() < 1e-6,
+            "{widest}"
+        );
+        // Labels that fit give their own widest width.
+        let labels = [span(0.0, 10.0), span(1.0, 20.0)];
+        assert_eq!(widest_label_that_fits(&ROOM, &labels), 40.0);
+        // A label at position 0 that no inset helps: it may reach from the room's left edge
+        // to `hi`, so it fits up to 2 × (40 - 30) = 20 wide.
+        let narrow = Room { hi: 40.0, ..ROOM };
+        let widest = widest_label_that_fits(&narrow, &[span(0.0, 15.0)]);
+        assert!((widest - 20.0).abs() < 1e-6, "{widest}");
+        // Labels that cannot fit at any width give 0: a tick at the left edge can never reach
+        // `lo` past the left cap.
+        let closed = Room { lo: 200.0, ..ROOM };
+        assert_eq!(widest_label_that_fits(&closed, &[span(0.0, 15.0)]), 0.0);
+        // Several labels that do not fit: the result fits, a little more does not.
+        let labels = [span(0.0, 500.0), span(0.5, 1000.0), span(1.0, 500.0)];
+        let widest = widest_label_that_fits(&ROOM, &labels);
+        assert!(widest > 0.0 && widest < 1000.0, "{widest}");
+        assert!(fits(&ROOM, &cut(&labels, widest)));
+        assert!(!fits(&ROOM, &cut(&labels, widest + 1e-6)));
     }
 
     #[test]
@@ -573,7 +614,7 @@ mod tests {
                     prop_assert!(((right - left) - width).abs() <= 1e-6, "{left} {right} {width}");
                     prop_assert!((left - least_left).abs() <= 1e-6, "{left} vs {least_left}");
                 }
-                (XInset::Overflowing { .. }, Some(want)) => {
+                (XInset::Overflowing, Some(want)) => {
                     prop_assert!(false, "overflowing, but {want:?} fits");
                 }
                 // Not exactly feasible: contained only within the tolerance.
@@ -583,9 +624,13 @@ mod tests {
                         prop_assert!(lo >= room.lo - 1e-6 && hi <= room.hi + 1e-6);
                     }
                 }
-                (XInset::Overflowing { left, right }, None) => {
-                    prop_assert!(left >= room.left && left <= room.left_max);
-                    prop_assert!(right <= room.right && right >= room.right_min);
+                // The labels cut to the widest width that fits do fit, and no label that
+                // fits is cut.
+                (XInset::Overflowing, None) => {
+                    let widest = widest_label_that_fits(&room, &labels);
+                    prop_assert!(fits(&room, &cut(&labels, widest)), "{widest}");
+                    let widest_half = labels.iter().map(|l| l.half).fold(0.0, f64::max);
+                    prop_assert!(widest == 0.0 || widest < 2.0 * widest_half, "{widest}");
                 }
             }
         }

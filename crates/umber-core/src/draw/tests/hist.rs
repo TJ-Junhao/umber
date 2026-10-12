@@ -87,7 +87,7 @@ fn zero_count_bins_draw_nothing() {
     // Graphite has no gradient: one solid fill for every bin, and nothing else.
     let theme = Theme::graphite();
     let f = hist_figure(theme.clone(), ScaleKind::Linear, &VALUES, 4);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let items = mark_items(&scene);
     assert_eq!(items.len(), 1);
@@ -114,7 +114,7 @@ fn bins_have_square_corners_and_start_on_the_baseline() {
     // Midnight rounds bar ends by 3.5 pt, but histogram bins stay square; with 0 on the lower
     // plot edge, no bin reaches below it.
     let f = hist_figure(Theme::midnight(), ScaleKind::Linear, &VALUES, 4);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let (path, _) = the_fill(mark_items(&scene));
     assert!(
         path.verbs()
@@ -134,7 +134,7 @@ fn the_gap_is_at_most_half_a_bin() {
     let theme = Theme::midnight().with_fill_style(FillStyle::Solid).unwrap();
     let values: Vec<f64> = (0..=MAX_BINS).map(|i| i as f64).collect();
     let f = hist_figure(theme, ScaleKind::Linear, &values, MAX_BINS);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let items = mark_items(&scene);
     assert_eq!(items.len(), 1);
@@ -164,7 +164,7 @@ fn gradient_runs_top_to_baseline() {
     let theme = Theme::midnight();
     let color = theme.palette()[0];
     let f = hist_figure(theme, ScaleKind::Linear, &VALUES, 4);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let (resolved, layout) = plan(&f);
     let items = mark_items(&scene);
     let (path, paint) = the_fill(items);
@@ -212,7 +212,7 @@ fn top_edges(items: &[Item]) -> (&Path, Rgba) {
 fn top_edges_follow_counts() {
     let theme = Theme::midnight();
     let f = hist_figure(theme.clone(), ScaleKind::Linear, &VALUES, 4);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let items = mark_items(&scene);
     let drawn = bins(the_fill(items).0);
     let (path, color) = top_edges(items);
@@ -236,7 +236,7 @@ fn top_edges_of_short_bins_stop_at_the_baseline() {
     let mut values = vec![0.0];
     values.extend(std::iter::repeat_n(1.0, 1000));
     let f = hist_figure(Theme::midnight(), ScaleKind::Linear, &values, 2);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let layout = plan(&f).1;
     let items = mark_items(&scene);
     let drawn = bins(the_fill(items).0);
@@ -255,7 +255,7 @@ fn cropped_limits_keep_the_gradient_opacity() {
     // visible count keeps the opacity of the full ramp from 100 (0.95) down to 0 (none).
     let mut f = hist_figure(Theme::midnight(), ScaleKind::Linear, &[0.0; 100], 1);
     f.axes_mut().unwrap().ylim(50.0, 60.0).unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let (resolved, layout) = plan(&f);
     let (_, paint) = the_fill(mark_items(&scene));
@@ -293,7 +293,7 @@ fn one_gradient_item_per_histogram() {
             .map(|i| (i % 7) as f64 * 1.5 + i as f64)
             .collect();
         let f = hist_figure(Theme::midnight(), ScaleKind::Linear, &values, bins_count);
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let items = mark_items(&scene);
         let (edges, _) = top_edges(items);
@@ -309,7 +309,7 @@ fn one_gradient_item_per_histogram() {
 fn log_y_bins_grow_from_the_baseline() {
     let log = ScaleKind::Log { base: LogBase::TEN };
     let f = hist_figure(Theme::midnight(), log, &VALUES, 4);
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let (resolved, layout) = plan(&f);
     // The counts 1, 0, 3, 5 would take the nice limits 1..10, but the smallest count lands on
@@ -346,7 +346,7 @@ fn hist_far_outside_limits_is_clipped() {
             .unwrap()
             .ylim(1e-11, 1e-10)
             .unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = plan(&f).1.plot;
         let items = mark_items(&scene);
@@ -375,7 +375,7 @@ fn hist_far_outside_limits_is_clipped() {
 fn a_histogram_without_finite_values_draws_nothing() {
     for values in [&[][..], &[f64::NAN][..]] {
         let f = hist_figure(Theme::midnight(), ScaleKind::Linear, values, 30);
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         // Only the chrome and the baseline: no marks group.
         assert_eq!(scene.items.len(), 2, "{:?}", scene.items);
     }
@@ -397,10 +397,13 @@ fn hist_reads_the_fill_style() {
         let color = theme.palette()[0];
         let scene_of = |style: FillStyle| {
             let theme = theme.with_fill_style(style).unwrap();
-            hist_figure(theme, ScaleKind::Linear, &VALUES, 4).to_scene(FontLibrary::global())
+            hist_figure(theme, ScaleKind::Linear, &VALUES, 4)
+                .to_scene(FontLibrary::global())
+                .unwrap()
         };
         let own_scene = hist_figure(theme.clone(), ScaleKind::Linear, &VALUES, 4)
-            .to_scene(FontLibrary::global());
+            .to_scene(FontLibrary::global())
+            .unwrap();
         assert_eq!(scene_of(own), own_scene);
 
         let solid = scene_of(FillStyle::Solid);

@@ -24,7 +24,8 @@
 //!   far from the data; data far outside the limits.
 //! - Headers and axis labels: all four labels, none, and the x label, the y label and the
 //!   subtitle each on its own. `font_scale` at its maximum of 10 and at 1e-30. Labels wider than
-//!   the layout's text width limit, which are cut to a prefix on a character boundary.
+//!   the layout's text width limit, which are cut to a prefix on a character boundary (in
+//!   `corpus/x_end_label.rs`, with tiny figures and crowded category names).
 //! - Text: every bundled font in both weights, with and without tabular figures, as scene text
 //!   and as layout metrics; characters drawn only by the in-memory fallback font; characters no
 //!   font draws.
@@ -227,7 +228,7 @@ fn axes(figure: &mut Figure) -> &mut umber_core::Axes {
 }
 
 fn to_scene(figure: &Figure, lib: &FontLibrary) -> Scene {
-    figure.to_scene(lib)
+    figure.to_scene(lib).unwrap()
 }
 
 /// A line of `n` points: a ramp with a deterministic wobble.
@@ -480,21 +481,6 @@ fn scene_cases(lib: &FontLibrary) -> Vec<(String, Scene)> {
         .unwrap();
     add("fig-category", to_scene(&category, lib));
 
-    let mut long_names = figure(3.0, 3.0, Theme::pigment(), ScaleKind::Category, log(10.0));
-    labelled(&mut long_names, "Long category names");
-    axes(&mut long_names)
-        .line(
-            AxisData::Categories(
-                (0..14)
-                    .map(|i| format!("category number {i} with a long name"))
-                    .collect(),
-            ),
-            &(0..14).map(|i| 10f64.powi(i % 5)).collect::<Vec<_>>(),
-            line(),
-        )
-        .unwrap();
-    add("fig-category-crowded-log", to_scene(&long_names, lib));
-
     // ---- Figures: data edge cases ----
     let mut gaps = figure(6.0, 4.0, Theme::pigment(), linear(), linear());
     labelled(&mut gaps, "NaN gaps");
@@ -646,23 +632,6 @@ fn scene_cases(lib: &FontLibrary) -> Vec<(String, Scene)> {
         )
         .unwrap();
     add("fig-text-fallback", to_scene(&text, lib));
-
-    let mut tiny = figure(
-        1.0,
-        1.0,
-        Theme::pigment().with_font_scale(3.0).unwrap(),
-        linear(),
-        linear(),
-    );
-    axes(&mut tiny)
-        .title(&"Wide title ".repeat(30))
-        .subtitle("Sub")
-        .xlabel("x label that is far too long for the figure")
-        .ylabel("y label that is far too long for the figure");
-    axes(&mut tiny)
-        .line(numbers(vec![0.0, 1.0]), &[0.0, 1.0], line())
-        .unwrap();
-    add("fig-squeezed-layout", to_scene(&tiny, lib));
 
     let mut wide = figure(14.0, 2.0, Theme::midnight(), linear(), linear());
     labelled(&mut wide, "Wide and short");
@@ -1374,24 +1343,6 @@ fn label_cases(lib: &FontLibrary, add: &mut impl FnMut(&str, Scene)) {
             .unwrap();
         add(name, to_scene(&f, lib));
     }
-
-    // Labels far wider than any figure are cut to the longest prefix that fits, on a character
-    // boundary: ASCII, two-byte characters, and characters drawn by the fallback font.
-    let theme = Theme::pigment().with_font_scale(10.0).unwrap();
-    let mut f = figure(2.0, 2.0, theme, ScaleKind::Category, linear());
-    axes(&mut f)
-        .title(&"W".repeat(20_000))
-        .subtitle(&"\u{fc}".repeat(6_000))
-        .xlabel(&"\u{E000}".repeat(6_000))
-        .ylabel(&"y\u{2212}".repeat(4_000));
-    axes(&mut f)
-        .line(
-            AxisData::Categories(vec!["M".repeat(20_000), "short".into()]),
-            &[1.0, 2.0],
-            line(),
-        )
-        .unwrap();
-    add("fig-text-truncated", to_scene(&f, lib));
 }
 
 /// Text in every bundled font and weight, with and without tabular figures.
@@ -2645,7 +2596,7 @@ fn png_errors(rec: &mut Log, lib: &FontLibrary) {
     f.add_axes(linear(), linear()).unwrap();
     rec.result(
         "render_png figure scene",
-        render_png(&f.to_scene(lib), 30),
+        render_png(&f.to_scene(lib).unwrap(), 30),
         digest,
     );
 }

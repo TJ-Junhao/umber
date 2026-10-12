@@ -34,7 +34,7 @@ use super::super::{Output, axes, emit_scene, figure, labelled, linear, numbers, 
 /// Passes every output of this area to `sink`, in a fixed order.
 pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     for (name, figure) in figures() {
-        emit_scene(name, &figure.to_scene(lib), sink);
+        emit_scene(name, &figure.to_scene(lib).unwrap(), sink);
     }
     sink(Output {
         kind: "api",

@@ -87,6 +87,29 @@ pub(crate) fn number(v: f64) -> impl std::fmt::Display {
     Number(v)
 }
 
+/// The most characters of user text an error message quotes; the Python layer's `short_repr`
+/// uses the same limit.
+const QUOTED_CHARS: usize = 40;
+
+/// Quotes user `text` for an error message, as Rust string literal syntax (`"North"`, with
+/// control characters escaped). Text longer than [`QUOTED_CHARS`] characters is cut to its
+/// first `QUOTED_CHARS - 1` characters followed by `…`.
+pub(crate) fn quoted(text: &str) -> impl std::fmt::Display {
+    struct Quoted(String);
+    impl std::fmt::Display for Quoted {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self.0)
+        }
+    }
+    if text.chars().count() <= QUOTED_CHARS {
+        Quoted(text.to_owned())
+    } else {
+        let mut cut: String = text.chars().take(QUOTED_CHARS - 1).collect();
+        cut.push('…');
+        Quoted(cut)
+    }
+}
+
 impl Error {
     /// An [`Error::Data`] detected in `context`, without a parameter or a hint.
     pub(crate) fn data(context: &'static str, message: impl Into<String>) -> Error {
@@ -330,6 +353,18 @@ mod tests {
         let err = err.with_parameter("path").with_hint("check the path.");
         assert_eq!(err.parameter(), None);
         assert_eq!(err.hint(), None);
+    }
+
+    #[test]
+    fn quoted_text_is_escaped_and_cut_to_forty_characters() {
+        let shown = |text: &str| quoted(text).to_string();
+        assert_eq!(shown("North"), "\"North\"");
+        assert_eq!(shown("a\"b\n"), "\"a\\\"b\\n\"");
+        let forty = "é".repeat(40);
+        assert_eq!(shown(&forty), format!("\"{forty}\""));
+        let cut = shown(&"é".repeat(41));
+        assert_eq!(cut, format!("\"{}…\"", "é".repeat(39)));
+        assert_eq!(cut.chars().count(), 42);
     }
 
     #[test]

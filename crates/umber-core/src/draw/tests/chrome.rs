@@ -9,7 +9,7 @@ use crate::{FontLibrary, GridLines, ScaleKind, Theme};
 #[test]
 fn figure_without_axes_is_background_only() {
     let figure = Figure::new(2.0, 1.0, Theme::midnight()).unwrap();
-    let scene = figure.to_scene(FontLibrary::global());
+    let scene = figure.to_scene(FontLibrary::global()).unwrap();
     assert!(scene.items.is_empty());
     assert_eq!((scene.width, scene.height), (144.0, 72.0));
     assert_eq!(scene.background, Theme::midnight().background());
@@ -23,7 +23,9 @@ fn grid_dashes_follow_the_theme() {
         (Theme::midnight(), vec![2.0, 4.0], LineCap::Butt),
     ];
     for (theme, dash, cap) in cases {
-        let scene = chrome_figure(theme.clone()).to_scene(FontLibrary::global());
+        let scene = chrome_figure(theme.clone())
+            .to_scene(FontLibrary::global())
+            .unwrap();
         let all = strokes(&scene);
         let (grid, baseline) = all.split_at(all.len() - 1);
         assert!(!grid.is_empty());
@@ -53,7 +55,7 @@ fn baseline_is_at_zero_or_bottom() {
     let baseline_y = |lo: f64, hi: f64| {
         let mut f = chrome_figure(Theme::graphite());
         f.axes_mut().unwrap().ylim(lo, hi).unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         let all = strokes(&scene);
         let (path, _) = all.last().copied().unwrap();
         let Some(PathVerb::MoveTo(p)) = path.verbs().first() else {
@@ -83,7 +85,7 @@ fn vertical_grid_and_category_axes() {
         .unwrap()
         .xlim(0.0, 10.0)
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let vertical = strokes(&scene)
         .iter()
         .filter(|(path, _)| match path.verbs() {
@@ -103,7 +105,7 @@ fn vertical_grid_and_category_axes() {
             LineOptions::default(),
         )
         .unwrap();
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let vertical = strokes(&scene)
         .iter()
         .filter(|(path, _)| match path.verbs() {
@@ -123,7 +125,9 @@ fn vertical_grid_and_category_axes() {
 #[test]
 fn text_colors_follow_roles() {
     let theme = Theme::midnight();
-    let scene = chrome_figure(theme.clone()).to_scene(FontLibrary::global());
+    let scene = chrome_figure(theme.clone())
+        .to_scene(FontLibrary::global())
+        .unwrap();
     for t in texts(&scene) {
         let expected = match t.text.as_str() {
             "Station output" | "Day" | "MW" => theme.text_color(),
@@ -174,7 +178,7 @@ fn x_end_labels_stay_on_the_canvas() {
                 .unwrap()
                 .ylim(-100_000.0, 100_000.0)
                 .unwrap();
-            let scene = f.to_scene(FontLibrary::global());
+            let scene = f.to_scene(FontLibrary::global()).unwrap();
             assert_text_on_canvas(&scene);
         }
 
@@ -193,7 +197,7 @@ fn x_end_labels_stay_on_the_canvas() {
                 LineOptions::default(),
             )
             .unwrap();
-        assert_text_on_canvas(&f.to_scene(FontLibrary::global()));
+        assert_text_on_canvas(&f.to_scene(FontLibrary::global()).unwrap());
     }
 }
 
@@ -214,7 +218,7 @@ fn end_label_inset_grows_only_for_the_first_x_label() {
                 LineOptions::default(),
             )
             .unwrap();
-        let scene = f.to_scene(FontLibrary::global());
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
         let all = strokes(&scene);
         let (path, _) = all.last().copied().unwrap();
         match path.verbs().first() {
@@ -230,8 +234,12 @@ fn end_label_inset_grows_only_for_the_first_x_label() {
 
 #[test]
 fn scenes_are_deterministic() {
-    let a = chrome_figure(Theme::pigment()).to_scene(FontLibrary::global());
-    let b = chrome_figure(Theme::pigment()).to_scene(FontLibrary::global());
+    let a = chrome_figure(Theme::pigment())
+        .to_scene(FontLibrary::global())
+        .unwrap();
+    let b = chrome_figure(Theme::pigment())
+        .to_scene(FontLibrary::global())
+        .unwrap();
     assert_eq!(a, b);
 }
 
@@ -250,7 +258,7 @@ fn baseline_is_drawn_last_over_the_marks() {
         )
         .unwrap();
     let layout = crate::pipeline::plan_figure(&f, FontLibrary::global()).1;
-    let scene = f.to_scene(FontLibrary::global());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
     let is_baseline = |item: &Item| match item {
         Item::Stroke { path, style } => {
             style.color == theme.baseline_color()
@@ -286,7 +294,9 @@ fn baseline_is_drawn_last_over_the_marks() {
     assert!(matches!(baseline.as_slice(), [only] if is_baseline(only)));
 
     // Without visible marks the baseline still follows the chrome.
-    let scene = chrome_figure(theme.clone()).to_scene(FontLibrary::global());
+    let scene = chrome_figure(theme.clone())
+        .to_scene(FontLibrary::global())
+        .unwrap();
     let [
         Item::Group { clip: None, .. },
         Item::Group {
