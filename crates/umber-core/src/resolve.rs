@@ -1004,9 +1004,9 @@ impl<'a> Anchor<'a> {
     /// [`holds`], each a level held from one x to another, and its last vertex in data order is
     /// the end of the last hold, so a level held out to a neighbour whose y is NaN reaches that
     /// neighbour's x. The end is the [`EndKind::Point`] anchor, unless limits cut the line: the
-    /// last vertex inside the x domain (both ends included) is then the anchor, and when the
-    /// line goes on from it to a vertex past the high end of the domain, across a hold's level,
-    /// the anchor is the [`EndKind::Edge`] where that level crosses the end. A midpoint is the
+    /// last hold that overlaps the x domain (both ends included) is then the one that ends the
+    /// visible line, and when it goes on past the high end of the domain, even from the end itself,
+    /// the anchor is the [`EndKind::Edge`] where its level crosses the end. A midpoint is the
     /// arithmetic mean of the two x values, and on a log x axis their geometric mean, as the line
     /// is drawn. A category line ends at the band of a point, or midway between two bands
     /// ([`AnchorX::Between`]). `None` when the line has no vertex inside.
@@ -1032,29 +1032,28 @@ impl<'a> Anchor<'a> {
                         (a + b) / 2.0
                     }
                 };
-                let inside = |x: f64| range.is_none_or(|(lo, hi)| lo <= x && x <= hi);
                 let line = holds(xs, step.y(), position);
-                // The vertices in drawing order: `(hold, is the end of it, x)`.
-                let mut vertices = line.iter().enumerate().flat_map(|(h, hold)| {
-                    [(h, false, hold.from), (h, true, hold.to)]
-                        .map(|(h, end, edge)| (h, end, edge.position(xs, mid)))
-                });
-                let (h, end, x) = vertices.rfind(|&(_, _, x)| inside(x))?;
-                let y = step.y()[line[h].point];
-                let leaves_at = range.map(|(_, hi)| hi).filter(|&hi| x < hi);
-                if let (false, Some(hi)) = (end, leaves_at)
-                    && line[h].to.position(xs, mid) > hi
-                {
-                    return Some(Anchor {
-                        x: AnchorX::Number(hi),
-                        y,
-                        end: EndKind::Edge,
-                    });
-                }
+                // The last hold that is visible: it overlaps the x domain, ends included.
+                let (lo, hi) = range.unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
+                let (hold, from, to) = line
+                    .iter()
+                    .map(|hold| {
+                        let at = |edge: Edge| edge.position(xs, mid);
+                        (hold, at(hold.from), at(hold.to))
+                    })
+                    .rfind(|&(_, from, to)| to >= lo && from <= hi)?;
+                let y = step.y()[hold.point];
+                // A hold that goes on past the high end is cut by it; one that ends inside the
+                // domain ends the line there.
+                let (x, end) = if to > hi && from <= hi {
+                    (hi, EndKind::Edge)
+                } else {
+                    (to, EndKind::Point)
+                };
                 Some(Anchor {
                     x: AnchorX::Number(x),
                     y,
-                    end: EndKind::Point,
+                    end,
                 })
             }
             AxisData::Categories(names) => {
@@ -3406,5 +3405,118 @@ mod tests {
         assert_eq!(full(Step::Post), at(AnchorX::Category("c"), 3.0));
         assert_eq!(full(Step::Mid), at(AnchorX::Category("c"), 3.0));
         assert_eq!(full(Step::Pre), at(AnchorX::Category("c"), 3.0));
+    }
+
+    #[test]
+    fn a_step_hold_that_covers_the_view_or_starts_at_the_high_limit_is_cut_by_it() {
+        let number = |x, y, end| {
+            Some(Anchor {
+                x: AnchorX::Number(x),
+                y,
+                end,
+            })
+        };
+        let edge = |x, y| number(x, y, EndKind::Edge);
+        // The hold of y = 2 runs from 5 to 15 and covers the view 9 to 11, with no vertex in it.
+        let anchor = |x: &[f64], xlim, kind| {
+            step_anchor(kind, nums(x), &[1.0, 2.0, 3.0], Step::Mid, Some(xlim))
+        };
+        assert_eq!(
+            anchor(&[0.0, 10.0, 20.0], (9.0, 11.0), LIN),
+            edge(11.0, 2.0)
+        );
+        // On a log x axis the holds change level at 10 and 1000, and 90 to 110 lies in the second.
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        assert_eq!(
+            anchor(&[1.0, 100.0, 10000.0], (90.0, 110.0), log),
+            edge(110.0, 2.0)
+        );
+        // A view wholly inside one hold, or before the first, or after the last.
+        assert_eq!(anchor(&[0.0, 10.0, 20.0], (0.0, 1.0), LIN), edge(1.0, 1.0));
+        assert_eq!(anchor(&[0.0, 10.0, 20.0], (30.0, 40.0), LIN), None);
+
+        // The last hold runs from 4 to 6; a limit at its start, just before it and just past it.
+        let (x, y) = ([0.0, 2.0, 6.0], [1.0, 5.0, 9.0]);
+        let at = |hi| step_anchor(LIN, nums(&x), &y, Step::Mid, Some((0.0, hi)));
+        assert_eq!(at(4.0), edge(4.0, 9.0));
+        assert_eq!(at(3.99), edge(3.99, 5.0));
+        assert_eq!(at(4.01), edge(4.01, 9.0));
+        // A hold that ends exactly at the high limit ends the line there.
+        assert_eq!(at(6.0), number(6.0, 9.0, EndKind::Point));
+    }
+
+    /// The last point of the step path through `xs` and `ys`, drawn from its holds, that lies in
+    /// the x domain `lo..=hi`, and whether the path goes on past `hi` from there. Segments are
+    /// clipped one by one, in drawing order.
+    fn last_visible(
+        xs: &[f64],
+        ys: &[f64],
+        position: Step,
+        lo: f64,
+        hi: f64,
+    ) -> Option<(f64, f64, bool)> {
+        let mid = |a: f64, b: f64| (a + b) / 2.0;
+        let mut found = None;
+        let mut visit = |px: f64, (qx, qy): (f64, f64)| {
+            // x never decreases along the path.
+            if qx < lo || px > hi {
+                return;
+            }
+            found = Some(if qx > hi {
+                (hi, qy, true)
+            } else {
+                (qx, qy, false)
+            });
+        };
+        let mut previous: Option<(usize, f64)> = None;
+        for hold in holds(xs, ys, position) {
+            let y = ys[hold.point];
+            let from = (hold.from.position(xs, mid), y);
+            let to = (hold.to.position(xs, mid), y);
+            if let Some((_, end)) = previous.filter(|&(p, _)| p + 1 == hold.point) {
+                visit(end, from);
+            }
+            visit(from.0, to);
+            previous = Some((hold.point, to.0));
+        }
+        found
+    }
+
+    #[test]
+    fn a_step_anchor_is_the_last_visible_point_of_the_drawn_path() {
+        let mut state = 7_u32;
+        let mut next = |n: u32| {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            (state >> 8) % n
+        };
+        for case in 0..400 {
+            let len = 1 + next(6) as usize;
+            let mut x = 0.0;
+            let mut xs = Vec::new();
+            let mut ys = Vec::new();
+            for _ in 0..len {
+                x += f64::from(next(4)) * 0.5;
+                xs.push(x);
+                ys.push(if next(5) == 0 {
+                    f64::NAN
+                } else {
+                    f64::from(next(9))
+                });
+            }
+            let lo = f64::from(next(8)) * 0.5 - 1.0;
+            let hi = lo + 0.5 + f64::from(next(10)) * 0.5;
+            let position = [Step::Post, Step::Pre, Step::Mid][next(3) as usize];
+            let expected = last_visible(&xs, &ys, position, lo, hi);
+            let got = step_anchor(LIN, nums(&xs), &ys, position, Some((lo, hi))).map(|a| {
+                let AnchorX::Number(x) = a.x else {
+                    panic!("number expected")
+                };
+                (x, a.y, a.end == EndKind::Edge)
+            });
+            assert_eq!(
+                got, expected,
+                "case {case}: {position:?} {xs:?} {ys:?} {lo}..{hi}"
+            );
+        }
     }
 }
