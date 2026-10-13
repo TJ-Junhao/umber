@@ -1,4 +1,5 @@
-//! The figure model: a [`Figure`] holds one [`Axes`], which holds [`Mark`]s.
+//! The figure model: a [`Figure`] holds a [`Grid`] and the [`Axes`] placed on it, which hold
+//! [`Mark`]s. An [`AxesMut`] changes one axes of a figure.
 //!
 //! The model is data only. Every input is validated at the call that receives it, so a model
 //! that exists is always drawable. Marks hold copies of their data that never change, so clones
@@ -8,18 +9,22 @@
 //! model.
 
 mod axes;
+mod axes_mut;
 mod axis_data;
 mod bar;
 mod figure;
+mod grid;
 mod hist;
 mod mark;
 mod ticks;
 mod validation;
 
 pub use axes::Axes;
+pub use axes_mut::AxesMut;
 pub use axis_data::AxisData;
 pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};
 pub use figure::Figure;
+pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement, Share};
 pub use hist::{HistMark, HistOptions};
 pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 pub(crate) use ticks::AxisTicks;
@@ -103,7 +108,7 @@ mod tests {
     #[test]
     fn length_mismatch_is_a_data_error() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         assert_data(
             a.line(nums(&[0.0, 1.0, 2.0]), &[1.0, 2.0], LineOptions::default()),
             "Axes.line()",
@@ -120,7 +125,7 @@ mod tests {
     #[test]
     fn infinite_values_are_data_errors() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         assert_data(
             a.line(
                 nums(&[0.0, 1.0, 2.0, f64::INFINITY]),
@@ -145,7 +150,7 @@ mod tests {
     #[test]
     fn huge_magnitudes_are_data_errors() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         assert_data(
             a.line(nums(&[0.0, 1e301]), &[0.0, 0.0], LineOptions::default()),
             "Axes.line()",
@@ -165,7 +170,7 @@ mod tests {
     #[test]
     fn non_positive_values_on_a_log_axis_are_data_errors() {
         let mut f = figure();
-        let a = f.add_axes(log_kind(), log_kind()).unwrap();
+        let mut a = f.add_axes(log_kind(), log_kind()).unwrap();
         assert_data(
             a.line(nums(&[1.0, 0.0]), &[1.0, 1.0], LineOptions::default()),
             "Axes.line()",
@@ -190,7 +195,7 @@ mod tests {
     #[test]
     fn log_axis_values_outside_the_log_range_are_data_errors() {
         let mut f = figure();
-        let a = f.add_axes(log_kind(), log_kind()).unwrap();
+        let mut a = f.add_axes(log_kind(), log_kind()).unwrap();
         assert_data(
             a.line(nums(&[1.0, 1e-301]), &[1.0, 1.0], LineOptions::default()),
             "Axes.line()",
@@ -214,7 +219,7 @@ mod tests {
     #[test]
     fn axis_data_kind_must_match_the_axis() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         assert_data(
             a.line(nums(&[0.0]), &[1.0], LineOptions::default()),
             "Axes.line()",
@@ -230,7 +235,7 @@ mod tests {
         );
 
         let mut g = figure();
-        let b = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut b = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         assert_data(
             b.scatter(
                 AxisData::Categories(vec!["a".into()]),
@@ -272,30 +277,32 @@ mod tests {
             let mut f = figure();
             assert_category_y(f.add_axes(x, ScaleKind::Category));
             // The failed call added no axes, so the figure can still take its axes.
-            assert!(f.axes().is_none());
+            assert_eq!(f.panels().count(), 0);
             let a = f.add_axes(x, ScaleKind::Linear).unwrap();
             assert_eq!(a.y_scale(), ScaleKind::Linear);
         }
     }
 
     #[test]
-    fn a_second_axes_is_reported_before_a_category_y() {
+    fn a_category_y_is_reported_before_a_taken_cell() {
         let mut f = figure();
         f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
-        match f.add_axes(ScaleKind::Linear, ScaleKind::Category) {
-            Err(Error::Usage { message, .. }) => assert!(
-                message.starts_with("the figure already has axes"),
-                "{message}"
+        assert_category_y(f.add_axes(ScaleKind::Linear, ScaleKind::Category));
+        match f.add_axes(ScaleKind::Linear, ScaleKind::Linear) {
+            Err(Error::Usage { message, .. }) => assert_eq!(
+                message,
+                "row 0, col 0 is taken by the axes added at row 0, col 0."
             ),
             other => panic!("expected Usage error, got {other:?}"),
         }
-        assert_eq!(f.axes().map(Axes::y_scale), Some(log_kind()));
+        let scales: Vec<ScaleKind> = f.panels().map(Axes::y_scale).collect();
+        assert_eq!(scales, [log_kind()]);
     }
 
     #[test]
     fn invalid_limits_are_style_errors() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         for (lo, hi) in [
             (1.0, 1.0),
             (2.0, 1.0),
@@ -318,7 +325,7 @@ mod tests {
     #[test]
     fn non_positive_or_out_of_range_limits_on_a_log_axis_are_style_errors() {
         let mut f = figure();
-        let a = f.add_axes(log_kind(), log_kind()).unwrap();
+        let mut a = f.add_axes(log_kind(), log_kind()).unwrap();
         assert_style(a.xlim(0.0, 10.0), "Axes.xlim()");
         assert_style(a.xlim(-5.0, 10.0), "Axes.xlim()");
         assert_style(a.ylim(1e-301, 10.0), "Axes.ylim()");
@@ -329,7 +336,7 @@ mod tests {
     #[test]
     fn extreme_limits_print_in_scientific_form() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
         assert_eq!(
             a.xlim(0.0, 1e301).unwrap_err().to_string(),
             "Axes.xlim(): the limits are 0 and 1e301; their magnitude must not exceed 1e300."
@@ -343,7 +350,7 @@ mod tests {
     #[test]
     fn limits_on_a_category_axis_are_usage_errors() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         assert_usage(a.xlim(0.0, 1.0), "Axes.xlim()");
         // Usage wins over invalid values.
         assert_usage(a.xlim(1.0, 0.0), "Axes.xlim()");
@@ -355,7 +362,7 @@ mod tests {
     #[test]
     fn nan_is_allowed_in_lines_and_scatters() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         a.line(
             nums(&[0.0, f64::NAN, 2.0]),
             &[f64::NAN, 1.0, 2.0],
@@ -370,7 +377,7 @@ mod tests {
     #[test]
     fn marks_store_copies_of_the_input() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         let mut y = vec![1.0, 2.0];
         let x = nums(&[0.0, 1.0]);
         a.line(x.clone(), &y, LineOptions::default()).unwrap();
@@ -388,7 +395,7 @@ mod tests {
     fn marks_keep_their_width_and_size() {
         use crate::SizeSpec;
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         let line = LineOptions {
             width: SizeSpec::times(2.0).unwrap(),
             ..LineOptions::default()
@@ -430,7 +437,7 @@ mod tests {
             .unwrap()
             .title("kept");
         let before = f.clone();
-        let a = f.axes_mut().unwrap();
+        let mut a = f.single_axes_mut();
         assert!(
             a.line(nums(&[0.0]), &[1.0, 2.0], LineOptions::default())
                 .is_err()
@@ -457,7 +464,7 @@ mod tests {
         assert!(a.ylim(1.0, 1e301).is_err());
         assert!(f.add_axes(ScaleKind::Linear, ScaleKind::Linear).is_err());
         assert_eq!(f, before);
-        let a = f.axes().unwrap();
+        let a = f.single_axes();
         assert_eq!(a.x_limits(), Some((-1.0, 2.0)));
         assert_eq!(a.y_limits(), Some((0.5, 50.0)));
         assert_eq!(a.marks().len(), 1);
@@ -466,7 +473,7 @@ mod tests {
     #[test]
     fn explicit_limits_keep_the_scale_they_define() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
         a.xlim(-0.0, 3.5).unwrap().ylim(2.0, 500.0).unwrap();
         let x = a.x_limit_scale().unwrap();
         let y = a.y_limit_scale().unwrap();
@@ -486,7 +493,7 @@ mod tests {
     #[test]
     fn text_setters_store_text() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         a.title("t").subtitle("s").xlabel("x").ylabel("y");
         assert_eq!(
             (
@@ -503,7 +510,7 @@ mod tests {
         v.iter().map(|s| (*s).to_owned()).collect()
     }
 
-    fn bars(a: &mut Axes, categories: &[&str], heights: &[f64]) -> Result<()> {
+    fn bars(a: &mut AxesMut<'_>, categories: &[&str], heights: &[f64]) -> Result<()> {
         a.bar(names(categories), heights, BarOptions::default())
             .map(|_| ())
     }
@@ -512,23 +519,23 @@ mod tests {
     fn bar_checks_run_in_order() {
         const BAR: &str = "Axes.bar()";
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         // Lengths first, whatever else is wrong.
         assert_data(
-            bars(a, &["a", "a"], &[f64::INFINITY]),
+            bars(&mut a, &["a", "a"], &[f64::INFINITY]),
             BAR,
             "categories has 2 values but heights has 1; categories and heights must have the same length.",
         );
         // Duplicates before heights; the message names both indices.
         assert_data(
-            bars(a, &["a", "b", "a"], &[f64::INFINITY, 1.0, 2.0]),
+            bars(&mut a, &["a", "b", "a"], &[f64::INFINITY, 1.0, 2.0]),
             BAR,
             "categories[2] repeats \"a\" from categories[0]; each category must appear once.",
         );
         // The first bad height, by index.
         assert_data(
             bars(
-                a,
+                &mut a,
                 &["a", "b", "c", "d"],
                 &[1.0, f64::NAN, 1e301, f64::INFINITY],
             ),
@@ -536,7 +543,11 @@ mod tests {
             "heights[2] is 1e301; magnitudes must not exceed 1e300.",
         );
         assert_data(
-            bars(a, &["a", "b", "c", "d"], &[1.0, 2.0, 3.0, f64::INFINITY]),
+            bars(
+                &mut a,
+                &["a", "b", "c", "d"],
+                &[1.0, 2.0, 3.0, f64::INFINITY],
+            ),
             BAR,
             "heights[3] is inf; values must be finite",
         );
@@ -544,9 +555,9 @@ mod tests {
 
         // The x axis kind before duplicates.
         let mut g = figure();
-        let b = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut b = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         assert_data(
-            bars(b, &["a", "a"], &[1.0, 2.0]),
+            bars(&mut b, &["a", "a"], &[1.0, 2.0]),
             BAR,
             "categories holds names but the x axis is not a category axis; use a category x axis.",
         );
@@ -558,26 +569,26 @@ mod tests {
     #[test]
     fn bars_on_a_log_y_axis_need_positive_heights() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, log_kind()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, log_kind()).unwrap();
         assert_data(
-            bars(a, &["a", "b"], &[2.0, 0.0]),
+            bars(&mut a, &["a", "b"], &[2.0, 0.0]),
             "Axes.bar()",
             "heights[1] is 0 on a log axis; values must be positive.",
         );
         assert_data(
-            bars(a, &["a"], &[1e-301]),
+            bars(&mut a, &["a"], &[1e-301]),
             "Axes.bar()",
             "heights[0] is 1e-301 on a log axis",
         );
         assert!(a.marks().is_empty());
-        bars(a, &["a", "b"], &[2.0, f64::NAN]).unwrap();
+        bars(&mut a, &["a", "b"], &[2.0, f64::NAN]).unwrap();
         assert_eq!(a.marks().len(), 1);
     }
 
     #[test]
     fn bars_store_their_input_and_share_it_with_clones() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         let heights = [-0.0, f64::from_bits(0xfff8_0000_0000_0001), -2.5, 0.0];
         let options = BarOptions {
             label: "sales".to_owned(),
@@ -592,9 +603,10 @@ mod tests {
             .bar(names(&["b", "", "a", "c"]), &heights, options.clone())
             .unwrap();
         let copy = f.clone();
-        let (Some([_, Mark::Bar(bar)]), Some([_, Mark::Bar(cloned)])) =
-            (f.axes().map(Axes::marks), copy.axes().map(Axes::marks))
-        else {
+        let (Some([_, Mark::Bar(bar)]), Some([_, Mark::Bar(cloned)])) = (
+            f.panels().next().map(Axes::marks),
+            copy.panels().next().map(Axes::marks),
+        ) else {
             panic!("expected two bar marks");
         };
         assert_eq!(bar.categories(), names(&["b", "", "a", "c"]));
@@ -612,10 +624,10 @@ mod tests {
             .bar(names(&["a"]), &[1.0], BarOptions::default())
             .unwrap();
         let before = f.clone();
-        let a = f.axes_mut().unwrap();
-        assert!(bars(a, &["a"], &[]).is_err());
-        assert!(bars(a, &["a", "a"], &[1.0, 1.0]).is_err());
-        assert!(bars(a, &["b"], &[f64::INFINITY]).is_err());
+        let mut a = f.single_axes_mut();
+        assert!(bars(&mut a, &["a"], &[]).is_err());
+        assert!(bars(&mut a, &["a", "a"], &[1.0, 1.0]).is_err());
+        assert!(bars(&mut a, &["b"], &[f64::INFINITY]).is_err());
         assert_eq!(f, before);
     }
 
@@ -626,12 +638,12 @@ mod tests {
         }
     }
 
-    fn grouped(a: &mut Axes, categories: &[&str], heights: &[&[f64]]) -> Result<()> {
+    fn grouped(a: &mut AxesMut<'_>, categories: &[&str], heights: &[&[f64]]) -> Result<()> {
         let list = heights.iter().map(|h| series(h)).collect();
         a.grouped_bar(names(categories), list).map(|_| ())
     }
 
-    fn stacked(a: &mut Axes, categories: &[&str], heights: &[&[f64]]) -> Result<()> {
+    fn stacked(a: &mut AxesMut<'_>, categories: &[&str], heights: &[&[f64]]) -> Result<()> {
         let list = heights.iter().map(|h| series(h)).collect();
         a.stacked_bar(names(categories), list).map(|_| ())
     }
@@ -642,31 +654,31 @@ mod tests {
     #[test]
     fn an_empty_series_list_is_a_data_error() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         // Before anything else, even with no categories.
         assert_data(
-            grouped(a, &["a", "a"], &[]),
+            grouped(&mut a, &["a", "a"], &[]),
             GROUPED,
             "series is empty; pass at least one series.",
         );
-        assert_data(stacked(a, &[], &[]), STACKED, "series is empty");
+        assert_data(stacked(&mut a, &[], &[]), STACKED, "series is empty");
         assert!(a.marks().is_empty());
     }
 
     #[test]
     fn a_series_length_mismatch_names_the_series() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         for (context, call) in [
             (
                 GROUPED,
-                grouped as fn(&mut Axes, &[&str], &[&[f64]]) -> Result<()>,
+                grouped as fn(&mut AxesMut<'_>, &[&str], &[&[f64]]) -> Result<()>,
             ),
             (STACKED, stacked),
         ] {
             assert_data(
                 call(
-                    a,
+                    &mut a,
                     &["a", "b"],
                     &[&[1.0, 2.0], &[1.0, 2.0], &[f64::INFINITY]],
                 ),
@@ -675,7 +687,7 @@ mod tests {
             );
             // The first mismatched series, before duplicates and bad heights.
             assert_data(
-                call(a, &["a", "a"], &[&[f64::INFINITY], &[1.0, 2.0, 3.0]]),
+                call(&mut a, &["a", "a"], &[&[f64::INFINITY], &[1.0, 2.0, 3.0]]),
                 context,
                 "series[0].values has 1",
             );
@@ -688,31 +700,31 @@ mod tests {
         for (context, call) in [
             (
                 GROUPED,
-                grouped as fn(&mut Axes, &[&str], &[&[f64]]) -> Result<()>,
+                grouped as fn(&mut AxesMut<'_>, &[&str], &[&[f64]]) -> Result<()>,
             ),
             (STACKED, stacked),
         ] {
             // The x axis kind before duplicates.
             let mut f = figure();
-            let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+            let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
             assert_data(
-                call(a, &["a", "a"], &[&[1.0, 2.0]]),
+                call(&mut a, &["a", "a"], &[&[1.0, 2.0]]),
                 context,
                 "categories holds names but the x axis is not a category axis; use a category x axis.",
             );
 
             let mut f = figure();
-            let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+            let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
             // Duplicates before heights.
             assert_data(
-                call(a, &["a", "b", "a"], &[&[f64::INFINITY; 3]]),
+                call(&mut a, &["a", "b", "a"], &[&[f64::INFINITY; 3]]),
                 context,
                 "categories[2] repeats \"a\" from categories[0]; each category must appear once.",
             );
             // Heights in series order; the message names the series and the height.
             assert_data(
                 call(
-                    a,
+                    &mut a,
                     &["a", "b"],
                     &[&[1.0, f64::NAN], &[2.0, 1e301], &[f64::INFINITY, 0.0]],
                 ),
@@ -723,13 +735,13 @@ mod tests {
 
             // A log y axis needs positive heights.
             let mut f = figure();
-            let a = f.add_axes(ScaleKind::Category, log_kind()).unwrap();
+            let mut a = f.add_axes(ScaleKind::Category, log_kind()).unwrap();
             assert_data(
-                call(a, &["a", "b"], &[&[1.0, 2.0], &[3.0, -1.0]]),
+                call(&mut a, &["a", "b"], &[&[1.0, 2.0], &[3.0, -1.0]]),
                 context,
                 "series[1].values[1] is -1 on a log axis; values must be positive.",
             );
-            call(a, &["a", "b"], &[&[1.0, f64::NAN], &[1e300, 2.0]]).unwrap();
+            call(&mut a, &["a", "b"], &[&[1.0, f64::NAN], &[1e300, 2.0]]).unwrap();
             assert_eq!(a.marks().len(), 1);
         }
     }
@@ -737,30 +749,30 @@ mod tests {
     #[test]
     fn stacked_total_beyond_limit_is_a_data_error() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         // Totals at the bound are fine, on both sides.
         stacked(
-            a,
+            &mut a,
             &["a", "b"],
             &[&[6e299, -6e299], &[f64::NAN, -4e299], &[4e299, 0.0]],
         )
         .unwrap();
         // The positive side of the second category.
         assert_data(
-            stacked(a, &["a", "b"], &[&[1.0, 6e299], &[-1e300, 5e299]]),
+            stacked(&mut a, &["a", "b"], &[&[1.0, 6e299], &[-1e300, 5e299]]),
             STACKED,
             "the values of categories[1] (\"b\") stack to 1.1e300; each stack must stay within 1e300 on both sides of 0.",
         );
         // The negative side; a positive height does not offset it.
         assert_data(
-            stacked(a, &["a"], &[&[-1e300], &[5.0], &[-1e300]]),
+            stacked(&mut a, &["a"], &[&[-1e300], &[5.0], &[-1e300]]),
             STACKED,
             "the values of categories[0] (\"a\") stack to -2e300",
         );
         // Grouped bars do not add up, so they have no such limit.
         let mut h = figure();
-        let c = h.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
-        grouped(c, &["a"], &[&[1e300], &[1e300]]).unwrap();
+        let mut c = h.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        grouped(&mut c, &["a"], &[&[1e300], &[1e300]]).unwrap();
         assert_eq!(a.marks().len(), 1);
         assert_eq!(c.marks().len(), 1);
     }
@@ -768,7 +780,7 @@ mod tests {
     #[test]
     fn bar_groups_store_their_input_and_share_it_with_clones() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         let fixed = crate::ColorSpec::Fixed(crate::Rgba::opaque(1, 2, 3));
         let gap = f64::from_bits(0xfff8_0000_0000_0001);
         let input = vec![
@@ -787,7 +799,10 @@ mod tests {
         let (
             Some([Mark::GroupedBar(group), Mark::StackedBar(stack)]),
             Some([Mark::GroupedBar(cloned), _]),
-        ) = (f.axes().map(Axes::marks), copy.axes().map(Axes::marks))
+        ) = (
+            f.panels().next().map(Axes::marks),
+            copy.panels().next().map(Axes::marks),
+        )
         else {
             panic!("expected a grouped and a stacked mark");
         };
@@ -811,16 +826,16 @@ mod tests {
             .grouped_bar(names(&["a"]), vec![series(&[1.0])])
             .unwrap();
         let before = f.clone();
-        let a = f.axes_mut().unwrap();
-        assert!(grouped(a, &["a"], &[]).is_err());
-        assert!(grouped(a, &["a"], &[&[1.0], &[]]).is_err());
-        assert!(stacked(a, &["a", "a"], &[&[1.0, 1.0]]).is_err());
-        assert!(stacked(a, &["a"], &[&[1e300], &[1e300]]).is_err());
-        assert!(grouped(a, &["b"], &[&[f64::INFINITY]]).is_err());
+        let mut a = f.single_axes_mut();
+        assert!(grouped(&mut a, &["a"], &[]).is_err());
+        assert!(grouped(&mut a, &["a"], &[&[1.0], &[]]).is_err());
+        assert!(stacked(&mut a, &["a", "a"], &[&[1.0, 1.0]]).is_err());
+        assert!(stacked(&mut a, &["a"], &[&[1e300], &[1e300]]).is_err());
+        assert!(grouped(&mut a, &["b"], &[&[f64::INFINITY]]).is_err());
         assert_eq!(f, before);
     }
 
-    fn hist(a: &mut Axes, values: &[f64], bins: i64) -> Result<()> {
+    fn hist(a: &mut AxesMut<'_>, values: &[f64], bins: i64) -> Result<()> {
         let options = HistOptions {
             bins,
             ..HistOptions::default()
@@ -833,10 +848,10 @@ mod tests {
     #[test]
     fn hist_bin_count_outside_its_range_is_a_style_error_naming_bins() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         for (bins, shown) in [(0, "0"), (10_001, "10001")] {
             // Before anything else, even an infinite value on a log x axis.
-            match hist(a, &[f64::INFINITY], bins) {
+            match hist(&mut a, &[f64::INFINITY], bins) {
                 Err(Error::Style {
                     context, message, ..
                 }) => {
@@ -850,20 +865,20 @@ mod tests {
             }
         }
         assert!(a.marks().is_empty());
-        hist(a, &[1.0], 1).unwrap();
-        hist(a, &[1.0], 10_000).unwrap();
+        hist(&mut a, &[1.0], 1).unwrap();
+        hist(&mut a, &[1.0], 10_000).unwrap();
         assert_eq!(a.marks().len(), 2);
         let mut g = figure();
-        let b = g.add_axes(log_kind(), ScaleKind::Linear).unwrap();
-        assert_style(hist(b, &[f64::INFINITY], 0), HIST);
+        let mut b = g.add_axes(log_kind(), ScaleKind::Linear).unwrap();
+        assert_style(hist(&mut b, &[f64::INFINITY], 0), HIST);
     }
 
     #[test]
     fn negative_bins_are_a_style_error() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         for bins in [-1, i64::MIN] {
-            let err = hist(a, &[1.0], bins).unwrap_err();
+            let err = hist(&mut a, &[1.0], bins).unwrap_err();
             assert!(matches!(err, Error::Style { .. }));
             assert_eq!(
                 err.to_string(),
@@ -873,16 +888,16 @@ mod tests {
             assert_eq!(err.hint(), Some("use at least one bin."));
         }
         // Above the range there is no hint to give.
-        assert_eq!(hist(a, &[1.0], 10_001).unwrap_err().hint(), None);
+        assert_eq!(hist(&mut a, &[1.0], 10_001).unwrap_err().hint(), None);
         assert!(a.marks().is_empty());
     }
 
     #[test]
     fn hist_on_a_log_x_axis_is_a_usage_error() {
         let mut f = figure();
-        let a = f.add_axes(log_kind(), ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(log_kind(), ScaleKind::Linear).unwrap();
         // Before the values are checked.
-        match hist(a, &[-1.0, f64::INFINITY], 30) {
+        match hist(&mut a, &[-1.0, f64::INFINITY], 30) {
             Err(Error::Usage {
                 context, message, ..
             }) => {
@@ -901,9 +916,9 @@ mod tests {
     fn hist_checks_run_in_order() {
         // A category x axis, before the values.
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         assert_data(
-            hist(a, &[f64::INFINITY], 30),
+            hist(&mut a, &[f64::INFINITY], 30),
             HIST,
             "values holds numbers but the x axis is a category axis; use a linear x axis.",
         );
@@ -911,14 +926,14 @@ mod tests {
 
         // The first bad value, by index; NaN is allowed.
         let mut g = figure();
-        let b = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut b = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         assert_data(
-            hist(b, &[1.0, f64::NAN, -1e301, f64::INFINITY], 30),
+            hist(&mut b, &[1.0, f64::NAN, -1e301, f64::INFINITY], 30),
             HIST,
             "values[2] is -1e301; magnitudes must not exceed 1e300.",
         );
         assert_data(
-            hist(b, &[1.0, f64::NEG_INFINITY], 30),
+            hist(&mut b, &[1.0, f64::NEG_INFINITY], 30),
             HIST,
             "values[1] is -inf; values must be finite",
         );
@@ -926,15 +941,15 @@ mod tests {
 
         // A log y axis is fine: the counts are positive, whatever the values.
         let mut k = figure();
-        let d = k.add_axes(ScaleKind::Linear, log_kind()).unwrap();
-        hist(d, &[-3.0, 0.0, 1e300, -1e300], 30).unwrap();
+        let mut d = k.add_axes(ScaleKind::Linear, log_kind()).unwrap();
+        hist(&mut d, &[-3.0, 0.0, 1e300, -1e300], 30).unwrap();
         assert_eq!(d.marks().len(), 1);
     }
 
     #[test]
     fn hist_stores_its_input_and_shares_it_with_clones() {
         let mut f = figure();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         let values = [-0.0, f64::from_bits(0x7ff8_0000_0000_0001), 2.5, 1e300];
         let options = HistOptions {
             bins: 7,
@@ -949,9 +964,10 @@ mod tests {
             .hist(&values, options.clone())
             .unwrap();
         let copy = f.clone();
-        let (Some([_, _, Mark::Hist(hist)]), Some([_, _, Mark::Hist(cloned)])) =
-            (f.axes().map(Axes::marks), copy.axes().map(Axes::marks))
-        else {
+        let (Some([_, _, Mark::Hist(hist)]), Some([_, _, Mark::Hist(cloned)])) = (
+            f.panels().next().map(Axes::marks),
+            copy.panels().next().map(Axes::marks),
+        ) else {
             panic!("expected three histogram marks");
         };
         let bits = |v: &[f64]| v.iter().map(|h| h.to_bits()).collect::<Vec<_>>();
@@ -968,10 +984,10 @@ mod tests {
             .hist(&[1.0, 2.0], HistOptions::default())
             .unwrap();
         let before = f.clone();
-        let a = f.axes_mut().unwrap();
-        assert!(hist(a, &[1.0], 0).is_err());
-        assert!(hist(a, &[1.0], 10_001).is_err());
-        assert!(hist(a, &[f64::INFINITY], 30).is_err());
+        let mut a = f.single_axes_mut();
+        assert!(hist(&mut a, &[1.0], 0).is_err());
+        assert!(hist(&mut a, &[1.0], 10_001).is_err());
+        assert!(hist(&mut a, &[f64::INFINITY], 30).is_err());
         assert_eq!(f, before);
     }
 }

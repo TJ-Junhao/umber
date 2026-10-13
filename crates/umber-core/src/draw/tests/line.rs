@@ -18,8 +18,7 @@ fn lines_far_outside_limits_are_clipped() {
             &[-1e9, 0.5, 1e9],
             LineOptions::default(),
         );
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xlim(0.0, 1.0)
             .unwrap()
             .ylim(0.0, 1.0)
@@ -59,8 +58,7 @@ fn lines_leaving_and_reentering_start_new_subpaths() {
         &[0.5, 1e6, 0.5],
         LineOptions::default(),
     );
-    f.axes_mut()
-        .unwrap()
+    f.single_axes_mut()
         .xlim(0.0, 1.0)
         .unwrap()
         .ylim(0.0, 1.0)
@@ -84,8 +82,7 @@ fn lines_leaving_and_reentering_start_new_subpaths() {
         &[1e300, 0.0, -1e300],
         LineOptions::default(),
     );
-    f.axes_mut()
-        .unwrap()
+    f.single_axes_mut()
         .xlim(0.0, 1e-290)
         .unwrap()
         .ylim(-1e-290, 1e-290)
@@ -216,8 +213,7 @@ fn per_series_width_sets_the_stroke_its_dashes_and_its_clip_margin() {
                     ..LineOptions::default()
                 },
             );
-            f.axes_mut()
-                .unwrap()
+            f.single_axes_mut()
                 .xlim(0.0, 1.0)
                 .unwrap()
                 .ylim(0.0, 1.0)
@@ -263,7 +259,7 @@ fn line_color_appears_in_plot() {
             &[0.7, 0.7],
             LineOptions::default(),
         );
-        f.axes_mut().unwrap().ylim(0.0, 1.0).unwrap();
+        f.single_axes_mut().ylim(0.0, 1.0).unwrap();
         let plot = plot_of(&f);
         let dpi = 144.0;
         let pixels = Pixels::decode(&f.to_png(dpi as i64).unwrap());
@@ -295,8 +291,7 @@ fn huge_horizontal_lines_keep_their_visible_width() {
             &[0.5, 0.5],
             LineOptions::default(),
         );
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xlim(0.0, 1.0)
             .unwrap()
             .ylim(0.0, 1.0)
@@ -330,8 +325,7 @@ fn huge_to_inside_segments_keep_the_inside_end() {
             &[-v, 0.5],
             LineOptions::default(),
         );
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xlim(0.0, 1.0)
             .unwrap()
             .ylim(0.0, 1.0)

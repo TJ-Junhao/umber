@@ -1,3 +1,4 @@
 # Cases whose committed outputs change on purpose in this change.
-# Series values renamed: the error text names series[i].values instead of series[i].heights.
-errors/grouped-bars
+# A second axes on a figure of one cell is refused as a taken cell: the message, parameter and
+# hint of that error are the grid's.
+errors/api

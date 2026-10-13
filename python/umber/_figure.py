@@ -17,6 +17,11 @@ _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
 _X_SCALE_HINT: Final = "use Scale.linear(), Scale.log() or Scale.category()."
 _Y_SCALE_HINT: Final = "use Scale.linear() or Scale.log()."
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
+# A figure of one cell: one row and one column, nothing shared (``Share`` value 0) and the
+# legend merged (``Legend`` value 0).
+_ONE_CELL: Final = (1, 1, 0, 0, 0)
+# The one cell's position: row and column ``AUTO`` (grid index kind 0), spanning one cell.
+_ONLY_CELL: Final = (0, 0, 0, 0, 1, 1)
 
 
 @final
@@ -66,7 +71,7 @@ class Figure:
             inches_wide = real("Figure()", "width", width)
             inches_high = real("Figure()", "height", height)
             instance("Figure()", "theme", theme, Theme, _THEME_HINT)
-            self._native = _umber.Figure(inches_wide, inches_high, _theme.native(theme))
+            self._native = _umber.Figure(inches_wide, inches_high, _theme.native(theme), *_ONE_CELL)
             self._axes = None
 
     @property
@@ -133,9 +138,9 @@ class Figure:
             context = "Figure.add_axes()"
             instance(context, "x", x, Scale, _X_SCALE_HINT)
             instance(context, "y", y, Scale, _Y_SCALE_HINT)
-            # The core refuses a second axes, then a category y scale.
-            self._native.add_axes(*_scale.native(x), *_scale.native(y))
-            axes = _axes.attach(self, self._native, x, y)
+            # The core refuses a category y scale, then a taken cell.
+            row, col = self._native.add_axes(*_ONLY_CELL, *_scale.native(x), *_scale.native(y))
+            axes = _axes.attach(self, self._native, x, y, row, col)
             self._axes = axes
             return axes
 
@@ -252,7 +257,8 @@ class Figure:
         clone._axes = None
         if self._axes is not None:
             x, y = _axes.scales(self._axes)
-            clone._axes = _axes.attach(clone, clone._native, x, y)
+            row, col = _axes.cell(self._axes)
+            clone._axes = _axes.attach(clone, clone._native, x, y, row, col)
         return clone
 
     def __reduce__(self) -> Never:

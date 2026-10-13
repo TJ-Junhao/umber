@@ -1,6 +1,7 @@
 //! The figure model and the calls that render it.
 //!
-//! A [`Figure`] holds one [`Axes`], which holds [`Mark`]s. Every input is validated at the call
+//! A [`Figure`] holds a [`Grid`] and the [`Axes`] placed on it, which hold [`Mark`]s; an
+//! [`AxesMut`] changes one of them. Every input is validated at the call
 //! that receives it, so a model that exists is always drawable. Marks hold copies of their data
 //! that never change, so clones of a figure share them.
 //! Colors stay as [`ColorSpec`](crate::ColorSpec)s until rendering resolves them against the
@@ -14,17 +15,18 @@
 //! use umber_core::{ScaleKind, Theme};
 //!
 //! let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-//! let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-//! axes.title("Growth")
+//! figure
+//!     .add_axes(ScaleKind::Linear, ScaleKind::Linear)?
+//!     .title("Growth")
 //!     .line(AxisData::Numbers(vec![0.0, 1.0, 2.0]), &[1.0, 3.0, 2.0], LineOptions::default())?;
-//! assert_eq!(figure.axes().map(|a| a.marks().len()), Some(1));
+//! assert_eq!(figure.panels().map(|a| a.marks().len()).sum::<usize>(), 1);
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
 pub use crate::model::{
-    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, ExplicitTicks,
-    Figure, HistMark, HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
-    Series, SeriesView,
+    AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
+    CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
+    LineOptions, MAX_GRID, Mark, Placement, ScatterMark, ScatterOptions, Series, SeriesView, Share,
 };
 
 use crate::render::{SvgText, check_dpi, render_png, render_svg};
@@ -33,13 +35,21 @@ use crate::{FontLibrary, Result, pipeline};
 
 impl Figure {
     /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.
-    /// The scene is `width × 72` by `height × 72` pt on the theme background. It holds the
-    /// axes chrome (gridlines, tick labels, header and axis labels) as one unclipped group,
-    /// followed by the visible marks, in insertion order, as one group clipped to the plot area
-    /// (widened horizontally by half of the widest line stroke when the axes hold lines or
-    /// areas, as far as the room beside the plot allows, so line ends stay whole), and last the
-    /// baseline as an unclipped group of its own, so marks never cover it. Without axes it
-    /// holds the background only. The same figure always gives the same scene.
+    /// The scene is `width × 72` by `height × 72` pt on the theme background. For each placed
+    /// axes, in row-major order of their top-left cells, it holds the axes chrome (gridlines,
+    /// tick labels, header and axis labels) as one unclipped group, followed by the visible
+    /// marks, in insertion order, as one group clipped to the plot area (widened horizontally
+    /// by half of the widest line stroke when the axes hold lines or areas, as far as the room
+    /// beside the plot allows, so line ends stay whole), the legend as one unclipped group when
+    /// it shows anything, and last the baseline as an unclipped group of its own, so marks
+    /// never cover it. Without axes it holds the background only. The same figure always gives
+    /// the same scene.
+    ///
+    /// The canvas inside the outer padding is split into the grid's equal cells, with no gap
+    /// between them, and each axes is laid out on its own in the cells it covers, as a figure
+    /// of one axes is laid out on the canvas: its header at the top of its cells, its texts
+    /// and plot area inside them. An empty cell draws nothing. A 1 × 1 grid is laid out on the
+    /// whole canvas.
     ///
     /// # Errors
     ///
@@ -57,10 +67,15 @@ impl Figure {
     /// figure needs, and the hint suggests making the figure taller or removing whichever of
     /// the title, subtitle and legend it has.
     ///
+    /// On a grid of more than one cell, the axes are checked in row-major order of their
+    /// top-left cells, each against its own cells, and the message starts with
+    /// `row {r}, col {c}: `, the top-left cell of the axes that does not fit; the sizes it
+    /// names are those of the cells' share of the canvas.
+    ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Figure, FontLibrary, ScaleKind, Theme};
+    /// use umber_core::{Figure, FontLibrary, GridIndex, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// assert!(figure.to_scene(FontLibrary::global())?.items.is_empty());
@@ -71,8 +86,7 @@ impl Figure {
     ///
     /// // A tick label far wider than the figure cannot fit.
     /// figure
-    ///     .axes_mut()
-    ///     .expect("the figure has axes")
+    ///     .axes_at_mut(GridIndex::Auto, GridIndex::Auto)?
     ///     .xticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])?;
     /// let err = figure.to_scene(FontLibrary::global()).unwrap_err();
     /// assert!(err.to_string().starts_with("Figure.to_scene(): x tick label \"WWW"));
@@ -146,13 +160,15 @@ mod tests {
     /// Each mark's color, resolved against the theme's palette, in mark order. `Auto` colors
     /// take palette slots in series order; `Palette` and `Fixed` colors do not consume a slot.
     fn resolved_colors(figure: &Figure) -> Vec<Rgba> {
-        let Some(axes) = figure.axes() else {
-            return Vec::new();
-        };
-        resolve::resolve_marks(axes.marks(), figure.theme())
-            .into_iter()
-            .flat_map(|resolved| resolved.keys(&resolve::Limits::of(axes)))
-            .map(|key| key.color)
+        figure
+            .panels()
+            .flat_map(|axes| {
+                resolve::resolve_marks(axes.marks(), figure.theme())
+                    .into_iter()
+                    .flat_map(|resolved| resolved.keys(&resolve::Limits::of(axes)))
+                    .map(|key| key.color)
+                    .collect::<Vec<_>>()
+            })
             .collect()
     }
 
@@ -242,7 +258,7 @@ mod tests {
         let mut f = figure();
         let palette = f.theme().palette().to_vec();
         let fixed = Rgba::opaque(1, 2, 3);
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         let specs = [
             ColorSpec::AUTO,
             ColorSpec::Fixed(fixed),
@@ -274,7 +290,7 @@ mod tests {
     fn auto_colors_count_lines_and_scatters_together() {
         let mut f = figure();
         let palette = f.theme().palette().to_vec();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         a.scatter(nums(&[0.0]), &[1.0], ScatterOptions::default())
             .unwrap()
             .line(nums(&[0.0]), &[1.0], LineOptions::default())
@@ -288,7 +304,7 @@ mod tests {
         let mut f = figure();
         let first = f.theme().palette()[0];
         let alpha = Alpha::new(0.5).unwrap();
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         a.line(
             nums(&[0.0]),
             &[1.0],

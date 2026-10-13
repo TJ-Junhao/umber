@@ -27,6 +27,10 @@ CATEGORY_X_HINT = "pass x=Scale.category() to Figure.add_axes()."
 LINEAR, CATEGORY = 0, 2
 OUTLINES = 0
 AUTO = (0, 0, 1.0)
+# A native figure of one cell (rows, cols, share_x, share_y, legend), and the position of its
+# axes: row and column AUTO (grid index kind 0) spanning one cell.
+ONE_CELL = (1, 1, 0, 0, 0)
+ONLY_CELL = (0, 0, 0, 0, 1, 1)
 THEMES = [ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT]
 NATIVE_THEMES = [_umber.Theme.pigment, _umber.Theme.graphite, _umber.Theme.midnight]
 
@@ -401,9 +405,9 @@ def test_an_area_matches_the_native_figure(
 ) -> None:
     fig = ub.Figure(4, 3, theme=theme.with_fill_style(fill))
     fig.add_axes().area([0, 1, 2, 3], [1, 3, 2, 4], label="a", width=ub.Size.times(2))
-    native_fig = _umber.Figure(4.0, 3.0, native_theme().with_fill_style(fill.value))
-    native_fig.add_axes(LINEAR, 10.0, LINEAR, 10.0)
-    native_fig.area(floats(0, 1, 2, 3), floats(1, 3, 2, 4), "a", AUTO, 0, (1, 2.0))
+    native_fig = _umber.Figure(4.0, 3.0, native_theme().with_fill_style(fill.value), *ONE_CELL)
+    native_fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
+    native_fig.area(0, 0, floats(0, 1, 2, 3), floats(1, 3, 2, 4), "a", AUTO, 0, (1, 2.0))
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
 
@@ -420,8 +424,8 @@ def test_the_fill_style_changes_the_rendering() -> None:
 def test_a_category_area_matches_the_native_figure() -> None:
     fig = ub.Figure(4, 3, theme=ub.Theme.MIDNIGHT)
     fig.add_axes(x=ub.Scale.category()).area(["Q1", "Q2", "Q3"], [3, 1, 2], label="Sales")
-    native = _umber.Figure(4.0, 3.0, _umber.Theme.midnight())
-    native.add_axes(CATEGORY, 10.0, LINEAR, 10.0)
-    native.area(["Q1", "Q2", "Q3"], floats(3, 1, 2), "Sales", AUTO, 0, (0, 0.0))
+    native = _umber.Figure(4.0, 3.0, _umber.Theme.midnight(), *ONE_CELL)
+    native.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
+    native.area(0, 0, ["Q1", "Q2", "Q3"], floats(3, 1, 2), "Sales", AUTO, 0, (0, 0.0))
     assert fig.to_png(dpi=60) == native.to_png(60)
     assert fig.to_svg() == native.to_svg(OUTLINES)

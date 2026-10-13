@@ -26,6 +26,10 @@ type ErrorCase = tuple[
 ]
 
 AUTO = (0, 0, 1.0)
+# A native figure of one cell (rows, cols, share_x, share_y, legend), and the position of its
+# axes: row and column AUTO (grid index kind 0) spanning one cell.
+ONE_CELL = (1, 1, 0, 0, 0)
+ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
 RED = (2, 0xD64933FF, 1.0)
 BLUE = (2, 0x3366B8FF, 1.0)
@@ -35,6 +39,10 @@ CONCRETE_HINT = "use Color.hex(), Color.rgb() or a named color."
 X_SCALE_HINT = "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."
 CATEGORY_X_HINT = "pass x=Scale.category() to Figure.add_axes()."
 LINEAR_X_HINT = "pass x=Scale.linear() to Figure.add_axes()."
+TAKEN_HINT = "each cell holds one axes; pick an empty cell."
+NO_AXES_AT_ORIGIN = "Figure.axes_at(): row 0, col 0 holds no axes."
+NO_AXES_HINT = "add one with add_axes(row=, col=) first."
+RANGE_HINT = "rows and columns count from 0."
 
 
 def floats(*values: float) -> npt.NDArray[np.float64]:
@@ -49,15 +57,15 @@ def details(err: BaseException) -> tuple[object, object]:
 
 def figure(x: int = LINEAR, y: int = LINEAR, *, base: float = 10.0) -> _umber.Figure:
     """A 3 by 2 inch figure with axes of the given scale kinds."""
-    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
-    fig.add_axes(x, base, y, base)
+    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
+    fig.add_axes(*ONLY_CELL, x, base, y, base)
     return fig
 
 
 def line_figure() -> _umber.Figure:
     fig = figure()
-    fig.title("Signal")
-    fig.line(floats(0, 1, 2), floats(1, 3, 2), "north", AUTO, 0, NO_SIZE)
+    fig.title(0, 0, "Signal")
+    fig.line(0, 0, floats(0, 1, 2), floats(1, 3, 2), "north", AUTO, 0, NO_SIZE)
     return fig
 
 
@@ -254,11 +262,11 @@ def test_unknown_color_kinds_are_internal_errors() -> None:
 
 
 def test_figure_uses_its_theme() -> None:
-    pigment = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
-    midnight = _umber.Figure(3.0, 2.0, _umber.Theme.midnight())
+    pigment = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
+    midnight = _umber.Figure(3.0, 2.0, _umber.Theme.midnight(), *ONE_CELL)
     assert pigment.to_svg(OUTLINES) != midnight.to_svg(OUTLINES)
     custom = _umber.Theme.pigment().with_background(BLUE)
-    assert 'fill="#3366B8"' in _umber.Figure(3.0, 2.0, custom).to_svg(OUTLINES)
+    assert 'fill="#3366B8"' in _umber.Figure(3.0, 2.0, custom, *ONE_CELL).to_svg(OUTLINES)
 
 
 @pytest.mark.parametrize(
@@ -274,7 +282,7 @@ def test_figure_sizes_are_validated(
     width: float, height: float, parameter: str, shown: str
 ) -> None:
     assert_reported(
-        lambda: _umber.Figure(width, height, _umber.Theme.pigment()),
+        lambda: _umber.Figure(width, height, _umber.Theme.pigment(), *ONE_CELL),
         ub.StyleError,
         f"Figure(): {parameter} is {shown}; it must be finite, above 0 and at most 200 inches.",
         parameter,
@@ -282,23 +290,23 @@ def test_figure_sizes_are_validated(
     )
 
 
-def test_a_figure_has_one_axes() -> None:
+def test_a_figure_of_one_cell_has_one_axes() -> None:
     fig = figure()
     assert_reported(
-        lambda: fig.add_axes(LINEAR, 10.0, LINEAR, 10.0),
+        lambda: fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0),
         ub.UsageError,
-        "Figure.add_axes(): the figure already has axes; v0.1 supports one axes per figure.",
-        None,
-        "create a new Figure for another chart.",
+        "Figure.add_axes(): row 0, col 0 is taken by the axes added at row 0, col 0.",
+        "row",
+        TAKEN_HINT,
     )
 
 
 def test_a_category_y_axis_is_refused() -> None:
-    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
+    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
     for x in (LINEAR, LOG, CATEGORY):
 
         def call(x: int = x) -> None:
-            fig.add_axes(x, 10.0, CATEGORY, 10.0)
+            fig.add_axes(*ONLY_CELL, x, 10.0, CATEGORY, 10.0)
 
         assert_reported(
             call,
@@ -307,50 +315,191 @@ def test_a_category_y_axis_is_refused() -> None:
             "y",
             "pass y=Scale.linear() or y=Scale.log().",
         )
-    fig.add_axes(CATEGORY, 0.0, LOG, 2.0)  # the failed calls added nothing
+    fig.add_axes(*ONLY_CELL, CATEGORY, 0.0, LOG, 2.0)  # the failed calls added nothing
 
 
 def test_unknown_scale_kinds_are_internal_errors() -> None:
-    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
+    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
     assert_internal(
-        lambda: fig.add_axes(3, 10.0, LINEAR, 10.0), ValueError, "3 is not a scale kind"
+        lambda: fig.add_axes(*ONLY_CELL, 3, 10.0, LINEAR, 10.0), ValueError, "3 is not a scale kind"
     )
     assert_internal(
-        lambda: fig.add_axes(LINEAR, 10.0, -1, 10.0), ValueError, "-1 is not a scale kind"
+        lambda: fig.add_axes(*ONLY_CELL, LINEAR, 10.0, -1, 10.0),
+        ValueError,
+        "-1 is not a scale kind",
     )
-    fig.add_axes(LOG, 2.0, LINEAR, 0.0)  # the failed calls added nothing
+    fig.add_axes(*ONLY_CELL, LOG, 2.0, LINEAR, 0.0)  # the failed calls added nothing
 
 
-AXES_CALLS: dict[str, Callable[[_umber.Figure], object]] = {
-    "title": lambda f: f.title("t"),
-    "subtitle": lambda f: f.subtitle("t"),
-    "xlabel": lambda f: f.xlabel("t"),
-    "ylabel": lambda f: f.ylabel("t"),
-    "xlim": lambda f: f.xlim(0.0, 1.0),
-    "ylim": lambda f: f.ylim(0.0, 1.0),
-    "legend": lambda f: f.legend(0),
-    "line": lambda f: f.line(floats(1), floats(1), "", AUTO, 0, NO_SIZE),
-    "area": lambda f: f.area(floats(1), floats(1), "", AUTO, 0, NO_SIZE),
-    "scatter": lambda f: f.scatter(floats(1), floats(1), "", AUTO, 0, NO_SIZE),
-    "bar": lambda f: f.bar(["a"], floats(1), "", AUTO),
-    "grouped_bar": lambda f: f.grouped_bar(["a"], [("s", floats(1), AUTO)]),
-    "stacked_bar": lambda f: f.stacked_bar(["a"], [("s", floats(1), AUTO)]),
-    "hist": lambda f: f.hist(floats(1), 3, "", AUTO),
+# Every axes method, called on the axes at `row`, `col` of a native figure.
+AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
+    "title": lambda f, r, c: f.title(r, c, "t"),
+    "subtitle": lambda f, r, c: f.subtitle(r, c, "t"),
+    "xlabel": lambda f, r, c: f.xlabel(r, c, "t"),
+    "ylabel": lambda f, r, c: f.ylabel(r, c, "t"),
+    "xlim": lambda f, r, c: f.xlim(r, c, 0.0, 1.0),
+    "ylim": lambda f, r, c: f.ylim(r, c, 0.0, 1.0),
+    "legend": lambda f, r, c: f.legend(r, c, 0),
+    "line": lambda f, r, c: f.line(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
+    "area": lambda f, r, c: f.area(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
+    "scatter": lambda f, r, c: f.scatter(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
+    "bar": lambda f, r, c: f.bar(r, c, ["a"], floats(1), "", AUTO),
+    "grouped_bar": lambda f, r, c: f.grouped_bar(r, c, ["a"], [("s", floats(1), AUTO)]),
+    "stacked_bar": lambda f, r, c: f.stacked_bar(r, c, ["a"], [("s", floats(1), AUTO)]),
+    "hist": lambda f, r, c: f.hist(r, c, floats(1), 3, "", AUTO),
 }
 
 
 @pytest.mark.parametrize("name", AXES_CALLS)
-def test_axes_methods_without_axes_are_internal_errors(name: str) -> None:
-    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
-    assert_internal(lambda: AXES_CALLS[name](fig), RuntimeError, "the figure has no axes")
+def test_axes_methods_without_axes_report_the_empty_cell(name: str) -> None:
+    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
+    assert_reported(
+        lambda: AXES_CALLS[name](fig, 0, 0), ub.UsageError, NO_AXES_AT_ORIGIN, None, NO_AXES_HINT
+    )
+
+
+# The methods that need a category x axis; the others run on numeric axes.
+CATEGORY_CALLS = {"bar", "grouped_bar", "stacked_bar"}
+
+
+@pytest.mark.parametrize("name", AXES_CALLS)
+def test_native_axes_calls_carry_their_cell(name: str) -> None:
+    fig = figure(CATEGORY if name in CATEGORY_CALLS else LINEAR)
+    assert AXES_CALLS[name](fig, 0, 0) is None
+    changed = fig.to_svg(OUTLINES)
+    assert_reported(
+        lambda: AXES_CALLS[name](fig, 0, 1),
+        ub.UsageError,
+        "Figure.axes_at(): col is 1; this figure has columns 0 to 0.",
+        "col",
+        RANGE_HINT,
+    )
+    assert_reported(
+        lambda: AXES_CALLS[name](fig, -1, 0),
+        ub.UsageError,
+        "Figure.axes_at(): row is -1; this figure has rows 0 to 0.",
+        "row",
+        RANGE_HINT,
+    )
+    assert fig.to_svg(OUTLINES) == changed
+
+
+def grid_figure(rows: int, cols: int) -> _umber.Figure:
+    """A 6 by 4 inch native figure on a `rows × cols` grid, nothing shared, legend merged."""
+    return _umber.Figure(6.0, 4.0, _umber.Theme.pigment(), rows, cols, 0, 0, 0)
+
+
+def at(
+    row: int, col: int, row_span: int = 1, col_span: int = 1
+) -> tuple[int, int, int, int, int, int]:
+    """A native position: the row and the column given (grid index kind 1), and the spans."""
+    return (1, row, 1, col, row_span, col_span)
+
+
+def test_native_grid_places_and_finds_axes() -> None:
+    fig = grid_figure(2, 3)
+    assert fig.add_axes(*at(0, 0, 1, 2), CATEGORY, 0.0, LINEAR, 10.0) == (0, 0)
+    assert fig.add_axes(*at(1, 2), LOG, 2.0, LOG, 10.0) == (1, 2)
+    assert fig.axes_at(1, 0, 1, 0, CATEGORY, 0.0, LINEAR, 10.0) == (0, 0)
+    assert fig.axes_at(1, 1, 1, 2, LOG, 2.0, LOG, 10.0) == (1, 2)
+    fig.title(1, 2, "Corner")
+    fig.bar(0, 0, ["a", "b"], floats(1, 2), "", AUTO)
+    assert ">Corner</text>" in fig.to_svg(EDITABLE)
+    assert_reported(
+        lambda: fig.axes_at(1, 1, 1, 2, LOG, 10.0, LOG, 10.0),
+        ub.UsageError,
+        "Figure.axes_at(): x is Scale.log(10); the axes at row 1, col 2 has x Scale.log(2).",
+        "x",
+        "pass the scales the axes was created with.",
+    )
+    assert_reported(
+        lambda: fig.title(0, 1, "Covered"),
+        ub.UsageError,
+        "Figure.axes_at(): row 0, col 1 is part of the axes added at row 0, col 0.",
+        None,
+        "find a spanning axes at its top-left cell.",
+    )
+    assert_reported(
+        lambda: fig.axes_at(1, 1, 1, 0, LINEAR, 10.0, LINEAR, 10.0),
+        ub.UsageError,
+        "Figure.axes_at(): row 1, col 0 holds no axes.",
+        None,
+        NO_AXES_HINT,
+    )
+    assert_reported(
+        lambda: fig.add_axes(0, 0, 1, 0, 1, 1, LINEAR, 10.0, LINEAR, 10.0),
+        ub.UsageError,
+        "Figure.add_axes(): row is AUTO; this figure has 2 rows, so each axes needs a row.",
+        "row",
+        "pass row=, counting from 0.",
+    )
+    assert_reported(
+        lambda: fig.add_axes(*at(0, 2, 2, 1), LINEAR, 10.0, LINEAR, 10.0),
+        ub.UsageError,
+        "Figure.add_axes(): row 1, col 2 is taken by the axes added at row 1, col 2.",
+        "row",
+        TAKEN_HINT,
+    )
+
+
+def test_native_grid_helpers() -> None:
+    assert _umber.grid_auto_size(2, 3) == (18.0, 8.0)
+    assert _umber.grid_cells(2, 3, 4) == [(0, 0), (0, 1), (0, 2), (1, 0)]
+    assert_reported(
+        lambda: _umber.grid_cells(2, 3, 7),
+        ub.StyleError,
+        "Figure.cells(): count is 7; a 2 × 3 figure has 6 cells.",
+        "count",
+        "pass a count from 1 to the number of cells.",
+    )
+    assert_reported(
+        lambda: _umber.grid_auto_size(0, 1),
+        ub.StyleError,
+        "Figure(): rows is 0; rows must be between 1 and 32.",
+        "rows",
+        "use at least 1 row.",
+    )
+
+
+def test_native_grid_arguments_are_checked() -> None:
+    theme = _umber.Theme.pigment()
+    assert_reported(
+        lambda: _umber.Figure(6.0, 4.0, theme, 1, 33, 0, 0, 0),
+        ub.StyleError,
+        "Figure(): cols is 33; cols must be between 1 and 32.",
+        "cols",
+        "split the figure into several figures.",
+    )
+    assert_internal(
+        lambda: _umber.Figure(6.0, 4.0, theme, 1, 1, 4, 0, 0),
+        ValueError,
+        "4 is not a value of Share",
+    )
+    assert_internal(
+        lambda: _umber.Figure(6.0, 4.0, theme, 1, 1, 0, 0, 2),
+        ValueError,
+        "2 is not a value of Legend",
+    )
+    fig = grid_figure(1, 1)
+    assert_internal(
+        lambda: fig.add_axes(2, 0, 0, 0, 1, 1, LINEAR, 10.0, LINEAR, 10.0),
+        ValueError,
+        "2 is not a grid index kind",
+    )
+    assert_internal(
+        lambda: fig.axes_at(0, 0, -1, 0, LINEAR, 10.0, LINEAR, 10.0),
+        ValueError,
+        "-1 is not a grid index kind",
+    )
+    assert fig.add_axes(0, 0, 0, 0, 1, 1, LINEAR, 10.0, LINEAR, 10.0) == (0, 0)
 
 
 def test_texts_appear_in_editable_svg() -> None:
     fig = figure()
-    fig.title("Growth")
-    fig.subtitle("Per year")
-    fig.xlabel("Year")
-    fig.ylabel("Revenue")
+    fig.title(0, 0, "Growth")
+    fig.subtitle(0, 0, "Per year")
+    fig.xlabel(0, 0, "Year")
+    fig.ylabel(0, 0, "Revenue")
     svg = fig.to_svg(EDITABLE)
     for text in ("Growth", "Per year", "Year", "Revenue"):
         assert f">{text}</text>" in svg
@@ -360,13 +509,13 @@ def test_texts_appear_in_editable_svg() -> None:
 def test_limits_and_legend_change_the_output() -> None:
     fig = line_figure()
     before = fig.to_svg(OUTLINES)
-    fig.xlim(-1.0, 5.0)
-    fig.ylim(0.0, 10.0)
+    fig.xlim(0, 0, -1.0, 5.0)
+    fig.ylim(0, 0, 0.0, 10.0)
     limited = fig.to_svg(OUTLINES)
     assert limited != before
-    fig.legend(3)
+    fig.legend(0, 0, 3)
     assert fig.to_svg(OUTLINES) != limited
-    assert_internal(lambda: fig.legend(4), ValueError, "4 is not a value of LegendStyle")
+    assert_internal(lambda: fig.legend(0, 0, 4), ValueError, "4 is not a value of LegendStyle")
 
 
 def range_message(context: str, limits: str, rule: str) -> str:
@@ -380,7 +529,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
     (
         "equal limits",
         figure,
-        lambda f: f.xlim(1.0, 1.0),
+        lambda f: f.xlim(0, 0, 1.0, 1.0),
         ub.StyleError,
         range_message("Axes.xlim()", "1 and 1", ORDER_RULE),
         None,
@@ -389,7 +538,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
     (
         "NaN limit",
         figure,
-        lambda f: f.ylim(float("nan"), 1.0),
+        lambda f: f.ylim(0, 0, float("nan"), 1.0),
         ub.StyleError,
         range_message("Axes.ylim()", "NaN and 1", ORDER_RULE),
         "low",
@@ -398,7 +547,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
     (
         "limit magnitude",
         figure,
-        lambda f: f.xlim(0.0, 1e301),
+        lambda f: f.xlim(0, 0, 0.0, 1e301),
         ub.StyleError,
         range_message("Axes.xlim()", "0 and 1e301", "their magnitude must not exceed 1e300"),
         "high",
@@ -407,7 +556,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
     (
         "limits too close",
         figure,
-        lambda f: f.xlim(1.0, 1.0 + 1e-12),
+        lambda f: f.xlim(0, 0, 1.0, 1.0 + 1e-12),
         ub.StyleError,
         "Axes.xlim(): the limits 1 and 1.000000000001 are too close; the range must be at "
         "least 1e-10 of their magnitude (and at least 1e-290).",
@@ -417,7 +566,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
     (
         "log lower limit",
         lambda: figure(y=LOG),
-        lambda f: f.ylim(0.0, 1.0),
+        lambda f: f.ylim(0, 0, 0.0, 1.0),
         ub.StyleError,
         "Axes.ylim(): the lower limit is 0; a log scale needs a positive lower limit.",
         "low",
@@ -426,7 +575,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
     (
         "log limits out of range",
         lambda: figure(x=LOG),
-        lambda f: f.xlim(1e-301, 1.0),
+        lambda f: f.xlim(0, 0, 1e-301, 1.0),
         ub.StyleError,
         range_message(
             "Axes.xlim()",
@@ -439,7 +588,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
     (
         "log limits too close",
         lambda: figure(y=LOG),
-        lambda f: f.ylim(1.0, 1.0 + 1e-12),
+        lambda f: f.ylim(0, 0, 1.0, 1.0 + 1e-12),
         ub.StyleError,
         "Axes.ylim(): the limits are 1 and 1.000000000001; the upper limit must be at least "
         "a factor of 1.000000001 above the lower limit.",
@@ -449,7 +598,7 @@ LIMIT_ERRORS: list[ErrorCase] = [
     (
         "category x limits",
         lambda: figure(x=CATEGORY),
-        lambda f: f.xlim(0.0, 1.0),
+        lambda f: f.xlim(0, 0, 0.0, 1.0),
         ub.UsageError,
         "Axes.xlim(): this is a category axis; limits apply to linear and log axes only.",
         None,
@@ -483,32 +632,32 @@ def test_limit_errors(
 def test_marks_draw() -> None:
     empty = figure().to_svg(OUTLINES)
     fig = figure()
-    fig.line(floats(0, 1, 2), floats(1, np.nan, 2), "a", AUTO, 1, NO_SIZE)
+    fig.line(0, 0, floats(0, 1, 2), floats(1, np.nan, 2), "a", AUTO, 1, NO_SIZE)
     with_line = fig.to_svg(OUTLINES)
     assert with_line != empty
-    fig.scatter(floats(0, 1, 2), floats(2, 1, 0), "b", (1, 3, 0.5), 4, NO_SIZE)
+    fig.scatter(0, 0, floats(0, 1, 2), floats(2, 1, 0), "b", (1, 3, 0.5), 4, NO_SIZE)
     assert fig.to_svg(OUTLINES) != with_line
 
     bars = figure(x=CATEGORY)
-    bars.bar(["a", "b"], floats(1, 2), "c", RED)
-    bars.grouped_bar(["c"], [("s", floats(1), AUTO), ("t", floats(2), BLUE)])
-    bars.stacked_bar(["d"], [("s", floats(1), AUTO), ("t", floats(-2), BLUE)])
+    bars.bar(0, 0, ["a", "b"], floats(1, 2), "c", RED)
+    bars.grouped_bar(0, 0, ["c"], [("s", floats(1), AUTO), ("t", floats(2), BLUE)])
+    bars.stacked_bar(0, 0, ["d"], [("s", floats(1), AUTO), ("t", floats(-2), BLUE)])
     assert bars.to_svg(OUTLINES) != figure(x=CATEGORY).to_svg(OUTLINES)
 
     categories = figure(x=CATEGORY)
-    categories.line(["a", "b"], floats(1, 2), "", AUTO, 0, NO_SIZE)
-    categories.scatter(["b", "c"], floats(1, 2), "", AUTO, 0, NO_SIZE)
+    categories.line(0, 0, ["a", "b"], floats(1, 2), "", AUTO, 0, NO_SIZE)
+    categories.scatter(0, 0, ["b", "c"], floats(1, 2), "", AUTO, 0, NO_SIZE)
 
     hist = figure()
-    hist.hist(floats(1.2, 3.4, 2.2, np.nan, 2.9), 3, "h", AUTO)
+    hist.hist(0, 0, floats(1.2, 3.4, 2.2, np.nan, 2.9), 3, "h", AUTO)
     assert hist.to_svg(OUTLINES) != empty
 
 
 def test_mark_labels_and_colors_reach_the_legend() -> None:
     fig = figure()
-    fig.legend(2)
-    fig.line(floats(0, 1), floats(1, 2), "North", RED, 0, NO_SIZE)
-    fig.scatter(floats(0, 1), floats(2, 1), "South", BLUE, 0, NO_SIZE)
+    fig.legend(0, 0, 2)
+    fig.line(0, 0, floats(0, 1), floats(1, 2), "North", RED, 0, NO_SIZE)
+    fig.scatter(0, 0, floats(0, 1), floats(2, 1), "South", BLUE, 0, NO_SIZE)
     svg = fig.to_svg(EDITABLE)
     assert ">North</text>" in svg
     assert ">South</text>" in svg
@@ -532,7 +681,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line length",
         figure,
-        lambda f: f.line(floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         "Axes.line(): x has 2 values but y has 1; x and y must have the same length.",
         None,
@@ -541,7 +690,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line x infinite",
         figure,
-        lambda f: f.line(floats(1, np.inf), floats(1, 2), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, np.inf), floats(1, 2), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         f"Axes.line(): x[1] is inf; {FINITE}",
         "x",
@@ -550,7 +699,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line y infinite",
         figure,
-        lambda f: f.line(floats(1, 2), floats(1, -np.inf), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 2), floats(1, -np.inf), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         f"Axes.line(): y[1] is -inf; {FINITE}",
         "y",
@@ -559,7 +708,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line magnitude",
         figure,
-        lambda f: f.line(floats(1, 2), floats(1, -1e301), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 2), floats(1, -1e301), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         "Axes.line(): y[1] is -1e301; magnitudes must not exceed 1e300.",
         "y",
@@ -568,7 +717,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line log not positive",
         lambda: figure(y=LOG),
-        lambda f: f.line(floats(1, 2), floats(1, 0), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 2), floats(1, 0), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         "Axes.line(): y[1] is 0 on a log axis; values must be positive.",
         "y",
@@ -577,7 +726,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line log too small",
         lambda: figure(x=LOG),
-        lambda f: f.line(floats(1, 1e-310), floats(1, 2), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 1e-310), floats(1, 2), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         "Axes.line(): x[1] is 1e-310 on a log axis; values must be at least 1e-300.",
         "x",
@@ -586,7 +735,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line numbers on a category axis",
         lambda: figure(x=CATEGORY),
-        lambda f: f.line(floats(1), floats(1), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         "Axes.line(): x holds numbers but the x axis is a category axis; pass category names.",
         None,
@@ -595,7 +744,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line names on a linear axis",
         figure,
-        lambda f: f.line(["a"], floats(1), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, ["a"], floats(1), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         "Axes.line(): x holds category names but the x axis is not a category axis; pass numbers.",
         None,
@@ -604,7 +753,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "area length",
         figure,
-        lambda f: f.area(floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE),
+        lambda f: f.area(0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         "Axes.area(): x has 2 values but y has 1; x and y must have the same length.",
         None,
@@ -613,7 +762,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "area y infinite",
         figure,
-        lambda f: f.area(floats(1, 2), floats(1, np.inf), "", AUTO, 0, NO_SIZE),
+        lambda f: f.area(0, 0, floats(1, 2), floats(1, np.inf), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         f"Axes.area(): y[1] is inf; {FINITE}",
         "y",
@@ -622,7 +771,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "scatter length",
         figure,
-        lambda f: f.scatter(floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE),
+        lambda f: f.scatter(0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         "Axes.scatter(): x has 2 values but y has 1; x and y must have the same length.",
         None,
@@ -631,7 +780,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "scatter y infinite",
         figure,
-        lambda f: f.scatter(floats(1, 2), floats(1, np.inf), "", AUTO, 0, NO_SIZE),
+        lambda f: f.scatter(0, 0, floats(1, 2), floats(1, np.inf), "", AUTO, 0, NO_SIZE),
         ub.DataError,
         f"Axes.scatter(): y[1] is inf; {FINITE}",
         "y",
@@ -641,7 +790,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "bar length",
         lambda: figure(x=CATEGORY),
-        lambda f: f.bar(["a", "b"], floats(1), "", AUTO),
+        lambda f: f.bar(0, 0, ["a", "b"], floats(1), "", AUTO),
         ub.DataError,
         "Axes.bar(): categories has 2 values but heights has 1; categories and heights must "
         "have the same length.",
@@ -651,7 +800,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "bar linear x",
         figure,
-        lambda f: f.bar(["a"], floats(1), "", AUTO),
+        lambda f: f.bar(0, 0, ["a"], floats(1), "", AUTO),
         ub.DataError,
         "Axes.bar(): categories holds names but the x axis is not a category axis; "
         "use a category x axis.",
@@ -661,7 +810,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "bar repeated category",
         lambda: figure(x=CATEGORY),
-        lambda f: f.bar(["a", "a"], floats(1, 2), "", AUTO),
+        lambda f: f.bar(0, 0, ["a", "a"], floats(1, 2), "", AUTO),
         ub.DataError,
         'Axes.bar(): categories[1] repeats "a" from categories[0]; each category must appear once.',
         "categories",
@@ -670,7 +819,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "bar infinite",
         lambda: figure(x=CATEGORY),
-        lambda f: f.bar(["a", "b"], floats(1, np.inf), "", AUTO),
+        lambda f: f.bar(0, 0, ["a", "b"], floats(1, np.inf), "", AUTO),
         ub.DataError,
         f"Axes.bar(): heights[1] is inf; {FINITE}",
         "heights",
@@ -680,7 +829,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped no series",
         lambda: figure(x=CATEGORY),
-        lambda f: f.grouped_bar(["a"], []),
+        lambda f: f.grouped_bar(0, 0, ["a"], []),
         ub.DataError,
         "Axes.grouped_bar(): series is empty; pass at least one series.",
         "series",
@@ -689,7 +838,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped series length",
         lambda: figure(x=CATEGORY),
-        lambda f: f.grouped_bar(["a"], [series(1), series()]),
+        lambda f: f.grouped_bar(0, 0, ["a"], [series(1), series()]),
         ub.DataError,
         "Axes.grouped_bar(): categories has 1 values but series[1].values has 0; each series "
         "must have one value per category.",
@@ -699,7 +848,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped repeated category",
         lambda: figure(x=CATEGORY),
-        lambda f: f.grouped_bar(["a", "a"], [series(1, 2)]),
+        lambda f: f.grouped_bar(0, 0, ["a", "a"], [series(1, 2)]),
         ub.DataError,
         'Axes.grouped_bar(): categories[1] repeats "a" from categories[0]; each category must '
         "appear once.",
@@ -709,7 +858,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped infinite",
         lambda: figure(x=CATEGORY),
-        lambda f: f.grouped_bar(["a", "b"], [series(1, 2), series(1, np.inf)]),
+        lambda f: f.grouped_bar(0, 0, ["a", "b"], [series(1, 2), series(1, np.inf)]),
         ub.DataError,
         f"Axes.grouped_bar(): series[1].values[1] is inf; {FINITE}",
         "series",
@@ -718,7 +867,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped linear x",
         figure,
-        lambda f: f.grouped_bar(["a"], [series(1)]),
+        lambda f: f.grouped_bar(0, 0, ["a"], [series(1)]),
         ub.DataError,
         "Axes.grouped_bar(): categories holds names but the x axis is not a category axis; "
         "use a category x axis.",
@@ -728,7 +877,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "stacked no series",
         lambda: figure(x=CATEGORY),
-        lambda f: f.stacked_bar(["a"], []),
+        lambda f: f.stacked_bar(0, 0, ["a"], []),
         ub.DataError,
         "Axes.stacked_bar(): series is empty; pass at least one series.",
         "series",
@@ -737,7 +886,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "stacked log not positive",
         lambda: figure(x=CATEGORY, y=LOG),
-        lambda f: f.stacked_bar(["a"], [series(-1)]),
+        lambda f: f.stacked_bar(0, 0, ["a"], [series(-1)]),
         ub.DataError,
         "Axes.stacked_bar(): series[0].values[0] is -1 on a log axis; values must be positive.",
         "series",
@@ -746,7 +895,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "stacked total",
         lambda: figure(x=CATEGORY),
-        lambda f: f.stacked_bar(["a"], [series(1e300), series(1e300)]),
+        lambda f: f.stacked_bar(0, 0, ["a"], [series(1e300), series(1e300)]),
         ub.DataError,
         'Axes.stacked_bar(): the values of categories[0] ("a") stack to 2e300; each stack '
         "must stay within 1e300 on both sides of 0.",
@@ -757,7 +906,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist no bins",
         figure,
-        lambda f: f.hist(floats(1), 0, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1), 0, "", AUTO),
         ub.StyleError,
         "Axes.hist(): bins is 0; bins must be between 1 and 10000.",
         "bins",
@@ -766,7 +915,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist too many bins",
         figure,
-        lambda f: f.hist(floats(1), _umber.MAX_BINS + 1, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1), _umber.MAX_BINS + 1, "", AUTO),
         ub.StyleError,
         "Axes.hist(): bins is 10001; bins must be between 1 and 10000.",
         "bins",
@@ -775,7 +924,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist category x",
         lambda: figure(x=CATEGORY),
-        lambda f: f.hist(floats(1), 3, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1), 3, "", AUTO),
         ub.DataError,
         "Axes.hist(): values holds numbers but the x axis is a category axis; use a linear x axis.",
         None,
@@ -784,7 +933,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist log x",
         lambda: figure(x=LOG),
-        lambda f: f.hist(floats(1), 3, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1), 3, "", AUTO),
         ub.UsageError,
         "Axes.hist(): the x axis is a log axis, which histograms do not support; "
         "use a linear x axis.",
@@ -794,7 +943,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist infinite",
         figure,
-        lambda f: f.hist(floats(1, np.inf), 3, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1, np.inf), 3, "", AUTO),
         ub.DataError,
         f"Axes.hist(): values[1] is inf; {FINITE}",
         "values",
@@ -832,37 +981,37 @@ INTERNAL_MARK_ERRORS: list[
 ] = [
     (
         "dash",
-        lambda f: f.line(floats(1), floats(1), "", AUTO, 3, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1), floats(1), "", AUTO, 3, NO_SIZE),
         ValueError,
         "3 is not a value of Dash",
     ),
     (
         "marker",
-        lambda f: f.scatter(floats(1), floats(1), "", AUTO, 5, NO_SIZE),
+        lambda f: f.scatter(0, 0, floats(1), floats(1), "", AUTO, 5, NO_SIZE),
         ValueError,
         "5 is not a value of Marker",
     ),
     (
         "color kind",
-        lambda f: f.hist(floats(1), 3, "", (4, 0, 1.0)),
+        lambda f: f.hist(0, 0, floats(1), 3, "", (4, 0, 1.0)),
         ValueError,
         "4 is not a color kind",
     ),
     (
         "list of floats",
-        lambda f: f.line(floats(1), untyped([1.0]), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1), untyped([1.0]), "", AUTO, 0, NO_SIZE),
         TypeError,
         "expected a one-dimensional float64 buffer, got list",
     ),
     (
         "series values",
-        lambda f: f.grouped_bar(["a"], [("s", untyped((1.0,)), AUTO)]),
+        lambda f: f.grouped_bar(0, 0, ["a"], [("s", untyped((1.0,)), AUTO)]),
         TypeError,
         "expected a one-dimensional float64 buffer, got tuple",
     ),
     (
         "tuple of names",
-        lambda f: f.bar(untyped(("a",)), floats(1), "", AUTO),
+        lambda f: f.bar(0, 0, untyped(("a",)), floats(1), "", AUTO),
         TypeError,
         "expected a list of str, got tuple",
     ),
@@ -890,11 +1039,11 @@ def test_unconvertible_mark_arguments_are_internal_errors_that_change_nothing(
     ("width", "height", "dpi"), [(3.0, 2.0, 50), (6.0, 4.0, 100), (2.5, 1.5, 72)]
 )
 def test_png_pixel_size_is_inches_times_dpi(width: float, height: float, dpi: int) -> None:
-    fig = _umber.Figure(width, height, _umber.Theme.pigment())
+    fig = _umber.Figure(width, height, _umber.Theme.pigment(), *ONE_CELL)
     expected = (round(width * dpi), round(height * dpi))
     assert png_size(fig.to_png(dpi)) == expected  # a figure without axes renders
-    fig.add_axes(LINEAR, 10.0, LINEAR, 10.0)
-    fig.line(floats(0, 1), floats(1, 2), "", AUTO, 0, NO_SIZE)
+    fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
+    fig.line(0, 0, floats(0, 1), floats(1, 2), "", AUTO, 0, NO_SIZE)
     png = fig.to_png(dpi)
     assert isinstance(png, bytes)
     assert png_size(png) == expected
@@ -942,7 +1091,7 @@ def test_png_errors_name_the_calling_method(method: str, context: str, dpi: int)
     ("side", "dpi", "message"), [(200.0, 2400, TOO_WIDE), (100.0, 100, TOO_MANY)]
 )
 def test_png_size_limits(method: str, context: str, side: float, dpi: int, message: str) -> None:
-    huge = _umber.Figure(side, side, _umber.Theme.pigment())
+    huge = _umber.Figure(side, side, _umber.Theme.pigment(), *ONE_CELL)
     assert_reported(
         lambda: getattr(huge, method)(dpi),
         ub.StyleError,
@@ -968,23 +1117,29 @@ def test_a_clone_is_independent_of_the_original() -> None:
     assert copy is not original
     assert copy.to_svg(EDITABLE) == svg
 
-    copy.title("Changed")
-    copy.scatter(floats(0, 1), floats(2, 2), "south", RED, 0, NO_SIZE)
-    copy.xlim(-1.0, 3.0)
+    copy.title(0, 0, "Changed")
+    copy.scatter(0, 0, floats(0, 1), floats(2, 2), "south", RED, 0, NO_SIZE)
+    copy.xlim(0, 0, -1.0, 3.0)
     assert ">Changed</text>" in copy.to_svg(EDITABLE)
     assert original.to_svg(EDITABLE) == svg
 
-    original.subtitle("Only here")
+    original.subtitle(0, 0, "Only here")
     assert ">Only here</text>" not in copy.to_svg(EDITABLE)
 
 
 def test_a_clone_of_a_figure_without_axes_gets_its_own_axes() -> None:
-    original = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
+    original = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
     copy = original.clone()
-    copy.add_axes(LINEAR, 10.0, LINEAR, 10.0)
-    copy.title("Copy")
-    assert_internal(lambda: original.title("Original"), RuntimeError, "the figure has no axes")
-    original.add_axes(CATEGORY, 0.0, LINEAR, 10.0)  # the original can still add its own
+    copy.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
+    copy.title(0, 0, "Copy")
+    assert_reported(
+        lambda: original.title(0, 0, "Original"),
+        ub.UsageError,
+        NO_AXES_AT_ORIGIN,
+        None,
+        NO_AXES_HINT,
+    )
+    original.add_axes(*ONLY_CELL, CATEGORY, 0.0, LINEAR, 10.0)  # the original can still add its own
 
 
 # Threads
@@ -997,7 +1152,7 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
     expected_pngs: set[bytes] = set()
     for title in titles:
         reference = changing.clone()
-        reference.title(title)
+        reference.title(0, 0, title)
         expected_svgs.add(reference.to_svg(OUTLINES))
         expected_pngs.add(reference.to_png(40))
     unchanged = line_figure()
@@ -1026,12 +1181,12 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
         nonlocal retitled
         try:
             while not stop.is_set():
-                changing.title(titles[retitled % 2])
+                changing.title(0, 0, titles[retitled % 2])
                 retitled += 1
         except BaseException as err:  # reported below
             errors.append(err)
 
-    changing.title(titles[0])
+    changing.title(0, 0, titles[0])
     renderers = [threading.Thread(target=render) for _ in range(2)]
     writer = threading.Thread(target=retitle)
     writer.start()

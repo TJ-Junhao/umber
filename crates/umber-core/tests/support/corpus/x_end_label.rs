@@ -162,7 +162,7 @@ fn end_labels(
     no_y_ticks: bool,
 ) -> Figure {
     let mut f = figure(width, height, theme, linear(), linear());
-    let a = axes(&mut f);
+    let mut a = axes(&mut f);
     a.xlim(0.0, 1.0)
         .unwrap()
         .xticks_labeled(&[0.0, 1.0], vec![first, last])
@@ -285,7 +285,7 @@ fn min_width_errors(lib: &FontLibrary) -> String {
         ("0.4 in, one W y tick label", 0.4, true),
     ] {
         let mut f = figure(width_in, 1.0, Theme::midnight(), linear(), linear());
-        let a = axes(&mut f);
+        let mut a = axes(&mut f);
         a.xticks(&[]).unwrap();
         if y_ticks {
             a.yticks_labeled(&[0.5], vec!["W".into()]).unwrap();
@@ -314,7 +314,7 @@ fn line(label: &str) -> LineOptions {
 }
 
 /// A day of load as one line, with the hours of the day labelled by name.
-fn day(a: &mut umber_core::Axes, label: &str) {
+fn day(a: &mut umber_core::AxesMut<'_>, label: &str) {
     a.line(
         numbers(vec![0.0, 6.0, 12.0, 18.0, 24.0]),
         &[1.0, 3.0, 2.0, 4.0, 3.0],
@@ -334,7 +334,7 @@ fn figures() -> Vec<(String, Figure)> {
     for (theme_name, theme) in themes() {
         // Named hours on a line's exact x extent: the last label sits on the right edge.
         let mut f = figure(6.0, 4.0, theme.clone(), linear(), linear());
-        day(axes(&mut f), "load");
+        day(&mut axes(&mut f), "load");
         out.push((format!("fig-x-end-label-hours-{theme_name}"), f));
 
         // An affixed format on a scatter's padded x axis.
@@ -366,9 +366,9 @@ fn figures() -> Vec<(String, Figure)> {
 
         // Direct labels already reserve room on the right; the last tick label stays inside.
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
-        let a = axes(&mut f);
+        let mut a = axes(&mut f);
         a.title("Next to direct labels").legend(LegendStyle::Direct);
-        day(a, "Station load");
+        day(&mut a, "Station load");
         out.push((format!("fig-x-end-label-direct-{theme_name}"), f));
     }
     out

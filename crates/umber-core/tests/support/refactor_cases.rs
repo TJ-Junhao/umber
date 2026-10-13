@@ -47,6 +47,8 @@
 //! - `Figure::clone`: a figure with labels, limits and marks is recorded with its clone, and
 //!   again after the clone is changed, so the clone must be equal to and independent of its
 //!   source.
+//! - Figures with several axes on a grid, and the errors of the grid calls (in
+//!   `corpus/grid.rs`).
 //!
 //! Not covered:
 //!
@@ -76,15 +78,16 @@ use umber_core::scene::{
     Scene, StrokeStyle,
 };
 use umber_core::{
-    Alpha, ColorSpec, ContinuousScale, Dash, Figure, FillStyle, Font, FontLibrary, GridLines,
-    LegendStyle, LogBase, Marker, Path, Point, Rgba, ScaleKind, TextStyle, Theme, Transform,
-    Weight,
+    Alpha, ColorSpec, ContinuousScale, Dash, Figure, FillStyle, Font, FontLibrary, GridIndex,
+    GridLines, LegendStyle, LogBase, Marker, Path, Point, Rgba, ScaleKind, TextStyle, Theme,
+    Transform, Weight,
 };
 
 /// Cases of the newer features, one module each, so that a feature edits only its own file.
 mod corpus {
     pub mod area;
     pub mod bars;
+    pub mod grid;
     pub mod hist;
     pub mod inputs;
     pub mod legend;
@@ -139,6 +142,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::ticks::cases(&lib, &mut sink);
     corpus::x_end_label::cases(&lib, &mut sink);
     corpus::plot_height::cases(&lib, &mut sink);
+    corpus::grid::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -225,8 +229,10 @@ fn figure(w: f64, h: f64, theme: Theme, x: ScaleKind, y: ScaleKind) -> Figure {
     figure
 }
 
-fn axes(figure: &mut Figure) -> &mut umber_core::Axes {
-    figure.axes_mut().unwrap()
+fn axes(figure: &mut Figure) -> umber_core::AxesMut<'_> {
+    figure
+        .axes_at_mut(GridIndex::Auto, GridIndex::Auto)
+        .unwrap()
 }
 
 fn to_scene(figure: &Figure, lib: &FontLibrary) -> Scene {
@@ -1309,7 +1315,7 @@ fn hostile_text_scene(lib: &FontLibrary) -> Scene {
 
 /// Figures that exercise header and axis label combinations, font scales and long labels.
 fn label_cases(lib: &FontLibrary, add: &mut impl FnMut(&str, Scene)) {
-    type Labeller = fn(&mut umber_core::Axes);
+    type Labeller = fn(&mut umber_core::AxesMut<'_>);
     let only: [(&str, Labeller); 3] = [
         ("fig-xlabel-only", |a| {
             a.xlabel("Horizontal only");
@@ -1323,7 +1329,7 @@ fn label_cases(lib: &FontLibrary, add: &mut impl FnMut(&str, Scene)) {
     ];
     for (name, label) in only {
         let mut f = figure(5.0, 3.5, Theme::pigment(), linear(), linear());
-        label(axes(&mut f));
+        label(&mut axes(&mut f));
         let (x, y) = wobble(20, 17);
         axes(&mut f).line(numbers(x), &y, line()).unwrap();
         add(name, to_scene(&f, lib));
@@ -1721,9 +1727,34 @@ mod record {
             f64(f.height_in()),
             palette.join(",")
         );
-        match f.axes() {
-            Some(a) => out.push_str(&axes(a)),
-            None => out.push_str("  axes none\n"),
+        let grid = f.grid();
+        // A figure of one cell is recorded as it was before figures had grids.
+        if grid.rows() * grid.cols() > 1 {
+            let _ = writeln!(
+                out,
+                "  grid rows={} cols={} panels={}",
+                grid.rows(),
+                grid.cols(),
+                f.panels().count()
+            );
+        }
+        let mut panels = f.panels().peekable();
+        if panels.peek().is_none() {
+            out.push_str("  axes none\n");
+        }
+        for a in panels {
+            if grid.rows() * grid.cols() > 1 {
+                let c = a.cells();
+                let _ = writeln!(
+                    out,
+                    "  cells row={} col={} row_span={} col_span={}",
+                    c.row(),
+                    c.col(),
+                    c.row_span(),
+                    c.col_span()
+                );
+            }
+            out.push_str(&axes(a));
         }
         out
     }
@@ -1915,9 +1946,11 @@ impl Log {
         &mut self,
         figure: &mut Figure,
         label: &str,
-        op: impl FnOnce(&mut umber_core::Axes) -> umber_core::Result<()>,
+        op: impl FnOnce(&mut umber_core::AxesMut<'_>) -> umber_core::Result<()>,
     ) {
-        let result = op(figure.axes_mut().unwrap());
+        let result = op(&mut figure
+            .axes_at_mut(GridIndex::Auto, GridIndex::Auto)
+            .unwrap());
         self.result(label, result, |()| String::new());
         self.raw(&record::figure(figure));
     }
@@ -2135,7 +2168,7 @@ fn figure_clone(rec: &mut Log) {
     };
     both(rec, "after clone", &source, &copy);
     // A clone without axes is recorded, not a panic, so the gate reports the difference.
-    if let Some(a) = copy.axes_mut() {
+    if let Ok(mut a) = copy.axes_at_mut(GridIndex::Auto, GridIndex::Auto) {
         a.title("Changed clone").xlim(1.0, 2.0).unwrap();
         a.line(numbers(vec![5.0]), &[50.0], line()).unwrap();
     } else {

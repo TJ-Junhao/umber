@@ -156,7 +156,7 @@ fn thin_lines_and_areas_next_to_a_thick_line_reach_the_widened_clip() {
             width: SizeSpec::pt(24.0).unwrap(),
             ..LineOptions::default()
         };
-        let a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         a.xlim(0.0, 1.0).unwrap().ylim(0.0, 1.0).unwrap();
         if area {
             a.area(nums(&[-1.0, 2.0]), &[0.25, 0.25], thin).unwrap();
@@ -209,7 +209,7 @@ fn clip_widening_stops_at_the_y_labels_and_the_canvas() {
             .unwrap()
             .line(nums(&[0.0, 1.0]), &[0.5, 0.5], LineOptions::default())
             .unwrap();
-        let layout = crate::pipeline::plan_figure(&f, FontLibrary::global()).1;
+        let layout = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         let (clip, _) = mark_group(&scene);
         let (left, right) = (f64::from(clip.x), f64::from(clip.x + clip.width));
@@ -286,8 +286,7 @@ fn mark_scenes_are_deterministic() {
             &[3.0, f64::NAN, 4.0],
             LineOptions::default(),
         );
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .scatter(nums(&[0.5, 1.5]), &[3.5, 3.7], ScatterOptions::default())
             .unwrap();
         f

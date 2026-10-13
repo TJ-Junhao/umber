@@ -25,7 +25,7 @@ fn bar_figure(theme: Theme, y: ScaleKind, categories: &[&str], heights: &[f64]) 
 }
 
 fn layout_of(figure: &Figure) -> Layout {
-    crate::pipeline::plan_figure(figure, FontLibrary::global()).1
+    crate::pipeline::plan_figure(figure, (0, 0), FontLibrary::global()).1
 }
 
 /// The bar fills of `scene`, in order: each outline and its color.
@@ -168,7 +168,7 @@ fn rounded_end_only_when_visible() {
         &["inside", "outside", "margin"],
         &[5.0, 1000.0, 10.0 + 1e-3],
     );
-    f.axes_mut().unwrap().ylim(0.0, 10.0).unwrap();
+    f.single_axes_mut().ylim(0.0, 10.0).unwrap();
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let plot = layout_of(&f).plot;
@@ -220,7 +220,7 @@ fn bars_far_outside_limits_are_clipped() {
             &["up", "down", "inside", "below"],
             &[1e300, -1e300, 5e-11, -1e300],
         );
-        f.axes_mut().unwrap().ylim(1e-11, 1e-10).unwrap();
+        f.single_axes_mut().ylim(1e-11, 1e-10).unwrap();
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = layout_of(&f).plot;
@@ -240,7 +240,7 @@ fn bars_far_outside_limits_are_clipped() {
     // The same on a log y axis, with heights at both ends of the log range.
     let log = ScaleKind::Log { base: LogBase::TEN };
     let mut f = bar_figure(Theme::midnight(), log, &["huge", "tiny"], &[1e300, 1e-300]);
-    f.axes_mut().unwrap().ylim(1.0, 10.0).unwrap();
+    f.single_axes_mut().ylim(1.0, 10.0).unwrap();
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let plot = layout_of(&f).plot;
@@ -283,7 +283,7 @@ fn log_bars_grow_from_the_baseline() {
     }
     // Explicit limits are not padded: the baseline, and the bars, start at the plot bottom.
     let mut f = bar_figure(Theme::graphite(), log, &["a", "b"], &[10.0, 1000.0]);
-    f.axes_mut().unwrap().ylim(5.0, 2000.0).unwrap();
+    f.single_axes_mut().ylim(5.0, 2000.0).unwrap();
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     let layout = layout_of(&f);
     let fills = bars(&scene);
@@ -310,7 +310,7 @@ fn group_figure(
     heights: &[&[f64]],
 ) -> Figure {
     let mut f = Figure::new(6.0, 4.0, theme).unwrap();
-    let axes = f.add_axes(ScaleKind::Category, y).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Category, y).unwrap();
     let list: Vec<Series> = heights.iter().map(|h| series(h)).collect();
     if stacked {
         axes.stacked_bar(names(categories), list).unwrap();
@@ -439,7 +439,7 @@ fn grouped_and_stacked_bars_are_drawn_by_category_then_series() {
     // An earlier all-NaN line sets the category order a, b; the marks list b, a.
     for stacked in [false, true] {
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-        let axes = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
         axes.line(
             AxisData::Categories(names(&["a", "b"])),
             &[f64::NAN; 2],
@@ -517,7 +517,7 @@ fn stacks_and_groups_far_outside_limits_are_clipped() {
             &["up", "down", "inside"],
             &[&[5e299, -5e299, 2e-11], &[5e299, -5e299, 3e-11]],
         );
-        f.axes_mut().unwrap().ylim(1e-11, 1e-10).unwrap();
+        f.single_axes_mut().ylim(1e-11, 1e-10).unwrap();
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         assert_scene_bounded(&scene);
         let plot = layout_of(&f).plot;

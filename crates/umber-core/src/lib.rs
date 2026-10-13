@@ -45,9 +45,13 @@
 //! **Figure API.** The items the Python bindings build on, and the usual entry point from
 //! Rust:
 //!
-//! - the figure model: [`Figure`] (size, theme and axes getters, [`Figure::add_axes`],
-//!   [`Figure::to_png`], [`Figure::to_svg`]), [`Axes`] (text, limit and tick setters, mark
-//!   methods and their getters), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
+//! - the figure model: [`Figure`] (size, theme and grid getters, [`Figure::with_grid`],
+//!   [`Figure::add_axes`], [`Figure::add_axes_at`], [`Figure::axes_at`],
+//!   [`Figure::axes_at_mut`], [`Figure::panels`], [`Figure::to_png`], [`Figure::to_svg`]), the
+//!   grid: [`Grid`] with its limit [`MAX_GRID`], [`Share`], [`LegendMode`], [`GridIndex`],
+//!   [`Placement`], [`CellRange`] and [`Cell`]; [`Axes`] (the getters of its cells, scales,
+//!   texts, limits, ticks and marks), [`AxesMut`] (text, limit and tick setters and mark
+//!   methods), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
 //!   [`ScatterOptions`], [`AreaOptions`], [`BarOptions`], [`Series`] and [`HistOptions`]
 //!   with its bin limit [`MAX_BINS`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`BarMark`],
@@ -112,9 +116,9 @@ pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
 pub use figure::{
-    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, ExplicitTicks,
-    Figure, HistMark, HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
-    Series, SeriesView,
+    AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
+    CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
+    LineOptions, MAX_GRID, Mark, Placement, ScatterMark, ScatterOptions, Series, SeriesView, Share,
 };
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};

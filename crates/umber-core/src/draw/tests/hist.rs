@@ -26,7 +26,7 @@ fn hist_figure(theme: Theme, y: ScaleKind, values: &[f64], bins: usize) -> Figur
 }
 
 fn plan(figure: &Figure) -> (Resolved, Layout) {
-    crate::pipeline::plan_figure(figure, FontLibrary::global())
+    crate::pipeline::plan_figure(figure, (0, 0), FontLibrary::global())
 }
 
 /// The items of the marks group of `scene`.
@@ -254,7 +254,7 @@ fn cropped_limits_keep_the_gradient_opacity() {
     // One bin of count 100 under limits 50..60: the gradient is clipped to the plot, but each
     // visible count keeps the opacity of the full ramp from 100 (0.95) down to 0 (none).
     let mut f = hist_figure(Theme::midnight(), ScaleKind::Linear, &[0.0; 100], 1);
-    f.axes_mut().unwrap().ylim(50.0, 60.0).unwrap();
+    f.single_axes_mut().ylim(50.0, 60.0).unwrap();
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
     let (resolved, layout) = plan(&f);
@@ -340,8 +340,7 @@ fn hist_far_outside_limits_is_clipped() {
     let values = [-1e300, -1e300, 1e300, 0.0, 5e-11, 5e-11];
     for theme in [Theme::pigment(), Theme::midnight()] {
         let mut f = hist_figure(theme, ScaleKind::Linear, &values, 3);
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xlim(1e-11, 1e-10)
             .unwrap()
             .ylim(1e-11, 1e-10)

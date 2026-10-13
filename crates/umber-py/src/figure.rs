@@ -1,9 +1,11 @@
-//! Figures: the `Figure` class with its axes, texts, limits, legend, marks and rendering.
+//! Figures: the `Figure` class with its grid, axes, texts, limits, legend, marks and rendering,
+//! and the grid helpers `grid_auto_size` and `grid_cells`.
 //!
-//! A figure holds at most one axes, which the Python layer adds before it calls any axes method.
-//! An axes method on a figure without axes is an internal `RuntimeError`. Every argument is
-//! converted before the core call, and the core validates before it stores anything, so a failed
-//! call leaves the figure unchanged.
+//! A figure holds a grid of cells and the axes placed on it. Every axes method takes the row
+//! and column of the axes' top-left cell first; the core reports a cell that holds no axes
+//! (a `UsageError`). A grid index travels as two values, `(kind, index)`: kind 0 is `AUTO`
+//! and 1 is the index given. Every argument is converted before the core call, and the core
+//! validates before it stores anything, so a failed call leaves the figure unchanged.
 //!
 //! Rendering takes a clone of the core figure, which is cheap because marks share their data, and
 //! renders it with the interpreter released. No borrow of the Python object is held while
@@ -15,17 +17,22 @@
     clippy::needless_update,
     reason = "core option structs gain fields that have defaults"
 )]
+// Native methods take every argument as a plain value, the axes' cell first.
+#![allow(
+    clippy::too_many_arguments,
+    reason = "native methods take a cell, the data and every option as plain values"
+)]
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use umber_core::{
-    AreaOptions, Axes, BarOptions, Dash, HistOptions, LegendStyle, LineOptions, Marker,
-    ScatterOptions, Series, SvgText,
+    AreaOptions, AxesMut, BarOptions, Dash, Grid, GridIndex, HistOptions, LegendMode, LegendStyle,
+    LineOptions, Marker, Placement, ScatterOptions, Series, Share, SvgText,
 };
 
 use crate::color::{ColorArg, color_spec};
 use crate::enums::enum_value;
-use crate::errors::{core_error, internal_state};
+use crate::errors::{core_error, internal_value};
 use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
@@ -35,16 +42,50 @@ use crate::values::{axis_data, floats, names, shared_floats};
 /// The series of a grouped or stacked bar chart: `(label, values, color)` for each series.
 type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
 
-/// A figure: a size in inches, a theme and at most one axes with its marks.
+/// The `kind` of a grid index argument that is `AUTO`.
+const AUTO_INDEX: i64 = 0;
+/// The `kind` of a grid index argument that is the index given.
+const AT_INDEX: i64 = 1;
+
+/// Converts a grid index argument `(kind, index)` to a [`GridIndex`]. An unknown kind is an
+/// internal `ValueError`.
+fn grid_index(kind: i64, index: i64) -> PyResult<GridIndex> {
+    match kind {
+        AUTO_INDEX => Ok(GridIndex::Auto),
+        AT_INDEX => Ok(GridIndex::At(index)),
+        _ => Err(internal_value(format!("{kind} is not a grid index kind"))),
+    }
+}
+
+/// The grid of `rows × cols` cells.
+fn grid(rows: i64, cols: i64) -> PyResult<Grid> {
+    Grid::new(rows, cols).map_err(core_error)
+}
+
+/// The figure size in inches that fits a `rows × cols` grid when no size is given.
+#[pyfunction]
+pub(crate) fn grid_auto_size(rows: i64, cols: i64) -> PyResult<(f64, f64)> {
+    Ok(grid(rows, cols)?.auto_size_in())
+}
+
+/// The first `count` cells of a `rows × cols` grid in row-major order, as `(row, col)`.
+#[pyfunction]
+pub(crate) fn grid_cells(rows: i64, cols: i64, count: i64) -> PyResult<Vec<(usize, usize)>> {
+    let cells = grid(rows, cols)?.cells(count).map_err(core_error)?;
+    Ok(cells.into_iter().map(|cell| (cell.row, cell.col)).collect())
+}
+
+/// A figure: a size in inches, a theme, a grid and the axes placed on it with their marks.
 #[pyclass(module = "umber._umber")]
 pub(crate) struct Figure(umber_core::Figure);
 
 impl Figure {
-    /// The axes; an internal `RuntimeError` when the figure has none.
-    fn axes(&mut self) -> PyResult<&mut Axes> {
+    /// The axes whose top-left cell is at `row`, `col`; the core's `UsageError` when no axes
+    /// starts there.
+    fn axes(&mut self, row: i64, col: i64) -> PyResult<AxesMut<'_>> {
         self.0
-            .axes_mut()
-            .ok_or_else(|| internal_state("the figure has no axes"))
+            .axes_at_mut(GridIndex::At(row), GridIndex::At(col))
+            .map_err(core_error)
     }
 
     /// A copy of the core figure, taken under a short borrow that ends before the copy is
@@ -96,10 +137,27 @@ impl Figure {
 
 #[pymethods]
 impl Figure {
-    /// An empty figure of `width` by `height` inches with `theme`.
+    /// An empty figure of `width` by `height` inches with `theme`, on a grid of `rows × cols`
+    /// cells whose x and y scales are shared as `share_x` and `share_y` say (`Share` values)
+    /// and whose legend is shown as `legend` says (a `Legend` value).
     #[new]
-    fn new(width: f64, height: f64, theme: &Theme) -> PyResult<Figure> {
-        umber_core::Figure::new(width, height, theme.core().clone())
+    fn new(
+        width: f64,
+        height: f64,
+        theme: &Theme,
+        rows: i64,
+        cols: i64,
+        share_x: i64,
+        share_y: i64,
+        legend: i64,
+    ) -> PyResult<Figure> {
+        let (share_x, share_y) = (enum_value::<Share>(share_x)?, enum_value::<Share>(share_y)?);
+        let legend = enum_value::<LegendMode>(legend)?;
+        let grid = grid(rows, cols)?
+            .with_share_x(share_x)
+            .with_share_y(share_y)
+            .with_legend(legend);
+        umber_core::Figure::with_grid(width, height, theme.core().clone(), grid)
             .map(Figure)
             .map_err(core_error)
     }
@@ -111,61 +169,110 @@ impl Figure {
         Figure(self.0.clone())
     }
 
-    /// Adds the axes with the x scale `(x_kind, x_base)` and the y scale `(y_kind, y_base)`.
-    /// The core refuses a second axes and a category y scale, and a refused call adds nothing.
-    fn add_axes(&mut self, x_kind: i64, x_base: f64, y_kind: i64, y_base: f64) -> PyResult<()> {
+    /// Adds axes at the row `(row_kind, row)` and the column `(col_kind, col)`, spanning
+    /// `row_span × col_span` cells, with the x scale `(x_kind, x_base)` and the y scale
+    /// `(y_kind, y_base)`, and returns the `(row, col)` of their top-left cell. The core checks
+    /// the position and the scales, and a refused call adds nothing.
+    fn add_axes(
+        &mut self,
+        row_kind: i64,
+        row: i64,
+        col_kind: i64,
+        col: i64,
+        row_span: i64,
+        col_span: i64,
+        x_kind: i64,
+        x_base: f64,
+        y_kind: i64,
+        y_base: f64,
+    ) -> PyResult<(usize, usize)> {
+        let at = Placement {
+            row: grid_index(row_kind, row)?,
+            col: grid_index(col_kind, col)?,
+            row_span,
+            col_span,
+        };
         let x = scale_kind(x_kind, x_base)?;
         let y = scale_kind(y_kind, y_base)?;
-        self.0.add_axes(x, y).map(drop).map_err(core_error)
+        let axes = self.0.add_axes_at(at, x, y).map_err(core_error)?;
+        Ok((axes.cells().row(), axes.cells().col()))
+    }
+
+    /// The `(row, col)` of the top-left cell of the axes found at the row `(row_kind, row)`
+    /// and the column `(col_kind, col)`, after the core has checked that they were created
+    /// with the x scale `(x_kind, x_base)` and the y scale `(y_kind, y_base)`.
+    fn axes_at(
+        &self,
+        row_kind: i64,
+        row: i64,
+        col_kind: i64,
+        col: i64,
+        x_kind: i64,
+        x_base: f64,
+        y_kind: i64,
+        y_base: f64,
+    ) -> PyResult<(usize, usize)> {
+        let (row, col) = (grid_index(row_kind, row)?, grid_index(col_kind, col)?);
+        let x = scale_kind(x_kind, x_base)?;
+        let y = scale_kind(y_kind, y_base)?;
+        let axes = self.0.axes_at(row, col).map_err(core_error)?;
+        axes.check_scales(x, y).map_err(core_error)?;
+        Ok((axes.cells().row(), axes.cells().col()))
     }
 
     /// Sets the title.
-    fn title(&mut self, text: &str) -> PyResult<()> {
-        self.axes()?.title(text);
+    fn title(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
+        self.axes(row, col)?.title(text);
         Ok(())
     }
 
     /// Sets the subtitle.
-    fn subtitle(&mut self, text: &str) -> PyResult<()> {
-        self.axes()?.subtitle(text);
+    fn subtitle(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
+        self.axes(row, col)?.subtitle(text);
         Ok(())
     }
 
     /// Sets the x axis label.
-    fn xlabel(&mut self, text: &str) -> PyResult<()> {
-        self.axes()?.xlabel(text);
+    fn xlabel(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
+        self.axes(row, col)?.xlabel(text);
         Ok(())
     }
 
     /// Sets the y axis label.
-    fn ylabel(&mut self, text: &str) -> PyResult<()> {
-        self.axes()?.ylabel(text);
+    fn ylabel(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
+        self.axes(row, col)?.ylabel(text);
         Ok(())
     }
 
     /// Sets the x limits.
-    fn xlim(&mut self, low: f64, high: f64) -> PyResult<()> {
-        self.axes()?.xlim(low, high).map(drop).map_err(core_error)
+    fn xlim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
+        self.axes(row, col)?
+            .xlim(low, high)
+            .map(drop)
+            .map_err(core_error)
     }
 
     /// Sets the y limits.
-    fn ylim(&mut self, low: f64, high: f64) -> PyResult<()> {
-        self.axes()?.ylim(low, high).map(drop).map_err(core_error)
+    fn ylim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
+        self.axes(row, col)?
+            .ylim(low, high)
+            .map(drop)
+            .map_err(core_error)
     }
 
     /// Replaces the x ticks with ticks at `positions`.
-    fn xticks(&mut self, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn xticks(&mut self, row: i64, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
         let positions = floats(positions)?;
-        self.axes()?
+        self.axes(row, col)?
             .xticks(&positions)
             .map(drop)
             .map_err(core_error)
     }
 
     /// Replaces the y ticks with ticks at `positions`.
-    fn yticks(&mut self, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn yticks(&mut self, row: i64, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
         let positions = floats(positions)?;
-        self.axes()?
+        self.axes(row, col)?
             .yticks(&positions)
             .map(drop)
             .map_err(core_error)
@@ -174,11 +281,13 @@ impl Figure {
     /// Replaces the x ticks with ticks at `positions`, each with the label at its index.
     fn xticks_labeled(
         &mut self,
+        row: i64,
+        col: i64,
         positions: &Bound<'_, PyAny>,
         labels: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let (positions, labels) = (floats(positions)?, names(labels)?);
-        self.axes()?
+        self.axes(row, col)?
             .xticks_labeled(&positions, labels)
             .map(drop)
             .map_err(core_error)
@@ -187,44 +296,48 @@ impl Figure {
     /// Replaces the y ticks with ticks at `positions`, each with the label at its index.
     fn yticks_labeled(
         &mut self,
+        row: i64,
+        col: i64,
         positions: &Bound<'_, PyAny>,
         labels: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let (positions, labels) = (floats(positions)?, names(labels)?);
-        self.axes()?
+        self.axes(row, col)?
             .yticks_labeled(&positions, labels)
             .map(drop)
             .map_err(core_error)
     }
 
     /// Sets the format of the x tick labels.
-    fn xtick_format(&mut self, format: TickFormatArg) -> PyResult<()> {
+    fn xtick_format(&mut self, row: i64, col: i64, format: TickFormatArg) -> PyResult<()> {
         let format = tick_format(format)?;
-        self.axes()?
+        self.axes(row, col)?
             .xtick_format(format)
             .map(drop)
             .map_err(core_error)
     }
 
     /// Sets the format of the y tick labels.
-    fn ytick_format(&mut self, format: TickFormatArg) -> PyResult<()> {
+    fn ytick_format(&mut self, row: i64, col: i64, format: TickFormatArg) -> PyResult<()> {
         let format = tick_format(format)?;
-        self.axes()?
+        self.axes(row, col)?
             .ytick_format(format)
             .map(drop)
             .map_err(core_error)
     }
 
     /// Sets the legend style (a `LegendStyle` value).
-    fn legend(&mut self, style: i64) -> PyResult<()> {
+    fn legend(&mut self, row: i64, col: i64, style: i64) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
-        self.axes()?.legend(style);
+        self.axes(row, col)?.legend(style);
         Ok(())
     }
 
     /// Adds a line.
     fn line(
         &mut self,
+        row: i64,
+        col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         label: String,
@@ -240,7 +353,7 @@ impl Figure {
             width: size_spec(width)?,
             ..Default::default()
         };
-        self.axes()?
+        self.axes(row, col)?
             .line_shared(x, y, options)
             .map(drop)
             .map_err(core_error)
@@ -249,6 +362,8 @@ impl Figure {
     /// Adds an area: a line with the region down to the baseline filled.
     fn area(
         &mut self,
+        row: i64,
+        col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         label: String,
@@ -264,7 +379,7 @@ impl Figure {
             width: size_spec(width)?,
             ..Default::default()
         };
-        self.axes()?
+        self.axes(row, col)?
             .area_shared(x, y, options)
             .map(drop)
             .map_err(core_error)
@@ -273,6 +388,8 @@ impl Figure {
     /// Adds a scatter series.
     fn scatter(
         &mut self,
+        row: i64,
+        col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         label: String,
@@ -288,7 +405,7 @@ impl Figure {
             size: size_spec(size)?,
             ..Default::default()
         };
-        self.axes()?
+        self.axes(row, col)?
             .scatter_shared(x, y, options)
             .map(drop)
             .map_err(core_error)
@@ -297,6 +414,8 @@ impl Figure {
     /// Adds bars, one per category.
     fn bar(
         &mut self,
+        row: i64,
+        col: i64,
         categories: &Bound<'_, PyAny>,
         heights: &Bound<'_, PyAny>,
         label: String,
@@ -308,7 +427,7 @@ impl Figure {
             color: color_spec(color)?,
             ..Default::default()
         };
-        self.axes()?
+        self.axes(row, col)?
             .bar_shared(categories, heights, options)
             .map(drop)
             .map_err(core_error)
@@ -317,11 +436,13 @@ impl Figure {
     /// Adds grouped bars: in each category, one bar per series.
     fn grouped_bar(
         &mut self,
+        row: i64,
+        col: i64,
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
     ) -> PyResult<()> {
         let (categories, series) = (names(categories)?, Self::series(series)?);
-        self.axes()?
+        self.axes(row, col)?
             .grouped_bar(categories, series)
             .map(drop)
             .map_err(core_error)
@@ -330,11 +451,13 @@ impl Figure {
     /// Adds stacked bars: in each category, one stack of the series.
     fn stacked_bar(
         &mut self,
+        row: i64,
+        col: i64,
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
     ) -> PyResult<()> {
         let (categories, series) = (names(categories)?, Self::series(series)?);
-        self.axes()?
+        self.axes(row, col)?
             .stacked_bar(categories, series)
             .map(drop)
             .map_err(core_error)
@@ -343,6 +466,8 @@ impl Figure {
     /// Adds a histogram of `values` in `bins` bins.
     fn hist(
         &mut self,
+        row: i64,
+        col: i64,
         values: &Bound<'_, PyAny>,
         bins: i64,
         label: String,
@@ -355,7 +480,7 @@ impl Figure {
             color: color_spec(color)?,
             ..Default::default()
         };
-        self.axes()?
+        self.axes(row, col)?
             .hist_shared(values, options)
             .map(drop)
             .map_err(core_error)

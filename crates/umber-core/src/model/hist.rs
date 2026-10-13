@@ -52,7 +52,7 @@ impl Default for HistOptions {
 /// use umber_core::{Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.hist(&[1.0, 2.5, f64::NAN, 2.0], HistOptions { bins: 4, ..HistOptions::default() })?;
 /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(hist.values().len(), 4);
@@ -111,7 +111,7 @@ impl HistMark {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// axes.hist(&[3.0, f64::NAN], HistOptions::default())?;
     /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
     /// assert_eq!(hist.values()[0], 3.0);
@@ -134,7 +134,7 @@ impl HistMark {
     /// use umber_core::{ColorSpec, Figure, Rgba, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// let options = HistOptions {
     ///     bins: 12,
     ///     label: "latency".into(),

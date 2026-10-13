@@ -1098,7 +1098,7 @@ mod tests {
     use crate::model::{
         AreaOptions, BarOptions, Figure, HistOptions, LineOptions, ScatterOptions, Series,
     };
-    use crate::{LogBase, MIN_LOG_VALUE, ScaleKind, Theme, TickFormat};
+    use crate::{AxesMut, LogBase, MIN_LOG_VALUE, ScaleKind, Theme, TickFormat};
 
     fn nums(v: &[f64]) -> AxisData {
         AxisData::Numbers(v.to_vec())
@@ -1114,8 +1114,8 @@ mod tests {
         figure
     }
 
-    fn axes(figure: &mut Figure) -> &mut Axes {
-        figure.axes_mut().unwrap()
+    fn axes(figure: &mut Figure) -> AxesMut<'_> {
+        figure.single_axes_mut()
     }
 
     /// The resolved color of every series of `resolved`, in order. Colors do not depend on the
@@ -1149,7 +1149,7 @@ mod tests {
     }
 
     fn domains(figure: &Figure) -> ((f64, f64), (f64, f64)) {
-        let r = resolve_axes(figure.axes().unwrap(), 5, 4);
+        let r = resolve_axes(figure.single_axes(), 5, 4);
         (r.x.continuous().unwrap().domain(), r.y.scale.domain())
     }
 
@@ -1213,7 +1213,7 @@ mod tests {
             .unwrap();
         let ((x0, x1), _) = domains(&f);
         assert!(close((x0, x1), pad(0.0, 10.0)), "{x0} {x1}");
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.x.ticks), ["0.0", "2.5", "5.0", "7.5", "10.0"]);
     }
 
@@ -1233,7 +1233,7 @@ mod tests {
         assert!(close((y0, y1), pad(0.0, 40.0)), "{y0} {y1}");
         // The ticks are the set that produced the nice limits, so the outermost ones sit at the
         // nice limits, just inside the padded domain: x is 10, 30, ..., 90, not 25, 50, 75.
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         for ticks in [&r.x.ticks, &r.y.ticks] {
             assert_end_ticks_inset(ticks);
         }
@@ -1246,7 +1246,7 @@ mod tests {
         axes(&mut f)
             .scatter(nums(&[12.0, 88.0]), &[1.0, 2.0], ScatterOptions::default())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         let domain = r.x.continuous().unwrap().domain();
         assert!(close(domain, pad_log(10.0, 100.0)), "{domain:?}");
         assert_eq!(labels(&r.x.ticks), ["10", "100"]);
@@ -1267,7 +1267,7 @@ mod tests {
         assert_eq!((x0, x1), (0.5, 9.5));
         assert_eq!((y0, y1), (-1.3, 2.7));
         // Every tick lies inside the explicit limits.
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(r.x.ticks.iter().all(|t| (0.0..=1.0).contains(&t.pos.get())));
         assert!(r.y.ticks.iter().all(|t| (0.0..=1.0).contains(&t.pos.get())));
         // 0 is inside -1.3..2.7, so the baseline sits at its normalized position.
@@ -1289,7 +1289,7 @@ mod tests {
         let log = ScaleKind::Log { base: LogBase::TEN };
         let f = figure(log, log);
         assert_eq!(domains(&f), ((1.0, 10.0), (1.0, 10.0)));
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(r.baseline.get(), 0.0);
 
         // Empty scatter data is empty data too.
@@ -1344,7 +1344,7 @@ mod tests {
             .unwrap();
         let (_, (y0, y1)) = domains(&f);
         assert!(close((y0, y1), pad_log(1.0, 1e5)), "{y0} {y1}");
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         // 0 is never inside a log range: the baseline sits at the nice lower limit, the
         // lowest tick, inside the padded domain.
         assert_eq!(r.baseline, r.y.ticks[0].pos);
@@ -1389,7 +1389,7 @@ mod tests {
                 ScatterOptions::default(),
             )
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(r.x.is_category());
         let labels: Vec<&str> = r.x.ticks.iter().map(|t| t.label.as_str()).collect();
         assert_eq!(labels, ["b", "a", "c", "d"]);
@@ -1418,7 +1418,7 @@ mod tests {
             },
             ColorSpec::AUTO,
         ];
-        let a = axes(&mut f);
+        let mut a = axes(&mut f);
         for (i, color) in specs.into_iter().enumerate() {
             // Lines and scatters alternate; both take Auto slots from the same sequence.
             if i % 2 == 0 {
@@ -1435,7 +1435,7 @@ mod tests {
                 a.line(nums(&[i as f64]), &[1.0], options).unwrap();
             }
         }
-        let marks = f.axes().unwrap().marks();
+        let marks = f.single_axes().marks();
         let resolved = resolve_marks(marks, f.theme());
         assert_eq!(resolved.len(), marks.len());
         for (record, mark) in resolved.iter().zip(marks) {
@@ -1485,7 +1485,7 @@ mod tests {
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
             let (w, d) = (theme.line_width(), theme.marker_size());
             let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
-            let a = f.add_axes(LIN, LIN).unwrap();
+            let mut a = f.add_axes(LIN, LIN).unwrap();
             for spec in specs {
                 a.line(nums(&[0.0, 1.0]), &[1.0, 2.0], line(spec))
                     .unwrap()
@@ -1494,7 +1494,7 @@ mod tests {
                     .scatter(nums(&[0.5]), &[1.5], scatter(spec))
                     .unwrap();
             }
-            let resolved = resolve_marks(f.axes().unwrap().marks(), &theme);
+            let resolved = resolve_marks(f.single_axes().marks(), &theme);
             let expected = [(w, d), (2.5 * w, 2.5 * d), (0.5 * w, 0.5 * d), (3.0, 3.0)];
             for (records, (width, size)) in resolved.chunks(3).zip(expected) {
                 match records {
@@ -1528,7 +1528,7 @@ mod tests {
                 scatter(SizeSpec::times(10.0).unwrap()),
             )
             .unwrap();
-        match resolve_marks(f.axes().unwrap().marks(), &theme).as_slice() {
+        match resolve_marks(f.single_axes().marks(), &theme).as_slice() {
             [
                 ResolvedMark::Line { width, .. },
                 ResolvedMark::Scatter { size, .. },
@@ -1562,8 +1562,8 @@ mod tests {
                 },
             )
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
-        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()));
+        let resolved = resolve_marks(f.single_axes().marks(), f.theme());
+        let keys = series_keys(&resolved, &Limits::of(f.single_axes()));
         assert_eq!(
             keys,
             [
@@ -1597,12 +1597,12 @@ mod tests {
     fn baseline_sits_at_zero_or_the_explicit_low_limit() {
         let mut f = figure(LIN, LIN);
         axes(&mut f).ylim(-10.0, 30.0).unwrap();
-        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.25);
+        assert_eq!(resolve_axes(f.single_axes(), 5, 4).baseline.get(), 0.25);
         // Explicit limits are not padded: their low limit is the plot bottom.
         axes(&mut f).ylim(5.0, 30.0).unwrap();
-        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
+        assert_eq!(resolve_axes(f.single_axes(), 5, 4).baseline.get(), 0.0);
         axes(&mut f).ylim(-30.0, -5.0).unwrap();
-        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
+        assert_eq!(resolve_axes(f.single_axes(), 5, 4).baseline.get(), 0.0);
         let log = ScaleKind::Log { base: LogBase::TEN };
         let mut f = figure(LIN, log);
         axes(&mut f)
@@ -1610,7 +1610,7 @@ mod tests {
             .unwrap()
             .ylim(2.0, 5e4)
             .unwrap();
-        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
+        assert_eq!(resolve_axes(f.single_axes(), 5, 4).baseline.get(), 0.0);
     }
 
     #[test]
@@ -1625,7 +1625,7 @@ mod tests {
             f
         };
         let lowest = |f: &Figure| {
-            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let r = resolve_axes(f.single_axes(), 5, 4);
             assert_eq!(r.baseline, r.y.ticks[0].pos);
             r.y.ticks[0].label.clone()
         };
@@ -1664,7 +1664,7 @@ mod tests {
         axes(&mut f)
             .scatter(nums(&ys), &ys, ScatterOptions::default())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 4, 4);
+        let r = resolve_axes(f.single_axes(), 4, 4);
         assert_eq!(labels(&r.x.ticks)[0], "35");
         assert_eq!(labels(&r.y.ticks)[0], "25");
     }
@@ -1682,7 +1682,7 @@ mod tests {
             axes(&mut f)
                 .line(nums(&[0.0, 1.0]), &[1.0, 1e100], LineOptions::default())
                 .unwrap();
-            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let r = resolve_axes(f.single_axes(), 5, 4);
             let pos: Vec<f64> = r.y.ticks.iter().map(|t| t.pos.get()).collect();
             assert!(pos.len() >= 2, "base {base}: {:?}", r.y.ticks);
             assert!(
@@ -1724,7 +1724,7 @@ mod tests {
             axes(&mut f)
                 .line(nums(&[0.0, 1.0]), &[low, high], LineOptions::default())
                 .unwrap();
-            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let r = resolve_axes(f.single_axes(), 5, 4);
             let data_low = r.y.scale.normalize(low);
             assert!(
                 r.baseline.get() < data_low,
@@ -1745,7 +1745,7 @@ mod tests {
         axes(&mut f)
             .line(nums(&[0.0, 1.0]), &[-12.0, 36.5], LineOptions::default())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         let scale = r.y.scale;
         assert_eq!(r.baseline.get(), scale.normalize(0.0));
         assert!(r.baseline.get() > r.y.ticks[0].pos.get());
@@ -1757,7 +1757,7 @@ mod tests {
             axes(&mut f)
                 .line(nums(&xs), &ys, LineOptions::default())
                 .unwrap();
-            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let r = resolve_axes(f.single_axes(), 5, 4);
             let lowest = &r.y.ticks[0];
             assert_eq!(r.baseline, lowest.pos);
             assert!(
@@ -1775,7 +1775,7 @@ mod tests {
         axes(&mut f)
             .scatter(nums(&[0.0, 1.0]), &[20.0, 880.0], ScatterOptions::default())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(r.y.ticks[0].label, "10");
         assert_eq!(r.baseline, r.y.ticks[0].pos);
         assert!(r.baseline.get() > 0.0);
@@ -1784,7 +1784,7 @@ mod tests {
         axes(&mut f)
             .scatter(nums(&[1.0]), &[20.0], ScatterOptions::default())
             .unwrap();
-        assert_eq!(resolve_axes(f.axes().unwrap(), 5, 4).baseline.get(), 0.0);
+        assert_eq!(resolve_axes(f.single_axes(), 5, 4).baseline.get(), 0.0);
     }
 
     /// `50 + 15 sin(t)` over two periods: its extent is 35 to 65, which are nice values.
@@ -1811,7 +1811,7 @@ mod tests {
         // line's minimum and maximum no longer sit on the plot edge, and the ticks stay 25..65.
         assert_ne!((y0, y1), (25.0, 65.0));
         assert!(close((y0, y1), (23.0, 67.0)), "{y0} {y1}");
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.y.ticks), ["25", "35", "45", "55", "65"]);
         assert_end_ticks_inset(&r.y.ticks);
         // The x axis of an all-line axes keeps the exact extent, unpadded.
@@ -1840,7 +1840,7 @@ mod tests {
         assert!(close(x, (10.0 / factor, 1000.0 * factor)), "{x:?}");
         let factor = 10f64.powf(0.15);
         assert!(close(y, (1.0 / factor, 1000.0 * factor)), "{y:?}");
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.x.ticks), ["10", "100", "1000"]);
         assert_eq!(labels(&r.y.ticks), ["1", "10", "100", "1000"]);
         assert_end_ticks_inset(&r.y.ticks);
@@ -1940,7 +1940,7 @@ mod tests {
     }
 
     fn y_domain(figure: &Figure) -> (f64, f64) {
-        resolve_axes(figure.axes().unwrap(), 5, 4).y.scale.domain()
+        resolve_axes(figure.single_axes(), 5, 4).y.scale.domain()
     }
 
     #[test]
@@ -1948,7 +1948,7 @@ mod tests {
         // Positive bars: the nice limits 0..40, padded above only, so the bars start on the
         // bottom edge, where the baseline and the first tick sit.
         let f = bar_figure(LIN, &[12.0, 36.5]);
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(y_domain(&f), (0.0, 42.0));
         assert_eq!(labels(&r.y.ticks), ["0", "10", "20", "30", "40"]);
         assert_eq!(r.y.ticks[0].pos.get(), 0.0);
@@ -1956,13 +1956,13 @@ mod tests {
 
         // Negative bars: the mirror image, padded below only.
         let f = bar_figure(LIN, &[-12.0, -36.5]);
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(y_domain(&f), (-42.0, 0.0));
         assert_eq!(r.baseline.get(), 1.0);
 
         // Bars on both sides of 0: both sides padded as usual.
         let f = bar_figure(LIN, &[-12.0, 36.5]);
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_end_ticks_inset(&r.y.ticks);
         assert!(labels(&r.y.ticks).contains(&"0"));
 
@@ -1975,7 +1975,7 @@ mod tests {
                 LineOptions::default(),
             )
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_end_ticks_inset(&r.y.ticks);
 
         // Without bars, data away from 0 keeps its own nice limits.
@@ -1993,7 +1993,7 @@ mod tests {
         // baseline is the nice lower limit, the lowest tick.
         let log = ScaleKind::Log { base: LogBase::TEN };
         let f = bar_figure(log, &[3.0, 4.2e4]);
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(close(y_domain(&f), pad_log(1.0, 1e5)), "{:?}", y_domain(&f));
         assert_eq!(r.baseline, r.y.ticks[0].pos);
         assert_eq!(r.y.ticks[0].label, "1");
@@ -2023,7 +2023,7 @@ mod tests {
             .unwrap()
             .bar(names(&["f"]), &[1.0], BarOptions::default())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.x.ticks), ["b", "a", "c", "d", "e", "f"]);
     }
 
@@ -2062,13 +2062,13 @@ mod tests {
             .unwrap()
             .bar(names(&["d"]), &[1.0], color(ColorSpec::AUTO, "last"))
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
+        let resolved = resolve_marks(f.single_axes().marks(), f.theme());
         let colors = series_colors(&resolved);
         assert_eq!(
             colors,
             [palette[0], palette[1], fixed, palette[6], palette[2]]
         );
-        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()));
+        let keys = series_keys(&resolved, &Limits::of(f.single_axes()));
         assert_eq!(
             keys[1],
             SeriesKey {
@@ -2121,7 +2121,7 @@ mod tests {
                 vec![auto(&[12.0, 5.0]), auto(&[24.5, f64::NAN])],
             )
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(y_domain(&f), (0.0, 42.0));
         assert_eq!(r.baseline.get(), 0.0);
         // All negative: mirrored.
@@ -2143,7 +2143,7 @@ mod tests {
                 vec![auto(&[30.0, -12.0]), auto(&[6.0, -7.0]), auto(&[-3.0, 2.0])],
             )
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         let (lo, hi) = y_domain(&f);
         assert!(lo < -19.0 && hi > 36.0, "{lo} {hi}");
         let nice = (
@@ -2183,7 +2183,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(domain, y_domain(&g));
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(r.baseline, r.y.ticks[0].pos);
         assert_eq!(r.y.ticks[0].label, "1");
     }
@@ -2218,7 +2218,7 @@ mod tests {
                 vec![auto(&[1.0]), series(at(0), &[1.0]), auto(&[2.0])],
             )
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
+        let resolved = resolve_marks(f.single_axes().marks(), f.theme());
         assert_eq!(
             series_colors(&resolved),
             [
@@ -2227,7 +2227,7 @@ mod tests {
             ]
         );
         // Every grouped or stacked series is a legend key of its own, drawn as a bar.
-        let keys = series_keys(&resolved, &Limits::of(f.axes().unwrap()));
+        let keys = series_keys(&resolved, &Limits::of(f.single_axes()));
         assert_eq!(keys.len(), 9);
         assert!(keys[1..5].iter().all(|key| key.kind == SeriesKind::Bar));
     }
@@ -2242,7 +2242,7 @@ mod tests {
             .unwrap()
             .grouped_bar(names(&["d", "a"]), vec![auto(&[1.0, 2.0])])
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.x.ticks), ["b", "c", "a", "d"]);
     }
 
@@ -2262,7 +2262,7 @@ mod tests {
         // The bins span the data, 12 to 88; x takes the nice limits 10..90, padded on both
         // sides like any axes that is not all lines.
         let f = hist_figure(LIN, &[12.0, 47.0, 88.0, 30.0, f64::NAN], 4);
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         let (x, _) = domains(&f);
         assert!(close(x, pad(10.0, 90.0)), "{x:?}");
         assert_eq!(labels(&r.x.ticks), ["10", "30", "50", "70", "90"]);
@@ -2280,7 +2280,7 @@ mod tests {
         // the baseline, and reaches past the largest count.
         let values = [0.0, 2.5, 2.6, 3.1, 3.2, 3.3, 3.4, 4.0];
         let f = hist_figure(LIN, &values, 4);
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         let (_, (lo, hi)) = domains(&f);
         assert_eq!(lo, 0.0);
         assert!(hi > 5.0, "{hi}");
@@ -2309,7 +2309,7 @@ mod tests {
             .line(nums(&[0.0, 1.0]), &[1.0, 40.0], LineOptions::default())
             .unwrap();
         assert_eq!(domain, y_domain(&g));
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(r.baseline, r.y.ticks[0].pos);
         assert_eq!(r.y.ticks[0].label, "0.1");
     }
@@ -2319,7 +2319,7 @@ mod tests {
         for values in [&[][..], &[f64::NAN, f64::NAN][..]] {
             let f = hist_figure(LIN, values, 30);
             assert_eq!(domains(&f), ((0.0, 1.0), (0.0, 1.0)));
-            let marks = resolve_marks(f.axes().unwrap().marks(), &Theme::pigment());
+            let marks = resolve_marks(f.single_axes().marks(), &Theme::pigment());
             assert!(matches!(
                 marks.as_slice(),
                 [ResolvedMark::Hist {
@@ -2348,7 +2348,7 @@ mod tests {
             .unwrap()
             .line(nums(&[1.0]), &[1.0], LineOptions::default())
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
+        let resolved = resolve_marks(f.single_axes().marks(), f.theme());
         assert_eq!(
             series_colors(&resolved),
             [palette[0], palette[1], palette[2]]
@@ -2362,7 +2362,7 @@ mod tests {
         };
         assert_eq!(histogram.counts(), &[1, 3]);
         assert_eq!(
-            resolved[1].keys(&Limits::of(f.axes().unwrap())),
+            resolved[1].keys(&Limits::of(f.single_axes())),
             [SeriesKey {
                 label: "sizes",
                 color: palette[1],
@@ -2389,7 +2389,7 @@ mod tests {
         if let Some((lo, hi)) = xlim {
             axes(&mut f).xlim(lo, hi).unwrap();
         }
-        let axes = f.axes().unwrap();
+        let axes = f.single_axes();
         let resolved = resolve_marks(axes.marks(), &Theme::pigment());
         let keys = series_keys(&resolved, &Limits::of(axes));
         keys[0].anchor.map(|anchor| match anchor.x {
@@ -2432,7 +2432,7 @@ mod tests {
         axes(&mut f)
             .line(cats(&["Jan", "Feb", "Mar"]), &[1.0, 2.0, nan], options)
             .unwrap();
-        let axes = f.axes().unwrap();
+        let axes = f.single_axes();
         let resolved = resolve_marks(axes.marks(), &Theme::pigment());
         let keys = series_keys(&resolved, &Limits::of(axes));
         let feb = Anchor {
@@ -2540,7 +2540,7 @@ mod tests {
         for xlim in [None, Some((0.0, 1.5))] {
             let keys_of = |area: bool| {
                 let mut f = figure(LIN, LIN);
-                let a = axes(&mut f);
+                let mut a = axes(&mut f);
                 if area {
                     a.area(x(), &[5.0, 6.0, 7.0], options.clone()).unwrap();
                 } else {
@@ -2549,7 +2549,7 @@ mod tests {
                 if let Some((lo, hi)) = xlim {
                     a.xlim(lo, hi).unwrap();
                 }
-                let axes = f.axes().unwrap();
+                let axes = f.single_axes();
                 let palette = f.theme().palette();
                 let resolved = resolve_marks(axes.marks(), f.theme());
                 let keys: Vec<OwnedKey> = series_keys(&resolved, &Limits::of(axes))
@@ -2611,7 +2611,7 @@ mod tests {
             .unwrap()
             .area(x(), &[1.0, 2.0], AreaOptions::default())
             .unwrap();
-        let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());
+        let resolved = resolve_marks(f.single_axes().marks(), f.theme());
         assert!(matches!(
             resolved.as_slice(),
             [
@@ -2654,7 +2654,7 @@ mod tests {
         axes(&mut f)
             .area(nums(&[0.0, 1.0]), &[10.0, 40.0], AreaOptions::default())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(r.y.ticks[0].label, "1");
         assert_eq!(r.baseline, r.y.ticks[0].pos);
         assert!(r.y.scale.domain().0 > 0.0);
@@ -2671,7 +2671,7 @@ mod tests {
             .unwrap()
             .hist(&[1.0, 2.0], HistOptions::default())
             .unwrap();
-        let axes = f.axes().unwrap();
+        let axes = f.single_axes();
         let resolved = resolve_marks(axes.marks(), &Theme::pigment());
         let anchors: Vec<bool> = series_keys(&resolved, &Limits::of(axes))
             .iter()
@@ -2711,7 +2711,7 @@ mod tests {
         ] {
             let mut f = scatter_figure(LIN, LIN, &[0.3, 9.7], &[1.0, 2.0]);
             axes(&mut f).xticks(&ticks).unwrap();
-            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let r = resolve_axes(f.single_axes(), 5, 4);
             let x = r.x.continuous().unwrap();
             assert!(close(x.domain(), pad(want.0, want.1)), "{ticks:?}: {x:?}");
             assert_eq!(r.x.ticks.len(), ticks.len());
@@ -2731,7 +2731,7 @@ mod tests {
         ] {
             let mut f = scatter_figure(LIN, log10(), &[0.0, 1.0], &[3.0, 400.0]);
             axes(&mut f).yticks(&ticks).unwrap();
-            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let r = resolve_axes(f.single_axes(), 5, 4);
             assert!(
                 close(r.y.scale.domain(), pad_log(want.0, want.1)),
                 "{ticks:?}"
@@ -2757,7 +2757,7 @@ mod tests {
             .unwrap()
             .xticks(&[-5.0, 0.0, 5.0, 10.0, 15.0])
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(r.x.continuous().unwrap().domain(), (0.0, 10.0));
         assert_eq!(labels(&r.x.ticks), ["0", "5", "10"]);
         let pos: Vec<f64> = r.x.ticks.iter().map(|t| t.pos.get()).collect();
@@ -2774,7 +2774,7 @@ mod tests {
             .unwrap()
             .yticks_labeled(&[1.0, 10.0, 100.0, 1000.0], names)
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(r.y.scale.domain(), (5.0, 500.0));
         assert_eq!(labels(&r.y.ticks), ["ten", "hundred"]);
         // The baseline sits at the explicit low limit.
@@ -2785,10 +2785,10 @@ mod tests {
     fn explicit_y_ticks_keep_the_zero_anchor_and_skip_the_lowering() {
         // Auto ticks move the lowest tick below data that starts on it; explicit ones do not.
         let mut f = scatter_figure(LIN, LIN, &[0.0, 1.0], &[10.0, 20.0]);
-        let auto = resolve_axes(f.axes().unwrap(), 5, 4);
+        let auto = resolve_axes(f.single_axes(), 5, 4);
         assert!(auto.y.scale.domain().0 < 10.0 - 1.0);
         axes(&mut f).yticks(&[10.0, 15.0, 20.0]).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(close(r.y.scale.domain(), pad(10.0, 20.0)));
         assert_eq!(labels(&r.y.ticks), ["10", "15", "20"]);
         // The baseline uses the unpadded lower limit of the resulting domain: the lowest tick.
@@ -2798,7 +2798,7 @@ mod tests {
         // Bars keep 0 in a linear y domain, and the zero side stays unpadded.
         let mut f = bar_figure(LIN, &[3.0, 7.0]);
         axes(&mut f).yticks(&[2.0, 4.0, 6.0, 8.0]).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(close(r.y.scale.domain(), (0.0, 8.4)), "{:?}", r.y.scale);
         assert_eq!(r.baseline, NormalizedPos::LOW);
         assert_eq!(labels(&r.y.ticks), ["2", "4", "6", "8"]);
@@ -2806,7 +2806,7 @@ mod tests {
         // A histogram on a log y axis grows from the unpadded low end of data and ticks.
         let mut f = hist_figure(log10(), &[1.0, 2.0, 2.5, 3.0, 3.5, 4.0], 3);
         axes(&mut f).yticks(&[0.5, 5.0]).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(
             close(r.y.scale.domain(), pad_log(0.5, 5.0)),
             "{:?}",
@@ -2819,12 +2819,12 @@ mod tests {
     fn empty_tick_lists_leave_no_ticks_or_gridlines() {
         let mut f = scatter_figure(LIN, LIN, &[1.0, 9.0], &[2.0, 4.0]);
         axes(&mut f).xticks(&[]).unwrap().yticks(&[]).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(r.x.ticks.is_empty() && r.y.ticks.is_empty());
         // The domain is the padded data extent, not rounded to nice limits.
         assert!(close(r.x.continuous().unwrap().domain(), pad(1.0, 9.0)));
         assert!(close(r.y.scale.domain(), pad(2.0, 4.0)));
-        let (_, layout) = crate::pipeline::plan_figure(&f, crate::FontLibrary::global());
+        let (_, layout) = crate::pipeline::plan_figure(&f, (0, 0), crate::FontLibrary::global());
         assert!(layout.x_grid.is_empty() && layout.y_grid.is_empty());
         assert!(layout.x_tick_labels.is_empty() && layout.y_tick_labels.is_empty());
 
@@ -2860,7 +2860,7 @@ mod tests {
             .unwrap()
             .ytick_format(TickFormat::percent(0).unwrap().affix("", " share").unwrap())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.x.ticks), ["start", "", "\u{2212}end"]);
         assert_eq!(labels(&r.y.ticks), ["0% share", "25% share", "50% share"]);
 
@@ -2872,32 +2872,32 @@ mod tests {
             .unwrap()
             .ytick_format(TickFormat::AUTO)
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.x.ticks), ["0.00", "1.50", "3.25"]);
         assert_eq!(labels(&r.y.ticks), ["\u{2212}0.5", "0.0", "0.5"]);
 
         // On a log axis AUTO labels each value, and other styles write the values.
         let mut f = scatter_figure(LIN, log10(), &[0.0, 1.0], &[3.0, 400.0]);
         axes(&mut f).yticks(&[2.0, 20.0, 200.0]).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.y.ticks), ["2", "20", "200"]);
         axes(&mut f)
             .ytick_format(TickFormat::fixed(1).unwrap())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.y.ticks), ["2.0", "20.0", "200.0"]);
     }
 
     #[test]
     fn formats_relabel_the_automatic_ticks() {
         let f = scatter_figure(LIN, LIN, &[0.0, 10.0], &[0.0, 40.0]);
-        let auto = resolve_axes(f.axes().unwrap(), 5, 5);
+        let auto = resolve_axes(f.single_axes(), 5, 5);
         assert_eq!(labels(&auto.y.ticks), ["0", "10", "20", "30", "40"]);
         let mut f = f;
         axes(&mut f)
             .ytick_format(TickFormat::fixed(1).unwrap().affix("$", "").unwrap())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 5);
+        let r = resolve_axes(f.single_axes(), 5, 5);
         assert_eq!(
             labels(&r.y.ticks),
             ["$0.0", "$10.0", "$20.0", "$30.0", "$40.0"]
@@ -2907,23 +2907,23 @@ mod tests {
         let pos = |ticks: &[AxisTick]| ticks.iter().map(|t| t.pos).collect::<Vec<_>>();
         assert_eq!(pos(&r.y.ticks), pos(&auto.y.ticks));
         axes(&mut f).ytick_format(TickFormat::scientific()).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 5);
+        let r = resolve_axes(f.single_axes(), 5, 5);
         assert_eq!(labels(&r.y.ticks), ["0", "1e1", "2e1", "3e1", "4e1"]);
 
         // On a log axis, AUTO keeps the value labels and the other styles write the values.
         let mut f = scatter_figure(LIN, log10(), &[0.0, 1.0], &[2.0, 3000.0]);
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.y.ticks), ["1", "10", "100", "1000", "10000"]);
         axes(&mut f)
             .ytick_format(TickFormat::percent(0).unwrap())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(
             labels(&r.y.ticks),
             ["100%", "1000%", "10000%", "100000%", "1000000%"]
         );
         axes(&mut f).ytick_format(TickFormat::scientific()).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.y.ticks), ["1e0", "1e1", "1e2", "1e3", "1e4"]);
     }
 
@@ -2933,20 +2933,20 @@ mod tests {
         let close_pair = [1.0, 1.0 + 3e-13];
         let mut f = scatter_figure(LIN, LIN, &[0.0, 1.0], &[0.0, 1.0]);
         axes(&mut f).yticks(&close_pair).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         let auto = labels(&r.y.ticks);
         assert_ne!(auto[0], auto[1], "{auto:?}");
         axes(&mut f)
             .ytick_format(TickFormat::fixed(2).unwrap())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.y.ticks), ["1.00", "1.00"]);
         // A coarse fixed format may merge automatic ticks too.
         let mut f = scatter_figure(LIN, LIN, &[0.0, 1.0], &[0.0, 1.0]);
         axes(&mut f)
             .ytick_format(TickFormat::fixed(0).unwrap())
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 5);
+        let r = resolve_axes(f.single_axes(), 5, 5);
         assert_eq!(labels(&r.y.ticks), ["0", "0", "0", "1", "1"]);
     }
 
@@ -2959,7 +2959,7 @@ mod tests {
             .unwrap()
             .ytick_format(format)
             .unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         r.y.ticks.into_iter().map(|t| t.label).collect()
     }
 
@@ -3000,19 +3000,19 @@ mod tests {
         let mut hist = hist_figure(LIN, &[f64::NAN, f64::NAN], 3);
         for f in [&mut bars, &mut hist] {
             axes(f).yticks(&[2.0, 4.0]).unwrap();
-            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let r = resolve_axes(f.single_axes(), 5, 4);
             assert!(close(r.y.scale.domain(), (0.0, 4.2)), "{:?}", r.y.scale);
             assert_eq!(r.baseline, NormalizedPos::LOW);
             assert_eq!(labels(&r.y.ticks), ["2", "4"]);
             // Without ticks either, the empty-data range stays.
             axes(f).yticks(&[]).unwrap();
-            let r = resolve_axes(f.axes().unwrap(), 5, 4);
+            let r = resolve_axes(f.single_axes(), 5, 4);
             assert_eq!(r.y.scale.domain(), (0.0, 1.0));
         }
         // On a log axis there is no 0 to keep.
         let mut f = bar_figure(log10(), &[f64::NAN]);
         axes(&mut f).yticks(&[2.0, 4.0]).unwrap();
-        let r = resolve_axes(f.axes().unwrap(), 5, 4);
+        let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(
             close(r.y.scale.domain(), pad_log(2.0, 4.0)),
             "{:?}",
@@ -3034,7 +3034,7 @@ mod tests {
                 .unwrap()
                 .ytick_format(format)
                 .unwrap();
-            let r = resolve_axes(f.axes().unwrap(), 5, 6);
+            let r = resolve_axes(f.single_axes(), 5, 6);
             r.y.ticks.into_iter().map(|t| t.label).collect::<Vec<_>>()
         };
         let low = -0.2_f64 * 1e-9;

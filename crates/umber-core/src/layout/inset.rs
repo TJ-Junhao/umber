@@ -704,7 +704,7 @@ mod tests {
             right - left >= room.min_width - ROUNDING_TOLERANCE,
             "{left} {right}"
         );
-        let (x, width) = fit_span(left, right, room.right.max(room.hi));
+        let (x, width) = fit_span(left, right, 0.0, room.right.max(room.hi));
         for l in labels {
             let (lo, hi) = l.ends(x, x + width);
             prop_assert!(

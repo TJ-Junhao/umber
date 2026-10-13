@@ -37,7 +37,7 @@ fn too_close_limits_are_rejected_and_too_narrow_data_is_padded() {
     let next_up = |v: f64| f64::from_bits(v.to_bits() + 1);
     for (lo, hi) in [(1.0, next_up(1.0)), (0.0, 5e-324), (1e200, next_up(1e200))] {
         let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
-        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         assert!(matches!(
             axes.xlim(lo, hi),
             Err(crate::Error::Style {

@@ -19,7 +19,9 @@
 use std::fmt::Write as _;
 
 use umber_core::figure::{BarOptions, LineOptions, ScatterOptions};
-use umber_core::{Axes, ExplicitTicks, Figure, FontLibrary, NumberStyle, ScaleKind, TickFormat};
+use umber_core::{
+    AxesMut, ExplicitTicks, Figure, FontLibrary, GridIndex, NumberStyle, ScaleKind, TickFormat,
+};
 
 use super::super::{
     Log, Output, axes, emit_scene, figure, labelled, linear, log, numbers, record, themes, wobble,
@@ -50,7 +52,7 @@ fn line(label: &str) -> LineOptions {
 
 /// Two labelled lines over `0..=n - 1` from the deterministic wobble, scaled by `scale` and
 /// lifted by `lift`.
-fn two_lines(a: &mut Axes, n: usize, scale: f64, lift: f64) {
+fn two_lines(a: &mut AxesMut<'_>, n: usize, scale: f64, lift: f64) {
     for (seed, label) in [(71, "North"), (72, "South")] {
         let (x, y) = wobble(n, seed);
         let y: Vec<f64> = y.iter().map(|v| v * scale + lift).collect();
@@ -59,7 +61,7 @@ fn two_lines(a: &mut Axes, n: usize, scale: f64, lift: f64) {
 }
 
 /// A rising series on a log y axis from about 2 to about 3000, as two lines.
-fn log_lines(a: &mut Axes) {
+fn log_lines(a: &mut AxesMut<'_>) {
     let x: Vec<f64> = (0..24).map(f64::from).collect();
     let north: Vec<f64> = x.iter().map(|v| 2.0 * 1.35_f64.powf(*v)).collect();
     let south: Vec<f64> = x.iter().map(|v| 5.0 * 1.25_f64.powf(*v)).collect();
@@ -86,8 +88,8 @@ fn figures() -> Vec<(String, Figure)> {
         // Explicit positions on both axes, at irregular steps, labelled by the automatic format.
         let mut f = figure(6.0, 4.0, theme.clone(), linear(), linear());
         labelled(&mut f, "Explicit ticks");
-        let a = axes(&mut f);
-        two_lines(a, 40, 3.0, 20.0);
+        let mut a = axes(&mut f);
+        two_lines(&mut a, 40, 3.0, 20.0);
         a.xticks(&[0.0, 7.0, 14.0, 30.0, 39.0])
             .unwrap()
             .yticks(&[5.0, 12.5, 20.0, 27.5, 35.0])
@@ -97,8 +99,8 @@ fn figures() -> Vec<(String, Figure)> {
         // Ticks with their own labels, drawn as given, on both axes.
         let mut f = figure(6.0, 4.0, theme.clone(), linear(), linear());
         labelled(&mut f, "Labelled ticks");
-        let a = axes(&mut f);
-        two_lines(a, 48, 2.0, 10.0);
+        let mut a = axes(&mut f);
+        two_lines(&mut a, 48, 2.0, 10.0);
         a.xticks_labeled(
             &[0.0, 12.0, 24.0, 36.0, 47.0],
             strings(&[
@@ -122,8 +124,8 @@ fn figures() -> Vec<(String, Figure)> {
         for (format_name, format) in formats() {
             let mut f = figure(6.0, 4.0, theme.clone(), linear(), linear());
             labelled(&mut f, &format!("Format {format_name}, linear"));
-            let a = axes(&mut f);
-            two_lines(a, 30, 0.08, 0.4);
+            let mut a = axes(&mut f);
+            two_lines(&mut a, 30, 0.08, 0.4);
             a.ytick_format(format.clone())
                 .unwrap()
                 .xticks(&[0.0, 2.5, 10.0, 20.0, 29.0])
@@ -134,8 +136,8 @@ fn figures() -> Vec<(String, Figure)> {
 
             let mut f = figure(6.0, 4.0, theme.clone(), linear(), log(10.0));
             labelled(&mut f, &format!("Format {format_name}, log"));
-            let a = axes(&mut f);
-            log_lines(a);
+            let mut a = axes(&mut f);
+            log_lines(&mut a);
             a.ytick_format(format).unwrap();
             out.push((format!("fig-ticks-{format_name}-log-{theme_name}"), f));
         }
@@ -191,8 +193,8 @@ fn figures() -> Vec<(String, Figure)> {
         // Explicit limits clip the ticks outside them, on a linear x and a log y axis.
         let mut f = figure(6.0, 4.0, theme.clone(), linear(), log(10.0));
         labelled(&mut f, "Ticks clipped by limits");
-        let a = axes(&mut f);
-        log_lines(a);
+        let mut a = axes(&mut f);
+        log_lines(&mut a);
         a.xlim(4.0, 18.0)
             .unwrap()
             .ylim(10.0, 500.0)
@@ -209,8 +211,8 @@ fn figures() -> Vec<(String, Figure)> {
         // Empty tick lists: no ticks, labels or gridlines on either axis.
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
         labelled(&mut f, "No ticks");
-        let a = axes(&mut f);
-        two_lines(a, 30, 2.0, 6.0);
+        let mut a = axes(&mut f);
+        two_lines(&mut a, 30, 2.0, 6.0);
         a.xticks(&[]).unwrap().yticks(&[]).unwrap();
         out.push((format!("fig-ticks-empty-{theme_name}"), f));
     }
@@ -288,7 +290,7 @@ fn explicit(t: Option<&ExplicitTicks>) -> String {
 
 /// The tick settings of both axes of `f`.
 fn tick_state(f: &Figure) -> String {
-    let a = f.axes().unwrap();
+    let a = f.axes_at(GridIndex::Auto, GridIndex::Auto).unwrap();
     format!(
         "  ticks x={} x_format={} y={} y_format={}\n",
         explicit(a.x_ticks()),
@@ -303,7 +305,7 @@ fn on_ticks(
     rec: &mut Log,
     f: &mut Figure,
     label: &str,
-    op: impl FnOnce(&mut Axes) -> umber_core::Result<&mut Axes>,
+    op: impl for<'b, 'f> FnOnce(&'b mut AxesMut<'f>) -> umber_core::Result<&'b mut AxesMut<'f>>,
 ) {
     rec.on_axes(f, label, |a| op(a).map(drop));
     rec.raw(&tick_state(f));

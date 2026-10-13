@@ -62,12 +62,12 @@ impl Group {
         }
     }
 
-    fn add(
+    fn add<'b, 'f>(
         self,
-        axes: &mut umber_core::Axes,
+        axes: &'b mut umber_core::AxesMut<'f>,
         categories: Vec<String>,
         series: Vec<Series>,
-    ) -> umber_core::Result<&mut umber_core::Axes> {
+    ) -> umber_core::Result<&'b mut umber_core::AxesMut<'f>> {
         match self {
             Group::Grouped => axes.grouped_bar(categories, series),
             Group::Stacked => axes.stacked_bar(categories, series),
@@ -225,7 +225,9 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         for (theme_name, theme) in themes() {
             let mut f = figure(6.0, 4.0, theme, ScaleKind::Category, linear());
             labelled(&mut f, &format!("{} bars", capitalized(kind)));
-            group.add(axes(&mut f), regions.clone(), three()).unwrap();
+            group
+                .add(&mut axes(&mut f), regions.clone(), three())
+                .unwrap();
             emit_scene(
                 &format!("fig-{kind}-bars-{theme_name}"),
                 &f.to_scene(lib).unwrap(),
@@ -243,7 +245,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             labelled(&mut f, "Mixed signs");
             group
                 .add(
-                    axes(&mut f),
+                    &mut axes(&mut f),
                     names(&["a", "b", "c", "d"]),
                     vec![
                         series(&[14.0, -6.5, 8.0, -3.0]),
@@ -263,7 +265,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut f = figure(6.0, 4.0, Theme::graphite(), ScaleKind::Category, linear());
         group
             .add(
-                axes(&mut f),
+                &mut axes(&mut f),
                 regions.clone(),
                 vec![series(&[3.0, 5.0, -2.0, 4.0, 1.0])],
             )
@@ -284,7 +286,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             })
             .collect();
         group
-            .add(axes(&mut f), names(&["Q1", "Q2", "Q3", "Q4"]), twelve)
+            .add(&mut axes(&mut f), names(&["Q1", "Q2", "Q3", "Q4"]), twelve)
             .unwrap();
         emit_scene(
             &format!("fig-{kind}-bars-12-series"),
@@ -296,7 +298,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut f = figure(6.0, 4.0, Theme::pigment(), ScaleKind::Category, linear());
         group
             .add(
-                axes(&mut f),
+                &mut axes(&mut f),
                 names(&["a", "b", "c"]),
                 vec![
                     series(&[4.0, 6.0, 3.0]),
@@ -328,7 +330,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             labelled(&mut f, "Bars on a log axis");
             group
                 .add(
-                    axes(&mut f),
+                    &mut axes(&mut f),
                     regions.clone(),
                     vec![
                         series(&[3.0, 420.0, 18.0, 9500.0, 61.0]),
@@ -347,7 +349,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut f = figure(6.0, 4.0, Theme::midnight(), ScaleKind::Category, linear());
         group
             .add(
-                axes(&mut f),
+                &mut axes(&mut f),
                 names(&["up", "down", "inside"]),
                 vec![
                     series(&[5e299, -5e299, 2e-11]),

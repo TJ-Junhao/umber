@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use umber_core::render::render_png;
 use umber_core::{
-    AreaOptions, AxisData, BarOptions, ColorSpec, Dash, Figure, FillStyle, FontLibrary,
+    AreaOptions, AxisData, BarOptions, ColorSpec, Dash, Figure, FillStyle, FontLibrary, GridIndex,
     HistOptions, LegendStyle, LineOptions, LogBase, Marker, ScaleKind, ScatterOptions, Series,
     Theme,
 };
@@ -135,7 +135,7 @@ fn numbers(values: Vec<f64>) -> AxisData {
 
 fn line_figure(theme_name: &str) -> Figure {
     let mut figure = Figure::new(6.0, 4.0, theme(theme_name)).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
     axes.title(TITLE).subtitle(SUBTITLE).xlabel("Day");
@@ -183,7 +183,7 @@ impl Lcg {
 
 fn scatter_figure(theme_name: &str) -> Figure {
     let mut figure = Figure::new(6.0, 4.0, theme(theme_name)).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
     axes.title(TITLE)
@@ -243,7 +243,7 @@ fn midnight_scatter() {
 #[test]
 fn pigment_log_line() {
     let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Log { base: LogBase::TEN })
         .unwrap();
     axes.title(TITLE).ylabel(YLABEL).xlabel("Day");
@@ -256,7 +256,7 @@ fn pigment_log_line() {
 #[test]
 fn pigment_nan_gaps() {
     let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
     axes.title(TITLE).ylabel(YLABEL).xlabel("Day");
@@ -278,7 +278,7 @@ fn pigment_nan_gaps() {
 #[test]
 fn graphite_category_line() {
     let mut figure = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Category, ScaleKind::Linear)
         .unwrap();
     axes.title(TITLE).ylabel(YLABEL).xlabel("Month");
@@ -336,7 +336,7 @@ fn revenue_series() -> Vec<Series> {
 
 fn grouped_bar_figure(theme_name: &str) -> Figure {
     let mut figure = Figure::new(6.0, 4.0, theme(theme_name)).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Category, ScaleKind::Linear)
         .unwrap();
     axes.title("Revenue by quarter").subtitle("USD, millions");
@@ -354,7 +354,7 @@ fn response_times() -> Vec<f64> {
 
 fn hist_figure(theme: Theme) -> Figure {
     let mut figure = Figure::new(6.0, 4.0, theme).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
     axes.title("Response time").subtitle("1,400 requests, ms");
@@ -366,7 +366,7 @@ fn hist_figure(theme: Theme) -> Figure {
 /// A 6 x 4 in figure in `theme` with a title and `count` labelled wobbling lines.
 fn many_lines(theme: Theme, title: &str, labels: &[String]) -> Figure {
     let mut figure = Figure::new(6.0, 4.0, theme).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
     axes.title(title).xlabel("Day");
@@ -393,7 +393,7 @@ fn many_lines(theme: Theme, title: &str, labels: &[String]) -> Figure {
 /// The first two series of the line images: the first as an area, the second as a dashed line.
 fn area_figure(theme_name: &str) -> Figure {
     let mut figure = Figure::new(6.0, 4.0, theme(theme_name)).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
     axes.title(TITLE).subtitle(SUBTITLE).xlabel("Day");
@@ -475,7 +475,7 @@ fn midnight_hist() {
 #[test]
 fn pigment_stacked_bar() {
     let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Category, ScaleKind::Linear)
         .unwrap();
     axes.title("Cash flow by quarter").subtitle("USD, millions");
@@ -497,7 +497,7 @@ fn pigment_stacked_bar() {
 #[test]
 fn graphite_bar_negative() {
     let mut figure = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Category, ScaleKind::Linear)
         .unwrap();
     axes.title("Net change by quarter")
@@ -525,7 +525,7 @@ fn pigment_legend_wrap() {
 #[test]
 fn graphite_direct_crowded() {
     let mut figure = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
     axes.title("Six lines, close ends").xlabel("Day");
@@ -555,7 +555,11 @@ fn graphite_direct_crowded() {
 fn graphite_direct_xlim() {
     let labels: Vec<String> = ["North", "Central", "South"].map(str::to_owned).to_vec();
     let mut figure = many_lines(Theme::graphite(), "Cut by an explicit limit", &labels);
-    figure.axes_mut().unwrap().xlim(0.0, 20.5).unwrap();
+    figure
+        .axes_at_mut(GridIndex::Auto, GridIndex::Auto)
+        .unwrap()
+        .xlim(0.0, 20.5)
+        .unwrap();
     check("graphite_direct_xlim", &figure);
 }
 
@@ -579,7 +583,10 @@ fn midnight_chips_long_labels() {
 fn pigment_legend_none() {
     let labels: Vec<String> = ["North", "Central", "South"].map(str::to_owned).to_vec();
     let mut figure = many_lines(Theme::pigment(), "Legend off", &labels);
-    figure.axes_mut().unwrap().legend(LegendStyle::None);
+    figure
+        .axes_at_mut(GridIndex::Auto, GridIndex::Auto)
+        .unwrap()
+        .legend(LegendStyle::None);
     check("pigment_legend_none", &figure);
 }
 

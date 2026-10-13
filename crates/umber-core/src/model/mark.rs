@@ -104,14 +104,14 @@ impl Default for ScatterOptions {
 
 /// One series drawn in an [`Axes`](super::Axes).
 ///
-/// Marks are created by [`Axes::line`](super::Axes::line),
-/// [`Axes::scatter`](super::Axes::scatter), [`Axes::area`](super::Axes::area),
-/// [`Axes::bar`](super::Axes::bar), [`Axes::grouped_bar`](super::Axes::grouped_bar),
-/// [`Axes::stacked_bar`](super::Axes::stacked_bar) and [`Axes::hist`](super::Axes::hist), which
-/// validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`],
-/// [`AreaMark`], [`BarMark`], [`BarGroupMark`], [`HistMark`]) that keeps the validated values
-/// together and exposes them read-only; it has no public constructor. Read a mark by matching
-/// on its variant.
+/// Marks are created by [`AxesMut::line`](super::AxesMut::line),
+/// [`AxesMut::scatter`](super::AxesMut::scatter), [`AxesMut::area`](super::AxesMut::area),
+/// [`AxesMut::bar`](super::AxesMut::bar), [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar),
+/// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar) and
+/// [`AxesMut::hist`](super::AxesMut::hist), which validate the data. Each variant holds a
+/// payload ([`LineMark`], [`ScatterMark`], [`AreaMark`], [`BarMark`], [`BarGroupMark`],
+/// [`HistMark`]) that keeps the validated values together and exposes them read-only; it has no
+/// public constructor. Read a mark by matching on its variant.
 ///
 /// # Examples
 ///
@@ -120,7 +120,7 @@ impl Default for ScatterOptions {
 /// use umber_core::{Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.line(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], LineOptions::default())?;
 /// match axes.marks() {
 ///     [Mark::Line(line)] => {
@@ -208,7 +208,7 @@ impl Mark {
 /// use umber_core::{Dash, Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
 /// axes.line(AxisData::Categories(vec!["a".into()]), &[1.0], LineOptions::default())?;
 /// let Some(Mark::Line(line)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(line.x(), &AxisData::Categories(vec!["a".into()]));
@@ -224,7 +224,7 @@ impl Mark {
 /// use umber_core::{Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.line(AxisData::Numbers(vec![0.0]), &[1.0], LineOptions::default())?
 ///     .line(AxisData::Numbers(vec![0.0, 1.0]), &[1.0, 2.0], LineOptions::default())?;
 /// let [Mark::Line(short), Mark::Line(long)] = axes.marks() else { unreachable!() };
@@ -285,7 +285,7 @@ impl fmt::Debug for LineMark {
 /// use umber_core::{Figure, Marker, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.scatter(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], ScatterOptions::default())?;
 /// let Some(Mark::Scatter(scatter)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(scatter.x(), &AxisData::Numbers(vec![0.0, 1.0]));
@@ -312,7 +312,7 @@ impl fmt::Debug for LineMark {
 /// use umber_core::{Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.scatter(AxisData::Numbers(vec![0.0]), &[1.0], ScatterOptions::default())?
 ///     .scatter(AxisData::Numbers(vec![0.0, 1.0]), &[1.0, 2.0], ScatterOptions::default())?;
 /// let [Mark::Scatter(short), Mark::Scatter(long)] = axes.marks() else { unreachable!() };
@@ -374,7 +374,7 @@ impl fmt::Debug for ScatterMark {
 /// use umber_core::{Dash, Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.area(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], AreaOptions::default())?;
 /// let Some(Mark::Area(area)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(area.x(), &AxisData::Numbers(vec![0.0, 1.0]));

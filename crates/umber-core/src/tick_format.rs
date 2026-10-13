@@ -1,8 +1,9 @@
 //! Tick label formats: how the numbers next to the ticks of a linear or log axis are written.
 //!
-//! A [`TickFormat`] is set per axis with [`Axes::xtick_format`](crate::Axes::xtick_format) and
-//! [`Axes::ytick_format`](crate::Axes::ytick_format). It applies to the automatic ticks and to
-//! explicit tick positions without labels; labels given with the positions are drawn as given.
+//! A [`TickFormat`] is set per axis with
+//! [`AxesMut::xtick_format`](crate::AxesMut::xtick_format) and
+//! [`AxesMut::ytick_format`](crate::AxesMut::ytick_format). It applies to the automatic ticks and
+//! to explicit tick positions without labels; labels given with the positions are drawn as given.
 //!
 //! # Examples
 //!
@@ -14,7 +15,7 @@
 //! assert_eq!(share.suffix(), " of sales");
 //!
 //! let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-//! let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+//! let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 //! axes.ytick_format(share)?;
 //! # Ok::<(), umber_core::Error>(())
 //! ```

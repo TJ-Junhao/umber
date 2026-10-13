@@ -509,7 +509,7 @@ mod tests {
     /// per label.
     fn figure(w: f64, h: f64, theme: Theme, labels: &[String]) -> Figure {
         let mut f = Figure::new(w, h, theme).unwrap();
-        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         axes.title("Station output")
             .subtitle("Daily mean, MW")
             .ylabel("MW");
@@ -538,7 +538,7 @@ mod tests {
     #[test]
     fn row_sits_under_the_subtitle_left_aligned_with_the_title() {
         let f = figure(6.0, 4.0, Theme::pigment(), &names(3));
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let (title, subtitle) = (layout.title.unwrap(), layout.subtitle.unwrap());
         let row = &layout.legend;
         assert_eq!(rows_of(row), [0, 0, 0]);
@@ -566,7 +566,7 @@ mod tests {
         let width = 6.0 * 72.0;
         for n in [1, 3, 20, 60] {
             let f = figure(6.0, 4.0, theme.clone(), &names(n));
-            let row = plan_figure(&f, FontLibrary::global()).1.legend;
+            let row = plan_figure(&f, (0, 0), FontLibrary::global()).1.legend;
             assert_eq!(row.entries().len(), n);
             let rows = rows_of(&row);
             // Rows only ever advance, by one at a time.
@@ -616,12 +616,14 @@ mod tests {
         for n in [1, 3, 20, 60] {
             let chips = plan_figure(
                 &figure(6.0, 8.0, chips_theme.clone(), &names(n)),
+                (0, 0),
                 FontLibrary::global(),
             )
             .1
             .legend;
             let header = plan_figure(
                 &figure(6.0, 8.0, header_theme.clone(), &names(n)),
+                (0, 0),
                 FontLibrary::global(),
             )
             .1
@@ -674,6 +676,7 @@ mod tests {
         let labels = ["A".to_owned(), long, "B".to_owned()];
         let row = plan_figure(
             &figure(6.0, 4.0, chips_theme, &labels),
+            (0, 0),
             FontLibrary::global(),
         )
         .1
@@ -705,7 +708,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let row = plan_figure(&f, FontLibrary::global()).1.legend;
+        let row = plan_figure(&f, (0, 0), FontLibrary::global()).1.legend;
         let [short] = row.entries() else {
             panic!("one entry");
         };
@@ -724,7 +727,7 @@ mod tests {
         let long = "Long legend label ".repeat(17);
         let labels = ["A".to_owned(), long, "B".to_owned()];
         let f = figure(6.0, 4.0, Theme::pigment(), &labels);
-        let row = plan_figure(&f, FontLibrary::global()).1.legend;
+        let row = plan_figure(&f, (0, 0), FontLibrary::global()).1.legend;
         assert_eq!(rows_of(&row), [0, 1, 2]);
         let wide = &row.entries()[1];
         assert_eq!(wide.swatch.x, PADDING);
@@ -737,7 +740,7 @@ mod tests {
             .with_legend_style(crate::LegendStyle::Header)
             .unwrap();
         let f = figure(6.0, 4.0, theme.clone(), &names(1));
-        let row = plan_figure(&f, FontLibrary::global()).1.legend;
+        let row = plan_figure(&f, (0, 0), FontLibrary::global()).1.legend;
         let swatch = row.entries()[0].swatch;
         let line_width = f64::from(theme.line_width());
         assert!((swatch.width - 10.0 * line_width).abs() < 1e-9);
@@ -801,7 +804,7 @@ mod tests {
     #[test]
     fn header_swatches_follow_their_series() {
         let f = sized_series_figure(crate::LegendStyle::Header);
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let boxes: Vec<(f64, f64)> = layout
             .legend
             .entries()
@@ -971,7 +974,7 @@ mod tests {
         let f = sized_series_figure(crate::LegendStyle::Chips);
         let theme = f.theme().clone();
         let size = f64::from(theme.body_size() * theme.font_scale());
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         assert_eq!(layout.legend.entries().len(), 5);
         for entry in layout.legend.entries() {
             assert!(matches!(entry.swatch.kind, Swatch::Dot { .. }));
@@ -984,7 +987,7 @@ mod tests {
         // Direct labels end in dots of the theme's marker size, thick and thin lines alike; the
         // scatters go to the row with their own sizes.
         let f = sized_series_figure(crate::LegendStyle::Direct);
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let theme_dot = f64::from(Theme::graphite().marker_size());
         assert_eq!(layout.direct.len(), 3);
         for label in &layout.direct {
@@ -1011,7 +1014,7 @@ mod tests {
                     // covers.
                     let build = |height: f64| {
                         let mut f = Figure::new(w, height, theme.clone()).ok()?;
-                        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
                         axes.title("Station output")
                             .subtitle("Daily mean, MW")
                             .ylabel("MW")
@@ -1035,7 +1038,8 @@ mod tests {
                     // A figure too short for its legend rows fails naming the height it needs,
                     // and one as tall lays out with every row on the canvas, unless it would be
                     // taller than a figure can be.
-                    let f = match try_plan_figure(&build(h).unwrap(), FontLibrary::global()) {
+                    let f = match try_plan_figure(&build(h).unwrap(), (0, 0), FontLibrary::global())
+                    {
                         Ok(_) => build(h).unwrap(),
                         Err(err) => {
                             let need = named_height(&err).unwrap_or_else(|| panic!("{err}"));
@@ -1048,7 +1052,7 @@ mod tests {
                         }
                     };
                     let canvas = f.height_in() * 72.0;
-                    let layout = plan_figure(&f, FontLibrary::global()).1;
+                    let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
                     let plot = layout.plot;
                     assert!(plot.width >= 1.0 && plot.height >= 1.0, "{plot:?}");
                     assert!(plot.y >= 0.0 && plot.bottom() <= canvas + 1e-9, "{plot:?}");
@@ -1088,7 +1092,7 @@ mod tests {
     /// top padding, with one labelled dashed line or one labelled scatter.
     fn huge_token_figure(theme: Theme, scatter: bool) -> Figure {
         let mut f = Figure::new(6.0, HUGE_TOKEN_HEIGHT, theme).unwrap();
-        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         let (x, y) = (AxisData::Numbers(vec![0.0, 1.0]), [1.0, 2.0]);
         if scatter {
             let options = crate::model::ScatterOptions {
@@ -1110,7 +1114,7 @@ mod tests {
     /// The legend's one swatch box, and the marks and legend items of the scene, which must
     /// hold chrome, marks, legend and baseline groups.
     fn swatch_and_items(f: &Figure) -> (SwatchBox, Vec<Item>, Vec<Item>) {
-        let layout = plan_figure(f, FontLibrary::global()).1;
+        let layout = plan_figure(f, (0, 0), FontLibrary::global()).1;
         let [entry] = layout.legend.entries() else {
             panic!("one legend entry");
         };
@@ -1200,7 +1204,7 @@ mod tests {
     /// line per `(label, x, y)`.
     fn line_figure(theme: Theme, lines: &[(&str, Vec<f64>, Vec<f64>)]) -> Figure {
         let mut f = Figure::new(6.0, 4.0, theme).unwrap();
-        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         axes.title("Station output")
             .subtitle("Daily mean, MW")
             .ylabel("MW");
@@ -1246,7 +1250,7 @@ mod tests {
                 ("West", vec![0.0, 1.0], vec![5.0, 5.0]),
             ],
         );
-        let (resolved, layout) = plan_figure(&f, FontLibrary::global());
+        let (resolved, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
         assert!(layout.legend.is_empty());
         let direct = &layout.direct;
         assert_eq!(direct.len(), 3);
@@ -1308,7 +1312,7 @@ mod tests {
                 ("Short", x, vec![2.0, 1.0]),
             ],
         );
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         assert!((layout.plot.right() - (width - PADDING - cap)).abs() < 1e-9);
         // The long label runs past the canvas, which clips it.
         let long = text_of(&layout.direct[0]);
@@ -1323,7 +1327,7 @@ mod tests {
                 .map(|&l| (l, vec![0.0, 1.0], vec![1.0, 2.0]))
                 .collect();
             let f = line_figure(Theme::graphite(), &lines);
-            let axes = f.axes().unwrap();
+            let axes = f.single_axes();
             let marks = crate::resolve::resolve_marks(axes.marks(), f.theme());
             let limits = crate::resolve::Limits::of(axes);
             let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits);
@@ -1350,7 +1354,7 @@ mod tests {
                 ("D", x, vec![7.0, 5.1]),
             ],
         );
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let centers: Vec<f64> = layout
             .direct
             .iter()
@@ -1384,8 +1388,8 @@ mod tests {
                 ("Inside", x, vec![0.0, 0.5]),
             ],
         );
-        f.axes_mut().unwrap().ylim(0.0, 1.0).unwrap();
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        f.single_axes_mut().ylim(0.0, 1.0).unwrap();
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let plot = layout.plot;
         let [high, low, inside] = layout.direct.as_slice() else {
             panic!("three direct labels");
@@ -1409,13 +1413,12 @@ mod tests {
                 ("Ends", vec![0.0, 1.0], vec![80.0, 90.0]),
             ],
         );
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xlim(0.0, 1.5)
             .unwrap()
             .ylim(0.0, 100.0)
             .unwrap();
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let plot = layout.plot;
         let [cut, ends] = layout.direct.as_slice() else {
             panic!("two direct labels");
@@ -1437,13 +1440,12 @@ mod tests {
             Theme::graphite(),
             &[("On the edge", vec![0.0, 1.0, 2.0], vec![10.0, 40.0, 30.0])],
         );
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xlim(0.0, 1.0)
             .unwrap()
             .ylim(0.0, 100.0)
             .unwrap();
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let [edge] = layout.direct.as_slice() else {
             panic!("one direct label");
         };
@@ -1474,7 +1476,7 @@ mod tests {
         .unwrap()
         .ylim(0.0, 100.0)
         .unwrap();
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let [log] = layout.direct.as_slice() else {
             panic!("one direct label");
         };
@@ -1492,7 +1494,7 @@ mod tests {
             for (w, h, n) in [(1.0, 1.0, 50), (6.0, 4.0, 400)] {
                 let build = |height: f64| {
                     let mut f = Figure::new(w, height, theme.clone()).unwrap();
-                    let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
                     // Without ticks: x tick labels too wide for these figures, and y tick labels
                     // that leave no room for the plot, fail the layout, which `layout::tests`
                     // covers.
@@ -1516,12 +1518,12 @@ mod tests {
                 };
                 // The figures too short for the title are drawn as tall as they need, so the
                 // plot is as short as it can be and the labels crowd it all the more.
-                let f = match try_plan_figure(&build(h), FontLibrary::global()) {
+                let f = match try_plan_figure(&build(h), (0, 0), FontLibrary::global()) {
                     Ok(_) => build(h),
                     Err(err) => build(named_height(&err).unwrap_or_else(|| panic!("{err}")) / 72.0),
                 };
                 let height = f.height_in() * 72.0;
-                let layout = plan_figure(&f, FontLibrary::global()).1;
+                let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
                 assert!(layout.plot.width >= 1.0 && layout.plot.height >= 1.0);
                 // Labels whose line of text is off the canvas are left out; every end dot stays.
                 assert_eq!(layout.direct.len(), n);
@@ -1555,7 +1557,7 @@ mod tests {
             .map(|(l, x, y)| (l.as_str(), x.clone(), y.clone()))
             .collect();
         let f = line_figure(theme, &refs);
-        let layout = plan_figure(&f, FontLibrary::global()).1;
+        let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let height = 4.0 * 72.0;
         let direct = &layout.direct;
         assert_eq!(direct.len(), 30);
@@ -1598,7 +1600,7 @@ mod tests {
         ];
         let laid_out = |as_areas: bool| {
             let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
-            let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+            let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
             for (label, x, y) in &series {
                 let options = AreaOptions {
                     label: (*label).to_owned(),
@@ -1612,7 +1614,7 @@ mod tests {
                 }
             }
             axes.xlim(0.0, 3.0).unwrap().ylim(0.0, 10.0).unwrap();
-            let layout = plan_figure(&f, FontLibrary::global()).1;
+            let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
             layout
                 .direct
                 .iter()

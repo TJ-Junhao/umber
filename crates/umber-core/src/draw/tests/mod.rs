@@ -135,7 +135,7 @@ fn nums(v: &[f64]) -> AxisData {
 }
 
 fn plot_of(figure: &Figure) -> Area {
-    crate::pipeline::plan_figure(figure, FontLibrary::global())
+    crate::pipeline::plan_figure(figure, (0, 0), FontLibrary::global())
         .1
         .plot
 }

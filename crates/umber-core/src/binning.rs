@@ -6,7 +6,7 @@ use std::num::NonZeroUsize;
 use crate::scale::{MAX_MAGNITUDE, too_narrow};
 
 /// The largest number of bins a histogram may have; more is an `Error::Style` from
-/// [`Axes::hist`](crate::Axes::hist).
+/// [`AxesMut::hist`](crate::AxesMut::hist).
 ///
 /// # Examples
 ///
@@ -15,7 +15,7 @@ use crate::scale::{MAX_MAGNITUDE, too_narrow};
 /// use umber_core::{Figure, MAX_BINS, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// let max = MAX_BINS as i64;
 /// assert!(axes.hist(&[1.0], HistOptions { bins: max, ..HistOptions::default() }).is_ok());
 /// assert!(axes.hist(&[1.0], HistOptions { bins: max + 1, ..HistOptions::default() }).is_err());

@@ -80,10 +80,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         True
     """
 
-    # The native figure is the one the axes' figure owns; it holds every mark and text.
-    __slots__ = ("_figure", "_native", "_x", "_y")
+    # The native figure is the one the axes' figure owns; it holds every mark and text. The
+    # axes are found there by the row and column of their top-left cell.
+    __slots__ = ("_col", "_figure", "_native", "_row", "_x", "_y")
     _figure: "umber.Figure"
     _native: _umber.Figure
+    _row: int
+    _col: int
     _x: Scale[X]
     _y: Scale[float]
 
@@ -128,7 +131,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().title("Revenue")
         """
         with api_call():
-            self._native.title(_args.text("Axes.title()", "text", text))
+            self._native.title(self._row, self._col, _args.text("Axes.title()", "text", text))
             return self
 
     def subtitle(self, text: str) -> Self:
@@ -149,7 +152,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().title("Revenue").subtitle("Per quarter")
         """
         with api_call():
-            self._native.subtitle(_args.text("Axes.subtitle()", "text", text))
+            self._native.subtitle(self._row, self._col, _args.text("Axes.subtitle()", "text", text))
             return self
 
     def xlabel(self, text: str) -> Self:
@@ -170,7 +173,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().xlabel("Year")
         """
         with api_call():
-            self._native.xlabel(_args.text("Axes.xlabel()", "text", text))
+            self._native.xlabel(self._row, self._col, _args.text("Axes.xlabel()", "text", text))
             return self
 
     def ylabel(self, text: str) -> Self:
@@ -191,7 +194,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().ylabel("Revenue")
         """
         with api_call():
-            self._native.ylabel(_args.text("Axes.ylabel()", "text", text))
+            self._native.ylabel(self._row, self._col, _args.text("Axes.ylabel()", "text", text))
             return self
 
     def xlim(self: "Axes[float, Y]", low: float, high: float) -> "Axes[float, Y]":
@@ -217,7 +220,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             lower = real("Axes.xlim()", "low", low)
             upper = real("Axes.xlim()", "high", high)
-            self._native.xlim(lower, upper)
+            self._native.xlim(self._row, self._col, lower, upper)
             return self
 
     def ylim(self: "Axes[X, float]", low: float, high: float) -> "Axes[X, float]":
@@ -242,7 +245,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             lower = real("Axes.ylim()", "low", low)
             upper = real("Axes.ylim()", "high", high)
-            self._native.ylim(lower, upper)
+            self._native.ylim(self._row, self._col, lower, upper)
             return self
 
     def xticks(self: "Axes[float, Y]", positions: Values[float]) -> "Axes[float, Y]":
@@ -274,7 +277,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.xticks([0, 12, 24])
         """
         with api_call():
-            self._native.xticks(floats("Axes.xticks()", "positions", positions))
+            self._native.xticks(
+                self._row, self._col, floats("Axes.xticks()", "positions", positions)
+            )
             return self
 
     def yticks(self: "Axes[X, float]", positions: Values[float]) -> "Axes[X, float]":
@@ -305,7 +310,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.yticks([0, 12, 24])
         """
         with api_call():
-            self._native.yticks(floats("Axes.yticks()", "positions", positions))
+            self._native.yticks(
+                self._row, self._col, floats("Axes.yticks()", "positions", positions)
+            )
             return self
 
     def xticks_labeled(
@@ -345,7 +352,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "labels", labels)
             places = floats(context, "positions", positions)
             texts = names(context, "labels", labels)
-            self._native.xticks_labeled(places, texts)
+            self._native.xticks_labeled(self._row, self._col, places, texts)
             return self
 
     def yticks_labeled(
@@ -384,7 +391,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "labels", labels)
             places = floats(context, "positions", positions)
             texts = names(context, "labels", labels)
-            self._native.yticks_labeled(places, texts)
+            self._native.yticks_labeled(self._row, self._col, places, texts)
             return self
 
     def xtick_format(self: "Axes[float, Y]", format: TickFormat) -> "Axes[float, Y]":
@@ -413,7 +420,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             checked = instance("Axes.xtick_format()", "format", format, TickFormat, _FORMAT_HINT)
-            self._native.xtick_format(_ticks.native(checked))
+            self._native.xtick_format(self._row, self._col, _ticks.native(checked))
             return self
 
     def ytick_format(self: "Axes[X, float]", format: TickFormat) -> "Axes[X, float]":
@@ -442,7 +449,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             checked = instance("Axes.ytick_format()", "format", format, TickFormat, _FORMAT_HINT)
-            self._native.ytick_format(_ticks.native(checked))
+            self._native.ytick_format(self._row, self._col, _ticks.native(checked))
             return self
 
     def legend(self, style: LegendStyle) -> Self:
@@ -467,7 +474,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             member = instance("Axes.legend()", "style", style, LegendStyle, _LEGEND_HINT)
-            self._native.legend(member.value)
+            self._native.legend(self._row, self._col, member.value)
             return self
 
     def line(
@@ -518,7 +525,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             xs = self._x_values(context, x)
             ys = floats(context, "y", y)
             name = _args.text(context, "label", label)
-            self._native.line(xs, ys, name, spec, style.value, extent)
+            self._native.line(self._row, self._col, xs, ys, name, spec, style.value, extent)
             return self
 
     def area(
@@ -570,7 +577,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             xs = self._x_values(context, x)
             ys = floats(context, "y", y)
             name = _args.text(context, "label", label)
-            self._native.area(xs, ys, name, spec, style.value, extent)
+            self._native.area(self._row, self._col, xs, ys, name, spec, style.value, extent)
             return self
 
     def scatter(
@@ -621,7 +628,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             xs = self._x_values(context, x)
             ys = floats(context, "y", y)
             name = _args.text(context, "label", label)
-            self._native.scatter(xs, ys, name, spec, shape.value, extent)
+            self._native.scatter(self._row, self._col, xs, ys, name, spec, shape.value, extent)
             return self
 
     def bar(
@@ -667,7 +674,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             category_names = names(context, "categories", categories)
             values = floats(context, "heights", heights)
             name = _args.text(context, "label", label)
-            self._native.bar(category_names, values, name, spec)
+            self._native.bar(self._row, self._col, category_names, values, name, spec)
             return self
 
     def grouped_bar(
@@ -704,7 +711,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "categories", categories)
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
-            self._native.grouped_bar(category_names, arguments)
+            self._native.grouped_bar(self._row, self._col, category_names, arguments)
             return self
 
     def stacked_bar(
@@ -744,7 +751,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "categories", categories)
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
-            self._native.stacked_bar(category_names, arguments)
+            self._native.stacked_bar(self._row, self._col, category_names, arguments)
             return self
 
     def hist(
@@ -788,7 +795,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             data = floats(context, "values", values)
             name = _args.text(context, "label", label)
-            self._native.hist(data, count, name, spec)
+            self._native.hist(self._row, self._col, data, count, name, spec)
             return self
 
     def _x_values(self, context: str, x: object) -> FloatArray | list[str]:
@@ -861,18 +868,26 @@ _SCALES: Final = attrgetter("_x", "_y")
 
 
 def attach(
-    figure: "umber.Figure", native: _umber.Figure, x: Scale[X], y: Scale[float]
+    figure: "umber.Figure",
+    native: _umber.Figure,
+    x: Scale[X],
+    y: Scale[float],
+    row: int,
+    col: int,
 ) -> Axes[X, float]:
     """Return new axes of ``figure`` with the scales ``x`` and ``y``.
 
-    The native figure must already hold axes with these scales; this builds the Python side
-    only, because ``Axes`` has no public constructor.
+    The native figure must already hold axes with these scales whose top-left cell is at
+    ``row``, ``col``; this builds the Python side only, because ``Axes`` has no public
+    constructor.
 
     Args:
         figure: The figure the axes belong to.
         native: The native figure ``figure`` owns.
         x: The x scale.
         y: The y scale; linear or log.
+        row: The row of the axes' top-left cell.
+        col: The column of the axes' top-left cell.
 
     Returns:
         The axes.
@@ -887,9 +902,32 @@ def attach(
     axes = cast(Axes[X, float], object.__new__(Axes))
     object.__setattr__(axes, "_figure", figure)
     object.__setattr__(axes, "_native", native)
+    object.__setattr__(axes, "_row", row)
+    object.__setattr__(axes, "_col", col)
     object.__setattr__(axes, "_x", x)
     object.__setattr__(axes, "_y", y)
     return axes
+
+
+_CELL: Final = attrgetter("_row", "_col")
+
+
+def cell(axes: Axes[Any, Any]) -> tuple[int, int]:
+    """Return the row and column of the top-left cell of ``axes``.
+
+    Args:
+        axes: The axes.
+
+    Returns:
+        The row and the column.
+
+    Example:
+        >>> import umber as ub
+        >>> from umber._axes import cell
+        >>> cell(ub.Figure().add_axes())
+        (0, 0)
+    """
+    return cast(tuple[int, int], _CELL(axes))
 
 
 def scales(axes: Axes[Any, Any]) -> tuple[Scale[Any], Scale[float]]:
