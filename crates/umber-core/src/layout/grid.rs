@@ -572,10 +572,11 @@ impl Columns {
 
     /// The columns placed for `growth`, a solution of [`Columns::program`] for `bounds`, once
     /// it is checked: `None` unless every label is within its bound to
-    /// [`CONTAINMENT_TOLERANCE`], the canvas edges within their caps and the plots at least
-    /// [`MIN_PLOT`] wide. A label out by more than [`MOVE_TOLERANCE`] first grows its band to
-    /// its requirement on the placed columns, at most [`X_LABEL_PASSES`] times, which settles
-    /// the rounding of a solution of the original program.
+    /// [`CONTAINMENT_TOLERANCE`], the distance by which a label may miss its bound and still
+    /// count as contained, the canvas edges within their caps and the plots at least
+    /// [`MIN_PLOT`] wide. A label out by more than that grows its band to its requirement on
+    /// the placed columns, at most [`X_LABEL_PASSES`] times, which settles rounding beyond the
+    /// tolerance.
     fn settle(&self, bounds: &[LabelBound], mut growth: Vec<f64>) -> Option<PlacedColumns> {
         let (cap_left, cap_right) = self.edge_caps();
         for pass in 0..=X_LABEL_PASSES {
@@ -592,9 +593,11 @@ impl Columns {
                 .zip(&required)
                 .map(|(b, r)| r - growth[b.growth])
                 .fold(0.0, f64::max);
-            if worst <= MOVE_TOLERANCE || (pass == X_LABEL_PASSES && worst <= CONTAINMENT_TOLERANCE)
-            {
+            if worst <= CONTAINMENT_TOLERANCE {
                 return Some(placed);
+            }
+            if pass == X_LABEL_PASSES {
+                return None;
             }
             for (b, r) in bounds.iter().zip(&required) {
                 growth[b.growth] = growth[b.growth].max(*r);
@@ -637,10 +640,10 @@ struct Stuck {
 /// The program is solved first with every bound raised by [`PROGRAM_MARGIN`], so that the
 /// rounding of the solve stays inside the margin and the growth meets the original bounds
 /// with room to spare. Only when that program has no solution (a fit that is tight to within
-/// the margin) is the program solved again with every bound lowered by half of
+/// the margin) is the program solved as it is, and when the rounding of its inputs leaves an
+/// exactly tight fit without a solution there, again with every bound lowered by half of
 /// [`CONTAINMENT_TOLERANCE`], the distance by which a label may miss its bound and still count
-/// as contained: a fit that is exactly tight, up to the rounding of its inputs, is found
-/// there. Either growth is checked on the placed columns before it is used
+/// as contained. Either growth is checked on the placed columns before it is used
 /// ([`Columns::settle`]): every label within its bound to [`CONTAINMENT_TOLERANCE`], the edges
 /// within their caps, the plots at least [`MIN_PLOT`] wide. So the labels are refused only
 /// when the lowered program has no solution: when no growth brings every label within the
@@ -669,7 +672,11 @@ fn fit_columns(
             .collect()
     };
     let vars = 2 * columns.count();
-    for program in [moved(PROGRAM_MARGIN), moved(-CONTAINMENT_TOLERANCE / 2.0)] {
+    for program in [
+        moved(PROGRAM_MARGIN),
+        moved(0.0),
+        moved(-CONTAINMENT_TOLERANCE / 2.0),
+    ] {
         if let Some(growth) = program::least_total(vars, &program)
             && let Some(placed) = columns.settle(bounds, growth)
         {
