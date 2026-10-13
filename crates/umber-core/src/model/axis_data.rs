@@ -105,6 +105,7 @@ mod tests {
             Mark::Line(line) => line.series(),
             Mark::Scatter(scatter) => scatter.series(),
             Mark::Area(area) => area.series(),
+            Mark::Step(step) => step.series(),
             other => panic!("{other:?} holds no series"),
         }
     }

@@ -93,6 +93,7 @@ mod corpus {
     pub mod legend;
     pub mod plot_height;
     pub mod size;
+    pub mod step;
     pub mod ticks;
     pub mod x_end_label;
 }
@@ -143,6 +144,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::x_end_label::cases(&lib, &mut sink);
     corpus::plot_height::cases(&lib, &mut sink);
     corpus::grid::cases(&lib, &mut sink);
+    corpus::step::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1668,7 +1670,24 @@ mod record {
                 text(&hist.options().label),
                 color_spec(hist.options().color)
             ),
+            Mark::Step(step) => format!(
+                "step x={} y={} position={} label={} color={} dash={}",
+                axis_data(step.x()),
+                floats64(step.y()),
+                step_position(step.options().position),
+                text(&step.options().label),
+                color_spec(step.options().color),
+                dash(step.options().dash)
+            ),
             _ => "unknown-mark".into(),
+        }
+    }
+
+    fn step_position(position: umber_core::Step) -> &'static str {
+        match position {
+            umber_core::Step::Post => "post",
+            umber_core::Step::Pre => "pre",
+            umber_core::Step::Mid => "mid",
         }
     }
 

@@ -13,6 +13,9 @@ grid-2x2-span-pigment
 grid-3x1-graphite
 grid-3x1-midnight
 grid-3x1-pigment
+step-positions-graphite
+step-positions-midnight
+step-positions-pigment
 errors/grid
 # The new theme getter, the gap between panels.
 api/themes

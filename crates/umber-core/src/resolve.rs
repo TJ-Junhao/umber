@@ -30,8 +30,9 @@
 use crate::binning::Histogram;
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
-    Mark, ScatterMark, SeriesView,
+    Mark, ScatterMark, SeriesView, StepMark,
 };
+use crate::model::{Edge, holds};
 use crate::scale::{Padding, is_single_value, log_offset};
 use crate::stacking::Stacks;
 use crate::ticks::{AutoTicks, TickValues};
@@ -648,6 +649,15 @@ pub(crate) enum ResolvedMark<'a> {
         /// The bar color.
         color: Rgba,
     },
+    /// A step mark.
+    Step {
+        /// The mark.
+        mark: &'a StepMark,
+        /// The line color.
+        color: Rgba,
+        /// The stroke width as drawn, in points.
+        width: f32,
+    },
 }
 
 impl<'a> ResolvedMark<'a> {
@@ -661,6 +671,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
             ResolvedMark::Area { mark, .. } => numbers(mark.x()),
+            ResolvedMark::Step { mark, .. } => numbers(mark.x()),
             ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. } => &[],
@@ -681,6 +692,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { mark, .. } => category_names(mark.x()),
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
             ResolvedMark::Area { mark, .. } => category_names(mark.x()),
+            ResolvedMark::Step { mark, .. } => category_names(mark.x()),
             ResolvedMark::Bar { mark, .. } => mark.categories(),
             ResolvedMark::Grouped { mark, .. } | ResolvedMark::Stacked { mark, .. } => {
                 mark.categories()
@@ -705,6 +717,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
             ResolvedMark::Area { mark, .. } => mark.y(),
+            ResolvedMark::Step { mark, .. } => mark.y(),
             ResolvedMark::Bar { mark, .. } => mark.heights(),
             ResolvedMark::Grouped { series, .. } => {
                 return DomainValues::Computed(Box::new(
@@ -733,7 +746,9 @@ impl<'a> ResolvedMark<'a> {
     /// area do: such a mark puts 0 into a linear y domain.
     pub fn grows_from_baseline(&self) -> bool {
         match self {
-            ResolvedMark::Line { .. } | ResolvedMark::Scatter { .. } => false,
+            ResolvedMark::Line { .. }
+            | ResolvedMark::Scatter { .. }
+            | ResolvedMark::Step { .. } => false,
             ResolvedMark::Area { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
@@ -748,7 +763,9 @@ impl<'a> ResolvedMark<'a> {
     /// half their stroke.
     pub fn line_width(&self) -> Option<f32> {
         match *self {
-            ResolvedMark::Line { width, .. } | ResolvedMark::Area { width, .. } => Some(width),
+            ResolvedMark::Line { width, .. }
+            | ResolvedMark::Area { width, .. }
+            | ResolvedMark::Step { width, .. } => Some(width),
             ResolvedMark::Scatter { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
@@ -802,6 +819,11 @@ impl<'a> ResolvedMark<'a> {
                 kind: SeriesKind::Bar,
                 anchor: None,
             }],
+            // A step line is labelled as a line is: the line's swatch, and a direct label at the
+            // end of the line.
+            &ResolvedMark::Step { mark, color, width } => {
+                vec![SeriesKey::of_step(mark, color, width, limits)]
+            }
         }
     }
 }
@@ -854,6 +876,23 @@ impl<'a> SeriesKey<'a> {
     }
 }
 
+impl<'a> SeriesKey<'a> {
+    /// The key of `step` in `color`, drawn `width` pt wide, on axes with the limits `limits`: a
+    /// line swatch in the step line's dash and width, and the step line's [`Anchor`].
+    fn of_step(step: &'a StepMark, color: Rgba, width: f32, limits: &Limits) -> SeriesKey<'a> {
+        let options = step.options();
+        SeriesKey {
+            label: &options.label,
+            color,
+            kind: SeriesKind::Line {
+                dash: options.dash,
+                width,
+            },
+            anchor: Anchor::of_step(step, limits),
+        }
+    }
+}
+
 /// The x value of a line's point, as the line holds it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum AnchorX<'a> {
@@ -861,6 +900,9 @@ pub(crate) enum AnchorX<'a> {
     Number(f64),
     /// A category name.
     Category(&'a str),
+    /// Midway between the band centres of two category names, where a step line that changes
+    /// level between two categories ends.
+    Between(&'a str, &'a str),
 }
 
 /// How a direct label's anchor ends its line: whether the line ends there, so that an end dot
@@ -955,6 +997,79 @@ impl<'a> Anchor<'a> {
                     y,
                     end: EndKind::Point,
                 }),
+        }
+    }
+
+    /// The anchor of `step`: where the step line as drawn ends. The line is the holds of
+    /// [`holds`], each a level held from one x to another, and its last vertex in data order is
+    /// the end of the last hold, so a level held out to a neighbour whose y is NaN reaches that
+    /// neighbour's x. The end is the [`EndKind::Point`] anchor, unless limits cut the line: the
+    /// last hold that overlaps the x domain (both ends included) is then the one that ends the
+    /// visible line, and when it goes on past the high end of the domain, even from the end itself,
+    /// the anchor is the [`EndKind::Edge`] where its level crosses the end. A midpoint is the
+    /// arithmetic mean of the two x values, and on a log x axis their geometric mean, as the line
+    /// is drawn. A category line ends at the band of a point, or midway between two bands
+    /// ([`AnchorX::Between`]). `None` when the line has no vertex inside.
+    fn of_step(step: &'a StepMark, limits: &Limits) -> Option<Anchor<'a>> {
+        let position = step.options().position;
+        match step.x() {
+            AxisData::Numbers(xs) => {
+                let (range, log) = match limits.x {
+                    AxisLimits::Continuous(ContinuousLimits {
+                        transform,
+                        explicit,
+                        ..
+                    }) => (
+                        explicit.map(|scale| scale.domain()),
+                        matches!(transform, Transform::Log(_)),
+                    ),
+                    AxisLimits::Category => (None, false),
+                };
+                let mid = |a: f64, b: f64| {
+                    if log {
+                        ((a.ln() + b.ln()) / 2.0).exp()
+                    } else {
+                        (a + b) / 2.0
+                    }
+                };
+                let line = holds(xs, step.y(), position);
+                // The last hold that is visible: it overlaps the x domain, ends included.
+                let (lo, hi) = range.unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
+                let (hold, from, to) = line
+                    .iter()
+                    .map(|hold| {
+                        let at = |edge: Edge| edge.position(xs, mid);
+                        (hold, at(hold.from), at(hold.to))
+                    })
+                    .rfind(|&(_, from, to)| to >= lo && from <= hi)?;
+                let y = step.y()[hold.point];
+                // A hold that goes on past the high end is cut by it; one that ends inside the
+                // domain ends the line there.
+                let (x, end) = if to > hi && from <= hi {
+                    (hi, EndKind::Edge)
+                } else {
+                    (to, EndKind::Point)
+                };
+                Some(Anchor {
+                    x: AnchorX::Number(x),
+                    y,
+                    end,
+                })
+            }
+            AxisData::Categories(names) => {
+                // Band positions in data order; every one is finite.
+                let order: Vec<f64> = (0..names.len()).map(|i| i as f64).collect();
+                let last = holds(&order, step.y(), position).pop()?;
+                let x = match last.to {
+                    Edge::At(k) => AnchorX::Category(&names[k]),
+                    Edge::Mid(i, k) => AnchorX::Between(&names[i], &names[k]),
+                };
+                Some(Anchor {
+                    x,
+                    y: step.y()[last.point],
+                    end: EndKind::Point,
+                })
+            }
         }
     }
 }
@@ -1088,6 +1203,11 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
                 histogram: Histogram::from_values(mark.values(), mark.bin_count()),
                 color: color_of(mark.color()),
             },
+            Mark::Step(mark) => ResolvedMark::Step {
+                mark,
+                color: color_of(mark.options().color),
+                width: theme.drawn_line_width(mark.options().width),
+            },
         })
         .collect()
 }
@@ -1096,7 +1216,8 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
 mod tests {
     use super::*;
     use crate::model::{
-        AreaOptions, BarOptions, Figure, HistOptions, LineOptions, ScatterOptions, Series,
+        AreaOptions, BarOptions, Figure, HistOptions, LineOptions, ScatterOptions, Series, Step,
+        StepOptions,
     };
     use crate::{AxesMut, LogBase, MIN_LOG_VALUE, ScaleKind, Theme, TickFormat};
 
@@ -2395,6 +2516,7 @@ mod tests {
         keys[0].anchor.map(|anchor| match anchor.x {
             AnchorX::Number(x) => (x, anchor.y, anchor.end),
             AnchorX::Category(name) => panic!("expected a number anchor, got {name}"),
+            AnchorX::Between(a, b) => panic!("expected a number anchor, got {a} to {b}"),
         })
     }
 
@@ -2557,7 +2679,9 @@ mod tests {
                     .map(|key| {
                         let anchor = key.anchor.map(|a| match a.x {
                             AnchorX::Number(ax) => (ax, a.y, a.end),
-                            AnchorX::Category(_) => panic!("numbers expected"),
+                            AnchorX::Category(_) | AnchorX::Between(..) => {
+                                panic!("numbers expected")
+                            }
                         });
                         (key.label.to_owned(), key.color, key.kind, anchor)
                     })
@@ -3072,6 +3196,327 @@ mod tests {
                     .collect();
                 assert_eq!(zeros, auto, "low {low:e}, {format:?}");
             }
+        }
+    }
+
+    /// A figure of linear axes holding one labelled step line of `position` through `x` and `y`,
+    /// with the explicit x limits `xlim`, if any.
+    fn step_figure(position: Step, x: &[f64], y: &[f64], xlim: Option<(f64, f64)>) -> Figure {
+        let mut f = figure(LIN, LIN);
+        let options = StepOptions {
+            position,
+            label: "Step".to_owned(),
+            ..StepOptions::default()
+        };
+        axes(&mut f).step(nums(x), y, options).unwrap();
+        if let Some((lo, hi)) = xlim {
+            axes(&mut f).xlim(lo, hi).unwrap();
+        }
+        f
+    }
+
+    #[test]
+    fn a_step_is_a_line_to_domains_width_swatch_and_color() {
+        let mut f = step_figure(Step::Post, &[0.0, 10.0], &[2.0, 6.0], None);
+        axes(&mut f)
+            .line(nums(&[1.0]), &[1.0], LineOptions::default())
+            .unwrap();
+        let theme = Theme::pigment();
+        let resolved = resolve_marks(f.single_axes().marks(), &theme);
+        let [step, line] = resolved.as_slice() else {
+            panic!("{resolved:?}")
+        };
+        assert_eq!(
+            step.line_width(),
+            Some(theme.drawn_line_width(crate::SizeSpec::Auto))
+        );
+        assert!(!step.grows_from_baseline());
+        assert_eq!(step.x_numbers().collect::<Vec<_>>(), [0.0, 10.0]);
+        assert_eq!(step.y_values().collect::<Vec<_>>(), [2.0, 6.0]);
+        // Colors come from the one palette sequence, in mark order.
+        assert_eq!(
+            series_colors(&resolved),
+            [theme.palette()[0], theme.palette()[1]]
+        );
+        let limits = Limits::of(f.single_axes());
+        let [key] = step.keys(&limits).try_into().unwrap();
+        assert_eq!(key.label, "Step");
+        assert_eq!(
+            key.kind,
+            SeriesKind::Line {
+                dash: Dash::Solid,
+                width: theme.drawn_line_width(crate::SizeSpec::Auto)
+            }
+        );
+        assert_eq!(line.keys(&limits)[0].kind, key.kind);
+        // Lines and steps alone keep the exact data extent of the x axis.
+        assert_eq!(
+            domains(&step_figure(Step::Mid, &[0.0, 10.0], &[2.0, 6.0], None)).0,
+            (0.0, 10.0)
+        );
+
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .step(cats(&["a", "b"]), &[1.0, 2.0], StepOptions::default())
+            .unwrap();
+        let resolved = resolve_marks(f.single_axes().marks(), &theme);
+        assert_eq!(resolved[0].x_categories().collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(resolved[0].x_numbers().count(), 0);
+    }
+
+    #[test]
+    fn the_anchor_of_a_step_cut_by_the_x_limits_has_the_level_the_step_has_there() {
+        let anchor = |position, x_hi| {
+            let f = step_figure(
+                position,
+                &[0.0, 2.0, 6.0],
+                &[1.0, 5.0, 9.0],
+                Some((0.0, x_hi)),
+            );
+            let axes = f.single_axes();
+            let resolved = resolve_marks(axes.marks(), &Theme::pigment());
+            let keys = series_keys(&resolved, &Limits::of(axes));
+            keys[0].anchor.map(|a| match a.x {
+                AnchorX::Number(x) => (x, a.y, a.end),
+                AnchorX::Category(name) => panic!("category {name}"),
+                AnchorX::Between(a, b) => panic!("between {a} and {b}"),
+            })
+        };
+        let edge = |x, y| Some((x, y, EndKind::Edge));
+        // The line leaves across x = 3, between the points (2, 5) and (6, 9). The step line
+        // holds 5 up to 6 (Post), already holds 9 from 2 on (Pre), and changes at x = 4 (Mid).
+        assert_eq!(anchor(Step::Post, 3.0), edge(3.0, 5.0));
+        assert_eq!(anchor(Step::Pre, 3.0), edge(3.0, 9.0));
+        assert_eq!(anchor(Step::Mid, 3.0), edge(3.0, 5.0));
+        assert_eq!(anchor(Step::Mid, 5.0), edge(5.0, 9.0));
+        // A step line that ends inside the limits ends at its last point.
+        assert_eq!(anchor(Step::Post, 6.0), Some((6.0, 9.0, EndKind::Point)));
+    }
+
+    /// The anchor of a labelled step line of `position` through `x` and `y` on axes of the x scale
+    /// `kind`, with the explicit x limits `xlim`, if any.
+    fn step_anchor(
+        kind: ScaleKind,
+        x: AxisData,
+        y: &[f64],
+        position: Step,
+        xlim: Option<(f64, f64)>,
+    ) -> Option<Anchor<'static>> {
+        let mut f = figure(kind, LIN);
+        let options = StepOptions {
+            position,
+            label: "Step".to_owned(),
+            ..StepOptions::default()
+        };
+        axes(&mut f).step(x, y, options).unwrap();
+        if let Some((lo, hi)) = xlim {
+            axes(&mut f).xlim(lo, hi).unwrap();
+        }
+        let axes = f.single_axes();
+        let resolved = resolve_marks(axes.marks(), &Theme::pigment());
+        let anchor = series_keys(&resolved, &Limits::of(axes))[0].anchor?;
+        // Category names borrow from the figure; the tests compare their text.
+        let x = match anchor.x {
+            AnchorX::Number(x) => AnchorX::Number(x),
+            AnchorX::Category(name) => AnchorX::Category(leak(name)),
+            AnchorX::Between(a, b) => AnchorX::Between(leak(a), leak(b)),
+        };
+        Some(Anchor { x, ..anchor })
+    }
+
+    fn leak(name: &str) -> &'static str {
+        Box::leak(name.to_owned().into_boxed_str())
+    }
+
+    #[test]
+    fn a_step_label_is_anchored_where_the_drawn_step_ends() {
+        let nan = f64::NAN;
+        let (x, y) = ([0.0, 1.0, 4.0], [1.0, 2.0, nan]);
+        let number = |x, y, end| {
+            Some(Anchor {
+                x: AnchorX::Number(x),
+                y,
+                end,
+            })
+        };
+        let point = |x, y| number(x, y, EndKind::Point);
+        let edge = |x, y| number(x, y, EndKind::Edge);
+        let at = |position, xlim| step_anchor(LIN, nums(&x), &y, position, xlim);
+        // The level of the last point with a y is held to the next x, however its y reads.
+        assert_eq!(at(Step::Post, None), point(4.0, 2.0));
+        assert_eq!(at(Step::Mid, None), point(2.5, 2.0));
+        assert_eq!(at(Step::Pre, None), point(1.0, 2.0));
+        // Explicit limits that hold the end, cut the held level, or cut it before its end.
+        assert_eq!(at(Step::Post, Some((0.0, 4.0))), point(4.0, 2.0));
+        assert_eq!(at(Step::Post, Some((0.0, 3.0))), edge(3.0, 2.0));
+        assert_eq!(at(Step::Mid, Some((0.0, 3.0))), point(2.5, 2.0));
+        assert_eq!(at(Step::Mid, Some((0.0, 2.0))), edge(2.0, 2.0));
+        assert_eq!(at(Step::Pre, Some((0.0, 3.0))), point(1.0, 2.0));
+        // A gap in the middle ends nothing: the last hold is the end.
+        let gapped = |position| {
+            step_anchor(
+                LIN,
+                nums(&[0.0, 1.0, 2.0]),
+                &[1.0, nan, 3.0],
+                position,
+                None,
+            )
+        };
+        assert_eq!(gapped(Step::Post), point(2.0, 3.0));
+        // On a log x axis the middle of 100 and 10000 is 1000.
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let anchor = step_anchor(log, nums(&[1.0, 100.0, 10000.0]), &y, Step::Mid, None);
+        let Some(Anchor {
+            x: AnchorX::Number(x),
+            ..
+        }) = anchor
+        else {
+            panic!("expected a number anchor, got {anchor:?}")
+        };
+        assert!((x / 1000.0 - 1.0).abs() < 1e-12, "{x}");
+    }
+
+    #[test]
+    fn a_category_step_label_is_anchored_where_the_drawn_step_ends() {
+        let nan = f64::NAN;
+        let names = || cats(&["a", "b", "c"]);
+        let y = [1.0, 2.0, nan];
+        let at = |name, y| {
+            Some(Anchor {
+                x: name,
+                y,
+                end: EndKind::Point,
+            })
+        };
+        let anchor = |position| step_anchor(ScaleKind::Category, names(), &y, position, None);
+        assert_eq!(anchor(Step::Post), at(AnchorX::Category("c"), 2.0));
+        assert_eq!(anchor(Step::Mid), at(AnchorX::Between("b", "c"), 2.0));
+        assert_eq!(anchor(Step::Pre), at(AnchorX::Category("b"), 2.0));
+        // Without a trailing gap the step ends at its last band.
+        let full = |position| {
+            step_anchor(
+                ScaleKind::Category,
+                names(),
+                &[1.0, 2.0, 3.0],
+                position,
+                None,
+            )
+        };
+        assert_eq!(full(Step::Post), at(AnchorX::Category("c"), 3.0));
+        assert_eq!(full(Step::Mid), at(AnchorX::Category("c"), 3.0));
+        assert_eq!(full(Step::Pre), at(AnchorX::Category("c"), 3.0));
+    }
+
+    #[test]
+    fn a_step_hold_that_covers_the_view_or_starts_at_the_high_limit_is_cut_by_it() {
+        let number = |x, y, end| {
+            Some(Anchor {
+                x: AnchorX::Number(x),
+                y,
+                end,
+            })
+        };
+        let edge = |x, y| number(x, y, EndKind::Edge);
+        // The hold of y = 2 runs from 5 to 15 and covers the view 9 to 11, with no vertex in it.
+        let anchor = |x: &[f64], xlim, kind| {
+            step_anchor(kind, nums(x), &[1.0, 2.0, 3.0], Step::Mid, Some(xlim))
+        };
+        assert_eq!(
+            anchor(&[0.0, 10.0, 20.0], (9.0, 11.0), LIN),
+            edge(11.0, 2.0)
+        );
+        // On a log x axis the holds change level at 10 and 1000, and 90 to 110 lies in the second.
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        assert_eq!(
+            anchor(&[1.0, 100.0, 10000.0], (90.0, 110.0), log),
+            edge(110.0, 2.0)
+        );
+        // A view wholly inside one hold, or before the first, or after the last.
+        assert_eq!(anchor(&[0.0, 10.0, 20.0], (0.0, 1.0), LIN), edge(1.0, 1.0));
+        assert_eq!(anchor(&[0.0, 10.0, 20.0], (30.0, 40.0), LIN), None);
+
+        // The last hold runs from 4 to 6; a limit at its start, just before it and just past it.
+        let (x, y) = ([0.0, 2.0, 6.0], [1.0, 5.0, 9.0]);
+        let at = |hi| step_anchor(LIN, nums(&x), &y, Step::Mid, Some((0.0, hi)));
+        assert_eq!(at(4.0), edge(4.0, 9.0));
+        assert_eq!(at(3.99), edge(3.99, 5.0));
+        assert_eq!(at(4.01), edge(4.01, 9.0));
+        // A hold that ends exactly at the high limit ends the line there.
+        assert_eq!(at(6.0), number(6.0, 9.0, EndKind::Point));
+    }
+
+    /// The last point of the step path through `xs` and `ys`, drawn from its holds, that lies in
+    /// the x domain `lo..=hi`, and whether the path goes on past `hi` from there. Segments are
+    /// clipped one by one, in drawing order.
+    fn last_visible(
+        xs: &[f64],
+        ys: &[f64],
+        position: Step,
+        lo: f64,
+        hi: f64,
+    ) -> Option<(f64, f64, bool)> {
+        let mid = |a: f64, b: f64| (a + b) / 2.0;
+        let mut found = None;
+        let mut visit = |px: f64, (qx, qy): (f64, f64)| {
+            // x never decreases along the path.
+            if qx < lo || px > hi {
+                return;
+            }
+            found = Some(if qx > hi {
+                (hi, qy, true)
+            } else {
+                (qx, qy, false)
+            });
+        };
+        let mut previous: Option<(usize, f64)> = None;
+        for hold in holds(xs, ys, position) {
+            let y = ys[hold.point];
+            let from = (hold.from.position(xs, mid), y);
+            let to = (hold.to.position(xs, mid), y);
+            if let Some((_, end)) = previous.filter(|&(p, _)| p + 1 == hold.point) {
+                visit(end, from);
+            }
+            visit(from.0, to);
+            previous = Some((hold.point, to.0));
+        }
+        found
+    }
+
+    #[test]
+    fn a_step_anchor_is_the_last_visible_point_of_the_drawn_path() {
+        let mut state = 7_u32;
+        let mut next = |n: u32| {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            (state >> 8) % n
+        };
+        for case in 0..400 {
+            let len = 1 + next(6) as usize;
+            let mut x = 0.0;
+            let mut xs = Vec::new();
+            let mut ys = Vec::new();
+            for _ in 0..len {
+                x += f64::from(next(4)) * 0.5;
+                xs.push(x);
+                ys.push(if next(5) == 0 {
+                    f64::NAN
+                } else {
+                    f64::from(next(9))
+                });
+            }
+            let lo = f64::from(next(8)) * 0.5 - 1.0;
+            let hi = lo + 0.5 + f64::from(next(10)) * 0.5;
+            let position = [Step::Post, Step::Pre, Step::Mid][next(3) as usize];
+            let expected = last_visible(&xs, &ys, position, lo, hi);
+            let got = step_anchor(LIN, nums(&xs), &ys, position, Some((lo, hi))).map(|a| {
+                let AnchorX::Number(x) = a.x else {
+                    panic!("number expected")
+                };
+                (x, a.y, a.end == EndKind::Edge)
+            });
+            assert_eq!(
+                got, expected,
+                "case {case}: {position:?} {xs:?} {ys:?} {lo}..{hi}"
+            );
         }
     }
 }

@@ -35,10 +35,11 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
         "FillStyle": [("SOLID", 0), ("GRADIENT", 1)],
         "GridLines": [("HORIZONTAL", 0), ("VERTICAL", 1), ("BOTH", 2), ("NONE", 3)],
         "SvgText": [("OUTLINES", 0), ("EDITABLE", 1)],
+        "Step": [("POST", 0), ("PRE", 1), ("MID", 2)],
     }
 
 
-def test_enum_members_keys_are_the_seven_enum_names() -> None:
+def test_enum_members_keys_are_the_eight_enum_names() -> None:
     assert set(_umber.enum_members()) == {
         "Dash",
         "Marker",
@@ -47,6 +48,7 @@ def test_enum_members_keys_are_the_seven_enum_names() -> None:
         "FillStyle",
         "GridLines",
         "SvgText",
+        "Step",
     }
 
 
