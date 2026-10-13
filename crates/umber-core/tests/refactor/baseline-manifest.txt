@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: a40358a004cd497ed4321748d077a4a66a308a81
+# revision: 40dd4153660ef387a13d857e323f4dc1a0bf83c2
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -811,8 +811,8 @@ e321aa8f37ad0a3861a9d2a2b195df1113e766700bac9a77232b9f562a24062b  scene/grid-2x2
 77a9a3dcb614a1af82d2aae18c2c6108dd5417ee9322199d79e3c04ce283a2ae  scene/grid-2x2-empty-midnight.txt
 f8a26eca9ab1813bc19b96ea889f538d63801a1c52cc094044782817509bf94f  scene/grid-2x2-empty-pigment.txt
 962dcc29d03ba141b1064a35e37a9180aeb52f912a9f1d1a79575c6f1c1a327a  scene/grid-2x2-long-y-graphite.txt
-b568b2a168ea2827bbb03aa8be0b91d3333593f15913fef89393509b87419e73  scene/grid-2x2-long-y-midnight.txt
-12dc7da3f9ba5acdfc53dd5e05501477cc89cc4aaa8a8b60bacdd35e72683f81  scene/grid-2x2-long-y-pigment.txt
+dae36b2aef0b8e3665bd6d3461908fe3b0c111e0b5a7114cecbbb17aaef8b267  scene/grid-2x2-long-y-midnight.txt
+d2c8035e12c8bf467bb42025e96ce45b757556bcb5eb2542e5328c91759944b9  scene/grid-2x2-long-y-pigment.txt
 3e50cf0abbc524c15602faf7b56c5b5e86eb0c89a9f35c3295b03233170b20c7  scene/grid-2x2-span-graphite.txt
 24765a515f208a539837d88a24519855c214d71c7184c4c67cd96cdf91d29922  scene/grid-2x2-span-midnight.txt
 6d31f3749c1f9efc4a8942997671c8ae0a0982993c97fd72c0efc7a0e449d69b  scene/grid-2x2-span-pigment.txt
@@ -1331,7 +1331,7 @@ b3202f0636bd17a7eaa1f68a4fcd2129c8be1e18a8180a62aecbb7d5de11624f  svg/grid-2x2-e
 1bbf58e3c905c4bf334a9ba6cd41a466ebdf1f86ed340da0649fc08d2f42ff4d  svg/grid-2x2-long-y-graphite.editable.svg
 8113cb8257bcf28f160953655d63151089f5e2a735ecec051c7fd641ff7da98e  svg/grid-2x2-long-y-graphite.outlines.svg
 c3fdde7fa0ce7835316a0449f79f2f98bba0e0fe5275408c1e88c63090ad3d01  svg/grid-2x2-long-y-midnight.editable.svg
-80e4a1a0f218b1bcd21f7347a4a9c1780dfaaa580988487e26f61d02ad489e01  svg/grid-2x2-long-y-midnight.outlines.svg
+ddbd2176e1abe51d9df236f11d416bd1ddd7645c582743fc8e66ab1d84ee4835  svg/grid-2x2-long-y-midnight.outlines.svg
 17cd01492aca9c72866cf1259c31575700603eb7d90b3198cc3a0307b8bb4cfd  svg/grid-2x2-long-y-pigment.editable.svg
 54fbc390f576873d1554d6f01770ff2f7473d8b8442573be024038c121168d46  svg/grid-2x2-long-y-pigment.outlines.svg
 d123e21cb21a71e336835042fc49b30ec37cf86cc594030bdeeda4a7d84af906  svg/grid-2x2-span-graphite.editable.svg

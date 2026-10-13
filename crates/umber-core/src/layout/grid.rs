@@ -51,9 +51,14 @@ use crate::error::{number, quoted};
 use crate::model::{CellRange, Grid};
 use crate::{Error, Result, Theme};
 
-/// The most passes that settle the rounding of the x tick label solve; a label still out of
-/// bounds after them fails the layout (see [`fit_columns`]).
+/// The most passes that settle the rounding of a solution of the x tick label program (see
+/// [`Columns::settle`]).
 const X_LABEL_PASSES: usize = 5;
+
+/// How far, in points, the x tick label program first raises every bound, so that the
+/// rounding of its solution stays within the original bounds (see [`fit_columns`]): far below
+/// anything visible, and far above the rounding of the solve.
+const PROGRAM_MARGIN: f64 = 1e-7;
 
 /// The overflow, in points, below which an x tick label counts as within its bound when the
 /// solve decides whether to grow a band: far below anything visible.
@@ -495,6 +500,31 @@ impl Columns {
         bounds
     }
 
+    /// The bounds of `bounds` that can decide the growth: a bound is left out when another on
+    /// the same band and the same panel columns requires at least as much at every plot width
+    /// up to the canvas width (its requirement is linear in the width), the first of equal
+    /// ones kept. Near-duplicate bounds, such as labels at positions 0 and 1e-10, would make
+    /// the program's bases nearly singular.
+    fn essential(&self, bounds: &[LabelBound]) -> Vec<LabelBound> {
+        let at = |b: &LabelBound, span: f64| b.half - b.share * span - b.base;
+        let covers = |j: &LabelBound, i: &LabelBound| {
+            (j.growth, j.first, j.last) == (i.growth, i.first, i.last)
+                && at(j, 0.0) >= at(i, 0.0)
+                && at(j, self.canvas) >= at(i, self.canvas)
+        };
+        bounds
+            .iter()
+            .enumerate()
+            .filter(|&(i, b)| {
+                !bounds
+                    .iter()
+                    .enumerate()
+                    .any(|(j, other)| j != i && covers(other, b) && (j < i || !covers(b, other)))
+            })
+            .map(|(_, b)| *b)
+            .collect()
+    }
+
     /// The linear program of the growth that fits `bounds` (see [`fit_columns`]), whose
     /// requirements on the `open` columns, without growth, are `at_open`: one row per bound,
     /// then the canvas edge caps and the smallest plot width.
@@ -540,6 +570,39 @@ impl Columns {
         rows
     }
 
+    /// The columns placed for `growth`, a solution of [`Columns::program`] for `bounds`, once
+    /// it is checked: `None` unless every label is within its bound to
+    /// [`CONTAINMENT_TOLERANCE`], the canvas edges within their caps and the plots at least
+    /// [`MIN_PLOT`] wide. A label out by more than [`MOVE_TOLERANCE`] first grows its band to
+    /// its requirement on the placed columns, at most [`X_LABEL_PASSES`] times, which settles
+    /// the rounding of a solution of the original program.
+    fn settle(&self, bounds: &[LabelBound], mut growth: Vec<f64>) -> Option<PlacedColumns> {
+        let (cap_left, cap_right) = self.edge_caps();
+        for pass in 0..=X_LABEL_PASSES {
+            let placed = self.place(&growth);
+            let within_caps = growth[0] <= cap_left + CONTAINMENT_TOLERANCE
+                && growth[1] <= cap_right + CONTAINMENT_TOLERANCE
+                && placed.plot_width >= MIN_PLOT - CONTAINMENT_TOLERANCE;
+            if !within_caps {
+                return None;
+            }
+            let required: Vec<f64> = bounds.iter().map(|b| b.required(&placed)).collect();
+            let worst = bounds
+                .iter()
+                .zip(&required)
+                .map(|(b, r)| r - growth[b.growth])
+                .fold(0.0, f64::max);
+            if worst <= MOVE_TOLERANCE || (pass == X_LABEL_PASSES && worst <= CONTAINMENT_TOLERANCE)
+            {
+                return Some(placed);
+            }
+            for (b, r) in bounds.iter().zip(&required) {
+                growth[b.growth] = growth[b.growth].max(*r);
+            }
+        }
+        None
+    }
+
     /// The most the grid may move in from each canvas edge: as on a single panel, x tick labels
     /// may move a plot edge in to at most [`END_LABEL_SHARE`] of the inner width from the
     /// padding, and not at all where the band there is already wider.
@@ -567,11 +630,21 @@ struct Stuck {
 /// column's plot by `g / cols`, so a panel spanning `n` columns narrows by `n × g / cols`, but a
 /// band between the panel's own columns also widens it by `g`. So the least total growth that
 /// meets every bound, keeps the canvas edges within their caps (see [`Columns::edge_caps`])
-/// and leaves the plots at least [`MIN_PLOT`] wide is a linear program, solved exactly (see
-/// [`program::least_total`]); it has no solution exactly when no growth fits the labels. Nothing
-/// is solved when every label already fits. Rounding in the solution is settled by growing
-/// each band to its requirement on the placed columns, at most [`X_LABEL_PASSES`] times; a
-/// label still out of bounds by more than [`CONTAINMENT_TOLERANCE`] after that fails.
+/// and leaves the plots at least [`MIN_PLOT`] wide is a linear program (see
+/// [`Columns::program`] and [`program::least_total`]). Nothing is solved when every label
+/// already fits.
+///
+/// The program is solved first with every bound raised by [`PROGRAM_MARGIN`], so that the
+/// rounding of the solve stays inside the margin and the growth meets the original bounds
+/// with room to spare. Only when that program has no solution (a fit that is tight to within
+/// the margin) is the program solved again with every bound lowered by half of
+/// [`CONTAINMENT_TOLERANCE`], the distance by which a label may miss its bound and still count
+/// as contained: a fit that is exactly tight, up to the rounding of its inputs, is found
+/// there. Either growth is checked on the placed columns before it is used
+/// ([`Columns::settle`]): every label within its bound to [`CONTAINMENT_TOLERANCE`], the edges
+/// within their caps, the plots at least [`MIN_PLOT`] wide. So the labels are refused only
+/// when the lowered program has no solution: when no growth brings every label within the
+/// containment tolerance of its bound.
 fn fit_columns(
     columns: &Columns,
     bounds: &[LabelBound],
@@ -584,30 +657,23 @@ fn fit_columns(
     if stuck.panels.is_empty() {
         return Ok(open);
     }
-    let rows = columns.program(bounds, &at_open, &open);
-    let Some(mut growth) = program::least_total(2 * columns.count(), &rows) else {
-        return Err(stuck);
+    let essential = columns.essential(bounds);
+    let at_essential: Vec<f64> = essential.iter().map(|b| b.required(&open)).collect();
+    let rows = columns.program(&essential, &at_essential, &open);
+    let moved = |by: f64| -> Vec<program::Row> {
+        rows.iter()
+            .map(|row| program::Row {
+                bound: row.bound + by,
+                ..row.clone()
+            })
+            .collect()
     };
-    let (cap_left, cap_right) = columns.edge_caps();
-    for pass in 0..=X_LABEL_PASSES {
-        let placed = columns.place(&growth);
-        let required: Vec<f64> = bounds.iter().map(|b| b.required(&placed)).collect();
-        let worst = bounds
-            .iter()
-            .zip(&required)
-            .map(|(b, r)| r - growth[b.growth])
-            .fold(0.0, f64::max);
-        let within_caps = growth[0] <= cap_left + CONTAINMENT_TOLERANCE
-            && growth[1] <= cap_right + CONTAINMENT_TOLERANCE
-            && placed.plot_width >= MIN_PLOT - CONTAINMENT_TOLERANCE;
-        if !within_caps {
-            return Err(stuck);
-        }
-        if worst <= MOVE_TOLERANCE || (pass == X_LABEL_PASSES && worst <= CONTAINMENT_TOLERANCE) {
+    let vars = 2 * columns.count();
+    for program in [moved(PROGRAM_MARGIN), moved(-CONTAINMENT_TOLERANCE / 2.0)] {
+        if let Some(growth) = program::least_total(vars, &program)
+            && let Some(placed) = columns.settle(bounds, growth)
+        {
             return Ok(placed);
-        }
-        for (b, r) in bounds.iter().zip(&required) {
-            growth[b.growth] = growth[b.growth].max(*r);
         }
     }
     Err(stuck)
@@ -699,9 +765,13 @@ impl Rows {
         if plot_height(input.height) < MIN_PLOT {
             // The least whole height that the check accepts.
             let needed = 2.0 * PADDING + bands + gaps + MIN_PLOT * rows as f64;
-            let mut whole = needed.ceil().max(input.height.floor() + 1.0);
+            let least = input.height.floor() + 1.0;
+            let mut whole = needed.ceil().max(least);
             while plot_height(whole) < MIN_PLOT {
                 whole += 1.0;
+            }
+            while whole > least && plot_height(whole - 1.0) >= MIN_PLOT {
+                whole -= 1.0;
             }
             return Err(grid_too_short(input.context, input.height, whole, rows));
         }
@@ -804,10 +874,11 @@ fn columns_too_narrow(
 ///
 /// The plots' width is `(W - 2 × PADDING - ΣL - ΣR(W) - gap × (cols - 1)) / cols`, where
 /// `ΣR(W)`, the room direct labels reserve, depends on the width `W`: each panel's labels
-/// reserve their own width but at most a share of the panel's cells. Between the widths where
-/// one panel's cap reaches another's labels in the same column (where `ΣR` changes slope), the
-/// plot width is linear in `W`, so the narrowest width is found segment by segment from the
-/// figure's width, and then checked: the result is a width the check accepts.
+/// reserve their own width but at most a share of the panel's cells, which are 0 wide up to
+/// `2 × PADDING + gap × (cols - 1)`. Between that width and the widths where one panel's cap
+/// reaches another's labels in the same column (where `ΣR` changes slope), the plot width is
+/// linear in `W`, so the narrowest width is found segment by segment from the figure's width,
+/// and then checked both ways: the check accepts the result and refuses one point less.
 fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -> f64 {
     let cols = columns.count();
     let gap = columns.gap;
@@ -843,7 +914,8 @@ fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -
             )
         })
         .collect();
-    let mut points: Vec<f64> = Vec::new();
+    // The width below which the cells, and so the caps, stop shrinking: they are 0 wide.
+    let mut points: Vec<f64> = vec![2.0 * PADDING + gap * (cols - 1) as f64];
     for &(column, span, _) in &wants {
         for &(_, _, want) in wants.iter().filter(|w| w.0 == column) {
             let cell = (want / END_LABEL_SHARE - gap * (span - 1) as f64) / span as f64;
@@ -886,11 +958,15 @@ fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -
         }
         (low, at_low) = (high, at_high);
     }
-    // A whole width the check accepts: rounding, or a segment on which the room falls again,
-    // can need a few more points.
-    let mut whole = width.ceil().max(input.width.floor() + 1.0);
+    // A whole width the check accepts, one point narrower than which it does not: rounding,
+    // or a segment on which the room falls again, can move it by a few points either way.
+    let least = input.width.floor() + 1.0;
+    let mut whole = width.ceil().max(least);
     while room(whole) < 0.0 && whole < last.ceil() + 1.0 {
         whole += 1.0;
+    }
+    while whole > least && room(whole - 1.0) >= 0.0 {
+        whole -= 1.0;
     }
     whole
 }
@@ -1187,6 +1263,11 @@ mod tests {
 
         fn below(&mut self, n: usize) -> usize {
             (self.next() % n as u64) as usize
+        }
+
+        /// A value in `0.0..1.0`.
+        fn unit(&mut self) -> f64 {
+            (self.next() >> 11) as f64 / (1_u64 << 53) as f64
         }
 
         fn text(&mut self, max: usize) -> String {
@@ -1900,6 +1981,26 @@ mod tests {
         Ok(())
     }
 
+    /// A tick position: often an end or within a hair of one.
+    fn position() -> impl Strategy<Value = f64> {
+        prop_oneof![
+            2 => Just(0.0),
+            2 => Just(1.0),
+            1 => Just(0.5),
+            1 => Just(1e-3),
+            1 => Just(1.0 - 1e-3),
+            1 => Just(1e-10),
+            1 => Just(1.0 - 1e-10),
+            4 => 0.0..=1.0_f64,
+        ]
+    }
+
+    /// The share of the widest label the known growth fits that a label takes: often all of
+    /// it, so that the label's bound is tight at the known growth.
+    fn tightness() -> impl Strategy<Value = f64> {
+        prop_oneof![2 => Just(1.0), 1 => 0.0..=1.0_f64]
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(2_000))]
 
@@ -1953,12 +2054,12 @@ mod tests {
         /// within its bound at the known growth.
         #[test]
         fn columns_that_can_fit_their_labels_are_fitted(
-            count in 1_usize..=5,
-            rows in prop::collection::vec(prop::collection::vec(1_usize..=5, 1..=5), 1..=4),
-            bands in prop::collection::vec((0.0..60.0_f64, 0.0..60.0_f64), 5),
-            known in prop::collection::vec(0.0..1.0_f64, 10),
-            labels in prop::collection::vec((0.0..=1.0_f64, 0.0..=1.0_f64), 1..=40),
-            canvas in 300.0..2000.0_f64,
+            count in 1_usize..=32,
+            rows in prop::collection::vec(prop::collection::vec(1_usize..=32, 1..=32), 1..=6),
+            bands in prop::collection::vec((0.0..60.0_f64, 0.0..60.0_f64), 32),
+            known in prop::collection::vec(0.0..1.0_f64, 64),
+            labels in prop::collection::vec((position(), tightness()), 1..=60),
+            canvas in 300.0..14_400.0_f64,
         ) {
             let cols = columns(
                 canvas,
@@ -2025,8 +2126,8 @@ mod tests {
             prop_assert!(fitted.is_ok(), "{bounds:?}");
             if let Ok(placed) = fitted {
                 assert_fitted(&cols, &placed, &bounds)?;
-                // The least total growth: no wider plots fit.
-                prop_assert!(placed.plot_width >= at.plot_width - 1e-6);
+                // The least total growth, up to the margin of the solve: no wider plots fit.
+                prop_assert!(placed.plot_width >= at.plot_width - 1e-3);
             }
         }
     }
@@ -2262,6 +2363,222 @@ mod tests {
                 assert!(label.x + label.width() <= left.frame.right());
                 assert!(label.x + label.width() < right.plot.x);
             }
+        }
+    }
+
+    /// A 14 400 pt grid of 21 columns with 28 label bounds whose widths are exact `f32` values
+    /// and whose ticks lie at the ends and within 0.001 of them: line 1 the canvas and gap,
+    /// lines 2 and 3 the left and right bands, line 4 a growth that fits every bound, then one
+    /// bound per line (panel, first and last column, growth entry, half width, share, base).
+    const TWENTY_ONE_COLUMNS: &str = "\
+14400,24\n\
+2.02018184661865234e1,2.46706352233886719e1,1.65958366394042969e1,6.18513131141662598e0,1.66243724822998047e1,2.25761775970458984e1,1.48729505538940430e1,1.71191406250000000e1,2.12288761138916016e1,1.93691272735595703e1,1.72622661590576172e1,1.48594293594360352e1,1.07971272468566895e1,1.08702840805053711e1,1.98756189346313477e1,9.39824867248535156e0,2.27736587524414062e1,9.49333143234252930e0,6.96388614177703857e0,1.87588129043579102e1,6.26450407505035400e0\n\
+2.63816623687744141e1,1.09761743545532227e1,1.85272541046142578e1,1.99630889892578125e1,2.09487733840942383e1,2.65384197235107422e1,2.34401025772094727e1,2.40130672454833984e1,8.03261146321892738e0,2.42730255126953125e1,2.37710456848144531e1,2.54840793609619141e1,2.39509229660034180e1,1.45349411964416504e1,9.72839486598968506e0,2.58556365966796875e1,1.40061492919921875e1,2.03323516845703125e1,1.90521755218505859e1,1.32186889648437500e1,8.76106053590774536e0\n\
+0.00000000000000000e0,0.00000000000000000e0,7.64948085458930649e0,9.66551922206344472e0,9.96614885680216034e0,1.06245092432491379e1,4.74997017550360745e0,1.98370945485611081e1,4.35813898827932178e0,2.61766192688434494e1,4.26609117057946907e0,1.32715953911510720e1,1.26970225347257433e1,7.56322082725313649e-1,4.20899973252741866e-2,1.26911654483521392e1,2.57794843927259230e1,2.61167419112370318e1,1.77297054469745134e1,2.80688000327603753e1,1.89939539580475625e1,1.66890622914523625e1,1.66962180349646871e1,1.29828375417464024e1,1.76145028752550274e1,1.60755120633935107e1,2.14979803730139132e1,1.87471014381564665e1,2.87704096798247875e1,1.52652646950178177e1,8.56823328620942526e0,1.84539040749560783e1,1.73598404200942262e1,1.75041177849328662e1,4.21144539897317927e-1,2.56685015087456385e1,2.60135626315160309e1,8.14198780874221262e-1,2.47681049016567307e1,1.57365273060361410e-1,5.01797070913894050e0,1.89054397895198534e1\n\
+0,0,7,0,6.74946517944335938e1,9.98999999999999999e-1,2.62018184661865234e1\n\
+0,0,7,17,6.74946517944335938e1,1.00000000000000089e-3,3.60130672454833984e1\n\
+1,8,12,16,3.99343109130859375e1,1.00000000000000002e-3,3.32288761138916016e1\n\
+1,8,12,27,3.99343109130859375e1,9.98999999999999999e-1,3.59509229660034180e1\n\
+2,13,14,26,1.59284105300903320e1,1.00000000000000002e-3,2.28702840805053711e1\n\
+2,13,14,31,1.59284105300903320e1,9.98999999999999999e-1,2.17283948659896851e1\n\
+2,13,14,26,3.26839111328125000e2,6.43493104085467338e-1,2.28702840805053711e1\n\
+2,13,14,31,3.26839111328125000e2,3.56506895914532662e-1,2.17283948659896851e1\n\
+3,15,18,30,3.26230239868164062e1,1.00000000000000002e-3,2.13982486724853516e1\n\
+3,15,18,39,3.26230239868164062e1,9.98999999999999999e-1,3.10521755218505859e1\n\
+4,19,19,38,4.65982398986816406e1,1.00000000000000002e-3,3.07588129043579102e1\n\
+4,19,19,41,4.65982398986816406e1,9.98999999999999999e-1,2.52186889648437500e1\n\
+4,19,19,38,4.47234611511230469e1,9.98999999999999999e-1,3.07588129043579102e1\n\
+4,19,19,41,4.47234611511230469e1,1.00000000000000089e-3,2.52186889648437500e1\n\
+11,13,16,26,5.80263244628906250e2,8.02575732939278752e-1,2.28702840805053711e1\n\
+11,13,16,35,5.80263244628906250e2,1.97424267060721248e-1,2.60061492919921875e1\n\
+11,13,16,26,9.25740905761718750e2,6.73542175847730906e-1,2.28702840805053711e1\n\
+11,13,16,35,9.25740905761718750e2,3.26457824152269094e-1,2.60061492919921875e1\n\
+13,0,15,0,5.49470996093750000e3,5.00000000000000000e-1,2.62018184661865234e1\n\
+13,0,15,33,5.49470996093750000e3,5.00000000000000000e-1,3.78556365966796875e1\n\
+18,7,14,14,1.40952835083007812e2,9.81684820633810018e-1,2.91191406250000000e1\n\
+18,7,14,31,1.40952835083007812e2,1.83151793661899820e-2,2.17283948659896851e1\n\
+23,15,16,30,4.94252967834472656e1,1.00000000000000000e0,2.13982486724853516e1\n\
+23,15,16,35,4.94252967834472656e1,0.00000000000000000e0,2.60061492919921875e1\n\
+23,15,16,30,5.29808120727539062e1,9.98999999999999999e-1,2.13982486724853516e1\n\
+23,15,16,35,5.29808120727539062e1,1.00000000000000089e-3,2.60061492919921875e1\n\
+24,17,18,34,6.48849853515625000e2,5.16256245220348520e-1,2.14933314323425293e1\n\
+24,17,18,39,6.48849853515625000e2,4.83743754779651480e-1,3.10521755218505859e1";
+
+    #[test]
+    fn a_known_fitting_growth_of_21_columns_is_found() {
+        let mut lines = TWENTY_ONE_COLUMNS.lines();
+        let mut numbers = || -> Vec<f64> {
+            lines
+                .next()
+                .unwrap()
+                .split(',')
+                .map(|x| x.parse().unwrap())
+                .collect()
+        };
+        let head = numbers();
+        let (left, right, known) = (numbers(), numbers(), numbers());
+        let cols = columns(head[0], head[1], left, right);
+        let bounds: Vec<LabelBound> = TWENTY_ONE_COLUMNS
+            .lines()
+            .skip(4)
+            .map(|line| {
+                let n: Vec<f64> = line.split(',').map(|x| x.parse().unwrap()).collect();
+                LabelBound {
+                    panel: n[0] as usize,
+                    first: n[1] as usize,
+                    last: n[2] as usize,
+                    growth: n[3] as usize,
+                    half: n[4],
+                    share: n[5],
+                    base: n[6],
+                }
+            })
+            .collect();
+        assert_eq!((cols.count(), bounds.len()), (21, 28));
+        // The known growth fits: every bound, both edge caps and the smallest plot width.
+        let at = cols.place(&known);
+        let (cap_left, cap_right) = cols.edge_caps();
+        assert!(known[0] <= cap_left && known[1] <= cap_right && at.plot_width >= MIN_PLOT);
+        for b in &bounds {
+            assert!(b.required(&at) <= known[b.growth] + 1e-9, "{b:?}");
+        }
+        let placed = fit_columns(&cols, &bounds).unwrap();
+        assert_fitted(&cols, &placed, &bounds).unwrap();
+        assert!(placed.plot_width >= at.plot_width - 1e-3);
+    }
+
+    #[test]
+    fn widths_reported_below_the_zero_cell_width_are_the_least() {
+        // 1 × 3 with one axes over two columns and a short direct label: below 72 pt the cells
+        // are 0 wide, and the label's cap stays 6 pt until then. The least width is 83 pt.
+        let build = |width: f64| {
+            let mut f = grid_figure(1, 3, (width / 72.0, 4.0), Theme::graphite());
+            add(&mut f, 0, 0, 1, 2)
+                .xticks(&[])
+                .unwrap()
+                .yticks(&[])
+                .unwrap()
+                .xlim(0.0, 1.0)
+                .unwrap()
+                .line(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[0.0, 1.0],
+                    LineOptions {
+                        label: "W".into(),
+                        ..LineOptions::default()
+                    },
+                )
+                .unwrap();
+            f
+        };
+        let err = render_error(&build(48.0));
+        assert_eq!(
+            err.to_string(),
+            "Figure.to_scene(): the figure is 48 pt wide; at least 83 pt is needed for 3 \
+             columns of plots."
+        );
+        assert!(build(83.0).to_scene(lib()).is_ok());
+        assert_eq!(named_width(&render_error(&build(82.0))), Some(83.0));
+    }
+
+    #[test]
+    fn reported_widths_and_heights_are_the_least_that_fit() {
+        // Random grids of spanning panels with direct labels of random widths: the width named
+        // passes the width check, one point less does not, and no whole width between the
+        // figure's and it passes. Then random row bands: the height named passes and one point
+        // less does not.
+        let mut rng = Rng(0x785a_b123_789d);
+        for case in 0..120 {
+            let count = 2 + rng.below(7);
+            let initial = 25.0 + rng.below(80) as f64;
+            let mut f = grid_figure(
+                count as i64,
+                count as i64,
+                (initial / 72.0, 20.0),
+                Theme::graphite(),
+            );
+            for row in 0..count {
+                let span = 1 + rng.below(count);
+                let col = rng.below(count - span + 1);
+                add(&mut f, row as i64, col as i64, 1, span as i64)
+                    .xticks(&[])
+                    .unwrap()
+                    .yticks(&[])
+                    .unwrap()
+                    .line(
+                        AxisData::Numbers(vec![0.0, 1.0]),
+                        &[0.0, 1.0],
+                        LineOptions {
+                            label: "W".repeat(1 + rng.below(140)),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .unwrap();
+            }
+            let first = f.panels().next().unwrap().cells();
+            crate::pipeline::with_layout_input(&f, (first.row(), first.col()), lib(), |_, grid| {
+                let bands: Vec<PanelBands> = grid
+                    .panels
+                    .iter()
+                    .map(|input| {
+                        let marks = crate::resolve::resolve_marks(input.axes.marks(), input.theme);
+                        let limits = crate::resolve::Limits::of(input.axes);
+                        let resolved = crate::resolve::resolve(&marks, &limits, 3, 3);
+                        super::super::measure_panel(input, &resolved, grid.span(input.axes.cells()))
+                    })
+                    .collect();
+                let cells: Vec<CellRange> = grid.panels.iter().map(|p| p.axes.cells()).collect();
+                let columns = Columns::measure(grid, &cells, &bands);
+                if columns.place(&columns.no_growth()).plot_width >= MIN_PLOT {
+                    return;
+                }
+                let need = needed_width(grid, &cells, &columns);
+                let width_at = |width: f64| {
+                    let wider = GridInput { width, ..*grid };
+                    let fresh: Vec<PanelBands> = grid
+                        .panels
+                        .iter()
+                        .zip(&bands)
+                        .map(|(p, b)| {
+                            let mut b = b.clone();
+                            b.direct_reserve = p
+                                .legend
+                                .direct
+                                .reserve(wider.span(p.axes.cells()).reserve_cap);
+                            b
+                        })
+                        .collect();
+                    let c = Columns::measure(&wider, &cells, &fresh);
+                    c.place(&c.no_growth()).plot_width
+                };
+                assert!(width_at(need) >= MIN_PLOT, "case {case}: {need}");
+                assert!(width_at(need - 1.0) < MIN_PLOT, "case {case}: {need}");
+                let least = (initial.floor() + 1.0) as usize;
+                let brute = (least..=need as usize).find(|&w| width_at(w as f64) >= MIN_PLOT);
+                assert_eq!(brute, Some(need as usize), "case {case}");
+            });
+        }
+        let theme = Theme::pigment();
+        for case in 0..300 {
+            let rows = 2 + rng.below(31);
+            let bands = Rows {
+                gap: 24.0,
+                above: (0..rows).map(|_| rng.unit() * 300.0).collect(),
+                below: (0..rows).map(|_| rng.unit() * 100.0).collect(),
+            };
+            let grid = Grid::new(rows as i64, 2).unwrap();
+            let input = GridInput {
+                width: 1000.0,
+                height: 1.0,
+                grid: &grid,
+                theme: &theme,
+                context: "Figure.to_scene()",
+                panels: &[],
+            };
+            let need = named_height(&bands.clone().place(&input).unwrap_err()).unwrap();
+            let at = |height: f64| bands.clone().place(&GridInput { height, ..input });
+            assert!(at(need).is_ok(), "case {case}");
+            assert!(at(need - 1.0).is_err(), "case {case}");
         }
     }
 }

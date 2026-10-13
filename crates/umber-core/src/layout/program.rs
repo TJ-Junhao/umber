@@ -2,19 +2,36 @@
 //!
 //! The program is: minimize `x₀ + x₁ + … + xₙ₋₁` subject to `aₖ · x ≥ bₖ` for every row `k`
 //! and `x ≥ 0`. It is solved through its dual, maximize `b · y` subject to `Aᵀ y ≤ 1` and
-//! `y ≥ 0`, whose origin is a feasible basis, by the simplex method with Bland's rule, which
-//! never cycles. The dual is unbounded exactly when the program has no solution. At the dual's
-//! optimum the reduced costs of its slack columns are an optimal `x`.
+//! `y ≥ 0`, whose origin is a feasible basis, by the simplex method: Bland's rule chooses the
+//! entering column, and the leaving row is the one with the largest pivot among those whose ratio
+//! is the least to within a tolerance, so that every basis stays well conditioned. The dual is unbounded exactly when the program has no solution. At the dual's
+//! optimum the prices of its rows, `c_B B⁻¹`, are an optimal `x`.
 //!
 //! The dual has one row per variable, so its tableau stays small however many rows the program
-//! has: `n × (rows + n)` entries.
+//! has: `n × (rows + n)` entries. Pivoting accumulates rounding in the tableau, so the tableau
+//! is rebuilt from the program and the current basis ([`Simplex::refactor`]) every
+//! [`REFACTOR_EVERY`] pivots, and always before the solve concludes: an optimum or an
+//! unbounded column found on an accumulated tableau is confirmed on a rebuilt one, and the
+//! solution is read from the rebuilt one.
 
-/// The smallest coefficient, in absolute value, that counts as nonzero when choosing a pivot.
+/// The smallest reduced cost, relative to the largest bound, that counts as improving, and the
+/// smallest pivot of a basis matrix that counts as nonsingular.
 const PIVOT_TOLERANCE: f64 = 1e-12;
 
-/// The most simplex steps before giving up. Bland's rule always terminates; this only bounds
-/// the work on inputs whose rounding keeps it from settling.
+/// The smallest tableau entry a pivot may have: smaller ones would make the next basis close
+/// to singular.
+const SMALLEST_PIVOT: f64 = 1e-9;
+
+/// How far, relative to the right-hand side, a ratio may exceed the least one and still
+/// compete for the leaving row on the size of its pivot.
+const RATIO_TOLERANCE: f64 = 1e-9;
+
+/// The most simplex steps before giving up: the leaving rule trades the guarantee of Bland's
+/// rule against cycling for well-conditioned bases, and this bounds the work if it cycles.
 const MAX_STEPS: usize = 100_000;
+
+/// The pivots between two rebuilds of the tableau.
+const REFACTOR_EVERY: usize = 16;
 
 /// One lower bound of a program: `coefficients · x ≥ bound`.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,57 +45,226 @@ pub(super) struct Row {
 /// The least-total `x ≥ 0` with `row.coefficients · x ≥ row.bound` for every row of `rows`, each
 /// row holding `vars` coefficients; `None` when no `x` meets every row (or the solve does not
 /// settle within [`MAX_STEPS`] steps).
+///
+/// The result is exact up to the rounding of one solve of the optimal basis; callers that need
+/// every row to hold check it against their own model.
 pub(super) fn least_total(vars: usize, rows: &[Row]) -> Option<Vec<f64>> {
-    let duals = rows.len();
-    let columns = duals + vars;
-    // The dual's tableau: one row per variable, `Aᵀ` then the slacks then the right-hand side.
-    let mut table: Vec<Vec<f64>> = (0..vars)
-        .map(|i| {
-            let mut line = vec![0.0; columns + 1];
-            for (k, row) in rows.iter().enumerate() {
-                line[k] = row.coefficients[i];
-            }
-            line[duals + i] = 1.0;
-            line[columns] = 1.0;
-            line
-        })
-        .collect();
-    // The objective row of `z - b · y = 0`.
-    let mut objective = vec![0.0; columns + 1];
-    for (k, row) in rows.iter().enumerate() {
-        objective[k] = -row.bound;
-    }
-    let mut basis: Vec<usize> = (duals..columns).collect();
-    let scale = rows.iter().map(|row| row.bound.abs()).fold(1.0, f64::max);
-    for _ in 0..MAX_STEPS {
-        // Bland's rule: the first column that improves the objective enters...
-        let Some(entering) = (0..columns).find(|&j| objective[j] < -PIVOT_TOLERANCE * scale) else {
-            // ...and when none does, the reduced costs of the slacks are the program's x.
-            return Some((0..vars).map(|i| objective[duals + i].max(0.0)).collect());
+    Simplex::new(vars, rows).solve()
+}
+
+/// The dual's simplex tableau and basis.
+struct Simplex<'a> {
+    /// The program.
+    rows: &'a [Row],
+    /// The number of the program's variables: the dual's rows.
+    vars: usize,
+    /// One row per dual row: the dual columns (one per program row, then one slack per
+    /// variable) and the right-hand side.
+    table: Vec<Vec<f64>>,
+    /// The reduced costs of the dual columns and the objective's value.
+    objective: Vec<f64>,
+    /// The basic dual column of each tableau row.
+    basis: Vec<usize>,
+}
+
+impl<'a> Simplex<'a> {
+    /// The tableau of the dual's origin: the slacks basic.
+    fn new(vars: usize, rows: &'a [Row]) -> Simplex<'a> {
+        let duals = rows.len();
+        let mut simplex = Simplex {
+            rows,
+            vars,
+            table: vec![vec![0.0; duals + vars + 1]; vars],
+            objective: vec![0.0; duals + vars + 1],
+            basis: (duals..duals + vars).collect(),
         };
-        // ...and of the rows that bound it, the one with the least ratio, ties broken by the
-        // smallest basic column, leaves.
-        let mut leaving: Option<(usize, f64)> = None;
-        for (i, line) in table.iter().enumerate() {
-            let a = line[entering];
-            if a <= PIVOT_TOLERANCE {
-                continue;
+        simplex.refactor();
+        simplex
+    }
+
+    /// The number of dual columns.
+    fn columns(&self) -> usize {
+        self.rows.len() + self.vars
+    }
+
+    /// Entry `i` of dual column `j`, as the program gives it.
+    fn entry(&self, i: usize, j: usize) -> f64 {
+        match self.rows.get(j) {
+            Some(row) => row.coefficients[i],
+            None => f64::from(u8::from(j - self.rows.len() == i)),
+        }
+    }
+
+    /// The dual objective's coefficient of column `j`.
+    fn cost(&self, j: usize) -> f64 {
+        self.rows.get(j).map_or(0.0, |row| row.bound)
+    }
+
+    /// Rebuilds the tableau and the reduced costs from the program for the current basis:
+    /// `B⁻¹ [Aᵀ | I | 1]` and `c_B B⁻¹ [Aᵀ | I | 1] - [b | 0 | 0]`. Returns false, leaving the
+    /// tableau as it was, when the basis matrix is singular to working precision.
+    fn refactor(&mut self) -> bool {
+        let m = self.vars;
+        let columns = self.columns();
+        let basis_matrix: Vec<Vec<f64>> = (0..m)
+            .map(|i| self.basis.iter().map(|&j| self.entry(i, j)).collect())
+            .collect();
+        let Some(inverse) = invert(basis_matrix) else {
+            return false;
+        };
+        // Row r of B⁻¹ [Aᵀ | I | 1].
+        for (r, line) in self.table.iter_mut().enumerate() {
+            let weights = &inverse[r];
+            for (j, row) in self.rows.iter().enumerate() {
+                line[j] = weights
+                    .iter()
+                    .zip(&row.coefficients)
+                    .map(|(w, a)| w * a)
+                    .sum();
             }
-            let ratio = line[columns] / a;
-            let better = match leaving {
-                None => true,
-                Some((kept, best)) => ratio < best || (ratio == best && basis[i] < basis[kept]),
+            line[self.rows.len()..columns].copy_from_slice(weights);
+            line[columns] = weights.iter().sum::<f64>().max(0.0);
+        }
+        // The prices c_B B⁻¹, then the reduced costs.
+        let prices: Vec<f64> = (0..m)
+            .map(|i| {
+                self.basis
+                    .iter()
+                    .enumerate()
+                    .map(|(r, &j)| self.cost(j) * inverse[r][i])
+                    .sum()
+            })
+            .collect();
+        for (j, row) in self.rows.iter().enumerate() {
+            let price: f64 = prices
+                .iter()
+                .zip(&row.coefficients)
+                .map(|(p, a)| p * a)
+                .sum();
+            self.objective[j] = price - row.bound;
+        }
+        self.objective[self.rows.len()..columns].copy_from_slice(&prices);
+        self.objective[columns] = prices.iter().sum();
+        // Basic columns are exactly unit columns with no reduced cost.
+        for (r, &j) in self.basis.iter().enumerate() {
+            for (i, line) in self.table.iter_mut().enumerate() {
+                line[j] = f64::from(u8::from(i == r));
+            }
+            self.objective[j] = 0.0;
+        }
+        true
+    }
+
+    /// The least-total `x`, or `None` when the dual is unbounded.
+    fn solve(mut self) -> Option<Vec<f64>> {
+        let columns = self.columns();
+        let duals = self.rows.len();
+        let scale = self
+            .rows
+            .iter()
+            .map(|row| row.bound.abs())
+            .fold(1.0, f64::max);
+        let mut since_rebuild = 0;
+        for _ in 0..MAX_STEPS {
+            if since_rebuild == REFACTOR_EVERY {
+                self.refactor();
+                since_rebuild = 0;
+            }
+            // Bland's rule: the first column that improves the objective enters...
+            let entering = (0..columns).find(|&j| self.objective[j] < -PIVOT_TOLERANCE * scale);
+            let Some(entering) = entering else {
+                if since_rebuild > 0 && self.refactor() {
+                    since_rebuild = 0;
+                    continue;
+                }
+                // ...and when none does, the prices of the rebuilt tableau are the program's x.
+                return Some(
+                    (0..self.vars)
+                        .map(|i| self.objective[duals + i].max(0.0))
+                        .collect(),
+                );
             };
-            if better {
-                leaving = Some((i, ratio));
+            // ...and of the rows that bound it, the one with the largest pivot among those whose
+            // ratio is the least to within a tolerance, ties broken by the smallest basic
+            // column, leaves; pivots too small to keep the basis well conditioned never do.
+            let candidates: Vec<(usize, f64, f64)> = self
+                .table
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| line[entering] > SMALLEST_PIVOT)
+                .map(|(i, line)| (i, line[entering], line[columns]))
+                .collect();
+            let least = candidates
+                .iter()
+                .map(|&(_, a, rhs)| (rhs + RATIO_TOLERANCE * (1.0 + rhs.abs())) / a)
+                .fold(f64::INFINITY, f64::min);
+            let leaving = candidates
+                .iter()
+                .filter(|&&(_, a, rhs)| rhs / a <= least)
+                .fold(None, |best: Option<(usize, f64)>, &(i, a, _)| match best {
+                    Some((kept, largest))
+                        if largest > a || (largest == a && self.basis[kept] < self.basis[i]) =>
+                    {
+                        best
+                    }
+                    _ => Some((i, a)),
+                });
+            let Some((row, _)) = leaving else {
+                if since_rebuild > 0 && self.refactor() {
+                    since_rebuild = 0;
+                    continue;
+                }
+                // An unbounded dual, on a rebuilt tableau: no x meets every row.
+                return None;
+            };
+            pivot(&mut self.table, &mut self.objective, row, entering);
+            self.basis[row] = entering;
+            since_rebuild += 1;
+        }
+        None
+    }
+}
+
+/// The inverse of the square matrix `matrix`, by Gauss–Jordan elimination with partial
+/// pivoting; `None` when it is singular to working precision.
+fn invert(mut matrix: Vec<Vec<f64>>) -> Option<Vec<Vec<f64>>> {
+    let n = matrix.len();
+    let mut inverse: Vec<Vec<f64>> = (0..n)
+        .map(|i| (0..n).map(|j| f64::from(u8::from(i == j))).collect())
+        .collect();
+    for c in 0..n {
+        let (p, largest) = (c..n)
+            .map(|r| (r, matrix[r][c].abs()))
+            .fold(
+                (c, -1.0),
+                |best, next| if next.1 > best.1 { next } else { best },
+            );
+        if largest <= PIVOT_TOLERANCE {
+            return None;
+        }
+        matrix.swap(c, p);
+        inverse.swap(c, p);
+        let d = matrix[c][c];
+        for v in &mut matrix[c] {
+            *v /= d;
+        }
+        for v in &mut inverse[c] {
+            *v /= d;
+        }
+        let (pivot_line, pivot_inverse) = (matrix[c].clone(), inverse[c].clone());
+        for r in (0..n).filter(|&r| r != c) {
+            let factor = matrix[r][c];
+            if factor != 0.0 {
+                for (v, p) in matrix[r].iter_mut().zip(&pivot_line) {
+                    *v -= factor * p;
+                }
+                for (v, p) in inverse[r].iter_mut().zip(&pivot_inverse) {
+                    *v -= factor * p;
+                }
             }
         }
-        // An unbounded dual: no x meets every row.
-        let (pivot_row, _) = leaving?;
-        pivot(&mut table, &mut objective, pivot_row, entering);
-        basis[pivot_row] = entering;
     }
-    None
+    Some(inverse)
 }
 
 /// Pivots the tableau `table` with objective row `objective` on row `row`, column `column`.
