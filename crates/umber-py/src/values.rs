@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use pyo3::buffer::PyBuffer;
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyString};
-use umber_core::AxisData;
+use pyo3::types::{PyFloat, PyList, PyString};
+use umber_core::{AxisData, AxisValue};
 
 use crate::errors::{internal_state, internal_type};
 
@@ -96,6 +96,21 @@ pub(crate) fn axis_data(obj: &Bound<'_, PyAny>) -> PyResult<AxisData> {
     } else {
         floats(obj).map(AxisData::Numbers)
     }
+}
+
+/// Converts the x of a vertical reference line: a `str` becomes [`AxisValue::Category`], a
+/// `float` [`AxisValue::Number`]. The Python layer passes the one that matches the x axis; any
+/// other object is an internal `TypeError`.
+pub(crate) fn axis_value(obj: &Bound<'_, PyAny>) -> PyResult<AxisValue> {
+    if let Ok(text) = obj.cast::<PyString>() {
+        let name = text.to_str().map_err(|_| {
+            internal_type("a name is not valid UTF-8: it contains a lone surrogate")
+        })?;
+        return Ok(AxisValue::Category(name.to_owned()));
+    }
+    obj.cast::<PyFloat>()
+        .map(|number| AxisValue::Number(number.value()))
+        .map_err(|_| internal_type(format!("expected a str or a float, got {}", type_name(obj))))
 }
 
 /// Whether a buffer format string is `d`, `@d` or `=d`: one `f64` in native byte order, with no
@@ -302,6 +317,26 @@ mod tests {
             let numbers = axis_data(&eval(py, DATA)).unwrap();
             assert_eq!(numbers, AxisData::Numbers(vec![1.5, -2.0, 3.25]));
             let err = axis_data(&eval(py, "['a', '\\udfff']")).unwrap_err();
+            internal_type_message(&err, py);
+        });
+    }
+
+    #[test]
+    fn axis_value_reads_a_str_as_a_category_and_a_float_as_a_number() {
+        with_python(|py| {
+            assert_eq!(
+                axis_value(&eval(py, "'Q3'")).unwrap(),
+                AxisValue::Category("Q3".into())
+            );
+            assert_eq!(
+                axis_value(&eval(py, "2.5")).unwrap(),
+                AxisValue::Number(2.5)
+            );
+            for refused in ["3", "None", "[1.0]", "b'x'"] {
+                let err = axis_value(&eval(py, refused)).unwrap_err();
+                internal_type_message(&err, py);
+            }
+            let err = axis_value(&eval(py, "'\\udfff'")).unwrap_err();
             internal_type_message(&err, py);
         });
     }

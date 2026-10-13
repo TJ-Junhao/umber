@@ -5,6 +5,7 @@ use std::fmt;
 use super::axis_data::{AxisData, XySeries};
 use super::bar::{BarGroupMark, BarMark};
 use super::hist::HistMark;
+use super::rule::{HLineMark, SpanMark, VLineMark};
 use super::step::StepMark;
 use crate::{ColorSpec, Dash, Marker, SizeSpec};
 
@@ -109,9 +110,12 @@ impl Default for ScatterOptions {
 /// [`AxesMut::scatter`](super::AxesMut::scatter), [`AxesMut::area`](super::AxesMut::area),
 /// [`AxesMut::bar`](super::AxesMut::bar), [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar),
 /// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar),
-/// [`AxesMut::hist`](super::AxesMut::hist) and [`AxesMut::step`](super::AxesMut::step), which
-/// validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
-/// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`]) that keeps the validated values
+/// [`AxesMut::hist`](super::AxesMut::hist), [`AxesMut::step`](super::AxesMut::step),
+/// [`AxesMut::hline`](super::AxesMut::hline), [`AxesMut::vline`](super::AxesMut::vline),
+/// [`AxesMut::hspan`](super::AxesMut::hspan) and [`AxesMut::vspan`](super::AxesMut::vspan),
+/// which validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
+/// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`], [`HLineMark`], [`VLineMark`],
+/// [`SpanMark`]) that keeps the validated values
 /// together and exposes them read-only; it has no
 /// public constructor. Read a mark by matching on its variant.
 ///
@@ -181,6 +185,17 @@ pub enum Mark {
     /// Horizontal and vertical segments through the points, which change level at the chosen
     /// [`Step`](crate::Step) position; NaN breaks the line.
     Step(StepMark),
+    /// A horizontal line across the whole plot at a y value. It is drawn above all data marks.
+    HLine(HLineMark),
+    /// A vertical line across the whole plot at an x value, or at a category's band centre. It
+    /// is drawn above all data marks.
+    VLine(VLineMark),
+    /// The region between two y values, across the whole plot, at the area opacity. It is drawn
+    /// below all data marks.
+    HSpan(SpanMark),
+    /// The region between two x values, across the whole plot, at the area opacity. It is drawn
+    /// below all data marks.
+    VSpan(SpanMark),
 }
 
 impl Mark {

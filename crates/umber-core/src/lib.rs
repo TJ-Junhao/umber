@@ -53,10 +53,12 @@
 //!   texts, limits, ticks and marks), [`AxesMut`] (text, limit and tick setters and mark
 //!   methods), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
 //!   [`ScatterOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`] position,
+//!   [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of a vertical line,
 //!   [`BarOptions`], [`Series`] and [`HistOptions`]
 //!   with its bin limit [`MAX_BINS`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`StepMark`],
-//!   [`BarMark`], [`BarGroupMark`], [`SeriesView`] and [`HistMark`] that [`Axes::marks`] returns;
+//!   [`HLineMark`], [`VLineMark`], [`SpanMark`], [`BarMark`], [`BarGroupMark`], [`SeriesView`]
+//!   and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
@@ -122,6 +124,7 @@ pub use figure::{
     LineOptions, MAX_GRID, Mark, Placement, ScatterMark, ScatterOptions, Series, SeriesView, Share,
     Step, StepMark, StepOptions,
 };
+pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use render::SvgText;

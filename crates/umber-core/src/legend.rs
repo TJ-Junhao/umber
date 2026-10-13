@@ -32,9 +32,11 @@ impl Swatch {
     /// marker diameter, or a square.
     fn of(kind: SeriesKind) -> Swatch {
         match kind {
-            SeriesKind::Line { dash, width } => Swatch::Line { dash, width },
+            SeriesKind::Line { dash, width } | SeriesKind::Rule { dash, width } => {
+                Swatch::Line { dash, width }
+            }
             SeriesKind::Points { size, .. } => Swatch::Dot { diameter: size },
-            SeriesKind::Bar => Swatch::Square,
+            SeriesKind::Bar | SeriesKind::Span => Swatch::Square,
         }
     }
 }
@@ -125,9 +127,11 @@ impl<'a> Legend<'a> {
     ///   [`RowStyle::Plain`]. Unlabelled series are skipped; duplicate labels are kept.
     /// - `Chips` gives the same entries, drawn [`RowStyle::Chips`].
     /// - `Direct` gives a direct label to every labelled series whose key has an [`Anchor`] (a
-    ///   line with a point to label), and puts every other labelled series, lines without an
-    ///   anchor included, into a row drawn [`RowStyle::Plain`], exactly as `Header` would show
-    ///   them. So every labelled series is labelled somewhere.
+    ///   line with a point to label) and whose kind takes one
+    ///   ([`SeriesKind::takes_direct_label`]), and puts every other labelled series, lines
+    ///   without an anchor, reference lines and reference spans included, into a row drawn
+    ///   [`RowStyle::Plain`], exactly as `Header` would show them. So every labelled series is
+    ///   labelled somewhere.
     /// - `None` gives nothing.
     pub fn new(style: LegendStyle, marks: &[ResolvedMark<'a>], limits: &Limits) -> Legend<'a> {
         let keys = marks.iter().flat_map(|mark| mark.keys(limits));
@@ -142,11 +146,13 @@ impl<'a> Legend<'a> {
             };
             match (style, key.anchor) {
                 (LegendStyle::None, _) => {}
-                (LegendStyle::Direct, Some(anchor)) => direct.push(DirectEntry {
-                    label: entry.label,
-                    color: entry.color,
-                    anchor,
-                }),
+                (LegendStyle::Direct, Some(anchor)) if key.kind.takes_direct_label() => {
+                    direct.push(DirectEntry {
+                        label: entry.label,
+                        color: entry.color,
+                        anchor,
+                    });
+                }
                 (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
                     row.push(entry);
                 }
@@ -594,5 +600,95 @@ mod tests {
         for style in [LegendStyle::Header, LegendStyle::Direct] {
             assert!(Legend::new(style, &[], &limits).is_empty());
         }
+    }
+
+    #[test]
+    fn reference_lines_and_spans_take_a_row_entry_under_every_style_with_direct_labels_beside() {
+        use crate::model::{AxisValue, RuleOptions, SpanOptions};
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(nums(&[0.0, 10.0]), &[1.0, 2.0], line("Signal", Dash::Solid))
+            .unwrap()
+            .hline(
+                1.5,
+                RuleOptions {
+                    label: "Threshold".into(),
+                    dash: Dash::Dashed,
+                    ..RuleOptions::default()
+                },
+            )
+            .unwrap()
+            .vline(
+                AxisValue::Number(5.0),
+                RuleOptions {
+                    label: "Event".into(),
+                    ..RuleOptions::default()
+                },
+            )
+            .unwrap()
+            .hspan(
+                1.0,
+                1.2,
+                SpanOptions {
+                    label: "Range".into(),
+                    ..SpanOptions::default()
+                },
+            )
+            .unwrap()
+            .vspan(
+                2.0,
+                3.0,
+                SpanOptions {
+                    label: "Window".into(),
+                    ..SpanOptions::default()
+                },
+            )
+            .unwrap()
+            .hline(1.7, RuleOptions::default())
+            .unwrap();
+        let row_labels = |legend: &Legend<'_>| {
+            legend
+                .row()
+                .iter()
+                .map(|entry| entry.label().to_owned())
+                .collect::<Vec<_>>()
+        };
+        // Direct: the line is labelled at its end; every reference mark is in the row.
+        let legend = legend_of(&f, LegendStyle::Direct);
+        let direct: Vec<&str> = legend.direct().iter().map(DirectEntry::label).collect();
+        assert_eq!(direct, ["Signal"]);
+        assert_eq!(
+            row_labels(&legend),
+            ["Threshold", "Event", "Range", "Window"]
+        );
+        // Header and Chips: all five in series order, and the same swatches under Direct.
+        for style in [LegendStyle::Header, LegendStyle::Chips] {
+            let legend = legend_of(&f, style);
+            assert_eq!(
+                row_labels(&legend),
+                ["Signal", "Threshold", "Event", "Range", "Window"]
+            );
+        }
+        let legend = legend_of(&f, LegendStyle::Direct);
+        let theme = f.theme();
+        let w = theme.drawn_line_width(crate::SizeSpec::Auto);
+        let swatches: Vec<Swatch> = legend.row().iter().map(LegendEntry::swatch).collect();
+        assert_eq!(
+            swatches,
+            [
+                Swatch::Line {
+                    dash: Dash::Dashed,
+                    width: w
+                },
+                Swatch::Line {
+                    dash: Dash::Solid,
+                    width: w
+                },
+                Swatch::Square,
+                Swatch::Square,
+            ]
+        );
+        assert!(legend_of(&f, LegendStyle::None).is_empty());
     }
 }

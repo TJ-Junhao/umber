@@ -12,6 +12,7 @@ mod mapping;
 mod marker;
 mod marks;
 mod oracle;
+mod rule;
 mod scatter;
 mod step;
 
