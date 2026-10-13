@@ -18,7 +18,7 @@
 //! anchors move with the axes, so they are placed in every layout pass.
 
 use super::nudge::separate;
-use super::{Area, BODY_LINE, Label, PADDING, Styles, baseline_in_line, measure, metrics};
+use super::{Area, BODY_LINE, Frame, Label, PADDING, Styles, baseline_in_line, measure, metrics};
 use crate::legend::{Legend, RowStyle, Swatch};
 use crate::resolve::{
     Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis,
@@ -325,8 +325,8 @@ impl<'a> DirectLabels<'a> {
         widest.map_or(0.0, |w| (self.dot / 2.0 + DIRECT_GAP + w).min(cap))
     }
 
-    /// The labels placed for the axes `resolved` on the plot area `plot` of a canvas
-    /// `canvas_height` pt tall, in series order.
+    /// The labels placed for the axes `resolved` on the plot area `plot` in `frame`, the canvas
+    /// for a single axes, in series order.
     ///
     /// Each anchor is placed on the plot, its x clamped to the plot's horizontal range. Its end
     /// dot is centered on it when the line ends there ([`EndKind::Point`]) and it lies inside
@@ -337,14 +337,9 @@ impl<'a> DirectLabels<'a> {
     /// plot's vertical range and then moved apart from its neighbours by [`separate`], so that
     /// label centers are at least `1.2 ×` the label size apart. Labels that would not fit
     /// between the plot's top and bottom are stacked around their mean target instead; a label
-    /// whose line of text then lies wholly off the canvas is left out, and its dot is kept. An
-    /// entry with neither a dot nor a label is left out.
-    pub(super) fn placed(
-        &self,
-        resolved: &Resolved,
-        plot: Area,
-        canvas_height: f64,
-    ) -> Vec<DirectLabel> {
+    /// whose line of text then lies wholly above or below the frame is left out, and its dot is
+    /// kept. An entry with neither a dot nor a label is left out.
+    pub(super) fn placed(&self, resolved: &Resolved, plot: Area, frame: Frame) -> Vec<DirectLabel> {
         // Only an anchor that the axes cannot place (impossible after resolve) has a NaN
         // position; its label is left out.
         let anchors: Vec<(&MeasuredDirect<'a>, f64, f64)> = self
@@ -366,8 +361,9 @@ impl<'a> DirectLabels<'a> {
             .zip(centers)
             .filter_map(|((entry, x, y), center)| {
                 let anchor_x = plot.x_at(NormalizedPos::new(x));
-                let on_canvas = center + line / 2.0 > 0.0 && center - line / 2.0 < canvas_height;
-                let label = on_canvas.then(|| {
+                let in_frame =
+                    center + line / 2.0 > frame.y && center - line / 2.0 < frame.bottom();
+                let label = in_frame.then(|| {
                     let mut label = entry.label.clone();
                     label.x = anchor_x + self.dot / 2.0 + DIRECT_GAP;
                     label.y =

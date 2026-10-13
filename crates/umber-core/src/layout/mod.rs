@@ -18,12 +18,15 @@
 mod inset;
 mod legend;
 mod nudge;
+mod panel;
 
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry};
+pub(crate) use panel::Frame;
+use panel::PanelBands;
 
 use crate::error::{number, quoted};
 use crate::model::Axes;
-use crate::resolve::{AxisTick, NormalizedPos, Resolved, coincides};
+use crate::resolve::{AxisTick, NormalizedPos, Resolved};
 use crate::{Error, FontLibrary, Result, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
@@ -163,25 +166,25 @@ pub(crate) struct Layout {
     pub x_grid: Vec<f64>,
     /// The y coordinate of the baseline.
     pub baseline_y: f64,
-    /// The canvas width.
-    pub canvas_width: f64,
+    /// The frame the axes were placed in: the canvas for a single axes.
+    pub frame: Frame,
 }
 
 impl Layout {
     /// The free room left of the plot area: up to the right edge of the furthest-reaching y
-    /// tick label, or to the canvas left edge when there are no y tick labels. Never negative.
+    /// tick label, or to the frame's left edge when there are no y tick labels. Never negative.
     pub fn room_left(&self) -> f64 {
         let edge = self
             .y_tick_labels
             .iter()
             .map(|label| label.x + label.width())
-            .fold(0.0, f64::max);
+            .fold(self.frame.x, f64::max);
         (self.plot.x - edge).max(0.0)
     }
 
-    /// The free room right of the plot area, up to the canvas right edge. Never negative.
+    /// The free room right of the plot area, up to the frame's right edge. Never negative.
     pub fn room_right(&self) -> f64 {
-        (self.canvas_width - self.plot.right()).max(0.0)
+        (self.frame.right() - self.plot.right()).max(0.0)
     }
 }
 
@@ -377,7 +380,9 @@ fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str
     }
 }
 
-/// Lays out the axes of `input` for already resolved scales.
+/// Lays out the axes of `input` for already resolved scales, alone on the canvas: measures
+/// them ([`panel::measure_panel`]), chooses the plot area ([`solve_single_panel`]) and places
+/// everything for it ([`panel::place_panel`]) with the canvas as the frame.
 ///
 /// # Errors
 ///
@@ -395,101 +400,50 @@ fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str
 ///   is shorter than [`MIN_PLOT`]: the message names the height the figure needs, and the hint
 ///   names only the header parts the figure has (see [`figure_too_short`]).
 pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<Layout> {
+    let bands = panel::measure_panel(input, resolved);
+    let plot = solve_single_panel(input, &bands)?;
+    let canvas = Frame {
+        x: 0.0,
+        y: 0.0,
+        width: input.width,
+        height: input.height,
+    };
+    Ok(panel::place_panel(input, resolved, bands, canvas, plot))
+}
+
+/// The plot area of the single panel of `input` that fills the canvas, for the texts measured
+/// in `bands`.
+///
+/// The header is stacked from the top padding, and the plot starts below it, the y label and
+/// the rise of the top y tick label. The plot starts right of the y tick labels and ends left
+/// of the room direct labels reserve. The x tick labels are centered on their ticks and may
+/// reach into the outer padding, up to [`X_LABEL_EDGE_GAP`] from the canvas edge; where one
+/// would reach further, the plot edge on that side moves in by exactly the overflow. Each side
+/// moves in by at most [`END_LABEL_SHARE`] of the inner width beyond the padding; labels that
+/// need more are an error. Direct labels reserve room under the same cap. Under the plot are
+/// the x tick labels, the x label and the bottom padding.
+///
+/// # Errors
+///
+/// As [`lay_out`].
+fn solve_single_panel(input: &LayoutInput<'_>, bands: &PanelBands) -> Result<Area> {
     let LayoutInput {
         width,
         height,
-        theme,
-        axes,
         legend,
-        lib,
         context,
+        ..
     } = *input;
-    let styles = Styles::new(theme);
-
-    // Header, top down.
-    let mut y = PADDING;
-    let title = (!axes.title_text().is_empty()).then(|| {
-        let mut label = measure(lib, axes.title_text(), styles.title);
-        let (ascent, descent) = metrics(lib, &styles.title);
-        let line = TITLE_LINE * f64::from(styles.title.size);
-        label.x = PADDING;
-        label.y = baseline_in_line(y, line, ascent, descent);
-        y += line;
-        label
-    });
-    let subtitle = (!axes.subtitle_text().is_empty()).then(|| {
-        if title.is_some() {
-            y += TITLE_GAP;
-        }
-        let mut label = measure(lib, axes.subtitle_text(), styles.body);
-        let (ascent, descent) = metrics(lib, &styles.body);
-        let line = BODY_LINE * f64::from(styles.body.size);
-        label.x = PADDING;
-        label.y = baseline_in_line(y, line, ascent, descent);
-        y += line;
-        label
-    });
-    let has_row = !legend.row.is_empty();
-    let row_top = if has_row {
-        if title.is_some() || subtitle.is_some() {
-            y += legend::ROW_TOP_GAP;
-        }
-        let top = y;
-        y += legend.row.height();
-        top
-    } else {
-        y
-    };
-    if title.is_some() || subtitle.is_some() || has_row {
-        y += HEADER_GAP;
-    }
-    let header_bottom = y;
-
-    // Tick labels.
-    let (tick_ascent, tick_descent) = metrics(lib, &styles.tick);
-    let tick_size = f64::from(styles.tick.size);
-    let baseline = resolved.baseline;
-    let mut y_labels = measure_ticks(lib, &resolved.y.ticks, styles.tick);
-    let mut x_labels = measure_ticks(lib, &resolved.x.ticks, styles.tick);
-    let y_label_width = y_labels
-        .iter()
-        .map(|(_, label)| label.width())
-        .fold(0.0, f64::max);
-
-    // How far the y tick label of a tick at the plot top reaches above it.
-    let label_row_rise = if y_labels.is_empty() {
-        0.0
-    } else {
-        (tick_ascent - Y_LABEL_CENTER * tick_size).max(0.0)
-    };
-
-    let mut xlabel =
-        (!axes.xlabel_text().is_empty()).then(|| measure(lib, axes.xlabel_text(), styles.body));
-    let mut ylabel =
-        (!axes.ylabel_text().is_empty()).then(|| measure(lib, axes.ylabel_text(), styles.body));
-    let (body_ascent, body_descent) = metrics(lib, &styles.body);
-
-    // The y label sits in the header region, above the top label row.
-    let ylabel_band = if ylabel.is_some() {
-        body_ascent + AXIS_LABEL_GAP
-    } else {
-        0.0
-    };
-    let plot_top = header_bottom + ylabel_band + label_row_rise;
-    // The plot starts right of the y tick labels and ends left of the room direct labels
-    // reserve. The x tick labels are centered on their ticks and may reach into the outer
-    // padding, up to `X_LABEL_EDGE_GAP` from the canvas edge; where one would reach further,
-    // the plot edge on that side moves in by exactly the overflow. Each side moves in by at
-    // most a quarter of the inner width beyond the padding; labels that need more are an
-    // error. Direct labels reserve room under the same cap.
-    let inner = (width - 2.0 * PADDING).max(0.0);
-    let cap = END_LABEL_SHARE * inner;
-    let left = if y_labels.is_empty() {
+    let plot_top = bands.heading.bottom(PADDING) + bands.y_label_band + bands.label_rise;
+    let cap = panel::end_label_cap(width);
+    // The widest y tick label and its gap are added to the padding one at a time, not as the
+    // one sum `bands.y_tick_column`, which can round differently.
+    let left = if bands.y_labels.is_empty() {
         PADDING
     } else {
-        PADDING + y_label_width + Y_LABEL_GAP
+        PADDING + bands.y_label_width + Y_LABEL_GAP
     };
-    let right = width - PADDING - legend.direct.reserve(cap);
+    let right = width - PADDING - bands.direct_reserve;
     let room = inset::Room {
         left,
         right,
@@ -499,53 +453,41 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
         hi: width - X_LABEL_EDGE_GAP,
         min_width: MIN_PLOT,
     };
-    let spans: Vec<inset::TickSpan> = x_labels
-        .iter()
-        .map(|(pos, label)| inset::TickSpan {
-            pos: pos.get(),
-            half: label.width() / 2.0,
-        })
-        .collect();
     // Every layout first needs a plot at least `MIN_PLOT` wide between the y tick labels and
     // the right padding, x tick labels or not; only then are the x tick labels fitted.
     if matches!(inset::fit_x_labels(&room, &[]), inset::XInset::Overflowing) {
         let direct = legend.direct.reserve(f64::INFINITY);
-        return Err(no_room_for_plot(context, width, &y_labels, &room, direct));
+        return Err(no_room_for_plot(
+            context,
+            width,
+            &bands.y_labels,
+            &room,
+            direct,
+        ));
     }
-    let (plot_left, plot_right) = match inset::fit_x_labels(&room, &spans) {
+    let (plot_left, plot_right) = match inset::fit_x_labels(&room, &bands.x_spans) {
         inset::XInset::Contained { left, right } => (left, right),
         inset::XInset::Overflowing => {
-            return Err(x_labels_overflow(context, &x_labels, &room, &spans));
+            return Err(x_labels_overflow(
+                context,
+                &bands.x_labels,
+                &room,
+                &bands.x_spans,
+            ));
         }
     };
-    let x_band = if x_labels.is_empty() {
-        0.0
-    } else {
-        X_LABEL_GAP + tick_ascent + tick_descent
-    };
-    let xlabel_band = if xlabel.is_some() {
-        AXIS_LABEL_GAP + body_ascent + body_descent
-    } else {
-        0.0
-    };
     // Everything under the plot: the x tick labels, the x label and the bottom padding.
-    let below = x_band + xlabel_band + PADDING;
+    let below = bands.x_band + bands.x_title_band + PADDING;
     let plot_bottom = height - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {
-        let hint = figure_height_hint(title.is_some(), subtitle.is_some(), has_row);
         return Err(figure_too_short(
             context,
             height,
             plot_top + MIN_PLOT + below,
-            hint,
+            bands.heading.height_hint(),
         ));
     }
-    let row = if has_row {
-        legend.row.placed(row_top)
-    } else {
-        LegendRow::default()
-    };
     let (x, plot_width) = fit_span(plot_left, plot_right, width);
     let plot = Area {
         x,
@@ -553,75 +495,23 @@ pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<La
         width: plot_width,
         height: plot_height,
     };
-
-    // Place everything relative to the final plot area.
-    for (pos, label) in &mut y_labels {
-        label.x = plot.x - Y_LABEL_GAP - label.width();
-        label.y = plot.y_at(*pos) + Y_LABEL_CENTER * tick_size;
-    }
-    for (pos, label) in &mut x_labels {
-        label.x = plot.x_at(*pos) - label.width() / 2.0;
-        label.y = plot.bottom() + X_LABEL_GAP + tick_ascent;
-    }
     // The solve keeps the labels within the bounds for a plot at least `MIN_PLOT` wide, which
-    // `fit_span` leaves in place; this holds the final placement to the same bounds.
-    let outside = x_labels.iter().any(|(_, label)| {
-        label.x < room.lo - inset::CONTAINMENT_TOLERANCE
-            || label.x + label.width() > room.hi + inset::CONTAINMENT_TOLERANCE
+    // `fit_span` leaves in place; this holds the final placement, where `place_panel` puts the
+    // labels, to the same bounds.
+    let outside = bands.x_labels.iter().any(|(pos, label)| {
+        let x = plot.x_at(*pos) - label.width() / 2.0;
+        x < room.lo - inset::CONTAINMENT_TOLERANCE
+            || x + label.width() > room.hi + inset::CONTAINMENT_TOLERANCE
     });
     if outside {
-        return Err(x_labels_overflow(context, &x_labels, &room, &spans));
+        return Err(x_labels_overflow(
+            context,
+            &bands.x_labels,
+            &room,
+            &bands.x_spans,
+        ));
     }
-    if let Some(label) = &mut xlabel {
-        label.x = plot.x + plot.width / 2.0 - label.width() / 2.0;
-        label.y = plot.bottom() + x_band + AXIS_LABEL_GAP + body_ascent;
-    }
-    if let Some(label) = &mut ylabel {
-        // Left-aligned with the left edge of the y tick label column.
-        label.x = if y_labels.is_empty() {
-            plot.x
-        } else {
-            plot.x - Y_LABEL_GAP - y_label_width
-        };
-        label.y = plot.y - label_row_rise - AXIS_LABEL_GAP;
-    }
-
-    let direct = legend.direct.placed(resolved, plot, height);
-    let baseline_y = plot.y_at(baseline);
-    let y_grid = resolved
-        .y
-        .ticks
-        .iter()
-        .filter(|tick| !coincides(tick.pos, baseline))
-        .map(|tick| plot.y_at(tick.pos))
-        .collect();
-    let x_grid = if resolved.x.is_category() {
-        Vec::new()
-    } else {
-        resolved
-            .x
-            .ticks
-            .iter()
-            .map(|tick| plot.x_at(tick.pos))
-            .collect()
-    };
-
-    Ok(Layout {
-        plot,
-        header_bottom,
-        title,
-        subtitle,
-        legend: row,
-        direct,
-        xlabel,
-        ylabel,
-        x_tick_labels: x_labels.into_iter().map(|(_, label)| label).collect(),
-        y_tick_labels: y_labels.into_iter().map(|(_, label)| label).collect(),
-        y_grid,
-        x_grid,
-        baseline_y,
-        canvas_width: width,
-    })
+    Ok(plot)
 }
 
 /// The widest of `labels`, the first of equally wide ones; `None` when there are none.
