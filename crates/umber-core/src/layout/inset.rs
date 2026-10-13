@@ -29,7 +29,7 @@ const BISECTION_STEPS: usize = 64;
 
 /// One x tick label as the inset sees it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct TickSpan {
+pub(crate) struct TickSpan {
     /// Its tick's position along the axis, in `[0, 1]` (0 = the plot's left edge).
     pub pos: f64,
     /// Half its width.
