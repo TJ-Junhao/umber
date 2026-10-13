@@ -175,4 +175,6 @@ class Step(Enum):
     """Change level at the previous x, then hold each value up to its own x."""
 
     MID = 2
-    """Change level halfway between two x values."""
+    """Change level halfway between two x values as drawn: at their mean on a linear x axis,
+    halfway between the band centres on a category x axis, and at their geometric mean on a log
+    x axis (between 1 and 100, at 10)."""

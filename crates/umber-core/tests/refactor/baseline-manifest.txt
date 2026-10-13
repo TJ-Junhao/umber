@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 013913fdc25fbdd582070c65511d03ae67448cff
+# revision: 049a59d378224287acb9c27f352ac9e21ff4fd82
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -570,6 +570,12 @@ a04064d0f032f61f0fdf0c2f078e75d4873454df426e5a9a29dfc0568a47cfce  png/step-log-x
 99141bc70c70a004e09629d8049e9971a1ddf312b28a304e86da9b2fc6747c09  png/step-positions-midnight.dpi72.png
 0da57d8588cd3a63b11a98a3298d5f6a20b47b9132fab13a2dee4ad8ee7fc889  png/step-positions-pigment.dpi200.png
 12fcb31e3e757bdacc005ce36cbbd3273a50e48f2aa41caa975eb1534329add7  png/step-positions-pigment.dpi72.png
+8e2aef37c157fbf9a73e4c2ba63e8be67fd835675f669acef3a222506b12cf42  png/step-trailing-gap-category.dpi200.png
+534bc74ed4ed54eb665dc8d77bdf29f2385a4d608eb53162dc9f9f8917493101  png/step-trailing-gap-category.dpi72.png
+64ca23e46ec6471c50b456a355d293e27d1a7809d6ea1de445d4273eb5d1b04a  png/step-trailing-gap-limits.dpi200.png
+67c534ff98f2b169f8ec11a49ec0c4256202813b6d4c34766f04bf1d34c109bc  png/step-trailing-gap-limits.dpi72.png
+d248959df5918705031faa7c1eb190cea1876fd9c8a7a66886ba8e298645c05c  png/step-trailing-gap.dpi200.png
+4a12c33be438b28f5525652b834806ac2fa148c7806ee5ec5358a677134350c6  png/step-trailing-gap.dpi72.png
 cf0045e6d05923d8e7cfef317eff61650e2aea4a4e2e95f8cc63217b9ddffb59  png/step-with-line-and-area.dpi200.png
 9165a859db52d9f20c013cdbfe47f3dd3c1ef460e2f5df4beab40f6ef458fb44  png/step-with-line-and-area.dpi72.png
 53efbf7da6ac4be26e4028633ecadc785e7d4c7f8a6d13e51e91bc665a7fba85  scene/fig-all-nan.txt
@@ -847,6 +853,9 @@ a69daf414d7447e928d2c5a5b5fe414c5d5be162eccff2daa818333b0d39919e  scene/step-gap
 e254199add96bef03f63c330c7237fcec440cf6bac66f6e336f06c4f1c47cb20  scene/step-positions-graphite.txt
 f9ea32711ccceb2bc71980c41a46cc20b6aa5fdce9a6a319956afbe80e2b695e  scene/step-positions-midnight.txt
 6e1dfc2dad8833c70f8dbfe372b599a56c3fab625fa8c22fb0450e9ce50cccc1  scene/step-positions-pigment.txt
+a3ca2dcb6fc6bdaa25c73cacd244ec61728950b502ed186495da292f9b0697c8  scene/step-trailing-gap-category.txt
+a7089dc85480a1b8446f7b60e1719bf9a95f69653917f009524fecc9ce61e56f  scene/step-trailing-gap-limits.txt
+aec92803eae81b59c00ec3bca4b6d11c239d7dcb412930ca5e4474ed3da51dff  scene/step-trailing-gap.txt
 a2f2fc9a9e7c0ff4ffc24c9bc175a7d3f97242eafe7d1555772494ae059280b0  scene/step-with-line-and-area.txt
 e24ae5322e5034976f03f8539e3bde8ff9b038ceef9dbb218b1b69390262727c  svg/fig-all-nan.editable.svg
 11c988e877d27d8432cf557a14d12140ecd2e48971b07aaffef13a519526c393  svg/fig-all-nan.outlines.svg
@@ -1398,5 +1407,11 @@ ebbcc4324ab77d9c507e9a6516df4b9896ee044a66d80d1f49adb507b5bed429  svg/step-posit
 09b210109e52f3c85672c0c50f403fd21125026621e756d088c5304f2355709c  svg/step-positions-midnight.outlines.svg
 bb7889bfcc6afaaaa3a1caa0298a761898fd928e95fd895c0d5db9e9c10ccc24  svg/step-positions-pigment.editable.svg
 baaf5cc9afd3c5dc4fc59cc7b186fc2f38a55310d86328193b6c7ee324ff1881  svg/step-positions-pigment.outlines.svg
+e885c3def1b3519aecde86fa40e3b14056cc4421f16cedb2fe9f3561cead43e6  svg/step-trailing-gap-category.editable.svg
+24e4a242281bc30851c3dbced5c61ead3cd58a8d6698e38056070b7cf9cfaf3a  svg/step-trailing-gap-category.outlines.svg
+d6218e4f0684dd91282e746ad83f8b49a55c5d4863183c3cb727e2f0a4c9e9f1  svg/step-trailing-gap-limits.editable.svg
+660942195e16c4878d7bae1a904f919f440a976c689ad8e1653a548a048d8112  svg/step-trailing-gap-limits.outlines.svg
+15e2e4c91954511626b20abe96f014747a1fe3e4550603c3532ba9562863e449  svg/step-trailing-gap.editable.svg
+51952df27a16480e772aa446dc121f9d346da682bd9b17687929250b07c6f0d6  svg/step-trailing-gap.outlines.svg
 7455cfc043c4af6c1b36b0e00e4340e383cb8cf10193ad23641484e81cc30d70  svg/step-with-line-and-area.editable.svg
 0edaf1baed7231bf5e528454228b87952446c287c058f8557833ba6aaba2a361  svg/step-with-line-and-area.outlines.svg

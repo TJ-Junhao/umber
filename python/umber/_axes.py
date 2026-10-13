@@ -822,7 +822,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             y: The y values, one per x value.
             where: Where the line changes level: ``Step.POST`` holds each value from its x to
                 the next x, ``Step.PRE`` holds it back from its x to the previous x, and
-                ``Step.MID`` changes level halfway between two x values.
+                ``Step.MID`` changes level halfway between two x values as drawn: at their
+                mean on a linear x axis, halfway between the band centres on a category x
+                axis, and at their geometric mean on a log x axis (between 1 and 100, at 10).
             label: The name shown in the legend; an empty string leaves the line out of it.
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.

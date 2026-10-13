@@ -22,8 +22,73 @@ pub enum Step {
     Post,
     /// The line holds `y[i]` from `x[i - 1]` up to `x[i]` and changes level at `x[i - 1]`.
     Pre,
-    /// The line changes level midway between `x[i]` and `x[i + 1]`.
+    /// The line changes level midway between `x[i]` and `x[i + 1]`: at their arithmetic mean on
+    /// a linear x axis, halfway between the band centres on a category x axis, and at their
+    /// geometric mean on a log x axis (between 1 and 100 it changes level at 10).
     Mid,
+}
+
+/// One end of a hold: the x of a point, or the middle between the x of two points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Edge {
+    /// The x of the point at this index.
+    At(usize),
+    /// Midway between the x of the points at these two indices.
+    Mid(usize, usize),
+}
+
+impl Edge {
+    /// The x of this end, given the x values `xs` of the points and `mid`, which finds the
+    /// middle of two x values.
+    pub(crate) fn position(self, xs: &[f64], mid: impl Fn(f64, f64) -> f64) -> f64 {
+        match self {
+            Edge::At(k) => xs[k],
+            Edge::Mid(i, k) => mid(xs[i], xs[k]),
+        }
+    }
+}
+
+/// The level of one point of a step line, held over a stretch of x.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Hold {
+    /// The index of the point that sets the level.
+    pub point: usize,
+    /// Where the level starts.
+    pub from: Edge,
+    /// Where the level ends.
+    pub to: Edge,
+}
+
+/// The holds of the step line of `position` through the points `(xs[i], ys[i])`, in data order,
+/// one for every point whose x and y are finite; the other points have no level and break the
+/// line. This is the one rule of where a step line runs, for drawing it and for finding where
+/// it ends.
+///
+/// The hold of point `i` runs from `x[i]` to `x[i + 1]` for [`Step::Post`], from `x[i - 1]` to
+/// `x[i]` for [`Step::Pre`], and from the middle of `x[i - 1]` and `x[i]` to the middle of
+/// `x[i]` and `x[i + 1]` for [`Step::Mid`]. At the ends of the series, and next to a point
+/// whose x is not finite, it ends at `x[i]`. A neighbour whose y is NaN still bounds a hold, so
+/// a level runs up to where a gap starts. Holds whose points are neighbours (indices `i` and
+/// `i + 1`) are joined by a vertical segment; any other two are apart.
+pub(crate) fn holds(xs: &[f64], ys: &[f64], position: Step) -> Vec<Hold> {
+    let n = xs.len().min(ys.len());
+    let has_x = |k: usize| k < n && xs[k].is_finite();
+    (0..n)
+        .filter(|&i| xs[i].is_finite() && ys[i].is_finite())
+        .map(|i| {
+            let before = i.checked_sub(1).filter(|&k| has_x(k));
+            let after = Some(i + 1).filter(|&k| has_x(k));
+            let (from, to) = match position {
+                Step::Post => (Edge::At(i), after.map_or(Edge::At(i), Edge::At)),
+                Step::Pre => (before.map_or(Edge::At(i), Edge::At), Edge::At(i)),
+                Step::Mid => (
+                    before.map_or(Edge::At(i), |k| Edge::Mid(i, k)),
+                    after.map_or(Edge::At(i), |k| Edge::Mid(i, k)),
+                ),
+            };
+            Hold { point: i, from, to }
+        })
+        .collect()
 }
 
 /// Options of a step mark.
@@ -191,6 +256,29 @@ mod tests {
         assert!(matches!(err, Error::Data { .. }), "{err:?}");
         assert_eq!(f, before);
         (err.to_string(), err.parameter(), err.hint())
+    }
+
+    #[test]
+    fn holds_run_between_neighbours_and_ignore_the_y_of_a_neighbour() {
+        let nan = f64::NAN;
+        let (xs, ys) = ([0.0, 1.0, 4.0, nan, 6.0], [1.0, 2.0, nan, 3.0, 4.0]);
+        let hold = |point, from, to| Hold { point, from, to };
+        assert_eq!(
+            holds(&xs, &ys, Step::Post),
+            [
+                hold(0, Edge::At(0), Edge::At(1)),
+                hold(1, Edge::At(1), Edge::At(2)),
+                hold(4, Edge::At(4), Edge::At(4)),
+            ]
+        );
+        assert_eq!(
+            holds(&xs, &ys, Step::Mid)[1],
+            hold(1, Edge::Mid(1, 0), Edge::Mid(1, 2))
+        );
+        assert_eq!(
+            holds(&xs, &ys, Step::Pre)[2],
+            hold(4, Edge::At(4), Edge::At(4))
+        );
     }
 
     #[test]

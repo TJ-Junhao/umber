@@ -5,7 +5,7 @@ use super::MarkContext;
 use super::line::{downsample, line_items, line_style};
 use super::mapping::{axis_x, axis_y};
 use crate::Rgba;
-use crate::model::{Step, StepMark};
+use crate::model::{Step, StepMark, holds};
 use crate::resolve::Resolved;
 use crate::scene::Item;
 
@@ -40,45 +40,26 @@ pub(super) fn step_items(
 /// The vertices of the step path through the axis-space points `(xs, ys)`, as x and y vectors,
 /// with a NaN pair between the runs that a gap separates.
 ///
-/// Every point with finite x and y holds its level over an interval, and the path runs along
-/// that interval, then up or down to the next interval's level. The interval of point `i` is
-/// `[x[i], x[i + 1]]` for [`Step::Post`], `[x[i - 1], x[i]]` for [`Step::Pre`] and
-/// `[(x[i - 1] + x[i]) / 2, (x[i] + x[i + 1]) / 2]` for [`Step::Mid`]; at the ends of the series
-/// and next to a point without a finite x, the interval ends at the point's own x. A point
-/// without a finite y has no interval and breaks the path, so does a point without a finite x.
-/// Repeated vertices are dropped, so a point whose interval is empty adds one vertex.
+/// The path follows the holds of [`holds`]: along each hold's level from its start to its end,
+/// then up or down to the next hold's level where the two points are neighbours. A middle is
+/// the arithmetic mean in axis space, so the geometric mean of the values on a log axis.
+/// Repeated vertices are dropped, so a hold that is empty adds one vertex.
 fn stepped(xs: &[f64], ys: &[f64], position: Step) -> (Vec<f64>, Vec<f64>) {
-    let n = xs.len().min(ys.len());
-    let finite = |i: usize| xs[i].is_finite() && ys[i].is_finite();
-    let neighbour = |i: Option<usize>| {
-        i.filter(|&j| j < n)
-            .map(|j| xs[j])
-            .filter(|x| x.is_finite())
-    };
-    let (mut out_x, mut out_y) = (Vec::with_capacity(2 * n), Vec::with_capacity(2 * n));
-    for i in 0..n {
-        if !finite(i) {
-            continue;
-        }
-        let (x, y) = (xs[i], ys[i]);
-        let previous = neighbour(i.checked_sub(1));
-        let next = neighbour(Some(i + 1));
-        let (from, to) = match position {
-            Step::Post => (x, next.unwrap_or(x)),
-            Step::Pre => (previous.unwrap_or(x), x),
-            Step::Mid => (
-                previous.map_or(x, |p| (p + x) / 2.0),
-                next.map_or(x, |q| (x + q) / 2.0),
-            ),
-        };
-        if (i == 0 || !finite(i - 1)) && !out_x.is_empty() {
+    let mid = |a: f64, b: f64| (a + b) / 2.0;
+    let (mut out_x, mut out_y) = (Vec::new(), Vec::new());
+    let mut previous: Option<usize> = None;
+    for hold in holds(xs, ys, position) {
+        if previous.is_some_and(|p| p + 1 != hold.point) {
             out_x.push(f64::NAN);
             out_y.push(f64::NAN);
         }
-        for vertex in [(from, y), (to, y)] {
-            if out_x.last() != Some(&vertex.0) || out_y.last() != Some(&vertex.1) {
-                out_x.push(vertex.0);
-                out_y.push(vertex.1);
+        previous = Some(hold.point);
+        let y = ys[hold.point];
+        for edge in [hold.from, hold.to] {
+            let x = edge.position(xs, mid);
+            if out_x.last() != Some(&x) || out_y.last() != Some(&y) {
+                out_x.push(x);
+                out_y.push(y);
             }
         }
     }

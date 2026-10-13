@@ -157,6 +157,63 @@ fn figures() -> Vec<(String, Figure)> {
         .unwrap();
     out.push(("step-category".to_owned(), f));
 
+    // Steps that end in a NaN y: the line, its direct label and its end dot stop where the last
+    // level stops, at the next x; on a category axis at the next band, or midway to it.
+    let mut f = figure(6.0, 4.0, Theme::graphite(), linear(), linear());
+    labelled(&mut f, "Trailing gaps");
+    for (k, (label, position)) in [("Post", Step::Post), ("Pre", Step::Pre), ("Mid", Step::Mid)]
+        .into_iter()
+        .enumerate()
+    {
+        axes(&mut f)
+            .step(
+                AxisData::Numbers(vec![0.0, 1.0, 4.0, 6.0]),
+                &[
+                    1.0 + 2.0 * k as f64,
+                    2.0 + 2.0 * k as f64,
+                    1.5 + 2.0 * k as f64,
+                    nan,
+                ],
+                labelled_step(label, position),
+            )
+            .unwrap();
+    }
+    out.push(("step-trailing-gap".to_owned(), f));
+    let mut f = figure(6.0, 4.0, Theme::graphite(), ScaleKind::Category, linear());
+    labelled(&mut f, "Trailing gaps");
+    for (k, (label, position)) in [("Post", Step::Post), ("Mid", Step::Mid)]
+        .into_iter()
+        .enumerate()
+    {
+        axes(&mut f)
+            .step(
+                AxisData::Categories(["a", "b", "c", "d"].map(String::from).to_vec()),
+                &[
+                    1.0 + 2.0 * k as f64,
+                    2.0 + 2.0 * k as f64,
+                    1.5 + 2.0 * k as f64,
+                    nan,
+                ],
+                labelled_step(label, position),
+            )
+            .unwrap();
+    }
+    out.push(("step-trailing-gap-category".to_owned(), f));
+    // The same cut by explicit limits: the held level crosses the high end.
+    let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
+    labelled(&mut f, "Trailing gap and limits");
+    axes(&mut f)
+        .step(
+            AxisData::Numbers(vec![0.0, 1.0, 4.0]),
+            &[1.0, 2.0, nan],
+            labelled_step("Post", Step::Post),
+        )
+        .unwrap()
+        .xlim(0.0, 3.0)
+        .unwrap()
+        .legend(LegendStyle::Direct);
+    out.push(("step-trailing-gap-limits".to_owned(), f));
+
     // A log x axis: the middle position changes level midway in log space.
     let mut f = figure(6.0, 4.0, Theme::pigment(), log(10.0), linear());
     labelled(&mut f, "Log x");
