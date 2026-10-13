@@ -60,6 +60,18 @@ pub(crate) fn plan_figure(figure: &Figure, lib: &FontLibrary) -> (Resolved, Layo
 /// `"Figure.to_scene()"`. Panics when the figure has no axes.
 #[cfg(test)]
 pub(crate) fn try_plan_figure(figure: &Figure, lib: &FontLibrary) -> Result<(Resolved, Layout)> {
+    with_layout_input(figure, lib, plan)
+}
+
+/// `f` called with the layout input of the axes of `figure`, at the figure's size, with layout
+/// errors reported in `"Figure.to_scene()"`, and with the axes' marks resolved against the
+/// figure's theme. Panics when the figure has no axes.
+#[cfg(test)]
+pub(crate) fn with_layout_input<R>(
+    figure: &Figure,
+    lib: &FontLibrary,
+    f: impl FnOnce(&LayoutInput<'_>, &[ResolvedMark<'_>]) -> R,
+) -> R {
     let theme = figure.theme();
     let axes = figure.axes().expect("the figure has axes");
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
@@ -74,7 +86,7 @@ pub(crate) fn try_plan_figure(figure: &Figure, lib: &FontLibrary) -> Result<(Res
         lib,
         context: "Figure.to_scene()",
     };
-    plan(&input, &marks)
+    f(&input, &marks)
 }
 
 /// The scene of `figure`: `width × 72` by `height × 72` pt on the theme background, holding
