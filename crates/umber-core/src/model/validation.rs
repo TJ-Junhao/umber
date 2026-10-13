@@ -134,6 +134,38 @@ pub(super) fn check_series(
     check_numbers(context, ("y", "y"), y, y_transform, gap_hint)
 }
 
+/// Checks that the numeric x values of a step mark, `x`, are in non-decreasing order, before the
+/// mark is stored. NaN marks a gap and is skipped: each value is compared with the last value
+/// before it that is not NaN. The first value below its predecessor is the error, under
+/// `context`. Category names have no order to check.
+pub(super) fn check_step_order(context: &'static str, x: &AxisData) -> Result<()> {
+    let AxisData::Numbers(values) = x else {
+        return Ok(());
+    };
+    let mut previous: Option<(usize, f64)> = None;
+    for (i, &v) in values.iter().enumerate() {
+        if v.is_nan() {
+            continue;
+        }
+        if let Some((j, u)) = previous
+            && v < u
+        {
+            return Err(Error::data(
+                context,
+                format!(
+                    "x[{i}] is {v}, below x[{j}] = {u}; step needs x in non-decreasing order.",
+                    v = number(v),
+                    u = number(u)
+                ),
+            )
+            .with_parameter("x")
+            .with_hint("sort the points by x first."));
+        }
+        previous = Some((i, v));
+    }
+    Ok(())
+}
+
 /// Validates the categories and heights of a bar mark for axes with an x axis of scale kind
 /// `x_kind` and a y axis of transform `y_transform`, before it is stored, so a failed call
 /// changes nothing. The checks run in a fixed order and the first failure is the error, under

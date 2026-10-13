@@ -15,7 +15,7 @@ import umber
 from umber import _args, _color, _series, _size, _ticks, _umber
 from umber._args import instance, integer, real, type_name
 from umber._color import Color
-from umber._enums import Dash, LegendStyle, Marker
+from umber._enums import Dash, LegendStyle, Marker, Step
 from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
@@ -55,6 +55,7 @@ def _members_hint(cls: type[Enum]) -> str:
 
 _DASH_HINT: Final = _members_hint(Dash)
 _MARKER_HINT: Final = _members_hint(Marker)
+_STEP_HINT: Final = _members_hint(Step)
 _SIZE_HINT: Final = (
     "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
 )
@@ -796,6 +797,69 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             data = floats(context, "values", values)
             name = _args.text(context, "label", label)
             self._native.hist(self._row, self._col, data, count, name, spec)
+            return self
+
+    def step(
+        self,
+        x: Values[X],
+        y: Values[float],
+        *,
+        where: Step = Step.POST,
+        label: str = "",
+        color: Color = Color.AUTO,
+        dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
+    ) -> Self:
+        """Add a step line through the points ``(x[i], y[i])``, in order.
+
+        The line runs horizontally and changes level vertically, at the place ``where`` sets.
+        A NaN in ``x`` or ``y`` leaves a gap in the line. On a linear or log x axis, ``x`` must
+        be in non-decreasing order; on a category x axis the line runs between the band
+        centres, in the order given.
+
+        Args:
+            x: The x values: numbers on a linear or log x axis, names on a category x axis.
+            y: The y values, one per x value.
+            where: Where the line changes level: ``Step.POST`` holds each value from its x to
+                the next x, ``Step.PRE`` holds it back from its x to the previous x, and
+                ``Step.MID`` changes level halfway between two x values as drawn: at their
+                mean on a linear x axis, halfway between the band centres on a category x
+                axis, and at their geometric mean on a log x axis (between 1 and 100, at 10).
+            label: The name shown in the legend; an empty string leaves the line out of it.
+            color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+            dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+                value is not positive on a log axis, names and numbers do not match the x
+                axis, or x is not in non-decreasing order.
+            StyleError: If ``label`` is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.step([0, 1, 3, 4], [1.0, 2.0, float("nan"), 0.5], where=ub.Step.MID)
+        """
+        with api_call():
+            context = "Axes.step()"
+            check_axis_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            position = instance(context, "where", where, Step, _STEP_HINT)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
+            xs = self._x_values(context, x)
+            ys = floats(context, "y", y)
+            name = _args.text(context, "label", label)
+            self._native.step(
+                self._row, self._col, xs, ys, position.value, name, spec, style.value, extent
+            )
             return self
 
     def _x_values(self, context: str, x: object) -> FloatArray | list[str]:

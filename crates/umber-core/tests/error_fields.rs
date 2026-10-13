@@ -5,7 +5,7 @@
 
 use umber_core::{
     Alpha, AreaOptions, AxisData, BarOptions, Error, Figure, HistOptions, LineOptions, LogBase,
-    Result, Rgba, ScaleKind, ScatterOptions, Series, SizeSpec, Theme,
+    Result, Rgba, ScaleKind, ScatterOptions, Series, SizeSpec, StepOptions, Theme,
 };
 
 const LOG: ScaleKind = ScaleKind::Log { base: LogBase::TEN };
@@ -465,6 +465,24 @@ fn errors_carry_their_parameter_and_hint() {
             SizeSpec::pt(72.1).expect_err("points above 72"),
             Some("points"),
             None,
+        ),
+        (
+            "step, unsorted x",
+            on_axes(linear, linear, |a| {
+                a.step(nums(&[1.0, 0.0]), &[1.0, 2.0], StepOptions::default())
+                    .map(|_| ())
+            }),
+            Some("x"),
+            Some("sort the points by x first."),
+        ),
+        (
+            "step, infinite y",
+            on_axes(linear, linear, |a| {
+                a.step(nums(&[0.0, 1.0]), &[1.0, inf], StepOptions::default())
+                    .map(|_| ())
+            }),
+            Some("y"),
+            Some("use NaN to leave a gap in the line."),
         ),
     ];
     for (name, err, parameter, hint) in cases {

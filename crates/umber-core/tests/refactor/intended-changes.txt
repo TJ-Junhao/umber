@@ -1,4 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# A second axes on a figure of one cell is refused as a taken cell: the message, parameter and
-# hint of that error are the grid's.
-errors/api
+# Cases whose committed outputs change on purpose in this change; none.

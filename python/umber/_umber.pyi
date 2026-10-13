@@ -249,6 +249,18 @@ class Figure:
     def hist(
         self, row: int, col: int, values: _FloatArray, bins: int, label: str, color: _ColorArg
     ) -> None: ...
+    def step(
+        self,
+        row: int,
+        col: int,
+        x: _AxisValues,
+        y: _FloatArray,
+        position: int,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
     def to_png(self, dpi: int) -> bytes: ...
     def to_svg(self, text: int) -> str: ...
     # The file variants report render errors in the context of Figure.save_png() and

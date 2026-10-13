@@ -27,6 +27,7 @@ pub use crate::model::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
     LineOptions, MAX_GRID, Mark, Placement, ScatterMark, ScatterOptions, Series, SeriesView, Share,
+    Step, StepMark, StepOptions,
 };
 
 use crate::render::{SvgText, check_dpi, render_png, render_svg};

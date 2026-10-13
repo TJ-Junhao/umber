@@ -23,6 +23,7 @@ EXPECTED = [
     "Marker",
     "Scale",
     "Size",
+    "Step",
     "StyleError",
     "SupportsArray",
     "SvgText",
@@ -79,6 +80,7 @@ def test_enums_are_exported_as_enums() -> None:
         "GridLines",
         "LegendStyle",
         "Marker",
+        "Step",
         "SvgText",
     }
 

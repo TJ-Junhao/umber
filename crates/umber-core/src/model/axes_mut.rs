@@ -10,8 +10,10 @@ use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
 use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
+use super::step::{StepMark, StepOptions};
 use super::validation::{
-    AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, check_x_limits, check_x_tick_axis,
+    AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, check_step_order, check_x_limits,
+    check_x_tick_axis,
 };
 use crate::{ContinuousScale, LegendStyle, Result, TickFormat};
 
@@ -809,6 +811,73 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let mark = HistMark::new("Axes.hist()", axes.x, values, options)?;
         axes.marks.push(Mark::Hist(mark));
+        Ok(self)
+    }
+
+    /// Adds a step line: horizontal and vertical segments through the points, which change level
+    /// where `options.position` says (see [`Step`](crate::Step)). Same rules as
+    /// [`AxesMut::line`], and NaN breaks the line; on a numeric x axis `x` must also be in
+    /// non-decreasing order, NaN apart. Names on a category x axis are drawn at the centres of
+    /// their bands, in the order given.
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order as for
+    /// [`AxesMut::line`], then: an x value below the one before it, naming the first such
+    /// index.
+    ///
+    /// The mark stores its own copy of `y`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`AxesMut::step_shared`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AxisData, StepOptions};
+    /// use umber_core::{Figure, ScaleKind, Step, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let mid = StepOptions { position: Step::Mid, ..StepOptions::default() };
+    /// axes.step(AxisData::Numbers(vec![0.0, 1.0, 3.0]), &[1.0, 2.0, f64::NAN], mid)?;
+    /// // Unsorted x is an error, and the axes keep their one mark.
+    /// assert!(axes
+    ///     .step(AxisData::Numbers(vec![1.0, 0.0]), &[1.0, 2.0], StepOptions::default())
+    ///     .is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn step(&mut self, x: AxisData, y: &[f64], options: StepOptions) -> Result<&mut Self> {
+        self.step_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds a step line as [`AxesMut::step`] does, but stores `y` itself rather than a copy of
+    /// it, as [`AxesMut::line_shared`] does. Same rules and errors as [`AxesMut::step`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AxisData, Mark, StepOptions};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([1.0, 2.0]);
+    /// axes.step_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), StepOptions::default())?;
+    /// let Some(Mark::Step(step)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(step.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn step_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: StepOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.step()";
+        let axes = self.axes_mut();
+        let series = XySeries::new(CONTEXT, axes.x, axes.y, x, y, LINE_GAP_HINT)?;
+        check_step_order(CONTEXT, series.x())?;
+        axes.marks.push(Mark::Step(StepMark::new(series, options)));
         Ok(self)
     }
 }

@@ -52,10 +52,11 @@
 //!   [`Placement`], [`CellRange`] and [`Cell`]; [`Axes`] (the getters of its cells, scales,
 //!   texts, limits, ticks and marks), [`AxesMut`] (text, limit and tick setters and mark
 //!   methods), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
-//!   [`ScatterOptions`], [`AreaOptions`], [`BarOptions`], [`Series`] and [`HistOptions`]
+//!   [`ScatterOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`] position,
+//!   [`BarOptions`], [`Series`] and [`HistOptions`]
 //!   with its bin limit [`MAX_BINS`], and the
-//!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`BarMark`],
-//!   [`BarGroupMark`], [`SeriesView`] and [`HistMark`] that [`Axes::marks`] returns;
+//!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`StepMark`],
+//!   [`BarMark`], [`BarGroupMark`], [`SeriesView`] and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
@@ -119,6 +120,7 @@ pub use figure::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
     LineOptions, MAX_GRID, Mark, Placement, ScatterMark, ScatterOptions, Series, SeriesView, Share,
+    Step, StepMark, StepOptions,
 };
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};

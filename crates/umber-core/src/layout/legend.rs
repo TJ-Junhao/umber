@@ -393,7 +393,13 @@ fn x_position(axis: &ResolvedAxis, x: AnchorX<'_>) -> f64 {
         (AxisScale::Category(scale), AnchorX::Category(name)) => {
             scale.index_of(name).map_or(f64::NAN, |i| scale.center(i))
         }
-        (AxisScale::Continuous(_), AnchorX::Category(_))
+        (AxisScale::Category(scale), AnchorX::Between(a, b)) => {
+            match (scale.index_of(a), scale.index_of(b)) {
+                (Some(a), Some(b)) => (scale.center(a) + scale.center(b)) / 2.0,
+                _ => f64::NAN,
+            }
+        }
+        (AxisScale::Continuous(_), AnchorX::Category(_) | AnchorX::Between(..))
         | (AxisScale::Category(_), AnchorX::Number(_)) => f64::NAN,
     }
 }

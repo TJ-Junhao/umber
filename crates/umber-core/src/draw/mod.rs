@@ -40,6 +40,7 @@ mod line;
 mod mapping;
 mod marker;
 mod scatter;
+mod step;
 mod stroke;
 #[cfg(test)]
 mod tests;
@@ -178,6 +179,13 @@ pub(crate) fn marks(
                         &mut items,
                     );
                 }
+            }
+            ResolvedMark::Step {
+                mark: step_mark,
+                color,
+                width,
+            } => {
+                step::step_items(&context, resolved, step_mark, (color, width), &mut items);
             }
         }
     }
