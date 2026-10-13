@@ -6,13 +6,19 @@
 //! Scenes, in the three built-in themes, at the automatic size of 6 in per column by 4 in per
 //! row: a 1 × 2 grid of a line and bars; a 2 × 2 grid whose top axes spans both columns over a
 //! scatter and a histogram; a 3 × 1 grid of labelled lines with header legends, one on a log y
-//! axis; a 2 × 2 grid with an empty cell. Only axes in the first column have labelled marks:
-//! the legend row is measured for the canvas width.
+//! axis; a 2 × 2 grid with an empty cell. Then, aligned on one grid solve: a 4 × 5 grid of
+//! twenty titled lines at 12 × 8 in; a 2 × 2 grid with long y tick labels in its first column
+//! and a wide last x tick label reaching into the gap; a 2 × 3 grid whose first axes spans both
+//! rows, with an empty column beside it.
 //!
 //! In `errors/grid.txt`: every error branch of `Grid::new`, `Grid::cells`,
 //! `Figure::add_axes_at` (in the order the checks run, with the figure's state after each
 //! failed call), `Figure::axes_at`, `Figure::axes_at_mut` and `Axes::check_scales`; the axes
 //! found at each cell; and layout errors on a grid, which name the axes' top-left cell.
+//!
+//! In `errors/grid-room.txt`: the room errors of a grid (too narrow for its columns, y tick
+//! labels of one column, x tick labels, too short for its rows) and texts wider than their
+//! panel, each next to the size just large enough to render.
 
 use umber_core::figure::{AreaOptions, AxisData, BarOptions, HistOptions, LineOptions};
 use umber_core::{
@@ -29,6 +35,12 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             ("grid-2x2-span", spanning(theme.clone())),
             ("grid-3x1", three_by_one(theme.clone())),
             ("grid-2x2-empty", with_empty_cell(theme.clone())),
+            ("grid-4x5-lines", twenty_lines(theme.clone())),
+            ("grid-2x2-long-y", long_y_labels(theme.clone())),
+            (
+                "grid-2x3-span-empty",
+                span_beside_empty_column(theme.clone()),
+            ),
         ] {
             emit_scene(
                 &format!("{name}-{theme_name}"),
@@ -41,6 +53,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         kind: "errors",
         file: "grid.txt".into(),
         bytes: grid_errors(lib).into_bytes(),
+    });
+    sink(Output {
+        kind: "errors",
+        file: "grid-room.txt".into(),
+        bytes: grid_room_errors(lib).into_bytes(),
     });
 }
 
@@ -177,6 +194,189 @@ fn with_empty_cell(theme: Theme) -> Figure {
         .area(AxisData::Numbers(x), &y, AreaOptions::default())
         .unwrap();
     f
+}
+
+/// Twenty titled lines on a 4 × 5 grid at 12 × 8 in.
+fn twenty_lines(theme: Theme) -> Figure {
+    let mut f = Figure::with_grid(12.0, 8.0, theme, Grid::new(4, 5).unwrap()).unwrap();
+    for i in 0..20_i64 {
+        let (x, y) = wobble(97, 50 + i as u32);
+        f.add_axes_at(at(i / 5, i % 5, 1, 1), linear(), linear())
+            .unwrap()
+            .title(&format!("Sensor {}", i + 1))
+            .line(AxisData::Numbers(x), &y, line())
+            .unwrap();
+    }
+    f
+}
+
+/// Long y tick labels in the first column, and a wide last x tick label in the top left axes
+/// that reaches into the gap.
+fn long_y_labels(theme: Theme) -> Figure {
+    let mut f = grid_figure(2, 2, theme);
+    for (row, col) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+        let (x, y) = wobble(30, 60 + (2 * row + col) as u32);
+        let mut axes = f
+            .add_axes_at(at(row, col, 1, 1), linear(), linear())
+            .unwrap();
+        axes.title(&format!("Panel {row}, {col}"))
+            .line(AxisData::Numbers(x), &y, line())
+            .unwrap();
+    }
+    f.axes_at_mut(GridIndex::At(1), GridIndex::At(0))
+        .unwrap()
+        .yticks_labeled(
+            &[-2.0, 0.0, 2.0],
+            names(&["far below target", "on target", "far above target"]),
+        )
+        .unwrap();
+    f.axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+        .unwrap()
+        .xticks_labeled(
+            &[0.0, 15.0, 29.0],
+            names(&["start", "middle", "end of the month, day 30"]),
+        )
+        .unwrap();
+    f
+}
+
+/// An axes spanning both rows of the first column, an empty middle column, and two axes in
+/// the last column.
+fn span_beside_empty_column(theme: Theme) -> Figure {
+    let mut f = grid_figure(2, 3, theme);
+    let (x, y) = wobble(80, 70);
+    f.add_axes_at(at(0, 0, 2, 1), linear(), linear())
+        .unwrap()
+        .title("Tall")
+        .ylabel("Level")
+        .line(AxisData::Numbers(x), &y, line())
+        .unwrap();
+    for row in 0..2 {
+        let (x, y) = wobble(20, 71 + row as u32);
+        f.add_axes_at(at(row, 2, 1, 1), linear(), linear())
+            .unwrap()
+            .title(&format!("Detail {}", row + 1))
+            .xlabel("Step")
+            .scatter(AxisData::Numbers(x), &y, scatter())
+            .unwrap();
+    }
+    f
+}
+
+/// A `rows × cols` figure `width_pt` by `height_pt` points, with an axes in every cell holding a
+/// line and no tick labels.
+fn bare_grid(rows: i64, cols: i64, width_pt: f64, height_pt: f64) -> Figure {
+    let grid = Grid::new(rows, cols).unwrap();
+    let mut f =
+        Figure::with_grid(width_pt / 72.0, height_pt / 72.0, Theme::pigment(), grid).unwrap();
+    for row in 0..rows {
+        for col in 0..cols {
+            f.add_axes_at(at(row, col, 1, 1), linear(), linear())
+                .unwrap()
+                .xticks(&[])
+                .unwrap()
+                .yticks(&[])
+                .unwrap()
+                .line(AxisData::Numbers(vec![0.0, 1.0]), &[0.0, 1.0], line())
+                .unwrap();
+        }
+    }
+    f
+}
+
+/// The room errors of grids, each next to the size just large enough to render.
+fn grid_room_errors(lib: &FontLibrary) -> String {
+    let mut rec = Log::default();
+    let render = |rec: &mut Log, label: &str, f: &Figure| {
+        rec.result(label, f.to_scene(lib).map(drop), |()| String::new());
+    };
+
+    rec.section("Too narrow for the columns");
+    for width in [74.0, 75.0] {
+        render(
+            &mut rec,
+            &format!("1 × 3 at {width} pt"),
+            &bare_grid(1, 3, width, 288.0),
+        );
+    }
+    for width in [24.0, 25.0] {
+        render(
+            &mut rec,
+            &format!("3 × 1 at {width} pt"),
+            &bare_grid(3, 1, width, 288.0),
+        );
+    }
+
+    rec.section("y tick labels of one column");
+    for width in [150.0, 400.0] {
+        let mut f = bare_grid(1, 3, width, 288.0);
+        f.axes_at_mut(GridIndex::At(0), GridIndex::At(2))
+            .unwrap()
+            .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(12)])
+            .unwrap();
+        render(&mut rec, &format!("1 × 3 at {width} pt"), &f);
+    }
+
+    rec.section("x tick labels");
+    for width in [60.0, 400.0] {
+        let mut f = bare_grid(1, 2, width, 288.0);
+        f.axes_at_mut(GridIndex::At(0), GridIndex::At(1))
+            .unwrap()
+            .xticks_labeled(&[0.0, 1.0], vec!["W".repeat(10), "1".into()])
+            .unwrap();
+        render(&mut rec, &format!("1 × 2 at {width} pt"), &f);
+    }
+
+    rec.section("Too short for the rows");
+    for height in [49.0, 50.0] {
+        render(
+            &mut rec,
+            &format!("2 × 1 at {height} pt"),
+            &bare_grid(2, 1, 288.0, height),
+        );
+    }
+    for height in [24.0, 25.0] {
+        render(
+            &mut rec,
+            &format!("1 × 2 at {height} pt"),
+            &bare_grid(1, 2, 288.0, height),
+        );
+    }
+    let mut f = bare_grid(2, 2, 288.0, 90.0);
+    f.axes_at_mut(GridIndex::At(1), GridIndex::At(1))
+        .unwrap()
+        .title("Load")
+        .subtitle("Daily mean");
+    render(&mut rec, "2 × 2 at 90 pt with a title and subtitle", &f);
+
+    rec.section("Texts wider than their panel");
+    /// Sets one text of an axes.
+    type SetText = fn(&mut umber_core::AxesMut<'_>, &str);
+    let texts: [(&str, SetText); 4] = [
+        ("title", |a, t| {
+            a.title(t);
+        }),
+        ("subtitle", |a, t| {
+            a.subtitle(t);
+        }),
+        ("xlabel", |a, t| {
+            a.xlabel(t);
+        }),
+        ("ylabel", |a, t| {
+            a.ylabel(t);
+        }),
+    ];
+    for (name, set) in texts {
+        for width in [200.0, 864.0] {
+            let mut f = bare_grid(1, 2, width, 288.0);
+            set(
+                &mut f.axes_at_mut(GridIndex::At(0), GridIndex::At(0)).unwrap(),
+                &"W".repeat(10),
+            );
+            render(&mut rec, &format!("{name} on 1 × 2 at {width} pt"), &f);
+        }
+    }
+    rec.out
 }
 
 /// The axes found at a cell, by its cells and title.

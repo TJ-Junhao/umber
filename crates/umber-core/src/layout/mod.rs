@@ -14,19 +14,24 @@
 //! tall.
 //! With figures of at most 200 in a side this keeps every coordinate far below the renderers'
 //! `MAX_COORD`.
+//!
+//! Every panel of a figure is laid out by one solve ([`grid::solve_grid`]): each panel is
+//! measured ([`panel::measure_panel`]), the solve chooses every plot area at once, and each
+//! panel is placed for its plot area ([`panel::place_panel`]).
 
+mod grid;
 mod inset;
 mod legend;
 mod nudge;
 mod panel;
 
+pub(crate) use grid::{GridInput, solve_grid};
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry};
-use panel::PanelBands;
-pub(crate) use panel::{Edges, Frame};
+pub(crate) use panel::{Frame, PanelBands, measure_panel, place_panel};
 
 use crate::error::{number, quoted};
-use crate::model::{Axes, CellRange, Grid};
-use crate::resolve::{AxisTick, NormalizedPos, Resolved};
+use crate::model::Axes;
+use crate::resolve::{AxisTick, NormalizedPos};
 use crate::{Error, FontLibrary, Result, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
@@ -141,8 +146,8 @@ impl Label {
 pub(crate) struct Layout {
     /// The plot area.
     pub plot: Area,
-    /// Where the header ends, gap included, as an absolute canvas y; `frame.y + PADDING` when
-    /// the header is empty.
+    /// Where the header ends, gap included, as an absolute canvas y; the header's top when the
+    /// header is empty.
     #[allow(dead_code, reason = "read by tests")]
     pub header_bottom: f64,
     /// The title, if not empty.
@@ -167,7 +172,9 @@ pub(crate) struct Layout {
     pub x_grid: Vec<f64>,
     /// The y coordinate of the baseline.
     pub baseline_y: f64,
-    /// The frame the axes were placed in: the canvas for a single axes.
+    /// The part of the canvas that belongs to the axes: the whole canvas for a figure of one
+    /// axes; on a grid, the axes' cells with their bands, reaching halfway into the gap next to
+    /// a neighbouring cell and to the canvas edge on the grid's outer sides.
     pub frame: Frame,
 }
 
@@ -342,14 +349,11 @@ pub(crate) fn initial_plot_size(width: f64, height: f64) -> PlotSize {
 /// for every layout pass.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LayoutInput<'a> {
-    /// The canvas width, in points, which the legend row and the room direct labels reserve
-    /// are measured for.
-    pub width: f64,
     /// The theme.
     pub theme: &'a Theme,
-    /// The axes, for their texts.
+    /// The axes, for their texts and cells.
     pub axes: &'a Axes,
-    /// The legend, measured by [`MeasuredLegend::measure`] for this canvas width.
+    /// The legend, measured by [`MeasuredLegend::measure`].
     pub legend: &'a MeasuredLegend<'a>,
     /// The fonts.
     pub lib: &'a FontLibrary,
@@ -381,10 +385,20 @@ fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str
     }
 }
 
-/// Lays out the axes of `input` for already resolved scales, alone in `frame`, whose sides on
-/// the canvas edge `edges` names: measures them ([`panel::measure_panel`]), chooses the plot
-/// area ([`solve_panel`]) and places everything for it ([`panel::place_panel`]). The frame of
-/// a figure with one axes is the whole canvas, on every edge; see [`panel_frame`].
+/// The plot area of the only panel of a figure of one cell, `input`, in `frame`, the whole
+/// canvas, for the texts measured in `bands`.
+///
+/// The header is stacked from the top padding, and the plot starts below it, the y label and
+/// the rise of the top y tick label. The plot starts right of the y tick labels and ends left
+/// of the room direct labels reserve. The x tick labels are centered on their ticks; they may
+/// reach into the outer padding, up to [`X_LABEL_EDGE_GAP`] from the canvas edge. Where one
+/// would reach further, the plot edge on that side moves in by exactly the overflow. Each side
+/// moves in by at most [`END_LABEL_SHARE`] of the inner width beyond the padding; labels that
+/// need more are an error. Direct labels reserve room under the same cap. Under the plot are
+/// the x tick labels, the x label and the bottom padding.
+///
+/// The canvas starts at 0, so every sum here is evaluated as for a figure of one axes before
+/// figures had grids, and the plot area is the same to the bit.
 ///
 /// # Errors
 ///
@@ -392,98 +406,15 @@ fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str
 /// - the room between the y tick labels and the right padding (less what direct labels
 ///   reserve) is narrower than [`MIN_PLOT`], with or without x tick labels: the message names
 ///   the widest y tick label when narrower ones would leave room, and otherwise the width the
-///   frame needs (see [`no_room_for_plot`]);
-/// - the x tick labels cannot all keep within their bounds (see [`solve_panel`]) on a plot at
-///   least [`MIN_PLOT`] wide, with each side of the plot inset by at most [`END_LABEL_SHARE`]
-///   of the frame's inner width: the message names the widest x tick label, its width and the
-///   width up to which labels fit;
+///   canvas needs (see [`no_room_for_plot`]);
+/// - the x tick labels cannot all keep within their bounds on a plot at least [`MIN_PLOT`]
+///   wide, with each side of the plot inset by at most [`END_LABEL_SHARE`] of the inner width:
+///   the message names the widest x tick label, its width and the width up to which labels fit;
 /// - the room between the header (title, subtitle and legend row), the y label and the y tick
 ///   label rising above the top tick, and the x tick labels, the x label and the bottom padding
-///   is shorter than [`MIN_PLOT`]: the message names the height the frame needs, and the hint
+///   is shorter than [`MIN_PLOT`]: the message names the height the canvas needs, and the hint
 ///   names only the header parts the axes have (see [`figure_too_short`]).
-pub(crate) fn lay_out_in(
-    input: &LayoutInput<'_>,
-    resolved: &Resolved,
-    frame: Frame,
-    edges: Edges,
-) -> Result<Layout> {
-    let bands = panel::measure_panel(input, resolved);
-    let plot = solve_panel(input, &bands, frame, edges)?;
-    Ok(panel::place_panel(input, resolved, bands, frame, plot))
-}
-
-/// The frame of the axes covering `cells` on `grid`, on a `width` by `height` pt canvas, and
-/// which of its sides lie on the canvas edge.
-///
-/// The canvas inside the outer padding is split into the grid's equal cells, with no gap
-/// between them. The frame is the rectangle of the covered cells with [`PADDING`] added on
-/// every side, so that the axes, laid out inside the frame's padding, fill their cells; on a
-/// canvas edge the frame ends at the canvas edge itself. A 1 × 1 grid's frame is therefore the
-/// canvas, to the bit. Frames of neighbouring axes overlap by twice the padding.
-pub(crate) fn panel_frame(
-    width: f64,
-    height: f64,
-    grid: &Grid,
-    cells: CellRange,
-) -> (Frame, Edges) {
-    let (left, right) = frame_span(width, grid.cols(), cells.col(), cells.col_span());
-    let (top, bottom) = frame_span(height, grid.rows(), cells.row(), cells.row_span());
-    let frame = Frame {
-        x: left,
-        y: top,
-        width: right - left,
-        height: bottom - top,
-    };
-    let edges = Edges {
-        left: cells.col() == 0,
-        right: cells.col() + cells.col_span() == grid.cols(),
-        top: cells.row() == 0,
-        bottom: cells.row() + cells.row_span() == grid.rows(),
-    };
-    (frame, edges)
-}
-
-/// Along one side of the canvas, `extent` pt long and split inside the padding into `count`
-/// equal cells: the start and end of the frame of `span` cells from cell `first` (see
-/// [`panel_frame`]). A frame on a canvas edge starts or ends exactly there.
-fn frame_span(extent: f64, count: usize, first: usize, span: usize) -> (f64, f64) {
-    let cell = (extent - 2.0 * PADDING) / count as f64;
-    let last = first + span;
-    // The cell boundary less the padding before a frame, plus the padding after it.
-    let start = if first == 0 { 0.0 } else { first as f64 * cell };
-    let end = if last == count {
-        extent
-    } else {
-        2.0 * PADDING + last as f64 * cell
-    };
-    (start, end)
-}
-
-/// The plot area of the panel of `input` in `frame`, for the texts measured in `bands`.
-///
-/// The header is stacked from the frame's top padding, and the plot starts below it, the y
-/// label and the rise of the top y tick label. The plot starts right of the y tick labels and
-/// ends left of the room direct labels reserve. The x tick labels are centered on their ticks.
-/// On a side of the frame that lies on the canvas edge (see `edges`) they may reach into the
-/// outer padding, up to [`X_LABEL_EDGE_GAP`] from the canvas edge; on any other side they
-/// stay inside the frame's padding, within the cells. Where one would reach further, the plot
-/// edge on that side moves in by exactly the overflow. Each side moves in by at most
-/// [`END_LABEL_SHARE`] of the frame's inner width beyond the padding; labels that need more
-/// are an error. Direct labels reserve room under the same cap. Under the plot are the x tick
-/// labels, the x label and the bottom padding.
-///
-/// With the canvas as the frame, every sum here starts from 0 and is evaluated in the order of
-/// a figure of one axes, so the plot area is the same to the bit.
-///
-/// # Errors
-///
-/// As [`lay_out_in`].
-fn solve_panel(
-    input: &LayoutInput<'_>,
-    bands: &PanelBands,
-    frame: Frame,
-    edges: Edges,
-) -> Result<Area> {
+fn solve_single(input: &LayoutInput<'_>, bands: &panel::PanelBands, frame: Frame) -> Result<Area> {
     let LayoutInput {
         legend, context, ..
     } = *input;
@@ -502,16 +433,8 @@ fn solve_panel(
         right,
         left_max: left.max(frame.x + PADDING + cap),
         right_min: right.min(frame.right() - PADDING - cap),
-        lo: if edges.left {
-            frame.x + X_LABEL_EDGE_GAP
-        } else {
-            frame.x + PADDING
-        },
-        hi: if edges.right {
-            frame.right() - X_LABEL_EDGE_GAP
-        } else {
-            frame.right() - PADDING
-        },
+        lo: frame.x + X_LABEL_EDGE_GAP,
+        hi: frame.right() - X_LABEL_EDGE_GAP,
         min_width: MIN_PLOT,
     };
     // Every layout first needs a plot at least `MIN_PLOT` wide between the y tick labels and
@@ -713,9 +636,19 @@ fn x_labels_overflow(
     room: &inset::Room,
     spans: &[inset::TickSpan],
 ) -> Error {
+    x_labels_wider_than(context, labels, inset::widest_label_that_fits(room, spans))
+}
+
+/// The error for x tick `labels` that cannot fit, when labels up to `fits` pt wide would: as
+/// [`x_labels_overflow`].
+fn x_labels_wider_than(
+    context: &'static str,
+    labels: &[(NormalizedPos, Label)],
+    fits: f64,
+) -> Error {
     // Without labels the room's own edges fit: layout checks that first.
     let (text, label_width) = widest(labels).map_or(("", 0.0), |l| (l.text.as_str(), l.width()));
-    let fits = inset::widest_label_that_fits(room, spans).floor();
+    let fits = fits.floor();
     Error::style(
         context,
         format!(
@@ -733,8 +666,8 @@ mod tests {
     use super::*;
     use crate::ScaleKind;
     use crate::model::{AxesMut, AxisData, Figure, LineOptions, ScatterOptions};
-    use crate::model::{CellRange, Grid};
     use crate::pipeline::plan_figure;
+    use crate::resolve::Resolved;
     use crate::test_support::named_height;
     use crate::test_support::scene::assert_scene_bounded;
 
@@ -1991,59 +1924,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn a_single_cell_is_framed_by_the_whole_canvas() {
-        let every_edge = Edges {
-            left: true,
-            right: true,
-            top: true,
-            bottom: true,
-        };
-        for (width, height) in [(432.0, 288.0), (0.3 * 72.0, 1.7 * 72.0), (14_400.0, 21.6)] {
-            let (frame, edges) =
-                panel_frame(width, height, &Grid::SINGLE, CellRange::new(0, 0, 1, 1));
-            let bits = |f: Frame| [f.x, f.y, f.width, f.height].map(f64::to_bits);
-            let canvas = Frame {
-                x: 0.0,
-                y: 0.0,
-                width,
-                height,
-            };
-            assert_eq!(bits(frame), bits(canvas));
-            assert_eq!(edges, every_edge);
-        }
-    }
-
-    #[test]
-    fn grid_frames_split_the_canvas_inside_the_padding() {
-        // 2 × 3 cells on 12 × 8 in: inside the padding the canvas is 840 × 552 pt, so each cell
-        // is 280 × 276 pt. A frame is its cells with the padding around them, cut at the canvas
-        // edges.
-        let grid = Grid::new(2, 3).unwrap();
-        let frame = |row, col, row_span, col_span| {
-            let cells = CellRange::new(row, col, row_span, col_span);
-            let (f, e) = panel_frame(864.0, 576.0, &grid, cells);
-            (
-                [f.x, f.y, f.right(), f.bottom()],
-                [e.left, e.right, e.top, e.bottom],
-            )
-        };
-        assert_eq!(
-            frame(0, 0, 1, 1),
-            ([0.0, 0.0, 304.0, 300.0], [true, false, true, false])
-        );
-        assert_eq!(
-            frame(1, 1, 1, 1),
-            ([280.0, 276.0, 584.0, 576.0], [false, false, false, true])
-        );
-        assert_eq!(
-            frame(0, 1, 2, 2),
-            ([280.0, 0.0, 864.0, 576.0], [false, true, true, true])
-        );
-        // The axes inside a frame start one padding in: at their cells' top-left corner.
-        let (f, _) = panel_frame(864.0, 576.0, &grid, CellRange::new(1, 2, 1, 1));
-        assert_eq!((f.x + PADDING, f.y + PADDING), (572.0, 288.0));
     }
 }

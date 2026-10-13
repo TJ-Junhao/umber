@@ -2667,6 +2667,7 @@ fn theme_cases() -> String {
     for (name, theme) in themes().into_iter().chain([("default", Theme::default())]) {
         let _ = writeln!(out, "theme {name}");
         out.push_str(&record::theme(&theme));
+        let _ = writeln!(out, "  panel_gap {}", record::f32(theme.panel_gap()));
     }
     out
 }

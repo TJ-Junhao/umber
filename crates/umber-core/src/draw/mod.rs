@@ -196,9 +196,12 @@ pub(crate) fn marks(
 ///
 /// The widening never takes more than the free room beside the plot area
 /// ([`Layout::room_left`], [`Layout::room_right`]): on the left it stops at the y tick labels
-/// (or the canvas edge without them), on the right at the canvas edge. The layout does not make
-/// room for the caps, so a line wide enough for half its stroke to exceed the gap between the
-/// plot and the y tick labels, or the outer padding on the right, still has its cap cut there.
+/// (or the frame's edge without them), on the right at the frame's edge. The frame is the
+/// canvas for a figure of one axes; on a grid it ends halfway into the gap next to a
+/// neighbouring cell, so a line's cap never reaches into another panel's cells, and at the
+/// canvas edge on the grid's outer sides. The layout does not make room for the caps, so a
+/// line wide enough for half its stroke to exceed the gap between the plot and the y tick
+/// labels, or the room up to the frame's edge on the right, still has its cap cut there.
 ///
 /// Every line is clipped in axis space against a margin of at least the widest stroke width
 /// and its own (see the module documentation), so each line, thin ones next to a thick one

@@ -2,10 +2,11 @@
 //! reserved on the right for direct labels.
 //!
 //! The legend row sits in the header, under the subtitle, left-aligned with the title. Its
-//! entries are laid out left to right and wrap onto further rows within the inner width (the
-//! canvas inside the outer padding); an entry wider than a whole row gets a row of its own and
-//! is clipped by the canvas. All rows have the height of the tallest entry. The row depends only
-//! on the canvas width, so it is measured once and then placed by each layout pass.
+//! entries are laid out left to right and wrap onto further rows within the width the panel
+//! gives it: the inner width (the canvas inside the outer padding) for a figure of one axes, the
+//! plot width on a grid. An entry wider than a whole row gets a row of its own and is clipped by
+//! the canvas. All rows have the height of the tallest entry. The entries are measured once;
+//! each layout pass wraps and places them.
 //!
 //! A plain entry is its swatch and its label. A chip is a pill as tall as the row, holding a dot
 //! and the label inside a horizontal padding. Both styles wrap the same way: an entry box is
@@ -18,7 +19,7 @@
 //! anchors move with the axes, so they are placed in every layout pass.
 
 use super::nudge::separate;
-use super::{Area, BODY_LINE, Frame, Label, PADDING, Styles, baseline_in_line, measure, metrics};
+use super::{Area, BODY_LINE, Frame, Label, Styles, baseline_in_line, measure, metrics};
 use crate::legend::{Legend, RowStyle, Swatch};
 use crate::resolve::{
     Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis,
@@ -100,9 +101,29 @@ pub(crate) struct LegendRow {
     rows: usize,
 }
 
-impl LegendRow {
-    /// The row entries of `legend`, measured in the body font and wrapped within the inner
-    /// width of a `width` pt canvas, with the first row's top at 0.
+/// The entries of a legend row, measured but not yet wrapped into rows: the same for every
+/// width the row is wrapped to (see [`MeasuredRow::wrap`]).
+#[derive(Debug, Clone)]
+pub(crate) struct MeasuredRow {
+    /// The entries, sized, in series order; their positions are set by [`MeasuredRow::wrap`].
+    entries: Vec<RowEntry>,
+    /// How the entries are drawn.
+    row_style: RowStyle,
+    /// The padding at each end of an entry box: a chip's, or 0.
+    padding_x: f64,
+    /// The gap between two entry boxes in a row.
+    entry_gap: f64,
+    /// The height of one row.
+    row_height: f64,
+    /// The ascent of the label style's primary font.
+    ascent: f64,
+    /// The descent of the label style's primary font.
+    descent: f64,
+}
+
+impl MeasuredRow {
+    /// The row entries of `legend`, measured in the body font; `None` when the legend has no
+    /// row entries.
     ///
     /// A plain entry is its swatch, a 4 pt gap and its label, and entries are 12 pt apart.
     /// Swatches are sized as their series are drawn: a line as tall as the series' drawn line
@@ -116,11 +137,9 @@ impl LegendRow {
     ///
     /// A chip is a pill one body line plus `2 × 3` pt tall, holding a dot of `0.6 ×` the label
     /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
-    ///
-    /// Rows are 4 pt apart in both styles, and swatches and labels are centered in them.
-    pub fn measure(width: f64, theme: &Theme, legend: &Legend, lib: &FontLibrary) -> LegendRow {
+    pub fn measure(theme: &Theme, legend: &Legend, lib: &FontLibrary) -> Option<MeasuredRow> {
         if legend.row().is_empty() {
-            return LegendRow::default();
+            return None;
         }
         let style = Styles::new(theme).body;
         let size = f64::from(style.size);
@@ -134,7 +153,7 @@ impl LegendRow {
                 BODY_LINE * size + 2.0 * CHIP_PADDING_Y,
             ),
         };
-        let mut entries: Vec<RowEntry> = legend
+        let entries: Vec<RowEntry> = legend
             .row()
             .iter()
             .map(|entry| {
@@ -155,18 +174,42 @@ impl LegendRow {
                 }
             })
             .collect();
-
         let row_height = entries
             .iter()
             .map(|entry| entry.swatch.height)
             .fold(line, f64::max);
-        let right = width - PADDING;
-        let (mut x, mut row, mut row_used) = (PADDING, 0_usize, false);
+        Some(MeasuredRow {
+            entries,
+            row_style,
+            padding_x,
+            entry_gap,
+            row_height,
+            ascent,
+            descent,
+        })
+    }
+
+    /// The entries laid out left to right from `left`, wrapping onto a further row before an
+    /// entry that would end right of `right`, with the first row's top at 0. An entry wider
+    /// than a whole row gets a row of its own. Rows are 4 pt apart in both styles, and
+    /// swatches and labels are centered in them.
+    pub fn wrap(&self, left: f64, right: f64) -> LegendRow {
+        let MeasuredRow {
+            row_style,
+            padding_x,
+            entry_gap,
+            row_height,
+            ascent,
+            descent,
+            ..
+        } = *self;
+        let mut entries = self.entries.clone();
+        let (mut x, mut row, mut row_used) = (left, 0_usize, false);
         for entry in &mut entries {
             let (inset, entry_width) = entry_extent(row_style, padding_x, row_height, entry);
             if row_used && x + entry_width > right {
                 row += 1;
-                x = PADDING;
+                x = left;
             }
             let top = row_top(row, row_height);
             #[cfg(test)]
@@ -192,7 +235,9 @@ impl LegendRow {
             rows: row + 1,
         }
     }
+}
 
+impl LegendRow {
     /// This row moved down so that its first row's top is at `top`.
     pub(super) fn placed(&self, top: f64) -> LegendRow {
         let entries = self
@@ -230,32 +275,35 @@ impl LegendRow {
     }
 }
 
-/// The legend of one axes measured for one canvas width: its row and its direct labels. It is
-/// measured once, and each layout pass places it.
+/// The legend of one axes, measured: its row entries and its direct labels. It is measured
+/// once; each layout pass wraps the row to the width the panel gives it and places both.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct MeasuredLegend<'a> {
-    /// The legend row, with its first row's top at 0.
-    pub row: LegendRow,
+    /// The legend row's entries, not yet wrapped; `None` without row entries.
+    pub row: Option<MeasuredRow>,
     /// The direct labels, not yet placed.
     pub direct: DirectLabels<'a>,
 }
 
 impl<'a> MeasuredLegend<'a> {
-    /// The row and the direct labels of `legend`, measured for a `width` pt canvas; see
-    /// [`LegendRow::measure`] and [`DirectLabels::measure`].
-    pub fn measure(
-        width: f64,
-        theme: &Theme,
-        legend: &Legend<'a>,
-        lib: &FontLibrary,
-    ) -> MeasuredLegend<'a> {
+    /// The row entries and the direct labels of `legend`, measured; see
+    /// [`MeasuredRow::measure`] and [`DirectLabels::measure`].
+    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &FontLibrary) -> MeasuredLegend<'a> {
         if legend.is_empty() {
             return MeasuredLegend::default();
         }
         MeasuredLegend {
-            row: LegendRow::measure(width, theme, legend, lib),
+            row: MeasuredRow::measure(theme, legend, lib),
             direct: DirectLabels::measure(theme, legend, lib),
         }
+    }
+
+    /// The legend row wrapped within `left..right` (see [`MeasuredRow::wrap`]); empty without
+    /// row entries.
+    pub fn row_within(&self, left: f64, right: f64) -> LegendRow {
+        self.row
+            .as_ref()
+            .map_or_else(LegendRow::default, |row| row.wrap(left, right))
     }
 }
 
@@ -458,7 +506,7 @@ fn entry_extent(
 /// A plain row keeps the entry's swatch at the size its series is drawn at, so each box is
 /// exactly what the drawing fills or strokes; the drawn sizes are finite and capped, and so is
 /// the label size. A line swatch is `10 ×` the theme's drawn line width long, whatever the
-/// series' width (see [`LegendRow::measure`]), and stroked at the series' width up to the side
+/// series' width (see [`MeasuredRow::measure`]), and stroked at the series' width up to the side
 /// of a square swatch (`0.8 ×` the label size) and up to its own length: a thicker line shows
 /// as a bar of that height, and its round caps fit the box, so its stroke never spills out of
 /// its box onto the label. A chips row always draws a dot of
@@ -496,6 +544,7 @@ fn swatch_size(
 
 #[cfg(test)]
 mod tests {
+    use super::super::PADDING;
     use super::*;
     use crate::model::{AxisData, Figure, LineOptions};
     use crate::pipeline::{plan_figure, try_plan_figure};
