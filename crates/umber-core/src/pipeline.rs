@@ -60,13 +60,14 @@ fn measure_legend<'a>(
 /// padding for a figure of one cell); the second uses each panel's plot size from the first,
 /// and is final. Each pass resolves every panel from its marks for its tick targets, measures
 /// it ([`layout::measure_panel`]) and solves the grid ([`layout::solve_grid`]); the panels are
-/// then placed for the final solve ([`layout::place_panel`]). Layout errors are reported in
-/// `context`.
+/// then placed for the final solve ([`layout::place_panel`]), and on a grid the texts of every
+/// panel are checked to stay in its cells ([`layout::check_panel_contents`]). Layout errors are
+/// reported in `context`.
 ///
 /// # Errors
 ///
 /// As [`layout::solve_grid`], from either pass: the second pass needs the plot sizes of the
-/// first.
+/// first; then as [`layout::check_panel_contents`], for the final layout only.
 fn plan(
     figure: &Figure,
     panels: &[Panel<'_>],
@@ -121,7 +122,7 @@ fn plan(
     let sizes = first.panels.iter().map(|slot| slot.plot.size()).collect();
     let (resolved, bands) = pass(sizes);
     let solution = layout::solve_grid(&grid, &bands)?;
-    Ok(inputs
+    let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = inputs
         .iter()
         .zip(resolved)
         .zip(bands)
@@ -130,7 +131,9 @@ fn plan(
             let layout = layout::place_panel(input, &resolved, bands, slot);
             (resolved, layout)
         })
-        .collect())
+        .unzip();
+    layout::check_panel_contents(&grid, &layouts)?;
+    Ok(resolved.into_iter().zip(layouts).collect())
 }
 
 /// [`plan`] for the axes of `figure` whose top-left cell is at `cell`, with the figure laid out

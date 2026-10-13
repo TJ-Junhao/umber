@@ -65,14 +65,19 @@ pub(crate) struct HeaderBox {
     pub top: f64,
 }
 
-/// Where a panel goes on the canvas: its plot area, its header box and its frame, the part of
-/// the canvas that belongs to it (the whole canvas for a figure of one axes).
+/// Where a panel goes on the canvas: its plot area, its header box, the baseline of its x axis
+/// label and its frame, the part of the canvas that belongs to it (the whole canvas for a
+/// figure of one axes).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PanelSlot {
     /// The plot area.
     pub plot: Area,
     /// The header box.
     pub header: HeaderBox,
+    /// The baseline of the x axis label: under the panel's own x tick labels for a figure of
+    /// one axes, and on a grid at the bottom of its row's band below the plots, so that the x
+    /// axis labels of one grid row line up.
+    pub xlabel_baseline: f64,
     /// The frame.
     pub frame: Frame,
 }
@@ -227,6 +232,8 @@ pub(crate) struct PanelBands {
     pub x_band: f64,
     /// The x axis label row and its gap; 0 without an x axis label.
     pub x_title_band: f64,
+    /// How far the bottom y tick label reaches below the plot; 0 without y tick labels.
+    pub label_drop: f64,
     /// The x tick labels as normalized positions and half widths, in tick order.
     pub x_spans: Vec<TickSpan>,
     /// The header, measured, with the legend row wrapped as [`measure_panel`] was asked.
@@ -238,15 +245,17 @@ pub(crate) struct PanelBands {
     /// The x tick labels at their ticks' positions, not yet placed.
     pub(super) x_labels: Vec<(NormalizedPos, Label)>,
     /// The x axis label, not yet placed; `None` when it is empty.
-    pub(super) xlabel: Option<Label>,
+    xlabel: Option<Label>,
     /// The y axis label, not yet placed; `None` when it is empty.
-    pub(super) ylabel: Option<Label>,
+    ylabel: Option<Label>,
     /// The ascent of the tick label style's primary font.
     tick_ascent: f64,
     /// The tick label size.
     tick_size: f64,
     /// The ascent of the body style's primary font.
-    body_ascent: f64,
+    pub(super) body_ascent: f64,
+    /// The descent of the body style's primary font.
+    pub(super) body_descent: f64,
 }
 
 impl PanelBands {
@@ -260,19 +269,10 @@ impl PanelBands {
         self.header_with_row(row) + self.y_label_band + self.label_rise
     }
 
-    /// Everything below the plot: the x tick label row and the x label row.
+    /// Everything below the plot: the x tick label row and the x label row, or the bottom y
+    /// tick label reaching below the plot when that reaches further.
     pub(super) fn below(&self) -> f64 {
-        self.x_band + self.x_title_band
-    }
-
-    /// The title, measured; `None` when it is empty.
-    pub(super) fn title(&self) -> Option<&Label> {
-        self.heading.title.as_ref().map(|line| &line.label)
-    }
-
-    /// The subtitle, measured; `None` when it is empty.
-    pub(super) fn subtitle(&self) -> Option<&Label> {
-        self.heading.subtitle.as_ref().map(|line| &line.label)
+        (self.x_band + self.x_title_band).max(self.label_drop)
     }
 }
 
@@ -327,11 +327,15 @@ pub(crate) fn measure_panel(
         .map(|(_, label)| label.width())
         .fold(0.0, f64::max);
 
-    // How far the y tick label of a tick at the plot top reaches above it.
-    let label_rise = if y_labels.is_empty() {
-        0.0
+    // How far the y tick label of a tick at the plot top reaches above it, and that of a tick
+    // at the plot bottom below it.
+    let (label_rise, label_drop) = if y_labels.is_empty() {
+        (0.0, 0.0)
     } else {
-        (tick_ascent - Y_LABEL_CENTER * tick_size).max(0.0)
+        (
+            (tick_ascent - Y_LABEL_CENTER * tick_size).max(0.0),
+            (Y_LABEL_CENTER * tick_size + tick_descent).max(0.0),
+        )
     };
 
     let xlabel =
@@ -376,6 +380,7 @@ pub(crate) fn measure_panel(
         direct_reserve: legend.direct.reserve(span.reserve_cap),
         x_band,
         x_title_band,
+        label_drop,
         x_spans,
         heading,
         y_labels,
@@ -386,6 +391,7 @@ pub(crate) fn measure_panel(
         tick_ascent,
         tick_size,
         body_ascent,
+        body_descent,
     }
 }
 
@@ -410,11 +416,11 @@ pub(crate) fn place_panel(
     let PanelSlot {
         plot,
         header: header_box,
+        xlabel_baseline,
         frame,
     } = *slot;
     let PanelBands {
         label_rise,
-        x_band,
         heading,
         mut y_labels,
         y_label_width,
@@ -423,7 +429,6 @@ pub(crate) fn place_panel(
         mut ylabel,
         tick_ascent,
         tick_size,
-        body_ascent,
         ..
     } = bands;
     let row = input.legend.row_within(header_box.left, header_box.right);
@@ -445,7 +450,7 @@ pub(crate) fn place_panel(
     }
     if let Some(label) = &mut xlabel {
         label.x = plot.x + plot.width / 2.0 - label.width() / 2.0;
-        label.y = plot.bottom() + x_band + AXIS_LABEL_GAP + body_ascent;
+        label.y = xlabel_baseline;
     }
     if let Some(label) = &mut ylabel {
         // Left-aligned with the left edge of the y tick label column.
@@ -794,9 +799,10 @@ mod tests {
     }
 
     /// The slot of the only axes of a figure of one cell, with the plot area `plot`.
-    fn single_slot(grid: &GridInput<'_>, plot: Area) -> PanelSlot {
+    fn single_slot(grid: &GridInput<'_>, plot: Area, bands: &PanelBands) -> PanelSlot {
         PanelSlot {
             plot,
+            xlabel_baseline: plot.bottom() + bands.x_band + AXIS_LABEL_GAP + bands.body_ascent,
             header: HeaderBox {
                 left: PADDING,
                 right: grid.width - PADDING,
@@ -825,7 +831,7 @@ mod tests {
             with_layout_input(figure, (0, 0), lib, |input, grid| {
                 let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
                 // A figure of one axes has the canvas as its frame.
-                let slot = single_slot(grid, layout.plot);
+                let slot = single_slot(grid, layout.plot, &bands);
                 assert_eq!(layout.frame, slot.frame, "{name}");
                 let placed = place_panel(input, &resolved, bands, &slot);
                 assert_layout_bits_eq(&placed, &layout, name);
@@ -903,11 +909,11 @@ mod tests {
         );
         let (resolved, layout) = plan_figure(&figure, (0, 0), lib);
         with_layout_input(&figure, (0, 0), lib, |input, grid| {
-            let mut slot = single_slot(grid, layout.plot);
+            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+            let mut slot = single_slot(grid, layout.plot, &bands);
             slot.header.left += 30.0;
             slot.header.right += 30.0;
             slot.header.top += 20.0;
-            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
             let moved = place_panel(input, &resolved, bands, &slot);
             let title = |l: &Layout| l.title.as_ref().map(|t| (t.x, t.y)).unwrap();
             let (x, y) = title(&layout);

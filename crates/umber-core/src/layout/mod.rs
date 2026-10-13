@@ -24,8 +24,9 @@ mod inset;
 mod legend;
 mod nudge;
 mod panel;
+mod program;
 
-pub(crate) use grid::{GridInput, solve_grid};
+pub(crate) use grid::{GridInput, check_panel_contents, solve_grid};
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry};
 pub(crate) use panel::{Frame, PanelBands, measure_panel, place_panel};
 

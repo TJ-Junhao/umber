@@ -53,9 +53,9 @@ impl Figure {
     /// [`panel_gap`](crate::Theme::panel_gap) separates neighbouring cells. An axes spanning
     /// several cells covers their plots and everything between them. An empty cell keeps its
     /// share of the canvas and draws nothing. Panel titles, subtitles and legend rows start at
-    /// the left edge of their plot area, and a legend row wraps within it. An x tick label may
-    /// reach halfway into the gap next to its axes; beyond that, the plots of the grid narrow
-    /// so that it fits.
+    /// the left edge of their plot area, and a legend row wraps within it; the x axis labels of
+    /// a grid row share a baseline. An x tick label may reach halfway into the gap next to its
+    /// axes; beyond that, the plots of the grid narrow so that it fits.
     ///
     /// # Errors
     ///
@@ -79,8 +79,9 @@ impl Figure {
     /// the y tick labels of one column are the cause; one too short names the height
     /// (`… pt is needed for 2 rows of plots.`). Errors about one axes' texts start with
     /// `row {r}, col {c}: `, the axes' top-left cell: its y tick labels, its x tick labels,
-    /// and a title, subtitle or axis label wider than its plot area, which would run into the
-    /// next cell (`row 0, col 1: the title is … pt wide; the panel has … pt.`).
+    /// and texts that would run into the next cell: a title, subtitle, legend row entry or axis
+    /// label wider than its plot area (`row 0, col 1: the title is … pt wide; the panel has …
+    /// pt.`), or a direct label that would end past the axes' share of the canvas.
     ///
     /// # Examples
     ///
