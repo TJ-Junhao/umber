@@ -44,7 +44,7 @@ fn narrow_limits_stay_bounded_on_every_axis_combination() {
                     _ => [1e-300, 1e300],
                 };
                 let mut f = Figure::new(6.0, 4.0, Theme::midnight()).unwrap();
-                let axes = f.add_axes(xkind, ykind).unwrap();
+                let mut axes = f.add_axes(xkind, ykind).unwrap();
                 axes.line(x.clone(), &y, LineOptions::default())
                     .unwrap()
                     .scatter(x, &y, ScatterOptions::default())
@@ -101,7 +101,7 @@ fn subpath_splitting_edge_cases() {
 
 /// The axis maps and the line clip box (in axis space) of `figure`.
 fn axis_clip(figure: &Figure) -> (AxisMaps, Bounds) {
-    let (resolved, layout) = crate::pipeline::plan_figure(figure, FontLibrary::global());
+    let (resolved, layout) = crate::pipeline::plan_figure(figure, (0, 0), FontLibrary::global());
     let maps = AxisMaps::new(&resolved.x, &resolved.y, layout.plot);
     let margin = f64::from(figure.theme().line_width()).max(2.0);
     let ((left, right), (top, bottom)) = (maps.x.expanded(margin), maps.y.expanded(margin));
@@ -223,8 +223,7 @@ fn overflowing_maps_keep_the_true_entry() {
             &[y0, 5e-11],
             LineOptions::default(),
         );
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xlim(0.0, 1e-10)
             .unwrap()
             .ylim(0.0, 1e-10)
@@ -334,7 +333,7 @@ fn axis_space_clipping_matches_the_oracle_on_every_axis_combination() {
                     y
                 };
                 let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
-                let axes = f.add_axes(xkind, ykind).unwrap();
+                let mut axes = f.add_axes(xkind, ykind).unwrap();
                 let (xdata, xa, xb) = if xkind == ScaleKind::Category {
                     // Two categories: band centers 0.25 and 0.75.
                     (

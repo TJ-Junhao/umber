@@ -20,7 +20,8 @@ THEME_HINT = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
 SVG_TEXT_HINT = "use SvgText.OUTLINES or SvgText.EDITABLE."
 CATEGORY_Y = "Figure.add_axes(): y is a category scale; the y axis must be linear or log."
 CATEGORY_Y_HINT = "pass y=Scale.linear() or y=Scale.log()."
-SECOND_AXES = "Figure.add_axes(): the figure already has axes; v0.1 supports one axes per figure."
+SECOND_AXES = "Figure.add_axes(): row 0, col 0 is taken by the axes added at row 0, col 0."
+SECOND_AXES_HINT = "each cell holds one axes; pick an empty cell."
 
 
 def _notes(err: BaseException) -> list[str]:
@@ -163,7 +164,7 @@ def test_a_second_axes_is_refused() -> None:
     with pytest.raises(ub.UsageError) as caught:
         fig.add_axes(x=ub.Scale.category())
     assert str(caught.value) == SECOND_AXES
-    assert details(caught.value) == (None, "create a new Figure for another chart.")
+    assert details(caught.value) == ("row", SECOND_AXES_HINT)
     assert fig._axes is ax
     assert fig.to_svg() == before
 
@@ -180,12 +181,12 @@ def test_a_category_y_axis_is_refused() -> None:
     fig.add_axes()  # the failed call added nothing
 
 
-def test_a_second_axes_is_reported_before_a_category_y() -> None:
+def test_a_category_y_is_reported_before_a_second_axes() -> None:
     fig = ub.Figure()
     fig.add_axes()
     with pytest.raises(ub.UsageError) as caught:
         fig.add_axes(y=cast(ub.Scale[float], ub.Scale.category()))
-    assert str(caught.value) == SECOND_AXES
+    assert str(caught.value) == CATEGORY_Y
 
 
 def test_category_y_error_highlights_y(tmp_path: Path) -> None:

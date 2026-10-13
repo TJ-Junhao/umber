@@ -73,7 +73,7 @@ fn gradient_area_sits_under_its_line() {
     assert_eq!(style.color, color);
     let (line_min, _) = line.bounds().unwrap();
     let (area_min, area_max) = area.bounds().unwrap();
-    let (_, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+    let (_, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
     let baseline = layout.baseline_y as f32;
     assert_eq!(area_min.y, line_min.y);
     assert_eq!(area_max.y, baseline);
@@ -115,8 +115,7 @@ fn an_area_is_drawn_as_its_line_over_the_fill() {
     );
     for theme in themes() {
         let limited = |mut f: Figure| {
-            f.axes_mut()
-                .unwrap()
+            f.single_axes_mut()
                 .xlim(-0.5, 4.5)
                 .unwrap()
                 .ylim(0.0, 50.0)
@@ -203,7 +202,7 @@ fn areas_include_zero_on_a_linear_y_axis() {
             &[0.0, 1.0, 2.0, 3.0],
             &[10.0, 40.0, 25.0, 30.0],
         );
-        let (resolved, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+        let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
         let lowest = &resolved.y.ticks[0];
         assert_eq!(lowest.label, "0");
         assert_eq!(resolved.baseline, lowest.pos);
@@ -222,7 +221,7 @@ fn areas_include_zero_on_a_linear_y_axis() {
         &[0.0, 1.0],
         &[-30.0, -10.0],
     );
-    let (resolved, _) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+    let (resolved, _) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
     assert_eq!(resolved.y.scale.domain().1, 0.0);
 }
 
@@ -233,7 +232,7 @@ fn areas_fill_down_to_the_baseline_on_a_log_y_axis() {
     // the lowest tick, above the plot bottom and below the line, and the area fills down to it.
     for theme in themes() {
         let f = area_figure(theme, LOG, &[0.0, 1.0, 2.0, 3.0], &[10.0, 40.0, 25.0, 30.0]);
-        let (resolved, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+        let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
         let lowest = &resolved.y.ticks[0];
         assert_eq!(lowest.label, "1");
         assert_eq!(resolved.baseline, lowest.pos);
@@ -304,8 +303,7 @@ fn data_pixel(f: &Figure, png: &[u8], x: f64, y: f64) -> [u8; 3] {
 
 /// `f` limited to 0..1 by -2..2.
 fn limited(mut f: Figure) -> Figure {
-    f.axes_mut()
-        .unwrap()
+    f.single_axes_mut()
         .xlim(0.0, 1.0)
         .unwrap()
         .ylim(-2.0, 2.0)
@@ -400,13 +398,12 @@ fn limited_area(
     ylim: (f64, f64),
 ) -> (crate::scene::Scene, crate::layout::Layout) {
     let mut f = area_figure(Theme::midnight(), y_scale, x, y);
-    f.axes_mut()
-        .unwrap()
+    f.single_axes_mut()
         .xlim(0.0, 1.0)
         .unwrap()
         .ylim(ylim.0, ylim.1)
         .unwrap();
-    let (_, layout) = crate::pipeline::plan_figure(&f, FontLibrary::global());
+    let (_, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
     (f.to_scene(FontLibrary::global()).unwrap(), layout)
 }
 

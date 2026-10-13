@@ -17,7 +17,7 @@ use crate::{Error, Result, Tick, TickFormat, Transform};
 /// use umber_core::{ExplicitTicks, Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.xticks(&[0.0, 5.0, 10.0])?;
 /// assert_eq!(axes.x_ticks(), Some(&ExplicitTicks::Positions(vec![0.0, 5.0, 10.0])));
 /// # Ok::<(), umber_core::Error>(())
@@ -115,7 +115,7 @@ impl AxisTicks {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Error, ExplicitTicks, Figure, LogBase, Result, ScaleKind, Theme, Tick, TickFormat,
+        AxesMut, Error, ExplicitTicks, Figure, LogBase, Result, ScaleKind, Theme, Tick, TickFormat,
     };
 
     fn figure(x: ScaleKind, y: ScaleKind) -> Figure {
@@ -149,10 +149,10 @@ mod tests {
     #[track_caller]
     fn fails_unchanged(
         f: &mut Figure,
-        op: impl FnOnce(&mut crate::Axes) -> Result<&mut crate::Axes>,
+        op: impl for<'b, 'f> FnOnce(&'b mut AxesMut<'f>) -> Result<&'b mut AxesMut<'f>>,
     ) -> (&'static str, String, Option<&'static str>) {
         let before = f.clone();
-        let result = op(f.axes_mut().unwrap()).map(|_| ());
+        let result = op(&mut f.single_axes_mut()).map(|_| ());
         assert_eq!(*f, before, "a failed call changed the axes");
         fault(result)
     }
@@ -193,8 +193,7 @@ mod tests {
             "{got:?}"
         );
         // Negative positions and the magnitude bounds themselves are fine on a linear axis.
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xticks(&[-1e300, -1.0, 0.0, 1e300])
             .unwrap();
     }
@@ -230,7 +229,7 @@ mod tests {
                 .starts_with("Axes.xticks_labeled(): positions[1] is 0"),
             "{got:?}"
         );
-        f.axes_mut().unwrap().yticks(&[1e-300, 1.0, 1e300]).unwrap();
+        f.single_axes_mut().yticks(&[1e-300, 1.0, 1e300]).unwrap();
     }
 
     #[test]
@@ -296,7 +295,7 @@ mod tests {
             );
         }
         // The y axis of the same axes takes ticks.
-        f.axes_mut().unwrap().yticks(&[0.0, 1.0]).unwrap();
+        f.single_axes_mut().yticks(&[0.0, 1.0]).unwrap();
     }
 
     #[test]
@@ -311,7 +310,7 @@ mod tests {
             TickFormat::scientific(),
         ] {
             let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
-            f.axes_mut().unwrap().ytick_format(format).unwrap();
+            f.single_axes_mut().ytick_format(format).unwrap();
             let got = fails_unchanged(&mut f, |a| a.yticks_labeled(&[0.0], strings(&["zero"])));
             assert_eq!(got.0, "usage");
             assert!(
@@ -325,8 +324,7 @@ mod tests {
 
         // Labels first, then a format.
         let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xticks_labeled(&[0.0, 1.0], strings(&["off", "on"]))
             .unwrap();
         for format in [percent.clone(), affixed_auto] {
@@ -341,15 +339,12 @@ mod tests {
             assert_eq!(got.2, Some("format"));
         }
         // Plain AUTO never conflicts.
-        f.axes_mut()
-            .unwrap()
-            .xtick_format(TickFormat::AUTO)
-            .unwrap();
+        f.single_axes_mut().xtick_format(TickFormat::AUTO).unwrap();
         // The axes are independent: the y axis takes any format.
-        f.axes_mut().unwrap().ytick_format(percent.clone()).unwrap();
+        f.single_axes_mut().ytick_format(percent.clone()).unwrap();
 
         // Positions without labels replace the labelled ticks, and the conflict is gone.
-        let axes = f.axes_mut().unwrap();
+        let mut axes = f.single_axes_mut();
         axes.xticks(&[0.0, 1.0]).unwrap();
         axes.xtick_format(percent.clone()).unwrap();
         assert_eq!(
@@ -362,7 +357,7 @@ mod tests {
     #[test]
     fn tick_setters_replace_the_ticks_and_keep_the_format() {
         let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
-        let axes = f.axes_mut().unwrap();
+        let mut axes = f.single_axes_mut();
         assert_eq!((axes.x_ticks(), axes.y_ticks()), (None, None));
         axes.yticks_labeled(&[0.0, 5.0], strings(&["none", "five"]))
             .unwrap();
@@ -396,9 +391,9 @@ mod tests {
         );
         // Clones are independent.
         let copy = f.clone();
-        f.axes_mut().unwrap().yticks(&[3.0]).unwrap();
+        f.single_axes_mut().yticks(&[3.0]).unwrap();
         assert_eq!(
-            copy.axes().unwrap().y_ticks(),
+            copy.single_axes().y_ticks(),
             Some(&ExplicitTicks::Positions(vec![1.0, 2.0]))
         );
     }

@@ -16,6 +16,10 @@ from umber._errors import details
 from umber._size import native
 
 AUTO = (0, 0, 1.0)
+# A native figure of one cell (rows, cols, share_x, share_y, legend), and the position of its
+# axes: row and column AUTO (grid index kind 0) spanning one cell.
+ONE_CELL = (1, 1, 0, 0, 0)
+ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
 LINEAR = 0
 OUTLINES = 0
@@ -263,9 +267,9 @@ def floats(*values: float) -> npt.NDArray[np.float64]:
 def test_a_line_with_a_relative_width_matches_the_native_figure() -> None:
     fig = ub.Figure(4, 3, theme=ub.Theme.GRAPHITE)
     fig.add_axes().line([0, 1, 2, 3], [1, 3, 2, 4], label="a", width=ub.Size.times(2))
-    native_fig = _umber.Figure(4.0, 3.0, _umber.Theme.graphite())
-    native_fig.add_axes(LINEAR, 10.0, LINEAR, 10.0)
-    native_fig.line(floats(0, 1, 2, 3), floats(1, 3, 2, 4), "a", AUTO, 0, (1, 2.0))
+    native_fig = _umber.Figure(4.0, 3.0, _umber.Theme.graphite(), *ONE_CELL)
+    native_fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
+    native_fig.line(0, 0, floats(0, 1, 2, 3), floats(1, 3, 2, 4), "a", AUTO, 0, (1, 2.0))
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
     plain = ub.Figure(4, 3, theme=ub.Theme.GRAPHITE)
@@ -276,9 +280,9 @@ def test_a_line_with_a_relative_width_matches_the_native_figure() -> None:
 def test_a_scatter_with_a_size_in_points_matches_the_native_figure() -> None:
     fig = ub.Figure(4, 3)
     fig.add_axes().scatter([0, 1, 2], [2, 1, 3], marker=ub.Marker.SQUARE, size=ub.Size.pt(11))
-    native_fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment())
-    native_fig.add_axes(LINEAR, 10.0, LINEAR, 10.0)
-    native_fig.scatter(floats(0, 1, 2), floats(2, 1, 3), "", AUTO, 1, (2, 11.0))
+    native_fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), *ONE_CELL)
+    native_fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
+    native_fig.scatter(0, 0, floats(0, 1, 2), floats(2, 1, 3), "", AUTO, 1, (2, 11.0))
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
     plain = ub.Figure(4, 3)
@@ -301,10 +305,10 @@ def test_auto_matches_leaving_the_size_out() -> None:
 
 @pytest.mark.parametrize("kind", [-1, 3, 99])
 def test_an_unknown_native_size_kind_is_an_internal_error(kind: int) -> None:
-    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
-    fig.add_axes(LINEAR, 10.0, LINEAR, 10.0)
+    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
+    fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
     with pytest.raises(ValueError, match="internal error: .* is not a size kind"):
-        fig.line(floats(0, 1), floats(1, 2), "", AUTO, 0, (kind, 1.0))
+        fig.line(0, 0, floats(0, 1), floats(1, 2), "", AUTO, 0, (kind, 1.0))
 
 
 def test_native_checks_report_the_core_errors() -> None:
@@ -323,11 +327,11 @@ def test_native_checks_report_the_core_errors() -> None:
 
 
 def test_native_marks_report_the_core_error_for_a_bad_size() -> None:
-    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment())
-    fig.add_axes(LINEAR, 10.0, LINEAR, 10.0)
+    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
+    fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
     before = fig.to_svg(OUTLINES)
     with pytest.raises(ub.StyleError) as caught:
-        fig.scatter(floats(0, 1), floats(1, 2), "", AUTO, 0, (2, 100.0))
+        fig.scatter(0, 0, floats(0, 1), floats(1, 2), "", AUTO, 0, (2, 100.0))
     assert str(caught.value) == f"Size.pt(): points is 100; {POINTS_RANGE}"
     # The failed call stored no series.
     assert fig.to_svg(OUTLINES) == before

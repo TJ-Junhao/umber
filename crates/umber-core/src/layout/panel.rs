@@ -3,9 +3,10 @@
 //! [`measure_panel`] measures the panel's texts for resolved scales and the bands they need
 //! around the plot area: the header and the y label above it, the y tick label column left of
 //! it, the room direct labels reserve right of it, and the x tick label and x label rows below
-//! it. Choosing the plot area from these bands is left to the caller: for a single panel that
-//! fills the canvas, [`super::lay_out`] does it. [`place_panel`] then places the panel's texts,
-//! gridlines and legend for that plot area, the header inside the panel's [`Frame`].
+//! it. Choosing the plot area from these bands is left to the caller: for a panel laid out on
+//! its own in its frame, [`super::lay_out_in`] does it. [`place_panel`] then places the
+//! panel's texts, gridlines and legend for that plot area, the header inside the panel's
+//! [`Frame`].
 
 use super::inset::TickSpan;
 use super::legend::{self, LegendRow};
@@ -44,9 +45,10 @@ impl Frame {
 /// Which sides of a panel lie on the canvas edge. x tick labels at a canvas edge may reach
 /// into the outer padding up to `X_LABEL_EDGE_GAP`; elsewhere their limit is set by the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[expect(
+#[allow(
     dead_code,
-    reason = "a single panel lies on every canvas edge; only panels on a grid need the flags"
+    reason = "the top and bottom flags are for the grid's vertical room; x tick labels only \
+              read the left and right ones"
 )]
 pub(crate) struct Edges {
     /// The left side is on the canvas edge.
@@ -374,6 +376,10 @@ pub(crate) fn place_panel(
     } = bands;
     let has_row = heading.row.is_some();
     let header = heading.place(frame.x + PADDING, frame.y + PADDING);
+    // The legend row is placed at the frame's y, but it was measured, wrapped and positioned
+    // horizontally for the canvas width (see `LegendRow::measure`), not for the frame: on a
+    // grid it starts at the canvas padding whatever the panel's column. Legends that know the
+    // grid come with the figure legend.
     let row = if has_row {
         input.legend.row.placed(header.row)
     } else {
@@ -458,7 +464,7 @@ mod tests {
         texts: [&str; 4],
     ) -> (&'static str, Figure) {
         let mut f = Figure::new(width, height, theme).unwrap();
-        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         let [title, subtitle, xlabel, ylabel] = texts;
         axes.title(title)
             .subtitle(subtitle)
@@ -741,21 +747,23 @@ mod tests {
     fn measure_then_place_equals_lay_out_for_every_corpus_style() {
         // For figures in the three themes, with and without title, subtitle, legend row,
         // direct labels, axis labels and tick labels: placing the measured bands into the plot
-        // area that `lay_out` chose yields the same `Layout`, field by field, bit for bit.
+        // area that `lay_out_in` chose yields the same `Layout`, field by field, bit for bit.
         let fixtures = panel_fixtures();
         assert!(fixtures.len() >= 12);
         let lib = FontLibrary::global();
         for (name, figure) in &fixtures {
-            with_layout_input(figure, lib, |input, marks| {
-                let (resolved, layout) = plan(input, marks).expect(name);
+            with_layout_input(figure, (0, 0), lib, |input, marks, frame, edges| {
+                let (resolved, layout) = plan(input, marks, frame, edges).expect(name);
                 let bands = measure_panel(input, &resolved);
-                let frame = Frame {
+                // A figure of one axes has the canvas as its frame.
+                let canvas = Frame {
                     x: 0.0,
                     y: 0.0,
                     width: input.width,
-                    height: input.height,
+                    height: figure.height_in() * 72.0,
                 };
-                let placed = place_panel(input, &resolved, bands, frame, layout.plot);
+                assert_eq!(frame, canvas, "{name}");
+                let placed = place_panel(input, &resolved, bands, canvas, layout.plot);
                 assert_layout_bits_eq(&placed, &layout, name);
             });
         }
@@ -769,8 +777,8 @@ mod tests {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
         let lib = FontLibrary::global();
         for (name, figure) in &panel_fixtures() {
-            with_layout_input(figure, lib, |input, marks| {
-                let (resolved, layout) = plan(input, marks).expect(name);
+            with_layout_input(figure, (0, 0), lib, |input, marks, frame, edges| {
+                let (resolved, layout) = plan(input, marks, frame, edges).expect(name);
                 let bands = measure_panel(input, &resolved);
                 let plot = layout.plot;
                 assert!(
@@ -787,7 +795,7 @@ mod tests {
                 assert!(
                     close(
                         plot.bottom(),
-                        input.height - PADDING - bands.x_band - bands.x_title_band
+                        frame.height - PADDING - bands.x_band - bands.x_title_band
                     ),
                     "{name}"
                 );
@@ -808,8 +816,8 @@ mod tests {
             Option::None,
             ALL,
         );
-        with_layout_input(&figure, lib, |input, marks| {
-            let (resolved, layout) = plan(input, marks).expect(name);
+        with_layout_input(&figure, (0, 0), lib, |input, marks, frame, edges| {
+            let (resolved, layout) = plan(input, marks, frame, edges).expect(name);
             let bands = measure_panel(input, &resolved);
             assert!(bands.y_tick_column > Y_LABEL_GAP);
             assert!(
@@ -831,13 +839,13 @@ mod tests {
             Option::None,
             ALL,
         );
-        with_layout_input(&figure, lib, |input, marks| {
-            let (resolved, layout) = plan(input, marks).expect(name);
+        with_layout_input(&figure, (0, 0), lib, |input, marks, frame, edges| {
+            let (resolved, layout) = plan(input, marks, frame, edges).expect(name);
             let frame = Frame {
                 x: 30.0,
                 y: 20.0,
-                width: input.width - 30.0,
-                height: input.height - 20.0,
+                width: frame.width - 30.0,
+                height: frame.height - 20.0,
             };
             let bands = measure_panel(input, &resolved);
             let moved = place_panel(input, &resolved, bands, frame, layout.plot);

@@ -21,6 +21,10 @@ type AnyAxes = ub.Axes[Any, Any]
 LINEAR, LOG, CATEGORY = 0, 1, 2
 OUTLINES = 0
 AUTO = (0, 0, 1.0)
+# A native figure of one cell (rows, cols, share_x, share_y, legend), and the position of its
+# axes: row and column AUTO (grid index kind 0) spanning one cell.
+ONE_CELL = (1, 1, 0, 0, 0)
+ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
 NATIVE_AUTO = (0, 0, "", "")
 TEXT_CAP = "text must be at most 1,000 characters."
@@ -67,9 +71,9 @@ def _axes(*, log: bool = False) -> AnyAxes:
 
 
 def _native(x: int = LINEAR, y: int = LINEAR) -> _umber.Figure:
-    fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment())
-    fig.add_axes(x, 10.0, y, 10.0)
-    fig.line(_floats(1, 2, 3), _floats(1, 10, 100), "", AUTO, 0, NO_SIZE)
+    fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), *ONE_CELL)
+    fig.add_axes(*ONLY_CELL, x, 10.0, y, 10.0)
+    fig.line(0, 0, _floats(1, 2, 3), _floats(1, 10, 100), "", AUTO, 0, NO_SIZE)
     return fig
 
 
@@ -582,8 +586,8 @@ def test_custom_ticks_match_the_native_figure() -> None:
     fig = ub.Figure(4, 3)
     fig.add_axes().line([1, 2, 3], [1, 10, 100]).xticks([1, 1.5, 3]).yticks([0, 25, 100])
     native_fig = _native()
-    native_fig.xticks(_floats(1, 1.5, 3))
-    native_fig.yticks(_floats(0, 25, 100))
+    native_fig.xticks(0, 0, _floats(1, 1.5, 3))
+    native_fig.yticks(0, 0, _floats(0, 25, 100))
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
     assert fig.to_svg() != _svg(lambda ax: ax)
@@ -595,8 +599,8 @@ def test_labeled_ticks_match_the_native_figure() -> None:
         [1, 3], ["start", "end"]
     ).yticks_labeled([0, 100], ["none", "all"])
     native_fig = _native()
-    native_fig.xticks_labeled(_floats(1, 3), ["start", "end"])
-    native_fig.yticks_labeled(_floats(0, 100), ["none", "all"])
+    native_fig.xticks_labeled(0, 0, _floats(1, 3), ["start", "end"])
+    native_fig.yticks_labeled(0, 0, _floats(0, 100), ["none", "all"])
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
     plain = _svg(lambda ax: ax.xticks([1, 3]).yticks([0, 100]))
@@ -623,8 +627,8 @@ def test_each_format_matches_the_native_figure(
     fig = ub.Figure(4, 3)
     fig.add_axes(x=kind, y=kind).line([1, 2, 3], [1, 10, 100]).xtick_format(fmt).ytick_format(fmt)
     native_fig = _native(scale, scale)
-    native_fig.xtick_format(arg)
-    native_fig.ytick_format(arg)
+    native_fig.xtick_format(0, 0, arg)
+    native_fig.ytick_format(0, 0, arg)
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
     plain = ub.Figure(4, 3)
     plain.add_axes(x=kind, y=kind).line([1, 2, 3], [1, 10, 100])
@@ -641,8 +645,8 @@ def test_a_format_applies_to_custom_positions() -> None:
         ub.TickFormat.fixed(1)
     )
     native_fig = _native()
-    native_fig.xticks(_floats(1, 2, 3))
-    native_fig.xtick_format((1, 1, "", ""))
+    native_fig.xticks(0, 0, _floats(1, 2, 3))
+    native_fig.xtick_format(0, 0, (1, 1, "", ""))
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
 
 
@@ -650,8 +654,8 @@ def test_an_empty_tick_list_removes_the_ticks() -> None:
     fig = ub.Figure(4, 3)
     fig.add_axes().line([1, 2, 3], [1, 10, 100]).xticks([]).yticks(np.array([]))
     native_fig = _native()
-    native_fig.xticks(_floats())
-    native_fig.yticks(_floats())
+    native_fig.xticks(0, 0, _floats())
+    native_fig.yticks(0, 0, _floats())
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
     assert fig.to_svg() != _svg(lambda ax: ax)
     _axes().xticks_labeled([], [])
@@ -693,7 +697,7 @@ def test_an_unknown_native_format_kind_is_an_internal_error(kind: int) -> None:
         _umber.check_tick_format((kind, 0, "", ""))
     fig = _native()
     with pytest.raises(ValueError, match="internal error: .* is not a tick format kind"):
-        fig.xtick_format((kind, 0, "", ""))
+        fig.xtick_format(0, 0, (kind, 0, "", ""))
 
 
 def test_native_checks_report_the_core_errors() -> None:
@@ -717,36 +721,38 @@ def test_native_methods_report_the_core_errors_and_store_nothing() -> None:
     fig = _native()
     before = fig.to_svg(OUTLINES)
     with pytest.raises(ub.StyleError) as caught:
-        fig.xticks(_floats(2, 1))
+        fig.xticks(0, 0, _floats(2, 1))
     assert str(caught.value).startswith("Axes.xticks(): positions[1] is 1 but positions[0] is 2")
     with pytest.raises(ub.StyleError):
-        fig.yticks_labeled(_floats(1, 2), ["a"])
+        fig.yticks_labeled(0, 0, _floats(1, 2), ["a"])
     with pytest.raises(ub.StyleError):
-        fig.xtick_format((1, 13, "", ""))
+        fig.xtick_format(0, 0, (1, 13, "", ""))
     assert fig.to_svg(OUTLINES) == before
-    fig.xticks_labeled(_floats(1, 2), ["a", "b"])
+    fig.xticks_labeled(0, 0, _floats(1, 2), ["a", "b"])
     with pytest.raises(ub.UsageError):
-        fig.xtick_format((1, 1, "", ""))
+        fig.xtick_format(0, 0, (1, 1, "", ""))
 
 
 def test_native_category_x_is_refused() -> None:
-    fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment())
-    fig.add_axes(CATEGORY, 10.0, LINEAR, 10.0)
+    fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), *ONE_CELL)
+    fig.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
     with pytest.raises(ub.UsageError) as caught:
-        fig.xticks(_floats(1))
+        fig.xticks(0, 0, _floats(1))
     assert str(caught.value).startswith("Axes.xticks(): this is a category axis;")
-    fig.yticks(_floats(1))
+    fig.yticks(0, 0, _floats(1))
 
 
 def test_native_tick_methods_need_axes() -> None:
-    fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment())
+    fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), *ONE_CELL)
     calls: list[Callable[[], object]] = [
-        lambda: fig.xticks(_floats(1)),
-        lambda: fig.yticks_labeled(_floats(1), ["a"]),
-        lambda: fig.ytick_format(NATIVE_AUTO),
+        lambda: fig.xticks(0, 0, _floats(1)),
+        lambda: fig.yticks_labeled(0, 0, _floats(1), ["a"]),
+        lambda: fig.ytick_format(0, 0, NATIVE_AUTO),
     ]
     for call in calls:
-        with pytest.raises(RuntimeError, match="internal error: the figure has no axes"):
+        with pytest.raises(
+            ub.UsageError, match=r"Figure.axes_at\(\): row 0, col 0 holds no axes\."
+        ):
             call()
 
 

@@ -45,7 +45,7 @@ fn render(rec: &mut Log, label: &str, f: &Figure, lib: &FontLibrary) {
 /// title, a subtitle, and a header legend row of one labelled line.
 fn bare(width: f64, height: f64, [title, subtitle, legend]: [bool; 3]) -> Figure {
     let mut f = figure(width, height, Theme::midnight(), linear(), linear());
-    let a = axes(&mut f);
+    let mut a = axes(&mut f);
     a.xticks(&[])
         .unwrap()
         .yticks(&[])
@@ -75,7 +75,7 @@ fn bare(width: f64, height: f64, [title, subtitle, legend]: [bool; 3]) -> Figure
 /// automatic ticks and three labelled lines in the theme's own legend style.
 fn full(theme: Theme, height: f64) -> Figure {
     let mut f = figure(6.0, height, theme, linear(), linear());
-    let a = axes(&mut f);
+    let mut a = axes(&mut f);
     a.title("Station output")
         .subtitle("Daily mean, MW")
         .xlabel("Day")

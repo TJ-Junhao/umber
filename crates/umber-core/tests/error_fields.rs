@@ -33,11 +33,11 @@ fn series(values: &[f64]) -> Series {
 fn on_axes(
     x: ScaleKind,
     y: ScaleKind,
-    call: impl FnOnce(&mut umber_core::Axes) -> Result<()>,
+    call: impl FnOnce(&mut umber_core::AxesMut<'_>) -> Result<()>,
 ) -> Error {
     let mut figure = figure();
-    let axes = figure.add_axes(x, y).expect("the first axes");
-    call(axes).expect_err("the call should fail")
+    let mut axes = figure.add_axes(x, y).expect("the first axes");
+    call(&mut axes).expect_err("the call should fail")
 }
 
 #[test]
@@ -372,8 +372,8 @@ fn errors_carry_their_parameter_and_hint() {
                     .map(|_| ())
                     .expect_err("a second axes")
             },
-            None,
-            Some("create a new Figure for another chart."),
+            Some("row"),
+            Some("each cell holds one axes; pick an empty cell."),
         ),
         (
             "Figure width",

@@ -80,7 +80,7 @@ fn hist_figure(n: usize) -> Figure {
 /// Long title and subtitle, axis labels, a legend with four series and many tick labels.
 fn text_figure() -> Figure {
     let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    let axes = figure
+    let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
     axes.title("Quarterly station output across the northern and southern grids")

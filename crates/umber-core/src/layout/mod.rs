@@ -21,11 +21,11 @@ mod nudge;
 mod panel;
 
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry};
-pub(crate) use panel::Frame;
 use panel::PanelBands;
+pub(crate) use panel::{Edges, Frame};
 
 use crate::error::{number, quoted};
-use crate::model::Axes;
+use crate::model::{Axes, CellRange, Grid};
 use crate::resolve::{AxisTick, NormalizedPos, Resolved};
 use crate::{Error, FontLibrary, Result, TextLayout, TextStyle, Theme, Weight};
 
@@ -141,7 +141,8 @@ impl Label {
 pub(crate) struct Layout {
     /// The plot area.
     pub plot: Area,
-    /// Where the header ends, gap included; [`PADDING`] when the header is empty.
+    /// Where the header ends, gap included, as an absolute canvas y; `frame.y + PADDING` when
+    /// the header is empty.
     #[allow(dead_code, reason = "read by tests")]
     pub header_bottom: f64,
     /// The title, if not empty.
@@ -296,12 +297,13 @@ fn baseline_in_line(top: f64, height: f64, ascent: f64, descent: f64) -> f64 {
     top + (height - ascent - descent) / 2.0 + ascent
 }
 
-/// The span `start..end` kept on a canvas of `extent`: the start is clamped to
-/// `0..=extent - MIN_PLOT`, and the span is at least [`MIN_PLOT`] and ends on the canvas. Only a
-/// canvas narrower than [`MIN_PLOT`] cannot hold it; then the span is `0..MIN_PLOT`.
-fn fit_span(start: f64, end: f64, extent: f64) -> (f64, f64) {
-    let start = start.clamp(0.0, (extent - MIN_PLOT).max(0.0));
-    let end = end.min(extent).max(start + MIN_PLOT);
+/// The span `start..end` kept within `low..high`, the frame's extent: the start is clamped to
+/// `low..=high - MIN_PLOT`, and the span is at least [`MIN_PLOT`] and ends within the frame.
+/// Only a frame narrower than [`MIN_PLOT`] cannot hold it; then the span is
+/// `low..low + MIN_PLOT`. Returns the start and the length.
+fn fit_span(start: f64, end: f64, low: f64, high: f64) -> (f64, f64) {
+    let start = start.clamp(low, (high - MIN_PLOT).max(low));
+    let end = end.min(high).max(start + MIN_PLOT);
     (start, end - start)
 }
 
@@ -340,10 +342,9 @@ pub(crate) fn initial_plot_size(width: f64, height: f64) -> PlotSize {
 /// for every layout pass.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LayoutInput<'a> {
-    /// The canvas width, in points.
+    /// The canvas width, in points, which the legend row and the room direct labels reserve
+    /// are measured for.
     pub width: f64,
-    /// The canvas height, in points.
-    pub height: f64,
     /// The theme.
     pub theme: &'a Theme,
     /// The axes, for their texts.
@@ -380,9 +381,10 @@ fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str
     }
 }
 
-/// Lays out the axes of `input` for already resolved scales, alone on the canvas: measures
-/// them ([`panel::measure_panel`]), chooses the plot area ([`solve_single_panel`]) and places
-/// everything for it ([`panel::place_panel`]) with the canvas as the frame.
+/// Lays out the axes of `input` for already resolved scales, alone in `frame`, whose sides on
+/// the canvas edge `edges` names: measures them ([`panel::measure_panel`]), chooses the plot
+/// area ([`solve_panel`]) and places everything for it ([`panel::place_panel`]). The frame of
+/// a figure with one axes is the whole canvas, on every edge; see [`panel_frame`].
 ///
 /// # Errors
 ///
@@ -390,67 +392,126 @@ fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str
 /// - the room between the y tick labels and the right padding (less what direct labels
 ///   reserve) is narrower than [`MIN_PLOT`], with or without x tick labels: the message names
 ///   the widest y tick label when narrower ones would leave room, and otherwise the width the
-///   figure needs (see [`no_room_for_plot`]);
-/// - the x tick labels cannot all keep [`X_LABEL_EDGE_GAP`] from the canvas edges on a plot at
-///   least [`MIN_PLOT`] wide, with each side of the plot inset by at most [`END_LABEL_SHARE`] of
-///   the inner width: the message names the widest x tick label, its width and the width up to
-///   which labels fit;
+///   frame needs (see [`no_room_for_plot`]);
+/// - the x tick labels cannot all keep within their bounds (see [`solve_panel`]) on a plot at
+///   least [`MIN_PLOT`] wide, with each side of the plot inset by at most [`END_LABEL_SHARE`]
+///   of the frame's inner width: the message names the widest x tick label, its width and the
+///   width up to which labels fit;
 /// - the room between the header (title, subtitle and legend row), the y label and the y tick
 ///   label rising above the top tick, and the x tick labels, the x label and the bottom padding
-///   is shorter than [`MIN_PLOT`]: the message names the height the figure needs, and the hint
-///   names only the header parts the figure has (see [`figure_too_short`]).
-pub(crate) fn lay_out(input: &LayoutInput<'_>, resolved: &Resolved) -> Result<Layout> {
+///   is shorter than [`MIN_PLOT`]: the message names the height the frame needs, and the hint
+///   names only the header parts the axes have (see [`figure_too_short`]).
+pub(crate) fn lay_out_in(
+    input: &LayoutInput<'_>,
+    resolved: &Resolved,
+    frame: Frame,
+    edges: Edges,
+) -> Result<Layout> {
     let bands = panel::measure_panel(input, resolved);
-    let plot = solve_single_panel(input, &bands)?;
-    let canvas = Frame {
-        x: 0.0,
-        y: 0.0,
-        width: input.width,
-        height: input.height,
-    };
-    Ok(panel::place_panel(input, resolved, bands, canvas, plot))
+    let plot = solve_panel(input, &bands, frame, edges)?;
+    Ok(panel::place_panel(input, resolved, bands, frame, plot))
 }
 
-/// The plot area of the single panel of `input` that fills the canvas, for the texts measured
-/// in `bands`.
+/// The frame of the axes covering `cells` on `grid`, on a `width` by `height` pt canvas, and
+/// which of its sides lie on the canvas edge.
 ///
-/// The header is stacked from the top padding, and the plot starts below it, the y label and
-/// the rise of the top y tick label. The plot starts right of the y tick labels and ends left
-/// of the room direct labels reserve. The x tick labels are centered on their ticks and may
-/// reach into the outer padding, up to [`X_LABEL_EDGE_GAP`] from the canvas edge; where one
-/// would reach further, the plot edge on that side moves in by exactly the overflow. Each side
-/// moves in by at most [`END_LABEL_SHARE`] of the inner width beyond the padding; labels that
-/// need more are an error. Direct labels reserve room under the same cap. Under the plot are
-/// the x tick labels, the x label and the bottom padding.
+/// The canvas inside the outer padding is split into the grid's equal cells, with no gap
+/// between them. The frame is the rectangle of the covered cells with [`PADDING`] added on
+/// every side, so that the axes, laid out inside the frame's padding, fill their cells; on a
+/// canvas edge the frame ends at the canvas edge itself. A 1 × 1 grid's frame is therefore the
+/// canvas, to the bit. Frames of neighbouring axes overlap by twice the padding.
+pub(crate) fn panel_frame(
+    width: f64,
+    height: f64,
+    grid: &Grid,
+    cells: CellRange,
+) -> (Frame, Edges) {
+    let (left, right) = frame_span(width, grid.cols(), cells.col(), cells.col_span());
+    let (top, bottom) = frame_span(height, grid.rows(), cells.row(), cells.row_span());
+    let frame = Frame {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    };
+    let edges = Edges {
+        left: cells.col() == 0,
+        right: cells.col() + cells.col_span() == grid.cols(),
+        top: cells.row() == 0,
+        bottom: cells.row() + cells.row_span() == grid.rows(),
+    };
+    (frame, edges)
+}
+
+/// Along one side of the canvas, `extent` pt long and split inside the padding into `count`
+/// equal cells: the start and end of the frame of `span` cells from cell `first` (see
+/// [`panel_frame`]). A frame on a canvas edge starts or ends exactly there.
+fn frame_span(extent: f64, count: usize, first: usize, span: usize) -> (f64, f64) {
+    let cell = (extent - 2.0 * PADDING) / count as f64;
+    let last = first + span;
+    // The cell boundary less the padding before a frame, plus the padding after it.
+    let start = if first == 0 { 0.0 } else { first as f64 * cell };
+    let end = if last == count {
+        extent
+    } else {
+        2.0 * PADDING + last as f64 * cell
+    };
+    (start, end)
+}
+
+/// The plot area of the panel of `input` in `frame`, for the texts measured in `bands`.
+///
+/// The header is stacked from the frame's top padding, and the plot starts below it, the y
+/// label and the rise of the top y tick label. The plot starts right of the y tick labels and
+/// ends left of the room direct labels reserve. The x tick labels are centered on their ticks.
+/// On a side of the frame that lies on the canvas edge (see `edges`) they may reach into the
+/// outer padding, up to [`X_LABEL_EDGE_GAP`] from the canvas edge; on any other side they
+/// stay inside the frame's padding, within the cells. Where one would reach further, the plot
+/// edge on that side moves in by exactly the overflow. Each side moves in by at most
+/// [`END_LABEL_SHARE`] of the frame's inner width beyond the padding; labels that need more
+/// are an error. Direct labels reserve room under the same cap. Under the plot are the x tick
+/// labels, the x label and the bottom padding.
+///
+/// With the canvas as the frame, every sum here starts from 0 and is evaluated in the order of
+/// a figure of one axes, so the plot area is the same to the bit.
 ///
 /// # Errors
 ///
-/// As [`lay_out`].
-fn solve_single_panel(input: &LayoutInput<'_>, bands: &PanelBands) -> Result<Area> {
+/// As [`lay_out_in`].
+fn solve_panel(
+    input: &LayoutInput<'_>,
+    bands: &PanelBands,
+    frame: Frame,
+    edges: Edges,
+) -> Result<Area> {
     let LayoutInput {
-        width,
-        height,
-        legend,
-        context,
-        ..
+        legend, context, ..
     } = *input;
-    let plot_top = bands.heading.bottom(PADDING) + bands.y_label_band + bands.label_rise;
-    let cap = panel::end_label_cap(width);
+    let plot_top = bands.heading.bottom(frame.y + PADDING) + bands.y_label_band + bands.label_rise;
+    let cap = panel::end_label_cap(frame.width);
     // The widest y tick label and its gap are added to the padding one at a time, not as the
     // one sum `bands.y_tick_column`, which can round differently.
     let left = if bands.y_labels.is_empty() {
-        PADDING
+        frame.x + PADDING
     } else {
-        PADDING + bands.y_label_width + Y_LABEL_GAP
+        frame.x + PADDING + bands.y_label_width + Y_LABEL_GAP
     };
-    let right = width - PADDING - bands.direct_reserve;
+    let right = frame.right() - PADDING - bands.direct_reserve;
     let room = inset::Room {
         left,
         right,
-        left_max: left.max(PADDING + cap),
-        right_min: right.min(width - PADDING - cap),
-        lo: X_LABEL_EDGE_GAP,
-        hi: width - X_LABEL_EDGE_GAP,
+        left_max: left.max(frame.x + PADDING + cap),
+        right_min: right.min(frame.right() - PADDING - cap),
+        lo: if edges.left {
+            frame.x + X_LABEL_EDGE_GAP
+        } else {
+            frame.x + PADDING
+        },
+        hi: if edges.right {
+            frame.right() - X_LABEL_EDGE_GAP
+        } else {
+            frame.right() - PADDING
+        },
         min_width: MIN_PLOT,
     };
     // Every layout first needs a plot at least `MIN_PLOT` wide between the y tick labels and
@@ -459,7 +520,7 @@ fn solve_single_panel(input: &LayoutInput<'_>, bands: &PanelBands) -> Result<Are
         let direct = legend.direct.reserve(f64::INFINITY);
         return Err(no_room_for_plot(
             context,
-            width,
+            frame,
             &bands.y_labels,
             &room,
             direct,
@@ -478,17 +539,17 @@ fn solve_single_panel(input: &LayoutInput<'_>, bands: &PanelBands) -> Result<Are
     };
     // Everything under the plot: the x tick labels, the x label and the bottom padding.
     let below = bands.x_band + bands.x_title_band + PADDING;
-    let plot_bottom = height - below;
+    let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {
         return Err(figure_too_short(
             context,
-            height,
-            plot_top + MIN_PLOT + below,
+            frame.height,
+            plot_top - frame.y + MIN_PLOT + below,
             bands.heading.height_hint(),
         ));
     }
-    let (x, plot_width) = fit_span(plot_left, plot_right, width);
+    let (x, plot_width) = fit_span(plot_left, plot_right, frame.x, frame.right());
     let plot = Area {
         x,
         y: plot_top,
@@ -528,25 +589,26 @@ fn widest(labels: &[(NormalizedPos, Label)]) -> Option<&Label> {
         })
 }
 
-/// The error for a `room` that leaves the plot less than [`MIN_PLOT`] on a canvas `width` pt
-/// wide, whose direct labels would reserve `direct` pt without the cap.
+/// The error for a `room` that leaves the plot less than [`MIN_PLOT`] in `frame`, the canvas
+/// for a figure of one axes, whose direct labels would reserve `direct` pt without the cap.
 ///
 /// If y tick labels no wider than some width would leave the plot [`MIN_PLOT`], they are the
 /// cause: the error names the widest y tick label (see [`y_labels_leave_no_room`]). Otherwise
 /// the canvas is too narrow even for y tick labels of no width, or without y tick labels, and
-/// the error names the width the figure needs (see [`figure_too_narrow`]).
+/// the error names the width the frame needs (see [`figure_too_narrow`]).
 fn no_room_for_plot(
     context: &'static str,
-    width: f64,
+    frame: Frame,
     y_labels: &[(NormalizedPos, Label)],
     room: &inset::Room,
     direct: f64,
 ) -> Error {
+    let inner_left = frame.x + PADDING;
     // The widest y tick label column that leaves the plot `MIN_PLOT` wide.
-    let y_room = room.right - MIN_PLOT - PADDING - Y_LABEL_GAP;
+    let y_room = room.right - MIN_PLOT - inner_left - Y_LABEL_GAP;
     match widest(y_labels) {
         Some(label) if y_room >= 0.0 => y_labels_leave_no_room(context, label, y_room),
-        _ => figure_too_narrow(context, width, room.left - PADDING, direct),
+        _ => figure_too_narrow(context, frame.width, room.left - inner_left, direct),
     }
 }
 
@@ -670,7 +732,8 @@ fn x_labels_overflow(
 mod tests {
     use super::*;
     use crate::ScaleKind;
-    use crate::model::{AxisData, Figure, LineOptions, ScatterOptions};
+    use crate::model::{AxesMut, AxisData, Figure, LineOptions, ScatterOptions};
+    use crate::model::{CellRange, Grid};
     use crate::pipeline::plan_figure;
     use crate::test_support::named_height;
     use crate::test_support::scene::assert_scene_bounded;
@@ -688,7 +751,7 @@ mod tests {
     }
 
     fn plan_of(figure: &Figure) -> (Resolved, Layout) {
-        plan_figure(figure, lib())
+        plan_figure(figure, (0, 0), lib())
     }
 
     #[test]
@@ -704,12 +767,12 @@ mod tests {
         assert_eq!(empty.header_bottom, PADDING);
         assert!(empty.legend.is_empty() && empty.legend.height() == 0.0);
 
-        f.axes_mut().unwrap().title("Station output");
+        f.single_axes_mut().title("Station output");
         let title = plan_of(&f).1;
         assert!(close(title.header_bottom, PADDING + 1.25 * ts + 8.0));
         assert!(title.subtitle.is_none());
 
-        f.axes_mut().unwrap().subtitle("Daily mean, MW");
+        f.single_axes_mut().subtitle("Daily mean, MW");
         let both = plan_of(&f).1;
         assert!(close(
             both.header_bottom,
@@ -718,7 +781,7 @@ mod tests {
         let (t, s) = (both.title.unwrap(), both.subtitle.unwrap());
         assert!(t.y < s.y && t.x == PADDING && s.x == PADDING);
 
-        f.axes_mut().unwrap().title("");
+        f.single_axes_mut().title("");
         let sub = plan_of(&f).1;
         assert!(close(sub.header_bottom, PADDING + 1.35 * bs + 8.0));
         assert!(sub.title.is_none());
@@ -733,9 +796,9 @@ mod tests {
     #[test]
     fn plot_area_shrinks_with_long_y_labels() {
         let mut short = figure(Theme::graphite());
-        short.axes_mut().unwrap().ylim(0.0, 1.0).unwrap();
+        short.single_axes_mut().ylim(0.0, 1.0).unwrap();
         let mut long = figure(Theme::graphite());
-        long.axes_mut().unwrap().ylim(100_000.0, 900_000.0).unwrap();
+        long.single_axes_mut().ylim(100_000.0, 900_000.0).unwrap();
         let (_, a) = plan_of(&short);
         let (_, b) = plan_of(&long);
         assert!(b.plot.x > a.plot.x + 10.0, "{} vs {}", b.plot.x, a.plot.x);
@@ -753,7 +816,7 @@ mod tests {
     fn y_labels_sit_left_of_the_plot_in_every_theme() {
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
             let mut f = figure(theme);
-            f.axes_mut().unwrap().ylim(0.0, 100.0).unwrap();
+            f.single_axes_mut().ylim(0.0, 100.0).unwrap();
             let (resolved, layout) = plan_of(&f);
             assert_eq!(resolved.baseline.get(), 0.0);
             // The baseline replaces the gridline at 0.
@@ -915,8 +978,7 @@ mod tests {
         // Chosen so a 6 by 4 in figure gets about five ticks per axis: y 0/25/50/75/100 and x 0/10/20/30 in every theme.
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
             let mut f = figure(theme);
-            f.axes_mut()
-                .unwrap()
+            f.single_axes_mut()
                 .title("Station output")
                 .subtitle("Daily mean, MW")
                 .xlabel("Day")
@@ -1032,8 +1094,7 @@ mod tests {
     #[test]
     fn labels_sit_around_the_plot() {
         let mut f = figure(Theme::graphite());
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .xlabel("Day")
             .ylabel("MW")
             .xlim(0.0, 30.0)
@@ -1057,25 +1118,25 @@ mod tests {
 
     #[test]
     fn custom_tick_labels_are_measured_like_automatic_ones() {
-        let plot_with = |set: &dyn Fn(&mut Axes)| {
+        let plot_with = |set: &dyn Fn(&mut AxesMut<'_>)| {
             let mut f = figure(Theme::graphite());
-            let axes = f.axes_mut().unwrap();
+            let mut axes = f.single_axes_mut();
             axes.scatter(
                 AxisData::Numbers(vec![0.0, 10.0]),
                 &[0.0, 10.0],
                 ScatterOptions::default(),
             )
             .unwrap();
-            set(axes);
+            set(&mut axes);
             plan_of(&f).1
         };
-        let short = plot_with(&|a: &mut Axes| {
+        let short = plot_with(&|a: &mut AxesMut<'_>| {
             a.xticks_labeled(&[0.0, 10.0], vec!["a".into(), "b".into()])
                 .unwrap()
                 .yticks_labeled(&[0.0, 10.0], vec!["a".into(), "b".into()])
                 .unwrap();
         });
-        let long = plot_with(&|a: &mut Axes| {
+        let long = plot_with(&|a: &mut AxesMut<'_>| {
             let wide = "a rather long label".to_owned();
             a.xticks_labeled(&[0.0, 10.0], vec!["a".into(), wide.clone()])
                 .unwrap()
@@ -1099,7 +1160,7 @@ mod tests {
             "{last:?}"
         );
         // A suffix from the tick format is measured the same way.
-        let suffixed = plot_with(&|a: &mut Axes| {
+        let suffixed = plot_with(&|a: &mut AxesMut<'_>| {
             let format = crate::TickFormat::AUTO
                 .affix("", " a rather long label")
                 .unwrap();
@@ -1165,8 +1226,7 @@ mod tests {
 
     fn day_line(theme: Theme, labels: [&str; 5]) -> Figure {
         let mut f = figure(theme);
-        f.axes_mut()
-            .unwrap()
+        f.single_axes_mut()
             .line(
                 AxisData::Numbers(vec![0.0, 6.0, 12.0, 18.0, 24.0]),
                 &[1.0, 3.0, 2.0, 4.0, 3.0],
@@ -1231,8 +1291,7 @@ mod tests {
             let format = crate::TickFormat::AUTO
                 .affix("", " thousand units")
                 .unwrap();
-            f.axes_mut()
-                .unwrap()
+            f.single_axes_mut()
                 .scatter(
                     AxisData::Numbers(vec![0.0, 40.0, 100.0]),
                     &[1.0, 3.0, 2.0],
@@ -1340,10 +1399,8 @@ mod tests {
     /// `labels`, and `y_ticks` as its y ticks.
     fn end_labels(width: f64, labels: [String; 2], y_ticks: Option<&[f64]>) -> Figure {
         let mut f = Figure::new(width, width.min(4.0), Theme::midnight()).unwrap();
-        let axes = f
-            .add_axes(ScaleKind::Linear, ScaleKind::Linear)
-            .unwrap()
-            .xlim(0.0, 1.0)
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        axes.xlim(0.0, 1.0)
             .unwrap()
             .xticks_labeled(&[0.0, 1.0], labels.to_vec())
             .unwrap();
@@ -1355,7 +1412,7 @@ mod tests {
 
     /// The error of laying out `f`, which must fail.
     fn overflow(f: &Figure) -> crate::Error {
-        crate::pipeline::try_plan_figure(f, lib()).unwrap_err()
+        crate::pipeline::try_plan_figure(f, (0, 0), lib()).unwrap_err()
     }
 
     #[test]
@@ -1451,11 +1508,10 @@ mod tests {
         // The y tick labels fail the layout whatever the x ticks: without any, or with one
         // empty label.
         let mut none = end_after_wide_y_labels(100);
-        none.axes_mut().unwrap().xticks(&[]).unwrap();
+        none.single_axes_mut().xticks(&[]).unwrap();
         let mut empty = end_after_wide_y_labels(100);
         empty
-            .axes_mut()
-            .unwrap()
+            .single_axes_mut()
             .xticks_labeled(&[0.5], vec![String::new()])
             .unwrap();
         for f in [none, empty] {
@@ -1556,8 +1612,7 @@ mod tests {
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
             let mut f = figure(theme);
             let wide = "W".repeat(40);
-            f.axes_mut()
-                .unwrap()
+            f.single_axes_mut()
                 .xlim(0.0, 30.0)
                 .unwrap()
                 .yticks_labeled(&[0.0, 1.0], vec![wide.clone(), wide])
@@ -1589,10 +1644,8 @@ mod tests {
     /// a title, a subtitle, and a header legend row of one labelled line.
     fn bare(width: f64, height: f64, title: bool, subtitle: bool, legend: bool) -> Figure {
         let mut f = Figure::new(width, height, Theme::midnight()).unwrap();
-        let axes = f
-            .add_axes(ScaleKind::Linear, ScaleKind::Linear)
-            .unwrap()
-            .xticks(&[])
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        axes.xticks(&[])
             .unwrap()
             .yticks(&[])
             .unwrap()
@@ -1684,7 +1737,7 @@ mod tests {
         // Direct labels and no legend take no header room, and the hint does not name them.
         for style in [crate::LegendStyle::Direct, crate::LegendStyle::None] {
             let mut f = bare(2.0, 0.3, true, false, true);
-            f.axes_mut().unwrap().legend(style);
+            f.single_axes_mut().legend(style);
             assert_eq!(
                 overflow(&f).hint(),
                 Some("make the figure taller, or remove the title.")
@@ -1696,10 +1749,8 @@ mod tests {
     /// a subtitle, axis labels, automatic ticks and three labelled lines shown in `style`.
     fn full(theme: &Theme, style: crate::LegendStyle, height: f64) -> Figure {
         let mut f = Figure::new(6.0, height, theme.clone()).unwrap();
-        let axes = f
-            .add_axes(ScaleKind::Linear, ScaleKind::Linear)
-            .unwrap()
-            .title("Station output")
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        axes.title("Station output")
             .subtitle("Daily mean, MW")
             .xlabel("Day")
             .ylabel("MW")
@@ -1812,12 +1863,8 @@ mod tests {
             ] {
                 for (width, header, lines) in cases {
                     let mut f = Figure::new(width, 2.0, theme.clone()).unwrap();
-                    let axes = f
-                        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
-                        .unwrap()
-                        .xlabel("Day")
-                        .ylabel("MW")
-                        .legend(style);
+                    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                    axes.xlabel("Day").ylabel("MW").legend(style);
                     if header {
                         axes.title("Station output").subtitle("Daily mean, MW");
                     }
@@ -1867,7 +1914,7 @@ mod tests {
                     .with_font_scale(scale)
                     .unwrap();
                 let mut f = Figure::new(width, height, theme).unwrap();
-                let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
                 if parts[0] {
                     axes.title("Station output");
                 }
@@ -1910,7 +1957,7 @@ mod tests {
             };
             let f = build(height);
             let canvas = height * 72.0;
-            let planned = crate::pipeline::try_plan_figure(&f, lib());
+            let planned = crate::pipeline::try_plan_figure(&f, (0, 0), lib());
             let scene = f.to_scene(lib());
             proptest::prop_assert_eq!(planned.is_ok(), scene.is_ok());
             match planned {
@@ -1929,7 +1976,11 @@ mod tests {
                     let message = err.to_string();
                     if let Some(needed) = named_height(&err) {
                         proptest::prop_assert!(needed > canvas.floor(), "{message}");
-                        let taller = crate::pipeline::try_plan_figure(&build(needed / 72.0), lib());
+                        let taller = crate::pipeline::try_plan_figure(
+                            &build(needed / 72.0),
+                            (0, 0),
+                            lib(),
+                        );
                         if let Err(again) = taller {
                             proptest::prop_assert!(
                                 !again.to_string().contains(" pt tall; "),
@@ -1940,5 +1991,59 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_single_cell_is_framed_by_the_whole_canvas() {
+        let every_edge = Edges {
+            left: true,
+            right: true,
+            top: true,
+            bottom: true,
+        };
+        for (width, height) in [(432.0, 288.0), (0.3 * 72.0, 1.7 * 72.0), (14_400.0, 21.6)] {
+            let (frame, edges) =
+                panel_frame(width, height, &Grid::SINGLE, CellRange::new(0, 0, 1, 1));
+            let bits = |f: Frame| [f.x, f.y, f.width, f.height].map(f64::to_bits);
+            let canvas = Frame {
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+            };
+            assert_eq!(bits(frame), bits(canvas));
+            assert_eq!(edges, every_edge);
+        }
+    }
+
+    #[test]
+    fn grid_frames_split_the_canvas_inside_the_padding() {
+        // 2 × 3 cells on 12 × 8 in: inside the padding the canvas is 840 × 552 pt, so each cell
+        // is 280 × 276 pt. A frame is its cells with the padding around them, cut at the canvas
+        // edges.
+        let grid = Grid::new(2, 3).unwrap();
+        let frame = |row, col, row_span, col_span| {
+            let cells = CellRange::new(row, col, row_span, col_span);
+            let (f, e) = panel_frame(864.0, 576.0, &grid, cells);
+            (
+                [f.x, f.y, f.right(), f.bottom()],
+                [e.left, e.right, e.top, e.bottom],
+            )
+        };
+        assert_eq!(
+            frame(0, 0, 1, 1),
+            ([0.0, 0.0, 304.0, 300.0], [true, false, true, false])
+        );
+        assert_eq!(
+            frame(1, 1, 1, 1),
+            ([280.0, 276.0, 584.0, 576.0], [false, false, false, true])
+        );
+        assert_eq!(
+            frame(0, 1, 2, 2),
+            ([280.0, 0.0, 864.0, 576.0], [false, true, true, true])
+        );
+        // The axes inside a frame start one padding in: at their cells' top-left corner.
+        let (f, _) = panel_frame(864.0, 576.0, &grid, CellRange::new(1, 2, 1, 1));
+        assert_eq!((f.x + PADDING, f.y + PADDING), (572.0, 288.0));
     }
 }

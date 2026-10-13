@@ -51,7 +51,7 @@ pub enum Error {
         /// One sentence that suggests a likely fix; `None` when there is no likely fix.
         hint: Option<&'static str>,
     },
-    /// The API was used in an unsupported way, e.g. adding a second axes in v0.1.
+    /// The API was used in an unsupported way, e.g. adding axes to a cell that holds some.
     #[error("{context}: {message}")]
     Usage {
         /// The API call where the problem was detected.
@@ -207,6 +207,18 @@ impl Error {
         self
     }
 
+    /// The error with `prefix` put before its message, such as the grid cell of the axes it is
+    /// about. The context, parameter and hint are kept. [`Error::Io`] is returned unchanged.
+    pub(crate) fn with_message_prefix(mut self, prefix: &str) -> Error {
+        if let Error::Data { message, .. }
+        | Error::Style { message, .. }
+        | Error::Usage { message, .. } = &mut self
+        {
+            message.insert_str(0, prefix);
+        }
+        self
+    }
+
     /// The Python parameter the error is about, or `None` when no single parameter is at fault
     /// and for [`Error::Io`].
     ///
@@ -238,7 +250,7 @@ impl Error {
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// let err = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap_err();
-    /// assert_eq!(err.hint(), Some("create a new Figure for another chart."));
+    /// assert_eq!(err.hint(), Some("each cell holds one axes; pick an empty cell."));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn hint(&self) -> Option<&'static str> {

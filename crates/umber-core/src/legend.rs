@@ -225,7 +225,7 @@ mod tests {
     }
 
     fn legend_of(f: &Figure, style: LegendStyle) -> Legend<'_> {
-        let axes = f.axes().unwrap();
+        let axes = f.single_axes();
         let marks = resolve_marks(axes.marks(), f.theme());
         Legend::new(style, &marks, &Limits::of(axes))
     }
@@ -548,7 +548,7 @@ mod tests {
             AxisData::Categories(_) => ScaleKind::Category,
         };
         let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
-        let axes = f.add_axes(kind, ScaleKind::Linear).unwrap();
+        let mut axes = f.add_axes(kind, ScaleKind::Linear).unwrap();
         axes.line(x, y, line("Line", Dash::Solid)).unwrap();
         if let Some((lo, hi)) = xlim {
             axes.xlim(lo, hi).unwrap();
@@ -590,7 +590,7 @@ mod tests {
         assert!(legend_of(&f, LegendStyle::Header).is_empty());
         assert!(legend_of(&f, LegendStyle::Chips).is_empty());
         assert!(legend_of(&f, LegendStyle::Direct).is_empty());
-        let limits = Limits::of(f.axes().unwrap());
+        let limits = Limits::of(f.single_axes());
         for style in [LegendStyle::Header, LegendStyle::Direct] {
             assert!(Legend::new(style, &[], &limits).is_empty());
         }

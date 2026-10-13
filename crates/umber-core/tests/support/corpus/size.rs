@@ -16,7 +16,7 @@ use std::fmt::Write as _;
 
 use umber_core::figure::{AreaOptions, AxisData, LineOptions, ScatterOptions};
 use umber_core::{
-    Alpha, ColorSpec, Dash, Figure, FontLibrary, LegendStyle, Marker, Rgba, SizeSpec,
+    Alpha, ColorSpec, Dash, Figure, FontLibrary, GridIndex, LegendStyle, Marker, Rgba, SizeSpec,
 };
 
 use super::super::{
@@ -143,7 +143,7 @@ fn figures() -> Vec<(String, Figure)> {
         let mut f = figure(6.0, 4.0, theme, linear(), log(10.0));
         labelled(&mut f, "Sizes in points");
         let x: Vec<f64> = (0..10).map(f64::from).collect();
-        let a = axes(&mut f);
+        let mut a = axes(&mut f);
         a.line(
             numbers(x.clone()),
             &x.iter().map(|v| 2.0 + v * v).collect::<Vec<_>>(),
@@ -311,7 +311,7 @@ fn size_errors() -> String {
             )
             .map(drop)
         });
-        let marks = f.axes().unwrap().marks();
+        let marks = f.axes_at(GridIndex::Auto, GridIndex::Auto).unwrap().marks();
         let widths: Vec<String> = marks
             .iter()
             .map(|mark| match mark {

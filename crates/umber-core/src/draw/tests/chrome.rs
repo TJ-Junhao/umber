@@ -54,7 +54,7 @@ fn grid_dashes_follow_the_theme() {
 fn baseline_is_at_zero_or_bottom() {
     let baseline_y = |lo: f64, hi: f64| {
         let mut f = chrome_figure(Theme::graphite());
-        f.axes_mut().unwrap().ylim(lo, hi).unwrap();
+        f.single_axes_mut().ylim(lo, hi).unwrap();
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         let all = strokes(&scene);
         let (path, _) = all.last().copied().unwrap();
@@ -172,8 +172,7 @@ fn x_end_labels_stay_on_the_canvas() {
     for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
         for (lo, hi) in [(0.0, 100_000.0), (-100_000.0, 100_000.0), (-900_000.0, 0.0)] {
             let mut f = chrome_figure(theme.clone());
-            f.axes_mut()
-                .unwrap()
+            f.single_axes_mut()
                 .xlim(lo, hi)
                 .unwrap()
                 .ylim(-100_000.0, 100_000.0)
@@ -249,15 +248,14 @@ fn baseline_is_drawn_last_over_the_marks() {
     use crate::scene::Item;
     let theme = Theme::pigment();
     let mut f = chrome_figure(theme.clone());
-    f.axes_mut()
-        .unwrap()
+    f.single_axes_mut()
         .line(
             AxisData::Numbers(vec![0.0, 100.0]),
             &[0.0, 1.0],
             LineOptions::default(),
         )
         .unwrap();
-    let layout = crate::pipeline::plan_figure(&f, FontLibrary::global()).1;
+    let layout = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1;
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     let is_baseline = |item: &Item| match item {
         Item::Stroke { path, style } => {

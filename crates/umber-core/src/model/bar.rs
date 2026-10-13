@@ -47,7 +47,7 @@ impl Default for BarOptions {
 /// use umber_core::{Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
 /// axes.bar(vec!["a".into(), "b".into()], &[3.0, -1.0], BarOptions::default())?;
 /// let Some(Mark::Bar(bar)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(bar.categories(), ["a", "b"]);
@@ -75,7 +75,7 @@ impl Default for BarOptions {
 /// use umber_core::{Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
 /// axes.bar(vec!["a".into()], &[1.0], BarOptions::default())?
 ///     .bar(vec!["a".into(), "b".into()], &[1.0, 2.0], BarOptions::default())?;
 /// let [Mark::Bar(short), Mark::Bar(long)] = axes.marks() else { unreachable!() };
@@ -120,7 +120,7 @@ impl BarMark {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// axes.bar(vec!["north".into()], &[2.0], BarOptions::default())?;
     /// let Some(Mark::Bar(bar)) = axes.marks().first() else { unreachable!() };
     /// assert_eq!(bar.categories(), ["north"]);
@@ -140,7 +140,7 @@ impl BarMark {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// axes.bar(vec!["a".into(), "b".into()], &[2.0, f64::NAN], BarOptions::default())?;
     /// let Some(Mark::Bar(bar)) = axes.marks().first() else { unreachable!() };
     /// assert_eq!(bar.heights()[0], 2.0);
@@ -161,7 +161,7 @@ impl BarMark {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let options = BarOptions { label: "sales".into(), ..BarOptions::default() };
     /// axes.bar(vec!["a".into()], &[2.0], options)?;
     /// let Some(Mark::Bar(bar)) = axes.marks().first() else { unreachable!() };
@@ -182,8 +182,8 @@ impl BarMark {
 }
 
 /// One series of a grouped or stacked bar mark, as given to
-/// [`Axes::grouped_bar`](super::Axes::grouped_bar) and
-/// [`Axes::stacked_bar`](super::Axes::stacked_bar): its label, one value per category, and
+/// [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar) and
+/// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar): its label, one value per category, and
 /// its color.
 ///
 /// # Examples
@@ -251,7 +251,7 @@ struct StoredSeries {
 /// use umber_core::{Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
 /// let series = |label: &str, values: &[f64]| Series {
 ///     label: label.into(),
 ///     values: values.to_vec(),
@@ -321,7 +321,7 @@ impl BarGroupMark {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let series = Series { values: vec![2.0], ..Series::default() };
     /// axes.stacked_bar(vec!["north".into()], vec![series])?;
     /// let Some(Mark::StackedBar(stack)) = axes.marks().first() else { unreachable!() };
@@ -342,7 +342,7 @@ impl BarGroupMark {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let series = |h: f64| Series { values: vec![h], ..Series::default() };
     /// axes.grouped_bar(vec!["a".into()], vec![series(1.0), series(f64::NAN)])?;
     /// let Some(Mark::GroupedBar(group)) = axes.marks().first() else { unreachable!() };
@@ -375,7 +375,7 @@ impl BarGroupMark {
 /// use umber_core::{ColorSpec, Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-/// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+/// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
 /// let series = Series { label: "y".into(), values: vec![2.0, -1.0], color: ColorSpec::AUTO };
 /// axes.stacked_bar(vec!["a".into(), "b".into()], vec![series])?;
 /// let Some(Mark::StackedBar(stack)) = axes.marks().first() else { unreachable!() };
@@ -400,7 +400,7 @@ impl<'a> SeriesView<'a> {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let series = Series { label: "2026".into(), values: vec![1.0], ..Series::default() };
     /// axes.grouped_bar(vec!["a".into()], vec![series])?;
     /// let Some(Mark::GroupedBar(group)) = axes.marks().first() else { unreachable!() };
@@ -422,7 +422,7 @@ impl<'a> SeriesView<'a> {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let series = Series { values: vec![1.0, 4.0], ..Series::default() };
     /// axes.grouped_bar(vec!["a".into(), "b".into()], vec![series])?;
     /// let Some(Mark::GroupedBar(group)) = axes.marks().first() else { unreachable!() };
@@ -443,7 +443,7 @@ impl<'a> SeriesView<'a> {
     /// use umber_core::{ColorSpec, Figure, Rgba, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let color = ColorSpec::Fixed(Rgba::opaque(10, 20, 30));
     /// let series = Series { values: vec![1.0], color, ..Series::default() };
     /// axes.grouped_bar(vec!["a".into()], vec![series])?;

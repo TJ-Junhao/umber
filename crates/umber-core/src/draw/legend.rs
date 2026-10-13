@@ -122,7 +122,7 @@ mod tests {
 
     fn layout(theme: Theme) -> (Theme, Layout) {
         let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
-        let axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         for (label, dash) in [("Solid", Dash::Solid), ("Dashed", Dash::Dashed)] {
             axes.line(
                 AxisData::Numbers(vec![0.0, 1.0]),
@@ -146,7 +146,7 @@ mod tests {
         .unwrap();
         (
             theme,
-            crate::pipeline::plan_figure(&f, FontLibrary::global()).1,
+            crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1,
         )
     }
 
@@ -414,7 +414,7 @@ mod tests {
             .unwrap()
             .ylim(0.0, 1.0)
             .unwrap();
-        let layout = crate::pipeline::plan_figure(&f, FontLibrary::global()).1;
+        let layout = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let theme = Theme::graphite();
         let Some(Item::Group { items, .. }) = legend(&theme, &layout) else {
             panic!("a legend group");

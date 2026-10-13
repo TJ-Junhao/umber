@@ -1,0 +1,814 @@
+//! The handle through which an axes on a figure is changed: its text, limit and tick setters
+//! and its mark methods.
+
+use std::ops::Deref;
+use std::sync::Arc;
+
+use super::axes::Axes;
+use super::axis_data::{AxisData, XySeries};
+use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
+use super::figure::Figure;
+use super::hist::{HistMark, HistOptions};
+use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
+use super::validation::{
+    AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, check_x_limits, check_x_tick_axis,
+};
+use crate::{ContinuousScale, LegendStyle, Result, TickFormat};
+
+/// One axes of a figure, held for changing: the setters of its texts, limits, ticks and legend
+/// style, and its mark methods. It borrows the whole figure, and dereferences to the [`Axes`]
+/// for its getters.
+///
+/// [`Figure::add_axes`], [`Figure::add_axes_at`] and [`Figure::axes_at_mut`] return one.
+/// Every setter checks its input before it stores anything, so a failed call leaves the figure
+/// unchanged. Setters return the handle, so calls chain.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::figure::{AxisData, LineOptions};
+/// use umber_core::{Figure, ScaleKind, Theme};
+///
+/// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// axes.title("Growth")
+///     .xlim(0.0, 10.0)?
+///     .line(AxisData::Numbers(vec![0.0, 10.0]), &[1.0, 2.0], LineOptions::default())?;
+/// assert_eq!((axes.title_text(), axes.marks().len()), ("Growth", 1));
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug)]
+pub struct AxesMut<'a> {
+    /// The figure that holds the axes.
+    figure: &'a mut Figure,
+    /// The index of the axes among the figure's panels; valid for as long as the handle lives,
+    /// since the handle holds the only borrow of the figure.
+    index: usize,
+}
+
+impl Deref for AxesMut<'_> {
+    type Target = Axes;
+
+    fn deref(&self) -> &Axes {
+        self.figure.panel(self.index)
+    }
+}
+
+impl<'a> AxesMut<'a> {
+    /// The handle of the axes at `index` among the panels of `figure`, which must hold it.
+    pub(super) fn new(figure: &'a mut Figure, index: usize) -> AxesMut<'a> {
+        AxesMut { figure, index }
+    }
+
+    /// The axes, for a setter to change.
+    fn axes_mut(&mut self) -> &mut Axes {
+        self.figure.panel_mut(self.index)
+    }
+
+    /// Sets the title.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.title("Revenue");
+    /// assert_eq!(axes.title_text(), "Revenue");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn title(&mut self, text: &str) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.title = text.to_owned();
+        self
+    }
+
+    /// Sets the subtitle.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.subtitle("2026");
+    /// assert_eq!(axes.subtitle_text(), "2026");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn subtitle(&mut self, text: &str) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.subtitle = text.to_owned();
+        self
+    }
+
+    /// Sets the x axis label.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.xlabel("time");
+    /// assert_eq!(axes.xlabel_text(), "time");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xlabel(&mut self, text: &str) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.xlabel = text.to_owned();
+        self
+    }
+
+    /// Sets the y axis label.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.ylabel("USD");
+    /// assert_eq!(axes.ylabel_text(), "USD");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ylabel(&mut self, text: &str) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.ylabel = text.to_owned();
+        self
+    }
+
+    /// Sets the x limits. `Error::Usage` on a category axis; `Error::Style` unless
+    /// `low < high`, both are finite and within the supported magnitudes (and positive on a
+    /// log axis), and the range is wide enough: on a linear axis at least
+    /// `max(1e-10 * max(|low|, |high|), 1e-290)`, on a log axis a factor of `1 + 1e-9`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert!(axes.xlim(0.0, 1.0).is_ok());
+    /// assert!(axes.xlim(1.0, 1.0).is_err());
+    /// assert!(axes.xlim(1.0, 1.0 + 1e-12).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        axes.xlim = Some(check_x_limits(axes.x, low, high)?);
+        Ok(self)
+    }
+
+    /// Sets the y limits. Same rules as [`AxesMut::xlim`]; the y axis is never a category axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert!(axes.ylim(-1.0, 1.0).is_ok());
+    /// assert!(axes.ylim(f64::NAN, 1.0).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        axes.ylim = Some(ContinuousScale::new(axes.y, low, high, "Axes.ylim()")?);
+        Ok(self)
+    }
+
+    /// Replaces the automatic x ticks with ticks at `positions`, labelled by the x tick format
+    /// ([`AxesMut::xtick_format`]). The positions are used in the order given and never sorted;
+    /// an empty list leaves the x axis without ticks and gridlines. Calling any x tick setter
+    /// again replaces the ticks, and drops labels set with [`AxesMut::xticks_labeled`].
+    ///
+    /// Without explicit x limits, the x domain covers both the data and the ticks, with no
+    /// rounding to round values, and is then padded as auto limits are; the lowest tick is not
+    /// moved below the data. With explicit limits, ticks outside them are not drawn.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis. `Error::Style`
+    /// naming the first bad index, unless every position is finite, within the supported
+    /// magnitudes (positive on a log axis) and above the one before it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ExplicitTicks, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.xticks(&[0.0, 12.0, 24.0])?;
+    /// assert_eq!(axes.x_ticks(), Some(&ExplicitTicks::Positions(vec![0.0, 12.0, 24.0])));
+    /// let err = axes.xticks(&[0.0, 24.0, 12.0]).unwrap_err();
+    /// assert_eq!(
+    ///     err.to_string(),
+    ///     "Axes.xticks(): positions[2] is 12 but positions[1] is 24; tick positions must be strictly increasing."
+    /// );
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xticks(&mut self, positions: &[f64]) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        const CONTEXT: &str = "Axes.xticks()";
+        let transform = check_x_tick_axis(CONTEXT, axes.x, "ticks")?;
+        axes.xticks.set_positions(CONTEXT, transform, positions)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic y ticks with ticks at `positions`. Same rules as
+    /// [`AxesMut::xticks`]; the y axis is never a category axis. Bars and histograms keep 0 in a
+    /// linear y domain.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Style` as for [`AxesMut::xticks`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LogBase, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let log = ScaleKind::Log { base: LogBase::TEN };
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, log)?;
+    /// assert!(axes.yticks(&[1.0, 3.0, 10.0, 30.0]).is_ok());
+    /// assert!(axes.yticks(&[0.0, 1.0]).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn yticks(&mut self, positions: &[f64]) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        axes.yticks
+            .set_positions("Axes.yticks()", axes.y, positions)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic x ticks with ticks at `positions`, each labelled with the label
+    /// at the same index of `labels`, drawn as given. Otherwise the same as [`AxesMut::xticks`].
+    /// Labels too wide to stay inside the figure make rendering fail (see
+    /// [`Figure::to_scene`](crate::Figure::to_scene)).
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. They are checked in this order: `Error::Usage` on a
+    /// category x axis; the positions as for [`AxesMut::xticks`]; `Error::Style` unless there is
+    /// one label per position, each at most 1,000 characters; `Error::Usage` when the x tick
+    /// format is not plain [`TickFormat::AUTO`], since given labels take no format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, TickFormat};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let labels = vec!["start".to_owned(), "launch".to_owned()];
+    /// axes.xticks_labeled(&[0.0, 7.0], labels.clone())?;
+    /// assert!(axes.xticks_labeled(&[0.0], labels.clone()).is_err());
+    /// // Given labels and a format other than AUTO conflict, in either order.
+    /// assert!(axes.xtick_format(TickFormat::fixed(1)?).is_err());
+    /// axes.xticks(&[0.0, 7.0])?.xtick_format(TickFormat::fixed(1)?)?;
+    /// assert!(axes.xticks_labeled(&[0.0, 7.0], labels).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        const CONTEXT: &str = "Axes.xticks_labeled()";
+        let transform = check_x_tick_axis(CONTEXT, axes.x, "ticks")?;
+        axes.xticks
+            .set_labeled(CONTEXT, transform, positions, labels)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic y ticks with ticks at `positions`, each labelled with the label
+    /// at the same index of `labels`, drawn as given. Same rules as [`AxesMut::xticks_labeled`];
+    /// the y axis is never a category axis.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: as for [`AxesMut::xticks_labeled`], against the y tick
+    /// format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.yticks_labeled(&[0.0, 50.0, 100.0], vec!["low".into(), "mid".into(), "high".into()])?;
+    /// assert!(axes.yticks_labeled(&[f64::NAN], vec!["x".into()]).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn yticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        axes.yticks
+            .set_labeled("Axes.yticks_labeled()", axes.y, positions, labels)?;
+        Ok(self)
+    }
+
+    /// Sets the format of the x tick labels: of the automatic ticks, and of positions set with
+    /// [`AxesMut::xticks`]. Calling it again replaces the format; the ticks stay as they are.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis, and when the x
+    /// ticks have labels given with [`AxesMut::xticks_labeled`] and `format` is not plain
+    /// [`TickFormat::AUTO`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, TickFormat};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.xtick_format(TickFormat::fixed(2)?.affix("", " s")?)?;
+    /// assert_eq!(axes.x_tick_format().suffix(), " s");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xtick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        const CONTEXT: &str = "Axes.xtick_format()";
+        check_x_tick_axis(CONTEXT, axes.x, "tick formats")?;
+        axes.xticks.set_format(CONTEXT, format)?;
+        Ok(self)
+    }
+
+    /// Sets the format of the y tick labels. Same rules as [`AxesMut::xtick_format`]; the y axis
+    /// is never a category axis.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` when the y ticks have labels given with
+    /// [`AxesMut::yticks_labeled`] and `format` is not plain [`TickFormat::AUTO`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, TickFormat};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.ytick_format(TickFormat::percent(0)?)?;
+    /// assert_eq!(axes.y_tick_format(), &TickFormat::percent(0)?);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ytick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        axes.yticks.set_format("Axes.ytick_format()", format)?;
+        Ok(self)
+    }
+
+    /// Sets the legend style of these axes, overriding the theme's style.
+    /// [`LegendStyle::None`] hides the legend. Calling it again replaces the style.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LegendStyle, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.legend(LegendStyle::Chips).legend(LegendStyle::None);
+    /// assert_eq!(axes.legend_style(), Some(LegendStyle::None));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn legend(&mut self, style: LegendStyle) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.legend = Some(style);
+        self
+    }
+
+    /// Adds a line. Errors leave the axes unchanged: `Error::Data` for mismatched lengths, an
+    /// infinite value, a magnitude beyond [`MAX_MAGNITUDE`], a value outside the log range on a
+    /// log axis, or `x` of the wrong kind for the axis. NaN is allowed and breaks the line.
+    ///
+    /// The mark stores its own copy of `y`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`AxesMut::line_shared`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AxisData, LineOptions};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.line(AxisData::Numbers(vec![0.0, 1.0]), &[1.0, f64::NAN], LineOptions::default())?;
+    /// assert!(axes
+    ///     .line(AxisData::Numbers(vec![0.0]), &[1.0, 2.0], LineOptions::default())
+    ///     .is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    ///
+    /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
+    pub fn line(&mut self, x: AxisData, y: &[f64], options: LineOptions) -> Result<&mut Self> {
+        self.line_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds a line as [`AxesMut::line`] does, but stores `y` itself rather than a copy of it: the
+    /// mark, and every clone of the figure, share the allocation of `y`. Use it for values
+    /// that are already in an `Arc<[f64]>`, so they are not copied again. Same rules and errors
+    /// as [`AxesMut::line`]; a failed call stores nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AxisData, LineOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([1.0, f64::NAN]);
+    /// axes.line_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), LineOptions::default())?;
+    /// let Some(Mark::Line(line)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(line.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn line_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: LineOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let series = XySeries::new("Axes.line()", axes.x, axes.y, x, y, LINE_GAP_HINT)?;
+        axes.marks.push(Mark::line(series, options));
+        Ok(self)
+    }
+
+    /// Adds a scatter series. Same rules as [`AxesMut::line`]; NaN skips a point.
+    ///
+    /// The mark stores its own copy of `y`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`AxesMut::scatter_shared`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AxisData, ScatterOptions};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.scatter(AxisData::Numbers(vec![0.0, 1.0]), &[1.0, 2.0], ScatterOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn scatter(
+        &mut self,
+        x: AxisData,
+        y: &[f64],
+        options: ScatterOptions,
+    ) -> Result<&mut Self> {
+        self.scatter_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds a scatter series as [`AxesMut::scatter`] does, but stores `y` itself rather than a
+    /// copy of it, as [`AxesMut::line_shared`] does. Same rules and errors as [`AxesMut::scatter`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AxisData, Mark, ScatterOptions};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([1.0, 2.0]);
+    /// let x = AxisData::Numbers(vec![0.0, 1.0]);
+    /// axes.scatter_shared(x, Arc::clone(&y), ScatterOptions::default())?;
+    /// let Some(Mark::Scatter(scatter)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(scatter.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn scatter_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: ScatterOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let series = XySeries::new("Axes.scatter()", axes.x, axes.y, x, y, SCATTER_GAP_HINT)?;
+        axes.marks.push(Mark::scatter(series, options));
+        Ok(self)
+    }
+
+    /// Adds an area: the line through the points, drawn as [`AxesMut::line`] draws it, over the
+    /// region between the line and the baseline, filled in the line's color as the theme's
+    /// [`FillStyle`](crate::FillStyle) paints it. The fill is drawn first and the line over it.
+    /// Like bars, an area puts 0 into a linear y axis, so the filled region is proportional to
+    /// the values; on a log y axis it fills down to the baseline, at the lowest y tick (or the
+    /// explicit lower limit). Same rules as [`AxesMut::line`]: NaN breaks both the line and the
+    /// fill.
+    ///
+    /// The mark stores its own copy of `y`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`AxesMut::area_shared`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AreaOptions, AxisData};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let x = AxisData::Numbers(vec![0.0, 1.0, 2.0]);
+    /// axes.area(x, &[3.0, f64::NAN, 4.0], AreaOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // An infinite value is an error, and the axes keep their one mark.
+    /// assert!(axes
+    ///     .area(AxisData::Numbers(vec![0.0]), &[f64::INFINITY], AreaOptions::default())
+    ///     .is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn area(&mut self, x: AxisData, y: &[f64], options: AreaOptions) -> Result<&mut Self> {
+        self.area_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds an area as [`AxesMut::area`] does, but stores `y` itself rather than a copy of it, as
+    /// [`AxesMut::line_shared`] does. Same rules and errors as [`AxesMut::area`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AreaOptions, AxisData, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([3.0, 4.0]);
+    /// axes.area_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), AreaOptions::default())?;
+    /// let Some(Mark::Area(area)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(area.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn area_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: AreaOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let series = XySeries::new("Axes.area()", axes.x, axes.y, x, y, AREA_GAP_HINT)?;
+        axes.marks.push(Mark::area(series, options));
+        Ok(self)
+    }
+
+    /// Adds bars: one bar per category, centered in the category's band, from the baseline to
+    /// its height. On a linear y axis bars grow from 0 and negative heights grow downwards; on a
+    /// log y axis they grow from the baseline, at the lowest y tick (or the explicit lower
+    /// limit). Bar marks added one after another are drawn at the same positions, in the order
+    /// they were added; categories join the x axis in order of first appearance across all
+    /// marks.
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order:
+    /// `categories` and `heights` of different lengths; an x axis that is not a category axis;
+    /// a category that appears twice; a height that is infinite, beyond [`MAX_MAGNITUDE`], or
+    /// outside the log range on a log y axis. NaN is allowed and draws no bar.
+    ///
+    /// The mark stores its own copy of `heights`, made once. To store heights already held in
+    /// an `Arc<[f64]>` without copying them, use [`AxesMut::bar_shared`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::BarOptions;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// axes.bar(vec!["a".into(), "b".into()], &[3.0, f64::NAN], BarOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // A repeated category is an error, and the axes keep their one mark.
+    /// assert!(axes.bar(vec!["a".into(), "a".into()], &[1.0, 2.0], BarOptions::default()).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    ///
+    /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
+    pub fn bar(
+        &mut self,
+        categories: Vec<String>,
+        heights: &[f64],
+        options: BarOptions,
+    ) -> Result<&mut Self> {
+        self.bar_shared(categories, Arc::from(heights), options)
+    }
+
+    /// Adds bars as [`AxesMut::bar`] does, but stores `heights` itself rather than a copy of it,
+    /// as [`AxesMut::line_shared`] does. Same rules and errors as [`AxesMut::bar`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{BarOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let heights: Arc<[f64]> = Arc::from([3.0, -1.0]);
+    /// axes.bar_shared(vec!["a".into(), "b".into()], Arc::clone(&heights), BarOptions::default())?;
+    /// let Some(Mark::Bar(bar)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(bar.heights(), &*heights));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn bar_shared(
+        &mut self,
+        categories: Vec<String>,
+        heights: Arc<[f64]>,
+        options: BarOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = BarMark::new("Axes.bar()", axes.x, axes.y, categories, heights, options)?;
+        axes.marks.push(Mark::Bar(mark));
+        Ok(self)
+    }
+
+    /// Adds grouped bars: in each category, one bar per series, side by side in series order.
+    /// The group takes 72 % of the category's band, centered in it, with a 2 pt gap between
+    /// its bars; when the bars would be narrower than the gap, they touch. Each bar grows from
+    /// the baseline as in [`AxesMut::bar`]. Each series takes its own color; `Auto` colors take
+    /// palette slots in series order. Categories join the x axis in order of first appearance
+    /// across all marks.
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: an empty
+    /// `series`; a series whose values are not one per category (the message names the
+    /// series' index); then the categories and each series' values as in [`AxesMut::bar`]. NaN is
+    /// allowed and draws no bar.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::Series;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let series = |label: &str, values: &[f64]| Series {
+    ///     label: label.into(),
+    ///     values: values.to_vec(),
+    ///     ..Series::default()
+    /// };
+    /// axes.grouped_bar(
+    ///     vec!["2025".into(), "2026".into()],
+    ///     vec![series("north", &[3.0, 4.0]), series("south", &[2.5, f64::NAN])],
+    /// )?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // A series with a height missing is an error, and the axes keep their one mark.
+    /// assert!(axes.grouped_bar(vec!["a".into()], vec![series("x", &[])]).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_bar(
+        &mut self,
+        categories: Vec<String>,
+        series: Vec<Series>,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = BarGroupMark::new(
+            "Axes.grouped_bar()",
+            Arrangement::Grouped,
+            axes.x,
+            axes.y,
+            categories,
+            series,
+        )?;
+        axes.marks.push(Mark::GroupedBar(mark));
+        Ok(self)
+    }
+
+    /// Adds stacked bars: in each category, one stack, as wide as a bar of [`AxesMut::bar`], with
+    /// the series stacked in series order. Positive values stack upward from the baseline and
+    /// negative ones downward, each side separately; NaN and 0 add no segment. Neighbouring
+    /// segments on one side are 1 pt apart, and a segment too thin for that gap is not drawn.
+    /// Only the outermost segment on each side has its end rounded. On a log y axis the first
+    /// segment starts at the baseline, at the lowest y tick (or the explicit lower limit).
+    /// Colors and categories work as in [`AxesMut::grouped_bar`].
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
+    /// [`AxesMut::grouped_bar`], with one more check at the end: in each category, the positive
+    /// values and the negative values must each add up to at most
+    /// [`MAX_MAGNITUDE`] in magnitude (the message names the category).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::Series;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let series = |values: &[f64]| Series { values: values.to_vec(), ..Series::default() };
+    /// axes.stacked_bar(vec!["a".into(), "b".into()], vec![series(&[3.0, -1.0]), series(&[2.0, 4.0])])?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // Totals beyond the supported magnitudes are an error.
+    /// assert!(axes.stacked_bar(vec!["a".into()], vec![series(&[1e300]), series(&[1e300])]).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    ///
+    /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
+    pub fn stacked_bar(
+        &mut self,
+        categories: Vec<String>,
+        series: Vec<Series>,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = BarGroupMark::new(
+            "Axes.stacked_bar()",
+            Arrangement::Stacked,
+            axes.x,
+            axes.y,
+            categories,
+            series,
+        )?;
+        axes.marks.push(Mark::StackedBar(mark));
+        Ok(self)
+    }
+
+    /// Adds a histogram: the finite `values` counted in `options.bins` equal-width bins from
+    /// their smallest to their largest value, drawn as one bar per non-empty bin from the
+    /// baseline to its count. Bins are half-open, `[low, high)`, except the last, which also
+    /// holds the largest value. NaN is ignored. Values that are all the same, or that span less
+    /// than a linear axis can show, are binned over `v ± max(0.5, |v| × 1e-9)` around their
+    /// midpoint `v`. The values are stored as given and binned when the figure is rendered.
+    ///
+    /// Neighbouring bars are the theme's [`hist_gap`](crate::Theme::hist_gap) apart, at most
+    /// half a bin, and have square corners. With [`FillStyle::Gradient`](crate::FillStyle), all
+    /// bars share one vertical gradient from the top of the tallest bar to the baseline, and
+    /// each bar gets a solid top edge. On a linear y axis the bars grow from 0; on a log y axis
+    /// they grow from the baseline, at the lowest y tick (or the explicit lower limit). Auto
+    /// limits put that tick below the smallest count, so every non-empty bin has a height.
+    ///
+    /// Errors leave the axes unchanged. They are checked in this order: `Error::Style` for
+    /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and
+    /// `Error::Usage` for a log x axis, which histograms do not support; `Error::Data` for a
+    /// value that is infinite or beyond [`MAX_MAGNITUDE`].
+    ///
+    /// The mark stores its own copy of `values`, made once. To store values already held in an
+    /// `Arc<[f64]>` without copying them, use [`AxesMut::hist_shared`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::HistOptions;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.hist(&[1.2, 3.4, 2.2, f64::NAN, 2.9], HistOptions { bins: 3, ..HistOptions::default() })?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// // No bins is an error, and the axes keep their one mark.
+    /// assert!(axes.hist(&[1.0], HistOptions { bins: 0, ..HistOptions::default() }).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    ///
+    /// [`MAX_BINS`]: crate::MAX_BINS
+    /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
+    pub fn hist(&mut self, values: &[f64], options: HistOptions) -> Result<&mut Self> {
+        self.hist_shared(Arc::from(values), options)
+    }
+
+    /// Adds a histogram as [`AxesMut::hist`] does, but stores `values` itself rather than a copy
+    /// of it, as [`AxesMut::line_shared`] does. Same rules and errors as [`AxesMut::hist`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{HistOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let values: Arc<[f64]> = Arc::from([1.2, 3.4, f64::NAN]);
+    /// axes.hist_shared(Arc::clone(&values), HistOptions::default())?;
+    /// let Some(Mark::Hist(hist)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(hist.values(), &*values));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hist_shared(&mut self, values: Arc<[f64]>, options: HistOptions) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = HistMark::new("Axes.hist()", axes.x, values, options)?;
+        axes.marks.push(Mark::Hist(mark));
+        Ok(self)
+    }
+}

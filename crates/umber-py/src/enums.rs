@@ -7,7 +7,9 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use umber_core::{Dash, FillStyle, Font, GridLines, LegendStyle, Marker, SvgText};
+use umber_core::{
+    Dash, FillStyle, Font, GridLines, LegendMode, LegendStyle, Marker, Share, SvgText,
+};
 
 use crate::errors::internal_value;
 
@@ -97,13 +99,27 @@ int_enum!("SvgText", SvgText {
     "EDITABLE" => SvgText::Editable = 1,
 });
 
+int_enum!("Share", Share {
+    "NONE" => Share::None = 0,
+    "ROW" => Share::Row = 1,
+    "COL" => Share::Col = 2,
+    "ALL" => Share::All = 3,
+});
+
+int_enum!("Legend", LegendMode {
+    "MERGED" => LegendMode::Merged = 0,
+    "PER_PANEL" => LegendMode::PerPanel = 1,
+});
+
 /// The variant of `E` with integer value `value`; an unknown value is an internal `ValueError`.
 pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
     E::from_value(value)
         .ok_or_else(|| internal_value(format!("{value} is not a value of {}", E::PY_NAME)))
 }
 
-/// Every bound enum: its Python name and its `(member name, value)` pairs.
+/// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
+/// pairs. `Share` and `Legend` are bound for the grid figure's constructor but are not public
+/// Python enums yet, so they are not listed.
 const TABLES: [(&str, &[(&str, i64)]); 7] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
@@ -155,6 +171,8 @@ mod tests {
         round_trips::<FillStyle>();
         round_trips::<GridLines>();
         round_trips::<SvgText>();
+        round_trips::<Share>();
+        round_trips::<LegendMode>();
     }
 
     #[test]

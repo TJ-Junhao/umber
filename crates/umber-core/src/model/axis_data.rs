@@ -216,14 +216,13 @@ mod tests {
         let mut copy = source.clone();
 
         // The clone reads the same arrays, not copies of them.
-        let original = series_of(&source.axes().unwrap().marks()[0]);
-        let cloned = series_of(&copy.axes().unwrap().marks()[0]);
+        let original = series_of(&source.single_axes().marks()[0]);
+        let cloned = series_of(&copy.single_axes().marks()[0]);
         assert!(Arc::ptr_eq(&original.x, &cloned.x));
         assert!(Arc::ptr_eq(&original.y, &cloned.y));
 
         // Changing the clone leaves the source as it was.
-        copy.axes_mut()
-            .unwrap()
+        copy.single_axes_mut()
             .scatter(
                 AxisData::Numbers(vec![5.0]),
                 &[6.0],
@@ -236,12 +235,12 @@ mod tests {
             .unwrap()
             .title("copy");
         assert_eq!(source, before);
-        let axes = source.axes().unwrap();
+        let axes = source.single_axes();
         assert_eq!(axes.marks().len(), 1);
         assert_eq!(axes.x_limits(), Some((0.0, 4.0)));
         assert_eq!(axes.y_limits(), None);
         assert_eq!(axes.title_text(), "");
-        assert_eq!(copy.axes().unwrap().marks().len(), 2);
+        assert_eq!(copy.single_axes().marks().len(), 2);
     }
 
     #[test]
@@ -251,7 +250,7 @@ mod tests {
         let x = vec![0.0, gap, -0.0];
         let y = [gap, 1.0, -0.0];
         let mut figure = Figure::new(6.0, 4.0, Theme::midnight()).unwrap();
-        let axes = figure.add_axes(LIN, LIN).unwrap();
+        let mut axes = figure.add_axes(LIN, LIN).unwrap();
         axes.area(AxisData::Numbers(x.clone()), &y, AreaOptions::default())
             .unwrap();
         let [mark @ Mark::Area(area)] = axes.marks() else {
@@ -279,7 +278,7 @@ mod tests {
     #[test]
     fn shared_values_are_stored_without_a_copy() {
         let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-        let axes = figure.add_axes(LIN, LIN).unwrap();
+        let mut axes = figure.add_axes(LIN, LIN).unwrap();
         let x = || AxisData::Numbers(vec![0.0, 1.0]);
         let y: Arc<[f64]> = Arc::from([2.0, f64::NAN]);
         axes.line_shared(x(), Arc::clone(&y), LineOptions::default())
@@ -305,7 +304,7 @@ mod tests {
         assert_eq!((Arc::strong_count(&y), axes.marks().len()), (4, 3));
 
         let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-        let axes = figure.add_axes(ScaleKind::Category, LIN).unwrap();
+        let mut axes = figure.add_axes(ScaleKind::Category, LIN).unwrap();
         let heights: Arc<[f64]> = Arc::from([3.0, -1.0]);
         axes.bar_shared(
             vec!["a".into(), "b".into()],
@@ -329,7 +328,7 @@ mod tests {
         assert_eq!((Arc::strong_count(&heights), axes.marks().len()), (2, 1));
 
         let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-        let axes = figure.add_axes(LIN, LIN).unwrap();
+        let mut axes = figure.add_axes(LIN, LIN).unwrap();
         let values: Arc<[f64]> = Arc::from([1.0, 2.5, f64::NAN]);
         axes.hist_shared(Arc::clone(&values), HistOptions::default())
             .unwrap();

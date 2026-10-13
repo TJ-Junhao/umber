@@ -88,8 +88,8 @@ pub enum Marker {
 
 /// How legends are drawn.
 ///
-/// A theme sets the style for every axes; [`Axes::legend`](crate::Axes::legend) overrides it
-/// for one axes.
+/// A theme sets the style for every axes; [`AxesMut::legend`](crate::AxesMut::legend) overrides
+/// it for one axes.
 ///
 /// # Examples
 ///
@@ -113,7 +113,7 @@ pub enum LegendStyle {
 
 /// How area and histogram fills are painted. It never decides whether something is filled:
 /// lines are never filled, and the fill under a line is the explicit
-/// [`Axes::area`](crate::Axes::area) mark.
+/// [`AxesMut::area`](crate::AxesMut::area) mark.
 ///
 /// # Examples
 ///
