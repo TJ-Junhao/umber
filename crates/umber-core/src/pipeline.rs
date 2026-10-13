@@ -55,7 +55,7 @@ fn measure_legend<'a>(
 
 /// `err`, a layout error of the axes whose top-left cell is at `row`, `col`, naming that cell
 /// first on a grid of more than one cell; unchanged on a 1 × 1 grid.
-fn panel_error(figure: &Figure, axes: &Axes, err: Error) -> Error {
+pub(crate) fn panel_error(figure: &Figure, axes: &Axes, err: Error) -> Error {
     let grid = figure.grid();
     if grid.rows() * grid.cols() == 1 {
         return err;

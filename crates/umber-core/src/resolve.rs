@@ -495,42 +495,57 @@ fn categories(marks: &[ResolvedMark<'_>]) -> CategoryScale {
 /// no `x`. On a grid of more than one cell the message starts with the axes' top-left cell, as
 /// the layout errors of [`pipeline::scene`](crate::pipeline) do.
 pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result<()> {
-    let grid = figure.grid();
     for axes in figure.panels() {
         if axes.x_scale() != ScaleKind::Category {
             continue;
         }
-        let marks = resolve_marks(axes.marks(), figure.theme());
-        let scale = categories(&marks);
-        for mark in &marks {
-            let ResolvedMark::VLine { mark, .. } = mark else {
-                continue;
-            };
-            let AxisValue::Category(name) = mark.x() else {
-                continue;
-            };
-            if scale.index_of(name).is_none() {
-                let error = Error::data(
-                    context,
-                    format!(
-                        "x is {}; no mark on this axes has that category.",
-                        quoted(name)
-                    ),
-                )
-                .with_hint("draw a mark with that category first.");
-                if grid.rows() * grid.cols() == 1 {
-                    return Err(error);
-                }
-                let cells = axes.cells();
-                return Err(error.with_message_prefix(&format!(
-                    "row {}, col {}: ",
-                    cells.row(),
-                    cells.col()
-                )));
-            }
+        let mut lines = axes.marks().iter().filter_map(|mark| match mark {
+            Mark::VLine(line) => match line.x() {
+                AxisValue::Category(name) => Some(name),
+                AxisValue::Number(_) => None,
+            },
+            _ => None,
+        });
+        // Axes without a vertical line at a category need no lookup, and no marks resolved.
+        let Some(first) = lines.next() else {
+            continue;
+        };
+        let scale = CategoryScale::from_first_appearance(
+            axes.marks()
+                .iter()
+                .flat_map(mark_categories)
+                .map(String::as_str),
+        );
+        if let Some(name) = std::iter::once(first)
+            .chain(lines)
+            .find(|name| scale.index_of(name).is_none())
+        {
+            let error = Error::data(
+                context,
+                format!(
+                    "x is {}; no mark on this axes has that category.",
+                    quoted(name)
+                ),
+            )
+            .with_hint("draw a mark with that category first.");
+            return Err(crate::pipeline::panel_error(figure, axes, error));
         }
     }
     Ok(())
+}
+
+/// The categories `mark` names on a category x axis, in data order, repeats included: what
+/// [`ResolvedMark::x_categories`] yields for the same mark, found without resolving it.
+fn mark_categories(mark: &Mark) -> &[String] {
+    match mark {
+        Mark::Line(mark) => category_names(mark.x()),
+        Mark::Scatter(mark) => category_names(mark.x()),
+        Mark::Area(mark) => category_names(mark.x()),
+        Mark::Step(mark) => category_names(mark.x()),
+        Mark::Bar(mark) => mark.categories(),
+        Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
+        Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
+    }
 }
 
 /// Resolves both axes from the resolved `marks` and the axes' `limits`, for about `x_target`
@@ -547,7 +562,9 @@ pub(crate) fn resolve(
             // Reference lines and spans do not decide the padding: an axis of lines and
             // references keeps the exact extent of the lines, while an axis of references
             // alone is padded.
-            let only_references = !marks.is_empty() && marks.iter().all(ResolvedMark::is_reference);
+            // Only references that give this axis values pad it; a horizontal reference alone
+            // leaves the x axis as it would be without it.
+            let only_references = data.is_some() && marks.iter().all(ResolvedMark::is_reference);
             let all_lines = !only_references
                 && marks
                     .iter()
@@ -3935,5 +3952,81 @@ mod tests {
         let mut f = figure(LIN, LIN);
         axes(&mut f).vline(at(3.0), rule()).unwrap();
         assert!(check_references(&f, "Figure.to_svg()").is_ok());
+    }
+
+    #[test]
+    fn a_reference_on_the_other_axis_leaves_an_axis_with_explicit_ticks_alone() {
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let build = |x: ScaleKind, reference: Option<&dyn Fn(&mut Figure)>| {
+            let mut f = figure(x, LIN);
+            if x == LIN {
+                axes(&mut f).xticks(&[0.0, 10.0]).unwrap();
+            } else {
+                axes(&mut f).xticks(&[1.0, 100.0]).unwrap();
+            }
+            axes(&mut f).ylim(0.0, 10.0).unwrap();
+            if let Some(add) = reference {
+                add(&mut f);
+            }
+            domains(&f)
+        };
+        let hline = |f: &mut Figure| {
+            axes(f).hline(5.0, rule()).unwrap();
+        };
+        let hspan = |f: &mut Figure| {
+            axes(f).hspan(2.0, 4.0, span()).unwrap();
+        };
+        for x in [LIN, log] {
+            assert_eq!(build(x, None), build(x, Some(&hline)), "hline on {x:?}");
+            assert_eq!(build(x, None), build(x, Some(&hspan)), "hspan on {x:?}");
+        }
+        // The same for y: a vertical reference leaves a y axis with explicit ticks alone.
+        let build_y = |reference: bool| {
+            let mut f = figure(LIN, LIN);
+            axes(&mut f)
+                .yticks(&[0.0, 10.0])
+                .unwrap()
+                .xlim(0.0, 10.0)
+                .unwrap();
+            if reference {
+                axes(&mut f)
+                    .vline(at(5.0), rule())
+                    .unwrap()
+                    .vspan(2.0, 4.0, span())
+                    .unwrap();
+            }
+            domains(&f)
+        };
+        assert_eq!(build_y(false), build_y(true));
+        // A reference that does give the axis values still pads it when alone.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f).vspan(2.0, 6.0, span()).unwrap();
+        let (lo, hi) = domains(&f).0;
+        assert!(lo < 2.0 && hi > 6.0);
+    }
+
+    #[test]
+    fn categories_of_marks_are_found_without_resolving_them() {
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .bar(
+                vec!["a".into(), "b".into()],
+                &[1.0, 2.0],
+                BarOptions::default(),
+            )
+            .unwrap()
+            .scatter(cats(&["c", "a"]), &[1.0, 2.0], ScatterOptions::default())
+            .unwrap()
+            .hline(1.0, rule())
+            .unwrap();
+        let marks = f.single_axes().marks();
+        let found: Vec<&str> = marks
+            .iter()
+            .flat_map(mark_categories)
+            .map(String::as_str)
+            .collect();
+        let resolved = resolve_marks(marks, &Theme::pigment());
+        let expected: Vec<&str> = resolved.iter().flat_map(|m| m.x_categories()).collect();
+        assert_eq!(found, expected);
     }
 }
