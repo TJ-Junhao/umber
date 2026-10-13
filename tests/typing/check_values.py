@@ -28,8 +28,8 @@ cats.bar(["A", "B"], [3, 5])
 cats.bar(("A", "B"), floats[:2])
 cats.bar(np.array(["A", "B"]), pd.Series([3.0, 5.0]))
 cats.bar(pl.Series(["A", "B"]), pl.Series([3.0, 5.0]))
-ub.BarSeries("North", floats)
-ub.BarSeries("North", pl.Series([1.0]))
+ub.Series("North", floats)
+ub.Series("North", pl.Series([1.0]))
 
 # Negative: ``bar`` categories must be a sequence of ``str`` or an array-like.
 cats.bar([1, 2], [3, 5])  # type: ignore[list-item]  # pyright: ignore[reportArgumentType]
@@ -38,7 +38,7 @@ cats.bar([1, 2], [3, 5])  # type: ignore[list-item]  # pyright: ignore[reportArg
 ax.line([1, 2], 3.0)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 ax.hist(3.0)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
-# A plain ``str`` is not accepted as ``heights``: ``str`` is a ``Sequence[str]``, not a
+# A plain ``str`` is not accepted as ``values``: ``str`` is a ``Sequence[str]``, not a
 # ``Sequence[float]``, so both checkers reject it (and it fails at runtime with a ``TypeError``,
 # see ``test_bars.py``).
-ub.BarSeries("a", "abc")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+ub.Series("a", "abc")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 4b975184aeeea6de4941af86e6ae3f576153730e
+# revision: ec174471f6cada984a24a143b37285c278350001
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -10,7 +10,7 @@ a550728a79f1484f468f30b07f202fd5e16a63bc420848c9a6ea05917fb0649d  api/themes.txt
 d0cdd58912ede360f7593c39f2a6ccaee04bff66e5a4a89b1ab7ecbe8cc54864  errors/api.txt
 f5570630344f0834c355bafc5594c3d4df960728f63559772a50696dc9ecbe3b  errors/area.txt
 18bbdce171fb9a8ba22e913661415e5c903264745b74777578bedb8665b6f553  errors/bars.txt
-9d4a37b8117e5c654591a76a6a1d7517c2916d507ae353cf97fa4b50bdab8e29  errors/grouped-bars.txt
+a506268401cd417c80f32a0f44cb3e59fd1c229ffe0c795f4b00df8a0036c5e4  errors/grouped-bars.txt
 124af6c864666aefd756ff84fb27ff26950004e295639fc7b6db7b82d70eef73  errors/hist.txt
 68c88012613aa73c8361c3350f5b18d859fbcac8286a86260461b74abe8cbeba  errors/inputs.txt
 560205641c3c60adb3072225f55b4e1d3474d07056cd59f1f72a9cdf22e72ee7  errors/plot-min-height.txt

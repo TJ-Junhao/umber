@@ -4,8 +4,8 @@
 #![allow(clippy::expect_used)]
 
 use umber_core::{
-    Alpha, AreaOptions, AxisData, BarOptions, BarSeries, Error, Figure, HistOptions, LineOptions,
-    LogBase, Result, Rgba, ScaleKind, ScatterOptions, SizeSpec, Theme,
+    Alpha, AreaOptions, AxisData, BarOptions, Error, Figure, HistOptions, LineOptions, LogBase,
+    Result, Rgba, ScaleKind, ScatterOptions, Series, SizeSpec, Theme,
 };
 
 const LOG: ScaleKind = ScaleKind::Log { base: LogBase::TEN };
@@ -22,10 +22,10 @@ fn names(values: &[&str]) -> Vec<String> {
     values.iter().map(|s| (*s).to_owned()).collect()
 }
 
-fn series(heights: &[f64]) -> BarSeries {
-    BarSeries {
-        heights: heights.to_vec(),
-        ..BarSeries::default()
+fn series(values: &[f64]) -> Series {
+    Series {
+        values: values.to_vec(),
+        ..Series::default()
     }
 }
 

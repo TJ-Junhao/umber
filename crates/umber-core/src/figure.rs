@@ -22,9 +22,9 @@
 //! ```
 
 pub use crate::model::{
-    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries,
-    BarSeriesView, ExplicitTicks, Figure, HistMark, HistOptions, LineMark, LineOptions, Mark,
-    ScatterMark, ScatterOptions,
+    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, ExplicitTicks,
+    Figure, HistMark, HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
+    Series, SeriesView,
 };
 
 use crate::render::{SvgText, check_dpi, render_png, render_svg};

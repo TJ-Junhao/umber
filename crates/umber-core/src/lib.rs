@@ -48,10 +48,10 @@
 //! - the figure model: [`Figure`] (size, theme and axes getters, [`Figure::add_axes`],
 //!   [`Figure::to_png`], [`Figure::to_svg`]), [`Axes`] (text, limit and tick setters, mark
 //!   methods and their getters), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
-//!   [`ScatterOptions`], [`AreaOptions`], [`BarOptions`], [`BarSeries`] and [`HistOptions`]
+//!   [`ScatterOptions`], [`AreaOptions`], [`BarOptions`], [`Series`] and [`HistOptions`]
 //!   with its bin limit [`MAX_BINS`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`BarMark`],
-//!   [`BarGroupMark`], [`BarSeriesView`] and [`HistMark`] that [`Axes::marks`] returns;
+//!   [`BarGroupMark`], [`SeriesView`] and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
@@ -112,9 +112,9 @@ pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
 pub use figure::{
-    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, BarSeries,
-    BarSeriesView, ExplicitTicks, Figure, HistMark, HistOptions, LineMark, LineOptions, Mark,
-    ScatterMark, ScatterOptions,
+    AreaMark, AreaOptions, Axes, AxisData, BarGroupMark, BarMark, BarOptions, ExplicitTicks,
+    Figure, HistMark, HistOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions,
+    Series, SeriesView,
 };
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};

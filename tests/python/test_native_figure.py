@@ -515,8 +515,8 @@ def test_mark_labels_and_colors_reach_the_legend() -> None:
     assert 'fill="#D64933"' in svg or 'stroke="#D64933"' in svg
 
 
-def series(*heights: float) -> tuple[str, npt.NDArray[np.float64], tuple[int, int, float]]:
-    return ("s", floats(*heights), AUTO)
+def series(*values: float) -> tuple[str, npt.NDArray[np.float64], tuple[int, int, float]]:
+    return ("s", floats(*values), AUTO)
 
 
 LINE_GAP = "use NaN to leave a gap in the line."
@@ -691,8 +691,8 @@ MARK_ERRORS: list[ErrorCase] = [
         lambda: figure(x=CATEGORY),
         lambda f: f.grouped_bar(["a"], [series(1), series()]),
         ub.DataError,
-        "Axes.grouped_bar(): categories has 1 values but series[1].heights has 0; each series "
-        "must have one height per category.",
+        "Axes.grouped_bar(): categories has 1 values but series[1].values has 0; each series "
+        "must have one value per category.",
         "series",
         None,
     ),
@@ -711,7 +711,7 @@ MARK_ERRORS: list[ErrorCase] = [
         lambda: figure(x=CATEGORY),
         lambda f: f.grouped_bar(["a", "b"], [series(1, 2), series(1, np.inf)]),
         ub.DataError,
-        f"Axes.grouped_bar(): series[1].heights[1] is inf; {FINITE}",
+        f"Axes.grouped_bar(): series[1].values[1] is inf; {FINITE}",
         "series",
         SERIES_GAP,
     ),
@@ -739,7 +739,7 @@ MARK_ERRORS: list[ErrorCase] = [
         lambda: figure(x=CATEGORY, y=LOG),
         lambda f: f.stacked_bar(["a"], [series(-1)]),
         ub.DataError,
-        "Axes.stacked_bar(): series[0].heights[0] is -1 on a log axis; values must be positive.",
+        "Axes.stacked_bar(): series[0].values[0] is -1 on a log axis; values must be positive.",
         "series",
         "use a linear axis, or remove values that are not positive.",
     ),
@@ -748,7 +748,7 @@ MARK_ERRORS: list[ErrorCase] = [
         lambda: figure(x=CATEGORY),
         lambda f: f.stacked_bar(["a"], [series(1e300), series(1e300)]),
         ub.DataError,
-        'Axes.stacked_bar(): the heights of categories[0] ("a") stack to 2e300; each stack '
+        'Axes.stacked_bar(): the values of categories[0] ("a") stack to 2e300; each stack '
         "must stay within 1e300 on both sides of 0.",
         "series",
         None,
@@ -855,7 +855,7 @@ INTERNAL_MARK_ERRORS: list[
         "expected a one-dimensional float64 buffer, got list",
     ),
     (
-        "series heights",
+        "series values",
         lambda f: f.grouped_bar(["a"], [("s", untyped((1.0,)), AUTO)]),
         TypeError,
         "expected a one-dimensional float64 buffer, got tuple",

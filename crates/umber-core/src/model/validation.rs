@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use super::axis_data::AxisData;
-use super::bar::{Arrangement, BarSeries};
+use super::bar::{Arrangement, Series};
 use crate::binning::{BinCount, MAX_BINS};
 use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
@@ -30,7 +30,7 @@ const BAR_GAP_HINT: &str = "use NaN to leave a category without a bar.";
 /// The largest accepted figure side, in inches.
 const MAX_FIGURE_IN: f64 = 200.0;
 
-/// Checks `values`, shown as `name` in messages (`"y"`, `"series[1].heights"`), against the
+/// Checks `values`, shown as `name` in messages (`"y"`, `"series[1].values"`), against the
 /// transform of their axis. An error names `parameter`, the Python parameter that holds them, and
 /// an infinite value gets `infinite_hint`, which says what to pass instead.
 fn check_numbers(
@@ -181,9 +181,9 @@ pub(super) fn check_bars(
 /// error, under `context`:
 ///
 /// 1. there is at least one series;
-/// 2. every series has one height per category, checked in series order;
+/// 2. every series has one value per category, checked in series order;
 /// 3. the categories, by [`check_categories`];
-/// 4. the heights of each series, in series order, as for a bar mark;
+/// 4. the values of each series, in series order, as for a bar mark;
 /// 5. for stacked series only: in every category, in category order, the positive heights and
 ///    the negative heights each add up to at most [`MAX_MAGNITUDE`] in magnitude, summed in
 ///    series order as the stacks are.
@@ -193,7 +193,7 @@ pub(super) fn check_bar_group(
     x_kind: ScaleKind,
     y_transform: Transform,
     categories: &[String],
-    series: &[BarSeries],
+    series: &[Series],
 ) -> Result<()> {
     if series.is_empty() {
         return Err(
@@ -202,13 +202,13 @@ pub(super) fn check_bar_group(
         );
     }
     for (i, s) in series.iter().enumerate() {
-        if s.heights.len() != categories.len() {
+        if s.values.len() != categories.len() {
             return Err(Error::data(
                 context,
                 format!(
-                    "categories has {} values but series[{i}].heights has {}; each series must have one height per category.",
+                    "categories has {} values but series[{i}].values has {}; each series must have one value per category.",
                     categories.len(),
-                    s.heights.len()
+                    s.values.len()
                 ),
             )
             .with_parameter("series"));
@@ -223,8 +223,8 @@ pub(super) fn check_bar_group(
     for (i, s) in series.iter().enumerate() {
         check_numbers(
             context,
-            (&format!("series[{i}].heights"), "series"),
-            &s.heights,
+            (&format!("series[{i}].values"), "series"),
+            &s.values,
             y_transform,
             "use NaN to omit that height.",
         )?;
@@ -326,12 +326,12 @@ fn check_categories(
 fn check_stacked_totals(
     context: &'static str,
     categories: &[String],
-    series: &[BarSeries],
+    series: &[Series],
 ) -> Result<()> {
     for (i, name) in categories.iter().enumerate() {
         let mut totals = Totals::default();
         for s in series {
-            totals.push(s.heights.get(i).copied().unwrap_or(f64::NAN));
+            totals.push(s.values.get(i).copied().unwrap_or(f64::NAN));
         }
         for total in [totals.positive(), totals.negative()] {
             // The heights are finite, so a total is a number, and an overflow is infinite.
@@ -339,7 +339,7 @@ fn check_stacked_totals(
                 return Err(Error::data(
                     context,
                     format!(
-                        "the heights of categories[{i}] ({name:?}) stack to {total}; each stack must stay within {MAX_MAGNITUDE:e} on both sides of 0.", total = number(total),
+                        "the values of categories[{i}] ({name:?}) stack to {total}; each stack must stay within {MAX_MAGNITUDE:e} on both sides of 0.", total = number(total),
                     ),
                 )
                 .with_parameter("series"));

@@ -19,7 +19,7 @@ from umber._enums import Dash, LegendStyle, Marker
 from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
-from umber._series import BarSeries
+from umber._series import Series
 from umber._size import Size
 from umber._ticks import TickFormat
 from umber._types import Values
@@ -43,8 +43,8 @@ _CATEGORY: Final = Scale.category()
 _COLOR_HINT: Final = 'use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.'
 _COPY_HINT: Final = "copy the figure instead: copy.copy(ax.figure)."
 _PICKLE_HINT: Final = "save the figure with save_png() or save_svg(), or build it again."
-_SERIES_HINT: Final = 'pass a list of series, e.g. [BarSeries("North", [3, 5])].'
-_SERIES_ITEM_HINT: Final = 'make each series with BarSeries(), e.g. BarSeries("North", [3, 5]).'
+_SERIES_HINT: Final = 'pass a list of series, e.g. [Series("North", [3, 5])].'
+_SERIES_ITEM_HINT: Final = 'make each series with Series(), e.g. Series("North", [3, 5]).'
 
 
 def _members_hint(cls: type[Enum]) -> str:
@@ -671,20 +671,20 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def grouped_bar(
-        self: "Axes[str, float]", categories: Values[str], series: Sequence[BarSeries]
+        self: "Axes[str, float]", categories: Values[str], series: Sequence[Series]
     ) -> "Axes[str, float]":
         """Add grouped bars: in each category, one bar per series, side by side.
 
         Args:
             categories: The category names, each at most once.
-            series: One or more ``BarSeries``, each with one height per category. The series
+            series: One or more ``Series``, each with one value per category. The series
                 take their places in the group in this order.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``series`` is not a sequence of ``BarSeries``, or ``categories`` has
+            TypeError: If ``series`` is not a sequence of ``Series``, or ``categories`` has
                 the wrong type.
             DataError: If the data cannot be plotted: ``series`` is empty, a series has a
                 different length, a category repeats, a height is infinite or not positive on
@@ -696,7 +696,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
             >>> ax = ax.grouped_bar(
             ...     ["Q1", "Q2", "Q3"],
-            ...     [ub.BarSeries("North", [3, 5, 2]), ub.BarSeries("South", [4, 1, 3])],
+            ...     [ub.Series("North", [3, 5, 2]), ub.Series("South", [4, 1, 3])],
             ... )
         """
         with api_call():
@@ -708,22 +708,22 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def stacked_bar(
-        self: "Axes[str, float]", categories: Values[str], series: Sequence[BarSeries]
+        self: "Axes[str, float]", categories: Values[str], series: Sequence[Series]
     ) -> "Axes[str, float]":
         """Add stacked bars: in each category, the series stacked on one another.
 
-        Positive and negative heights stack separately, above and below the baseline.
+        Positive and negative values stack separately, above and below the baseline.
 
         Args:
             categories: The category names, each at most once.
-            series: One or more ``BarSeries``, each with one height per category. The first
+            series: One or more ``Series``, each with one value per category. The first
                 series sits on the baseline.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``series`` is not a sequence of ``BarSeries``, or ``categories`` has
+            TypeError: If ``series`` is not a sequence of ``Series``, or ``categories`` has
                 the wrong type.
             DataError: If the data cannot be plotted: ``series`` is empty, a series has a
                 different length, a category repeats, a height is infinite or not positive on
@@ -736,7 +736,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
             >>> ax = ax.stacked_bar(
             ...     ["Q1", "Q2", "Q3"],
-            ...     [ub.BarSeries("North", [3, 5, 2]), ub.BarSeries("South", [4, 1, 3])],
+            ...     [ub.Series("North", [3, 5, 2]), ub.Series("South", [4, 1, 3])],
             ... )
         """
         with api_call():
@@ -844,14 +844,14 @@ def _series_arguments(
 ) -> list[tuple[str, FloatArray, tuple[int, int, float]]]:
     """Check a ``series`` argument and return the native form of each series."""
     if isinstance(value, str | bytes) or not isinstance(value, Sequence):
-        message = f"series is {type_name(value)}; series must be a sequence of BarSeries."
+        message = f"series is {type_name(value)}; series must be a sequence of Series."
         raise new_error(TypeError, context, message, parameter="series", hint=_SERIES_HINT)
     items = cast(Sequence[object], value)
     arguments: list[tuple[str, FloatArray, tuple[int, int, float]]] = []
     for index, item in enumerate(items):
-        if not isinstance(item, BarSeries):
+        if not isinstance(item, Series):
             label = f"series[{index}]"
-            message = f"{label} is {type_name(item)}; {label} must be of type BarSeries."
+            message = f"{label} is {type_name(item)}; {label} must be of type Series."
             raise new_error(TypeError, context, message, parameter="series", hint=_SERIES_ITEM_HINT)
         arguments.append(_series.native(item))
     return arguments

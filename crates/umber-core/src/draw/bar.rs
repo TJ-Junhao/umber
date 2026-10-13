@@ -4,7 +4,7 @@ use super::MarkContext;
 use super::bar_shape::BarFrame;
 use super::mapping::axis_y_value;
 use crate::geometry::Path;
-use crate::model::{BarGroupMark, BarMark, BarSeriesView};
+use crate::model::{BarGroupMark, BarMark, SeriesView};
 use crate::resolve::{AxisScale, ResolvedAxis, ResolvedContinuousAxis};
 use crate::scene::{FillRule, Item, Paint};
 use crate::stacking::Stacks;
@@ -128,7 +128,7 @@ pub(super) fn grouped_items(
     x: &ResolvedAxis,
     y: &ResolvedContinuousAxis,
     mark: &BarGroupMark,
-    series: &[(BarSeriesView<'_>, Rgba)],
+    series: &[(SeriesView<'_>, Rgba)],
     items: &mut Vec<Item>,
 ) {
     let AxisScale::Category(categories) = &x.scale else {
@@ -140,7 +140,7 @@ pub(super) fn grouped_items(
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let (group_left, _) = bar_span(categories, index);
         for (j, (view, color)) in series.iter().enumerate() {
-            let Some(&height) = view.heights().get(i) else {
+            let Some(&height) = view.values().get(i) else {
                 continue;
             };
             let left = group_left + j as f64 * (width + gap);
@@ -165,7 +165,7 @@ pub(super) fn stacked_items(
     x: &ResolvedAxis,
     y: &ResolvedContinuousAxis,
     mark: &BarGroupMark,
-    series: &[(BarSeriesView<'_>, Rgba)],
+    series: &[(SeriesView<'_>, Rgba)],
     stacks: &Stacks,
     items: &mut Vec<Item>,
 ) {

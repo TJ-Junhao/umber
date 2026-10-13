@@ -19,8 +19,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use umber_core::{
-    AreaOptions, Axes, BarOptions, BarSeries, Dash, HistOptions, LegendStyle, LineOptions, Marker,
-    ScatterOptions, SvgText,
+    AreaOptions, Axes, BarOptions, Dash, HistOptions, LegendStyle, LineOptions, Marker,
+    ScatterOptions, Series, SvgText,
 };
 
 use crate::color::{ColorArg, color_spec};
@@ -32,7 +32,7 @@ use crate::theme::Theme;
 use crate::ticks::{TickFormatArg, tick_format};
 use crate::values::{axis_data, floats, names, shared_floats};
 
-/// The series of a grouped or stacked bar chart: `(label, heights, color)` for each series.
+/// The series of a grouped or stacked bar chart: `(label, values, color)` for each series.
 type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
 
 /// A figure: a size in inches, a theme and at most one axes with its marks.
@@ -78,14 +78,14 @@ impl Figure {
             .map_err(|err| core_error(err.with_context(context)))
     }
 
-    /// The core bar series of a grouped or stacked bar chart.
-    fn bar_series(series: SeriesArgs<'_>) -> PyResult<Vec<BarSeries>> {
+    /// The core series of a grouped or stacked bar chart.
+    fn series(series: SeriesArgs<'_>) -> PyResult<Vec<Series>> {
         series
             .into_iter()
-            .map(|(label, heights, color)| {
-                Ok(BarSeries {
+            .map(|(label, values, color)| {
+                Ok(Series {
                     label,
-                    heights: floats(&heights)?,
+                    values: floats(&values)?,
                     color: color_spec(color)?,
                     ..Default::default()
                 })
@@ -320,7 +320,7 @@ impl Figure {
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
     ) -> PyResult<()> {
-        let (categories, series) = (names(categories)?, Self::bar_series(series)?);
+        let (categories, series) = (names(categories)?, Self::series(series)?);
         self.axes()?
             .grouped_bar(categories, series)
             .map(drop)
@@ -333,7 +333,7 @@ impl Figure {
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
     ) -> PyResult<()> {
-        let (categories, series) = (names(categories)?, Self::bar_series(series)?);
+        let (categories, series) = (names(categories)?, Self::series(series)?);
         self.axes()?
             .stacked_bar(categories, series)
             .map(drop)

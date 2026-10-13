@@ -18,8 +18,8 @@ from umber._series import native
 COLOR_HINT = 'use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.'
 TEXT_HINT = "pass a str; convert other values with str()."
 TOO_LONG_HINT = "shorten the text; it would not fit the figure."
-SERIES_HINT = 'pass a list of series, e.g. [BarSeries("North", [3, 5])].'
-SERIES_ITEM_HINT = 'make each series with BarSeries(), e.g. BarSeries("North", [3, 5]).'
+SERIES_HINT = 'pass a list of series, e.g. [Series("North", [3, 5])].'
+SERIES_ITEM_HINT = 'make each series with Series(), e.g. Series("North", [3, 5]).'
 CATEGORY_X_HINT = "pass x=Scale.category() to Figure.add_axes()."
 BAR_GAP = "use NaN to leave a category without a bar."
 SERIES_GAP = "use NaN to omit that height."
@@ -78,53 +78,53 @@ def _numeric() -> Bars:
     return cast(Bars, ub.Figure(3, 2).add_axes())
 
 
-def _series(*heights: float, label: str = "s") -> ub.BarSeries:
-    return ub.BarSeries(label, list(heights))
+def _series(*values: float, label: str = "s") -> ub.Series:
+    return ub.Series(label, list(values))
 
 
-def _heights(series: ub.BarSeries) -> npt.NDArray[np.float64]:
+def _values(series: ub.Series) -> npt.NDArray[np.float64]:
     return native(series)[1]
 
 
-# BarSeries
+# Series
 
 
 def test_series_holds_its_values() -> None:
-    series = ub.BarSeries("North", [3, 5, 2], color=ub.Color.BLUE)
-    label, heights, color = native(series)
+    series = ub.Series("North", [3, 5, 2], color=ub.Color.BLUE)
+    label, values, color = native(series)
     assert label == "North"
-    assert heights.dtype == np.float64
-    assert heights.tolist() == [3.0, 5.0, 2.0]
+    assert values.dtype == np.float64
+    assert values.tolist() == [3.0, 5.0, 2.0]
     assert color == (2, 0x3366B8FF, 1.0)
-    assert native(ub.BarSeries("", []))[2] == (0, 0, 1.0)
+    assert native(ub.Series("", []))[2] == (0, 0, 1.0)
 
 
 def test_series_accepts_lists_arrays_and_series() -> None:
-    for heights in (
+    for values in (
         [1, 2.5],
         (1.0, 2.5),
         np.array([1.0, 2.5], dtype=np.float32),
         pd.Series([1.0, 2.5]),
     ):
-        assert _heights(ub.BarSeries("s", heights)).tolist() == [1.0, 2.5]
+        assert _values(ub.Series("s", values)).tolist() == [1.0, 2.5]
 
 
-def test_series_heights_are_a_read_only_copy() -> None:
+def test_series_values_are_a_read_only_copy() -> None:
     source = np.array([1.0, 2.0, 3.0])
-    series = ub.BarSeries("s", source)
-    heights = _heights(series)
-    assert not np.shares_memory(heights, source)
+    series = ub.Series("s", source)
+    values = _values(series)
+    assert not np.shares_memory(values, source)
     source[0] = 99.0
-    assert heights.tolist() == [1.0, 2.0, 3.0]
-    assert not heights.flags.writeable
+    assert values.tolist() == [1.0, 2.0, 3.0]
+    assert not values.flags.writeable
     with pytest.raises(ValueError, match="read-only"):
-        heights[0] = 5.0
-    assert heights.flags.c_contiguous
+        values[0] = 5.0
+    assert values.flags.c_contiguous
 
 
 def test_series_copies_strided_input() -> None:
     source = np.arange(6.0)[::2]
-    assert _heights(ub.BarSeries("s", source)).tolist() == [0.0, 2.0, 4.0]
+    assert _values(ub.Series("s", source)).tolist() == [0.0, 2.0, 4.0]
 
 
 def test_series_is_immutable() -> None:
@@ -132,7 +132,7 @@ def test_series_is_immutable() -> None:
     with pytest.raises(AttributeError, match="immutable"):
         series._label = "other"
     with pytest.raises(AttributeError, match="immutable"):
-        del series._heights
+        del series._values
     with pytest.raises(AttributeError, match="immutable"):
         series.__init__("other", [2.0])
     assert native(series)[0] == "s"
@@ -140,33 +140,42 @@ def test_series_is_immutable() -> None:
 
 
 def test_series_repr_shows_label_and_length() -> None:
-    assert repr(ub.BarSeries("North", [3, 5, 2])) == "<umber.BarSeries 'North' (3 heights)>"
-    assert repr(ub.BarSeries("One", [3])) == "<umber.BarSeries 'One' (1 height)>"
-    assert repr(ub.BarSeries("", [])) == "<umber.BarSeries '' (0 heights)>"
+    assert repr(ub.Series("North", [3, 5, 2])) == "<umber.Series 'North' (3 values)>"
+    assert repr(ub.Series("One", [3])) == "<umber.Series 'One' (1 value)>"
+    assert repr(ub.Series("", [])) == "<umber.Series '' (0 values)>"
 
 
 @pytest.mark.parametrize("duplicate", [copy.copy, copy.deepcopy])
-def test_series_copy_is_the_series(duplicate: Callable[[ub.BarSeries], ub.BarSeries]) -> None:
+def test_series_copy_is_the_series(duplicate: Callable[[ub.Series], ub.Series]) -> None:
     series = _series(1, 2)
     assert duplicate(series) is series
 
 
 @pytest.mark.parametrize("protocol", range(pickle.HIGHEST_PROTOCOL + 1))
 def test_series_pickles_by_value(protocol: int) -> None:
-    series = ub.BarSeries("North", [3, np.nan, 2], color=ub.Color.RED.alpha(0.5))
-    restored = cast(ub.BarSeries, pickle.loads(pickle.dumps(series, protocol)))
+    series = ub.Series("North", [3, np.nan, 2], color=ub.Color.RED.alpha(0.5))
+    restored = cast(ub.Series, pickle.loads(pickle.dumps(series, protocol)))
     assert restored is not series
     assert repr(restored) == repr(series)
-    label, heights, color = native(restored)
+    label, values, color = native(restored)
     assert (label, color) == (native(series)[0], native(series)[2])
-    np.testing.assert_array_equal(heights, _heights(series))
-    assert not heights.flags.writeable
+    np.testing.assert_array_equal(values, _values(series))
+    assert not values.flags.writeable
     ax = _bars().grouped_bar(["a", "b", "c"], [restored])
     assert ax.figure.to_svg() == _bars().grouped_bar(["a", "b", "c"], [series]).figure.to_svg()
 
 
 def test_series_reports_the_package_as_its_module() -> None:
-    assert ub.BarSeries.__module__ == "umber"
+    assert ub.Series.__module__ == "umber"
+    assert not hasattr(ub, "BarSeries")
+
+
+def test_series_error_names_values() -> None:
+    series = cast(Callable[..., object], ub.Series)
+    with pytest.raises(ub.DataError) as info:
+        series("A", [[1.0]])
+    assert str(info.value).startswith("Series(): values")
+    assert _parameter(info.value) == "values"
 
 
 # (arguments, keywords, error class, message, parameter, hint)
@@ -175,7 +184,7 @@ SERIES_ERRORS: list[tuple[tuple[object, ...], dict[str, object], type, str, str,
         (3, [1.0]),
         {},
         TypeError,
-        "BarSeries(): label is int; label must be a str.",
+        "Series(): label is int; label must be a str.",
         "label",
         TEXT_HINT,
     ),
@@ -183,7 +192,7 @@ SERIES_ERRORS: list[tuple[tuple[object, ...], dict[str, object], type, str, str,
         ("x" * 1001, [1.0]),
         {},
         ub.StyleError,
-        "BarSeries(): label has 1,001 characters; text must be at most 1,000 characters.",
+        "Series(): label has 1,001 characters; text must be at most 1,000 characters.",
         "label",
         TOO_LONG_HINT,
     ),
@@ -191,7 +200,7 @@ SERIES_ERRORS: list[tuple[tuple[object, ...], dict[str, object], type, str, str,
         ("s", [1.0]),
         {"color": "red"},
         TypeError,
-        "BarSeries(): color is str; color must be of type Color.",
+        "Series(): color is str; color must be of type Color.",
         "color",
         COLOR_HINT,
     ),
@@ -199,40 +208,40 @@ SERIES_ERRORS: list[tuple[tuple[object, ...], dict[str, object], type, str, str,
         ("s", "abc"),
         {},
         TypeError,
-        "BarSeries(): heights is str; heights must be a sequence or an array.",
-        "heights",
+        "Series(): values is str; values must be a sequence or an array.",
+        "values",
         "wrap a single value in a list.",
     ),
     (
         ("s", 3.0),
         {},
         TypeError,
-        "BarSeries(): heights is float; heights must be a sequence or an array.",
-        "heights",
+        "Series(): values is float; values must be a sequence or an array.",
+        "values",
         "wrap a single value in a list.",
     ),
     (
         ("s", np.ones((2, 2))),
         {},
         ub.DataError,
-        "BarSeries(): heights has 2 dimensions; values must be one-dimensional.",
-        "heights",
+        "Series(): values has 2 dimensions; values must be one-dimensional.",
+        "values",
         "pass one column, or flatten it with .ravel().",
     ),
     (
         ("s", np.array([True, False])),
         {},
         ub.DataError,
-        "BarSeries(): heights has dtype bool; values must be numbers.",
-        "heights",
+        "Series(): values has dtype bool; values must be numbers.",
+        "values",
         "convert with .astype(float) if 0 and 1 are meant.",
     ),
     (
         ("s", [1.0, None]),
         {},
         ub.DataError,
-        "BarSeries(): heights[1] is None; values must be numbers.",
-        "heights",
+        "Series(): values[1] is None; values must be numbers.",
+        "values",
         "use NaN for missing values, e.g. series.to_numpy(dtype=float, na_value=np.nan).",
     ),
 ]
@@ -249,7 +258,7 @@ def test_series_checks_type_shape_and_dtype(
     parameter: str,
     hint: str,
 ) -> None:
-    make = cast(Callable[..., object], ub.BarSeries)
+    make = cast(Callable[..., object], ub.Series)
     with pytest.raises(cls) as caught:
         make(*arguments, **keywords)
     assert type(caught.value) is cls
@@ -276,13 +285,13 @@ def _parameter(err: BaseException) -> object:
 
 
 def test_series_types_are_checked_before_any_conversion() -> None:
-    series = cast(Callable[..., object], ub.BarSeries)
+    series = cast(Callable[..., object], ub.Series)
     with pytest.raises(TypeError) as caught:
         series("s", ["a"], color="red")
     assert _parameter(caught.value) == "color"
     with pytest.raises(TypeError) as caught:
         series("x" * 1001, None)
-    assert _parameter(caught.value) == "heights"
+    assert _parameter(caught.value) == "values"
     with pytest.raises(TypeError) as caught:
         series(3, "abc", color="red")
     assert _parameter(caught.value) == "label"
@@ -300,20 +309,20 @@ def test_series_types_are_checked_before_any_conversion() -> None:
 
 
 def test_series_leaves_finite_and_log_checks_to_the_chart() -> None:
-    series = ub.BarSeries("s", [np.inf, -1.0])
-    assert _heights(series)[0] == np.inf
+    series = ub.Series("s", [np.inf, -1.0])
+    assert _values(series)[0] == np.inf
     with pytest.raises(ub.DataError) as caught:
         _bars().grouped_bar(["a", "b"], [series])
-    assert str(caught.value) == f"Axes.grouped_bar(): series[0].heights[0] is inf; {FINITE}"
+    assert str(caught.value) == f"Axes.grouped_bar(): series[0].values[0] is inf; {FINITE}"
 
 
 @pytest.mark.parametrize(
     ("call", "argument"),
     [
-        ('ub.BarSeries("North", "abc")', '"abc"'),
-        ('ub.BarSeries("North", [1, None])', "[1, None]"),
-        ("ub.BarSeries(label=3, heights=[1])", "label=3"),
-        ('ub.BarSeries("North", [1], color="blue")', 'color="blue"'),
+        ('ub.Series("North", "abc")', '"abc"'),
+        ('ub.Series("North", [1, None])', "[1, None]"),
+        ("ub.Series(label=3, values=[1])", "label=3"),
+        ('ub.Series("North", [1], color="blue")', 'color="blue"'),
     ],
 )
 def test_series_errors_highlight_the_argument(tmp_path: Path, call: str, argument: str) -> None:
@@ -365,8 +374,8 @@ def test_grouped_and_stacked_bars_differ() -> None:
 
 @pytest.mark.parametrize("name", ["grouped_bar", "stacked_bar"])
 def test_series_order_and_colors_reach_the_figure(name: str) -> None:
-    red = ub.BarSeries("North", [1, 2], color=ub.Color.RED)
-    blue = ub.BarSeries("South", [2, 1], color=ub.Color.BLUE)
+    red = ub.Series("North", [1, 2], color=ub.Color.RED)
+    blue = ub.Series("South", [2, 1], color=ub.Color.BLUE)
     method = cast(Callable[..., Bars], getattr(_bars(), name))
     svg = method(["a", "b"], (red, blue)).figure.to_svg(text=ub.SvgText.EDITABLE)
     assert 'fill="#D64933"' in svg
@@ -392,7 +401,7 @@ def test_series_must_be_a_sequence(name: str, series: object) -> None:
     with pytest.raises(TypeError) as caught:
         cast(Callable[..., object], getattr(ax, name))(["a"], series)
     assert str(caught.value) == (
-        f"Axes.{name}(): series is {_type_name(series)}; series must be a sequence of BarSeries."
+        f"Axes.{name}(): series is {_type_name(series)}; series must be a sequence of Series."
     )
     assert details(caught.value) == ("series", SERIES_HINT)
     assert ax.figure.to_svg() == before
@@ -400,12 +409,12 @@ def test_series_must_be_a_sequence(name: str, series: object) -> None:
 
 @pytest.mark.parametrize("name", ["grouped_bar", "stacked_bar"])
 @pytest.mark.parametrize("item", ["North", [1.0], None, ("s", [1.0])])
-def test_series_items_must_be_bar_series(name: str, item: object) -> None:
+def test_series_items_must_be_series(name: str, item: object) -> None:
     ax = _bars()
     with pytest.raises(TypeError) as caught:
         cast(Callable[..., object], getattr(ax, name))(["a"], [_series(1), item])
     assert str(caught.value) == (
-        f"Axes.{name}(): series[1] is {_type_name(item)}; series[1] must be of type BarSeries."
+        f"Axes.{name}(): series[1] is {_type_name(item)}; series[1] must be of type Series."
     )
     assert details(caught.value) == ("series", SERIES_ITEM_HINT)
 
@@ -425,7 +434,7 @@ def test_categories_type_is_checked_before_series(name: str) -> None:
     assert _parameter(caught.value) == "series"
     assert not recorder.converted
     with pytest.raises(ub.DataError) as data:
-        method([1, 2], [ub.BarSeries("s", [1.0, 2.0])])
+        method([1, 2], [ub.Series("s", [1.0, 2.0])])
     assert _parameter(data.value) == "categories"
 
 
@@ -555,8 +564,8 @@ BAR_ERRORS: list[tuple[str, Callable[[], Bars], Callable[[Bars], object], type, 
         _bars,
         lambda ax: ax.grouped_bar(["a"], [_series(1), _series()]),
         ub.DataError,
-        "Axes.grouped_bar(): categories has 1 values but series[1].heights has 0; each series "
-        "must have one height per category.",
+        "Axes.grouped_bar(): categories has 1 values but series[1].values has 0; each series "
+        "must have one value per category.",
         "series",
         None,
     ),
@@ -575,7 +584,7 @@ BAR_ERRORS: list[tuple[str, Callable[[], Bars], Callable[[Bars], object], type, 
         _bars,
         lambda ax: ax.grouped_bar(["a", "b"], [_series(1, 2), _series(1, np.inf)]),
         ub.DataError,
-        f"Axes.grouped_bar(): series[1].heights[1] is inf; {FINITE}",
+        f"Axes.grouped_bar(): series[1].values[1] is inf; {FINITE}",
         "series",
         SERIES_GAP,
     ),
@@ -584,7 +593,7 @@ BAR_ERRORS: list[tuple[str, Callable[[], Bars], Callable[[Bars], object], type, 
         lambda: _bars(ub.Scale.log()),
         lambda ax: ax.grouped_bar(["a"], [_series(-2)]),
         ub.DataError,
-        "Axes.grouped_bar(): series[0].heights[0] is -2 on a log axis; values must be positive.",
+        "Axes.grouped_bar(): series[0].values[0] is -2 on a log axis; values must be positive.",
         "series",
         NOT_POSITIVE,
     ),
@@ -612,8 +621,8 @@ BAR_ERRORS: list[tuple[str, Callable[[], Bars], Callable[[Bars], object], type, 
         _bars,
         lambda ax: ax.stacked_bar(["a", "b"], [_series(1, 2), _series(1)]),
         ub.DataError,
-        "Axes.stacked_bar(): categories has 2 values but series[1].heights has 1; each series "
-        "must have one height per category.",
+        "Axes.stacked_bar(): categories has 2 values but series[1].values has 1; each series "
+        "must have one value per category.",
         "series",
         None,
     ),
@@ -632,7 +641,7 @@ BAR_ERRORS: list[tuple[str, Callable[[], Bars], Callable[[Bars], object], type, 
         _bars,
         lambda ax: ax.stacked_bar(["a"], [_series(-np.inf)]),
         ub.DataError,
-        f"Axes.stacked_bar(): series[0].heights[0] is -inf; {FINITE}",
+        f"Axes.stacked_bar(): series[0].values[0] is -inf; {FINITE}",
         "series",
         SERIES_GAP,
     ),
@@ -641,7 +650,7 @@ BAR_ERRORS: list[tuple[str, Callable[[], Bars], Callable[[Bars], object], type, 
         lambda: _bars(ub.Scale.log()),
         lambda ax: ax.stacked_bar(["a"], [_series(-1)]),
         ub.DataError,
-        "Axes.stacked_bar(): series[0].heights[0] is -1 on a log axis; values must be positive.",
+        "Axes.stacked_bar(): series[0].values[0] is -1 on a log axis; values must be positive.",
         "series",
         NOT_POSITIVE,
     ),
@@ -650,7 +659,7 @@ BAR_ERRORS: list[tuple[str, Callable[[], Bars], Callable[[Bars], object], type, 
         _bars,
         lambda ax: ax.stacked_bar(["a"], [_series(1e300), _series(1e300)]),
         ub.DataError,
-        'Axes.stacked_bar(): the heights of categories[0] ("a") stack to 2e300; each stack '
+        'Axes.stacked_bar(): the values of categories[0] ("a") stack to 2e300; each stack '
         "must stay within 1e300 on both sides of 0.",
         "series",
         None,
@@ -719,16 +728,16 @@ RANGE_CALLS: list[tuple[str, str, str, str, str]] = [
     ("bar", "ax.bar(['a', 'b'], [1.0, {h}])", "[1.0, {h}]", "heights[1]", "heights"),
     (
         "grouped_bar",
-        "ax.grouped_bar(['a', 'b'], [ub.BarSeries('s', [1.0, {h}])])",
-        "[ub.BarSeries('s', [1.0, {h}])]",
-        "series[0].heights[1]",
+        "ax.grouped_bar(['a', 'b'], [ub.Series('s', [1.0, {h}])])",
+        "[ub.Series('s', [1.0, {h}])]",
+        "series[0].values[1]",
         "series",
     ),
     (
         "stacked_bar",
-        "ax.stacked_bar(['a', 'b'], [ub.BarSeries('s', [1.0, {h}])])",
-        "[ub.BarSeries('s', [1.0, {h}])]",
-        "series[0].heights[1]",
+        "ax.stacked_bar(['a', 'b'], [ub.Series('s', [1.0, {h}])])",
+        "[ub.Series('s', [1.0, {h}])]",
+        "series[0].values[1]",
         "series",
     ),
 ]
@@ -791,8 +800,8 @@ SETUP = "\n".join(
     [
         "inf = float('inf')",
         "cats = ub.Figure().add_axes(x=ub.Scale.category())",
-        "good = ub.BarSeries('North', [1.0, 2.0])",
-        "bad = ub.BarSeries('South', [1.0, inf])",
+        "good = ub.Series('North', [1.0, 2.0])",
+        "bad = ub.Series('South', [1.0, inf])",
     ]
 )
 
@@ -819,19 +828,19 @@ def test_bar_errors_highlight_the_argument(tmp_path: Path, call: str, argument: 
 def test_grouped_error_output_shows_the_series_and_the_hint(tmp_path: Path) -> None:
     call = "cats.grouped_bar(['a', 'b'], [good, bad])"
     err = _raised(tmp_path, call, SETUP)
-    assert str(err) == f"Axes.grouped_bar(): series[1].heights[1] is inf; {FINITE}"
+    assert str(err) == f"Axes.grouped_bar(): series[1].values[1] is inf; {FINITE}"
     assert _notes(err) == [_marked(call, "[good, bad]"), f"hint: {SERIES_GAP}"]
 
 
 def test_masked_heights_are_a_value_error_after_the_types() -> None:
     masked = np.ma.array([1.0, 2.0])
-    series = cast(Callable[..., object], ub.BarSeries)
+    series = cast(Callable[..., object], ub.Series)
     with pytest.raises(TypeError) as caught:
         series("s", masked, color="red")
     assert _parameter(caught.value) == "color"
     with pytest.raises(ub.DataError) as data:
         series("s", masked)
-    assert _parameter(data.value) == "heights"
+    assert _parameter(data.value) == "values"
     with pytest.raises(TypeError) as caught:
         cast(Callable[..., object], _bars().bar)(masked, None)
     assert _parameter(caught.value) == "heights"

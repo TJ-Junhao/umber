@@ -17,7 +17,7 @@ from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
 from umber._quick import bar, hist, line, scatter
 from umber._scale import Scale
-from umber._series import BarSeries
+from umber._series import Series
 from umber._size import Size
 from umber._theme import Theme
 from umber._ticks import TickFormat
@@ -37,7 +37,7 @@ Example:
 __all__ = [
     "MAX_BINS",
     "Axes",
-    "BarSeries",
+    "Series",
     "Color",
     "DataError",
     "Dash",
@@ -81,7 +81,7 @@ def _report_package_as_module(*exported: type | Callable[..., object]) -> None:
 
 _report_package_as_module(
     Axes,
-    BarSeries,
+    Series,
     Color,
     Dash,
     FillStyle,

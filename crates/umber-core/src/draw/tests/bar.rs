@@ -4,7 +4,7 @@
 use super::mark_group;
 use crate::geometry::{Path, PathVerb, Point};
 use crate::layout::Layout;
-use crate::model::{AxisData, BarOptions, BarSeries, Figure, LineOptions};
+use crate::model::{AxisData, BarOptions, Figure, LineOptions, Series};
 use crate::render::{SvgText, render_png, render_svg};
 use crate::scene::{Item, Paint, Scene};
 use crate::test_support::scene::assert_scene_bounded;
@@ -294,10 +294,10 @@ fn log_bars_grow_from_the_baseline() {
     }
 }
 
-fn series(heights: &[f64]) -> BarSeries {
-    BarSeries {
-        heights: heights.to_vec(),
-        ..BarSeries::default()
+fn series(values: &[f64]) -> Series {
+    Series {
+        values: values.to_vec(),
+        ..Series::default()
     }
 }
 
@@ -311,7 +311,7 @@ fn group_figure(
 ) -> Figure {
     let mut f = Figure::new(6.0, 4.0, theme).unwrap();
     let axes = f.add_axes(ScaleKind::Category, y).unwrap();
-    let list: Vec<BarSeries> = heights.iter().map(|h| series(h)).collect();
+    let list: Vec<Series> = heights.iter().map(|h| series(h)).collect();
     if stacked {
         axes.stacked_bar(names(categories), list).unwrap();
     } else {

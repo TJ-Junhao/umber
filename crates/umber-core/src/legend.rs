@@ -428,13 +428,13 @@ mod tests {
     }
 
     #[test]
-    fn bar_series_get_square_swatches_in_series_order() {
-        use crate::model::BarSeries;
-        let series = |labels: [&str; 3]| -> Vec<BarSeries> {
+    fn series_get_square_swatches_in_series_order() {
+        use crate::model::Series;
+        let series = |labels: [&str; 3]| -> Vec<Series> {
             labels
-                .map(|label| BarSeries {
+                .map(|label| Series {
                     label: label.to_owned(),
-                    heights: vec![1.0, 2.0],
+                    values: vec![1.0, 2.0],
                     color: ColorSpec::AUTO,
                 })
                 .to_vec()
@@ -501,7 +501,7 @@ mod tests {
         assert!(!legend.is_empty());
 
         // Bars go to the row too, with their square swatches, between the direct lines.
-        use crate::model::{BarOptions, BarSeries};
+        use crate::model::{BarOptions, Series};
         let categories = || vec!["A".to_owned(), "B".to_owned()];
         let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
         f.add_axes(ScaleKind::Category, ScaleKind::Linear)
@@ -523,9 +523,9 @@ mod tests {
             .unwrap()
             .grouped_bar(
                 categories(),
-                vec![BarSeries {
+                vec![Series {
                     label: "North".to_owned(),
-                    heights: vec![1.0, 2.0],
+                    values: vec![1.0, 2.0],
                     color: ColorSpec::AUTO,
                 }],
             )

@@ -29,8 +29,8 @@
 
 use crate::binning::Histogram;
 use crate::model::{
-    AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, BarSeriesView, ExplicitTicks,
-    HistMark, LineMark, Mark, ScatterMark,
+    AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
+    Mark, ScatterMark, SeriesView,
 };
 use crate::scale::{Padding, is_single_value, log_offset};
 use crate::stacking::Stacks;
@@ -627,14 +627,14 @@ pub(crate) enum ResolvedMark<'a> {
         /// The mark.
         mark: &'a BarGroupMark,
         /// Each series of the mark, in order, with its resolved color.
-        series: Box<[(BarSeriesView<'a>, Rgba)]>,
+        series: Box<[(SeriesView<'a>, Rgba)]>,
     },
     /// A stacked bar mark.
     Stacked {
         /// The mark.
         mark: &'a BarGroupMark,
         /// Each series of the mark, in order, with its resolved color.
-        series: Box<[(BarSeriesView<'a>, Rgba)]>,
+        series: Box<[(SeriesView<'a>, Rgba)]>,
         /// The segments of every series in every category of the mark, indexed as the mark's
         /// categories and series.
         stacks: Stacks,
@@ -694,7 +694,7 @@ impl<'a> ResolvedMark<'a> {
     /// The values the mark contributes to the y domain. See [`ResolvedMark`] for the contract.
     ///
     /// Lines, scatters, areas and bars yield their y values or heights in data order, and grouped
-    /// bars the heights of each series in turn. Stacked bars yield the end of every segment away
+    /// bars the values of each series in turn. Stacked bars yield the end of every segment away
     /// from 0 ([`Stacks::ends`]), never 0 itself: on a linear axis the bars put 0 into the domain
     /// anyway (see [`grows_from_baseline`](Self::grows_from_baseline)), and on a log axis, where
     /// every height is positive, these are the positive segment ends, which a log domain can hold.
@@ -710,7 +710,7 @@ impl<'a> ResolvedMark<'a> {
                 return DomainValues::Computed(Box::new(
                     series
                         .iter()
-                        .flat_map(|(view, _)| view.heights().iter().copied()),
+                        .flat_map(|(view, _)| view.values().iter().copied()),
                 ));
             }
             ResolvedMark::Stacked { stacks, .. } => {
@@ -1076,7 +1076,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
                     .series()
                     .map(|view| (view, color_of(view.color())))
                     .collect();
-                let heights: Vec<&[f64]> = series.iter().map(|(view, _)| view.heights()).collect();
+                let heights: Vec<&[f64]> = series.iter().map(|(view, _)| view.values()).collect();
                 ResolvedMark::Stacked {
                     mark,
                     stacks: Stacks::new(mark.categories().len(), &heights),
@@ -1096,7 +1096,7 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
 mod tests {
     use super::*;
     use crate::model::{
-        AreaOptions, BarOptions, BarSeries, Figure, HistOptions, LineOptions, ScatterOptions,
+        AreaOptions, BarOptions, Figure, HistOptions, LineOptions, ScatterOptions, Series,
     };
     use crate::{LogBase, MIN_LOG_VALUE, ScaleKind, Theme, TickFormat};
 
@@ -2081,16 +2081,16 @@ mod tests {
         assert_eq!(keys[4].label, "last");
     }
 
-    fn bar_series(color: ColorSpec, heights: &[f64]) -> BarSeries {
-        BarSeries {
+    fn series(color: ColorSpec, values: &[f64]) -> Series {
+        Series {
             label: String::new(),
-            heights: heights.to_vec(),
+            values: values.to_vec(),
             color,
         }
     }
 
-    fn auto(heights: &[f64]) -> BarSeries {
-        bar_series(ColorSpec::AUTO, heights)
+    fn auto(values: &[f64]) -> Series {
+        series(ColorSpec::AUTO, values)
     }
 
     #[test]
@@ -2205,8 +2205,8 @@ mod tests {
                 names(&["a"]),
                 vec![
                     auto(&[1.0]),
-                    bar_series(ColorSpec::Fixed(fixed), &[1.0]),
-                    bar_series(at(5), &[1.0]),
+                    series(ColorSpec::Fixed(fixed), &[1.0]),
+                    series(at(5), &[1.0]),
                     auto(&[1.0]),
                 ],
             )
@@ -2215,7 +2215,7 @@ mod tests {
             .unwrap()
             .stacked_bar(
                 names(&["a"]),
-                vec![auto(&[1.0]), bar_series(at(0), &[1.0]), auto(&[2.0])],
+                vec![auto(&[1.0]), series(at(0), &[1.0]), auto(&[2.0])],
             )
             .unwrap();
         let resolved = resolve_marks(f.axes().unwrap().marks(), f.theme());

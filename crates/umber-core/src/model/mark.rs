@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use super::axis_data::{AxisData, Series};
+use super::axis_data::{AxisData, XySeries};
 use super::bar::{BarGroupMark, BarMark};
 use super::hist::HistMark;
 use crate::{ColorSpec, Dash, Marker, SizeSpec};
@@ -180,17 +180,17 @@ pub enum Mark {
 
 impl Mark {
     /// A line through a validated series.
-    pub(super) fn line(series: Series, options: LineOptions) -> Mark {
+    pub(super) fn line(series: XySeries, options: LineOptions) -> Mark {
         Mark::Line(LineMark { series, options })
     }
 
     /// Markers at the points of a validated series.
-    pub(super) fn scatter(series: Series, options: ScatterOptions) -> Mark {
+    pub(super) fn scatter(series: XySeries, options: ScatterOptions) -> Mark {
         Mark::Scatter(ScatterMark { series, options })
     }
 
     /// An area under a validated series.
-    pub(super) fn area(series: Series, options: AreaOptions) -> Mark {
+    pub(super) fn area(series: XySeries, options: AreaOptions) -> Mark {
         Mark::Area(AreaMark {
             line: LineMark { series, options },
         })
@@ -234,7 +234,7 @@ impl Mark {
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct LineMark {
-    series: Series,
+    series: XySeries,
     options: LineOptions,
 }
 
@@ -259,7 +259,7 @@ impl LineMark {
 
     /// The validated series.
     #[cfg(test)]
-    pub(super) fn series(&self) -> &Series {
+    pub(super) fn series(&self) -> &XySeries {
         &self.series
     }
 }
@@ -322,7 +322,7 @@ impl fmt::Debug for LineMark {
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct ScatterMark {
-    series: Series,
+    series: XySeries,
     options: ScatterOptions,
 }
 
@@ -347,7 +347,7 @@ impl ScatterMark {
 
     /// The validated series.
     #[cfg(test)]
-    pub(super) fn series(&self) -> &Series {
+    pub(super) fn series(&self) -> &XySeries {
         &self.series
     }
 }
@@ -421,7 +421,7 @@ impl AreaMark {
 
     /// The validated series.
     #[cfg(test)]
-    pub(super) fn series(&self) -> &Series {
+    pub(super) fn series(&self) -> &XySeries {
         self.line.series()
     }
 }

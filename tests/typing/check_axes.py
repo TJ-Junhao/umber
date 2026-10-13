@@ -42,11 +42,11 @@ assert_type(titled, ub.Axes[str, float])
 assert_type(titled.ylim(0, 10), ub.Axes[str, float])
 assert_type(cats.legend(ub.LegendStyle.CHIPS), ub.Axes[str, float])
 assert_type(
-    cats.grouped_bar(["A", "B"], [ub.BarSeries("North", [1, 2])]),
+    cats.grouped_bar(["A", "B"], [ub.Series("North", [1, 2])]),
     ub.Axes[str, float],
 )
 assert_type(
-    cats.stacked_bar(["A", "B"], [ub.BarSeries("North", [1, 2])]),
+    cats.stacked_bar(["A", "B"], [ub.Series("North", [1, 2])]),
     ub.Axes[str, float],
 )
 assert_type(cats.line(["A", "B"], [1, 2]), ub.Axes[str, float])
@@ -63,5 +63,5 @@ cats.xlim(0, 1)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIs
 ub.Figure().add_axes(y=ub.Scale.category())  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
 # Negative: mark methods that need a category axis refuse a numeric one for the series too.
-ax.grouped_bar(["A"], [ub.BarSeries("a", [1])])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-ax.stacked_bar(["A"], [ub.BarSeries("a", [1])])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+ax.grouped_bar(["A"], [ub.Series("a", [1])])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+ax.stacked_bar(["A"], [ub.Series("a", [1])])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]

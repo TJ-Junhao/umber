@@ -16,7 +16,7 @@
 //!
 //! Marks carry no labels, so no legend is drawn.
 
-use umber_core::figure::{AxisData, BarOptions, BarSeries};
+use umber_core::figure::{AxisData, BarOptions, Series};
 use umber_core::{Alpha, ColorSpec, FontLibrary, Rgba, ScaleKind, Theme};
 
 use super::super::{Log, Output, axes, emit_scene, figure, labelled, line, linear, log, themes};
@@ -29,19 +29,19 @@ fn bar() -> BarOptions {
     BarOptions::default()
 }
 
-/// An unlabelled series of `heights` in the automatic color.
-fn series(heights: &[f64]) -> BarSeries {
-    BarSeries {
-        heights: heights.to_vec(),
-        ..BarSeries::default()
+/// An unlabelled series of `values` in the automatic color.
+fn series(values: &[f64]) -> Series {
+    Series {
+        values: values.to_vec(),
+        ..Series::default()
     }
 }
 
-/// An unlabelled series of `heights` in `color`.
-fn colored(color: ColorSpec, heights: &[f64]) -> BarSeries {
-    BarSeries {
+/// An unlabelled series of `values` in `color`.
+fn colored(color: ColorSpec, values: &[f64]) -> Series {
+    Series {
         color,
-        ..series(heights)
+        ..series(values)
     }
 }
 
@@ -66,7 +66,7 @@ impl Group {
         self,
         axes: &mut umber_core::Axes,
         categories: Vec<String>,
-        series: Vec<BarSeries>,
+        series: Vec<Series>,
     ) -> umber_core::Result<&mut umber_core::Axes> {
         match self {
             Group::Grouped => axes.grouped_bar(categories, series),
@@ -277,7 +277,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         // Twelve series: the palette wraps; grouped bars in a narrow band touch.
         let mut f = figure(6.0, 4.0, Theme::midnight(), ScaleKind::Category, linear());
         labelled(&mut f, "Twelve series");
-        let twelve: Vec<BarSeries> = (0..12)
+        let twelve: Vec<Series> = (0..12)
             .map(|j| {
                 let j = f64::from(j);
                 series(&[1.0 + j, 12.0 - j, 2.0 + (j * 7.0) % 5.0, 3.0])
@@ -399,8 +399,7 @@ fn group_errors() -> String {
     let inf = f64::INFINITY;
     let nan = f64::NAN;
     let mut rec = Log::default();
-    let list =
-        |heights: &[&[f64]]| -> Vec<BarSeries> { heights.iter().map(|h| series(h)).collect() };
+    let list = |values: &[&[f64]]| -> Vec<Series> { values.iter().map(|h| series(h)).collect() };
 
     for group in Group::BOTH {
         let kind = group.name();
@@ -412,9 +411,9 @@ fn group_errors() -> String {
                     a,
                     names(&["a", "b"]),
                     vec![
-                        BarSeries {
+                        Series {
                             label: "kept".into(),
-                            heights: vec![1.0, -2.0],
+                            values: vec![1.0, -2.0],
                             color: ColorSpec::Fixed(Rgba::opaque(1, 2, 3)),
                         },
                         series(&[f64::from_bits(0x7ff8_0000_0000_0001), -0.0]),
@@ -425,7 +424,7 @@ fn group_errors() -> String {
         rec.on_axes(&mut f, &format!("{kind} no categories"), |a| {
             group.add(a, Vec::new(), list(&[&[], &[]])).map(drop)
         });
-        let cases: Vec<(&str, Vec<String>, Vec<BarSeries>)> = vec![
+        let cases: Vec<(&str, Vec<String>, Vec<Series>)> = vec![
             ("empty series", names(&["a"]), Vec::new()),
             (
                 "empty series before duplicates",
