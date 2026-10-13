@@ -1674,7 +1674,7 @@ mod record {
                 format!(
                     "label={} heights={} color={}",
                     text(s.label()),
-                    floats64(s.heights()),
+                    floats64(s.values()),
                     color_spec(s.color())
                 )
             })

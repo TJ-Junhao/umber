@@ -38,7 +38,7 @@ def sales() -> None:
     ax.title("Sales by region").ylabel("units")
     ax.grouped_bar(
         quarters,
-        [ub.BarSeries("North", [12, 18, 15, 22]), ub.BarSeries("South", [9, 11, 17, 14])],
+        [ub.Series("North", [12, 18, 15, 22]), ub.Series("South", [9, 11, 17, 14])],
     )
     fig.save_png(OUT / "bars-pigment.png", dpi=DPI)
 

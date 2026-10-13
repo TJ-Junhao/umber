@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use super::axis_data::{AxisData, Series};
-use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, BarSeries};
+use super::axis_data::{AxisData, XySeries};
+use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::ticks::{AxisTicks, ExplicitTicks};
@@ -680,7 +680,7 @@ impl Axes {
         y: Arc<[f64]>,
         options: LineOptions,
     ) -> Result<&mut Axes> {
-        let series = Series::new("Axes.line()", self.x, self.y, x, y, LINE_GAP_HINT)?;
+        let series = XySeries::new("Axes.line()", self.x, self.y, x, y, LINE_GAP_HINT)?;
         self.marks.push(Mark::line(series, options));
         Ok(self)
     }
@@ -737,7 +737,7 @@ impl Axes {
         y: Arc<[f64]>,
         options: ScatterOptions,
     ) -> Result<&mut Axes> {
-        let series = Series::new("Axes.scatter()", self.x, self.y, x, y, SCATTER_GAP_HINT)?;
+        let series = XySeries::new("Axes.scatter()", self.x, self.y, x, y, SCATTER_GAP_HINT)?;
         self.marks.push(Mark::scatter(series, options));
         Ok(self)
     }
@@ -800,7 +800,7 @@ impl Axes {
         y: Arc<[f64]>,
         options: AreaOptions,
     ) -> Result<&mut Axes> {
-        let series = Series::new("Axes.area()", self.x, self.y, x, y, AREA_GAP_HINT)?;
+        let series = XySeries::new("Axes.area()", self.x, self.y, x, y, AREA_GAP_HINT)?;
         self.marks.push(Mark::area(series, options));
         Ok(self)
     }
@@ -884,22 +884,22 @@ impl Axes {
     /// across all marks.
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: an empty
-    /// `series`; a series whose heights are not one per category (the message names the
-    /// series' index); then the categories and each series' heights as in [`Axes::bar`]. NaN is
+    /// `series`; a series whose values are not one per category (the message names the
+    /// series' index); then the categories and each series' values as in [`Axes::bar`]. NaN is
     /// allowed and draws no bar.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::figure::BarSeries;
+    /// use umber_core::figure::Series;
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// let series = |label: &str, heights: &[f64]| BarSeries {
+    /// let series = |label: &str, values: &[f64]| Series {
     ///     label: label.into(),
-    ///     heights: heights.to_vec(),
-    ///     ..BarSeries::default()
+    ///     values: values.to_vec(),
+    ///     ..Series::default()
     /// };
     /// axes.grouped_bar(
     ///     vec!["2025".into(), "2026".into()],
@@ -914,7 +914,7 @@ impl Axes {
     pub fn grouped_bar(
         &mut self,
         categories: Vec<String>,
-        series: Vec<BarSeries>,
+        series: Vec<Series>,
     ) -> Result<&mut Axes> {
         let mark = BarGroupMark::new(
             "Axes.grouped_bar()",
@@ -944,12 +944,12 @@ impl Axes {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::figure::BarSeries;
+    /// use umber_core::figure::Series;
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// let series = |heights: &[f64]| BarSeries { heights: heights.to_vec(), ..BarSeries::default() };
+    /// let series = |values: &[f64]| Series { values: values.to_vec(), ..Series::default() };
     /// axes.stacked_bar(vec!["a".into(), "b".into()], vec![series(&[3.0, -1.0]), series(&[2.0, 4.0])])?;
     /// assert_eq!(axes.marks().len(), 1);
     /// // Totals beyond the supported magnitudes are an error.
@@ -962,7 +962,7 @@ impl Axes {
     pub fn stacked_bar(
         &mut self,
         categories: Vec<String>,
-        series: Vec<BarSeries>,
+        series: Vec<Series>,
     ) -> Result<&mut Axes> {
         let mark = BarGroupMark::new(
             "Axes.stacked_bar()",

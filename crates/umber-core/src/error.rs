@@ -33,7 +33,7 @@ pub enum Error {
         /// What is wrong and what is required.
         message: String,
         /// The Python parameter the error is about, e.g. `"y"`; `None` when no single parameter
-        /// is at fault. Nested data names its top-level parameter: `series[1].heights[3]` is
+        /// is at fault. Nested data names its top-level parameter: `series[1].values[3]` is
         /// `"series"`.
         parameter: Option<&'static str>,
         /// One sentence that suggests a likely fix; `None` when there is no likely fix.

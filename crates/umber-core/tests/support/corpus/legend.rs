@@ -31,7 +31,7 @@
 use std::fmt::Write as _;
 
 use umber_core::figure::{AxisData, BarOptions, HistOptions, LineOptions, ScatterOptions};
-use umber_core::{BarSeries, ColorSpec, Dash, Figure, FontLibrary, LegendStyle, ScaleKind, Theme};
+use umber_core::{ColorSpec, Dash, Figure, FontLibrary, LegendStyle, ScaleKind, Series, Theme};
 
 use super::super::{Output, axes, emit_scene, figure, labelled, linear, numbers, record, wobble};
 
@@ -289,9 +289,9 @@ fn figures() -> Vec<(&'static str, Figure)> {
         ("2025", [9.0, 14.0, 19.0, 17.0]),
         ("2026", [5.0, 8.0, 11.0, 14.0]),
     ]
-    .map(|(label, heights)| BarSeries {
+    .map(|(label, values)| Series {
         label: label.into(),
-        heights: heights.to_vec(),
+        values: values.to_vec(),
         color: ColorSpec::AUTO,
     })
     .to_vec();
@@ -316,9 +316,9 @@ fn bar_legend_figures() -> Vec<(&'static str, Figure)> {
             ("2025", [9.0, 14.0, 19.0, 17.0]),
             ("2026", [5.0, 8.0, 11.0, 14.0]),
         ]
-        .map(|(label, heights)| BarSeries {
+        .map(|(label, values)| Series {
             label: label.into(),
-            heights: heights.to_vec(),
+            values: values.to_vec(),
             color: ColorSpec::AUTO,
         })
         .to_vec()
@@ -481,9 +481,9 @@ fn chips_figures() -> Vec<(&'static str, Figure)> {
 
     // A grouped bar: bars get a dot in a chip, not a square.
     let series = [("North", 1.0), ("South", 2.0), ("East", 3.0)]
-        .map(|(label, k)| BarSeries {
+        .map(|(label, k)| Series {
             label: label.into(),
-            heights: vec![10.0 + k, 14.0 - k, 9.0 + 2.0 * k],
+            values: vec![10.0 + k, 14.0 - k, 9.0 + 2.0 * k],
             color: ColorSpec::AUTO,
         })
         .to_vec();

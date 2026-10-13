@@ -183,36 +183,36 @@ impl BarMark {
 
 /// One series of a grouped or stacked bar mark, as given to
 /// [`Axes::grouped_bar`](super::Axes::grouped_bar) and
-/// [`Axes::stacked_bar`](super::Axes::stacked_bar): its label, one height per category, and
+/// [`Axes::stacked_bar`](super::Axes::stacked_bar): its label, one value per category, and
 /// its color.
 ///
 /// # Examples
 ///
 /// ```
-/// use umber_core::figure::BarSeries;
+/// use umber_core::figure::Series;
 /// use umber_core::ColorSpec;
 ///
-/// let series = BarSeries { label: "2025".into(), heights: vec![3.0, 4.5], color: ColorSpec::AUTO };
-/// assert_eq!(series.heights.len(), 2);
-/// let empty = BarSeries::default();
-/// assert!(empty.label.is_empty() && empty.heights.is_empty());
+/// let series = Series { label: "2025".into(), values: vec![3.0, 4.5], color: ColorSpec::AUTO };
+/// assert_eq!(series.values.len(), 2);
+/// let empty = Series::default();
+/// assert!(empty.label.is_empty() && empty.values.is_empty());
 /// assert_eq!(empty.color, ColorSpec::AUTO);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
-pub struct BarSeries {
+pub struct Series {
     /// The legend label; empty for none.
     pub label: String,
     /// One height per category, in the order of the mark's categories. NaN draws no bar.
-    pub heights: Vec<f64>,
+    pub values: Vec<f64>,
     /// The series color.
     pub color: ColorSpec,
 }
 
-impl Default for BarSeries {
+impl Default for Series {
     fn default() -> Self {
-        BarSeries {
+        Series {
             label: String::new(),
-            heights: Vec::new(),
+            values: Vec::new(),
             color: ColorSpec::AUTO,
         }
     }
@@ -230,14 +230,14 @@ pub(super) enum Arrangement {
 
 /// One stored series of a [`BarGroupMark`].
 #[derive(Debug, Clone, PartialEq)]
-struct StoredBarSeries {
+struct StoredSeries {
     label: String,
-    heights: Box<[f64]>,
+    values: Box<[f64]>,
     color: ColorSpec,
 }
 
 /// A grouped or stacked bar mark: one or more series over shared categories, each series with
-/// one height per category.
+/// one value per category.
 ///
 /// The categories and series are validated together and stored together; they never change,
 /// and clones share them. Every category appears once, and there is at least one series.
@@ -247,15 +247,15 @@ struct StoredBarSeries {
 /// # Examples
 ///
 /// ```
-/// use umber_core::figure::{BarSeries, Mark};
+/// use umber_core::figure::{Series, Mark};
 /// use umber_core::{Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
 /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-/// let series = |label: &str, heights: &[f64]| BarSeries {
+/// let series = |label: &str, values: &[f64]| Series {
 ///     label: label.into(),
-///     heights: heights.to_vec(),
-///     ..BarSeries::default()
+///     values: values.to_vec(),
+///     ..Series::default()
 /// };
 /// axes.grouped_bar(
 ///     vec!["a".into(), "b".into()],
@@ -281,13 +281,13 @@ struct StoredBarSeries {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BarGroupMark {
     categories: Arc<[String]>,
-    series: Arc<[StoredBarSeries]>,
+    series: Arc<[StoredSeries]>,
 }
 
 impl BarGroupMark {
     /// Validates `categories` and `series` for axes with an x axis of scale kind `x_kind` and a
     /// y axis of transform `y`, arranged as `arrangement` (see [`check_bar_group`] for the checks and their order), then
-    /// stores them unchanged, every bit of the heights included. The first failure is the
+    /// stores them unchanged, every bit of the values included. The first failure is the
     /// error, under `context`.
     pub(super) fn new(
         context: &'static str,
@@ -295,14 +295,14 @@ impl BarGroupMark {
         x_kind: ScaleKind,
         y: Transform,
         categories: Vec<String>,
-        series: Vec<BarSeries>,
+        series: Vec<Series>,
     ) -> Result<BarGroupMark> {
         check_bar_group(context, arrangement, x_kind, y, &categories, &series)?;
-        let series: Vec<StoredBarSeries> = series
+        let series: Vec<StoredSeries> = series
             .into_iter()
-            .map(|s| StoredBarSeries {
+            .map(|s| StoredSeries {
                 label: s.label,
-                heights: s.heights.into_boxed_slice(),
+                values: s.values.into_boxed_slice(),
                 color: s.color,
             })
             .collect();
@@ -317,12 +317,12 @@ impl BarGroupMark {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::figure::{BarSeries, Mark};
+    /// use umber_core::figure::{Series, Mark};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// let series = BarSeries { heights: vec![2.0], ..BarSeries::default() };
+    /// let series = Series { values: vec![2.0], ..Series::default() };
     /// axes.stacked_bar(vec!["north".into()], vec![series])?;
     /// let Some(Mark::StackedBar(stack)) = axes.marks().first() else { unreachable!() };
     /// assert_eq!(stack.categories(), ["north"]);
@@ -338,22 +338,22 @@ impl BarGroupMark {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::figure::{BarSeries, Mark};
+    /// use umber_core::figure::{Series, Mark};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// let series = |h: f64| BarSeries { heights: vec![h], ..BarSeries::default() };
+    /// let series = |h: f64| Series { values: vec![h], ..Series::default() };
     /// axes.grouped_bar(vec!["a".into()], vec![series(1.0), series(f64::NAN)])?;
     /// let Some(Mark::GroupedBar(group)) = axes.marks().first() else { unreachable!() };
     /// assert_eq!(group.series().len(), 2);
-    /// assert_eq!(group.series().next().map(|s| s.heights()), Some(&[1.0][..]));
+    /// assert_eq!(group.series().next().map(|s| s.values()), Some(&[1.0][..]));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn series(&self) -> impl ExactSizeIterator<Item = BarSeriesView<'_>> {
-        self.series.iter().map(|s| BarSeriesView {
+    pub fn series(&self) -> impl ExactSizeIterator<Item = SeriesView<'_>> {
+        self.series.iter().map(|s| SeriesView {
             label: &s.label,
-            heights: &s.heights,
+            values: &s.values,
             color: s.color,
         })
     }
@@ -365,43 +365,43 @@ impl BarGroupMark {
     }
 }
 
-/// A read-only view of one series of a [`BarGroupMark`]: its label, its heights (one per
+/// A read-only view of one series of a [`BarGroupMark`]: its label, its values (one per
 /// category of the mark) and its color as given.
 ///
 /// # Examples
 ///
 /// ```
-/// use umber_core::figure::{BarSeries, Mark};
+/// use umber_core::figure::{Series, Mark};
 /// use umber_core::{ColorSpec, Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
 /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-/// let series = BarSeries { label: "y".into(), heights: vec![2.0, -1.0], color: ColorSpec::AUTO };
+/// let series = Series { label: "y".into(), values: vec![2.0, -1.0], color: ColorSpec::AUTO };
 /// axes.stacked_bar(vec!["a".into(), "b".into()], vec![series])?;
 /// let Some(Mark::StackedBar(stack)) = axes.marks().first() else { unreachable!() };
 /// let view = stack.series().next().unwrap();
-/// assert_eq!((view.label(), view.heights(), view.color()), ("y", &[2.0, -1.0][..], ColorSpec::AUTO));
+/// assert_eq!((view.label(), view.values(), view.color()), ("y", &[2.0, -1.0][..], ColorSpec::AUTO));
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BarSeriesView<'a> {
+pub struct SeriesView<'a> {
     label: &'a str,
-    heights: &'a [f64],
+    values: &'a [f64],
     color: ColorSpec,
 }
 
-impl<'a> BarSeriesView<'a> {
+impl<'a> SeriesView<'a> {
     /// The legend label; empty for none.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::figure::{BarSeries, Mark};
+    /// use umber_core::figure::{Series, Mark};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// let series = BarSeries { label: "2026".into(), heights: vec![1.0], ..BarSeries::default() };
+    /// let series = Series { label: "2026".into(), values: vec![1.0], ..Series::default() };
     /// axes.grouped_bar(vec!["a".into()], vec![series])?;
     /// let Some(Mark::GroupedBar(group)) = axes.marks().first() else { unreachable!() };
     /// assert_eq!(group.series().next().map(|s| s.label()), Some("2026"));
@@ -412,26 +412,26 @@ impl<'a> BarSeriesView<'a> {
         self.label
     }
 
-    /// The heights, one per category of the mark, in the mark's category order. NaN draws no
+    /// The values, one per category of the mark, in the mark's category order. NaN draws no
     /// bar.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::figure::{BarSeries, Mark};
+    /// use umber_core::figure::{Series, Mark};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// let series = BarSeries { heights: vec![1.0, 4.0], ..BarSeries::default() };
+    /// let series = Series { values: vec![1.0, 4.0], ..Series::default() };
     /// axes.grouped_bar(vec!["a".into(), "b".into()], vec![series])?;
     /// let Some(Mark::GroupedBar(group)) = axes.marks().first() else { unreachable!() };
-    /// assert_eq!(group.series().next().map(|s| s.heights()), Some(&[1.0, 4.0][..]));
+    /// assert_eq!(group.series().next().map(|s| s.values()), Some(&[1.0, 4.0][..]));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
-    pub fn heights(&self) -> &'a [f64] {
-        self.heights
+    pub fn values(&self) -> &'a [f64] {
+        self.values
     }
 
     /// The color as given, before it is resolved against a palette.
@@ -439,13 +439,13 @@ impl<'a> BarSeriesView<'a> {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::figure::{BarSeries, Mark};
+    /// use umber_core::figure::{Series, Mark};
     /// use umber_core::{ColorSpec, Figure, Rgba, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let color = ColorSpec::Fixed(Rgba::opaque(10, 20, 30));
-    /// let series = BarSeries { heights: vec![1.0], color, ..BarSeries::default() };
+    /// let series = Series { values: vec![1.0], color, ..Series::default() };
     /// axes.grouped_bar(vec!["a".into()], vec![series])?;
     /// let Some(Mark::GroupedBar(group)) = axes.marks().first() else { unreachable!() };
     /// assert_eq!(group.series().next().map(|s| s.color()), Some(color));

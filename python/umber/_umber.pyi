@@ -97,7 +97,7 @@ def check_tick_format(format: _TickFormatArg) -> None: ...
 type _FloatArray = numpy.typing.NDArray[numpy.float64]
 # x values: float data for a linear or log x axis, a list of names for a category x axis.
 type _AxisValues = _FloatArray | list[str]
-# A bar series of grouped and stacked bars: (label, heights, color).
+# A bar series of grouped and stacked bars: (label, values, color).
 type _SeriesArg = tuple[str, _FloatArray, _ColorArg]
 
 @final

@@ -39,12 +39,12 @@ impl AxisData {
 /// stored together and never changes, so clones share both arrays and an x is never paired
 /// with the y of another series.
 #[derive(Clone, PartialEq)]
-pub(super) struct Series {
+pub(super) struct XySeries {
     x: Arc<AxisData>,
     y: Arc<[f64]>,
 }
 
-impl Series {
+impl XySeries {
     /// Validates `x` and `y` for axes with an x axis of scale kind `x_kind` and a y axis of
     /// transform `y_transform`, then stores both
     /// unchanged: every bit, NaN gaps included, in the given order. Both are stored as given,
@@ -59,9 +59,9 @@ impl Series {
         x: AxisData,
         y: Arc<[f64]>,
         gap_hint: &'static str,
-    ) -> Result<Series> {
+    ) -> Result<XySeries> {
         check_series(context, x_kind, y_transform, &x, &y, gap_hint)?;
-        Ok(Series { x: Arc::new(x), y })
+        Ok(XySeries { x: Arc::new(x), y })
     }
 
     /// The x values.
@@ -75,9 +75,9 @@ impl Series {
     }
 }
 
-impl fmt::Debug for Series {
+impl fmt::Debug for XySeries {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Series")
+        f.debug_struct("XySeries")
             .field("x", &self.x)
             .field("y", &self.y)
             .finish()
@@ -100,7 +100,7 @@ mod tests {
         values.iter().map(|v| v.to_bits()).collect()
     }
 
-    fn series_of(mark: &Mark) -> &Series {
+    fn series_of(mark: &Mark) -> &XySeries {
         match mark {
             Mark::Line(line) => line.series(),
             Mark::Scatter(scatter) => scatter.series(),
@@ -120,7 +120,7 @@ mod tests {
         ];
         let x = vec![3.0, gaps[0], -0.0, gaps[1], 1.0];
         let y = [gaps[2], 0.0, 2.0, -0.0, gaps[3]];
-        let series = Series::new(
+        let series = XySeries::new(
             "t",
             LIN,
             LIN_Y,
@@ -137,7 +137,7 @@ mod tests {
 
         let names: Vec<String> = ["b", "a", "b"].iter().map(|s| (*s).to_owned()).collect();
         let cats = AxisData::Categories(names.clone());
-        let series = Series::new(
+        let series = XySeries::new(
             "t",
             ScaleKind::Category,
             LIN_Y,
@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn series_checks_run_in_order() {
         let log = ScaleKind::Log { base: LogBase::TEN };
-        let message = |r: Result<Series>| match r {
+        let message = |r: Result<XySeries>| match r {
             Err(Error::Data {
                 context, message, ..
             }) => {
@@ -164,7 +164,7 @@ mod tests {
         let nums = |v: &[f64]| AxisData::Numbers(v.to_vec());
         // Lengths before values, x before y, the first bad index within an axis.
         assert!(
-            message(Series::new(
+            message(XySeries::new(
                 "t",
                 LIN,
                 LIN_Y,
@@ -175,7 +175,7 @@ mod tests {
             .starts_with("x has 1 values but y has 0")
         );
         assert!(
-            message(Series::new(
+            message(XySeries::new(
                 "t",
                 log,
                 Transform::Log(LogBase::TEN),
@@ -186,7 +186,7 @@ mod tests {
             .starts_with("x[1] is -1 on a log axis")
         );
         assert!(
-            message(Series::new(
+            message(XySeries::new(
                 "t",
                 LIN,
                 LIN_Y,

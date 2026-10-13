@@ -1,1 +1,3 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Series values renamed: the error text names series[i].values instead of series[i].heights.
+errors/grouped-bars

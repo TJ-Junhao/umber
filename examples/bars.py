@@ -6,8 +6,8 @@ import umber as ub
 
 out = Path(__file__).parent
 quarters = ["Q1", "Q2", "Q3", "Q4"]
-north = ub.BarSeries("North", [12, 18, 15, 22])
-south = ub.BarSeries("South", [9, 11, 17, 14])
+north = ub.Series("North", [12, 18, 15, 22])
+south = ub.Series("South", [9, 11, 17, 14])
 
 simple = ub.Figure()
 (

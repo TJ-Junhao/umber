@@ -18,7 +18,7 @@ mod validation;
 
 pub use axes::Axes;
 pub use axis_data::AxisData;
-pub use bar::{BarGroupMark, BarMark, BarOptions, BarSeries, BarSeriesView};
+pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};
 pub use figure::Figure;
 pub use hist::{HistMark, HistOptions};
 pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
@@ -619,10 +619,10 @@ mod tests {
         assert_eq!(f, before);
     }
 
-    fn series(heights: &[f64]) -> BarSeries {
-        BarSeries {
-            heights: heights.to_vec(),
-            ..BarSeries::default()
+    fn series(values: &[f64]) -> Series {
+        Series {
+            values: values.to_vec(),
+            ..Series::default()
         }
     }
 
@@ -671,13 +671,13 @@ mod tests {
                     &[&[1.0, 2.0], &[1.0, 2.0], &[f64::INFINITY]],
                 ),
                 context,
-                "categories has 2 values but series[2].heights has 1; each series must have one height per category.",
+                "categories has 2 values but series[2].values has 1; each series must have one value per category.",
             );
             // The first mismatched series, before duplicates and bad heights.
             assert_data(
                 call(a, &["a", "a"], &[&[f64::INFINITY], &[1.0, 2.0, 3.0]]),
                 context,
-                "series[0].heights has 1",
+                "series[0].values has 1",
             );
         }
         assert!(a.marks().is_empty());
@@ -717,7 +717,7 @@ mod tests {
                     &[&[1.0, f64::NAN], &[2.0, 1e301], &[f64::INFINITY, 0.0]],
                 ),
                 context,
-                "series[1].heights[1] is 1e301; magnitudes must not exceed 1e300.",
+                "series[1].values[1] is 1e301; magnitudes must not exceed 1e300.",
             );
             assert!(a.marks().is_empty());
 
@@ -727,7 +727,7 @@ mod tests {
             assert_data(
                 call(a, &["a", "b"], &[&[1.0, 2.0], &[3.0, -1.0]]),
                 context,
-                "series[1].heights[1] is -1 on a log axis; values must be positive.",
+                "series[1].values[1] is -1 on a log axis; values must be positive.",
             );
             call(a, &["a", "b"], &[&[1.0, f64::NAN], &[1e300, 2.0]]).unwrap();
             assert_eq!(a.marks().len(), 1);
@@ -772,9 +772,9 @@ mod tests {
         let fixed = crate::ColorSpec::Fixed(crate::Rgba::opaque(1, 2, 3));
         let gap = f64::from_bits(0xfff8_0000_0000_0001);
         let input = vec![
-            BarSeries {
+            Series {
                 label: "first".into(),
-                heights: vec![-0.0, gap],
+                values: vec![-0.0, gap],
                 color: fixed,
             },
             series(&[2.0, -1.0]),
@@ -796,7 +796,7 @@ mod tests {
         let bits = |v: &[f64]| v.iter().map(|h| h.to_bits()).collect::<Vec<_>>();
         for (view, given) in group.series().zip(&input) {
             assert_eq!(view.label(), given.label);
-            assert_eq!(bits(view.heights()), bits(&given.heights));
+            assert_eq!(bits(view.values()), bits(&given.values));
             assert_eq!(view.color(), given.color);
         }
         assert_eq!(stack.categories(), names(&["c"]));

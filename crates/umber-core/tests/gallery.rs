@@ -19,8 +19,9 @@ use std::path::PathBuf;
 
 use umber_core::render::render_png;
 use umber_core::{
-    AreaOptions, AxisData, BarOptions, BarSeries, ColorSpec, Dash, Figure, FillStyle, FontLibrary,
-    HistOptions, LegendStyle, LineOptions, LogBase, Marker, ScaleKind, ScatterOptions, Theme,
+    AreaOptions, AxisData, BarOptions, ColorSpec, Dash, Figure, FillStyle, FontLibrary,
+    HistOptions, LegendStyle, LineOptions, LogBase, Marker, ScaleKind, ScatterOptions, Series,
+    Theme,
 };
 
 use golden_compare::{assert_golden, golden_dir};
@@ -319,15 +320,15 @@ fn quarters() -> Vec<String> {
     QUARTERS.map(str::to_owned).to_vec()
 }
 
-fn revenue_series() -> Vec<BarSeries> {
+fn revenue_series() -> Vec<Series> {
     [
         ("2024", [12.0, 18.0, 15.0, 22.0]),
         ("2025", [9.0, 14.0, 19.0, 17.0]),
         ("2026", [5.0, 8.0, 11.0, 14.0]),
     ]
-    .map(|(label, heights)| BarSeries {
+    .map(|(label, values)| Series {
         label: label.to_owned(),
-        heights: heights.to_vec(),
+        values: values.to_vec(),
         color: ColorSpec::AUTO,
     })
     .to_vec()
@@ -483,9 +484,9 @@ fn pigment_stacked_bar() {
         ("Services", [6.0, -4.0, 9.0, 7.0]),
         ("Costs", [-8.0, -10.0, -6.0, -12.0]),
     ]
-    .map(|(label, heights)| BarSeries {
+    .map(|(label, values)| Series {
         label: label.to_owned(),
-        heights: heights.to_vec(),
+        values: values.to_vec(),
         color: ColorSpec::AUTO,
     })
     .to_vec();

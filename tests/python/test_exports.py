@@ -11,7 +11,7 @@ import umber
 EXPECTED = [
     "MAX_BINS",
     "Axes",
-    "BarSeries",
+    "Series",
     "Color",
     "DataError",
     "Dash",
