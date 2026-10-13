@@ -712,7 +712,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> "Axes[str, float]":
         """Add stacked bars: in each category, the series stacked on one another.
 
-        Positive and negative heights stack separately, above and below the baseline.
+        Positive and negative values stack separately, above and below the baseline.
 
         Args:
             categories: The category names, each at most once.

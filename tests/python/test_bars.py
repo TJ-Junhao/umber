@@ -659,7 +659,7 @@ BAR_ERRORS: list[tuple[str, Callable[[], Bars], Callable[[Bars], object], type, 
         _bars,
         lambda ax: ax.stacked_bar(["a"], [_series(1e300), _series(1e300)]),
         ub.DataError,
-        'Axes.stacked_bar(): the heights of categories[0] ("a") stack to 2e300; each stack '
+        'Axes.stacked_bar(): the values of categories[0] ("a") stack to 2e300; each stack '
         "must stay within 1e300 on both sides of 0.",
         "series",
         None,

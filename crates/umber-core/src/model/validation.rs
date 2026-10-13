@@ -339,7 +339,7 @@ fn check_stacked_totals(
                 return Err(Error::data(
                     context,
                     format!(
-                        "the heights of categories[{i}] ({name:?}) stack to {total}; each stack must stay within {MAX_MAGNITUDE:e} on both sides of 0.", total = number(total),
+                        "the values of categories[{i}] ({name:?}) stack to {total}; each stack must stay within {MAX_MAGNITUDE:e} on both sides of 0.", total = number(total),
                     ),
                 )
                 .with_parameter("series"));

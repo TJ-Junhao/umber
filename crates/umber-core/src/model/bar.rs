@@ -202,7 +202,7 @@ impl BarMark {
 pub struct Series {
     /// The legend label; empty for none.
     pub label: String,
-    /// One height per category, in the order of the mark's categories. NaN draws no bar.
+    /// One value per category, in the order of the mark's categories. NaN draws no bar.
     pub values: Vec<f64>,
     /// The series color.
     pub color: ColorSpec,

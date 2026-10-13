@@ -748,7 +748,7 @@ MARK_ERRORS: list[ErrorCase] = [
         lambda: figure(x=CATEGORY),
         lambda f: f.stacked_bar(["a"], [series(1e300), series(1e300)]),
         ub.DataError,
-        'Axes.stacked_bar(): the heights of categories[0] ("a") stack to 2e300; each stack '
+        'Axes.stacked_bar(): the values of categories[0] ("a") stack to 2e300; each stack '
         "must stay within 1e300 on both sides of 0.",
         "series",
         None,

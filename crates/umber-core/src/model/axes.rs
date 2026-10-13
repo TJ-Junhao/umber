@@ -929,7 +929,7 @@ impl Axes {
     }
 
     /// Adds stacked bars: in each category, one stack, as wide as a bar of [`Axes::bar`], with
-    /// the series stacked in series order. Positive heights stack upward from the baseline and
+    /// the series stacked in series order. Positive values stack upward from the baseline and
     /// negative ones downward, each side separately; NaN and 0 add no segment. Neighbouring
     /// segments on one side are 1 pt apart, and a segment too thin for that gap is not drawn.
     /// Only the outermost segment on each side has its end rounded. On a log y axis the first
@@ -938,7 +938,7 @@ impl Axes {
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
     /// [`Axes::grouped_bar`], with one more check at the end: in each category, the positive
-    /// heights and the negative heights must each add up to at most
+    /// values and the negative values must each add up to at most
     /// [`MAX_MAGNITUDE`] in magnitude (the message names the category).
     ///
     /// # Examples

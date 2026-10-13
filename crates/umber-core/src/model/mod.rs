@@ -749,13 +749,13 @@ mod tests {
         assert_data(
             stacked(a, &["a", "b"], &[&[1.0, 6e299], &[-1e300, 5e299]]),
             STACKED,
-            "the heights of categories[1] (\"b\") stack to 1.1e300; each stack must stay within 1e300 on both sides of 0.",
+            "the values of categories[1] (\"b\") stack to 1.1e300; each stack must stay within 1e300 on both sides of 0.",
         );
         // The negative side; a positive height does not offset it.
         assert_data(
             stacked(a, &["a"], &[&[-1e300], &[5.0], &[-1e300]]),
             STACKED,
-            "the heights of categories[0] (\"a\") stack to -2e300",
+            "the values of categories[0] (\"a\") stack to -2e300",
         );
         // Grouped bars do not add up, so they have no such limit.
         let mut h = figure();
