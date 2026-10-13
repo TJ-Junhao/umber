@@ -5,6 +5,7 @@ use std::fmt;
 use super::axis_data::{AxisData, XySeries};
 use super::bar::{BarGroupMark, BarMark};
 use super::hist::HistMark;
+use super::step::StepMark;
 use crate::{ColorSpec, Dash, Marker, SizeSpec};
 
 /// Options of a line mark.
@@ -107,10 +108,11 @@ impl Default for ScatterOptions {
 /// Marks are created by [`AxesMut::line`](super::AxesMut::line),
 /// [`AxesMut::scatter`](super::AxesMut::scatter), [`AxesMut::area`](super::AxesMut::area),
 /// [`AxesMut::bar`](super::AxesMut::bar), [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar),
-/// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar) and
-/// [`AxesMut::hist`](super::AxesMut::hist), which validate the data. Each variant holds a
-/// payload ([`LineMark`], [`ScatterMark`], [`AreaMark`], [`BarMark`], [`BarGroupMark`],
-/// [`HistMark`]) that keeps the validated values together and exposes them read-only; it has no
+/// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar),
+/// [`AxesMut::hist`](super::AxesMut::hist) and [`AxesMut::step`](super::AxesMut::step), which
+/// validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
+/// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`]) that keeps the validated values
+/// together and exposes them read-only; it has no
 /// public constructor. Read a mark by matching on its variant.
 ///
 /// # Examples
@@ -176,6 +178,9 @@ pub enum Mark {
     /// The values counted in equal-width bins, one bar per bin from the baseline to its count;
     /// NaN is ignored and an empty bin draws nothing.
     Hist(HistMark),
+    /// Horizontal and vertical segments through the points, which change level at the chosen
+    /// [`Step`](crate::Step) position; NaN breaks the line.
+    Step(StepMark),
 }
 
 impl Mark {

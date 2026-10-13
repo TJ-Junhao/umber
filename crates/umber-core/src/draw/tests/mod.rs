@@ -13,6 +13,7 @@ mod marker;
 mod marks;
 mod oracle;
 mod scatter;
+mod step;
 
 use crate::geometry::{Path, PathVerb, Point};
 use crate::layout::Area;

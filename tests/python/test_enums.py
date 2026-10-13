@@ -5,7 +5,16 @@ import pytest
 import umber as ub
 from umber import _umber
 
-ENUMS = [ub.Dash, ub.Marker, ub.Font, ub.LegendStyle, ub.FillStyle, ub.GridLines, ub.SvgText]
+ENUMS = [
+    ub.Dash,
+    ub.Marker,
+    ub.Font,
+    ub.LegendStyle,
+    ub.FillStyle,
+    ub.GridLines,
+    ub.SvgText,
+    ub.Step,
+]
 
 
 def _public_enums() -> list[type[enum.Enum]]:
@@ -48,3 +57,8 @@ def test_members_are_identified_by_name_and_value() -> None:
 def test_fill_style_members() -> None:
     assert [(m.name, m.value) for m in ub.FillStyle] == [("SOLID", 0), ("GRADIENT", 1)]
     assert ub.FillStyle(1) is ub.FillStyle.GRADIENT
+
+
+def test_step_members() -> None:
+    assert [(m.name, m.value) for m in ub.Step] == [("POST", 0), ("PRE", 1), ("MID", 2)]
+    assert ub.Step(2) is ub.Step.MID

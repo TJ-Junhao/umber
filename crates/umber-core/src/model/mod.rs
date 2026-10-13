@@ -16,6 +16,7 @@ mod figure;
 mod grid;
 mod hist;
 mod mark;
+mod step;
 mod ticks;
 mod validation;
 
@@ -27,6 +28,7 @@ pub use figure::Figure;
 pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement, Share};
 pub use hist::{HistMark, HistOptions};
 pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
+pub use step::{Step, StepMark, StepOptions};
 pub(crate) use ticks::AxisTicks;
 pub use ticks::ExplicitTicks;
 pub(crate) use validation::check_text;

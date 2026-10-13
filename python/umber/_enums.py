@@ -156,3 +156,23 @@ class SvgText(Enum):
 
     EDITABLE = 1
     """Text kept as text elements, so it can be edited in a vector editor."""
+
+
+@unique
+class Step(Enum):
+    """Where a step line changes level between two points.
+
+    Example:
+        >>> import umber as ub
+        >>> ub.Step.MID.name
+        'MID'
+    """
+
+    POST = 0
+    """Hold each value from its x to the next x, then change level there."""
+
+    PRE = 1
+    """Change level at the previous x, then hold each value up to its own x."""
+
+    MID = 2
+    """Change level halfway between two x values."""

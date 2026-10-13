@@ -27,7 +27,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use umber_core::{
     AreaOptions, AxesMut, BarOptions, Dash, Grid, GridIndex, HistOptions, LegendMode, LegendStyle,
-    LineOptions, Marker, Placement, ScatterOptions, Series, Share, SvgText,
+    LineOptions, Marker, Placement, ScatterOptions, Series, Share, Step, StepOptions, SvgText,
 };
 
 use crate::color::{ColorArg, color_spec};
@@ -482,6 +482,33 @@ impl Figure {
         };
         self.axes(row, col)?
             .hist_shared(values, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a step line; `position` is a `Step` value.
+    fn step(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        position: i64,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let (x, y) = (axis_data(x)?, shared_floats(y)?);
+        let options = StepOptions {
+            position: enum_value::<Step>(position)?,
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+        };
+        self.axes(row, col)?
+            .step_shared(x, y, options)
             .map(drop)
             .map_err(core_error)
     }
