@@ -86,6 +86,7 @@ use umber_core::{
 /// Cases of the newer features, one module each, so that a feature edits only its own file.
 mod corpus {
     pub mod area;
+    pub mod band;
     pub mod bars;
     pub mod grid;
     pub mod hist;
@@ -147,6 +148,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::grid::cases(&lib, &mut sink);
     corpus::step::cases(&lib, &mut sink);
     corpus::rules::cases(&lib, &mut sink);
+    corpus::band::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1711,6 +1713,14 @@ mod record {
                 floats64(&[span.high()]),
                 text(&span.options().label),
                 color_spec(span.options().color)
+            ),
+            Mark::Band(band) => format!(
+                "band x={} low={} high={} label={} color={}",
+                floats64(band.x()),
+                floats64(band.low()),
+                floats64(band.high()),
+                text(&band.options().label),
+                color_spec(band.options().color)
             ),
             _ => "unknown-mark".into(),
         }

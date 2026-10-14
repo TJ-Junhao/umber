@@ -30,6 +30,7 @@
 //! clipping of [`clip`], and receive their input as one [`MarkContext`].
 
 mod area;
+mod band;
 mod bar;
 mod bar_shape;
 mod chrome;
@@ -190,6 +191,12 @@ pub(crate) fn marks(
                 width,
             } => {
                 step::step_items(&context, resolved, step_mark, (color, width), &mut items);
+            }
+            ResolvedMark::Band {
+                mark: band_mark,
+                color,
+            } => {
+                band::band_items(&context, resolved, band_mark, color, &mut items);
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }

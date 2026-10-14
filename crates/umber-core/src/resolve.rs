@@ -34,7 +34,7 @@ use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
     Mark, ScatterMark, SeriesView, StepMark,
 };
-use crate::model::{AxisValue, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
+use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
 use crate::model::{Edge, holds};
 use crate::scale::{Finish, Padding, TickJudge, is_single_value, log_offset};
 use crate::stacking::Stacks;
@@ -584,6 +584,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Bar(mark) => mark.categories(),
         Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
+        Mark::Band(_) => &[],
     }
 }
 
@@ -609,7 +610,7 @@ pub(crate) fn resolve(
                 && marks
                     .iter()
                     .filter(|mark| !mark.is_reference())
-                    .all(|mark| mark.line_width().is_some());
+                    .all(ResolvedMark::has_exact_x_extent);
             let auto = if all_lines {
                 AutoLimits::Exact
             } else {
@@ -804,6 +805,13 @@ pub(crate) enum ResolvedMark<'a> {
         /// The fill color, before the area opacity.
         color: Rgba,
     },
+    /// A band between two curves.
+    Band {
+        /// The mark.
+        mark: &'a BandMark,
+        /// The fill color, before the area opacity.
+        color: Rgba,
+    },
 }
 
 impl<'a> ResolvedMark<'a> {
@@ -820,6 +828,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Step { mark, .. } => numbers(mark.x()),
             ResolvedMark::VLine { mark, .. } => mark.x_numbers(),
             ResolvedMark::VSpan { mark, .. } => mark.bounds(),
+            ResolvedMark::Band { mark, .. } => mark.x(),
             ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -853,7 +862,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
-            | ResolvedMark::VSpan { .. } => &[],
+            | ResolvedMark::VSpan { .. }
+            | ResolvedMark::Band { .. } => &[],
         }
         .iter()
         .map(String::as_str)
@@ -877,6 +887,11 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::HLine { mark, .. } => mark.y_values(),
             ResolvedMark::HSpan { mark, .. } => mark.bounds(),
             ResolvedMark::VLine { .. } | ResolvedMark::VSpan { .. } => &[],
+            ResolvedMark::Band { mark, .. } => {
+                return DomainValues::Computed(Box::new(
+                    mark.low().iter().chain(mark.high()).copied(),
+                ));
+            }
             ResolvedMark::Bar { mark, .. } => mark.heights(),
             ResolvedMark::Grouped { series, .. } => {
                 return DomainValues::Computed(Box::new(
@@ -911,7 +926,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
-            | ResolvedMark::VSpan { .. } => false,
+            | ResolvedMark::VSpan { .. }
+            | ResolvedMark::Band { .. } => false,
             ResolvedMark::Area { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
@@ -937,7 +953,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
-            | ResolvedMark::VSpan { .. } => None,
+            | ResolvedMark::VSpan { .. }
+            | ResolvedMark::Band { .. } => None,
         }
     }
 
@@ -957,8 +974,17 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::Hist { .. }
-            | ResolvedMark::Step { .. } => false,
+            | ResolvedMark::Step { .. }
+            | ResolvedMark::Band { .. } => false,
         }
+    }
+
+    /// Whether an x axis padded by the marks reads the exact extent of this mark: the marks
+    /// drawn along a line ([`line_width`](Self::line_width)) and bands, which are bounded by
+    /// curves over their x values. An x axis whose marks, references apart, all have it keeps
+    /// the exact data extent (see [`resolve`]).
+    pub fn has_exact_x_extent(&self) -> bool {
+        self.line_width().is_some() || matches!(self, ResolvedMark::Band { .. })
     }
 
     /// The series the mark shows, in order, one key each: what a legend lists for the mark, on
@@ -1027,6 +1053,14 @@ impl<'a> ResolvedMark<'a> {
                     anchor: None,
                 }]
             }
+            // A band is a filled region and is listed as a span is: a square swatch, and an
+            // entry in the legend row under every style.
+            &ResolvedMark::Band { mark, color } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Span,
+                anchor: None,
+            }],
         }
     }
 }
@@ -1362,7 +1396,8 @@ pub(crate) enum SeriesKind {
         /// The stroke width as drawn, in points.
         width: f32,
     },
-    /// A reference span, a filled region across the plot.
+    /// A filled region without an outline: a reference span across the plot, or a band between
+    /// two curves.
     Span,
 }
 
@@ -1470,6 +1505,10 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
                 mark,
                 color: color_of(mark.options().color),
             },
+            Mark::Band(mark) => ResolvedMark::Band {
+                mark,
+                color: color_of(mark.options().color),
+            },
         })
         .collect()
 }
@@ -1478,8 +1517,8 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
 mod tests {
     use super::*;
     use crate::model::{
-        AreaOptions, BarOptions, Figure, HistOptions, LineOptions, ScatterOptions, Series, Step,
-        StepOptions,
+        AreaOptions, BandOptions, BarOptions, Figure, HistOptions, LineOptions, ScatterOptions,
+        Series, Step, StepOptions,
     };
     use crate::{AxesMut, FontLibrary, LogBase, MIN_LOG_VALUE, ScaleKind, Theme, TickFormat};
 
@@ -4069,5 +4108,94 @@ mod tests {
         let resolved = resolve_marks(marks, &Theme::pigment());
         let expected: Vec<&str> = resolved.iter().flat_map(|m| m.x_categories()).collect();
         assert_eq!(found, expected);
+    }
+
+    /// A figure of linear axes holding one labelled band over `x` between `low` and `high`.
+    fn band_figure(x: &[f64], low: &[f64], high: &[f64]) -> Figure {
+        let mut f = figure(LIN, LIN);
+        let options = BandOptions {
+            label: "Band".to_owned(),
+            ..BandOptions::default()
+        };
+        axes(&mut f).band(x, low, high, options).unwrap();
+        f
+    }
+
+    #[test]
+    fn a_band_gives_x_and_both_curves_to_the_domains() {
+        let f = band_figure(&[0.0, 5.0, 10.0], &[1.0, 2.0, 0.5], &[5.0, 9.0, 4.0]);
+        let marks = resolve_marks(f.single_axes().marks(), &Theme::pigment());
+        let [band] = marks.as_slice() else {
+            panic!("{marks:?}")
+        };
+        assert_eq!(band.x_numbers().collect::<Vec<_>>(), [0.0, 5.0, 10.0]);
+        // Every low, then every high.
+        assert_eq!(
+            band.y_values().collect::<Vec<_>>(),
+            [1.0, 2.0, 0.5, 5.0, 9.0, 4.0]
+        );
+        assert_eq!(band.x_categories().count(), 0);
+        assert!(!band.grows_from_baseline() && !band.is_reference());
+        assert_eq!(band.line_width(), None);
+        // The y axis holds the lowest low and the highest high, padded as a scatter's is.
+        let mut scatter = figure(LIN, LIN);
+        axes(&mut scatter)
+            .scatter(nums(&[0.0, 10.0]), &[0.5, 9.0], ScatterOptions::default())
+            .unwrap();
+        assert_eq!(domains(&f).1, domains(&scatter).1);
+    }
+
+    #[test]
+    fn a_band_reads_the_exact_x_extent_like_a_line_and_pads_beside_other_marks() {
+        // Alone, and beside a line: the exact extent.
+        let f = band_figure(&[0.0, 10.0], &[1.0, 2.0], &[3.0, 4.0]);
+        assert_eq!(domains(&f).0, (0.0, 10.0));
+        let mut f = band_figure(&[0.0, 10.0], &[1.0, 2.0], &[3.0, 4.0]);
+        axes(&mut f)
+            .line(nums(&[2.0, 6.0]), &[2.0, 3.0], LineOptions::default())
+            .unwrap();
+        assert_eq!(domains(&f).0, (0.0, 10.0));
+        // Beside a scatter, the nice padding of the scatter decides, and a band inside the
+        // scatter's extent changes nothing.
+        let mut scatter = figure(LIN, LIN);
+        axes(&mut scatter)
+            .scatter(nums(&[0.0, 10.0]), &[1.0, 2.0], ScatterOptions::default())
+            .unwrap();
+        let alone = domains(&scatter).0;
+        assert_ne!(alone, (0.0, 10.0));
+        axes(&mut scatter)
+            .band(
+                &[2.0, 6.0],
+                &[1.0, 1.0],
+                &[2.0, 2.0],
+                BandOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(domains(&scatter).0, alone);
+        // A band beside references: the references do not pad it.
+        let mut f = band_figure(&[0.0, 10.0], &[1.0, 2.0], &[3.0, 4.0]);
+        axes(&mut f).vspan(2.0, 6.0, span()).unwrap();
+        assert_eq!(domains(&f).0, (0.0, 10.0));
+    }
+
+    #[test]
+    fn a_band_key_is_a_square_swatch_without_an_anchor_and_takes_a_palette_slot() {
+        let theme = Theme::pigment();
+        let mut f = band_figure(&[0.0, 1.0], &[0.0, 0.0], &[1.0, 2.0]);
+        axes(&mut f)
+            .line(nums(&[0.0, 1.0]), &[0.5, 1.0], LineOptions::default())
+            .unwrap();
+        let axes = f.single_axes();
+        let resolved = resolve_marks(axes.marks(), &theme);
+        let keys = series_keys(&resolved, &Limits::of(axes));
+        let [band, line] = keys.as_slice() else {
+            panic!("{keys:?}")
+        };
+        assert_eq!(
+            (band.label, band.kind, band.anchor, band.color),
+            ("Band", SeriesKind::Span, None, theme.palette()[0])
+        );
+        assert!(!band.kind.takes_direct_label());
+        assert_eq!(line.color, theme.palette()[1]);
     }
 }

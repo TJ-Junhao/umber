@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use super::axes::Axes;
 use super::axis_data::{AxisData, XySeries};
+use super::band::{BandMark, BandOptions};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
 use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
@@ -13,8 +14,9 @@ use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
-    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_reference_value,
-    check_span, check_step_order, check_vline_x, check_x_limits, check_x_tick_axis,
+    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
+    check_reference_value, check_span, check_step_order, check_vline_x, check_x_limits,
+    check_x_tick_axis,
 };
 use crate::{ContinuousScale, Error, LegendStyle, Result, TickFormat};
 
@@ -1016,6 +1018,88 @@ impl<'a> AxesMut<'a> {
         check_span(CONTEXT, (low, high), transform)?;
         axes.marks
             .push(Mark::VSpan(SpanMark::new(low, high, options)));
+        Ok(self)
+    }
+
+    /// Adds a band: the region between the lower curve `(x[i], low[i])` and the upper curve
+    /// `(x[i], high[i])`, filled flat at the area opacity with no outline, whatever the theme's
+    /// [`FillStyle`](crate::FillStyle). Both curves extend the automatic y domain, and `x` the
+    /// automatic x domain as the x values of a line do. A NaN in `x`, `low` or `high` breaks the
+    /// band there into separate polygons. A band needs a linear or log x axis.
+    ///
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis; otherwise
+    /// `Error::Data`, checked in this order: the three slices differ in length; a value of `x`,
+    /// then of `low`, then of `high` is infinite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE)
+    /// or not valid on its axis (positive on a log axis); `low[i]` is above `high[i]`, naming the
+    /// first such index. Where either is NaN, the index is not compared.
+    ///
+    /// `x` must be in non-decreasing order, NaN apart, as for [`AxesMut::step`]: the first
+    /// value below the one before it is an `Error::Data` naming its index, checked after the
+    /// values and before the curves are compared.
+    ///
+    /// The mark stores its own copies of the values, made once. To store values already held in
+    /// `Arc<[f64]>`s without copying them, use [`AxesMut::band_shared`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::BandOptions;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.band(&[0.0, 1.0, 2.0], &[1.0, 2.0, 1.5], &[3.0, 4.0, 3.5], BandOptions::default())?;
+    /// // A lower curve above the upper one is an error, and the axes keep their one mark.
+    /// assert!(axes
+    ///     .band(&[0.0, 1.0], &[5.0, 5.0], &[1.0, 1.0], BandOptions::default())
+    ///     .is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn band(
+        &mut self,
+        x: &[f64],
+        low: &[f64],
+        high: &[f64],
+        options: BandOptions,
+    ) -> Result<&mut Self> {
+        self.band_shared(Arc::from(x), Arc::from(low), Arc::from(high), options)
+    }
+
+    /// Adds a band as [`AxesMut::band`] does, but stores the three arrays themselves rather
+    /// than copies of them, as [`AxesMut::line_shared`] does for `y`. Same rules and errors as
+    /// [`AxesMut::band`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{BandOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let x: Arc<[f64]> = Arc::from([0.0, 1.0]);
+    /// let low: Arc<[f64]> = Arc::from([1.0, 2.0]);
+    /// let high: Arc<[f64]> = Arc::from([3.0, 4.0]);
+    /// axes.band_shared(Arc::clone(&x), low, high, BandOptions::default())?;
+    /// let Some(Mark::Band(band)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(band.x(), &*x));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn band_shared(
+        &mut self,
+        x: Arc<[f64]>,
+        low: Arc<[f64]>,
+        high: Arc<[f64]>,
+        options: BandOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.band()";
+        let axes = self.axes_mut();
+        check_band(CONTEXT, axes.x, axes.y, (&x, &low, &high))?;
+        axes.marks
+            .push(Mark::Band(BandMark::new(x, low, high, options)));
         Ok(self)
     }
 }
