@@ -30,6 +30,7 @@
 use crate::binning::Histogram;
 use crate::error::quoted;
 use crate::layout::TickRoom;
+use crate::model::StemMark;
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
     Mark, ScatterMark, SeriesView, StepMark,
@@ -584,6 +585,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
     match mark {
         Mark::Line(mark) => category_names(mark.x()),
         Mark::Scatter(mark) => category_names(mark.x()),
+        Mark::Stem(mark) => category_names(mark.x()),
         Mark::Area(mark) => category_names(mark.x()),
         Mark::Step(mark) => category_names(mark.x()),
         Mark::Bar(mark) => mark.categories(),
@@ -825,6 +827,15 @@ pub(crate) enum ResolvedMark<'a> {
         /// The fill color, before the area opacity.
         color: Rgba,
     },
+    /// A stem mark, drawn from the baseline with a scatter marker at each value.
+    Stem {
+        /// The mark.
+        mark: &'a StemMark,
+        /// The color of the stems and their markers.
+        color: Rgba,
+        /// The marker diameter as drawn, in points.
+        size: f32,
+    },
     /// Error bars.
     ErrorBars {
         /// The mark.
@@ -846,6 +857,7 @@ impl<'a> ResolvedMark<'a> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
+            ResolvedMark::Stem { mark, .. } => numbers(mark.x()),
             ResolvedMark::Area { mark, .. } => numbers(mark.x()),
             ResolvedMark::Step { mark, .. } => numbers(mark.x()),
             ResolvedMark::VLine { mark, .. } => mark.x_numbers(),
@@ -881,6 +893,7 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => category_names(mark.x()),
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
+            ResolvedMark::Stem { mark, .. } => category_names(mark.x()),
             ResolvedMark::Area { mark, .. } => category_names(mark.x()),
             ResolvedMark::Step { mark, .. } => category_names(mark.x()),
             ResolvedMark::ErrorBars { mark, .. } => category_names(mark.positions()),
@@ -915,6 +928,7 @@ impl<'a> ResolvedMark<'a> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
+            ResolvedMark::Stem { mark, .. } => mark.y(),
             ResolvedMark::Area { mark, .. } => mark.y(),
             ResolvedMark::Step { mark, .. } => mark.y(),
             ResolvedMark::HLine { mark, .. } => mark.y_values(),
@@ -965,6 +979,9 @@ impl<'a> ResolvedMark<'a> {
     /// area do: such a mark puts 0 into a linear y domain.
     pub fn grows_from_baseline(&self) -> bool {
         match self {
+            // With no finite y value, a stem does not change the y domain or its padding,
+            // even when explicit ticks are the only values on that axis.
+            ResolvedMark::Stem { mark, .. } => mark.y().iter().any(|v| v.is_finite()),
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Step { .. }
@@ -988,6 +1005,7 @@ impl<'a> ResolvedMark<'a> {
     /// half their stroke.
     pub fn line_width(&self) -> Option<f32> {
         match *self {
+            ResolvedMark::Stem { .. } => None,
             ResolvedMark::Line { width, .. }
             | ResolvedMark::Area { width, .. }
             | ResolvedMark::Step { width, .. } => Some(width),
@@ -1010,6 +1028,7 @@ impl<'a> ResolvedMark<'a> {
     /// is padded (see [`resolve`]).
     pub fn is_reference(&self) -> bool {
         match self {
+            ResolvedMark::Stem { .. } => false,
             ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
@@ -1039,6 +1058,15 @@ impl<'a> ResolvedMark<'a> {
     /// an axes whose axes have the limits `limits`.
     pub fn keys(&self, limits: &Limits) -> Vec<SeriesKey<'a>> {
         match self {
+            &ResolvedMark::Stem { mark, color, size } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Points {
+                    marker: mark.options().marker,
+                    size,
+                },
+                anchor: None,
+            }],
             &ResolvedMark::Line { mark, color, width } => {
                 vec![SeriesKey::of_line(mark, color, width, limits)]
             }
@@ -1513,6 +1541,11 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::Scatter(mark) => ResolvedMark::Scatter {
+                mark,
+                color: color_of(mark.options().color),
+                size: theme.drawn_marker_size(mark.options().size),
+            },
+            Mark::Stem(mark) => ResolvedMark::Stem {
                 mark,
                 color: color_of(mark.options().color),
                 size: theme.drawn_marker_size(mark.options().size),

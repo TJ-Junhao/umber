@@ -13,6 +13,7 @@ use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
     AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
@@ -507,6 +508,59 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let series = XySeries::new("Axes.scatter()", axes.x, axes.y, x, y, SCATTER_GAP_HINT)?;
         axes.marks.push(Mark::scatter(series, options));
+        Ok(self)
+    }
+
+    /// Adds a line from the baseline to each value and a scatter marker at the value. Same
+    /// validation as [`AxesMut::scatter`]; NaN skips the point. Category x values sit at band
+    /// centres. A linear y domain includes 0; a log y axis starts stems at its baseline.
+    /// Explicit limits clip stems and markers as they do other marks. Points are not reduced.
+    ///
+    /// The line width is [`Theme::stem_width`](crate::Theme::stem_width); `options.size` sets
+    /// only the marker diameter. Labelled stems take a legend row entry, never a direct label.
+    /// The mark copies `y` once; [`AxesMut::stem_shared`] can store an existing `Arc<[f64]>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Figure, ScaleKind, StemOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.stem(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, -1.0], StemOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stem(&mut self, x: AxisData, y: &[f64], options: StemOptions) -> Result<&mut Self> {
+        self.stem_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds stems as [`AxesMut::stem`] does, storing `y` without copying it. Same rules and
+    /// errors as [`AxesMut::stem`]; a failed call leaves the figure unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::{AxisData, Figure, Mark, ScaleKind, StemOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([2.0, -1.0]);
+    /// axes.stem_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), StemOptions::default())?;
+    /// let Some(Mark::Stem(stem)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(stem.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stem_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: StemOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let series = XySeries::new("Axes.stem()", axes.x, axes.y, x, y, SCATTER_GAP_HINT)?;
+        axes.marks.push(Mark::Stem(StemMark::new(series, options)));
         Ok(self)
     }
 
