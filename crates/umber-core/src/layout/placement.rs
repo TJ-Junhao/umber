@@ -85,6 +85,21 @@ pub(crate) fn best_fits(legend: &MeasuredLegend<'_>, plot: &Area) -> bool {
             && column.height() + 4.0 * BEST_PADDING <= plot.height + CONTAINMENT_TOLERANCE)
 }
 
+/// Checks entry widths, including the swatch and chip padding, before or after placement.
+pub(super) fn check_width(context: &'static str, legend: &LegendRow, width: f64) -> Result<()> {
+    for entry in legend.entries() {
+        let start = entry.chip.map_or(entry.swatch.x, |c| c.x);
+        let end = entry
+            .chip
+            .map_or(entry.label.x + entry.label.width(), |c| c.right());
+        if end - start > width + CONTAINMENT_TOLERANCE {
+            let room = width - (end - start - entry.label.width());
+            return Err(legend_too_wide(context, &entry.label, room, "panel"));
+        }
+    }
+    Ok(())
+}
+
 /// Checks every new placement even on a single panel. The legacy top-left row retains canvas
 /// clipping on a single cell; on a grid all entries, including chip padding, must fit.
 pub(super) fn check(input: &LayoutInput<'_>, layout: &Layout, single: bool) -> Result<()> {
@@ -94,20 +109,12 @@ pub(super) fn check(input: &LayoutInput<'_>, layout: &Layout, single: bool) -> R
     }
     let plot = layout.plot;
     let width = match position {
+        LegendPosition::Bottom if single => layout.frame.width - 2.0 * super::PADDING,
         LegendPosition::TopLeft | LegendPosition::TopRight | LegendPosition::Bottom => plot.width,
         LegendPosition::Right => layout.frame.right() - (plot.right() + RIGHT_GAP),
         LegendPosition::Best => plot.width - 4.0 * BEST_PADDING,
     };
-    for entry in layout.legend.entries() {
-        let start = entry.chip.map_or(entry.swatch.x, |c| c.x);
-        let end = entry
-            .chip
-            .map_or(entry.label.x + entry.label.width(), |c| c.right());
-        if end - start > width + CONTAINMENT_TOLERANCE {
-            let room = width - (end - start - entry.label.width());
-            return Err(legend_too_wide(input.context, &entry.label, room, "panel"));
-        }
-    }
+    check_width(input.context, &layout.legend, width)?;
     let height = layout.legend.height();
     let room = match position {
         LegendPosition::Right => plot.height,
@@ -118,9 +125,14 @@ pub(super) fn check(input: &LayoutInput<'_>, layout: &Layout, single: bool) -> R
     };
     if height > room + CONTAINMENT_TOLERANCE {
         let (height, room) = widths(height, room);
+        let available = if position == LegendPosition::Best {
+            format!("the plot leaves {room} pt for the legend")
+        } else {
+            format!("the plot has {room} pt")
+        };
         return Err(Error::style(
             input.context,
-            format!("the legend is {height} pt tall; the plot has {room} pt."),
+            format!("the legend is {height} pt tall; {available}."),
         )
         .with_hint("make the figure taller, or use fewer legend entries."));
     }

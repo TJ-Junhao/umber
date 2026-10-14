@@ -679,6 +679,14 @@ fn solve_single(
     if matches!(inset::fit_x_labels(&room, &[]), inset::XInset::Overflowing) {
         let direct = legend.direct.reserve(f64::INFINITY);
         if bands.right_legend > 0.0 {
+            let available = frame.right() - PADDING - left - MIN_PLOT;
+            if available >= 0.0 {
+                placement::check_width(
+                    context,
+                    &legend.column(0.0),
+                    available - placement::RIGHT_GAP,
+                )?;
+            }
             let y_room = right - MIN_PLOT - (frame.x + PADDING) - Y_LABEL_GAP;
             if let Some(label) = widest(&bands.y_labels)
                 && y_room >= 0.0
@@ -716,8 +724,7 @@ fn solve_single(
     if legend.position == crate::LegendPosition::TopRight {
         plot_top = top + bands.above_with_row(&legend.header_within(plot_left, plot_right));
     }
-    let below =
-        bands.x_band + bands.x_title_band + PADDING + legend.bottom_reserve(plot_left, plot_right);
+    let below = bands.x_band + bands.x_title_band + PADDING + bands.bottom_legend;
     let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {

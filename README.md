@@ -71,6 +71,30 @@ Bar charts need a category x axis: `fig.add_axes(x=ub.Scale.category())`. Log ax
   <img alt="A histogram with a gradient fill in the Pigment theme" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/histogram-pigment.png" width="49%">
 </p>
 
+## Grids and shared axes
+
+`Figure(rows=2, cols=2)` declares a grid. Its default `width=ub.AUTO` and `height=ub.AUTO` give each column 6 inches and each row 4 inches; an explicit size is for the whole figure. Add panels by their zero-based top-left cell:
+
+```python
+import copy
+import umber as ub
+
+fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.COL, legend=ub.Legend.MERGED)
+fig.add_axes(row=0, col=0).line([0, 1, 2], [1, 3, 2], label="North")
+fig.add_axes(row=1, col=0).line([0, 1, 2], [2, 1, 3], label="South")
+fig.add_axes(row=0, col=1, row_span=2).line([0, 1, 2], [1, 3, 2], label="North")
+fig.save_png("subplots.png")
+
+variant = copy.copy(fig)
+variant.axes_at(row=0, col=1).title("Comparison")  # the original is unchanged
+```
+
+`Share.NONE`, `Share.ROW`, `Share.COL` and `Share.ALL` choose which panels share a scale, limits, ticks and tick format. `Legend.PER_PANEL` keeps a separate legend for each panel instead of the default merged legend. Empty cells remain empty; overlapping panels are refused.
+
+Use `fig.axes_at(row=..., col=..., x=..., y=...)` to retrieve axes, including those in a copy. The scale kinds and log bases must match creation; for category axes, pass `x=ub.Scale.category()` to get `Axes[str, float]`. A spanning panel is found only at its top-left cell. A row or column can be omitted only when that dimension has size 1. `Figure.axes` has been removed in favor of this typed method.
+
+`fig.cells()` yields immutable `Cell` positions in row-major order, occupied or not; `fig.cells(n)` yields the first `n`. For example, `for cell, values in zip(fig.cells(), datasets): cell.add_axes().line(x, values)` adds one panel per dataset. `AUTO` is a typed sentinel, not `None`, and only parameters that declare it accept it.
+
 ## Themes
 
 Three themes are built in: `Theme.PIGMENT` (warm paper, serif titles), `Theme.GRAPHITE` (neutral, sans-serif) and `Theme.MIDNIGHT` (dark, monospaced figures). A theme is an immutable value; derive a variant with its `with_*` methods:

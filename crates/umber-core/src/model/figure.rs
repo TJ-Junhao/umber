@@ -216,12 +216,11 @@ impl Figure {
     /// # Errors
     ///
     /// Errors add no axes. They are `Error::Usage`, checked in this order:
-    /// - `at.row` is `Auto` on a grid of more than one row (parameter `row`); then likewise
-    ///   `at.col` (parameter `col`);
-    /// - `at.row` is outside the grid (`row`); then likewise `at.col` (`col`);
-    /// - `at.row_span` is below 1 (`row_span`); then likewise `at.col_span` (`col_span`);
-    /// - the rows spanned run past the last row (`row_span`); then likewise the columns
-    ///   (`col_span`);
+    /// - `at.row` is `Auto` on a grid of more than one row, or outside the grid (parameter
+    ///   `row`);
+    /// - `at.col` is `Auto` on a grid of more than one column, or outside the grid (`col`);
+    /// - `at.row_span` is below 1, or the rows spanned run past the last row (`row_span`);
+    /// - `at.col_span` is below 1, or the columns spanned run past the last column (`col_span`);
     /// - `y` is a category scale, because the y axis is always linear or log (`y`);
     /// - a cell is taken by an axes already added (`row`): the message names the first taken
     ///   cell in row-major order and the top-left cell of the axes that holds it;
@@ -261,12 +260,12 @@ impl Figure {
     ) -> Result<AxesMut<'_>> {
         let (rows, cols) = (self.grid.rows(), self.grid.cols());
         let row = auto_index(ADD_AXES, Dimension::ROW, at.row, rows)?;
-        let col = auto_index(ADD_AXES, Dimension::COL, at.col, cols)?;
         let row = in_range(ADD_AXES, Dimension::ROW, row, rows)?;
+        let col = auto_index(ADD_AXES, Dimension::COL, at.col, cols)?;
         let col = in_range(ADD_AXES, Dimension::COL, col, cols)?;
         let row_span = positive_span(Dimension::ROW, at.row_span)?;
-        let col_span = positive_span(Dimension::COL, at.col_span)?;
         let row_span = span_in_grid(Dimension::ROW, row, row_span, rows)?;
+        let col_span = positive_span(Dimension::COL, at.col_span)?;
         let col_span = span_in_grid(Dimension::COL, col, col_span, cols)?;
         let Some(y) = y.transform() else {
             return Err(Error::usage(
@@ -754,20 +753,31 @@ mod tests {
                 "pass row=, counting from 0.",
             ),
             case(
-                grid(1, 4),
-                auto,
-                category,
-                "col is AUTO; this figure has 4 columns, so each axes needs a col.",
-                "col",
-                "pass col=, counting from 0.",
-            ),
-            case(
                 grid(3, 3),
                 at(3, -1, 0, 0),
                 category,
                 "row is 3; this figure has rows 0 to 2.",
                 "row",
                 "rows and columns count from 0.",
+            ),
+            case(
+                grid(2, 2),
+                Placement {
+                    row: GridIndex::At(5),
+                    ..auto
+                },
+                category,
+                "row is 5; this figure has rows 0 to 1.",
+                "row",
+                "rows and columns count from 0.",
+            ),
+            case(
+                grid(1, 4),
+                auto,
+                category,
+                "col is AUTO; this figure has 4 columns, so each axes needs a col.",
+                "col",
+                "pass col=, counting from 0.",
             ),
             case(
                 grid(3, 3),
@@ -787,19 +797,27 @@ mod tests {
             ),
             case(
                 grid(3, 3),
-                at(0, 0, 1, -2),
-                linear,
-                "col_span is -2; col_span must be at least 1.",
-                "col_span",
-                "use 1 for an axes in one column.",
-            ),
-            case(
-                grid(3, 3),
                 at(1, 0, 3, 9),
                 category,
                 "row 1 with row_span 3 runs past the last row, 2.",
                 "row_span",
                 "use a smaller span or a larger grid.",
+            ),
+            case(
+                grid(3, 3),
+                at(1, 0, 3, -2),
+                category,
+                "row 1 with row_span 3 runs past the last row, 2.",
+                "row_span",
+                "use a smaller span or a larger grid.",
+            ),
+            case(
+                grid(3, 3),
+                at(0, 0, 1, -2),
+                linear,
+                "col_span is -2; col_span must be at least 1.",
+                "col_span",
+                "use 1 for an axes in one column.",
             ),
             case(
                 grid(3, 3),

@@ -864,6 +864,21 @@ fn columns_too_narrow(
     let cols = columns.count();
     let placed = columns.place(&columns.no_growth());
     let deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
+    for ((cell, band), panel) in cells.iter().zip(bands).zip(input.panels) {
+        let last = cell.col() + cell.col_span() - 1;
+        if band.right_legend > 0.0 && band.right_legend == columns.right[last] {
+            let available = band.right_legend - deficit;
+            if available >= 0.0
+                && let Err(err) = super::placement::check_width(
+                    input.context,
+                    &panel.legend.column(0.0),
+                    available - super::placement::RIGHT_GAP,
+                )
+            {
+                return in_panel(*cell, err);
+            }
+        }
+    }
     let culprit = cells
         .iter()
         .zip(bands)

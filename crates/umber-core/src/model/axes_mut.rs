@@ -463,7 +463,7 @@ impl<'a> AxesMut<'a> {
         if style == LegendStyle::Direct {
             return Err(Error::usage(
                 "Axes.legend()",
-                format!("position is {position:?}; direct labels sit at the ends of their lines and take no position."),
+                format!("position is {}; direct labels sit at the ends of their lines and take no position.", position.display()),
             ).with_parameter("position").with_hint("drop position=, or use another legend style."));
         }
         let axes = self.axes_mut();

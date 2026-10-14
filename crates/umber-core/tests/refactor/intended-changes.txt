@@ -1,1 +1,2 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Legend positions add outputs; existing outputs at origin/main stay unchanged.
+# Bottom alignment and DIRECT spelling only change the new legend-position cases.

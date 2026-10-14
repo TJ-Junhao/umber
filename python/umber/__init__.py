@@ -11,8 +11,22 @@ from types import FunctionType
 from typing import Final
 
 from umber._axes import Axes
+from umber._cell import Cell
 from umber._color import Color
-from umber._enums import Dash, FillStyle, Font, GridLines, LegendStyle, Marker, Step, SvgText
+from umber._enums import (
+    AUTO,
+    Auto,
+    Dash,
+    FillStyle,
+    Font,
+    GridLines,
+    Legend,
+    LegendStyle,
+    Marker,
+    Share,
+    Step,
+    SvgText,
+)
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
 from umber._quick import bar, hist, line, scatter
@@ -35,8 +49,11 @@ Example:
 """
 
 __all__ = [
+    "AUTO",
     "MAX_BINS",
+    "Auto",
     "Axes",
+    "Cell",
     "Series",
     "Color",
     "DataError",
@@ -45,9 +62,11 @@ __all__ = [
     "Figure",
     "Font",
     "GridLines",
+    "Legend",
     "LegendStyle",
     "Marker",
     "Scale",
+    "Share",
     "Size",
     "Step",
     "StyleError",
@@ -81,7 +100,9 @@ def _report_package_as_module(*exported: type | Callable[..., object]) -> None:
 
 
 _report_package_as_module(
+    Auto,
     Axes,
+    Cell,
     Series,
     Color,
     Dash,
@@ -89,9 +110,11 @@ _report_package_as_module(
     Figure,
     Font,
     GridLines,
+    Legend,
     LegendStyle,
     Marker,
     Scale,
+    Share,
     Size,
     Step,
     SupportsArray,

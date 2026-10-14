@@ -259,7 +259,14 @@ def text(context: str, name: str, value: object, *, hint: str = _TEXT_HINT) -> s
     return checked_text(context, name, name, value, StyleError)
 
 
-def real(context: str, name: str, value: object, *, hint: str = _REAL_HINT) -> float:
+def real(
+    context: str,
+    name: str,
+    value: object,
+    *,
+    expected: str = "a float",
+    hint: str = _REAL_HINT,
+) -> float:
     """Check a number argument and return it as a ``float``.
 
     Ints, floats and the NumPy integer and floating scalars are accepted. ``bool``, NumPy
@@ -270,6 +277,7 @@ def real(context: str, name: str, value: object, *, hint: str = _REAL_HINT) -> f
         context: The API call, such as ``"Axes.xlim()"``.
         name: The parameter name.
         value: The value passed.
+        expected: The accepted types to name in an error, including any handled by the caller.
         hint: The hint for a value of another type.
 
     Returns:
@@ -289,7 +297,7 @@ def real(context: str, name: str, value: object, *, hint: str = _REAL_HINT) -> f
     if kind == "float":
         return float(cast(SupportsFloat, value))
     if kind != "int":
-        raise _wrong_type(context, name, value, "a float", hint)
+        raise _wrong_type(context, name, value, expected, hint)
     number = operator.index(cast(SupportsIndex, value))
     try:
         return float(number)
@@ -297,7 +305,14 @@ def real(context: str, name: str, value: object, *, hint: str = _REAL_HINT) -> f
         return math.inf if number > 0 else -math.inf
 
 
-def integer(context: str, name: str, value: object) -> int:
+def integer(
+    context: str,
+    name: str,
+    value: object,
+    *,
+    expected: str = "an int",
+    hint: str = _INTEGER_HINT,
+) -> int:
     """Check a whole-number argument and return it clamped to the 64-bit signed range.
 
     Ints and NumPy integer scalars are accepted; ``bool``, NumPy ``bool`` and ``timedelta64``
@@ -309,6 +324,8 @@ def integer(context: str, name: str, value: object) -> int:
         context: The API call, such as ``"Axes.hist()"``.
         name: The parameter name.
         value: The value passed.
+        expected: The accepted types to name in an error, including any handled by the caller.
+        hint: The hint for a value of another type.
 
     Returns:
         The value as an ``int`` between -2**63 and 2**63 - 1.
@@ -322,7 +339,7 @@ def integer(context: str, name: str, value: object) -> int:
         9223372036854775807
     """
     if _number_kind(value) != "int":
-        raise _wrong_type(context, name, value, "an int", _INTEGER_HINT)
+        raise _wrong_type(context, name, value, expected, hint)
     return min(max(operator.index(cast(SupportsIndex, value)), _I64_MIN), _I64_MAX)
 
 

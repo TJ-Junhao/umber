@@ -154,6 +154,75 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             axes.legend_position()
         ));
     }
+    let mut errors = String::new();
+    for style in [LegendStyle::Header, LegendStyle::Chips] {
+        for grid in [false, true] {
+            for (position, tall) in [
+                (LegendPosition::TopRight, false),
+                (LegendPosition::Right, false),
+                (LegendPosition::Bottom, false),
+                (LegendPosition::Best, false),
+                (LegendPosition::Right, true),
+                (LegendPosition::Best, true),
+            ] {
+                let mut figure = if grid {
+                    Figure::with_grid(
+                        6.0,
+                        4.0,
+                        Theme::pigment(),
+                        Grid::new(1, 2).unwrap().with_legend(LegendMode::PerPanel),
+                    )
+                    .unwrap()
+                } else {
+                    Figure::new(6.0, 4.0, Theme::pigment()).unwrap()
+                };
+                let mut axes = figure
+                    .add_axes_at(
+                        Placement {
+                            row: GridIndex::At(0),
+                            col: GridIndex::At(i64::from(grid)),
+                            ..Placement::default()
+                        },
+                        ScaleKind::Linear,
+                        ScaleKind::Linear,
+                    )
+                    .unwrap();
+                axes.legend_at(style, position)
+                    .unwrap()
+                    .xlim(0.0, 1.0)
+                    .unwrap()
+                    .ylim(0.0, 1.0)
+                    .unwrap();
+                for i in 0..if tall { 30 } else { 1 } {
+                    axes.line(
+                        AxisData::Numbers(vec![0.0, 1.0]),
+                        &[0.0, 1.0],
+                        LineOptions {
+                            label: if tall {
+                                format!("Series {i}")
+                            } else {
+                                "W".repeat(80)
+                            },
+                            ..LineOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                let before = figure.clone();
+                let error = figure.to_scene(lib).unwrap_err();
+                errors.push_str(&format!(
+                    "{style:?} grid={grid} {position:?} tall={tall}\n{}\nunchanged={}\n",
+                    record::error(&error),
+                    figure == before
+                ));
+            }
+        }
+    }
+    sink(Output {
+        kind: "errors",
+        file: "legend_position.txt".into(),
+        bytes: errors.into_bytes(),
+    });
     sink(Output {
         kind: "api",
         file: "legend-positions.txt".into(),

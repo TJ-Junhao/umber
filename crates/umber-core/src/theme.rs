@@ -140,6 +140,19 @@ pub enum LegendPosition {
     Best,
 }
 
+impl LegendPosition {
+    /// The Python spelling used in user-facing messages.
+    pub(crate) fn display(self) -> &'static str {
+        match self {
+            Self::TopLeft => "LegendPosition.TOP_LEFT",
+            Self::TopRight => "LegendPosition.TOP_RIGHT",
+            Self::Right => "LegendPosition.RIGHT",
+            Self::Bottom => "LegendPosition.BOTTOM",
+            Self::Best => "LegendPosition.BEST",
+        }
+    }
+}
+
 /// Horizontal alignment of titles, subtitles and the figure's merged legend.
 ///
 /// # Examples

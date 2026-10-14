@@ -573,7 +573,7 @@ pub(crate) fn place_panel(
             };
             input
                 .legend
-                .row_within(plot.x, plot.right())
+                .row_within(header_box.left, header_box.right)
                 .placed(axis_bottom + super::placement::BOTTOM_GAP)
         }
         // The final resolved mark geometry chooses the position after layout.

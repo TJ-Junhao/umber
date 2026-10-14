@@ -192,6 +192,8 @@ fn right_and_bottom_reserve_room_and_keep_plots_aligned() {
             ls[0].legend.entries()[0].swatch.x,
             ls[0].plot.right() + 12.0,
         );
+        let entry = &ls[1].legend.entries()[0];
+        near(entry.chip.map_or(entry.swatch.x, |c| c.x), ls[1].plot.x);
         let label = ls[1].xlabel.as_ref().unwrap();
         assert!(ls[1].legend.entries()[0].swatch.center_y > label.y + 8.0);
     }
@@ -203,13 +205,63 @@ fn right_and_bottom_reserve_room_and_keep_plots_aligned() {
 }
 
 #[test]
+fn single_bottom_wraps_and_reserves_the_inner_canvas_width() {
+    for style in [LegendStyle::Header, LegendStyle::Chips] {
+        for xlabel in ["", "Time"] {
+            let make = |position| {
+                let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+                let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                axes.legend_at(style, position)
+                    .unwrap()
+                    .xlabel(xlabel)
+                    .yticks_labeled(&[0.0, 1.0], vec!["1234567890".repeat(3); 2])
+                    .unwrap();
+                for i in 0..5 {
+                    axes.line(
+                        AxisData::Numbers(vec![0.0, 1.0]),
+                        &[0.0, 1.0],
+                        LineOptions {
+                            label: format!("Series {i}"),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                f
+            };
+            let top = layout(&make(LegendPosition::TopLeft));
+            let bottom = layout(&make(LegendPosition::Bottom));
+            near(bottom.legend.height(), top.legend.height());
+            assert!(bottom.legend.width() > bottom.plot.width);
+            let first = &bottom.legend.entries()[0];
+            near(first.chip.map_or(first.swatch.x, |c| c.x), 12.0);
+            for entry in bottom.legend.entries() {
+                let end = entry
+                    .chip
+                    .map_or(entry.label.x + entry.label.width(), |c| c.right());
+                assert!(end <= bottom.frame.right() - 12.0);
+            }
+            near(
+                first.swatch.center_y + bottom.legend.height() / 2.0,
+                bottom.frame.bottom() - 12.0,
+            );
+            let axis_bottom = bottom.xlabel.as_ref().map_or_else(
+                || bottom.x_tick_labels.iter().map(|l| l.y).fold(0.0, f64::max),
+                |l| l.y,
+            );
+            assert!(first.swatch.center_y - bottom.legend.height() / 2.0 > axis_bottom + 8.0);
+        }
+    }
+}
+
+#[test]
 fn direct_style_rejects_a_position() {
-    for position in [
-        LegendPosition::TopLeft,
-        LegendPosition::TopRight,
-        LegendPosition::Right,
-        LegendPosition::Bottom,
-        LegendPosition::Best,
+    for (position, name) in [
+        (LegendPosition::TopLeft, "LegendPosition.TOP_LEFT"),
+        (LegendPosition::TopRight, "LegendPosition.TOP_RIGHT"),
+        (LegendPosition::Right, "LegendPosition.RIGHT"),
+        (LegendPosition::Bottom, "LegendPosition.BOTTOM"),
+        (LegendPosition::Best, "LegendPosition.BEST"),
     ] {
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
@@ -233,7 +285,7 @@ fn direct_style_rejects_a_position() {
         assert_eq!(
             err.to_string(),
             format!(
-                "Axes.legend(): position is {position:?}; direct labels sit at the ends of their lines and take no position."
+                "Axes.legend(): position is {name}; direct labels sit at the ends of their lines and take no position."
             )
         );
         assert_eq!(err.parameter(), Some("position"));
@@ -361,43 +413,107 @@ fn merged_grid_ignores_panel_positions() {
     }
 }
 
+fn room_error(
+    position: LegendPosition,
+    grid: bool,
+    tall: bool,
+    style: LegendStyle,
+) -> crate::Error {
+    let mut f = if grid {
+        Figure::with_grid(
+            6.0,
+            4.0,
+            Theme::pigment(),
+            Grid::new(1, 2).unwrap().with_legend(LegendMode::PerPanel),
+        )
+        .unwrap()
+    } else {
+        Figure::new(6.0, 4.0, Theme::pigment()).unwrap()
+    };
+    let mut axes = f
+        .add_axes_at(
+            Placement {
+                row: GridIndex::At(0),
+                col: GridIndex::At(i64::from(grid)),
+                ..Placement::default()
+            },
+            ScaleKind::Linear,
+            ScaleKind::Linear,
+        )
+        .unwrap();
+    axes.legend_at(style, position)
+        .unwrap()
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap();
+    for i in 0..if tall { 30 } else { 1 } {
+        axes.line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: if tall {
+                    format!("Series {i}")
+                } else {
+                    "W".repeat(80)
+                },
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    f.to_scene(FontLibrary::global()).unwrap_err()
+}
+
 #[test]
 fn new_positions_reject_legends_that_cannot_fit() {
-    for position in [
-        LegendPosition::TopRight,
-        LegendPosition::Right,
-        LegendPosition::Bottom,
-        LegendPosition::Best,
+    for (style, grid, widths, height) in [
+        (LegendStyle::Header, false, [362, 352, 384, 338], 460),
+        (LegendStyle::Header, true, [158, 327, 158, 134], 460),
+        (LegendStyle::Chips, false, [363, 353, 384, 339], 640),
+        (LegendStyle::Chips, true, [159, 328, 159, 135], 640),
     ] {
-        let mut f = figure(position);
-        f.single_axes_mut()
-            .line(
-                AxisData::Numbers(vec![0.0, 1.0]),
-                &[0.0, 1.0],
-                LineOptions {
-                    label: "A wide label ".repeat(100),
-                    ..LineOptions::default()
-                },
-            )
-            .unwrap();
-        assert!(f.to_scene(FontLibrary::global()).is_err(), "{position:?}");
-    }
-    for position in [LegendPosition::Right, LegendPosition::Best] {
-        let mut f = figure(position);
-        for index in 0..30 {
-            f.single_axes_mut()
-                .line(
-                    AxisData::Numbers(vec![0.0, 1.0]),
-                    &[0.0, 1.0],
-                    LineOptions {
-                        label: format!("Series {index}"),
-                        ..LineOptions::default()
-                    },
+        for (index, (position, tall)) in [
+            (LegendPosition::TopRight, false),
+            (LegendPosition::Right, false),
+            (LegendPosition::Bottom, false),
+            (LegendPosition::Best, false),
+            (LegendPosition::Right, true),
+            (LegendPosition::Best, true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let err = room_error(position, grid, tall, style);
+            let detail = if tall {
+                let available = if position == LegendPosition::Right {
+                    "the plot has 243 pt"
+                } else {
+                    "the plot leaves 219 pt for the legend"
+                };
+                format!("the legend is {height} pt tall; {available}.")
+            } else {
+                format!(
+                    "the legend label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW… is 609 pt wide; the panel has {} pt.",
+                    widths[index]
                 )
-                .unwrap();
+            };
+            let prefix = if grid { "row 0, col 1: " } else { "" };
+            let message = format!("{prefix}{detail}");
+            assert_eq!(err.to_string(), format!("Figure.to_scene(): {message}"));
+            assert!(
+                matches!(&err, crate::Error::Style { context: "Figure.to_scene()", message: actual, .. } if actual == &message)
+            );
+            assert_eq!(err.parameter(), None);
+            assert_eq!(
+                err.hint(),
+                Some(if tall {
+                    "make the figure taller, or use fewer legend entries."
+                } else {
+                    "shorten the label or widen the figure."
+                })
+            );
         }
-        let err = f.to_scene(FontLibrary::global()).unwrap_err();
-        assert!(err.to_string().contains("pt tall"), "{err}");
     }
 }
 

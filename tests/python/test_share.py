@@ -94,6 +94,25 @@ def test_all_modes_render_with_only_outer_tick_labels(share_x: int, share_y: int
     assert texts.count("Level") == 4
 
 
+@pytest.mark.parametrize("dimension", ["x", "y"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_mixed_spans_keep_labels_on_each_panel(dimension: str, reverse: bool) -> None:
+    fig = figure()
+    places = (
+        [(0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 2)]
+        if dimension == "x"
+        else [(0, 1, 1, 1), (1, 1, 1, 1), (0, 0, 2, 1)]
+    )
+    for row, col, row_span, col_span in reversed(places) if reverse else places:
+        fig.add_axes(1, row, 1, col, row_span, col_span, LINEAR, 10.0, LINEAR, 10.0)
+        fig.xticks_labeled(row, col, np.array([0.0, 1.0]), ["LOWX", "HIGHX"])
+        fig.yticks_labeled(row, col, np.array([0.0, 1.0]), ["LOWY", "HIGHY"])
+    root = ElementTree.fromstring(fig.to_svg(EDITABLE))
+    texts = ["".join(node.itertext()) for node in root.iter("{http://www.w3.org/2000/svg}text")]
+    for label in ("LOWX", "HIGHX") if dimension == "x" else ("LOWY", "HIGHY"):
+        assert texts.count(label) == len(places)
+
+
 def test_mixed_scales_and_cross_group_spans_surface_as_usage_errors() -> None:
     fig = figure(ROW, NONE)
     add(fig, 0, 0)

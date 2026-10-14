@@ -73,7 +73,7 @@ def test_data_and_copies_are_independent() -> None:
     values[:] = 12
     assert fig.to_svg() == before
     cloned = copy.copy(fig)
-    cloned.axes.stacked_area([0, 1, 2], [ub.Series("b", [3, 2, 1])])
+    cloned.axes_at().stacked_area([0, 1, 2], [ub.Series("b", [3, 2, 1])])
     assert cloned.to_svg() != before
     assert fig.to_svg() == before
 
