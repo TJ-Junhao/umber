@@ -7,13 +7,16 @@ use super::MarkContext;
 use super::area::AREA_ALPHA;
 use super::clip::{ClampedPoint, clamp_polyline};
 use super::line::{LineClip, downsample_columns};
-use super::mapping::{axis_x_value, axis_y};
+use super::mapping::{PlotPoint, axis_x_value, axis_y};
 use crate::Rgba;
 use crate::geometry::Path;
 use crate::m4_indices;
 use crate::model::BandMark;
 use crate::resolve::Resolved;
 use crate::scene::{FillRule, Item, Paint};
+
+/// The overlap with the plot, in points, at or below which a polygon only touches it.
+const TOUCH: f64 = 1e-6;
 
 /// The scene item of one band in `color`: the fill of all its polygons as one path with a
 /// closed subpath each, and nothing when no part of the band is visible.
@@ -39,6 +42,7 @@ pub(super) fn band_items(
     let clip = LineClip::of(context, 0.0);
     let uppers = clamp_polyline(&xs, &highs, &clip.bounds);
     let lowers = clamp_polyline(&xs, &lows, &clip.bounds);
+    let plot = context.plot;
     let mut path = Path::new();
     for (upper, lower) in uppers.iter().zip(&lowers) {
         // Both curves are cut where x leaves the clip, so their pieces pair up; a pair that
@@ -46,15 +50,30 @@ pub(super) fn band_items(
         if !same_span(upper, lower) || is_flat(upper, lower) {
             continue;
         }
-        let mut points = upper
+        let mut points: Vec<PlotPoint> = upper
             .iter()
             .chain(lower.iter().rev())
-            .map(|p| clip.plot_point(p.at).to_scene());
-        let Some(first) = points.next() else {
+            .map(|p| clip.plot_point(p.at))
+            .collect();
+        // A polygon that only touches the plot, or lies in the margin around it, shows nothing.
+        let (x0, x1) = extent(points.iter().map(|p| p.x));
+        let (y0, y1) = extent(points.iter().map(|p| p.y));
+        if x1.min(plot.right()) - x0.max(plot.x) <= TOUCH
+            || y1.min(plot.bottom()) - y0.max(plot.y) <= TOUCH
+        {
+            continue;
+        }
+        // Every polygon is wound the same way, so that polygons of separate runs never cancel
+        // each other under the non-zero rule, and where they overlap the fill is drawn once.
+        if signed_area(&points) < 0.0 {
+            points.reverse();
+        }
+        let mut scene = points.iter().map(|p| p.to_scene());
+        let Some(first) = scene.next() else {
             continue;
         };
         path.move_to(first);
-        points.for_each(|p| path.line_to(p));
+        scene.for_each(|p| path.line_to(p));
         path.close();
     }
     if !path.is_empty() {
@@ -64,6 +83,22 @@ pub(super) fn band_items(
             rule: FillRule::NonZero,
         });
     }
+}
+
+/// The smallest and largest of `values`.
+fn extent(values: impl Iterator<Item = f64>) -> (f64, f64) {
+    values.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+        (lo.min(v), hi.max(v))
+    })
+}
+
+/// Twice the signed area of the closed polygon through `points`; its sign is its winding.
+fn signed_area(points: &[PlotPoint]) -> f64 {
+    points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .map(|(a, b)| a.x * b.y - b.x * a.y)
+        .sum()
 }
 
 /// The x, low and high values of `mark` in axis space, with NaN in all three wherever any of
@@ -87,6 +122,10 @@ fn gapped_points(resolved: &Resolved, mark: &BandMark) -> (Vec<f64>, Vec<f64>, V
 /// The points of the band `(xs, lows, highs)` that keep its envelope over the plot's device
 /// columns; all of them when the band is short or its x is not sorted.
 ///
+/// On a sorted x, the points inside the x domain are reduced, and of the points outside it
+/// only the neighbour on each side is kept, so the segments that cross the limits stay exact
+/// and points out of view never share a column with the first or last points in view.
+///
 /// M4 downsampling keeps, for each column and each run that no gap breaks, the first and last
 /// point and the points of the lowest and the highest value of one curve. Applied to the
 /// lower and to the upper curve, which break at the same places, the union of the points kept
@@ -100,15 +139,28 @@ fn kept_points(
     highs: Vec<f64>,
 ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let columns = downsample_columns(context.plot.width);
-    let range = (context.maps.x.lo, context.maps.x.hi);
-    let mut kept = m4_indices(&xs, &lows, range, columns);
-    if kept.len() == xs.len() {
+    let (lo, hi) = (context.maps.x.lo, context.maps.x.hi);
+    let n = xs.len();
+    let sorted = xs
+        .iter()
+        .filter(|x| !x.is_nan())
+        .zip(xs.iter().filter(|x| !x.is_nan()).skip(1))
+        .all(|(a, b)| a <= b);
+    if n <= 4 * columns || !sorted {
         return (xs, lows, highs);
     }
-    kept.extend(m4_indices(&xs, &highs, range, columns));
-    kept.sort_unstable();
-    kept.dedup();
-    let pick = |v: &[f64]| -> Vec<f64> { kept.iter().filter_map(|&i| v.get(i).copied()).collect() };
+    let first = xs.iter().position(|&x| x >= lo).unwrap_or(n);
+    let end = xs.iter().position(|&x| x > hi).unwrap_or(n);
+    let (first, end) = (first.min(end), end);
+    let mut kept: Vec<usize> = first.checked_sub(1).into_iter().collect();
+    let (sx, sl, sh) = (&xs[first..end], &lows[first..end], &highs[first..end]);
+    let mut inside = m4_indices(sx, sl, (lo, hi), columns);
+    inside.extend(m4_indices(sx, sh, (lo, hi), columns));
+    inside.sort_unstable();
+    inside.dedup();
+    kept.extend(inside.into_iter().map(|i| first + i));
+    kept.extend((end < n).then_some(end));
+    let pick = |v: &[f64]| -> Vec<f64> { kept.iter().map(|&i| v[i]).collect() };
     (pick(&xs), pick(&lows), pick(&highs))
 }
 

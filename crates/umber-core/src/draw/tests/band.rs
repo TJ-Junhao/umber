@@ -3,7 +3,7 @@
 
 use super::super::area::AREA_ALPHA;
 use super::super::line::downsample_columns;
-use super::{mark_group, nums, plot_of, subpaths};
+use super::{Pixels, mark_group, nums, plot_of, subpaths};
 use crate::geometry::PathVerb;
 use crate::model::{BandOptions, Figure, LineOptions};
 use crate::scene::{FillRule, Item, Paint};
@@ -237,13 +237,7 @@ fn explicit_limits_cut_the_band_at_the_plot_and_at_its_clip_margin() {
             .unwrap()
             .ylim(0.0, 4.0)
             .unwrap();
-        let plot = plot_of(&f);
-        for part in polygons(&f) {
-            let inside = part
-                .iter()
-                .any(|p| p.0 > plot.x + 1e-3 && p.0 < plot.right() - 1e-3);
-            assert!(!inside, "{part:?}");
-        }
+        assert_eq!(items(&f), [], "{x:?}");
     }
     // A band entirely beyond a limit is not drawn.
     for (low, high) in [(5.0, 6.0), (-3.0, -1.0)] {
@@ -325,4 +319,217 @@ fn band_downsampled_keeps_the_envelope() {
         (right - plot.right()).abs() < plot.width / n as f64 * 2.0 + 1e-3,
         "{right}"
     );
+}
+
+/// Twice the signed area of a polygon given as `(x, y)` points.
+fn signed_area(part: &[(f64, f64)]) -> f64 {
+    part.iter()
+        .zip(part.iter().cycle().skip(1))
+        .map(|(a, b)| a.0 * b.1 - b.0 * a.1)
+        .sum()
+}
+
+/// A figure of linear axes with the limits given and a red band, or none for `None`.
+fn limited(xlim: (f64, f64), ylim: (f64, f64), band: Option<(&[f64], &[f64], &[f64])>) -> Figure {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(LIN, LIN)
+        .unwrap()
+        .xlim(xlim.0, xlim.1)
+        .unwrap()
+        .ylim(ylim.0, ylim.1)
+        .unwrap();
+    if let Some((x, low, high)) = band {
+        f.single_axes_mut()
+            .band(
+                x,
+                low,
+                high,
+                BandOptions {
+                    color: crate::ColorSpec::Fixed(crate::Rgba::opaque(214, 73, 51)),
+                    ..BandOptions::default()
+                },
+            )
+            .unwrap();
+    }
+    f
+}
+
+#[test]
+fn runs_that_run_in_opposite_directions_do_not_cancel() {
+    let f = limited(
+        (0.0, 2.0),
+        (-1.0, 2.0),
+        Some((&[0.0, 2.0, NAN, 2.0, 0.0], &[0.0; 5], &[1.0; 5])),
+    );
+    let parts = polygons(&f);
+    assert_eq!(parts.len(), 2);
+    assert!(
+        signed_area(&parts[0]) * signed_area(&parts[1]) > 0.0,
+        "{parts:?}"
+    );
+    let empty = limited((0.0, 2.0), (-1.0, 2.0), None);
+    assert_ne!(f.to_png(72).unwrap(), empty.to_png(72).unwrap());
+}
+
+#[test]
+fn overlapping_runs_are_filled_once() {
+    // Two runs that overlap over x in 1..=2, one running backwards.
+    let f = limited(
+        (0.0, 3.0),
+        (-1.0, 2.0),
+        Some((&[0.0, 2.0, NAN, 3.0, 1.0], &[0.0; 5], &[1.0; 5])),
+    );
+    let parts = polygons(&f);
+    assert_eq!(parts.len(), 2);
+    assert!(signed_area(&parts[0]) * signed_area(&parts[1]) > 0.0);
+    let plot = plot_of(&f);
+    let pixels = Pixels::decode(&f.to_png(72).unwrap());
+    let at = |x: f64| {
+        pixels.at_point(
+            (
+                plot.x + x / 3.0 * plot.width,
+                plot.bottom() - 0.5 / 3.0 * plot.height,
+            ),
+            72.0,
+        )
+    };
+    assert_eq!(at(1.5), at(0.5));
+    assert_eq!(at(1.5), at(2.5));
+}
+
+#[test]
+fn a_band_that_only_touches_a_limit_leaves_no_pixel() {
+    let cases: [(&[f64], &[f64], &[f64]); 4] = [
+        // Above the high y limit, below the low one, left of the low x limit, right of the high.
+        (&[1.0, 2.0], &[2.0, 2.0], &[3.0, 3.0]),
+        (&[1.0, 2.0], &[0.0, 0.0], &[1.0, 1.0]),
+        (&[0.0, 1.0], &[1.0, 1.0], &[2.0, 2.0]),
+        (&[2.0, 3.0], &[1.0, 1.0], &[2.0, 2.0]),
+    ];
+    let empty = limited((1.0, 2.0), (1.0, 2.0), None).to_png(72).unwrap();
+    for (x, low, high) in cases {
+        let f = limited((1.0, 2.0), (1.0, 2.0), Some((x, low, high)));
+        assert_eq!(f.to_png(72).unwrap(), empty, "{x:?} {low:?} {high:?}");
+        assert_eq!(items(&f), [], "{x:?} {low:?} {high:?}");
+    }
+}
+
+/// The polyline `chain` over the x range `a..=b`: its lowest and highest y there.
+fn over(chain: &[(f64, f64)], a: f64, b: f64) -> Option<(f64, f64)> {
+    let at = |x: f64| {
+        let k = chain.partition_point(|p| p.0 < x);
+        match (k.checked_sub(1).and_then(|i| chain.get(i)), chain.get(k)) {
+            (Some(p), Some(q)) if q.0 > p.0 => Some(p.1 + (q.1 - p.1) * (x - p.0) / (q.0 - p.0)),
+            (_, Some(q)) if q.0 == x => Some(q.1),
+            _ => None,
+        }
+    };
+    let from = chain.partition_point(|p| p.0 <= a);
+    let to = chain.partition_point(|p| p.0 < b);
+    let mut ys: Vec<f64> = chain
+        .get(from..to.max(from))
+        .unwrap_or(&[])
+        .iter()
+        .map(|p| p.1)
+        .collect();
+    ys.extend(at(a));
+    ys.extend(at(b));
+    (!ys.is_empty()).then(|| {
+        (
+            ys.iter().copied().fold(f64::INFINITY, f64::min),
+            ys.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        )
+    })
+}
+
+/// Checks that the one polygon of `f`, a band over the raw `(x, low, high)`, has in every device
+/// column of the plot the highest and lowest upper edge, and the highest and lowest lower
+/// edge, of the polygon through all the raw points.
+#[track_caller]
+fn assert_envelope_kept(
+    f: &Figure,
+    (x, low, high): (&[f64], &[f64], &[f64]),
+    xlim: (f64, f64),
+    ylim: (f64, f64),
+) {
+    let plot = plot_of(f);
+    let px = |v: f64| plot.x + (v - xlim.0) / (xlim.1 - xlim.0) * plot.width;
+    let py = |v: f64| plot.bottom() - (v - ylim.0) / (ylim.1 - ylim.0) * plot.height;
+    let raw = |ys: &[f64]| -> Vec<(f64, f64)> {
+        x.iter().zip(ys).map(|(&x, &y)| (px(x), py(y))).collect()
+    };
+    let (raw_up, raw_low) = (raw(high), raw(low));
+    let parts = polygons(f);
+    assert_eq!(parts.len(), 1);
+    let part = &parts[0];
+    // The upper edge runs to the right-most vertex, the lower edge comes back from it.
+    let right = part.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+    let split = part.iter().position(|p| p.0 == right).unwrap();
+    let up: Vec<(f64, f64)> = part[..=split].to_vec();
+    let mut lo: Vec<(f64, f64)> = part[split..].to_vec();
+    lo.reverse();
+    let columns = downsample_columns(plot.width);
+    let width = plot.width / columns as f64;
+    for c in 0..columns {
+        let (a, b) = (plot.x + c as f64 * width, plot.x + (c + 1) as f64 * width);
+        for (got, want) in [(&up, &raw_up), (&lo, &raw_low)] {
+            let (g, w) = (over(got, a, b), over(want, a, b));
+            let (Some(g), Some(w)) = (g, w) else {
+                assert_eq!(g.is_some(), w.is_some(), "column {c}");
+                continue;
+            };
+            assert!(
+                (g.0 - w.0).abs() < 0.05 && (g.1 - w.1).abs() < 0.05,
+                "column {c}: {g:?} vs {w:?}"
+            );
+        }
+    }
+}
+
+fn noisy(n: usize, seed: u64, amplitude: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let noise = |i: usize| {
+        let h = (i as u64 ^ seed).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40;
+        amplitude * h as f64 / f64::from(1_u32 << 24)
+    };
+    let x = (0..n).map(|i| i as f64).collect();
+    let low = (0..n).map(|i| 1.0 + noise(i)).collect();
+    let high = (0..n).map(|i| 3.0 + noise(i + n)).collect();
+    (x, low, high)
+}
+
+#[test]
+fn a_long_band_keeps_its_envelope_in_every_column() {
+    let n = 200_000;
+    let (x, low, high) = noisy(n, 5, 1.0);
+    let (xlim, ylim) = ((0.0, n as f64 - 1.0), (0.0, 5.0));
+    let f = limited(xlim, ylim, Some((&x, &low, &high)));
+    assert_envelope_kept(&f, (&x, &low, &high), xlim, ylim);
+}
+
+#[test]
+fn a_zoomed_band_keeps_its_envelope_and_ignores_the_points_out_of_view() {
+    // Points far out of view on both sides, with spikes among them: only the neighbours of
+    // the view take part, and the first and last columns hold what is in view.
+    let n = 200_000;
+    let (x, low, mut high) = noisy(n, 9, 0.05);
+    high[40_000] = 4.9;
+    high[160_000] = 4.9;
+    high[59_999] = 4.9;
+    high[140_001] = 4.9;
+    let (xlim, ylim) = ((60_000.0, 140_000.0), (0.0, 5.0));
+    let f = limited(xlim, ylim, Some((&x, &low, &high)));
+    assert_envelope_kept(&f, (&x, &low, &high), xlim, ylim);
+}
+
+#[test]
+fn a_spike_beside_the_low_limit_does_not_reach_the_first_visible_column() {
+    let mut x: Vec<f64> = (-10_000..-1).map(f64::from).collect();
+    x.extend([-0.002, -0.001, 0.03]);
+    x.extend((1..=100).map(f64::from));
+    let low = vec![0.0; x.len()];
+    let mut high = vec![1.0; x.len()];
+    high[x.iter().position(|&v| v == -0.002).unwrap()] = 100.0;
+    let (xlim, ylim) = ((0.0, 100.0), (-1.0, 10.0));
+    let f = limited(xlim, ylim, Some((&x, &low, &high)));
+    assert_envelope_kept(&f, (&x, &low, &high), xlim, ylim);
 }
