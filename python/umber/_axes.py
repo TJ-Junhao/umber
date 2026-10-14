@@ -19,7 +19,7 @@ from umber._enums import AUTO, Auto, Dash, LegendPosition, LegendStyle, Marker, 
 from umber._errors import DataError, new_error
 from umber._report import api_call
 from umber._scale import Scale
-from umber._series import Series
+from umber._series import Distribution, Series
 from umber._size import Size
 from umber._ticks import TickFormat
 from umber._types import Values
@@ -749,6 +749,100 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.bar(self._row, self._col, category_names, values, name, spec)
             return self
 
+    def box(
+        self: "Axes[str, float]",
+        categories: Values[str],
+        groups: Sequence[Values[float]],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+    ) -> "Axes[str, float]":
+        """Add a box plot for each category, ignoring NaN samples.
+
+        Quartiles use linear interpolation (Hyndman-Fan type 7, NumPy's default). The fences
+        lie 1.5 times the interquartile range beyond the quartiles; samples outside them are
+        outliers. Whiskers reach the most extreme samples inside the fences, clamped to the
+        quartiles so they never extend into the box. Empty groups draw nothing; when the
+        quartiles coincide, only the median and any outliers are drawn. The y domain
+        includes whiskers and outliers. Boxes occupy half of each category band and use
+        the theme's area opacity.
+
+        Args:
+            categories: The category names, each appearing once.
+            groups: One group of numeric samples per category, in category order.
+            label: The legend label; an empty string omits the legend entry.
+            color: The box color. ``Color.AUTO`` takes the next palette color.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If group counts differ, categories repeat, or samples are not
+                numeric, are infinite, exceed the supported range or are not positive on
+                a log y axis.
+            StyleError: If a label or category name is too long.
+            UsageError: If x is not a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.box(["North", "South"], [[1, 2, 4, 9], [2, 3, 5]], label="Samples")
+        """
+        with api_call():
+            context = "Axes.box()"
+            check_names_type(context, "categories", categories)
+            _series.check_groups_type(context, groups)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            category_names = names(context, "categories", categories)
+            values = _series.group_values(context, groups)
+            name = _args.text(context, "label", label)
+            self._native.box_plot(self._row, self._col, category_names, values, name, spec)
+            return self
+
+    def grouped_box(
+        self: "Axes[str, float]",
+        categories: Values[str],
+        distributions: Sequence[Distribution],
+    ) -> "Axes[str, float]":
+        """Add distributions side by side within each category band.
+
+        Statistics and NaN handling are as in ``box()``. The group occupies half the band;
+        boxes are 2 pt apart, or touch if that gap would leave them narrower than the gap.
+        Each distribution has its own color and legend entry, in input order.
+
+        Args:
+            categories: The category names, each appearing once.
+            distributions: One or more distributions, each with one group per category.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If categories or distributions have the wrong type.
+            DataError: If distributions are empty, group counts differ, categories repeat,
+                or a sample is infinite, exceeds the supported range or is not positive
+                on a log y axis.
+            StyleError: If a category name is too long.
+            UsageError: If x is not a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.grouped_box(["2026"], [
+            ...     ub.Distribution("North", [[1, 2, 4]]),
+            ...     ub.Distribution("South", [[2, 3, 5]]),
+            ... ])
+        """
+        with api_call():
+            context = "Axes.grouped_box()"
+            check_names_type(context, "categories", categories)
+            arguments = _distribution_arguments(context, distributions)
+            category_names = names(context, "categories", categories)
+            self._native.grouped_box_plot(self._row, self._col, category_names, arguments)
+            return self
+
     def grouped_bar(
         self: "Axes[str, float]", categories: Values[str], series: Sequence[Series]
     ) -> "Axes[str, float]":
@@ -1432,6 +1526,36 @@ def _series_arguments(
             message = f"{label} is {type_name(item)}; {label} must be of type Series."
             raise new_error(TypeError, context, message, parameter="series", hint=_SERIES_ITEM_HINT)
         arguments.append(_series.native(item))
+    return arguments
+
+
+def _distribution_arguments(
+    context: str,
+    value: object,
+) -> list[tuple[str, list[FloatArray], tuple[int, int, float]]]:
+    """Check distributions and return their native arguments without copying samples."""
+    hint = 'pass a list of distributions, e.g. [Distribution("North", [[1, 2]])].'
+    if isinstance(value, str | bytes) or not isinstance(value, Sequence):
+        raise new_error(
+            TypeError,
+            context,
+            f"distributions is {type_name(value)}; "
+            "distributions must be a sequence of Distribution.",
+            parameter="distributions",
+            hint=hint,
+        )
+    arguments: list[tuple[str, list[FloatArray], tuple[int, int, float]]] = []
+    for index, item in enumerate(cast(Sequence[object], value)):
+        if not isinstance(item, Distribution):
+            name = f"distributions[{index}]"
+            raise new_error(
+                TypeError,
+                context,
+                f"{name} is {type_name(item)}; {name} must be of type Distribution.",
+                parameter="distributions",
+                hint=hint,
+            )
+        arguments.append(_series.native_distribution(item))
     return arguments
 
 

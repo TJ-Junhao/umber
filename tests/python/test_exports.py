@@ -19,6 +19,7 @@ EXPECTED = [
     "Color",
     "DataError",
     "Dash",
+    "Distribution",
     "FillStyle",
     "Figure",
     "Font",

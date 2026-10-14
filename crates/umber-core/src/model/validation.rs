@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use super::axis_data::AxisData;
 use super::bar::{Arrangement, Series};
+use super::box_plot::Distribution;
 use crate::binning::{BinCount, MAX_BINS};
 use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
@@ -632,6 +633,118 @@ pub(super) fn check_bar_group(
     }
     if arrangement == Arrangement::Stacked {
         check_stacked_totals(context, categories, series)?;
+    }
+    Ok(())
+}
+
+/// Checks the category axis before any distribution data, then the unique category names.
+fn check_box_categories(context: &'static str, x: ScaleKind, categories: &[String]) -> Result<()> {
+    if x != ScaleKind::Category {
+        return Err(Error::usage(
+            context,
+            "the x axis is not a category axis; box plots need a category x axis.",
+        )
+        .with_parameter("categories")
+        .with_hint("pass x=Scale.category() to Figure.add_axes()."));
+    }
+    check_categories(
+        context,
+        x,
+        categories,
+        "combine the samples of repeated categories.",
+    )
+}
+
+/// Checks that a distribution has one group per category, naming its container on failure.
+fn check_group_count(
+    context: &'static str,
+    name: &str,
+    parameter: &'static str,
+    count: usize,
+    categories: usize,
+) -> Result<()> {
+    if count != categories {
+        return Err(Error::data(
+            context,
+            format!("{name} has {count} groups; categories has {categories}."),
+        )
+        .with_parameter(parameter)
+        .with_hint(
+            "pass one group per category, using an empty group when there are no samples.",
+        ));
+    }
+    Ok(())
+}
+
+/// Validates each group's values, keeping group and sample indices in the first error.
+fn check_group_values(
+    context: &'static str,
+    name: &str,
+    parameter: &'static str,
+    y: Transform,
+    groups: &[Vec<f64>],
+) -> Result<()> {
+    for (k, values) in groups.iter().enumerate() {
+        check_numbers(
+            context,
+            (&format!("{name}[{k}]"), parameter),
+            values,
+            y,
+            "use NaN to leave a sample out.",
+        )?;
+    }
+    Ok(())
+}
+
+/// Validates plain box data: axis kind, group count, category uniqueness, then all samples.
+pub(super) fn check_box_groups(
+    context: &'static str,
+    x: ScaleKind,
+    y: Transform,
+    categories: &[String],
+    groups: &[Vec<f64>],
+) -> Result<()> {
+    check_box_categories(context, x, &[])?;
+    check_group_count(context, "groups", "groups", groups.len(), categories.len())?;
+    check_box_categories(context, x, categories)?;
+    check_group_values(context, "groups", "groups", y, groups)
+}
+
+/// Validates grouped boxes: axis kind, non-empty distributions, all group counts, unique
+/// categories, then every sample, without storing any part of a failed call.
+pub(super) fn check_distributions(
+    context: &'static str,
+    x: ScaleKind,
+    y: Transform,
+    categories: &[String],
+    distributions: &[Distribution],
+) -> Result<()> {
+    check_box_categories(context, x, &[])?;
+    if distributions.is_empty() {
+        return Err(Error::data(
+            context,
+            "distributions is empty; pass at least one Distribution.",
+        )
+        .with_parameter("distributions"));
+    }
+    for (k, d) in distributions.iter().enumerate() {
+        check_group_count(
+            context,
+            &format!("distributions[{k}].groups"),
+            "distributions",
+            d.groups.len(),
+            categories.len(),
+        )?;
+    }
+    check_box_categories(context, x, categories)?;
+    for (k, d) in distributions.iter().enumerate() {
+        check_group_values(
+            context,
+            &format!("distributions[{k}].groups"),
+            "distributions",
+            y,
+            &d.groups,
+        )?;
     }
     Ok(())
 }
