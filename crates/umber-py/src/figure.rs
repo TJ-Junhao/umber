@@ -26,9 +26,9 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use umber_core::{
-    AreaOptions, AxesMut, BarOptions, Dash, Grid, GridIndex, HistOptions, LegendMode, LegendStyle,
-    LineOptions, Marker, Placement, RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step,
-    StepOptions, SvgText,
+    AreaOptions, AxesMut, BandOptions, BarOptions, Dash, Grid, GridIndex, HistOptions, LegendMode,
+    LegendStyle, LineOptions, Marker, Placement, RuleOptions, ScatterOptions, Series, Share,
+    SpanOptions, Step, StepOptions, SvgText,
 };
 
 use crate::color::{ColorArg, color_spec};
@@ -597,6 +597,28 @@ impl Figure {
         };
         self.axes(row, col)?
             .vspan(low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a band between the curves `low` and `high` over `x`.
+    fn band(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        low: &Bound<'_, PyAny>,
+        high: &Bound<'_, PyAny>,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let (x, low, high) = (shared_floats(x)?, shared_floats(low)?, shared_floats(high)?);
+        let options = BandOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        self.axes(row, col)?
+            .band_shared(x, low, high, options)
             .map(drop)
             .map_err(core_error)
     }

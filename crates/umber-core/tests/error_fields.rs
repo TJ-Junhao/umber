@@ -4,9 +4,9 @@
 #![allow(clippy::expect_used)]
 
 use umber_core::{
-    Alpha, AreaOptions, AxisData, AxisValue, BarOptions, Error, Figure, HistOptions, LineOptions,
-    LogBase, Result, Rgba, RuleOptions, ScaleKind, ScatterOptions, Series, SizeSpec, SpanOptions,
-    StepOptions, Theme,
+    Alpha, AreaOptions, AxisData, AxisValue, BandOptions, BarOptions, Error, Figure, HistOptions,
+    LineOptions, LogBase, Result, Rgba, RuleOptions, ScaleKind, ScatterOptions, Series, SizeSpec,
+    SpanOptions, StepOptions, Theme,
 };
 
 const LOG: ScaleKind = ScaleKind::Log { base: LogBase::TEN };
@@ -543,6 +543,42 @@ fn errors_carry_their_parameter_and_hint() {
             }),
             Some("x"),
             Some("use a linear axis, or pass a positive value."),
+        ),
+        (
+            "band, category x axis",
+            on_axes(cat, linear, |a| {
+                a.band(&[0.0], &[0.0], &[1.0], BandOptions::default())
+                    .map(|_| ())
+            }),
+            Some("x"),
+            Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
+        ),
+        (
+            "band, low above high",
+            on_axes(linear, linear, |a| {
+                a.band(&[0.0], &[2.0], &[1.0], BandOptions::default())
+                    .map(|_| ())
+            }),
+            Some("low"),
+            Some("check that low and high are not swapped."),
+        ),
+        (
+            "band, infinite high",
+            on_axes(linear, linear, |a| {
+                a.band(&[0.0], &[0.0], &[inf], BandOptions::default())
+                    .map(|_| ())
+            }),
+            Some("high"),
+            Some("use NaN to leave a gap in the band."),
+        ),
+        (
+            "band, length mismatch",
+            on_axes(linear, linear, |a| {
+                a.band(&[0.0, 1.0], &[0.0], &[1.0, 2.0], BandOptions::default())
+                    .map(|_| ())
+            }),
+            None,
+            None,
         ),
     ];
     for (name, err, parameter, hint) in cases {

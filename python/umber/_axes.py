@@ -1061,6 +1061,63 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.vspan(self._row, self._col, lower, upper, name, spec)
             return self
 
+    def band(
+        self: "Axes[float, Y]",
+        x: Values[float],
+        low: Values[float],
+        high: Values[float],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+    ) -> "Axes[float, Y]":
+        """Add a band between the curves ``(x[i], low[i])`` and ``(x[i], high[i])``.
+
+        The band is a flat fill at the opacity of an area, with no outline, whatever the fill
+        style of the theme. Without explicit limits both curves extend the y axis and ``x``
+        the x axis, as the values of a line do. A NaN in ``x``, ``low`` or ``high`` breaks the
+        band there into separate pieces. A long band is reduced to the points that keep its
+        envelope at the resolution of the plot. It needs a linear or log x axis.
+
+        Args:
+            x: The x values, numbers.
+            low: The lower curve, one value per x value.
+            high: The upper curve, one value per x value; no value of ``low`` may exceed the
+                value of ``high`` at the same index.
+            label: The name shown in the legend; an empty string leaves the band out of it.
+                A band always takes an entry in the legend row, also under
+                ``LegendStyle.DIRECT``.
+            color: The fill color. ``Color.AUTO`` takes the next color of the theme palette.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+                value is not positive on a log axis, or a value of ``low`` is above the value
+                of ``high`` at the same index.
+            StyleError: If ``label`` is too long.
+            UsageError: If the x axis is a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.band([0, 1, 2, 3], [1.0, 1.5, float("nan"), 1.0], [2.0, 3.0, 3.5, 2.5])
+        """
+        with api_call():
+            context = "Axes.band()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "low", low)
+            check_floats_type(context, "high", high)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            xs = floats(context, "x", x)
+            lows = floats(context, "low", low)
+            highs = floats(context, "high", high)
+            name = _args.text(context, "label", label)
+            self._native.band(self._row, self._col, xs, lows, highs, name, spec)
+            return self
+
     def _x_values(self, context: str, x: object) -> FloatArray | list[str]:
         """Convert x values; empty data is an empty list of names on a category x axis."""
         values = axis_values(context, "x", x)

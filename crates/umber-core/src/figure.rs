@@ -30,6 +30,7 @@ pub use crate::model::{
     Step, StepMark, StepOptions,
 };
 pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+pub use crate::model::{BandMark, BandOptions};
 
 use crate::render::{SvgText, check_dpi, render_png, render_svg};
 use crate::scene::Scene;

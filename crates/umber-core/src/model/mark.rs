@@ -3,6 +3,7 @@
 use std::fmt;
 
 use super::axis_data::{AxisData, XySeries};
+use super::band::BandMark;
 use super::bar::{BarGroupMark, BarMark};
 use super::hist::HistMark;
 use super::rule::{HLineMark, SpanMark, VLineMark};
@@ -112,10 +113,11 @@ impl Default for ScatterOptions {
 /// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar),
 /// [`AxesMut::hist`](super::AxesMut::hist), [`AxesMut::step`](super::AxesMut::step),
 /// [`AxesMut::hline`](super::AxesMut::hline), [`AxesMut::vline`](super::AxesMut::vline),
-/// [`AxesMut::hspan`](super::AxesMut::hspan) and [`AxesMut::vspan`](super::AxesMut::vspan),
+/// [`AxesMut::hspan`](super::AxesMut::hspan), [`AxesMut::vspan`](super::AxesMut::vspan) and
+/// [`AxesMut::band`](super::AxesMut::band),
 /// which validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
 /// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`], [`HLineMark`], [`VLineMark`],
-/// [`SpanMark`]) that keeps the validated values
+/// [`SpanMark`], [`BandMark`]) that keeps the validated values
 /// together and exposes them read-only; it has no
 /// public constructor. Read a mark by matching on its variant.
 ///
@@ -196,6 +198,9 @@ pub enum Mark {
     /// The region between two x values, across the whole plot, at the area opacity. It is drawn
     /// below all data marks.
     VSpan(SpanMark),
+    /// The region between a lower and an upper curve, filled flat at the area opacity with no
+    /// outline; NaN in x, low or high breaks it.
+    Band(BandMark),
 }
 
 impl Mark {
