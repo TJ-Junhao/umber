@@ -103,15 +103,17 @@ def test_size_out_of_range(width: float, height: float, parameter: str, shown: s
     assert _frames(caught.value) == ["test_size_out_of_range"]
 
 
-@pytest.mark.parametrize(
-    ("width", "height", "name", "shown"),
-    [("6", 4, "width", "str"), (6, None, "height", "None"), (True, 4, "width", "bool")],
-)
-def test_size_must_be_a_number(width: object, height: object, name: str, shown: str) -> None:
+@pytest.mark.parametrize("name", ["width", "height"])
+@pytest.mark.parametrize("value", ["6", None, True, np.bool_(True), 1j, ub.Share.ALL])
+def test_size_must_be_a_number_or_auto(name: str, value: object) -> None:
     with pytest.raises(TypeError) as caught:
-        ub.Figure(cast(float, width), cast(float, height))
-    assert str(caught.value) == f"Figure(): {name} is {shown}; {name} must be a float."
-    assert details(caught.value) == (name, "pass a number such as 1.5.")
+        cast(Any, ub.Figure)(**{name: value})
+    shown = "None" if value is None else type(value).__name__
+    assert str(caught.value) == f"Figure(): {name} is {shown}; {name} must be a float or AUTO."
+    assert details(caught.value) == (
+        name,
+        "pass a number such as 1.5, or ub.AUTO for the default size.",
+    )
 
 
 @pytest.mark.parametrize("theme", ["midnight", None, ub.Color.BLUE])
@@ -142,7 +144,7 @@ def test_add_axes_returns_axes_of_this_figure() -> None:
     ax = fig.add_axes()
     assert isinstance(ax, ub.Axes)
     assert ax.figure is fig
-    assert fig._axes is ax
+    assert fig._axes == {(0, 0): ax}
 
 
 def test_add_axes_passes_the_scales() -> None:
@@ -165,8 +167,52 @@ def test_a_second_axes_is_refused() -> None:
         fig.add_axes(x=ub.Scale.category())
     assert str(caught.value) == SECOND_AXES
     assert details(caught.value) == ("row", SECOND_AXES_HINT)
-    assert fig._axes is ax
+    assert fig._axes == {(0, 0): ax}
     assert fig.to_svg() == before
+
+
+@pytest.mark.parametrize("call", ["cell.add_axes()", "cell.add_axes(x=ub.Scale.linear())"])
+def test_occupied_cell_highlights_the_call(tmp_path: Path, call: str) -> None:
+    setup = "fig = ub.Figure()\ncell = next(fig.cells())\ncell.add_axes()"
+    line = f"{call}.title('Unreachable')"
+    err = _raised(tmp_path, line, setup)
+    assert isinstance(err, ub.UsageError)
+    assert str(err) == SECOND_AXES
+    assert details(err) == ("row", SECOND_AXES_HINT)
+    assert _notes(err) == [_marked(line, call), f"hint: {SECOND_AXES_HINT}"]
+    assert _frames(err) == ["_raised", "<module>"]
+
+
+def test_occupied_cell_partial_does_not_get_a_misleading_highlight(tmp_path: Path) -> None:
+    setup = (
+        "from functools import partial\n"
+        "cell = next(ub.Figure().cells())\n"
+        "cell.add_axes()\n"
+        "add_axes = partial(cell.add_axes, x=ub.Scale.log())"
+    )
+    err = _raised(tmp_path, "add_axes()", setup)
+    assert isinstance(err, ub.UsageError)
+    assert _notes(err) == [f"hint: {SECOND_AXES_HINT}"]
+
+
+def test_cell_category_y_error_still_highlights_y(tmp_path: Path) -> None:
+    line = "cell.add_axes(y=ub.Scale.category())"
+    err = _raised(tmp_path, line, "cell = next(ub.Figure().cells())")
+    assert isinstance(err, ub.UsageError)
+    assert str(err) == CATEGORY_Y
+    assert details(err) == ("y", CATEGORY_Y_HINT)
+    assert _notes(err) == [_marked(line, "y=ub.Scale.category()"), f"hint: {CATEGORY_Y_HINT}"]
+
+
+def test_cell_scale_type_error_still_highlights_x(tmp_path: Path) -> None:
+    line = "cell.add_axes(x=None)"
+    err = _raised(tmp_path, line, "cell = next(ub.Figure().cells())")
+    assert isinstance(err, TypeError)
+    assert str(err) == "Cell.add_axes(): x is None; x must be of type Scale."
+    assert _notes(err) == [
+        _marked(line, "x=None"),
+        "hint: use Scale.linear(), Scale.log() or Scale.category().",
+    ]
 
 
 def test_a_category_y_axis_is_refused() -> None:
@@ -176,7 +222,7 @@ def test_a_category_y_axis_is_refused() -> None:
         fig.add_axes(x=ub.Scale.category(), y=cast(ub.Scale[float], ub.Scale.category()))
     assert str(caught.value) == CATEGORY_Y
     assert details(caught.value) == ("y", CATEGORY_Y_HINT)
-    assert fig._axes is None
+    assert fig._axes == {}
     assert fig.to_svg() == before
     fig.add_axes()  # the failed call added nothing
 
@@ -206,51 +252,45 @@ def test_category_y_error_highlights_y(tmp_path: Path) -> None:
 def test_scales_must_be_scales(name: str, value: object, hint: str) -> None:
     fig = ub.Figure()
     with pytest.raises(TypeError) as caught:
-        fig.add_axes(**{name: cast(ub.Scale[float], value)})
+        cast(Any, fig.add_axes)(**{name: value})
     shown = "None" if value is None else type(value).__name__
     assert (
         str(caught.value) == f"Figure.add_axes(): {name} is {shown}; {name} must be of type Scale."
     )
     assert details(caught.value) == (name, hint)
-    assert fig._axes is None
+    assert fig._axes == {}
 
 
-# The axes property
-
-NO_AXES = "Figure.axes: the figure has no axes; call add_axes() first."
-NO_AXES_HINT = "call fig.add_axes() before drawing."
+# Retrieving axes
 
 
-def test_axes_property_returns_the_axes() -> None:
+def test_axes_at_returns_the_axes() -> None:
     fig = ub.Figure()
     ax = fig.add_axes(x=ub.Scale.category())
-    assert fig.axes is ax
-    assert fig.axes.figure is fig
+    assert fig.axes_at(x=ub.Scale.category()) is ax
+    assert fig.axes_at(x=ub.Scale.category()).figure is fig
 
 
-def test_axes_property_without_axes_is_a_usage_error() -> None:
+def test_axes_at_without_axes_is_a_usage_error() -> None:
     with pytest.raises(ub.UsageError) as caught:
-        _ = ub.Figure().axes
-    assert str(caught.value) == NO_AXES
-    assert details(caught.value) == (None, NO_AXES_HINT)
-    assert _notes(caught.value) == [f"hint: {NO_AXES_HINT}"]
-    assert _frames(caught.value) == ["test_axes_property_without_axes_is_a_usage_error"]
+        ub.Figure().axes_at()
+    assert str(caught.value) == "Figure.axes_at(): row 0, col 0 holds no axes."
+    assert details(caught.value) == (None, "add one with add_axes(row=, col=) first.")
+    assert _frames(caught.value) == ["test_axes_at_without_axes_is_a_usage_error"]
 
 
-def test_axes_property_error_from_user_code(tmp_path: Path) -> None:
-    err = _raised(tmp_path, "ub.Figure().axes.title('T')")
+def test_axes_at_error_from_user_code(tmp_path: Path) -> None:
+    line = "ub.Figure().axes_at(row=0).title('T')"
+    err = _raised(tmp_path, line)
     assert isinstance(err, ub.UsageError)
-    assert _notes(err) == [f"hint: {NO_AXES_HINT}"]
+    assert _notes(err) == ["hint: add one with add_axes(row=, col=) first."]
 
 
-def test_axes_property_is_read_only() -> None:
+def test_figure_has_no_axes_property() -> None:
     fig = ub.Figure()
-    ax = fig.add_axes()
+    assert not hasattr(fig, "axes")
     with pytest.raises(AttributeError):
-        fig.axes = ax  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue]
-    with pytest.raises(AttributeError):
-        del fig.axes  # pyright: ignore[reportAttributeAccessIssue]
-    assert fig.axes is ax
+        fig.axes = fig.add_axes()  # type: ignore[attr-defined]  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_axes_of_a_copy_draw_on_the_copy_only() -> None:
@@ -258,21 +298,22 @@ def test_axes_of_a_copy_draw_on_the_copy_only() -> None:
     fig.add_axes().line([0, 1, 2], [1, 3, 2])
     before = fig.to_svg()
     variant = copy.copy(fig)
-    variant.axes.line([0, 1, 2], [2, 1, 3], color=ub.Color.RED)
-    assert variant.axes is not fig.axes
-    assert variant.axes.figure is variant
+    variant.axes_at().line([0, 1, 2], [2, 1, 3], color=ub.Color.RED)
+    assert variant.axes_at() is not fig.axes_at()
+    assert variant.axes_at().figure is variant
     assert fig.to_svg() == before
     assert variant.to_svg() != before
     deep = copy.deepcopy(fig)
-    deep.axes.title("Deep")
+    deep.axes_at().title("Deep")
     assert fig.to_svg() == before
 
 
-def test_axes_property_type_hints_resolve() -> None:
-    getter = cast(property, vars(ub.Figure)["axes"]).fget
-    assert getter is not None
-    assert getter.__module__ == "umber"
-    assert typing.get_type_hints(getter)["return"] == ub.Axes[typing.Any, typing.Any]
+def test_axes_at_type_hints_resolve() -> None:
+    assert ub.Figure.axes_at.__module__ == "umber"
+    assert (
+        typing.get_type_hints(ub.Figure.axes_at)["return"]
+        == typing.get_type_hints(ub.Figure.add_axes)["return"]
+    )
 
 
 # Rendering
@@ -434,8 +475,7 @@ def test_copies_are_independent(duplicate: Callable[[ub.Figure], ub.Figure]) -> 
     assert fig.to_svg() != before
     assert clone.to_svg() == before
 
-    clone_axes = clone._axes
-    assert clone_axes is not None
+    clone_axes = clone.axes_at(x=ub.Scale.log())
     assert clone_axes is not ax
     assert clone_axes.figure is clone
     clone_axes.title("Clone")
@@ -455,9 +495,9 @@ def test_a_copy_of_a_figure_without_axes_gets_its_own(
 ) -> None:
     fig = ub.Figure(3, 2)
     clone = duplicate(fig)
-    assert clone._axes is None
+    assert clone._axes == {}
     clone.add_axes().title("Clone")
-    assert fig._axes is None
+    assert fig._axes == {}
     fig.add_axes()  # the original can still get axes of its own
 
 

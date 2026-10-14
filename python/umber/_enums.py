@@ -1,9 +1,81 @@
 """The public enums.
 
-Each member's value is the integer the native extension maps to the matching core enum.
+Except for ``Auto``, each member's value maps to the matching core enum in the extension.
 """
 
-from enum import Enum, unique
+from enum import Enum, auto, unique
+from typing import Final
+
+
+@unique
+class Auto(Enum):
+    """Use the default size or position appropriate to the figure.
+
+    Example:
+        >>> import umber as ub
+        >>> ub.AUTO is ub.Auto.AUTO
+        True
+    """
+
+    __slots__ = ()
+
+    AUTO = auto()
+    """Choose automatically where the parameter accepts ``AUTO``."""
+
+    def __repr__(self) -> str:
+        return "AUTO"
+
+
+AUTO: Final = Auto.AUTO
+"""The typed sentinel for automatic figure sizes, positions and cell counts.
+
+Example:
+    >>> import umber as ub
+    >>> repr(ub.AUTO)
+    'AUTO'
+"""
+
+
+@unique
+class Share(Enum):
+    """Which panels share an axis scale, limits, ticks and tick format.
+
+    Example:
+        >>> import umber as ub
+        >>> fig = ub.Figure(rows=2, share_x=ub.Share.COL)
+    """
+
+    __slots__ = ()
+
+    NONE = 0
+    """Each panel has its own scale."""
+
+    ROW = 1
+    """Panels in the same row share a scale."""
+
+    COL = 2
+    """Panels in the same column share a scale."""
+
+    ALL = 3
+    """All panels share a scale."""
+
+
+@unique
+class Legend(Enum):
+    """Whether the figure combines panel legends or shows each separately.
+
+    Example:
+        >>> import umber as ub
+        >>> fig = ub.Figure(cols=2, legend=ub.Legend.MERGED)
+    """
+
+    __slots__ = ()
+
+    MERGED = 0
+    """One legend for the whole figure."""
+
+    PER_PANEL = 1
+    """A separate legend for each panel."""
 
 
 @unique

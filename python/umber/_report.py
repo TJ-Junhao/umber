@@ -18,6 +18,7 @@ replaces the error: a note that cannot be built is left out.
 
 import inspect
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from types import FrameType, TracebackType
 
@@ -32,11 +33,12 @@ _LOCATED = "_umber_located"
 class ApiCall:
     """Report an umber error raised inside one public call; see the module docstring."""
 
-    __slots__ = ("_arguments",)
+    __slots__ = ("_arguments", "_parameter_map")
 
-    def __init__(self) -> None:
+    def __init__(self, parameter_map: Mapping[str, str] | None = None) -> None:
         """Create the reporter; ``__enter__`` records the call's arguments."""
         self._arguments: dict[str, object] | None = None
+        self._parameter_map: Mapping[str, str] = parameter_map if parameter_map is not None else {}
 
     def __enter__(self) -> None:
         """Record the values the public function's parameters start with.
@@ -125,20 +127,26 @@ class ApiCall:
             and arguments is not None
             and parameter is not None
         ):
-            highlight = find(caller, public, arguments, parameter)
+            highlight = find(
+                caller, public, arguments, self._parameter_map.get(parameter, parameter)
+            )
             if highlight is not None:
                 exc.add_note(render(highlight, color=color))
         if hint is not None:
             exc.add_note(f"{bold('hint:') if color else 'hint:'} {hint}")
 
 
-def api_call() -> ApiCall:
+def api_call(*, parameter_map: Mapping[str, str] | None = None) -> ApiCall:
     """Return the reporter to wrap the whole body of a public function or method in.
+
+    Args:
+        parameter_map: Map nested error parameters to this call's parameters for highlighting.
+            Mapping to ``self`` highlights the method call without changing the error's details.
 
     Returns:
         A context manager; see the module docstring.
     """
-    return ApiCall()
+    return ApiCall(parameter_map)
 
 
 def _public_frame() -> FrameType | None:

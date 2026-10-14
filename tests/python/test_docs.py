@@ -38,6 +38,20 @@ def test_every_alias_and_constant_example_runs() -> None:
     assert failing_attribute_examples(PACKAGE_DIR, umber.__all__) == []
 
 
+def test_cell_property_examples_run() -> None:
+    import doctest
+    import inspect
+
+    for name in ("row", "col"):
+        member = vars(umber.Cell)[name]
+        assert isinstance(member, property)
+        doc = inspect.getdoc(member)
+        assert doc is not None
+        test = doctest.DocTestParser().get_doctest(doc, {}, f"Cell.{name}", None, 0)
+        assert test.examples
+        assert doctest.DocTestRunner().run(test).failed == 0
+
+
 # --- self-tests: the checker must catch what it is meant to catch ---
 
 _GOOD_DOC = """A documented object.
