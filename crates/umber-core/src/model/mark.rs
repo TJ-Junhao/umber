@@ -12,6 +12,7 @@ use super::rule::{HLineMark, SpanMark, VLineMark};
 use super::stacked_area::StackedAreaMark;
 use super::stem::StemMark;
 use super::step::StepMark;
+use super::violin::{ViolinGroupMark, ViolinMark};
 use crate::{ColorSpec, Dash, Marker, SizeSpec};
 
 /// Options of a line mark.
@@ -175,6 +176,10 @@ impl Default for ScatterOptions {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive] // further mark kinds are added as variants
 pub enum Mark {
+    /// Violin densities, one per category.
+    Violin(ViolinMark),
+    /// Violin distributions side by side within each category.
+    GroupedViolin(ViolinGroupMark),
     /// Box plots, one per category.
     Box(BoxMark),
     /// Distributions side by side within each category.

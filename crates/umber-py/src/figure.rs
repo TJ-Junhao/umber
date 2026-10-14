@@ -25,6 +25,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use umber_core::ViolinOptions;
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
@@ -561,6 +562,55 @@ impl Figure {
             .collect::<PyResult<Vec<_>>>()?;
         self.axes(row, col)?
             .grouped_box_plot(categories, distributions)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a violin for each category.
+    fn violin(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        groups: Vec<Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
+        let options = ViolinOptions {
+            label,
+            color: color_spec(color)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .violin(categories, groups, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds distributions side by side in each category.
+    fn grouped_violin(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        distributions: DistributionArgs<'_>,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let distributions = distributions
+            .into_iter()
+            .map(|(label, groups, color)| {
+                Ok(Distribution {
+                    label,
+                    groups: groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?,
+                    color: color_spec(color)?,
+                    ..Default::default()
+                })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        self.axes(row, col)?
+            .grouped_violin(categories, distributions)
             .map(drop)
             .map_err(core_error)
     }

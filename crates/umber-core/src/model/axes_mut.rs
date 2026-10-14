@@ -23,6 +23,7 @@ use super::validation::{
     check_reference_value, check_span, check_step_order, check_vline_x, check_x_error_bars,
     check_x_limits, check_x_tick_axis, check_y_error_bars,
 };
+use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{ContinuousScale, Error, LegendPosition, LegendStyle, Result, TickFormat};
 
 /// One axes of a figure, held for changing: the setters of its texts, limits, ticks and legend
@@ -947,6 +948,65 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let mark = BoxGroupMark::new(axes.x, axes.y, categories, distributions)?;
         axes.marks.push(Mark::GroupedBox(mark));
+        Ok(self)
+    }
+
+    /// Adds a Gaussian density per category, using Scott bandwidth and 128 points from min to max.
+    /// NaN is ignored; empty groups draw nothing, and constant groups draw only a median line.
+    /// Violins occupy the theme's [`violin_width`](crate::Theme::violin_width) fraction of each band.
+    /// Each density has the same maximum width. The median spans its local width; quartile
+    /// lines span half their local width. The y domain includes all samples, without forcing zero.
+    ///
+    /// A numeric x axis is `Error::Usage`. Group counts, repeated categories, infinities,
+    /// unsupported magnitudes and non-positive log values are `Error::Data`.
+    /// Errors leave the figure unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ViolinOptions, Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Category, ScaleKind::Linear)?
+    ///     .violin(vec!["North".into()], vec![vec![1.0, 2.0, 4.0]], ViolinOptions::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn violin(
+        &mut self,
+        categories: Vec<String>,
+        groups: Vec<Vec<f64>>,
+        options: ViolinOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = ViolinMark::new(axes.x, axes.y, categories, groups, options)?;
+        axes.marks.push(Mark::Violin(mark));
+        Ok(self)
+    }
+
+    /// Adds distributions side by side in each category, in input order.
+    /// The group occupies the theme's violin width fraction of the band. Neighbours are 2 pt
+    /// apart; they touch when the gap would leave violins narrower than it, as grouped bars do.
+    /// Each distribution has its own color and legend entry. Statistics and errors follow
+    /// [`AxesMut::violin`]; empty distributions are `Error::Data`, and every distribution
+    /// must have one group per category. A failed call leaves the figure unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Distribution, Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let d = Distribution { label: "North".into(), groups: vec![vec![1.0, 3.0]], ..Default::default() };
+    /// f.add_axes(ScaleKind::Category, ScaleKind::Linear)?
+    ///     .grouped_violin(vec!["2026".into()], vec![d])?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_violin(
+        &mut self,
+        categories: Vec<String>,
+        distributions: Vec<Distribution>,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = ViolinGroupMark::new(axes.x, axes.y, categories, distributions)?;
+        axes.marks.push(Mark::GroupedViolin(mark));
         Ok(self)
     }
 

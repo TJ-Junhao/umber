@@ -35,6 +35,7 @@ pub use crate::model::{BandMark, BandOptions};
 pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use crate::model::{StemMark, StemOptions};
+pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
 
 use crate::render::{SvgText, check_dpi, render_png, render_svg};
 use crate::scene::Scene;

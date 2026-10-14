@@ -169,6 +169,39 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 ],
             }
         }
+        Swatch::Violin { width } => {
+            let inset = f64::from(width) / 4.0;
+            let center = b.x + b.width / 2.0;
+            let (left, right) = (b.x + inset, b.x + b.width - inset);
+            let (top, bottom) = (
+                b.center_y - b.height / 2.0 + inset,
+                b.center_y + b.height / 2.0 - inset,
+            );
+            let mut path = Path::new();
+            path.move_to(point(center, top));
+            // Control points stay inside the stroke-inset box, as does the whole curve.
+            path.cubic_to(
+                point(right, top),
+                point(right, bottom),
+                point(center, bottom),
+            );
+            path.cubic_to(point(left, bottom), point(left, top), point(center, top));
+            path.close();
+            Item::Group {
+                clip: None,
+                items: vec![
+                    Item::Fill {
+                        path: path.clone(),
+                        paint: Paint::Solid(b.color.scale_alpha(super::area::AREA_ALPHA)),
+                        rule: FillRule::NonZero,
+                    },
+                    Item::Stroke {
+                        path,
+                        style: bar_style(width / 2.0, b.color),
+                    },
+                ],
+            }
+        }
         Swatch::Square => {
             let (top_left, bottom_right) = (
                 point(b.x, b.center_y - b.height / 2.0),
@@ -506,6 +539,64 @@ mod tests {
                             panic!("small box")
                         };
                         assert_eq!(items.len(), 3);
+                        for item in &items {
+                            let (x0, y0, x1, y1) = bounds(item);
+                            let (dx, dy) = match item {
+                                Item::Stroke { style, .. } if y0 == y1 => {
+                                    (0.0, f64::from(style.width) / 2.0)
+                                }
+                                Item::Stroke { style, .. } => {
+                                    (f64::from(style.width) / 2.0, f64::from(style.width) / 2.0)
+                                }
+                                _ => (0.0, 0.0),
+                            };
+                            assert!(f64::from(x0) - dx >= b.x - 1e-3);
+                            assert!(f64::from(x1) + dx <= b.x + b.width + 1e-3);
+                            assert!(f64::from(y0) - dy >= b.center_y - b.height / 2.0 - 1e-3);
+                            assert!(f64::from(y1) + dy <= b.center_y + b.height / 2.0 + 1e-3);
+                            assert!(entry.label.x - (f64::from(x1) + dx) >= 4.0 - 1e-3);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn violin_swatch_strokes_fit_the_measured_bounds() {
+        use crate::LegendStyle;
+        use crate::model::ViolinOptions;
+        for base in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            for scale in [0.5, 1.0, 4.0, 10.0] {
+                for width in [0.5, 8.0, 72.0, f64::from(f32::MAX)] {
+                    for style in [LegendStyle::Header, LegendStyle::Direct] {
+                        let theme = base
+                            .with_font_scale(scale)
+                            .unwrap()
+                            .with_line_width(width)
+                            .unwrap()
+                            .with_legend_style(style)
+                            .unwrap();
+                        let mut f = Figure::new(20.0, 12.0, theme.clone()).unwrap();
+                        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+                            .unwrap()
+                            .violin(
+                                vec!["A".into()],
+                                vec![vec![1.0, 2.0]],
+                                ViolinOptions {
+                                    label: "Samples".into(),
+                                    ..Default::default()
+                                },
+                            )
+                            .unwrap();
+                        let layout =
+                            crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1;
+                        let entry = &layout.legend.entries()[0];
+                        let b = entry.swatch;
+                        let Item::Group { items, .. } = swatch(&theme, entry) else {
+                            panic!("filled lens")
+                        };
+                        assert_eq!(items.len(), 2);
                         for item in &items {
                             let (x0, y0, x1, y1) = bounds(item);
                             let (dx, dy) = match item {

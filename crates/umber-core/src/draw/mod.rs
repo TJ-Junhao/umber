@@ -50,6 +50,7 @@ mod step;
 mod stroke;
 #[cfg(test)]
 mod tests;
+mod violin;
 
 pub(crate) use chrome::{baseline, chrome, figure_header};
 
@@ -250,6 +251,21 @@ pub(crate) fn marks(
                 ..
             } => {
                 box_plot::box_items(
+                    &context,
+                    resolved,
+                    categories,
+                    distributions,
+                    width,
+                    &mut items,
+                );
+            }
+            ResolvedMark::Violin {
+                categories,
+                ref distributions,
+                width,
+                ..
+            } => {
+                violin::violin_items(
                     &context,
                     resolved,
                     categories,

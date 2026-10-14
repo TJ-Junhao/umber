@@ -1,1 +1,3 @@
-# Benchmark-only change; no committed outputs change on purpose.
+# Cases whose committed outputs change on purpose in this change.
+# The theme record gains the violin_width getter.
+api/themes
