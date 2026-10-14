@@ -9,7 +9,7 @@ use crate::{Align, AxisData, BarOptions, Grid, GridIndex, LineOptions, Placement
 fn every_existing_mark_exposes_its_legend_swatch() {
     use crate::{
         AreaOptions, AxisValue, BandOptions, ErrorBarOptions, HistOptions, RuleOptions,
-        ScatterOptions, Series, SpanOptions, StepOptions,
+        ScatterOptions, Series, SpanOptions, StemOptions, StepOptions,
     };
     let mut f = Figure::with_grid(8.0, 4.0, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
     let x = || AxisData::Numbers(vec![0.0, 1.0]);
@@ -38,6 +38,15 @@ fn every_existing_mark_exposes_its_legend_swatch() {
         ScatterOptions {
             label: "A".into(),
             ..ScatterOptions::default()
+        },
+    )
+    .unwrap();
+    a.stem(
+        x(),
+        &[1.0, 2.0],
+        StemOptions {
+            label: "A".into(),
+            ..StemOptions::default()
         },
     )
     .unwrap();
@@ -236,6 +245,57 @@ fn one_label_one_color_across_panels() {
         colors[1],
         vec![f.theme().palette()[0], f.theme().palette()[1]]
     );
+}
+
+#[test]
+fn stems_share_label_slots_before_unlabelled_colors_and_merge_marker_swatches() {
+    let mut f = Figure::with_grid(8.0, 4.0, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
+    for col in [1, 0] {
+        let mut axes = f
+            .add_axes_at(
+                Placement {
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap();
+        for label in ["", "North", if col == 0 { "North" } else { "South" }] {
+            axes.stem(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1.0, 2.0],
+                crate::StemOptions {
+                    label: label.into(),
+                    ..crate::StemOptions::default()
+                },
+            )
+            .unwrap();
+        }
+    }
+    let marks = resolve::resolve_figure_marks(&f);
+    let palette = f.theme().palette();
+    for (panel, expected) in marks.iter().zip([[2, 0, 0], [2, 0, 1]]) {
+        for (mark, slot) in panel.iter().zip(expected) {
+            assert!(matches!(mark, ResolvedMark::Stem { color, .. } if *color == palette[slot]));
+        }
+    }
+    let legend = Legend::merged(&f, marks.iter().map(Vec::as_slice));
+    assert_eq!(legend.row().len(), 2);
+    for (entry, (slot, label)) in legend
+        .row()
+        .iter()
+        .zip(["North", "South"].into_iter().enumerate())
+    {
+        assert_eq!(entry.label(), label);
+        assert_eq!(entry.color(), palette[slot]);
+        assert_eq!(
+            entry.swatch(),
+            Swatch::Dot {
+                diameter: f.theme().marker_size(),
+            }
+        );
+    }
 }
 
 #[test]

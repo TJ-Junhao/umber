@@ -33,6 +33,7 @@ use crate::binning::Histogram;
 use crate::error::quoted;
 use crate::layout::TickRoom;
 use crate::legend::{LegendEntry, Swatch};
+use crate::model::StemMark;
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
     Mark, ScatterMark, SeriesView, StepMark,
@@ -594,6 +595,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
     match mark {
         Mark::Line(mark) => category_names(mark.x()),
         Mark::Scatter(mark) => category_names(mark.x()),
+        Mark::Stem(mark) => category_names(mark.x()),
         Mark::Area(mark) => category_names(mark.x()),
         Mark::Step(mark) => category_names(mark.x()),
         Mark::Bar(mark) => mark.categories(),
@@ -856,6 +858,15 @@ pub(crate) enum ResolvedMark<'a> {
         /// The fill color, before the area opacity.
         color: Rgba,
     },
+    /// A stem mark, drawn from the baseline with a scatter marker at each value.
+    Stem {
+        /// The mark.
+        mark: &'a StemMark,
+        /// The color of the stems and their markers.
+        color: Rgba,
+        /// The marker diameter as drawn, in points.
+        size: f32,
+    },
     /// Error bars.
     ErrorBars {
         /// The mark.
@@ -877,6 +888,7 @@ impl<'a> ResolvedMark<'a> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
+            ResolvedMark::Stem { mark, .. } => numbers(mark.x()),
             ResolvedMark::Area { mark, .. } => numbers(mark.x()),
             ResolvedMark::Step { mark, .. } => numbers(mark.x()),
             ResolvedMark::VLine { mark, .. } => mark.x_numbers(),
@@ -912,6 +924,7 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => category_names(mark.x()),
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
+            ResolvedMark::Stem { mark, .. } => category_names(mark.x()),
             ResolvedMark::Area { mark, .. } => category_names(mark.x()),
             ResolvedMark::Step { mark, .. } => category_names(mark.x()),
             ResolvedMark::ErrorBars { mark, .. } => category_names(mark.positions()),
@@ -946,6 +959,7 @@ impl<'a> ResolvedMark<'a> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
+            ResolvedMark::Stem { mark, .. } => mark.y(),
             ResolvedMark::Area { mark, .. } => mark.y(),
             ResolvedMark::Step { mark, .. } => mark.y(),
             ResolvedMark::HLine { mark, .. } => mark.y_values(),
@@ -996,6 +1010,9 @@ impl<'a> ResolvedMark<'a> {
     /// area do: such a mark puts 0 into a linear y domain.
     pub fn grows_from_baseline(&self) -> bool {
         match self {
+            // With no finite y value, a stem does not change the y domain or its padding,
+            // even when explicit ticks are the only values on that axis.
+            ResolvedMark::Stem { mark, .. } => mark.y().iter().any(|v| v.is_finite()),
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Step { .. }
@@ -1019,6 +1036,7 @@ impl<'a> ResolvedMark<'a> {
     /// half their stroke.
     pub fn line_width(&self) -> Option<f32> {
         match *self {
+            ResolvedMark::Stem { .. } => None,
             ResolvedMark::Line { width, .. }
             | ResolvedMark::Area { width, .. }
             | ResolvedMark::Step { width, .. } => Some(width),
@@ -1041,6 +1059,7 @@ impl<'a> ResolvedMark<'a> {
     /// is padded (see [`resolve_x`]).
     pub fn is_reference(&self) -> bool {
         match self {
+            ResolvedMark::Stem { .. } => false,
             ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
@@ -1116,6 +1135,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mark, color, size } => {
                 one(&mark.options().label, color, Swatch::Dot { diameter: size })
             }
+            ResolvedMark::Stem { mark, color, size } => {
+                one(&mark.options().label, color, Swatch::Dot { diameter: size })
+            }
             ResolvedMark::Bar { mark, color } => one(&mark.options().label, color, Swatch::Square),
             ResolvedMark::Grouped { ref series, .. } | ResolvedMark::Stacked { ref series, .. } => {
                 series
@@ -1145,6 +1167,15 @@ impl<'a> ResolvedMark<'a> {
     /// an axes whose axes have the limits `limits`.
     pub fn keys(&self, limits: &Limits) -> Vec<SeriesKey<'a>> {
         match self {
+            &ResolvedMark::Stem { mark, color, size } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Points {
+                    marker: mark.options().marker,
+                    size,
+                },
+                anchor: None,
+            }],
             &ResolvedMark::Line { mark, color, width } => {
                 vec![SeriesKey::of_line(mark, color, width, limits)]
             }
@@ -1621,6 +1652,7 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
     match mark {
         Mark::Line(m) => vec![(&m.options().label, m.options().color)],
         Mark::Scatter(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Stem(m) => vec![(&m.options().label, m.options().color)],
         Mark::Area(m) => vec![(&m.options().label, m.options().color)],
         Mark::Bar(m) => vec![(&m.options().label, m.options().color)],
         Mark::GroupedBar(m) | Mark::StackedBar(m) => {
@@ -1679,6 +1711,11 @@ fn resolve_panel_marks<'a>(
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::Scatter(mark) => ResolvedMark::Scatter {
+                mark,
+                color: color_of(mark.options().color, &mark.options().label),
+                size: theme.drawn_marker_size(mark.options().size),
+            },
+            Mark::Stem(mark) => ResolvedMark::Stem {
                 mark,
                 color: color_of(mark.options().color, &mark.options().label),
                 size: theme.drawn_marker_size(mark.options().size),
@@ -2333,10 +2370,10 @@ mod tests {
 
     #[test]
     fn lowering_a_log_limit_keeps_the_ticks_evenly_spaced_and_distinct() {
-        // 1..1e100 on base 10 has its powers thinned; the lower limit moves to 0.1 and the
-        // powers are chosen again for 0.1..1e100, so they stay evenly spaced in log space and
-        // none crowds the new end. Bases near 1 keep distinct positions too.
-        for base in [10.0, 1.000_001, 1.0 + f64::EPSILON] {
+        // 1..1e100 on base 10 has its powers thinned; the first exponent gap is 33, so the
+        // lower limit moves to 1e-33. Powers chosen again for the wider domain stay evenly
+        // spaced in log space. The smallest supported base keeps distinct positions too.
+        for base in [10.0, 1.000_001, 1.0 + 1e-12] {
             let log = ScaleKind::Log {
                 base: LogBase::new(base).unwrap(),
             };
@@ -2353,16 +2390,10 @@ mod tests {
                 r.y.ticks
             );
             assert_eq!(r.baseline, r.y.ticks[0].pos, "base {base}");
-            // At base 1 + EPSILON one step down is a factor of 1 + EPSILON, too small to move
-            // any position; every other base moves the limit visibly below the data.
             let data_low = r.y.scale.normalize(1.0);
-            if base > 1.0 + f64::EPSILON {
-                assert!(r.baseline.get() < data_low, "base {base}: {:?}", r.y.ticks);
-            } else {
-                assert!(r.baseline.get() <= data_low, "base {base}: {:?}", r.y.ticks);
-            }
+            assert!(r.baseline.get() < data_low, "base {base}: {:?}", r.y.ticks);
             if base == 10.0 {
-                assert_eq!(r.y.ticks[0].label, "1e\u{2212}1");
+                assert_eq!(r.y.ticks[0].label, "1e\u{2212}33");
                 let gaps: Vec<f64> = pos.windows(2).map(|w| w[1] - w[0]).collect();
                 let (min, max) = gaps
                     .iter()

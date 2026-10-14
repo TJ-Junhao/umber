@@ -8,6 +8,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `step.py`: step lines in the three positions.
 - `reference_lines.py`: a threshold, an event, a normal range and a window over a line.
 - `band.py`: a mean line over its 95% interval band.
+- `stem.py`: a damped impulse response drawn as stems, with positive and negative samples.
 - `error_bars.py`: group means with intervals on a category axis, and measurements with uncertainty in x and y.
 - `bars.py`: a bar chart, a grouped bar chart and a stacked bar chart.
 - `histogram.py`: a histogram with a chosen number of bins.

@@ -17,6 +17,7 @@ mod marks;
 mod oracle;
 mod rule;
 mod scatter;
+mod stem;
 mod step;
 
 use crate::geometry::{Path, PathVerb, Point};

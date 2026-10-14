@@ -128,6 +128,7 @@ pub use figure::{
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use figure::{StemMark, StemOptions};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use render::SvgText;
