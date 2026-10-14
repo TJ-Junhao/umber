@@ -528,7 +528,16 @@ pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result
                 ),
             )
             .with_hint("draw a mark with that category first.");
-            return Err(crate::pipeline::panel_error(figure, axes, error));
+            let grid = figure.grid();
+            if grid.rows() * grid.cols() == 1 {
+                return Err(error);
+            }
+            let cells = axes.cells();
+            return Err(error.with_message_prefix(&format!(
+                "row {}, col {}: ",
+                cells.row(),
+                cells.col()
+            )));
         }
     }
     Ok(())

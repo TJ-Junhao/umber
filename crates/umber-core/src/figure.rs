@@ -47,11 +47,17 @@ impl Figure {
     /// never cover it. Without axes it holds the background only. The same figure always gives
     /// the same scene.
     ///
-    /// The canvas inside the outer padding is split into the grid's equal cells, with no gap
-    /// between them, and each axes is laid out on its own in the cells it covers, as a figure
-    /// of one axes is laid out on the canvas: its header at the top of its cells, its texts
-    /// and plot area inside them. An empty cell draws nothing. A 1 × 1 grid is laid out on the
-    /// whole canvas.
+    /// A 1 × 1 grid is laid out on the whole canvas. On a larger grid every axes' plot area
+    /// has the same size and the axes line up: each grid column has room left of its plots
+    /// for the widest y tick labels among its axes and right of them for direct labels, each
+    /// grid row has room above its plots for the tallest header, y axis label and rising top
+    /// y tick label, and below them for the x tick labels and x axis labels, and the theme's
+    /// [`panel_gap`](crate::Theme::panel_gap) separates neighbouring cells. An axes spanning
+    /// several cells covers their plots and everything between them. An empty cell keeps its
+    /// share of the canvas and draws nothing. Panel titles, subtitles and legend rows start at
+    /// the left edge of their plot area, and a legend row wraps within it; the x axis labels of
+    /// a grid row share a baseline. An x tick label may reach halfway into the gap next to its
+    /// axes; beyond that, the plots of the grid narrow so that it fits.
     ///
     /// # Errors
     ///
@@ -69,10 +75,15 @@ impl Figure {
     /// figure needs, and the hint suggests making the figure taller or removing whichever of
     /// the title, subtitle and legend it has.
     ///
-    /// On a grid of more than one cell, the axes are checked in row-major order of their
-    /// top-left cells, each against its own cells, and the message starts with
-    /// `row {r}, col {c}: `, the top-left cell of the axes that does not fit; the sizes it
-    /// names are those of the cells' share of the canvas.
+    /// On a grid of more than one cell the same checks run for the grid's columns and rows, in
+    /// the same order. A figure too narrow for its columns of plots names the width it needs
+    /// (`the figure is … pt wide; at least … pt is needed for 3 columns of plots.`) unless
+    /// the y tick labels of one column are the cause; one too short names the height
+    /// (`… pt is needed for 2 rows of plots.`). Errors about one axes' texts start with
+    /// `row {r}, col {c}: `, the axes' top-left cell: its y tick labels, its x tick labels,
+    /// and texts that would run into the next cell: a title, subtitle, legend row entry or axis
+    /// label wider than its plot area (`row 0, col 1: the title is … pt wide; the panel has …
+    /// pt.`), or a direct label that would end past the axes' share of the canvas.
     ///
     /// `Error::Data` in the same context, without a parameter, when a vertical reference line
     /// ([`AxesMut::vline`]) on a category x axis names a category that no other mark of its axes
