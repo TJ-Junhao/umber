@@ -151,23 +151,276 @@ pub(crate) enum TickCoverage {
     Free,
 }
 
+/// What a tick search must keep apart: a candidate set of tick values fits when its labels
+/// leave room between them on screen.
+#[derive(Clone, Copy)]
+pub(crate) struct Fit<'a> {
+    /// The least step, as a share of the searched range `dmax - dmin`, that can fit whatever
+    /// the labels: on a linear axis that shows at least the range, ticks are never further
+    /// apart on screen than their step's share of it. A candidate with a smaller step does not
+    /// fit and is not judged; 0 judges every candidate.
+    pub least_share: f64,
+    /// The room a candidate's values leave between their labels.
+    pub slack: &'a dyn Fn(&[f64]) -> Room,
+}
+
+/// The room a candidate's labels leave on screen, as [`Fit::slack`] judges it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Room {
+    /// Fewer than two of the candidate's ticks are drawn, so it has no labels to keep apart.
+    TooFewTicks,
+    /// The room, in points, between the most crowded pair of adjacent labels: the labels fit
+    /// when it is not negative.
+    Slack(f64),
+}
+
+impl Fit<'_> {
+    /// Every candidate fits: the search chooses for its target alone.
+    pub(crate) const ANY: Fit<'static> = Fit {
+        least_share: 0.0,
+        slack: &unjudged,
+    };
+
+    /// Whether the best scored candidate, `values` `step` apart in a searched range `range`
+    /// wide, stays the choice: its labels fit, or fewer than two of its ticks are drawn, and the
+    /// caller chooses again for another target as it always has.
+    fn keeps(&self, values: &[f64], step: f64, range: f64) -> bool {
+        self.steps_apart(step, range)
+            && match (self.slack)(values) {
+                Room::TooFewTicks => true,
+                Room::Slack(slack) => slack >= 0.0,
+            }
+    }
+
+    /// Whether a candidate chosen in place of the best scored one, `values` `step` apart in a
+    /// searched range `range` wide, fits: at least two of its ticks are drawn and their labels
+    /// fit.
+    fn admits(&self, values: &[f64], step: f64, range: f64) -> bool {
+        self.steps_apart(step, range)
+            && matches!((self.slack)(values), Room::Slack(slack) if slack >= 0.0)
+    }
+
+    /// Whether `step` reaches the least share of a range `range` wide.
+    fn steps_apart(&self, step: f64, range: f64) -> bool {
+        // A step a rounding error short of the least share is left to the judge.
+        step >= self.least_share * range * (1.0 - 1e-9)
+    }
+}
+
+/// The room left by values that are not judged: unlimited.
+fn unjudged(_: &[f64]) -> Room {
+    Room::Slack(f64::INFINITY)
+}
+
+/// `k` values from `lmin`, `step` apart, each computed from its index.
+fn candidate(lmin: f64, step: f64, k: usize) -> Vec<f64> {
+    (0..k).map(|i| lmin + i as f64 * step).collect()
+}
+
+/// One Extended Wilkinson candidate: `k` ticks from `lmin`, `step` apart, and its score.
+#[derive(Debug, Clone, Copy)]
+struct Candidate {
+    /// The first value.
+    lmin: f64,
+    /// The step.
+    step: f64,
+    /// The number of ticks.
+    k: usize,
+    /// The score.
+    score: f64,
+}
+
+impl Candidate {
+    /// The tick values, each computed from its index.
+    fn values(&self) -> Vec<f64> {
+        candidate(self.lmin, self.step, self.k)
+    }
+}
+
+/// The mantissas of round steps, which [`round_candidates`] tries, each with its index in
+/// [`Q`], which scores its simplicity.
+const ROUND_MANTISSAS: [(usize, f64); 4] = [(0, 1.0), (2, 2.0), (3, 2.5), (1, 5.0)];
+
+/// What one pass of the Extended Wilkinson search found.
+#[derive(Debug, Default)]
+struct Search {
+    /// The best scored candidate that was admitted.
+    best: Option<Candidate>,
+    /// The fallback among the two-tick candidates that were not admitted.
+    widest: Option<Widest>,
+}
+
+/// A two-tick candidate that [`extended`] may fall back to when no candidate fits, ranked by
+/// how far apart its ticks lie on the axis, then by score, then by the order found.
+#[derive(Debug, Clone, Copy)]
+struct Widest {
+    /// The step as a share of the span the axis shows: the candidate's own span or the range,
+    /// whichever is wider.
+    share: f64,
+    /// The candidate.
+    candidate: Candidate,
+}
+
+impl Widest {
+    /// `candidate` as a fallback for the range `[dmin, dmax]`.
+    fn of(candidate: Candidate, dmin: f64, dmax: f64) -> Widest {
+        let lmax = candidate.lmin + candidate.step * (candidate.k as f64 - 1.0);
+        Widest {
+            share: candidate.step / (lmax.max(dmax) - candidate.lmin.min(dmin)),
+            candidate,
+        }
+    }
+
+    /// Whether `self` is a better fallback than `other`.
+    fn beats(&self, other: Option<&Widest>) -> bool {
+        other.is_none_or(|other| {
+            self.share > other.share
+                || (self.share == other.share && self.candidate.score > other.candidate.score)
+        })
+    }
+}
+
 /// Extended Wilkinson tick positions for `[dmin, dmax]` (Talbot, Lin & Hanrahan, 2010).
 ///
-/// `tick_coverage` says whether the ticks must cover the range. Values are computed as
-/// `start * step`, never by accumulation. Invalid input (non-finite or `dmin >= dmax`) and the
-/// case where no candidate is found yield `max(target, 2)` evenly spaced values instead.
+/// `tick_coverage` says whether the ticks must cover the range. The best scored candidate is
+/// the choice when `fit` admits it, so a fit changes nothing where that candidate fits.
+/// Otherwise the choice is the best scored round candidate that `fit` admits
+/// ([`round_candidates`]): a step of 1, 2, 2.5 or 5 times a power of ten, with every tick a
+/// whole multiple of it, so 0 is a tick whenever it lies between the ticks. When none is
+/// admitted, it is the best scored two-tick candidate that `fit` admits, and when none is
+/// either, a two-tick candidate whose ticks lie furthest apart on the axis (the step as a share
+/// of the wider of its own span and the range), ties going to the better score, then to the
+/// first found: a round one if there is one, else any the search scores, with two ticks that
+/// cover the range ([`TickCoverage::Loose`]) or lie inside it ([`TickCoverage::Free`]).
+/// Values are computed as `start * step`, never by accumulation. Invalid input (non-finite or
+/// `dmin >= dmax`) and the case where no candidate is found yield `max(target, 2)` evenly
+/// spaced values instead, or the two range ends when those do not fit.
 pub(crate) fn extended(
     dmin: f64,
     dmax: f64,
     target: usize,
     tick_coverage: TickCoverage,
+    fit: &Fit<'_>,
 ) -> Vec<f64> {
     let target = clamp_target(target);
+    let evenly = || {
+        let values = evenly_spaced(dmin, dmax, target);
+        let fits = match (fit.slack)(&values) {
+            Room::TooFewTicks => true,
+            Room::Slack(slack) => slack >= 0.0,
+        };
+        if fits {
+            values
+        } else {
+            evenly_spaced(dmin, dmax, 2)
+        }
+    };
     if !(dmin.is_finite() && dmax.is_finite() && dmin < dmax) {
-        return evenly_spaced(dmin, dmax, target);
+        return evenly();
     }
+    let range = dmax - dmin;
+    let Some(best) = search(dmin, dmax, target, tick_coverage, &|_| true).best else {
+        return evenly();
+    };
+    if fit.keeps(&best.values(), best.step, range) {
+        return best.values();
+    }
+    // A candidate in place of the best needs two ticks drawn: one that does not would only
+    // raise the bar for the others.
+    let admits = |c: &Candidate| fit.admits(&c.values(), c.step, range);
+    let round = round_candidates(dmin, dmax, target, tick_coverage);
+    let better = |chosen: Option<Candidate>, c: Candidate| match chosen {
+        Some(chosen) if chosen.score >= c.score => Some(chosen),
+        _ => Some(c),
+    };
+    if let Some(chosen) = round.iter().copied().filter(admits).fold(None, better) {
+        return chosen.values();
+    }
+    // No round set fits: two ticks that do.
+    let pair = |c: &Candidate| c.k == 2 && admits(c);
+    if let Some(chosen) = search(dmin, dmax, target, tick_coverage, &pair).best {
+        return chosen.values();
+    }
+    let widest_round = round
+        .iter()
+        .filter(|c| c.k == 2)
+        .map(|&c| Widest::of(c, dmin, dmax))
+        .fold(None, |widest: Option<Widest>, c| {
+            if c.beats(widest.as_ref()) {
+                Some(c)
+            } else {
+                widest
+            }
+        });
+    let widest =
+        widest_round.or_else(|| search(dmin, dmax, target, tick_coverage, &|_| false).widest);
+    match widest {
+        Some(widest) => widest.candidate.values(),
+        None => evenly(),
+    }
+}
+
+/// The round candidates for about `target` ticks on `[dmin, dmax]`, scored as
+/// [`extended`] scores every candidate: for each step `m * 10^z` with `m` 1, 2, 2.5 or 5, from
+/// a fiftieth of the range up to ten times its next power of ten, the multiples of the step
+/// that cover the range most tightly ([`TickCoverage::Loose`]) or all those inside it
+/// ([`TickCoverage::Free`]), when they are 2 to 50 ticks. In order of step, smallest first.
+fn round_candidates(
+    dmin: f64,
+    dmax: f64,
+    target: usize,
+    tick_coverage: TickCoverage,
+) -> Vec<Candidate> {
+    let range = dmax - dmin;
+    let tol = 1e-9 * range;
     let m = target as f64;
-    let mut best: Option<(f64, f64, f64, usize)> = None; // (lmin, lmax, step, k)
+    let (first, last) = ((range / 50.0).log10().floor(), range.log10().ceil() + 1.0);
+    if !(first.is_finite() && last.is_finite()) {
+        return Vec::new();
+    }
+    let mut candidates = Vec::new();
+    let mut z = first;
+    while z <= last {
+        for (qi, mantissa) in ROUND_MANTISSAS {
+            let step = mantissa * 10f64.powf(z);
+            let (lo, hi) = match tick_coverage {
+                TickCoverage::Loose => ((dmin / step).floor(), (dmax / step).ceil()),
+                TickCoverage::Free => (((dmin - tol) / step).ceil(), ((dmax + tol) / step).floor()),
+            };
+            let count = hi - lo + 1.0;
+            if !(count.is_finite() && (2.0..=50.0).contains(&count)) {
+                continue;
+            }
+            let lmin = lo * step;
+            let lmax = lmin + step * (count - 1.0);
+            let s = simplicity(qi, 1.0, lmin, lmax, step);
+            let c = coverage(dmin, dmax, lmin, lmax);
+            let g = density(count, m, dmin, dmax, lmin, lmax);
+            candidates.push(Candidate {
+                lmin,
+                step,
+                k: count as usize,
+                score: W[0] * s + W[1] * c + W[2] * g + W[3],
+            });
+        }
+        z += 1.0;
+    }
+    candidates
+}
+
+/// One pass of the Extended Wilkinson search over `[dmin, dmax]` for about `target` ticks,
+/// among the candidates `admit` lets through, keeping the two-tick fallbacks among those it
+/// does not.
+fn search(
+    dmin: f64,
+    dmax: f64,
+    target: usize,
+    tick_coverage: TickCoverage,
+    admit: &dyn Fn(&Candidate) -> bool,
+) -> Search {
+    let tol = 1e-9 * (dmax - dmin);
+    let m = target as f64;
+    let mut found = Search::default();
     let mut best_score = -2.0_f64;
 
     let mut j: u32 = 1;
@@ -211,12 +464,30 @@ pub(crate) fn extended(
                                     let c = coverage(dmin, dmax, lmin, lmax);
                                     let g = density(kf, m, dmin, dmax, lmin, lmax);
                                     let score = W[0] * s + W[1] * c + W[2] * g + W[3];
-                                    if score > best_score
-                                        && (tick_coverage == TickCoverage::Free
-                                            || (lmin <= dmin && lmax >= dmax))
+                                    let covers = lmin <= dmin && lmax >= dmax;
+                                    if !(score > best_score
+                                        && (tick_coverage == TickCoverage::Free || covers))
                                     {
+                                        continue;
+                                    }
+                                    let candidate = Candidate {
+                                        lmin,
+                                        step,
+                                        k,
+                                        score,
+                                    };
+                                    if admit(&candidate) {
                                         best_score = score;
-                                        best = Some((lmin, lmax, step, k));
+                                        found.best = Some(candidate);
+                                        continue;
+                                    }
+                                    let inside = lmin >= dmin - tol && lmax <= dmax + tol;
+                                    if k != 2 || (tick_coverage == TickCoverage::Free && !inside) {
+                                        continue;
+                                    }
+                                    let fallback = Widest::of(candidate, dmin, dmax);
+                                    if fallback.beats(found.widest.as_ref()) {
+                                        found.widest = Some(fallback);
                                     }
                                 }
                             }
@@ -229,11 +500,7 @@ pub(crate) fn extended(
         }
         j += 1;
     }
-
-    match best {
-        Some((lmin, _, step, k)) => (0..k).map(|i| lmin + i as f64 * step).collect(),
-        None => evenly_spaced(dmin, dmax, target),
-    }
+    found
 }
 
 /// Smallest number of decimals (0..=12) at which `step` is a whole number of units.
@@ -507,12 +774,125 @@ mod tests {
             ),
         ];
         for &(lo, hi, m, coverage, want) in cases {
-            let got = extended(lo, hi, m, coverage);
+            let got = extended(lo, hi, m, coverage, &Fit::ANY);
             assert!(
                 close(&got, want),
                 "extended({lo}, {hi}, {m}, {coverage:?}) = {got:?}, want {want:?}"
             );
         }
+    }
+
+    /// A fit that admits the values `slack` finds room for, judging every candidate.
+    fn judged(slack: &dyn Fn(&[f64]) -> Room) -> Fit<'_> {
+        Fit {
+            least_share: 0.0,
+            slack,
+        }
+    }
+
+    /// The smallest gap between adjacent values, less `least`.
+    fn gap_beyond(values: &[f64], least: f64) -> f64 {
+        values
+            .windows(2)
+            .map(|w| w[1] - w[0] - least)
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    #[test]
+    fn only_admitted_candidates_are_chosen() {
+        use TickCoverage::{Free, Loose};
+        // Unjudged, data from −0.01 to 5.69 for a target of 3 gets eight ticks one apart.
+        let any = extended(-0.01, 5.69, 3, Loose, &Fit::ANY);
+        assert!(
+            close(&any, &[-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            "{any:?}"
+        );
+        // Asked for ticks at least 1.5 apart, the best scored round candidate that is: not
+        // −0.4, 1.2, 2.8, 4.4, 6.0, which scores better.
+        let slack = |values: &[f64]| Room::Slack(gap_beyond(values, 1.5));
+        let fit = judged(&slack);
+        let loose = extended(-0.01, 5.69, 3, Loose, &fit);
+        assert!(close(&loose, &[-2.0, 0.0, 2.0, 4.0, 6.0]), "{loose:?}");
+        // The best scored free candidate, 0, 3, 6, is 3 apart and stays.
+        let free = extended(-0.01, 5.69, 3, Free, &fit);
+        assert!(close(&free, &[0.0, 3.0, 6.0]), "{free:?}");
+        // Asked for 4 apart, it does not: a round step of 5.
+        let slack = |values: &[f64]| Room::Slack(gap_beyond(values, 4.0));
+        let free = extended(-0.01, 5.69, 3, Free, &judged(&slack));
+        assert!(close(&free, &[0.0, 5.0]), "{free:?}");
+        // A candidate the unjudged search prefers and that fits is still the choice.
+        let slack = |values: &[f64]| Room::Slack(gap_beyond(values, 0.5));
+        assert_eq!(extended(-0.01, 5.69, 3, Loose, &judged(&slack)), any);
+    }
+
+    #[test]
+    fn the_least_share_rejects_without_judging() {
+        // A step below 2 / 5.7 of the range, below 2, is rejected before the judge sees it.
+        let judged = std::cell::Cell::new(f64::INFINITY);
+        let slack = |values: &[f64]| {
+            judged.set(judged.get().min(values[1] - values[0]));
+            Room::Slack(f64::INFINITY)
+        };
+        let fit = Fit {
+            least_share: 2.0 / 5.7,
+            slack: &slack,
+        };
+        let values = extended(-0.01, 5.69, 3, TickCoverage::Loose, &fit);
+        assert!(judged.get() >= 2.0 - 1e-9, "{}", judged.get());
+        assert!(gap_beyond(&values, 2.0) >= -1e-9, "{values:?}");
+    }
+
+    /// Whether `values` are round: a step of 1, 2, 2.5 or 5 times a power of ten, and every
+    /// value a whole multiple of it.
+    fn is_round(values: &[f64]) -> bool {
+        let step = values[1] - values[0];
+        let mantissa = step / 10f64.powf(step.log10().floor());
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-6 * b.abs().max(1.0);
+        [1.0, 2.0, 2.5, 5.0, 10.0]
+            .iter()
+            .any(|&m| near(mantissa, m))
+            && values.iter().all(|v| near(v / step, (v / step).round()))
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn rejected_choices_are_replaced_by_round_ones(
+            low in -1e4f64..1e4,
+            e in -3.0f64..5.0,
+            target in 2usize..9,
+            loose in proptest::prelude::any::<bool>(),
+            least in 0.0f64..0.6,
+        ) {
+            let high = low + 10f64.powf(e);
+            let coverage = if loose { TickCoverage::Loose } else { TickCoverage::Free };
+            let least = least * (high - low);
+            let slack = |values: &[f64]| gap_beyond(values, least);
+            let room = |values: &[f64]| Room::Slack(slack(values));
+            let best = extended(low, high, target, coverage, &Fit::ANY);
+            let chosen = extended(low, high, target, coverage, &judged(&room));
+            if slack(&best) >= 0.0 {
+                proptest::prop_assert_eq!(chosen, best);
+            } else if chosen.len() > 2 {
+                // A round candidate that fits; only a two-tick fallback may be neither.
+                proptest::prop_assert!(slack(&chosen) >= 0.0, "{:?}", chosen);
+                proptest::prop_assert!(is_round(&chosen), "{:?} for {:?}", chosen, best);
+            }
+        }
+    }
+
+    #[test]
+    fn no_fit_falls_back_to_the_widest_two_ticks() {
+        use TickCoverage::{Free, Loose};
+        let slack = |_: &[f64]| Room::Slack(-1.0);
+        let none = judged(&slack);
+        // Two loose ticks always span the whole axis: the best scored pair.
+        assert!(close(&extended(0.5, 9.5, 5, Loose, &none), &[0.0, 10.0]));
+        assert!(close(&extended(-0.01, 5.69, 3, Loose, &none), &[-1.0, 6.0]));
+        // Two free ticks inside the range, as far apart as any candidate the search scores.
+        let free = extended(0.5, 9.5, 5, Free, &none);
+        assert!(close(&free, &[2.0, 8.0]), "{free:?}");
+        // Without a candidate: the two range ends.
+        assert_eq!(extended(1.0, 1.0, 5, Free, &none), [1.0, 1.0]);
     }
 
     #[test]

@@ -2530,7 +2530,8 @@ mod tests {
                     .map(|input| {
                         let marks = crate::resolve::resolve_marks(input.axes.marks(), input.theme);
                         let limits = crate::resolve::Limits::of(input.axes);
-                        let resolved = crate::resolve::resolve(&marks, &limits, 3, 3);
+                        let (x, y) = super::super::TickRoom::unlimited(3, 3, lib());
+                        let resolved = crate::resolve::resolve(&marks, &limits, &x, &y);
                         super::super::measure_panel(input, &resolved, grid.span(input.axes.cells()))
                     })
                     .collect();

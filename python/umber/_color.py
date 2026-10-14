@@ -1,60 +1,20 @@
 """``Color``: an immutable color, either fixed or resolved from the theme when drawn."""
 
-import math
-import numbers
 from collections.abc import Callable
 from operator import attrgetter
+from operator import index as integer_index
 from typing import ClassVar, Final, Self, cast, final
 
-from umber import _umber
+from umber import _args, _umber
 from umber._errors import StyleError, new_error
 from umber._report import api_call
 
-_INT64_MIN = -(2**63)
 _INT64_MAX = 2**63 - 1
 
 # The native color argument kinds; see ``umber._umber``.
 _AUTO = 0
 _PALETTE = 1
 _FIXED = 2
-
-
-def _clamp(value: int) -> int:
-    """Limit ``value`` to the native integer range."""
-    return min(max(value, _INT64_MIN), _INT64_MAX)
-
-
-def _type_error(context: str, name: str, value: object, expected: str, hint: str) -> TypeError:
-    """Build the ``TypeError`` for a parameter of the wrong type."""
-    return new_error(
-        TypeError,
-        context,
-        f"{name} is {type(value).__name__}; {name} must be a {expected}.",
-        parameter=name,
-        hint=hint,
-    )
-
-
-def _check_text(context: str, name: str, value: object, hint: str) -> str:
-    if not isinstance(value, str):
-        raise _type_error(context, name, value, "str", hint)
-    return value
-
-
-def _check_int(context: str, name: str, value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
-        raise _type_error(context, name, value, "int", "pass a whole number such as 3.")
-    return int(value)
-
-
-def _check_float(context: str, name: str, value: object, hint: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
-        raise _type_error(context, name, value, "float", hint)
-    try:
-        return float(value)
-    except OverflowError:
-        # An int beyond the float range: the native check rejects the infinity.
-        return math.inf if cast(int, value) > 0 else -math.inf
 
 
 @final
@@ -227,7 +187,7 @@ class Color:
             Color.hex("#3366B880")
         """
         with api_call():
-            text = _check_text("Color.hex()", "code", code, 'pass a string such as "#3366B8".')
+            text = _args.text("Color.hex()", "code", code, hint='pass a string such as "#3366B8".')
             return _new(_FIXED, _umber.color_hex(text), 1.0)
 
     @staticmethod
@@ -252,12 +212,10 @@ class Color:
             True
         """
         with api_call():
-            red = _check_int("Color.rgb()", "r", r)
-            green = _check_int("Color.rgb()", "g", g)
-            blue = _check_int("Color.rgb()", "b", b)
-            # Channels beyond the native integer range are clamped; the native check rejects
-            # them with its own message.
-            return _new(_FIXED, _umber.color_rgb(_clamp(red), _clamp(green), _clamp(blue)), 1.0)
+            red = _args.integer("Color.rgb()", "r", r)
+            green = _args.integer("Color.rgb()", "g", g)
+            blue = _args.integer("Color.rgb()", "b", b)
+            return _new(_FIXED, _umber.color_rgb(red, green, blue), 1.0)
 
     @staticmethod
     def palette(index: int) -> "Color":
@@ -282,16 +240,17 @@ class Color:
             Color.palette(0)
         """
         with api_call():
-            position = _check_int("Color.palette()", "index", index)
-            if position > _INT64_MAX:
+            position = _args.integer("Color.palette()", "index", index)
+            # The largest native integer is valid here, so reject values clamped down to it.
+            if position == _INT64_MAX and integer_index(index) > _INT64_MAX:
                 raise new_error(
                     StyleError,
                     "Color.palette()",
-                    f"index is {position}; a palette index must be at most {_INT64_MAX}.",
+                    f"index is {_args.short_repr(index)}; "
+                    f"a palette index must be at most {_INT64_MAX}.",
                     parameter="index",
                     hint="indexes wrap around the palette, so a smaller one picks the same color.",
                 )
-            position = max(position, _INT64_MIN)
             _umber.check_palette_index(position)
             return _new(_PALETTE, position, 1.0)
 
@@ -314,7 +273,7 @@ class Color:
             Color.hex("#3366B880")
         """
         with api_call():
-            opacity = _check_float("Color.alpha()", "a", a, "pass a number from 0.0 to 1.0.")
+            opacity = _args.real("Color.alpha()", "a", a, hint="pass a number from 0.0 to 1.0.")
             if self._kind == _FIXED:
                 return _new(_FIXED, _umber.color_with_alpha(self._payload, opacity), 1.0)
             _umber.check_alpha(opacity)

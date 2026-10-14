@@ -1,13 +1,16 @@
 //! Character maps: secondary and format 2 subtables, and agreement between the shaper and
 //! skrifa on the best subtable.
 
+use read_fonts::tables::cmap::Cmap;
 use read_fonts::types::GlyphId;
+use read_fonts::{FontData, FontRead};
 
 use super::fixtures::{assert_no_bundled_font_has, cmap_of, font_with_cmap, format12, style};
 use crate::fonts::{Font, Weight};
 use crate::text::FontLibrary;
-use crate::text::cmap::SECONDARY_SUBTABLES;
+use crate::text::cmap::{SECONDARY_SUBTABLES, subtable_glyph};
 use crate::text::font::{Face, FontKey};
+use crate::text::system;
 
 /// 50,000 characters over 4,096 distinct code points from U+F0000.
 fn many_secondary_characters() -> String {
@@ -100,6 +103,94 @@ fn secondary_subtables_are_capped() {
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
     assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
     assert_fast(elapsed);
+}
+
+/// Single-byte sub-header 0 covers 0xE0..=0xFF; 0xE0 is instead a lead byte whose
+/// sub-header has two glyphs starting at `lead_first`. Optionally, 0x00 uses that header too.
+fn mixed_format_2_cmap(zero_is_lead: bool, lead_first: u16) -> Vec<u8> {
+    let mut sub = Vec::new();
+    for word in [2u16, 602, 0] {
+        sub.extend(word.to_be_bytes());
+    }
+    for byte in 0..256 {
+        let key = if byte == 0xE0 || (byte == 0 && zero_is_lead) {
+            8u16
+        } else {
+            0
+        };
+        sub.extend(key.to_be_bytes());
+    }
+    // Both range offsets point past the two sub-headers, into their own glyph arrays.
+    for word in [0xE0u16, 32, 0, 10, lead_first, 2, 0, 66] {
+        sub.extend(word.to_be_bytes());
+    }
+    for glyph in std::iter::repeat_n(1u16, 32).chain([2, 3]) {
+        sub.extend(glyph.to_be_bytes());
+    }
+    assert_eq!(sub.len(), 602);
+    cmap_of(&[sub], &[(3, 1, 0)])
+}
+
+#[test]
+fn format_2_single_byte_ff_uses_its_own_key() {
+    for zero_is_lead in [false, true] {
+        let bytes = mixed_format_2_cmap(zero_is_lead, 0x20);
+        let cmap = Cmap::read(FontData::new(&bytes)).unwrap();
+        let sub = cmap.encoding_records()[0]
+            .subtable(cmap.offset_data())
+            .unwrap();
+        assert_eq!(subtable_glyph(&sub, 0xFF), Some(GlyphId::new(1)));
+    }
+}
+
+#[test]
+fn format_2_lead_byte_does_not_map_as_a_single_byte() {
+    let bytes = mixed_format_2_cmap(false, 0x20);
+    let cmap = Cmap::read(FontData::new(&bytes)).unwrap();
+    let sub = cmap.encoding_records()[0]
+        .subtable(cmap.offset_data())
+        .unwrap();
+    assert_eq!(subtable_glyph(&sub, 0xE0), None);
+    assert_eq!(subtable_glyph(&sub, 0xE020), Some(GlyphId::new(2)));
+    assert_eq!(subtable_glyph(&sub, 0xE021), Some(GlyphId::new(3)));
+}
+
+#[test]
+fn format_2_single_byte_cannot_lead_a_two_byte_code() {
+    let bytes = mixed_format_2_cmap(false, 0x20);
+    let cmap = Cmap::read(FontData::new(&bytes)).unwrap();
+    let sub = cmap.encoding_records()[0]
+        .subtable(cmap.offset_data())
+        .unwrap();
+    assert_eq!(subtable_glyph(&sub, 0x41E1), None);
+    assert_eq!(subtable_glyph(&sub, 0xFFE1), None);
+}
+
+#[test]
+fn format_2_lookup_agrees_with_ranges_for_every_two_byte_code() {
+    for first in [0x20, 0xFE, 0xFF, 0x100, u16::MAX] {
+        let bytes = mixed_format_2_cmap(false, first);
+        let cmap = Cmap::read(FontData::new(&bytes)).unwrap();
+        let sub = cmap.encoding_records()[0]
+            .subtable(cmap.offset_data())
+            .unwrap();
+        let ranges = system::cmap_ranges(&bytes, 256).unwrap();
+        assert_eq!(ranges.visited(), 256);
+        // Every glyph in this table is nonzero, so coverage and lookup must agree exactly,
+        // even when the lead-byte sub-header's range extends past its 256 low-byte values.
+        for code in 0..=0xFFFF {
+            let covered = ranges
+                .ranges()
+                .iter()
+                .any(|&(lo, hi)| lo <= code && code <= hi);
+            assert_eq!(
+                subtable_glyph(&sub, code).is_some(),
+                covered,
+                "first={first:#06X}, code={code:#06X}"
+            );
+        }
+        assert_eq!(subtable_glyph(&sub, 0x10000), None);
+    }
 }
 
 #[test]

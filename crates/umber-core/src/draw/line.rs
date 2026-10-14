@@ -4,9 +4,9 @@
 use super::MarkContext;
 use super::clip::{Bounds, clip_polyline};
 use super::mapping::{AxisMaps, AxisPoint, PlotPoint, axis_x, axis_y};
+use crate::downsample::visible_m4_indices;
 use crate::geometry::Path;
 use crate::layout::Area;
-use crate::m4_indices;
 use crate::model::LineMark;
 use crate::resolve::Resolved;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
@@ -53,7 +53,7 @@ pub(super) fn downsample(
 ) -> (Vec<f64>, Vec<f64>) {
     let columns = downsample_columns(context.plot.width);
     let xm = context.maps.x;
-    let kept = m4_indices(&xs, &ys, (xm.lo, xm.hi), columns);
+    let kept = visible_m4_indices(&xs, &ys, (xm.lo, xm.hi), columns);
     if kept.len() < xs.len() {
         let pick =
             |v: &[f64]| -> Vec<f64> { kept.iter().filter_map(|&i| v.get(i).copied()).collect() };
