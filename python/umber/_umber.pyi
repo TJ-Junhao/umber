@@ -12,9 +12,9 @@ produces such a buffer. Name arguments must be a ``list`` of ``str`` without lon
 Text arguments (titles, labels) must not hold lone surrogates either; PyO3 refuses them with a
 ``UnicodeEncodeError`` that carries neither attribute.
 
-Enum arguments are the integer values that ``enum_members()`` lists. The ``Figure`` methods other
-than ``add_axes``, ``clone`` and the rendering methods need the figure's axes; without them they
-raise the internal ``RuntimeError``.
+Enum arguments are the integer values that ``enum_members()`` lists. The ``Figure`` methods
+that take an axes position resolve it through ``axes_at``; a cell without axes raises
+``umber.UsageError`` with a parameter and hint.
 
 The native objects are not shareable across threads while a call is in progress. A ``Figure`` is a
 mutable PyO3 object: a call that needs it while another call holds a

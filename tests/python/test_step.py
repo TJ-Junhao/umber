@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, get_type_hints
 
 import numpy as np
 import numpy.typing as npt
@@ -37,6 +37,12 @@ THEMES = [ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT]
 NATIVE_THEMES = [_umber.Theme.pigment, _umber.Theme.graphite, _umber.Theme.midnight]
 
 type AnyAxes = ub.Axes[Any, Any]
+
+
+def test_step_y_annotation_matches_the_other_point_marks() -> None:
+    y = get_type_hints(ub.Axes.step)["y"]
+    for method in (ub.Axes.line, ub.Axes.area, ub.Axes.scatter):
+        assert y == get_type_hints(method)["y"]
 
 
 def _notes(err: BaseException) -> list[str]:

@@ -94,8 +94,9 @@ pub(crate) fn internal_value(message: impl Into<String>) -> PyErr {
     PyValueError::new_err(format!("internal error: {}", message.into()))
 }
 
-/// An internal `RuntimeError`: the Python layer made a call that the object's state does not
-/// allow, such as adding a mark to a figure without axes. It carries no detail attributes.
+/// An internal `RuntimeError`: a binding invariant failed, such as a new shared slice already
+/// being shared. It carries no detail attributes. Missing axes instead use the core's
+/// `UsageError` from `axes_at`, mapped by `core_error`.
 pub(crate) fn internal_state(message: impl Into<String>) -> PyErr {
     PyRuntimeError::new_err(format!("internal error: {}", message.into()))
 }
