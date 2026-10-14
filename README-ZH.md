@@ -1,6 +1,6 @@
 # umber
 
-umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、散点图、面积图、柱状图和直方图，排版考究，内置三套主题，输出 PNG 或 SVG。
+umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、阶梯图、散点图、面积图、堆叠面积图、柱状图、直方图、箱线图、小提琴图、气泡图、误差棒、区间带、杆状图和参考线，可以单独成图，也可以排成共享坐标轴的多面板网格；排版考究，内置三套主题，输出 PNG 或 SVG。
 
 [English](https://github.com/TJ-Junhao/umber/blob/main/README.md)
 
@@ -63,8 +63,17 @@ fig.save_svg("temperature.svg")
 | 面积图 | `ax.area(x, y)` |
 | 柱状图、分组柱状图、堆叠柱状图 | `ax.bar(categories, heights)`、`ax.grouped_bar(categories, series)`、`ax.stacked_bar(categories, series)` |
 | 直方图 | `ax.hist(values, bins=30)` |
+| 阶梯图 | `ax.step(x, y, where=ub.Step.MID)` |
+| 堆叠面积图 | `ax.stacked_area(x, [ub.Series("A", a), ub.Series("B", b)])` |
+| 箱线图、分组箱线图 | `ax.box(categories, groups)`、`ax.grouped_box(categories, [ub.Distribution("A", groups)])` |
+| 小提琴图、分组小提琴图 | `ax.violin(categories, groups)`、`ax.grouped_violin(categories, distributions)` |
+| 气泡图 | `ax.bubbles(x, y, sizes, label="Cities")`（附带尺寸图例） |
+| 误差棒 | `ax.y_error_bars(x, low, high)`、`ax.x_error_bars(y, low, high)` |
+| 区间带 | `ax.band(x, low, high)` |
+| 杆状图 | `ax.stem(x, y)` |
+| 参考线和参考区间 | `ax.hline(y)`、`ax.vline(x)`、`ax.hspan(low, high)`、`ax.vspan(low, high)` |
 
-柱状图需要类别 x 轴：`fig.add_axes(x=ub.Scale.category())`。对数轴用 `ub.Scale.log()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
+柱状图、箱线图和小提琴图需要类别 x 轴：`fig.add_axes(x=ub.Scale.category())`。对数轴用 `ub.Scale.log()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
 
 <p>
   <img alt="Pigment 主题下的分组柱状图" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/bars-pigment.png" width="49%">
@@ -176,6 +185,7 @@ ax.bar(["a", "b"], [1, 2])  # pyright 和 mypy 报错：bar() 需要 Axes[str, f
 | 100 万点折线 → SVG | 21 ms |
 | 10 万点散点图 → PNG | 47 ms |
 | 100 万个值的直方图 → PNG | 20 ms |
+| 4 × 5 网格，每格一条 1 万个点的折线 → PNG | 97 ms |
 
 对于 x 值有序的数值折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。
 

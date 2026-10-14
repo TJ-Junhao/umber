@@ -1,6 +1,6 @@
 # umber
 
-umber is a plotting library for Python with a rendering core written in Rust. It draws line, scatter, area, bar and histogram charts with careful typography, three built-in themes, and PNG or SVG output.
+umber is a plotting library for Python with a rendering core written in Rust. It draws line, step, scatter, area, stacked area, bar, histogram, box, violin, bubble, error bar, band, stem and reference-line charts, alone or on a grid of panels with shared axes, with careful typography, three built-in themes, and PNG or SVG output.
 
 [简体中文](https://github.com/TJ-Junhao/umber/blob/main/README-ZH.md)
 
@@ -63,8 +63,17 @@ This is the chart at the top of this page. Data can be a list, a tuple, a NumPy 
 | Area | `ax.area(x, y)` |
 | Bar, grouped, stacked | `ax.bar(categories, heights)`, `ax.grouped_bar(categories, series)`, `ax.stacked_bar(categories, series)` |
 | Histogram | `ax.hist(values, bins=30)` |
+| Step | `ax.step(x, y, where=ub.Step.MID)` |
+| Stacked area | `ax.stacked_area(x, [ub.Series("A", a), ub.Series("B", b)])` |
+| Box, grouped | `ax.box(categories, groups)`, `ax.grouped_box(categories, [ub.Distribution("A", groups)])` |
+| Violin, grouped | `ax.violin(categories, groups)`, `ax.grouped_violin(categories, distributions)` |
+| Bubbles | `ax.bubbles(x, y, sizes, label="Cities")` (adds a size legend) |
+| Error bars | `ax.y_error_bars(x, low, high)`, `ax.x_error_bars(y, low, high)` |
+| Band | `ax.band(x, low, high)` |
+| Stem | `ax.stem(x, y)` |
+| Reference lines and spans | `ax.hline(y)`, `ax.vline(x)`, `ax.hspan(low, high)`, `ax.vspan(low, high)` |
 
-Bar charts need a category x axis: `fig.add_axes(x=ub.Scale.category())`. Log axes use `ub.Scale.log()`. Limits, ticks and tick label formats are set with `xlim`, `ylim`, `xticks`, `xticks_labeled`, `ytick_format(ub.TickFormat.percent())` and their counterparts on the other axis.
+Bar, box and violin charts need a category x axis: `fig.add_axes(x=ub.Scale.category())`. Log axes use `ub.Scale.log()`. Limits, ticks and tick label formats are set with `xlim`, `ylim`, `xticks`, `xticks_labeled`, `ytick_format(ub.TickFormat.percent())` and their counterparts on the other axis.
 
 <p>
   <img alt="A grouped bar chart in the Pigment theme" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/bars-pigment.png" width="49%">
@@ -176,6 +185,7 @@ Medians from the [criterion](https://github.com/criterion-rs/criterion.rs) suite
 | 1,000,000-point line → SVG | 21 ms |
 | 100,000-point scatter → PNG | 47 ms |
 | Histogram of 1,000,000 values → PNG | 20 ms |
+| 4 × 5 grid, one 10,000-point line per panel → PNG | 97 ms |
 
 Lines with sorted numeric x values are downsampled when they have more than four points per pixel column of the plot (counted at a nominal 300 dpi), keeping the first, last, minimum and maximum point in each column, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads.
 
