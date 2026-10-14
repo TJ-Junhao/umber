@@ -519,14 +519,40 @@ mod tests {
         ticks.iter().map(|tick| tick.label.as_str()).collect()
     }
 
-    /// A line over x from 0 to 96 whose y values rise evenly from `low` to `high`.
-    fn ramp(axes: &mut crate::AxesMut<'_>, low: f64, high: f64) {
-        let x: Vec<f64> = (0..=96).map(f64::from).collect();
-        let y: Vec<f64> = (0..=96)
-            .map(|i| low + (high - low) * f64::from(i) / 96.0)
+    /// A random walk of 97 steps, each up to half a unit either way, from a linear
+    /// congruential generator seeded with `seed`, over x from 0 to 96.
+    fn walk(seed: u32) -> (Vec<f64>, Vec<f64>) {
+        let mut state = seed;
+        let mut level = 0.0;
+        let y = (0..97)
+            .map(|_| {
+                state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                level += f64::from((state >> 8) & 0xffff) / 65536.0 - 0.5;
+                level
+            })
             .collect();
-        axes.line(AxisData::Numbers(x), &y, LineOptions::default())
-            .unwrap();
+        ((0..97).map(f64::from).collect(), y)
+    }
+
+    /// Twenty titled walks on a 4 × 5 grid at 12 × 8 in, "Sensor 1" to "Sensor 20", seeded 50
+    /// to 69.
+    fn sensors() -> Figure {
+        let mut f =
+            Figure::with_grid(12.0, 8.0, Theme::pigment(), Grid::new(4, 5).unwrap()).unwrap();
+        for i in 0..20_u32 {
+            let at = Placement {
+                row: GridIndex::At(i64::from(i / 5)),
+                col: GridIndex::At(i64::from(i % 5)),
+                ..Placement::default()
+            };
+            let (x, y) = walk(50 + i);
+            f.add_axes_at(at, ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .title(&format!("Sensor {}", i + 1))
+                .line(AxisData::Numbers(x), &y, LineOptions::default())
+                .unwrap();
+        }
+        f
     }
 
     /// The panels of `figure` resolved for a plot of `size` and the tick spacing `spacing`, with
@@ -549,14 +575,14 @@ mod tests {
 
     #[test]
     fn crowded_y_ticks_keep_their_labels_apart() {
-        // A panel of a 4 × 5 grid at 12 × 8 in has a plot of about 126 × 72 pt. For data from
-        // −0.01 to 5.69, the target alone (3) gives 8 y ticks about 8.2 pt apart.
+        // "Sensor 5" of a 4 × 5 grid at 12 × 8 in, a plot of about 126 × 72 pt: for data from
+        // −0.01 to 5.69 the target alone (3) gives 8 y ticks about 8.2 pt apart.
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-        ramp(
-            &mut f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap(),
-            -0.01,
-            5.69,
-        );
+        let (x, y) = walk(54);
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(AxisData::Numbers(x), &y, LineOptions::default())
+            .unwrap();
         let lib = FontLibrary::global();
         let size = PlotSize {
             width: 126.0,
@@ -571,34 +597,18 @@ mod tests {
         assert!(room.slack(&old.y.ticks) < 0.0);
         assert!(room.slack(&new.y.ticks) >= 0.0);
         // A line (11.05 pt) and the gap (4.25 pt) apart, on a domain padded to 1.1 times the
-        // span of the ticks, at most 1 + 72 / (1.1 × 15.3) = 5.3 ticks fit.
-        assert_eq!(
-            tick_labels(&new.y.ticks),
-            ["\u{2212}0.4", "1.2", "2.8", "4.4", "6.0"]
-        );
+        // span of the ticks, at most 1 + 72 / (1.1 × 15.3) = 5.3 ticks fit: round ones.
+        assert_eq!(tick_labels(&new.y.ticks), ["\u{2212}2", "0", "2", "4", "6"]);
         // The x ticks were apart already, and stay as they were.
         assert_eq!(new.x.ticks, old.x.ticks);
     }
 
     #[test]
-    fn grid_panels_keep_their_tick_labels_apart() {
-        // Twenty panels of data from −0.01 to 5.69 on a 4 × 5 grid at 12 × 8 in.
-        let mut f =
-            Figure::with_grid(12.0, 8.0, Theme::pigment(), Grid::new(4, 5).unwrap()).unwrap();
-        for i in 0..20 {
-            let at = Placement {
-                row: GridIndex::At(i / 5),
-                col: GridIndex::At(i % 5),
-                ..Placement::default()
-            };
-            let mut axes = f
-                .add_axes_at(at, ScaleKind::Linear, ScaleKind::Linear)
-                .unwrap();
-            axes.title(&format!("Sensor {}", i + 1));
-            ramp(&mut axes, -0.01, 5.69);
-        }
+    fn crowded_grid_panels_get_round_ticks() {
+        let f = sensors();
         let lib = FontLibrary::global();
-        for (resolved, layout) in try_plan_panels(&f, lib).unwrap() {
+        let planned = try_plan_panels(&f, lib).unwrap();
+        for (resolved, layout) in &planned {
             let (x, y) =
                 layout::tick_rooms(layout.plot.size(), f.theme(), lib, TickSpacing::LabelsApart);
             assert!(y.slack(&resolved.y.ticks) >= 0.0, "{:?}", layout.plot);
@@ -607,6 +617,14 @@ mod tests {
             let baselines: Vec<f64> = layout.y_tick_labels.iter().map(|l| l.y).collect();
             assert!(baselines.windows(2).all(|w| (w[0] - w[1]).abs() >= 15.0));
         }
+        // The panels whose y labels crowded for the target alone get round steps, with 0 a
+        // tick: before, 6, 8, 6 and 8 ticks one step apart.
+        let y_labels = |sensor: usize| tick_labels(&planned[sensor - 1].0.y.ticks);
+        let m = |n: &str| format!("\u{2212}{n}");
+        assert_eq!(y_labels(2), [&m("5.0"), &m("2.5"), "0.0", "2.5"]);
+        assert_eq!(y_labels(5), [&m("2"), "0", "2", "4", "6"]);
+        assert_eq!(y_labels(15), [&m("2"), "0", "2", "4"]);
+        assert_eq!(y_labels(19), [&m("6"), &m("4"), &m("2"), "0", "2"]);
     }
 
     #[test]
@@ -732,9 +750,25 @@ mod tests {
         /// One resolved axis: its domain and its ticks.
         type Axis<'a> = (Option<&'a crate::ContinuousScale>, &'a [AxisTick]);
 
+        /// Whether the values of `ticks` on the linear `scale` are round: a step of 1, 2, 2.5
+        /// or 5 times a power of ten, and every value a whole multiple of it.
+        fn is_round(scale: &crate::ContinuousScale, ticks: &[AxisTick]) -> bool {
+            let (lo, hi) = scale.domain();
+            let values: Vec<f64> = ticks.iter().map(|t| lo + t.pos.get() * (hi - lo)).collect();
+            let step = values[1] - values[0];
+            let near = |a: f64, b: f64| (a - b).abs() <= 1e-6 * b.abs().max(1.0);
+            let mantissa = step / 10f64.powf(step.log10().floor());
+            [1.0, 2.0, 2.5, 5.0, 10.0]
+                .iter()
+                .any(|&m| near(mantissa, m))
+                && values.iter().all(|v| near(v / step, (v / step).round()))
+        }
+
         /// Checks one axis: its labels keep apart, or none of its candidates could and it
-        /// fell back to a few ticks on a short axis; and ticks whose labels were apart for the
-        /// target alone stay as they were, on the same domain.
+        /// fell back to a few ticks on a short axis; ticks whose labels were apart for the
+        /// target alone stay as they were, on the same domain; and ticks chosen again on a
+        /// linear axis are round, unless they are a fallback of two ticks, or three with the
+        /// lowest moved below the data.
         fn check_axis(
             name: &str,
             room: &layout::TickRoom<'_>,
@@ -742,19 +776,29 @@ mod tests {
             old: Axis<'_>,
         ) -> std::result::Result<(), TestCaseError> {
             let ticks = new.1;
+            let linear = new
+                .0
+                .is_some_and(|scale| scale.transform() == crate::Transform::Linear);
             if room.slack(ticks) < 0.0 {
                 // The widest candidate: two ticks, or three with the lowest moved below the
-                // data, on an axis so short that the outer labels crowd a quarter of it apart.
+                // data, on a linear axis so short that the outer labels crowd a quarter of it
+                // apart. A log axis draws linear ticks unevenly, so its widest pair in value
+                // need not be the widest on screen.
                 prop_assert!(ticks.len() <= 3, "{}: {} ticks crowd", name, ticks.len());
                 let at = |tick: &AxisTick, pos: f64| AxisTick {
                     pos: NormalizedPos::new(pos),
                     label: tick.label.clone(),
                 };
                 let outer = [at(&ticks[0], 0.0), at(&ticks[ticks.len() - 1], 0.25)];
-                prop_assert!(room.slack(&outer) < 0.0, "{}: {:?}", name, ticks);
+                prop_assert!(!linear || room.slack(&outer) < 0.0, "{}: {:?}", name, ticks);
             }
             if room.slack(old.1) >= 0.0 {
                 prop_assert_eq!(new, old, "{}", name);
+            } else if let Some(scale) = new.0
+                && linear
+                && ticks.len() > 3
+            {
+                prop_assert!(is_round(scale, ticks), "{}: {:?}", name, ticks);
             }
             Ok(())
         }

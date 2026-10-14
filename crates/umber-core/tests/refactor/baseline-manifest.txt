@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: fa6042a64943a81d9be10a07fbc2caac8fcae8e4
+# revision: d6dfb765a0c39e6cd9ec610c4fa3a869078c632f
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -120,8 +120,8 @@ ab52e0141b81d4c530d253a096b39b56f7b2645319eda0ba69450bd05fa26a8d  png/fig-direct
 a83c468e5ff3e3bdf531d761d2b54a34171cdfffd94e503f710b748c439e1308  png/fig-direct-ylim-ends-off-plot.dpi72.png
 84234cd02597eec63003877144d5971b00763174051c400edf5ba718fa501923  png/fig-extreme-clipping.dpi200.png
 64006ef1ddcc695942f7fa4d075fae2ff0ffcadc06666f8b08df703aed5afa77  png/fig-extreme-clipping.dpi72.png
-f8e3e353916cc6479cd93694433defc23c64d092200aa68a3adf44ef9ac4f5f3  png/fig-font-scale-max.dpi200.png
-da3671555f21f09c64f19d8d3427aa331f04aa917ffe0a71d559c1f921df545f  png/fig-font-scale-max.dpi72.png
+2ffe300bcbe0a96fcd535eeebc2c881277140c898bffe773eb1f87d481aa9de3  png/fig-font-scale-max.dpi200.png
+96c91b529e4b5aedfbdaeb252f5543d414c3b763d105a350cac109655da6dca2  png/fig-font-scale-max.dpi72.png
 8751b62e5cf2d3cd1ace5c67e107372eaf28b4d93d9323ba3458fadf254ea2ab  png/fig-font-scale-tiny.dpi200.png
 7306e58dbcd636a33764a18f0c0584f8e08f3ba9450fe76a2e9c1059e863303f  png/fig-font-scale-tiny.dpi72.png
 864ea9b17fdaff15160607751d7c5a1bf66530ecf7d62f75094eb9b1c9f4f1e5  png/fig-graphite-empty-axes.dpi200.png
@@ -538,12 +538,12 @@ fada57b6ed87981a94dc91842d5f89a94ff45cef254975e529a46e9047a2e1c4  png/grid-3x1-m
 fb648755a15bb02955903b8099b6367b65748852488f18eacabbd6c5fa5968fb  png/grid-3x1-midnight.dpi72.png
 252d0370386df3feac819fb25d882020251330616fed7fe65f035503af579329  png/grid-3x1-pigment.dpi200.png
 c2e3b8a167558f6fbaf7fbf8b9d570b84af7c1c7ea9cf898fe607b520c7c2f49  png/grid-3x1-pigment.dpi72.png
-7076ed6225f727108bfb4f350e1436b30423b1bbe675cc3762e9ee7dcbf04396  png/grid-4x5-lines-graphite.dpi200.png
-493653f92dc9651e1b1fa1a10085e65a6cda7b350fb7bdaa060ff756f7a77819  png/grid-4x5-lines-graphite.dpi72.png
-851fc696409b1b973135533cd785401e51cdf7e79b826a6991bac4c547630fdd  png/grid-4x5-lines-midnight.dpi200.png
-8e6778c12926d6a516eb5df964ca9e4c3d3606a616e97360ecdb6cd4795c01d0  png/grid-4x5-lines-midnight.dpi72.png
-6880a1aa45ba4d4960cc5b26d7aadfec2d8c81a2a91b02652fba6d4d4736fa24  png/grid-4x5-lines-pigment.dpi200.png
-a403881a85923369677c937f18fd4f7c35541ee12490bff37ce37cb443bf6397  png/grid-4x5-lines-pigment.dpi72.png
+e70bef25277eb2eeec7fb72f5ae686be77e422c4fe3e2c2afddaa48741b1c190  png/grid-4x5-lines-graphite.dpi200.png
+3f68aa625bb9aff6edb755aa3e8fb9c676ee6e62d4a7aebad06041ab6a1e67b0  png/grid-4x5-lines-graphite.dpi72.png
+80ea8d1367f12786ac6d359dde8c5097f3a3c50ffc1ba217542a5549c00dcfa2  png/grid-4x5-lines-midnight.dpi200.png
+9fd2a5beed85d98731ff55ae2d40577eae644743a39882faae1aee88344f47d7  png/grid-4x5-lines-midnight.dpi72.png
+252b504a89678ed193d1c2d186f80f2bb69070f9d6990dd73ffeb0b0f0e8499b  png/grid-4x5-lines-pigment.dpi200.png
+e5efbe8b4cc00fc5941255f31ba8f9a5ed1be527a3799bd9ffebb901c1f0fedf  png/grid-4x5-lines-pigment.dpi72.png
 a12ed9e502cbc9b978078c6b42b3404615db11252c39593ecbb372c71a27449a  png/rules-alone.dpi200.png
 4e84d8b5744a88b99596a6f113cb31e927a8bfbb1ba283d47524dfe2118e89bd  png/rules-alone.dpi72.png
 adacb61f8250381b8c19c49ba4a1ac62a85e3d224a14be1f330d99f6bf3d9e6e  png/rules-category-added-later.dpi200.png
@@ -683,7 +683,7 @@ b52e7969855bf3adec2700b848d4cdf8135646215dd67805ccd0ed5672fd122a  scene/fig-dire
 305837e9ce4734b1b36a456319889736c730951fe6d1c437766d12bf2459b1b6  scene/fig-direct-xlim-cuts-ends.txt
 4583c0d37c954f3f43cbfabf205f93d539ab7d15a3e2b0da67f3435bd7160504  scene/fig-direct-ylim-ends-off-plot.txt
 10a89dd78d756b4205d3ebdd8fdf45c9baf95784d7cf34e1352747ff8c658db7  scene/fig-extreme-clipping.txt
-65ed9abed7b4af7b4ea2bfcaff0b2d6a8ede1e1c9985e15806eb88c6ddca9b7d  scene/fig-font-scale-max.txt
+1bb74693d2ebfa836e9fb6968a527096dce1c9bfcbeb2131c1489dc9260c4ec1  scene/fig-font-scale-max.txt
 519f8940d3f15df0ce736ab50c9b31b18fe50e8c72e4a2d52c1bf41a5238fde9  scene/fig-font-scale-tiny.txt
 f9f98e986cf8378c3f7dc6a0cf4bc510e08cfc82118697ef32c63685a1f953bb  scene/fig-graphite-empty-axes.txt
 ca5d3dcfa2c791c6e7a765e137dfea8f810ef181073dd253cb20b037f36b1929  scene/fig-graphite-line-scatter.txt
@@ -892,9 +892,9 @@ d2a545b975dafc9f12e3bd64e51711eafe8421d7ecdc5f4e6546b397ad665d6a  scene/grid-2x3
 5b3deee15e6f0f4edfddcb661ea0bb67dff6b4b20dfa99397907c03cdf788af3  scene/grid-3x1-graphite.txt
 fd6b728bdd0568c7aecd074221fa766b04bee2db3af9e0d7de9e965c1607fabc  scene/grid-3x1-midnight.txt
 38b009bba1633cd4c48551d150493fc4c6cb419df38c3d97f1a5cb262f0ade46  scene/grid-3x1-pigment.txt
-eb3ed126eba1e699bd152a35d82f59ebbf4918c34429d41554ed5eeb0e962c02  scene/grid-4x5-lines-graphite.txt
-8d8c3ab04abe849cc7cbefc358f65a2848d2ca33839637553f6b7806dc14731e  scene/grid-4x5-lines-midnight.txt
-92a179b8e9fde02d00460559e6ae19e79b56b2ca5baba8e57a25e4a3ede88f7c  scene/grid-4x5-lines-pigment.txt
+319cd939b1721c4ec3599d31a6af3c795efd7454f5cb8a172a76cfc7f86f6a1f  scene/grid-4x5-lines-graphite.txt
+164cd547d1519f7448b6442aa5bc75958cc9732cbfb28175149c8bf586588cf5  scene/grid-4x5-lines-midnight.txt
+8e07b23383590158528cc69a28540bdd0a6fcfcc59af0516287505fb2d658e22  scene/grid-4x5-lines-pigment.txt
 856356a0e49fa45ca3db62fd39f052a1b87ab3b157788ded0b09624bacc16007  scene/rules-alone.txt
 c29d47f97de66838e201aae2716eb4edc00fc18e636695349840bc1925e9af29  scene/rules-category-added-later.txt
 1ced22bb8d314fe203795cab67e005e46929a4a13d7bb580a2bd983f2c1b04ec  scene/rules-category-graphite.txt
@@ -1038,8 +1038,8 @@ b0c95266d9a858cfa674b73f3e8832f846aa5e4337f3d259639bbe264c0a4351  svg/fig-direct
 3c9de80b473f730d0f9259f6358cc4c2fef2a6154e193027d7aa688895be6c46  svg/fig-direct-ylim-ends-off-plot.outlines.svg
 b3f8e16481f4a784b106faddb96b6bcd7617924ce1f281eb149e36f42d005ebc  svg/fig-extreme-clipping.editable.svg
 19ecf7c6c189692773e5e20934161cc198dcec36cce64c4975193dc7eb8e7c3a  svg/fig-extreme-clipping.outlines.svg
-ba35456710362ac178af855498808e105b78e7de003f11fa10e3ae0cf63fa28c  svg/fig-font-scale-max.editable.svg
-f36892005272ccb1fdaf65b78a898bd53c3466dcd8d0c959a06d332393ca7b4a  svg/fig-font-scale-max.outlines.svg
+8eacd8a4dbab26ee0027be1e2354752646595fd3362c41f2474fa55cf296f53a  svg/fig-font-scale-max.editable.svg
+1501b9b9fbf6e09053fb112d62b927b247ec0ba65dd8359660fa6238719a1147  svg/fig-font-scale-max.outlines.svg
 903b7f60d0dcc41a1ca86209522e66d544dfae3d12bd2ef9debdd89bcf338e50  svg/fig-font-scale-tiny.editable.svg
 cfbc2c12b93e7213c1ae7c5504ef7ec5f2ef6ce43941c4f0073956d45ea1cb12  svg/fig-font-scale-tiny.outlines.svg
 7e25391afa99e419659829c4652864dc99e88e9f270f635bbbc04307ff7cd49b  svg/fig-graphite-empty-axes.editable.svg
@@ -1456,12 +1456,12 @@ e06a847bb03d2d353365526565f51c2154d252d3448a364f2610e759c4c8f595  svg/grid-3x1-g
 4062829c2108281936bf83c77ce45fce47bf6a8b14be89a0520feaa7622158cb  svg/grid-3x1-midnight.outlines.svg
 0e54603084226b9ae62a1933a3cf23610ad1ab7087548f09deccf995ae802da8  svg/grid-3x1-pigment.editable.svg
 395c88300de3ee1fa42bc0413e499f59f623d2c2efbd4439413c8bf48bc5bd74  svg/grid-3x1-pigment.outlines.svg
-9dda2b3b954b17abeb5b72b4f97f46820c40294e5843ac5f6605e0ebe672b41f  svg/grid-4x5-lines-graphite.editable.svg
-440e4cfaa7682be1e30a72024f1a77f85e5a3b7af92acbfd3c1aa1bd2aa41fe7  svg/grid-4x5-lines-graphite.outlines.svg
-0c9a917bcba018fc18f3596f6c04266addd8dfe8a613889e92b1803496900c7c  svg/grid-4x5-lines-midnight.editable.svg
-1ffc95827f1fcdc9a6119b5d26869686719d19f44f0290828eb9f0de4bdb2407  svg/grid-4x5-lines-midnight.outlines.svg
-bfcc27ffff70bcc23967c948c8f807a6246ff7b67fd2d283016f3faac2daefcb  svg/grid-4x5-lines-pigment.editable.svg
-fdbc50e0f73dbe9593e596fbf8a014e6314f30046bc669804ac41cbd716b3844  svg/grid-4x5-lines-pigment.outlines.svg
+acbb326dcab98c3d0de216e7e9439336653efde65aa70bd491fcee72df78a2e8  svg/grid-4x5-lines-graphite.editable.svg
+c358f5d844a05d76391ee6d895bb6a0336247159a6714b341775bbf8ec433e44  svg/grid-4x5-lines-graphite.outlines.svg
+0e289871a31c1896c4da458520533a6986910b2b3437049ad1ed7f27db05e310  svg/grid-4x5-lines-midnight.editable.svg
+f67c92be4ca49264558f2b7ffc24bbe76ba3121013a985fe3173a423ac3a7112  svg/grid-4x5-lines-midnight.outlines.svg
+b1f3e17228c4607e27e498263ca673e41957142d343d98c4512ffa4c24f66cca  svg/grid-4x5-lines-pigment.editable.svg
+c22e58422bf32211ea055c4079b5ac5a2af63957dc9e33a2fdbc9a766551a437  svg/grid-4x5-lines-pigment.outlines.svg
 0a863e579be4ecbdb92eb2f67a726314cda26c48db4a3017e7186697af8bc076  svg/rules-alone.editable.svg
 94fb95fb161e00b576b29ff8af86ac339819b744b53df6af44b65251cf576f4b  svg/rules-alone.outlines.svg
 65d5c04436b0f457be73b043be4721b98a3f6b01e41d9e21f946a81ff4479819  svg/rules-category-added-later.editable.svg
