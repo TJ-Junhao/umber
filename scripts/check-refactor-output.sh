@@ -15,10 +15,10 @@
 # Usage:
 #   scripts/check-refactor-output.sh check [--png]
 #       Compare this tree with the committed baseline manifest
-#       (crates/umber-core/tests/refactor/baseline-manifest.txt, made at b2e0207).
+#       (crates/umber-core/tests/refactor/baseline-manifest.txt).
 #       Scene, SVG and error hashes are compared by default. PNG hashes depend on the machine's
 #       floating-point and SIMD behaviour, so --png is only meaningful on the machine that
-#       generated the baseline (a macOS arm64 laptop for the committed one).
+#       generated the baseline (a Linux x86_64 host for the committed one).
 #   scripts/check-refactor-output.sh compare <git-rev> [--png|--no-png]
 #       Build the corpus at <git-rev> (a temporary worktree that gets this tree's corpus
 #       files) and at this tree, in the same environment, and compare everything including
@@ -51,8 +51,8 @@
 #      api/themes.txt or api/constants.txt, because that changes an existing hash. Each feature
 #      edits only its own module under crates/umber-core/tests/support/corpus/. Recorders may
 #      gain match arms for new marks; existing record formats do not change.
-#   3. Regenerate the manifest with `update` on the platform of the committed baseline (macOS
-#      arm64), so that its PNG lines stay meaningful, and commit it.
+#   3. Regenerate the manifest with `update` on the platform of the committed baseline (Linux
+#      x86_64), so that its PNG lines stay meaningful, and commit it.
 #   4. List the cases whose outputs change on purpose in intended-changes.txt, one name per
 #      line (blank lines and # comments are ignored), and replace the file's contents in every
 #      pull request. Everything else must stay byte-identical.
