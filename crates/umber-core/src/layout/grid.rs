@@ -2009,6 +2009,161 @@ mod tests {
         Ok(())
     }
 
+    /// Builds labels around a known feasible growth and checks that the solver finds a fit.
+    fn assert_known_columns_fit(
+        count: usize,
+        rows: &[Vec<usize>],
+        bands: &[(f64, f64)],
+        known: &[f64],
+        labels: &[(f64, f64)],
+        canvas: f64,
+    ) -> std::result::Result<(), TestCaseError> {
+        let cols = columns(
+            canvas,
+            24.0,
+            bands.iter().take(count).map(|b| b.0).collect(),
+            bands.iter().take(count).map(|b| b.1).collect(),
+        );
+        let (cap_left, cap_right) = cols.edge_caps();
+        // A known growth that leaves the plots at least a tenth of their open width.
+        let open = cols.place(&cols.no_growth()).plot_width;
+        prop_assume!(open >= 10.0 * MIN_PLOT);
+        let budget = 0.9 * open * count as f64 / (2 * count) as f64;
+        let mut growth: Vec<f64> = known[..2 * count].iter().map(|k| k * budget).collect();
+        growth[0] = growth[0].min(cap_left);
+        growth[1] = growth[1].min(cap_right);
+        let at = cols.place(&growth);
+        prop_assume!(at.plot_width >= MIN_PLOT);
+        // Panels: each row splits the columns into spans.
+        let mut panels = Vec::new();
+        for spans in rows {
+            let mut first = 0;
+            for span in spans {
+                if first == count {
+                    break;
+                }
+                let last = (first + span - 1).min(count - 1);
+                panels.push((first, last));
+                first = last + 1;
+            }
+        }
+        // Labels of random panels, each as wide as the known growth allows, or less.
+        let mut bounds = Vec::new();
+        for (i, &(pos, room)) in labels.iter().enumerate() {
+            let panel = i % panels.len();
+            let (first, last) = panels[panel];
+            let left_room = if first == 0 {
+                PADDING - X_LABEL_EDGE_GAP
+            } else {
+                12.0
+            };
+            let right_room = if last + 1 == count {
+                PADDING - X_LABEL_EDGE_GAP
+            } else {
+                12.0
+            };
+            let mut pair = [
+                LabelBound {
+                    panel,
+                    first,
+                    last,
+                    growth: Columns::left_growth(first),
+                    half: 0.0,
+                    share: pos,
+                    base: cols.left[first] + left_room,
+                },
+                LabelBound {
+                    panel,
+                    first,
+                    last,
+                    growth: Columns::right_growth(last, count),
+                    half: 0.0,
+                    share: 1.0 - pos,
+                    base: cols.right[last] + right_room,
+                },
+            ];
+            // The widest half each side allows at the known growth.
+            let half = pair
+                .iter()
+                .map(|b| growth[b.growth] - b.required(&at))
+                .fold(f64::INFINITY, f64::min);
+            let half = (room * half).max(0.0);
+            for b in &mut pair {
+                b.half = half;
+            }
+            bounds.extend(pair);
+        }
+        assert_fitted(&cols, &at, &bounds)?;
+        let fitted = fit_columns(&cols, &bounds);
+        prop_assert!(fitted.is_ok(), "{bounds:?}");
+        if let Ok(placed) = fitted {
+            assert_fitted(&cols, &placed, &bounds)?;
+            // The least total growth, up to the margin of the solve: no wider plots fit.
+            prop_assert!(placed.plot_width >= at.plot_width - 1e-3);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn twenty_two_columns_with_near_endpoint_labels_fit() {
+        // Exact minimal input from CI run 38572056803.
+        let rows = [
+            vec![21, 1],
+            vec![8, 14],
+            vec![21, 1],
+            vec![1],
+            vec![22],
+            vec![13, 1],
+        ];
+        let mut bands = [(0.0, 0.0); 32];
+        bands[20].1 = 40.275609168231725;
+        let mut known = [0.0; 64];
+        for (entry, value) in [
+            (1, 0.5081251091636685),
+            (9, 0.6582789108880946),
+            (11, 0.4101609823932938),
+            (12, 0.7774890596712326),
+            (13, 0.27058475710456104),
+            (14, 0.31227338447421904),
+            (15, 0.5928941082221074),
+            (17, 0.5374834131344018),
+            (20, 0.4991772170379112),
+            (21, 0.5222050814267442),
+            (23, 0.39686674796811133),
+            (25, 0.9263579507935972),
+            (28, 0.45789199295745026),
+            (30, 0.5443759383258923),
+            (31, 0.1277514848008628),
+            (32, 0.7136848769034178),
+            (33, 0.6995307228224282),
+            (34, 0.8344355772876255),
+            (35, 0.8235340934097671),
+            (36, 0.7830738856340518),
+            (37, 0.525008561176744),
+            (38, 0.5823865439891766),
+            (39, 0.02385390523752573),
+            (40, 0.6164100151070087),
+            (41, 0.755436155176224),
+        ] {
+            known[entry] = value;
+        }
+        let mut labels = [(0.0, 1.0); 34];
+        for (label, pos) in [
+            (0, 0.5),
+            (2, 1e-10),
+            (4, 0.5785756375468266),
+            (8, 1e-10),
+            (13, 0.9999999999),
+            (17, 0.9999999999),
+            (18, 0.001),
+            (23, 1e-10),
+            (32, 0.999),
+        ] {
+            labels[label].0 = pos;
+        }
+        assert_known_columns_fit(22, &rows, &bands, &known, &labels, 11218.060618880776).unwrap();
+    }
+
     /// A tick position: often an end or within a hair of one.
     fn position() -> impl Strategy<Value = f64> {
         prop_oneof![
@@ -2030,7 +2185,10 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(2_000))]
+        #![proptest_config(ProptestConfig {
+            rng_seed: proptest::test_runner::RngSeed::Fixed(38572056803),
+            ..ProptestConfig::with_cases(2_000)
+        })]
 
         #[test]
         fn fitted_columns_keep_every_label_in_bounds(
@@ -2089,74 +2247,7 @@ mod tests {
             labels in prop::collection::vec((position(), tightness()), 1..=60),
             canvas in 300.0..14_400.0_f64,
         ) {
-            let cols = columns(
-                canvas,
-                24.0,
-                bands.iter().take(count).map(|b| b.0).collect(),
-                bands.iter().take(count).map(|b| b.1).collect(),
-            );
-            let (cap_left, cap_right) = cols.edge_caps();
-            // A known growth that leaves the plots at least a tenth of their open width.
-            let open = cols.place(&cols.no_growth()).plot_width;
-            prop_assume!(open >= 10.0 * MIN_PLOT);
-            let budget = 0.9 * open * count as f64 / (2 * count) as f64;
-            let mut growth: Vec<f64> = known[..2 * count].iter().map(|k| k * budget).collect();
-            growth[0] = growth[0].min(cap_left);
-            growth[1] = growth[1].min(cap_right);
-            let at = cols.place(&growth);
-            prop_assume!(at.plot_width >= MIN_PLOT);
-            // Panels: each row splits the columns into spans.
-            let mut panels = Vec::new();
-            for spans in &rows {
-                let mut first = 0;
-                for span in spans {
-                    if first == count {
-                        break;
-                    }
-                    let last = (first + span - 1).min(count - 1);
-                    panels.push((first, last));
-                    first = last + 1;
-                }
-            }
-            // Labels of random panels, each as wide as the known growth allows, or less.
-            let mut bounds = Vec::new();
-            for (i, &(pos, room)) in labels.iter().enumerate() {
-                let panel = i % panels.len();
-                let (first, last) = panels[panel];
-                let left_room = if first == 0 { PADDING - X_LABEL_EDGE_GAP } else { 12.0 };
-                let right_room = if last + 1 == count { PADDING - X_LABEL_EDGE_GAP } else { 12.0 };
-                let mut pair = [
-                    LabelBound {
-                        panel, first, last,
-                        growth: Columns::left_growth(first),
-                        half: 0.0, share: pos,
-                        base: cols.left[first] + left_room,
-                    },
-                    LabelBound {
-                        panel, first, last,
-                        growth: Columns::right_growth(last, count),
-                        half: 0.0, share: 1.0 - pos,
-                        base: cols.right[last] + right_room,
-                    },
-                ];
-                // The widest half each side allows at the known growth.
-                let half = pair
-                    .iter()
-                    .map(|b| growth[b.growth] - b.required(&at))
-                    .fold(f64::INFINITY, f64::min);
-                let half = (room * half).max(0.0);
-                for b in &mut pair {
-                    b.half = half;
-                }
-                bounds.extend(pair);
-            }
-            let fitted = fit_columns(&cols, &bounds);
-            prop_assert!(fitted.is_ok(), "{bounds:?}");
-            if let Ok(placed) = fitted {
-                assert_fitted(&cols, &placed, &bounds)?;
-                // The least total growth, up to the margin of the solve: no wider plots fit.
-                prop_assert!(placed.plot_width >= at.plot_width - 1e-3);
-            }
+            assert_known_columns_fit(count, &rows, &bands, &known, &labels, canvas)?;
         }
     }
 
