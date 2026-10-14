@@ -105,6 +105,7 @@ pub(crate) fn marks(
                 mark: line_mark,
                 color,
                 width,
+                ..
             } => {
                 let (xs, ys) = line::line_points(&context, resolved, line_mark);
                 let style = line::line_style(width, color, line_mark.options().dash);
@@ -114,6 +115,7 @@ pub(crate) fn marks(
                 mark: area_mark,
                 color,
                 width,
+                ..
             } => {
                 let (xs, ys) = line::line_points(&context, resolved, area_mark.line());
                 let style = line::line_style(width, color, area_mark.options().dash);
@@ -123,6 +125,7 @@ pub(crate) fn marks(
                 mark: scatter_mark,
                 color,
                 size,
+                ..
             } => {
                 let xs = axis_x(&resolved.x, scatter_mark.x());
                 let ys = axis_y(&resolved.y, scatter_mark.y());
@@ -134,6 +137,7 @@ pub(crate) fn marks(
             ResolvedMark::Bar {
                 mark: bar_mark,
                 color,
+                ..
             } => {
                 bar::bar_items(
                     &context,
@@ -147,6 +151,7 @@ pub(crate) fn marks(
             ResolvedMark::Grouped {
                 mark: group_mark,
                 ref series,
+                ..
             } => {
                 bar::grouped_items(
                     &context,
@@ -161,6 +166,7 @@ pub(crate) fn marks(
                 mark: stack_mark,
                 ref series,
                 ref stacks,
+                ..
             } => {
                 bar::stacked_items(
                     &context,
@@ -177,6 +183,7 @@ pub(crate) fn marks(
                 ref series,
                 ref stacks,
                 width,
+                ..
             } => {
                 stacked_area::stacked_area_items(
                     &context, resolved, mark, series, stacks, width, &mut items,
@@ -202,12 +209,14 @@ pub(crate) fn marks(
                 mark: step_mark,
                 color,
                 width,
+                ..
             } => {
                 step::step_items(&context, resolved, step_mark, (color, width), &mut items);
             }
             ResolvedMark::Band {
                 mark: band_mark,
                 color,
+                ..
             } => {
                 band::band_items(&context, resolved, band_mark, color, &mut items);
             }
@@ -215,6 +224,7 @@ pub(crate) fn marks(
                 mark: bars_mark,
                 color,
                 width,
+                ..
             } => {
                 error_bars::error_bar_items(
                     &context,
@@ -228,6 +238,7 @@ pub(crate) fn marks(
                 mark: stem_mark,
                 color,
                 size,
+                ..
             } => {
                 stem::stem_items(&context, resolved, stem_mark, (color, size), &mut items);
             }

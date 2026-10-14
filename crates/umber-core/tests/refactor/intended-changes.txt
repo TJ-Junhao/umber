@@ -1,5 +1,2 @@
-# The wide top panel keeps its x tick labels: the narrower panels below do not
-# cover exactly the same columns. Tick fitting and layout may change with them.
-share-span-graphite
-share-span-midnight
-share-span-pigment
+# Legend positions add outputs; existing outputs at origin/main stay unchanged.
+# Bottom alignment and DIRECT spelling only change the new legend-position cases.

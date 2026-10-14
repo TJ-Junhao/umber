@@ -17,7 +17,10 @@ use std::time::Duration;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use umber_core::figure::{AxisData, HistOptions, LineOptions, ScatterOptions};
 use umber_core::render::{SvgText, render_png, render_svg};
-use umber_core::{Figure, FontLibrary, LegendStyle, ScaleKind, Theme};
+use umber_core::{
+    AreaOptions, BandOptions, Figure, FontLibrary, LegendPosition, LegendStyle, ScaleKind, Series,
+    Theme,
+};
 
 const DPI: u32 = 200;
 
@@ -213,5 +216,88 @@ fn benches(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(render, benches);
+/// Best scans the final drawn geometry; stacked areas retain more vertices than a line.
+fn legend_benches(c: &mut Criterion) {
+    let library = FontLibrary::global();
+    let mut group = c.benchmark_group("legend_position");
+    group.sample_size(10);
+    group.warm_up_time(Duration::from_millis(500));
+    group.measurement_time(Duration::from_secs(5));
+    for (kind, n) in [
+        ("line_1m", 1_000_000),
+        ("area_1m", 1_000_000),
+        ("band_1m", 1_000_000),
+        ("stacked_area_3x100k", 100_000),
+    ] {
+        let x = xs(n);
+        let y = wave(n);
+        for (name, position) in [
+            ("top_left", LegendPosition::TopLeft),
+            ("best", LegendPosition::Best),
+        ] {
+            let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+            let mut axes = figure
+                .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap();
+            axes.legend_at(LegendStyle::Header, position).unwrap();
+            match kind {
+                "line_1m" => {
+                    axes.line(
+                        AxisData::Numbers(x.clone()),
+                        &y,
+                        LineOptions {
+                            label: "Signal".into(),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                "area_1m" => {
+                    axes.area(
+                        AxisData::Numbers(x.clone()),
+                        &y,
+                        AreaOptions {
+                            label: "Signal".into(),
+                            ..AreaOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                "band_1m" => {
+                    let upper: Vec<_> = y.iter().map(|v| v + 2.0).collect();
+                    axes.band(
+                        &x,
+                        &y,
+                        &upper,
+                        BandOptions {
+                            label: "Signal".into(),
+                            ..BandOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                "stacked_area_3x100k" => {
+                    axes.stacked_area(
+                        &x,
+                        (0..3)
+                            .map(|k| Series {
+                                label: format!("Layer {k}"),
+                                values: y.iter().map(|v| v + 12.0 + k as f64).collect(),
+                                ..Series::default()
+                            })
+                            .collect(),
+                    )
+                    .unwrap();
+                }
+                _ => unreachable!(),
+            }
+            group.bench_function(format!("{kind}_{name}_scene"), |b| {
+                b.iter(|| black_box(figure.to_scene(library).unwrap()));
+            });
+        }
+    }
+    group.finish();
+}
+
+criterion_group!(render, benches, legend_benches);
 criterion_main!(render);

@@ -94,6 +94,7 @@ mod corpus {
     pub mod hist;
     pub mod inputs;
     pub mod legend;
+    pub mod legend_position;
     pub mod plot_height;
     pub mod rules;
     pub mod share;
@@ -146,6 +147,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::hist::cases(&lib, &mut sink);
     corpus::inputs::cases(&lib, &mut sink);
     corpus::legend::cases(&lib, &mut sink);
+    corpus::legend_position::cases(&lib, &mut sink);
     corpus::size::cases(&lib, &mut sink);
     corpus::ticks::cases(&lib, &mut sink);
     corpus::x_end_label::cases(&lib, &mut sink);
