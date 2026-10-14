@@ -22,13 +22,15 @@ while IFS= read -r line; do
   fi
 done <"$script"
 in_corpus=0
+modules=0
 while IFS= read -r line; do
   if [[ "$line" == 'mod corpus {' ]]; then
     in_corpus=1
   elif [[ "$in_corpus" -eq 1 && "$line" == '}' ]]; then
     in_corpus=0
-  elif [[ "$in_corpus" -eq 1 && "$line" =~ ^[[:space:]]*pub[[:space:]]+mod[[:space:]]+([a-zA-Z_][a-zA-Z_0-9]*)\; ]]; then
-    module="${BASH_REMATCH[1]}"
+  elif [[ "$in_corpus" -eq 1 && "$line" =~ ^[[:space:]]*(pub[[:space:]]+)?mod[[:space:]]+([a-zA-Z_][a-zA-Z_0-9]*)\; ]]; then
+    module="${BASH_REMATCH[2]}"
+    modules=$((modules + 1))
     path="crates/umber-core/tests/support/corpus/$module.rs"
     found=0
     for file in "${driver_files[@]}"; do
@@ -42,6 +44,10 @@ while IFS= read -r line; do
     fi
   fi
 done <"$root/crates/umber-core/tests/support/refactor_cases.rs"
+if [[ "${#driver_files[@]}" -eq 0 || "$modules" -eq 0 ]]; then
+  printf 'FAIL could not read driver_files (%s entries) or the corpus modules (%s)\n' "${#driver_files[@]}" "$modules" >&2
+  failures=$((failures + 1))
+fi
 # The driver list can be checked without constructing the command-line fixtures below.
 if [[ "${1:-}" == --drivers-only ]]; then exit "$failures"; fi
 
