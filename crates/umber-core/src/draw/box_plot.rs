@@ -81,7 +81,7 @@ fn box_group(
             path.line_to(context.maps.to_plot(b).to_scene());
         }
     };
-    if stats.low_whisker != stats.high_whisker {
+    if stats.q1 != stats.q3 {
         for (quartile, whisker) in [(q1, y(stats.low_whisker)), (q3, y(stats.high_whisker))] {
             segment(&mut outline, (center, quartile), (center, whisker));
             segment(

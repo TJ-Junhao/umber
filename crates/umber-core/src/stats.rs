@@ -27,9 +27,9 @@ pub(crate) struct BoxStats {
     pub median: f64,
     /// The upper quartile.
     pub q3: f64,
-    /// The smallest value inside the fences.
+    /// The smaller of q1 and the smallest sample at or above the lower fence.
     pub low_whisker: f64,
-    /// The largest value inside the fences.
+    /// The larger of q3 and the largest sample at or below the upper fence.
     pub high_whisker: f64,
     /// Values outside the fences, in sorted order, including repeats.
     pub outliers: Vec<f64>,
@@ -54,8 +54,8 @@ pub(crate) fn box_stats(values: &[f64]) -> Option<BoxStats> {
         q1,
         median,
         q3,
-        low_whisker: sorted[first],
-        high_whisker: sorted[after - 1],
+        low_whisker: sorted[first].min(q1),
+        high_whisker: sorted[after - 1].max(q3),
         outliers: sorted[..first]
             .iter()
             .chain(&sorted[after..])
@@ -78,6 +78,21 @@ mod tests {
         let stats = box_stats(&[-6.0, 0.0, 0.0, 2.0, 4.0, 4.0, 10.0]).unwrap();
         assert_eq!((stats.low_whisker, stats.high_whisker), (-6.0, 10.0));
         assert!(stats.outliers.is_empty());
+    }
+
+    #[test]
+    fn whiskers_are_clamped_to_quartiles() {
+        for (values, q1, median, q3, outlier) in [
+            ([0.0, 100.0, 100.0, 100.0], 75.0, 100.0, 100.0, 0.0),
+            ([0.0, 0.0, 0.0, 100.0], 0.0, 0.0, 25.0, 100.0),
+            ([0.0, 90.0, 100.0, 100.0], 67.5, 95.0, 100.0, 0.0),
+            ([0.0, 0.0, 10.0, 100.0], 0.0, 5.0, 32.5, 100.0),
+        ] {
+            let stats = box_stats(&values).unwrap();
+            assert_eq!((stats.q1, stats.median, stats.q3), (q1, median, q3));
+            assert_eq!((stats.low_whisker, stats.high_whisker), (q1, q3));
+            assert_eq!(stats.outliers, [outlier]);
+        }
     }
 
     #[test]

@@ -99,6 +99,64 @@ fn box_geometry_matches_the_theme_ratios() {
 }
 
 #[test]
+fn boxes_with_inliers_inside_the_box_keep_their_geometry() {
+    for (samples, q1, median, q3, outlier) in [
+        ([0.0, 100.0, 100.0, 100.0], 75.0, 100.0, 100.0, 0.0),
+        ([0.0, 0.0, 0.0, 100.0], 0.0, 0.0, 25.0, 100.0),
+        ([0.0, 90.0, 100.0, 100.0], 67.5, 95.0, 100.0, 0.0),
+        ([0.0, 0.0, 10.0, 100.0], 0.0, 5.0, 32.5, 100.0),
+    ] {
+        let mut f = figure(Theme::pigment(), ScaleKind::Linear);
+        f.single_axes_mut()
+            .ylim(-10.0, 110.0)
+            .unwrap()
+            .box_plot(
+                vec!["A".into()],
+                vec![samples.to_vec()],
+                BoxOptions::default(),
+            )
+            .unwrap();
+        let plot = plot_of(&f);
+        let y = |value: f64| plot.bottom() - (value + 10.0) / 120.0 * plot.height;
+        let drawn = items(&f);
+        let [
+            Item::Fill { path: fill, .. },
+            Item::Stroke { path: outline, .. },
+            Item::Stroke { path: line, .. },
+            Item::Markers { positions, .. },
+        ] = drawn.as_slice()
+        else {
+            panic!("fill, outline, median and outlier expected: {drawn:?}")
+        };
+        let (a, b) = fill.bounds().unwrap();
+        near(f64::from(a.y), y(q3));
+        near(f64::from(b.y), y(q1));
+        near(f64::from(b.x - a.x), plot.width * 0.5);
+        let segments = subpaths(outline);
+        assert_eq!(segments.len(), 5);
+        assert_eq!(segments[4], subpaths(fill)[0]);
+        // Both stems and their caps stay on the box edges, never in its interior.
+        for (segment, quartile) in segments[..4].iter().zip([q1, q1, q3, q3]) {
+            for point in segment {
+                near(f64::from(point.y), y(quartile));
+            }
+        }
+        let median_line = subpaths(line);
+        assert_eq!(median_line.len(), 1);
+        for point in &median_line[0] {
+            near(f64::from(point.y), y(median));
+        }
+        near(
+            f64::from(median_line[0][1].x - median_line[0][0].x),
+            plot.width * 0.5,
+        );
+        assert_eq!(positions.len(), 1);
+        near(f64::from(positions[0].x), plot.x + plot.width * 0.5);
+        near(f64::from(positions[0].y), y(outlier));
+    }
+}
+
+#[test]
 fn boxes_include_whiskers_and_outliers_without_forcing_zero() {
     for sign in [-1.0, 1.0] {
         let mut f = figure(Theme::pigment(), ScaleKind::Linear);

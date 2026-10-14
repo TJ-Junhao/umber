@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 0de909451c67885a5ffef8f5024bc824de29e691
+# revision: 63b4f11ca2593ef71bbdea827cb118d97144e18f
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 e56c73176662595cd3ef79573282c24d9f1ed87891c0bc128adf8df5c8d02f86  api/constants-error-bars.txt

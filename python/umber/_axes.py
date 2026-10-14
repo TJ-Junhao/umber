@@ -742,11 +742,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> "Axes[str, float]":
         """Add a box plot for each category, ignoring NaN samples.
 
-        Quartiles use linear interpolation (Hyndman-Fan type 7, NumPy's default). Whiskers
-        reach the most extreme samples within 1.5 times the interquartile range of the
-        quartiles; samples beyond them are outliers. Empty groups draw nothing; a constant
-        group draws only its median. The y domain includes whiskers and outliers. Boxes
-        occupy half of each category band and use the theme's area opacity.
+        Quartiles use linear interpolation (Hyndman-Fan type 7, NumPy's default). The fences
+        lie 1.5 times the interquartile range beyond the quartiles; samples outside them are
+        outliers. Whiskers reach the most extreme samples inside the fences, clamped to the
+        quartiles so they never extend into the box. Empty groups draw nothing; when the
+        quartiles coincide, only the median and any outliers are drawn. The y domain
+        includes whiskers and outliers. Boxes occupy half of each category band and use
+        the theme's area opacity.
 
         Args:
             categories: The category names, each appearing once.
