@@ -5,6 +5,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `line.py`: two lines with labels, a title, a subtitle and axis labels.
 - `scatter.py`: two point clouds with different markers and sizes.
 - `area.py`: an area chart with the gradient fill style.
+- `stacked_area.py`: renewable generation in three stacked layers, outlined over flat fills.
 - `step.py`: step lines in the three positions.
 - `reference_lines.py`: a threshold, an event, a normal range and a window over a line.
 - `band.py`: a mean line over its 95% interval band.

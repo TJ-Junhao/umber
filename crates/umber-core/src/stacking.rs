@@ -128,6 +128,40 @@ impl Stacks {
     }
 }
 
+/// The cumulative upper curves of non-negative area layers, in series order.
+/// Unlike bars, a gap in any series breaks every curve at the same x.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AreaStacks {
+    /// One cumulative curve per series, each as long as x.
+    curves: Vec<Box<[f64]>>,
+}
+
+impl AreaStacks {
+    /// Stacks validated non-negative series over x, using the same sums as validation.
+    pub(crate) fn new(x: &[f64], series: &[&[f64]]) -> AreaStacks {
+        let mut curves: Vec<_> = series
+            .iter()
+            .map(|_| vec![f64::NAN; x.len()].into_boxed_slice())
+            .collect();
+        for (i, &x) in x.iter().enumerate() {
+            if x.is_nan() || series.iter().any(|values| values[i].is_nan()) {
+                continue;
+            }
+            let mut total = Totals::default();
+            for (curve, values) in curves.iter_mut().zip(series) {
+                total.push(values[i]);
+                curve[i] = total.positive();
+            }
+        }
+        AreaStacks { curves }
+    }
+
+    /// Every cumulative upper curve, in series order.
+    pub(crate) fn curves(&self) -> &[Box<[f64]>] {
+        &self.curves
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

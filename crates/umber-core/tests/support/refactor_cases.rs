@@ -96,6 +96,7 @@ mod corpus {
     pub mod plot_height;
     pub mod rules;
     pub mod size;
+    pub mod stacked_area;
     pub mod step;
     pub mod ticks;
     pub mod x_end_label;
@@ -151,6 +152,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::rules::cases(&lib, &mut sink);
     corpus::band::cases(&lib, &mut sink);
     corpus::error_bars::cases(&lib, &mut sink);
+    corpus::stacked_area::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1715,6 +1717,19 @@ mod record {
                 floats64(&[span.high()]),
                 text(&span.options().label),
                 color_spec(span.options().color)
+            ),
+            Mark::StackedArea(mark) => format!(
+                "stacked-area x={} series=[{}]",
+                floats64(mark.x()),
+                mark.series()
+                    .map(|s| format!(
+                        "label={} values={} color={}",
+                        text(s.label()),
+                        floats64(s.values()),
+                        color_spec(s.color())
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
             Mark::Band(band) => format!(
                 "band x={} low={} high={} label={} color={}",

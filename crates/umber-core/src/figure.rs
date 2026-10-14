@@ -23,6 +23,7 @@
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
+pub use crate::model::StackedAreaMark;
 pub use crate::model::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,

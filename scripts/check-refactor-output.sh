@@ -91,6 +91,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/plot_height.rs
   crates/umber-core/tests/support/corpus/rules.rs
   crates/umber-core/tests/support/corpus/size.rs
+  crates/umber-core/tests/support/corpus/stacked_area.rs
   crates/umber-core/tests/support/corpus/step.rs
   crates/umber-core/tests/support/corpus/ticks.rs
   crates/umber-core/tests/support/corpus/x_end_label.rs

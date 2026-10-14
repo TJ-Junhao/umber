@@ -30,6 +30,7 @@
 use crate::binning::Histogram;
 use crate::error::quoted;
 use crate::layout::TickRoom;
+use crate::model::StackedAreaMark;
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
     Mark, ScatterMark, SeriesView, StepMark,
@@ -38,7 +39,7 @@ use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark
 use crate::model::{Edge, holds};
 use crate::model::{ErrorBarMark, ErrorBarOrientation};
 use crate::scale::{Finish, Padding, TickJudge, is_single_value, log_offset};
-use crate::stacking::Stacks;
+use crate::stacking::{AreaStacks, Stacks};
 use crate::tick_format::TickFormat;
 use crate::ticks::{AutoTicks, TickValues};
 use crate::{
@@ -589,7 +590,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Bar(mark) => mark.categories(),
         Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
-        Mark::Band(_) => &[],
+        Mark::Band(_) | Mark::StackedArea(_) => &[],
         Mark::ErrorBars(mark) => category_names(mark.positions()),
     }
 }
@@ -768,6 +769,17 @@ pub(crate) enum ResolvedMark<'a> {
         /// categories and series.
         stacks: Stacks,
     },
+    /// Non-negative area layers, filled between cumulative curves.
+    StackedArea {
+        /// The mark.
+        mark: &'a StackedAreaMark,
+        /// Each series and its resolved color, in stacking order.
+        series: Box<[(SeriesView<'a>, Rgba)]>,
+        /// The cumulative upper curves, with gaps shared across all layers.
+        stacks: AreaStacks,
+        /// The width of every upper outline, in points.
+        width: f32,
+    },
     /// A histogram mark.
     Hist {
         /// The mark.
@@ -851,6 +863,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::VLine { mark, .. } => mark.x_numbers(),
             ResolvedMark::VSpan { mark, .. } => mark.bounds(),
             ResolvedMark::Band { mark, .. } => mark.x(),
+            ResolvedMark::StackedArea { mark, .. } => mark.x(),
             ResolvedMark::ErrorBars { mark, .. } => match mark.orientation() {
                 ErrorBarOrientation::Vertical => numbers(mark.positions()),
                 // The limits of horizontal bars are x values.
@@ -895,7 +908,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
-            | ResolvedMark::Band { .. } => &[],
+            | ResolvedMark::Band { .. }
+            | ResolvedMark::StackedArea { .. } => &[],
         }
         .iter()
         .map(String::as_str)
@@ -941,6 +955,14 @@ impl<'a> ResolvedMark<'a> {
                         .flat_map(|(view, _)| view.values().iter().copied()),
                 ));
             }
+            ResolvedMark::StackedArea { stacks, .. } => {
+                return DomainValues::Computed(Box::new(
+                    stacks
+                        .curves()
+                        .iter()
+                        .flat_map(|curve| curve.iter().copied()),
+                ));
+            }
             ResolvedMark::Stacked { stacks, series, .. } => {
                 let zeros = series
                     .iter()
@@ -978,7 +1000,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
-            | ResolvedMark::Hist { .. } => true,
+            | ResolvedMark::Hist { .. }
+            | ResolvedMark::StackedArea { .. } => true,
         }
     }
 
@@ -990,7 +1013,8 @@ impl<'a> ResolvedMark<'a> {
         match *self {
             ResolvedMark::Line { width, .. }
             | ResolvedMark::Area { width, .. }
-            | ResolvedMark::Step { width, .. } => Some(width),
+            | ResolvedMark::Step { width, .. }
+            | ResolvedMark::StackedArea { width, .. } => Some(width),
             ResolvedMark::Scatter { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
@@ -1022,6 +1046,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::Hist { .. }
             | ResolvedMark::Step { .. }
+            | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. } => false,
         }
@@ -1072,6 +1097,24 @@ impl<'a> ResolvedMark<'a> {
                     color,
                     kind: SeriesKind::Bar,
                     anchor: None,
+                })
+                .collect(),
+            ResolvedMark::StackedArea {
+                mark,
+                series,
+                stacks,
+                width,
+            } => series
+                .iter()
+                .zip(stacks.curves())
+                .map(|(&(view, color), curve)| SeriesKey {
+                    label: view.label(),
+                    color,
+                    kind: SeriesKind::Line {
+                        dash: Dash::Solid,
+                        width: *width,
+                    },
+                    anchor: Anchor::of_numbers(mark.x(), curve, limits),
                 })
                 .collect(),
             &ResolvedMark::Hist { mark, color, .. } => vec![SeriesKey {
@@ -1258,47 +1301,7 @@ impl<'a> Anchor<'a> {
     fn of_line(line: &'a LineMark, limits: &Limits) -> Option<Anchor<'a>> {
         let y = line.y();
         match line.x() {
-            AxisData::Numbers(xs) => {
-                let range = match limits.x {
-                    AxisLimits::Continuous(ContinuousLimits {
-                        transform,
-                        explicit: Some(scale),
-                        ..
-                    }) => Some((transform, scale.domain())),
-                    AxisLimits::Continuous(ContinuousLimits { explicit: None, .. })
-                    | AxisLimits::Category => None,
-                };
-                let inside = |x: f64| range.is_none_or(|(_, (lo, hi))| lo <= x && x <= hi);
-                let last = xs
-                    .iter()
-                    .zip(y)
-                    .rposition(|(&x, &y)| x.is_finite() && y.is_finite() && inside(x))?;
-                let point = Anchor {
-                    x: AnchorX::Number(xs[last]),
-                    y: y[last],
-                    end: EndKind::Point,
-                };
-                let (Some((x_transform, (_, hi))), Some(&next_x), Some(&next_y)) =
-                    (range, xs.get(last + 1), y.get(last + 1))
-                else {
-                    return Some(point);
-                };
-                let leaves = xs[last] < hi && next_x > hi;
-                if !(leaves && next_x.is_finite() && next_y.is_finite()) {
-                    return Some(point);
-                }
-                let crossing = crossing_at(
-                    (x_transform, limits.y.transform),
-                    (xs[last], y[last]),
-                    (next_x, next_y),
-                    hi,
-                );
-                Some(Anchor {
-                    x: AnchorX::Number(hi),
-                    y: crossing,
-                    end: EndKind::Edge,
-                })
-            }
+            AxisData::Numbers(xs) => Self::of_numbers(xs, y, limits),
             AxisData::Categories(names) => names
                 .iter()
                 .zip(y)
@@ -1310,6 +1313,50 @@ impl<'a> Anchor<'a> {
                     end: EndKind::Point,
                 }),
         }
+    }
+
+    /// The anchor of a numeric line or a stacked area's cumulative upper curve. Numeric
+    /// anchors own their coordinates, so they need not borrow the computed curve.
+    fn of_numbers(xs: &[f64], y: &[f64], limits: &Limits) -> Option<Anchor<'a>> {
+        let range = match limits.x {
+            AxisLimits::Continuous(ContinuousLimits {
+                transform,
+                explicit: Some(scale),
+                ..
+            }) => Some((transform, scale.domain())),
+            AxisLimits::Continuous(ContinuousLimits { explicit: None, .. })
+            | AxisLimits::Category => None,
+        };
+        let inside = |x: f64| range.is_none_or(|(_, (lo, hi))| lo <= x && x <= hi);
+        let last = xs
+            .iter()
+            .zip(y)
+            .rposition(|(&x, &y)| x.is_finite() && y.is_finite() && inside(x))?;
+        let point = Anchor {
+            x: AnchorX::Number(xs[last]),
+            y: y[last],
+            end: EndKind::Point,
+        };
+        let (Some((x_transform, (_, hi))), Some(&next_x), Some(&next_y)) =
+            (range, xs.get(last + 1), y.get(last + 1))
+        else {
+            return Some(point);
+        };
+        let leaves = xs[last] < hi && next_x > hi;
+        if !(leaves && next_x.is_finite() && next_y.is_finite()) {
+            return Some(point);
+        }
+        let crossing = crossing_at(
+            (x_transform, limits.y.transform),
+            (xs[last], y[last]),
+            (next_x, next_y),
+            hi,
+        );
+        Some(Anchor {
+            x: AnchorX::Number(hi),
+            y: crossing,
+            end: EndKind::Edge,
+        })
     }
 
     /// The anchor of `step`: where the step line as drawn ends. The line is the holds of
@@ -1543,6 +1590,19 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
                     mark,
                     stacks: Stacks::new(mark.categories().len(), &heights),
                     series,
+                }
+            }
+            Mark::StackedArea(mark) => {
+                let series: Box<[_]> = mark
+                    .series()
+                    .map(|view| (view, color_of(view.color())))
+                    .collect();
+                let values: Vec<&[f64]> = series.iter().map(|(view, _)| view.values()).collect();
+                ResolvedMark::StackedArea {
+                    mark,
+                    stacks: AreaStacks::new(mark.x(), &values),
+                    series,
+                    width: theme.drawn_line_width(crate::SizeSpec::Auto),
                 }
             }
             Mark::Hist(mark) => ResolvedMark::Hist {
@@ -4279,6 +4339,98 @@ mod tests {
         let resolved = resolve_marks(marks, &Theme::pigment());
         let expected: Vec<&str> = resolved.iter().flat_map(|m| m.x_categories()).collect();
         assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn stacked_areas_include_zero_and_keep_exact_x_extent() {
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .stacked_area(
+                &[3.5, 8.5],
+                vec![
+                    Series {
+                        values: vec![2.0, 3.0],
+                        ..Series::default()
+                    },
+                    Series {
+                        values: vec![4.0, 5.0],
+                        ..Series::default()
+                    },
+                ],
+            )
+            .unwrap();
+        let (x, y) = domains(&f);
+        assert_eq!(x, (3.5, 8.5));
+        assert_eq!(y.0, 0.0);
+        assert!(y.1 >= 8.0);
+        axes(&mut f).xlim(4.0, 7.0).unwrap().ylim(2.0, 6.0).unwrap();
+        assert_eq!(domains(&f), ((4.0, 7.0), (2.0, 6.0)));
+
+        let mut f = figure(LIN, ScaleKind::Log { base: LogBase::TEN });
+        axes(&mut f)
+            .stacked_area(
+                &[1.0, 2.0],
+                vec![
+                    Series {
+                        values: vec![10.0, 20.0],
+                        ..Series::default()
+                    },
+                    Series {
+                        values: vec![20.0, 30.0],
+                        ..Series::default()
+                    },
+                ],
+            )
+            .unwrap();
+        let y = domains(&f).1;
+        assert!(y.0 > 0.0 && y.0 <= 10.0 && y.1 >= 50.0);
+    }
+
+    #[test]
+    fn stacked_area_auto_colors_follow_other_series_and_skip_fixed_colors() {
+        let theme = Theme::graphite();
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .line(nums(&[0.0, 1.0]), &[1.0, 2.0], LineOptions::default())
+            .unwrap()
+            .stacked_area(
+                &[0.0, 1.0],
+                vec![
+                    Series {
+                        values: vec![1.0, 2.0],
+                        ..Series::default()
+                    },
+                    Series {
+                        values: vec![2.0, 3.0],
+                        color: ColorSpec::Fixed(Rgba::opaque(1, 2, 3)),
+                        ..Series::default()
+                    },
+                    Series {
+                        values: vec![3.0, 4.0],
+                        ..Series::default()
+                    },
+                ],
+            )
+            .unwrap()
+            .area(nums(&[0.0, 1.0]), &[1.0, 2.0], AreaOptions::default())
+            .unwrap();
+        let marks = resolve_marks(f.single_axes().marks(), &theme);
+        let keys: Vec<_> = marks
+            .iter()
+            .flat_map(|mark| mark.keys(&Limits::of(f.single_axes())))
+            .collect();
+        let colors: Vec<_> = keys.iter().map(|key| key.color).collect();
+        assert_eq!(
+            colors,
+            [
+                theme.palette()[0],
+                theme.palette()[1],
+                Rgba::opaque(1, 2, 3),
+                theme.palette()[2],
+                theme.palette()[3]
+            ]
+        );
+        assert_eq!(keys[1].kind, keys[4].kind);
     }
 
     /// A figure of linear axes holding one labelled band over `x` between `low` and `high`.

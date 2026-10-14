@@ -19,6 +19,7 @@ mod grid;
 mod hist;
 mod mark;
 mod rule;
+mod stacked_area;
 mod step;
 mod ticks;
 mod validation;
@@ -34,6 +35,7 @@ pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement
 pub use hist::{HistMark, HistOptions};
 pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 pub use rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+pub use stacked_area::StackedAreaMark;
 pub(crate) use step::{Edge, holds};
 pub use step::{Step, StepMark, StepOptions};
 pub(crate) use ticks::AxisTicks;

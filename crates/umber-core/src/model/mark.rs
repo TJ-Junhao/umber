@@ -8,6 +8,7 @@ use super::bar::{BarGroupMark, BarMark};
 use super::error_bars::ErrorBarMark;
 use super::hist::HistMark;
 use super::rule::{HLineMark, SpanMark, VLineMark};
+use super::stacked_area::StackedAreaMark;
 use super::step::StepMark;
 use crate::{ColorSpec, Dash, Marker, SizeSpec};
 
@@ -112,6 +113,7 @@ impl Default for ScatterOptions {
 /// [`AxesMut::scatter`](super::AxesMut::scatter), [`AxesMut::area`](super::AxesMut::area),
 /// [`AxesMut::bar`](super::AxesMut::bar), [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar),
 /// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar),
+/// [`AxesMut::stacked_area`](super::AxesMut::stacked_area),
 /// [`AxesMut::hist`](super::AxesMut::hist), [`AxesMut::step`](super::AxesMut::step),
 /// [`AxesMut::hline`](super::AxesMut::hline), [`AxesMut::vline`](super::AxesMut::vline),
 /// [`AxesMut::hspan`](super::AxesMut::hspan), [`AxesMut::vspan`](super::AxesMut::vspan),
@@ -119,7 +121,7 @@ impl Default for ScatterOptions {
 /// and [`AxesMut::x_error_bars`](super::AxesMut::x_error_bars),
 /// which validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
 /// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`], [`HLineMark`], [`VLineMark`],
-/// [`SpanMark`], [`BandMark`], [`ErrorBarMark`]) that keeps the validated values
+/// [`SpanMark`], [`BandMark`], [`StackedAreaMark`], [`ErrorBarMark`]) that keeps the validated values
 /// together and exposes them read-only; it has no
 /// public constructor. Read a mark by matching on its variant.
 ///
@@ -183,6 +185,9 @@ pub enum Mark {
     /// One stack per category, its series stacked in order, positive heights upward and
     /// negative ones downward from the baseline; NaN and 0 add no segment.
     StackedBar(BarGroupMark),
+    /// Non-negative series stacked in order, filled flat and outlined on top; a NaN in any
+    /// series breaks every layer.
+    StackedArea(StackedAreaMark),
     /// The values counted in equal-width bins, one bar per bin from the baseline to its count;
     /// NaN is ignored and an empty bin draws nothing.
     Hist(HistMark),
