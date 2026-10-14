@@ -226,13 +226,14 @@ def require_text(context: str, name: str, value: object) -> None:
         raise _wrong_type(context, name, value, "a str", _TEXT_HINT)
 
 
-def text(context: str, name: str, value: object) -> str:
+def text(context: str, name: str, value: object, *, hint: str = _TEXT_HINT) -> str:
     """Check a text argument, such as a title or a label, and return it as a plain ``str``.
 
     Args:
         context: The API call, such as ``"Axes.title()"``.
         name: The parameter name.
         value: The value passed. ``str`` subclasses are accepted.
+        hint: The hint for a value of another type.
 
     Returns:
         The text as a plain ``str``.
@@ -253,11 +254,11 @@ def text(context: str, name: str, value: object) -> str:
         Axes.title(): text is int; text must be a str.
     """
     if not isinstance(value, str):
-        raise _wrong_type(context, name, value, "a str", _TEXT_HINT)
+        raise _wrong_type(context, name, value, "a str", hint)
     return checked_text(context, name, name, value, StyleError)
 
 
-def real(context: str, name: str, value: object) -> float:
+def real(context: str, name: str, value: object, *, hint: str = _REAL_HINT) -> float:
     """Check a number argument and return it as a ``float``.
 
     Ints, floats and the NumPy integer and floating scalars are accepted. ``bool``, NumPy
@@ -268,6 +269,7 @@ def real(context: str, name: str, value: object) -> float:
         context: The API call, such as ``"Axes.xlim()"``.
         name: The parameter name.
         value: The value passed.
+        hint: The hint for a value of another type.
 
     Returns:
         The value as a ``float``.
@@ -286,7 +288,7 @@ def real(context: str, name: str, value: object) -> float:
     if kind == "float":
         return float(cast(SupportsFloat, value))
     if kind != "int":
-        raise _wrong_type(context, name, value, "a float", _REAL_HINT)
+        raise _wrong_type(context, name, value, "a float", hint)
     number = operator.index(cast(SupportsIndex, value))
     try:
         return float(number)

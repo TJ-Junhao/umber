@@ -248,8 +248,9 @@ impl RangeScan {
                 }
                 Format2Byte::Lead(_) => {
                     let base = (high << 8) + first;
-                    if count > 0 && base <= 0xFFFF {
-                        self.visit(base, (base + count - 1).min(0xFFFF))
+                    let end = (high << 8) + 0xFF;
+                    if count > 0 && base <= end {
+                        self.visit(base, (base + count - 1).min(end))
                     } else {
                         self.skip()
                     }

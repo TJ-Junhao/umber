@@ -187,7 +187,7 @@ class Color:
             Color.hex("#3366B880")
         """
         with api_call():
-            text = _args.text("Color.hex()", "code", code)
+            text = _args.text("Color.hex()", "code", code, hint='pass a string such as "#3366B8".')
             return _new(_FIXED, _umber.color_hex(text), 1.0)
 
     @staticmethod
@@ -273,7 +273,7 @@ class Color:
             Color.hex("#3366B880")
         """
         with api_call():
-            opacity = _args.real("Color.alpha()", "a", a)
+            opacity = _args.real("Color.alpha()", "a", a, hint="pass a number from 0.0 to 1.0.")
             if self._kind == _FIXED:
                 return _new(_FIXED, _umber.color_with_alpha(self._payload, opacity), 1.0)
             _umber.check_alpha(opacity)

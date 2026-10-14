@@ -218,10 +218,10 @@ def test_hex_rejects_a_non_string() -> None:
     with pytest.raises(TypeError) as caught:
         ub.Color.hex(cast(str, 123))
     assert str(caught.value) == "Color.hex(): code is int; code must be a str."
-    assert details(caught.value) == ("code", "pass a str; convert other values with str().")
+    assert details(caught.value) == ("code", 'pass a string such as "#3366B8".')
     assert _notes(caught.value) == [
         _marked("ub.Color.hex(cast(str, 123))", "cast(str, 123)"),
-        "hint: pass a str; convert other values with str().",
+        'hint: pass a string such as "#3366B8".',
     ]
 
 
@@ -229,8 +229,9 @@ def test_alpha_rejects_a_string() -> None:
     with pytest.raises(TypeError) as caught:
         ub.Color.BLUE.alpha(cast(float, "0.5"))
     assert str(caught.value) == "Color.alpha(): a is str; a must be a float."
-    assert details(caught.value) == ("a", "pass a number such as 1.5.")
+    assert details(caught.value) == ("a", "pass a number from 0.0 to 1.0.")
     assert _notes(caught.value)[0].startswith('  ub.Color.BLUE.alpha(cast(float, "0.5"))\n')
+    assert _notes(caught.value)[1] == "hint: pass a number from 0.0 to 1.0."
 
 
 @pytest.mark.parametrize("value", [1.5, "1", None, True])

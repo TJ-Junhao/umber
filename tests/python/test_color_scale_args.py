@@ -33,6 +33,13 @@ numbers.Integral.register(RegisteredIntegral)
 
 type ScalarCall = tuple[Callable[[object], object], str, str]
 
+CALL_HINTS = {
+    "Color.hex()": 'pass a string such as "#3366B8".',
+    "Color.alpha()": "pass a number from 0.0 to 1.0.",
+    "Scale.log()": "pass a number greater than 1, such as 10.",
+    "Color.rgb()": "pass a whole number such as 3.",
+    "Color.palette()": "pass a whole number such as 3.",
+}
 REAL_CALLS: list[ScalarCall] = [
     (lambda value: ub.Color.BLUE.alpha(cast(float, value)), "Color.alpha()", "a"),
     (lambda value: ub.Scale.log(cast(float, value)), "Scale.log()", "base"),
@@ -64,7 +71,7 @@ def test_none_uses_the_shared_type_message(
     with pytest.raises(TypeError) as caught:
         call(None)
     assert str(caught.value) == str(expected.value)
-    assert details(caught.value) == details(expected.value)
+    assert details(caught.value) == (parameter, CALL_HINTS[context])
     assert " is None;" in str(caught.value)
 
 
@@ -112,7 +119,7 @@ def test_real_arguments_reject_types_outside_the_shared_contract(
     with pytest.raises(TypeError) as caught:
         call(value)
     assert str(caught.value) == str(expected.value)
-    assert details(caught.value) == details(expected.value)
+    assert details(caught.value) == (parameter, CALL_HINTS[context])
 
 
 @pytest.mark.parametrize("value", [RegisteredIntegral(), np.bool_(True), np.timedelta64(2, "D")])

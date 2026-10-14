@@ -84,7 +84,9 @@ class Scale(Generic[T]):  # noqa: UP046
             Scale.log(2.0)
         """
         with api_call():
-            value = _args.real("Scale.log()", "base", base)
+            value = _args.real(
+                "Scale.log()", "base", base, hint="pass a number greater than 1, such as 10."
+            )
             _umber.check_log_base(value)
             return cast(Scale[float], _new(_LOG, value))
 

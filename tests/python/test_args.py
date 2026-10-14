@@ -74,6 +74,17 @@ def test_text_rejects_other_types(value: object, shown: str) -> None:
     )
 
 
+def test_text_uses_the_given_type_error_hint() -> None:
+    assert error(
+        TypeError,
+        lambda: text("Color.hex()", "code", 42, hint='pass a string such as "#3366B8".'),
+    ) == (
+        "Color.hex(): code is int; code must be a str.",
+        "code",
+        'pass a string such as "#3366B8".',
+    )
+
+
 def test_text_length_cap() -> None:
     assert MAX_TEXT_LENGTH == 1000
     assert text("Axes.title()", "text", "x" * 1000) == "x" * 1000
@@ -179,6 +190,17 @@ def test_real_rejects_other_types(value: object, shown: str) -> None:
         f"Axes.xlim(): low is {shown}; low must be a float.",
         "low",
         REAL_HINT,
+    )
+
+
+def test_real_uses_the_given_type_error_hint() -> None:
+    assert error(
+        TypeError,
+        lambda: real("Color.alpha()", "a", "0.5", hint="pass a number from 0.0 to 1.0."),
+    ) == (
+        "Color.alpha(): a is str; a must be a float.",
+        "a",
+        "pass a number from 0.0 to 1.0.",
     )
 
 

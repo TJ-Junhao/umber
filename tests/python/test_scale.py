@@ -102,7 +102,7 @@ def test_log_rejects_other_types(base: object) -> None:
         ub.Scale.log(cast(float, base))
     name = "None" if base is None else type(base).__name__
     assert str(caught.value) == f"Scale.log(): base is {name}; base must be a float."
-    assert details(caught.value) == ("base", "pass a number such as 1.5.")
+    assert details(caught.value) == ("base", "pass a number greater than 1, such as 10.")
 
 
 def test_log_type_error_highlights_the_argument() -> None:
@@ -110,7 +110,7 @@ def test_log_type_error_highlights_the_argument() -> None:
         ub.Scale.log(cast(float, "10"))
     assert _notes(caught.value) == [
         _marked('ub.Scale.log(cast(float, "10"))', 'cast(float, "10")'),
-        "hint: pass a number such as 1.5.",
+        "hint: pass a number greater than 1, such as 10.",
     ]
 
 
