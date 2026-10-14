@@ -574,10 +574,14 @@ pub(crate) fn resolve(
             // alone is padded.
             // Only references that give this axis values pad it; a horizontal reference alone
             // leaves the x axis as it would be without it.
-            let only_references = data.is_some() && marks.iter().all(ResolvedMark::is_reference);
-            let all_lines = !only_references
-                && marks
+            let contributing = || {
+                marks
                     .iter()
+                    .filter(|mark| mark.x_numbers().any(f64::is_finite))
+            };
+            let only_references = data.is_some() && contributing().all(ResolvedMark::is_reference);
+            let all_lines = !only_references
+                && contributing()
                     .filter(|mark| !mark.is_reference())
                     .all(ResolvedMark::has_exact_x_extent);
             let auto = if all_lines {
@@ -599,7 +603,10 @@ pub(crate) fn resolve(
     let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
     // Bars and areas grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
     // edge when it is a limit. On a log axis they grow from the baseline.
-    let bars = marks.iter().any(ResolvedMark::grows_from_baseline);
+    // With no data at all, explicit ticks still use the baseline convention of the mark.
+    let bars = marks.iter().any(|mark| {
+        mark.grows_from_baseline() && (data.is_none() || mark.y_values().any(f64::is_finite))
+    });
     let (data, padding) = if bars && transform == Transform::Linear {
         let with_zero = data.map(|(lo, hi)| (lo.min(0.0), hi.max(0.0)));
         (with_zero, Padding::KeepZero)
@@ -842,9 +849,10 @@ impl<'a> ResolvedMark<'a> {
     ///
     /// Lines, scatters, areas and bars yield their y values or heights in data order, and grouped
     /// bars the values of each series in turn. Stacked bars yield the end of every segment away
-    /// from 0 ([`Stacks::ends`]), never 0 itself: on a linear axis the bars put 0 into the domain
-    /// anyway (see [`grows_from_baseline`](Self::grows_from_baseline)), and on a log axis, where
-    /// every height is positive, these are the positive segment ends, which a log domain can hold.
+    /// from 0 ([`Stacks::ends`]) and any zero heights, so an all-zero stack still has a domain.
+    /// On a linear axis the bars put 0 into the domain anyway (see
+    /// [`grows_from_baseline`](Self::grows_from_baseline)), and on a log axis, where every height
+    /// is positive, these are the positive segment ends, which a log domain can hold.
     /// Histograms yield the count of every non-empty bin, in bin order, and so never 0 either: on a
     /// log axis the domain spans the smallest positive count to the largest.
     pub fn y_values(&self) -> DomainValues<'_> {
@@ -869,8 +877,12 @@ impl<'a> ResolvedMark<'a> {
                         .flat_map(|(view, _)| view.values().iter().copied()),
                 ));
             }
-            ResolvedMark::Stacked { stacks, .. } => {
-                return DomainValues::Computed(Box::new(stacks.ends()));
+            ResolvedMark::Stacked { stacks, series, .. } => {
+                let zeros = series
+                    .iter()
+                    .flat_map(|(view, _)| view.values().iter().copied())
+                    .filter(|&height| height == 0.0);
+                return DomainValues::Computed(Box::new(stacks.ends().chain(zeros)));
             }
             ResolvedMark::Hist { histogram, .. } => {
                 let counts = histogram.as_ref().map_or(&[][..], Histogram::counts);
@@ -2503,6 +2515,30 @@ mod tests {
     }
 
     #[test]
+    fn all_zero_bars_have_the_same_y_domain() {
+        let mut plain = figure(ScaleKind::Category, LIN);
+        axes(&mut plain)
+            .bar(names(&["a", "b"]), &[0.0, 0.0], BarOptions::default())
+            .unwrap();
+        let mut grouped = figure(ScaleKind::Category, LIN);
+        axes(&mut grouped)
+            .grouped_bar(
+                names(&["a", "b"]),
+                vec![auto(&[0.0, 0.0]), auto(&[0.0, 0.0])],
+            )
+            .unwrap();
+        let mut stacked = figure(ScaleKind::Category, LIN);
+        axes(&mut stacked)
+            .stacked_bar(
+                names(&["a", "b"]),
+                vec![auto(&[0.0, 0.0]), auto(&[0.0, 0.0])],
+            )
+            .unwrap();
+        assert_eq!(y_domain(&plain), y_domain(&grouped));
+        assert_eq!(y_domain(&stacked), y_domain(&plain));
+    }
+
+    #[test]
     fn stacked_y_extent_spans_the_stacks_and_zero() {
         // Category a stacks to 12 + 24.5 = 36.5; nothing below 0, so 0 stays on the edge.
         let mut f = figure(ScaleKind::Category, LIN);
@@ -3599,6 +3635,44 @@ mod tests {
     }
 
     #[test]
+    fn log_mid_step_anchor_at_repeated_low_limit() {
+        let anchor = step_anchor(
+            ScaleKind::Log { base: LogBase::TEN },
+            nums(&[6.0, 6.0]),
+            &[1.0, f64::NAN],
+            Step::Mid,
+            Some((6.0, 10.0)),
+        );
+        assert_eq!(
+            anchor,
+            Some(Anchor {
+                x: AnchorX::Number(6.0),
+                y: 1.0,
+                end: EndKind::Point
+            })
+        );
+    }
+
+    #[test]
+    fn log_mid_step_anchor_at_repeated_high_limit() {
+        let anchor = step_anchor(
+            ScaleKind::Log { base: LogBase::TEN },
+            nums(&[3.0, 3.0]),
+            &[1.0, 2.0],
+            Step::Mid,
+            Some((1.0, 3.0)),
+        );
+        assert_eq!(
+            anchor,
+            Some(Anchor {
+                x: AnchorX::Number(3.0),
+                y: 2.0,
+                end: EndKind::Point
+            })
+        );
+    }
+
+    #[test]
     fn a_step_label_is_anchored_where_the_drawn_step_ends() {
         let nan = f64::NAN;
         let (x, y) = ([0.0, 1.0, 4.0], [1.0, 2.0, nan]);
@@ -3855,6 +3929,42 @@ mod tests {
             .ylim(0.0, 8.0)
             .unwrap();
         assert_eq!(domains(&f), ((0.0, 12.0), (0.0, 8.0)));
+    }
+
+    #[test]
+    fn empty_lines_do_not_remove_reference_padding() {
+        for values in [&[][..], &[f64::NAN][..]] {
+            let mut f = figure(LIN, LIN);
+            axes(&mut f).vspan(2.0, 6.0, span()).unwrap();
+            let alone = domains(&f);
+            axes(&mut f)
+                .line(nums(values), values, LineOptions::default())
+                .unwrap();
+            assert_eq!(domains(&f), alone);
+        }
+    }
+
+    #[test]
+    fn empty_scatters_do_not_pad_line_domains() {
+        for values in [&[][..], &[f64::NAN][..]] {
+            let mut f = lined();
+            let alone = domains(&f);
+            axes(&mut f)
+                .scatter(nums(values), values, ScatterOptions::default())
+                .unwrap();
+            assert_eq!(domains(&f), alone);
+        }
+    }
+
+    #[test]
+    fn empty_areas_do_not_change_reference_y_padding() {
+        let mut f = figure(LIN, LIN);
+        axes(&mut f).hspan(2.0, 6.0, span()).unwrap();
+        let alone = domains(&f);
+        axes(&mut f)
+            .area(nums(&[]), &[], AreaOptions::default())
+            .unwrap();
+        assert_eq!(domains(&f), alone);
     }
 
     #[test]

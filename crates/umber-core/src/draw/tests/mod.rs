@@ -7,6 +7,7 @@ mod band;
 mod bar;
 mod chrome;
 mod clip;
+mod downsample;
 mod hist;
 mod line;
 mod mapping;
