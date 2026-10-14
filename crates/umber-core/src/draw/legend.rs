@@ -124,6 +124,40 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 style: bar_style(width, b.color),
             }
         }
+        Swatch::Box { width } => {
+            // The outline reaches width/4 beyond its path. Keep its entire envelope inside
+            // the measured box; the median's butt ends stop at that inset too.
+            let inset = f64::from(width) / 4.0;
+            let (left, right) = (b.x + inset, b.x + b.width - inset);
+            let (top, bottom) = (
+                b.center_y - b.height / 2.0 + inset,
+                b.center_y + b.height / 2.0 - inset,
+            );
+            let path = polygon(&[
+                (left as f32, top as f32),
+                (right as f32, top as f32),
+                (right as f32, bottom as f32),
+                (left as f32, bottom as f32),
+            ]);
+            Item::Group {
+                clip: None,
+                items: vec![
+                    Item::Fill {
+                        path: path.clone(),
+                        paint: Paint::Solid(b.color.scale_alpha(super::area::AREA_ALPHA)),
+                        rule: FillRule::NonZero,
+                    },
+                    Item::Stroke {
+                        path,
+                        style: bar_style(width / 2.0, b.color),
+                    },
+                    Item::Stroke {
+                        path: segment(point(left, b.center_y), point(right, b.center_y)),
+                        style: bar_style(width, b.color),
+                    },
+                ],
+            }
+        }
         Swatch::Square => {
             let (top_left, bottom_right) = (
                 point(b.x, b.center_y - b.height / 2.0),
@@ -424,6 +458,64 @@ mod tests {
     #[test]
     fn vertical_error_bar_strokes_fit_the_swatch_box_before_the_label_gap() {
         error_bar_envelope(true);
+    }
+
+    #[test]
+    fn box_swatch_strokes_fit_the_measured_bounds() {
+        use crate::LegendStyle;
+        use crate::model::BoxOptions;
+        for base in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            for scale in [0.5, 1.0, 4.0, 10.0] {
+                for width in [0.5, 8.0, 72.0, f64::from(f32::MAX)] {
+                    for style in [LegendStyle::Header, LegendStyle::Direct] {
+                        let theme = base
+                            .with_font_scale(scale)
+                            .unwrap()
+                            .with_line_width(width)
+                            .unwrap()
+                            .with_legend_style(style)
+                            .unwrap();
+                        let mut f = Figure::new(20.0, 12.0, theme.clone()).unwrap();
+                        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+                            .unwrap()
+                            .box_plot(
+                                vec!["A".into()],
+                                vec![vec![1.0, 2.0]],
+                                BoxOptions {
+                                    label: "Samples".into(),
+                                    ..Default::default()
+                                },
+                            )
+                            .unwrap();
+                        let layout =
+                            crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1;
+                        let entry = &layout.legend.entries()[0];
+                        let b = entry.swatch;
+                        let Item::Group { items, .. } = swatch(&theme, entry) else {
+                            panic!("small box")
+                        };
+                        assert_eq!(items.len(), 3);
+                        for item in &items {
+                            let (x0, y0, x1, y1) = bounds(item);
+                            let (dx, dy) = match item {
+                                Item::Stroke { style, .. } if y0 == y1 => {
+                                    (0.0, f64::from(style.width) / 2.0)
+                                }
+                                Item::Stroke { style, .. } => {
+                                    (f64::from(style.width) / 2.0, f64::from(style.width) / 2.0)
+                                }
+                                _ => (0.0, 0.0),
+                            };
+                            assert!(f64::from(x0) - dx >= b.x - 1e-3);
+                            assert!(f64::from(x1) + dx <= b.x + b.width + 1e-3);
+                            assert!(f64::from(y0) - dy >= b.center_y - b.height / 2.0 - 1e-3);
+                            assert!(f64::from(y1) + dy <= b.center_y + b.height / 2.0 + 1e-3);
+                            assert!(entry.label.x - (f64::from(x1) + dx) >= 4.0 - 1e-3);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

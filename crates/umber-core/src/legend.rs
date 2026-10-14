@@ -28,6 +28,11 @@ pub(crate) enum Swatch {
     },
     /// A square, for filled bars.
     Square,
+    /// A small outlined box with a median line.
+    Box {
+        /// The median stroke width, in points.
+        width: f32,
+    },
     /// A short bar with a cap at each end, for error bars.
     ErrorBar {
         /// Whether the bar runs along y; otherwise along x.
@@ -47,6 +52,7 @@ impl Swatch {
             }
             SeriesKind::Points { size, .. } => Swatch::Dot { diameter: size },
             SeriesKind::Bar | SeriesKind::Span => Swatch::Square,
+            SeriesKind::Box { width } => Swatch::Box { width },
             SeriesKind::ErrorBar { vertical, width } => Swatch::ErrorBar { vertical, width },
         }
     }

@@ -8,6 +8,7 @@ use super::axes::Axes;
 use super::axis_data::{AxisData, XySeries};
 use super::band::{BandMark, BandOptions};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
+use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
 use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
@@ -858,6 +859,64 @@ impl<'a> AxesMut<'a> {
             series,
         )?;
         axes.marks.push(Mark::GroupedBar(mark));
+        Ok(self)
+    }
+
+    /// Adds one box per category: type-7 quartiles, 1.5-IQR Tukey whiskers and outliers.
+    /// NaN is ignored; empty groups draw nothing, and constant groups draw only a median line.
+    /// Boxes occupy the theme's [`box_width`](crate::Theme::box_width) fraction of each band.
+    /// The automatic y domain includes whiskers and outliers, without forcing zero.
+    ///
+    /// A numeric x axis is `Error::Usage`. Group counts, repeated categories, infinities,
+    /// unsupported magnitudes and non-positive log values are `Error::Data`.
+    /// Errors leave the figure unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BoxOptions, Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Category, ScaleKind::Linear)?
+    ///     .box_plot(vec!["North".into()], vec![vec![1.0, 2.0, 4.0]], BoxOptions::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn box_plot(
+        &mut self,
+        categories: Vec<String>,
+        groups: Vec<Vec<f64>>,
+        options: BoxOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = BoxMark::new(axes.x, axes.y, categories, groups, options)?;
+        axes.marks.push(Mark::Box(mark));
+        Ok(self)
+    }
+
+    /// Adds distributions side by side in each category, in input order.
+    /// The group occupies the theme's box width fraction of the band. Neighbours are 2 pt
+    /// apart; they touch when the gap would leave boxes narrower than it, as grouped bars do.
+    /// Each distribution has its own color and legend entry. Statistics and errors follow
+    /// [`AxesMut::box_plot`]; empty distributions are `Error::Data`, and every distribution
+    /// must have one group per category. A failed call leaves the figure unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Distribution, Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let d = Distribution { label: "North".into(), groups: vec![vec![1.0, 3.0]], ..Default::default() };
+    /// f.add_axes(ScaleKind::Category, ScaleKind::Linear)?
+    ///     .grouped_box_plot(vec!["2026".into()], vec![d])?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_box_plot(
+        &mut self,
+        categories: Vec<String>,
+        distributions: Vec<Distribution>,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = BoxGroupMark::new(axes.x, axes.y, categories, distributions)?;
+        axes.marks.push(Mark::GroupedBox(mark));
         Ok(self)
     }
 

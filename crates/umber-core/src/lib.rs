@@ -55,10 +55,11 @@
 //!   [`ScatterOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`] position,
 //!   [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of a vertical line,
 //!   [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
-//!   [`BarOptions`], [`Series`] and [`HistOptions`]
+//!   [`BoxOptions`] and [`Distribution`], [`BarOptions`], [`Series`] and [`HistOptions`]
 //!   with its bin limit [`MAX_BINS`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`StepMark`],
 //!   [`HLineMark`], [`VLineMark`], [`SpanMark`], [`BarMark`], [`BarGroupMark`], [`SeriesView`],
+//!   [`BoxMark`], [`BoxGroupMark`], [`DistributionView`],
 //!   [`BandMark`], [`ErrorBarMark`] and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
@@ -108,6 +109,7 @@ pub mod scene;
 mod scene_text;
 pub mod size;
 mod stacking;
+mod stats;
 #[cfg(test)]
 mod test_support;
 pub mod text;
@@ -128,6 +130,7 @@ pub use figure::{
 };
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};
+pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use figure::{StemMark, StemOptions};
 pub use fonts::{Font, Weight};

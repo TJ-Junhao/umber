@@ -17,7 +17,7 @@ from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
 from umber._quick import bar, hist, line, scatter
 from umber._scale import Scale
-from umber._series import Series
+from umber._series import Distribution, Series
 from umber._size import Size
 from umber._theme import Theme
 from umber._ticks import TickFormat
@@ -41,6 +41,7 @@ __all__ = [
     "Color",
     "DataError",
     "Dash",
+    "Distribution",
     "FillStyle",
     "Figure",
     "Font",
@@ -85,6 +86,7 @@ _report_package_as_module(
     Series,
     Color,
     Dash,
+    Distribution,
     FillStyle,
     Figure,
     Font,

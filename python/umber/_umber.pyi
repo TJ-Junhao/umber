@@ -103,6 +103,8 @@ type _FloatArray = numpy.typing.NDArray[numpy.float64]
 type _AxisValues = _FloatArray | list[str]
 # A bar series of grouped and stacked bars: (label, values, color).
 type _SeriesArg = tuple[str, _FloatArray, _ColorArg]
+# A named distribution: (label, one array per category, color).
+type _DistributionArg = tuple[str, list[_FloatArray], _ColorArg]
 
 @final
 class Theme:
@@ -250,6 +252,22 @@ class Figure:
         heights: _FloatArray,
         label: str,
         color: _ColorArg,
+    ) -> None: ...
+    def box_plot(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+    ) -> None: ...
+    def grouped_box_plot(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        distributions: list[_DistributionArg],
     ) -> None: ...
     def grouped_bar(
         self, row: int, col: int, categories: list[str], series: list[_SeriesArg]

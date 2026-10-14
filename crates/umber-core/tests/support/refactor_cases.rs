@@ -88,6 +88,7 @@ mod corpus {
     pub mod area;
     pub mod band;
     pub mod bars;
+    pub mod r#box;
     pub mod error_bars;
     pub mod grid;
     pub mod header;
@@ -159,6 +160,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::share::cases(&lib, &mut sink);
     corpus::stacked_area::cases(&lib, &mut sink);
     corpus::stem::cases(&lib, &mut sink);
+    corpus::r#box::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1768,6 +1770,34 @@ mod record {
                 marker(stem.options().marker),
                 stem.options().size
             ),
+            Mark::Box(mark) => format!(
+                "box categories={:?} groups=[{}] label={} color={}",
+                mark.categories(),
+                mark.groups()
+                    .iter()
+                    .map(|g| floats64(g))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                text(&mark.options().label),
+                color_spec(mark.options().color)
+            ),
+            Mark::GroupedBox(mark) => format!(
+                "grouped-box categories={:?} distributions=[{}]",
+                mark.categories(),
+                mark.distributions()
+                    .map(|d| format!(
+                        "label={} groups=[{}] color={}",
+                        text(d.label()),
+                        d.groups()
+                            .iter()
+                            .map(|g| floats64(g))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                        color_spec(d.color())
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
             _ => "unknown-mark".into(),
         }
     }
@@ -2776,6 +2806,7 @@ fn theme_cases() -> String {
         let _ = writeln!(out, "theme {name}");
         out.push_str(&record::theme(&theme));
         let _ = writeln!(out, "  panel_gap {}", record::f32(theme.panel_gap()));
+        let _ = writeln!(out, "  box_width {}", record::f32(theme.box_width()));
     }
     out
 }

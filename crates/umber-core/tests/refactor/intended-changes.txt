@@ -1,1 +1,3 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Theme getters now include the box_width fraction of a category band.
+api/themes

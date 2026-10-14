@@ -592,6 +592,17 @@ fn swatch_size(
             let d = f64::from(diameter);
             (swatch, d, d)
         }
+        (RowStyle::Plain, Swatch::Box { width }) => {
+            let side = SQUARE_SWATCH_SIDE * size;
+            let thickness = f64::from(width).min(side / 2.0);
+            (
+                Swatch::Box {
+                    width: thickness as f32,
+                },
+                side,
+                side,
+            )
+        }
         (RowStyle::Plain, Swatch::Square) => {
             let side = SQUARE_SWATCH_SIDE * size;
             (swatch, side, side)

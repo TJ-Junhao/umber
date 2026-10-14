@@ -5,6 +5,7 @@ use std::fmt;
 use super::axis_data::{AxisData, XySeries};
 use super::band::BandMark;
 use super::bar::{BarGroupMark, BarMark};
+use super::box_plot::{BoxGroupMark, BoxMark};
 use super::error_bars::ErrorBarMark;
 use super::hist::HistMark;
 use super::rule::{HLineMark, SpanMark, VLineMark};
@@ -119,10 +120,13 @@ impl Default for ScatterOptions {
 /// [`AxesMut::hline`](super::AxesMut::hline), [`AxesMut::vline`](super::AxesMut::vline),
 /// [`AxesMut::hspan`](super::AxesMut::hspan), [`AxesMut::vspan`](super::AxesMut::vspan),
 /// [`AxesMut::band`](super::AxesMut::band), [`AxesMut::y_error_bars`](super::AxesMut::y_error_bars)
-/// and [`AxesMut::x_error_bars`](super::AxesMut::x_error_bars),
+/// [`AxesMut::x_error_bars`](super::AxesMut::x_error_bars),
+/// [`AxesMut::box_plot`](super::AxesMut::box_plot) and
+/// [`AxesMut::grouped_box_plot`](super::AxesMut::grouped_box_plot),
 /// which validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
 /// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`], [`HLineMark`], [`VLineMark`],
-/// [`SpanMark`], [`BandMark`], [`StackedAreaMark`], [`ErrorBarMark`]) that keeps the validated values
+/// [`SpanMark`], [`BandMark`], [`StackedAreaMark`], [`ErrorBarMark`], [`BoxMark`], [`BoxGroupMark`])
+/// that keeps the validated values
 /// together and exposes them read-only; it has no
 /// public constructor. Read a mark by matching on its variant.
 ///
@@ -171,6 +175,10 @@ impl Default for ScatterOptions {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive] // further mark kinds are added as variants
 pub enum Mark {
+    /// Box plots, one per category.
+    Box(BoxMark),
+    /// Distributions side by side within each category.
+    GroupedBox(BoxGroupMark),
     /// A polyline through the points; NaN breaks it.
     Line(LineMark),
     /// Individual markers; NaN skips a point.

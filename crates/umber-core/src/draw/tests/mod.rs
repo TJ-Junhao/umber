@@ -5,6 +5,7 @@
 mod area;
 mod band;
 mod bar;
+mod box_plot;
 mod chrome;
 mod clip;
 mod downsample;

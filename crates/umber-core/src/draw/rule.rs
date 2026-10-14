@@ -88,7 +88,8 @@ pub(super) fn span_layer(
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
             | ResolvedMark::Band { .. }
-            | ResolvedMark::ErrorBars { .. } => {}
+            | ResolvedMark::ErrorBars { .. }
+            | ResolvedMark::Box { .. } => {}
         }
     }
 }
@@ -126,7 +127,8 @@ pub(super) fn rule_layer(
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Band { .. }
-            | ResolvedMark::ErrorBars { .. } => {}
+            | ResolvedMark::ErrorBars { .. }
+            | ResolvedMark::Box { .. } => {}
         }
     }
 }
