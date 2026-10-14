@@ -13,13 +13,25 @@ ENUMS = [
     ub.FillStyle,
     ub.GridLines,
     ub.SvgText,
+    ub.Share,
+    ub.Legend,
     ub.Step,
 ]
 
 
 def _public_enums() -> list[type[enum.Enum]]:
     found = [getattr(ub, name) for name in ub.__all__]
-    return [obj for obj in found if isinstance(obj, type) and issubclass(obj, enum.Enum)]
+    return [
+        obj
+        for obj in found
+        if isinstance(obj, type) and issubclass(obj, enum.Enum) and obj is not ub.Auto
+    ]
+
+
+def test_auto_has_one_member_and_no_native_table() -> None:
+    assert list(ub.Auto) == [ub.AUTO]
+    assert "Auto" not in _umber.enum_members()
+    assert repr(ub.AUTO) == "AUTO"
 
 
 def test_public_enums_are_exactly_the_native_tables() -> None:

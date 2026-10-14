@@ -1,14 +1,16 @@
-"""``Figure``: a chart's canvas, which holds one axes and renders to PNG and SVG."""
+"""``Figure``: a canvas with a grid of axes, rendered to PNG and SVG."""
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Final, Never, Self, final
 
-from umber import _args, _axes, _scale, _theme, _umber
+from umber import _args, _axes, _cell, _scale, _theme, _umber
 from umber._args import instance, integer, real
 from umber._axes import Axes, X
-from umber._enums import SvgText
-from umber._errors import UsageError, new_error
+from umber._cell import Cell
+from umber._enums import AUTO, Auto, Legend, Share, SvgText
+from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._theme import Theme
@@ -17,24 +19,27 @@ _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
 _X_SCALE_HINT: Final = "use Scale.linear(), Scale.log() or Scale.category()."
 _Y_SCALE_HINT: Final = "use Scale.linear() or Scale.log()."
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
-# A figure of one cell: one row and one column, nothing shared (``Share`` value 0) and the
-# legend merged (``Legend`` value 0).
-_ONE_CELL: Final = (1, 1, 0, 0, 0)
-# The one cell's position: row and column ``AUTO`` (grid index kind 0), spanning one cell.
-_ONLY_CELL: Final = (0, 0, 0, 0, 1, 1)
+_SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
+_LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
+
+
+def _index(context: str, name: str, value: int | Auto) -> tuple[int, int]:
+    """Convert a grid index: kind 0 is AUTO, kind 1 is an explicit integer."""
+    return (0, 0) if value is AUTO else (1, integer(context, name, value))
 
 
 @final
 class Figure:
-    """A figure: the canvas of one chart, with a size, a theme and one axes.
+    """A canvas with a size, a theme and a grid of axes.
 
-    Create a figure, add its axes with ``add_axes()``, draw on the axes, then render the
-    figure with ``to_png()`` or ``to_svg()``, or write it with ``save_png()`` or
-    ``save_svg()``. A figure without axes renders its background only.
+    Create a figure, add panels with ``add_axes()``, draw on their axes, then render with
+    ``to_png()`` or ``to_svg()``, or write with ``save_png()`` or ``save_svg()``. Empty cells
+    show the background. Positions count from zero; an axes may span several cells.
 
     ``copy.copy()`` and ``copy.deepcopy()`` return an independent figure with the same size,
-    theme, axes and marks; changing one leaves the other unchanged. The ``axes`` property
-    reaches a figure's axes, including those of a copy. Figures cannot be pickled.
+    theme, grid, axes and marks; changing one leaves the other unchanged. ``axes_at()``
+    reaches a panel, including one in a copy, with the scales used to create it as a type
+    witness. Figures cannot be pickled.
 
     Example:
         >>> import umber as ub
@@ -43,76 +48,90 @@ class Figure:
         >>> fig.save_svg("signal.svg")
     """
 
-    # ``_axes`` is set only once the native figure holds the axes.
-    __slots__ = ("_axes", "_native")
+    # Python state is stored only after the native call succeeds.
+    __slots__ = ("_axes", "_cols", "_native", "_rows")
     _native: _umber.Figure
-    _axes: Axes[Any, Any] | None
+    _axes: dict[tuple[int, int], Axes[Any, Any]]
+    _rows: int
+    _cols: int
 
     def __init__(
-        self, width: float = 6.0, height: float = 4.0, *, theme: Theme = Theme.PIGMENT
+        self,
+        width: float | Auto = AUTO,
+        height: float | Auto = AUTO,
+        *,
+        rows: int = 1,
+        cols: int = 1,
+        share_x: Share = Share.NONE,
+        share_y: Share = Share.NONE,
+        legend: Legend = Legend.MERGED,
+        theme: Theme = Theme.PIGMENT,
     ) -> None:
-        """Create an empty figure of ``width`` by ``height`` inches.
+        """Create an empty grid of ``rows`` by ``cols`` cells.
 
         Args:
-            width: The width in inches; finite, above 0 and at most 200.
-            height: The height in inches; finite, above 0 and at most 200.
+            width: The whole figure's width in inches; finite, above 0 and at most 200.
+                ``AUTO`` chooses 6 inches per column.
+            height: The whole figure's height in inches; finite, above 0 and at most 200.
+                ``AUTO`` chooses 4 inches per row.
+            rows: The number of rows, from 1 to 32.
+            cols: The number of columns, from 1 to 32.
+            share_x: Which panels share their x scale, limits, ticks and tick format.
+            share_y: Which panels share their y scale, limits, ticks and tick format.
+            legend: One merged legend or a separate legend per panel.
             theme: The theme that styles the figure.
 
         Raises:
-            TypeError: If ``width`` or ``height`` is not a number, or ``theme`` is not a
-                ``Theme``.
-            StyleError: If ``width`` or ``height`` is out of range.
+            TypeError: If an argument has the wrong type; bool is not a number or an index.
+            StyleError: If ``width``, ``height``, ``rows`` or ``cols`` is out of range.
 
         Example:
             >>> import umber as ub
-            >>> fig = ub.Figure(8, 4.5, theme=ub.Theme.MIDNIGHT)
+            >>> fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.ALL)
+            >>> ax = fig.add_axes(row=0, col=0)
         """
         with api_call():
-            inches_wide = real("Figure()", "width", width)
-            inches_high = real("Figure()", "height", height)
-            instance("Figure()", "theme", theme, Theme, _THEME_HINT)
-            self._native = _umber.Figure(inches_wide, inches_high, _theme.native(theme), *_ONE_CELL)
-            self._axes = None
-
-    @property
-    def axes(self) -> Axes[Any, Any]:
-        """The axes added with ``add_axes()``; use it to keep drawing on a copied figure.
-
-        Raises:
-            UsageError: If the figure has no axes yet.
-
-        Example:
-            >>> import copy
-            >>> import umber as ub
-            >>> fig = ub.Figure()
-            >>> ax = fig.add_axes().line([0, 1], [1, 2])
-            >>> fig.axes is ax
-            True
-            >>> variant = copy.copy(fig)
-            >>> variant.axes.title("Variant").figure is variant
-            True
-        """
-        with api_call():
-            if self._axes is None:
-                raise new_error(
-                    UsageError,
-                    "Figure.axes",
-                    "the figure has no axes; call add_axes() first.",
-                    parameter=None,
-                    hint="call fig.add_axes() before drawing.",
-                )
-            return self._axes
+            context = "Figure()"
+            inches_wide = None if width is AUTO else real(context, "width", width)
+            inches_high = None if height is AUTO else real(context, "height", height)
+            row_count = integer(context, "rows", rows)
+            col_count = integer(context, "cols", cols)
+            instance(context, "share_x", share_x, Share, _SHARE_HINT)
+            instance(context, "share_y", share_y, Share, _SHARE_HINT)
+            instance(context, "legend", legend, Legend, _LEGEND_HINT)
+            instance(context, "theme", theme, Theme, _THEME_HINT)
+            self._native = _umber.Figure(
+                inches_wide,
+                inches_high,
+                _theme.native(theme),
+                row_count,
+                col_count,
+                share_x.value,
+                share_y.value,
+                legend.value,
+            )
+            self._rows = row_count
+            self._cols = col_count
+            self._axes = {}
 
     def add_axes(
         self,
         *,
+        row: int | Auto = AUTO,
+        col: int | Auto = AUTO,
+        row_span: int = 1,
+        col_span: int = 1,
         # mypy rejects ``Scale[float]`` as the default of ``Scale[X]``; pyright accepts it.
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
         y: Scale[float] = Scale.linear(),  # noqa: B008
     ) -> Axes[X, float]:
-        """Add the axes to this figure and return them; a figure holds one axes.
+        """Add axes at a grid position and return them.
 
         Args:
+            row: The zero-based top row; ``AUTO`` means 0 only on a one-row figure.
+            col: The zero-based left column; ``AUTO`` means 0 only on a one-column figure.
+            row_span: The number of rows occupied, at least 1.
+            col_span: The number of columns occupied, at least 1.
             x: The x scale. ``Scale.linear()`` and ``Scale.log()`` make a numeric x axis;
                 ``Scale.category()`` makes an axis of names, as bar charts need.
             y: The y scale: ``Scale.linear()`` or ``Scale.log()``. The y axis is always
@@ -122,8 +141,9 @@ class Figure:
             The new axes.
 
         Raises:
-            TypeError: If ``x`` or ``y`` is not a ``Scale``.
-            UsageError: If ``y`` is ``Scale.category()``, or the figure already has axes.
+            TypeError: If an index, span or scale has the wrong type.
+            UsageError: If a position is missing, out of range or occupied, a span is invalid,
+                ``y`` is a category scale, or shared axes would have incompatible scales.
 
         Note:
             A wrong explicit annotation, such as ``Axes[str, float]`` on the result of
@@ -136,13 +156,95 @@ class Figure:
         """
         with api_call():
             context = "Figure.add_axes()"
+            row_index = _index(context, "row", row)
+            col_index = _index(context, "col", col)
+            rows = integer(context, "row_span", row_span)
+            cols = integer(context, "col_span", col_span)
             instance(context, "x", x, Scale, _X_SCALE_HINT)
             instance(context, "y", y, Scale, _Y_SCALE_HINT)
-            # The core refuses a category y scale, then a taken cell.
-            row, col = self._native.add_axes(*_ONLY_CELL, *_scale.native(x), *_scale.native(y))
-            axes = _axes.attach(self, self._native, x, y, row, col)
-            self._axes = axes
+            top, left = self._native.add_axes(
+                *row_index, *col_index, rows, cols, *_scale.native(x), *_scale.native(y)
+            )
+            axes = _axes.attach(self, self._native, x, y, top, left)
+            self._axes[top, left] = axes
             return axes
+
+    def axes_at(
+        self,
+        *,
+        row: int | Auto = AUTO,
+        col: int | Auto = AUTO,
+        x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+        y: Scale[float] = Scale.linear(),  # noqa: B008
+    ) -> Axes[X, float]:
+        """Return existing axes with the given position and scales, including those of a copy.
+
+        Args:
+            row: The zero-based top row; ``AUTO`` means 0 only on a one-row figure.
+            col: The zero-based left column; ``AUTO`` means 0 only on a one-column figure.
+            x: The x scale used to create the axes, including the log base. This type witness
+                determines whether the result accepts numeric or category x values.
+            y: The y scale used to create the axes, including the log base.
+
+        Returns:
+            The axes at this top-left cell; other cells covered by a span do not match.
+
+        Raises:
+            TypeError: If an index or scale has the wrong type.
+            UsageError: If the position is missing, out of range or not a panel's top-left
+                cell, or either scale differs from the one used at creation.
+
+        Example:
+            >>> import copy
+            >>> import umber as ub
+            >>> fig = ub.Figure(cols=2)
+            >>> ax = fig.add_axes(col=1, x=ub.Scale.category()).bar(["A"], [2])
+            >>> fig.axes_at(col=1, x=ub.Scale.category()) is ax
+            True
+            >>> twin = copy.copy(fig)
+            >>> twin.axes_at(col=1, x=ub.Scale.category()).title("Variant").figure is twin
+            True
+        """
+        with api_call():
+            context = "Figure.axes_at()"
+            row_index = _index(context, "row", row)
+            col_index = _index(context, "col", col)
+            instance(context, "x", x, Scale, _X_SCALE_HINT)
+            instance(context, "y", y, Scale, _Y_SCALE_HINT)
+            position = self._native.axes_at(
+                *row_index, *col_index, *_scale.native(x), *_scale.native(y)
+            )
+            return self._axes[position]
+
+    def cells(self, count: int | Auto = AUTO, /) -> Iterator[Cell]:
+        """Iterate over grid cells in row-major order, whether occupied or empty.
+
+        Args:
+            count: How many cells to yield, from 1 to ``rows * cols``. ``AUTO`` yields all.
+
+        Returns:
+            An iterator of immutable cells, each able to add axes to this figure.
+
+        Raises:
+            TypeError: If ``count`` is neither an int nor ``AUTO``; bool is not accepted.
+            StyleError: If ``count`` is outside the grid's capacity.
+
+        Example:
+            >>> import umber as ub
+            >>> fig = ub.Figure(cols=2)
+            >>> for cell, values in zip(fig.cells(), ([1, 3], [2, 4])):
+            ...     ax = cell.add_axes().line([0, 1], values)
+            >>> [(cell.row, cell.col) for cell in fig.cells()]
+            [(0, 0), (0, 1)]
+        """
+        with api_call():
+            total = (
+                self._rows * self._cols
+                if count is AUTO
+                else integer("Figure.cells()", "count", count)
+            )
+            positions = _umber.grid_cells(self._rows, self._cols, total)
+            return (_cell.at(self, row, col) for row, col in positions)
 
     def to_png(self, *, dpi: int = 200) -> bytes:
         """Render the figure as a PNG image.
@@ -254,11 +356,12 @@ class Figure:
         """Return an independent figure: the native clone, with axes of its own."""
         clone = object.__new__(type(self))
         clone._native = self._native.clone()
-        clone._axes = None
-        if self._axes is not None:
-            x, y = _axes.scales(self._axes)
-            row, col = _axes.cell(self._axes)
-            clone._axes = _axes.attach(clone, clone._native, x, y, row, col)
+        clone._rows = self._rows
+        clone._cols = self._cols
+        clone._axes = {}
+        for (row, col), axes in self._axes.items():
+            x, y = _axes.scales(axes)
+            clone._axes[row, col] = _axes.attach(clone, clone._native, x, y, row, col)
         return clone
 
     def __reduce__(self) -> Never:

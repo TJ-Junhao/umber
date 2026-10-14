@@ -64,8 +64,9 @@ class UmberError(Exception):
     Example:
         >>> import umber as ub
         >>> try:
-        ...     raise ub.UsageError("Figure.add_axes(): this figure already has an axes; "
-        ...                         "umber 0.1 supports one axes per figure.")
+        ...     fig = ub.Figure()
+        ...     ax = fig.add_axes()
+        ...     fig.add_axes()
         ... except ub.UmberError as err:
         ...     print(type(err).__name__)
         UsageError
@@ -106,9 +107,9 @@ class StyleError(UmberError, ValueError):
 class UsageError(UmberError):
     """The API was called in a way umber does not support.
 
-    For example, umber 0.1 allows one axes per figure, so a second ``Figure.add_axes()``
-    raises this error. It is deliberately not a ``ValueError``: the arguments are fine,
-    the sequence of calls is not.
+    For example, adding axes to an occupied grid cell or retrieving axes with different
+    scales raises this error. It is deliberately not a ``ValueError``: the arguments can
+    be valid on their own but incompatible with the figure's state.
 
     Example:
         >>> import umber as ub

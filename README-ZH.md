@@ -71,6 +71,30 @@ fig.save_svg("temperature.svg")
   <img alt="Pigment 主题下带渐变填充的直方图" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/histogram-pigment.png" width="49%">
 </p>
 
+## Grid 与共享轴
+
+`Figure(rows=2, cols=2)` 声明一个 grid。默认的 `width=ub.AUTO` 和 `height=ub.AUTO` 为每列分配 6 英寸、每行分配 4 英寸；显式尺寸则是整张 figure 的尺寸。添加 panel 时指定左上角 cell 的位置，索引从零开始：
+
+```python
+import copy
+import umber as ub
+
+fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.ALL, legend=ub.Legend.MERGED)
+fig.add_axes(row=0, col=0).line([0, 1, 2], [1, 3, 2], label="North")
+fig.add_axes(row=0, col=1).line([0, 1, 2], [2, 1, 3], label="South")
+fig.add_axes(row=1, col=0, col_span=2).line([0, 1, 2], [1, 3, 2], label="North")
+fig.save_png("subplots.png")
+
+variant = copy.copy(fig)
+variant.axes_at(row=1, col=0).title("Comparison")  # 原图不变
+```
+
+`Share.NONE`、`Share.ROW`、`Share.COL` 和 `Share.ALL` 指定哪些 panel 共享 scale、limits、ticks 和 tick format。默认使用合并的 legend；`Legend.PER_PANEL` 则为每个 panel 保留独立 legend。空 cell 保持空白，不允许 panel 相互重叠。
+
+用 `fig.axes_at(row=..., col=..., x=..., y=...)` 取回已有 axes，也可用于副本。scale kind 和 log base 必须与创建时一致；类别轴需传入 `x=ub.Scale.category()`，返回类型为 `Axes[str, float]`。跨多个 cell 的 panel 只能通过左上角位置取回。仅当某个维度大小为 1 时，才能省略该维度的 row 或 col。旧的 `Figure.axes` 已移除，由这个有精确类型的方法替代。
+
+`fig.cells()` 按 row-major 顺序返回不可变的 `Cell` 位置，包含已占用位置；`fig.cells(n)` 返回前 `n` 个。例如，`for cell, values in zip(fig.cells(), datasets): cell.add_axes().line(x, values)` 为每份数据添加一个 panel。`AUTO` 是有类型的 sentinel，不是 `None`，仅接受它的参数才能使用。
+
 ## 主题
 
 内置三套主题：`Theme.PIGMENT`（暖色纸张底，衬线标题）、`Theme.GRAPHITE`（中性色，无衬线）和 `Theme.MIDNIGHT`（深色底，等宽数字）。主题是不可变的值，用它的 `with_*` 方法派生变体：

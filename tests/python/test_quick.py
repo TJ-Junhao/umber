@@ -90,7 +90,10 @@ def test_quick_function_matches_the_step_by_step_chart(name: str) -> None:
     ax = _quick(name)(*arguments)
     assert isinstance(ax, ub.Axes)
     assert isinstance(ax.figure, ub.Figure)
-    assert ax.figure.axes is ax
+    if name == "bar":
+        assert ax.figure.axes_at(x=ub.Scale.category()) is ax
+    else:
+        assert ax.figure.axes_at() is ax
     assert ax.figure.to_svg() == build(ub.Theme.PIGMENT).to_svg()
 
 
