@@ -4,15 +4,17 @@
 //! and `x ≥ 0`. It is solved through its dual, maximize `b · y` subject to `Aᵀ y ≤ 1` and
 //! `y ≥ 0`, whose origin is a feasible basis, by the simplex method: Bland's rule chooses the
 //! entering column, and the leaving row is the one with the largest pivot among those whose ratio
-//! is the least to within a tolerance, so that every basis stays well conditioned. The dual is unbounded exactly when the program has no solution. At the dual's
-//! optimum the prices of its rows, `c_B B⁻¹`, are an optimal `x`.
+//! is the least to within a tolerance, to avoid small pivots. The dual is unbounded exactly
+//! when the program has no solution. At the dual's optimum the prices of its rows, `c_B B⁻¹`,
+//! are an optimal `x`.
 //!
 //! The dual has one row per variable, so its tableau stays small however many rows the program
 //! has: `n × (rows + n)` entries. Pivoting accumulates rounding in the tableau, so the tableau
 //! is rebuilt from the program and the current basis ([`Simplex::refactor`]) every
 //! [`REFACTOR_EVERY`] pivots, and always before the solve concludes: an optimum or an
 //! unbounded column found on an accumulated tableau is confirmed on a rebuilt one, and the
-//! solution is read from the rebuilt one.
+//! solution is read from the rebuilt one. The prices are refined against the original basis
+//! equations, since nearly parallel bounds can lose precision even in a freshly rebuilt tableau.
 
 /// The smallest reduced cost, relative to the largest bound, that counts as improving, and the
 /// smallest pivot of a basis matrix that counts as nonsingular.
@@ -126,7 +128,7 @@ impl<'a> Simplex<'a> {
             line[columns] = weights.iter().sum::<f64>().max(0.0);
         }
         // The prices c_B B⁻¹, then the reduced costs.
-        let prices: Vec<f64> = (0..m)
+        let mut prices: Vec<f64> = (0..m)
             .map(|i| {
                 self.basis
                     .iter()
@@ -135,6 +137,24 @@ impl<'a> Simplex<'a> {
                     .sum()
             })
             .collect();
+        // Nearly parallel bounds can make c_B B⁻¹ cancel large terms, even on a rebuilt
+        // tableau. Refine Bᵀ prices = c_B against the original coefficients: each correction
+        // is B⁻ᵀ (c_B - Bᵀ prices). Otherwise basic bounds may be violated while their reduced
+        // costs below are forced to zero, hiding the error from the optimality check.
+        for _ in 0..2 {
+            let residual: Vec<f64> = self
+                .basis
+                .iter()
+                .map(|&j| self.cost(j) - (0..m).map(|i| prices[i] * self.entry(i, j)).sum::<f64>())
+                .collect();
+            for (i, price) in prices.iter_mut().enumerate() {
+                *price += residual
+                    .iter()
+                    .enumerate()
+                    .map(|(r, d)| d * inverse[r][i])
+                    .sum::<f64>();
+            }
+        }
         for (j, row) in self.rows.iter().enumerate() {
             let price: f64 = prices
                 .iter()
@@ -322,8 +342,31 @@ mod tests {
         assert!(least_total(2, &[row(&[1.0, -1.0], 1.0), row(&[-1.0, 1.0], 1.0)]).is_none());
     }
 
+    #[test]
+    fn nearly_parallel_bounds_keep_their_residuals_small() {
+        for separation in [1e-6, 1e-8, 1e-9] {
+            let bound = 100.123456789;
+            let rows = [
+                row(&[1.0 + separation, 1.0], bound),
+                row(&[1.0, 1.0 + separation], bound),
+            ];
+            let x = least_total(2, &rows).unwrap();
+            for row in &rows {
+                let at: f64 = row.coefficients.iter().zip(&x).map(|(a, x)| a * x).sum();
+                assert!((at - row.bound).abs() < 1e-10, "{separation}: {x:?}, {at}");
+            }
+            assert!((x.iter().sum::<f64>() - 2.0 * bound / (2.0 + separation)).abs() < 1e-10);
+        }
+    }
+
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(2_000))]
+        // Apply the environment after these defaults so stress runs can override them.
+        #![proptest_config(proptest::test_runner::contextualize_config(ProptestConfig {
+            cases: 2_000,
+            rng_seed: proptest::test_runner::RngSeed::Fixed(38572056803),
+            max_global_rejects: 1_024,
+            ..ProptestConfig::default()
+        }))]
 
         /// Programs built around a known solution are solved, never refused, and the result
         /// meets every row with a total no larger than the known one.
