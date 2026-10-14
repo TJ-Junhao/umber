@@ -69,13 +69,15 @@ pub(crate) fn clamp_target(target: usize) -> usize {
 
 const Q: [f64; 6] = [1.0, 5.0, 2.0, 2.5, 4.0, 3.0];
 const W: [f64; 4] = [0.25, 0.2, 0.5, 0.05];
-const EPS: f64 = 1e-10;
 /// `Q.len() - 1`, as a float.
 const Q_LAST: f64 = 5.0;
 
 fn simplicity(qi: usize, j: f64, lmin: f64, lmax: f64, lstep: f64) -> f64 {
-    let r = lmin % lstep;
-    let zero_included = (r.abs() < EPS || lstep - r.abs() < EPS) && lmin <= 0.0 && 0.0 <= lmax;
+    // Measure the error in grid units: an absolute tolerance in data units loses zero on
+    // large grids and invents it between ticks on tiny ones.
+    let index = lmin / lstep;
+    let tolerance = 4.0 * f64::EPSILON * index.abs().max(1.0);
+    let zero_included = (index - index.round()).abs() <= tolerance && lmin <= 0.0 && 0.0 <= lmax;
     let v = if zero_included { 1.0 } else { 0.0 };
     1.0 - qi as f64 / Q_LAST - j + v
 }
@@ -503,12 +505,13 @@ fn search(
     found
 }
 
-/// Smallest number of decimals (0..=12) at which `step` is a whole number of units.
-fn decimals(step: f64) -> usize {
+/// Smallest number of decimals (0..=12) at which `value` is a whole number of units,
+/// within `relative_tolerance` of the scaled value.
+fn decimals(value: f64, relative_tolerance: f64) -> usize {
     (0..=12_i32)
         .find(|&d| {
-            let scaled = step * 10f64.powi(d);
-            (scaled - scaled.round()).abs() < 1e-6 * scaled
+            let scaled = value * 10f64.powi(d);
+            (scaled - scaled.round()).abs() < relative_tolerance * scaled
         })
         .map_or(12, |d| d as usize)
 }
@@ -607,7 +610,7 @@ fn unique_scientific(values: &[f64]) -> Vec<String> {
 /// label, the precision is raised until they do not.
 pub(crate) fn format_ticks(values: &[f64], step: f64) -> Vec<String> {
     let step = step.abs();
-    grid_labels(&snapped_to_zero(values, step), decimals(step))
+    grid_labels(&snapped_to_zero(values, step), decimals(step, 1e-6))
 }
 
 /// `values` with every value within `step * 1e-9` of zero set to an unsigned zero: ticks
@@ -645,7 +648,9 @@ pub(crate) fn format_given(values: &[f64]) -> Vec<String> {
     let places = values
         .iter()
         .filter(|v| **v != 0.0)
-        .map(|v| decimals(v.abs()))
+        // Unlike computed steps, explicit values may have meaningful fractional parts at
+        // any magnitude. Allow only the rounding error of scaling a value by a power of ten.
+        .map(|v| decimals(v.abs(), 4.0 * f64::EPSILON))
         .max()
         .unwrap_or(0);
     // Only the sign of a zero changes.
@@ -728,7 +733,8 @@ mod tests {
     #[test]
     fn matches_reference_port() {
         use TickCoverage::{Free, Loose};
-        // (dmin, dmax, target, coverage) -> expected, produced by the verified Python port.
+        // (dmin, dmax, target, coverage) -> expected from the reference port, except for
+        // the corrected zero membership on the large grid noted below.
         let cases: &[(f64, f64, usize, TickCoverage, &[f64])] = &[
             (0.0, 100.0, 5, Free, &[0.0, 25.0, 50.0, 75.0, 100.0]),
             (0.0, 100.0, 4, Free, &[0.0, 50.0, 100.0]),
@@ -758,19 +764,21 @@ mod tests {
                 Loose,
                 &[-3e68, 3e68],
             ),
+            // Zero belongs to the grid with step 2e37 despite the non-zero f64 remainder.
             (
                 -5.219454767136544e37,
                 4.908864837878777e37,
                 6,
                 Loose,
-                &[-6e37, -3e37, 0.0, 3e37, 6e37],
+                &[-6e37, -4e37, -2e37, 0.0, 2e37, 4e37, 6e37],
             ),
+            // The same correction counts zero on the grid with step 2e100.
             (
                 -1.161350009461411e101,
                 2.0915500407958136e100,
                 8,
                 Free,
-                &[-1.25e101, -1e101, -7.5e100, -5e100, -2.5e100, 0.0, 2.5e100],
+                &[-1.2e101, -1e101, -8e100, -6e100, -4e100, -2e100, 0.0, 2e100],
             ),
         ];
         for &(lo, hi, m, coverage, want) in cases {
@@ -893,6 +901,96 @@ mod tests {
         assert!(close(&free, &[2.0, 8.0]), "{free:?}");
         // Without a candidate: the two range ends.
         assert_eq!(extended(1.0, 1.0, 5, Free, &none), [1.0, 1.0]);
+    }
+
+    #[test]
+    fn given_large_fractional_ticks_keep_their_decimal_places() {
+        let labels: Vec<Vec<String>> = [500000.4, 100000.05, 50000.04]
+            .into_iter()
+            .map(|value| format_given(&[0.0, value]))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                vec!["0.0", "500000.4"],
+                vec!["0.00", "100000.05"],
+                vec!["0.00", "50000.04"],
+            ]
+        );
+    }
+
+    #[test]
+    fn simplicity_does_not_count_zero_between_tiny_ticks() {
+        // With j = 3 these bounds can straddle zero without a tick there.
+        assert_eq!(simplicity(0, 3.0, -3e-12, 7e-12, 6e-12), -2.0);
+    }
+
+    #[test]
+    fn simplicity_counts_zero_on_a_large_grid() {
+        // The floating-point remainder of -1e20 by 1e20 / 3 is not zero.
+        assert_eq!(simplicity(0, 3.0, -1e20, 2e20, 1e20 / 3.0), -1.0);
+    }
+
+    #[test]
+    fn corrected_large_grid_choices_match_the_unit_ranges() {
+        for (lo, hi, target, coverage, factor) in [
+            (
+                -5.219454767136544,
+                4.908864837878777,
+                6,
+                TickCoverage::Loose,
+                1e37,
+            ),
+            (
+                -11.61350009461411,
+                2.0915500407958136,
+                8,
+                TickCoverage::Free,
+                1e100,
+            ),
+        ] {
+            let unit = extended(lo, hi, target, coverage, &Fit::ANY);
+            let scaled: Vec<f64> = extended(lo * factor, hi * factor, target, coverage, &Fit::ANY)
+                .iter()
+                .map(|v| v / factor)
+                .collect();
+            assert!(close(&scaled, &unit), "{scaled:?} vs {unit:?}");
+        }
+    }
+
+    #[test]
+    fn simplicity_is_scale_invariant_for_integer_grid_indices() {
+        for factor in [1e-290, 1e-12, 1.0, 1e20, 1e299] {
+            for j in [1, 3, 7] {
+                for (qi, q) in Q.into_iter().enumerate() {
+                    let jf = f64::from(j);
+                    let step = jf * q * factor;
+                    for start in -30..=0 {
+                        let lo = f64::from(start) * (step / jf);
+                        let hi = lo + 11.0 * step;
+                        let has_zero = start % j == 0 && start >= -11 * j;
+                        let want = 1.0 - qi as f64 / Q_LAST - jf + if has_zero { 1.0 } else { 0.0 };
+                        assert_eq!(
+                            simplicity(qi, jf, lo, hi, step),
+                            want,
+                            "factor {factor:e}, j {j}, q {q}, start {start}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn given_labels_keep_common_precision_and_trim_float_noise() {
+        assert_eq!(format_given(&[0.0, 1.5, 3.25]), ["0.00", "1.50", "3.25"]);
+        assert_eq!(format_given(&[0.0, 0.30000000000000004]), ["0.0", "0.3"]);
+        assert_eq!(
+            format_given(&[-500000.4, -0.0]),
+            ["\u{2212}500000.4", "0.0"]
+        );
+        // Computed steps keep their existing tolerance, independent of explicit values.
+        assert_eq!(format_ticks(&[0.0, 500000.4], 500000.4), ["0", "500000"]);
     }
 
     #[test]

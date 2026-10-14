@@ -81,6 +81,29 @@ def test_log_rejects_invalid_bases_with_the_native_message(base: float, shown: s
     assert details(caught.value) == ("base", None)
 
 
+@pytest.mark.parametrize("base", [math.nextafter(1.0, math.inf), 1.0 + 1e-15])
+def test_log_rejects_bases_with_unresolvable_exponents(base: float) -> None:
+    with pytest.raises(ub.StyleError) as caught:
+        ub.Scale.log(base)
+    assert str(caught.value) == (
+        f"Scale.log(): base is {base}; a log base must be at least 1.000000000001 "
+        "so tick exponents remain distinct."
+    )
+    assert details(caught.value) == (
+        "base",
+        "use base 10 or 2, or a linear scale for evenly spaced ticks.",
+    )
+    assert _notes(caught.value) == [
+        _marked("ub.Scale.log(base)", "base"),
+        "hint: use base 10 or 2, or a linear scale for evenly spaced ticks.",
+    ]
+
+
+def test_log_accepts_the_smallest_supported_base() -> None:
+    base = 1.0 + 1e-12
+    assert native(ub.Scale.log(base)) == (1, base)
+
+
 def test_log_error_highlights_the_argument() -> None:
     with pytest.raises(ub.StyleError) as caught:
         ub.Scale.log(1.0)
@@ -102,7 +125,10 @@ def test_log_rejects_other_types(base: object) -> None:
         ub.Scale.log(cast(float, base))
     name = "None" if base is None else type(base).__name__
     assert str(caught.value) == f"Scale.log(): base is {name}; base must be a float."
-    assert details(caught.value) == ("base", "pass a number greater than 1, such as 10.")
+    assert details(caught.value) == (
+        "base",
+        "pass a finite number at least 1.000000000001, such as 10.",
+    )
 
 
 def test_log_type_error_highlights_the_argument() -> None:
@@ -110,7 +136,7 @@ def test_log_type_error_highlights_the_argument() -> None:
         ub.Scale.log(cast(float, "10"))
     assert _notes(caught.value) == [
         _marked('ub.Scale.log(cast(float, "10"))', 'cast(float, "10")'),
-        "hint: pass a number greater than 1, such as 10.",
+        "hint: pass a finite number at least 1.000000000001, such as 10.",
     ]
 
 

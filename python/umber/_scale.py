@@ -69,23 +69,29 @@ class Scale(Generic[T]):  # noqa: UP046
         """Return the logarithmic scale with the given base.
 
         Args:
-            base: The base of the logarithm; finite and greater than 1.
+            base: The base of the logarithm; finite and at least 1.000000000001.
+                This lower bound keeps consecutive tick exponents distinct.
 
         Returns:
             The scale. Axes using it hold positive values only.
 
         Raises:
             TypeError: If ``base`` is not a number.
-            StyleError: If ``base`` is not finite and greater than 1.
+            StyleError: If ``base`` is not finite or is less than 1.000000000001.
 
         Example:
             >>> import umber as ub
             >>> ub.Scale.log(2)
             Scale.log(2.0)
+            >>> ub.Scale.log(1.000000000001)
+            Scale.log(1.000000000001)
         """
         with api_call():
             value = _args.real(
-                "Scale.log()", "base", base, hint="pass a number greater than 1, such as 10."
+                "Scale.log()",
+                "base",
+                base,
+                hint="pass a finite number at least 1.000000000001, such as 10.",
             )
             _umber.check_log_base(value)
             return cast(Scale[float], _new(_LOG, value))
