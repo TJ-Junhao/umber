@@ -1,4 +1,4 @@
-//! Render benchmarks: the spec's two timing targets plus SVG, histogram and text-heavy cases.
+//! Render benchmarks: the spec's timing targets plus SVG, marks, legends and text-heavy cases.
 //!
 //! ```text
 //! cargo bench -p umber-core --bench render
@@ -18,8 +18,8 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use umber_core::figure::{AxisData, HistOptions, LineOptions, ScatterOptions};
 use umber_core::render::{SvgText, render_png, render_svg};
 use umber_core::{
-    AreaOptions, BandOptions, Figure, FontLibrary, LegendPosition, LegendStyle, ScaleKind, Series,
-    Theme,
+    AreaOptions, BandOptions, Figure, FontLibrary, Grid, GridIndex, LegendPosition, LegendStyle,
+    Placement, ScaleKind, Series, Share, Theme,
 };
 
 const DPI: u32 = 200;
@@ -51,6 +51,32 @@ fn line_figure(n: usize) -> Figure {
         .unwrap()
         .line(AxisData::Numbers(xs(n)), &wave(n), LineOptions::default())
         .unwrap();
+    figure
+}
+
+/// Twenty 10k-point lines at 12x8 in; only scale sharing differs between the two cases.
+fn grid_figure(share: Share) -> Figure {
+    let grid = Grid::new(4, 5)
+        .unwrap()
+        .with_share_x(share)
+        .with_share_y(share);
+    let mut figure = Figure::with_grid(12.0, 8.0, Theme::pigment(), grid).unwrap();
+    let x = xs(10_000);
+    let y = wave(10_000);
+    for row in 0..4 {
+        for col in 0..5 {
+            let at = Placement {
+                row: GridIndex::At(row),
+                col: GridIndex::At(col),
+                ..Placement::default()
+            };
+            figure
+                .add_axes_at(at, ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .line(AxisData::Numbers(x.clone()), &y, LineOptions::default())
+                .unwrap();
+        }
+    }
     figure
 }
 
@@ -166,6 +192,40 @@ fn benches(c: &mut Criterion) {
     let scatter = scatter_figure(100_000);
     group.bench_function("scatter_100k_png", |b| {
         b.iter(|| black_box(scatter.to_png(i64::from(DPI)).unwrap()));
+    });
+
+    // The v0.2 grid target, including the shared-axes resolve/layout repair path.
+    for (name, share) in [
+        ("grid_20_lines_10k_png", Share::None),
+        ("grid_20_lines_10k_png_shared", Share::All),
+    ] {
+        let grid = grid_figure(share);
+        group.bench_function(name, |b| {
+            b.iter(|| black_box(grid.to_png(i64::from(DPI)).unwrap()));
+        });
+    }
+
+    // End-to-end PNG complements the scene-only legend-position comparisons below.
+    let mut stacked_area = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let y = wave(100_000);
+    let mut axes = stacked_area
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap();
+    axes.legend_at(LegendStyle::Header, LegendPosition::Best)
+        .unwrap();
+    axes.stacked_area(
+        &xs(100_000),
+        (0..3)
+            .map(|k| Series {
+                label: format!("Layer {k}"),
+                values: y.iter().map(|v| v + 12.0 + k as f64).collect(),
+                ..Series::default()
+            })
+            .collect(),
+    )
+    .unwrap();
+    group.bench_function("best_legend_stacked_area", |b| {
+        b.iter(|| black_box(stacked_area.to_png(i64::from(DPI)).unwrap()));
     });
 
     // Split timings for the scatter case: build the figure, resolve and lay out and draw the
