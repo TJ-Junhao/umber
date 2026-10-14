@@ -129,6 +129,7 @@ pub use figure::{
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use figure::{StemMark, StemOptions};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use render::SvgText;
@@ -141,7 +142,7 @@ pub use scene::{
 };
 pub use size::{Factor, Points, SizeSpec};
 pub use text::{FontLibrary, TextLayout, TextStyle};
-pub use theme::{Dash, FillStyle, GridLines, LegendStyle, Marker, Theme};
+pub use theme::{Align, Dash, FillStyle, GridLines, LegendStyle, Marker, Theme};
 pub use tick_format::{Decimals, NumberStyle, TickFormat};
 pub use ticks::Tick;
 

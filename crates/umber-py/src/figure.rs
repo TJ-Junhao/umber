@@ -25,6 +25,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use umber_core::StemOptions;
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
     HistOptions, LegendMode, LegendStyle, LineOptions, Marker, Placement, RuleOptions,
@@ -408,6 +409,32 @@ impl Figure {
         };
         self.axes(row, col)?
             .scatter_shared(x, y, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds stems from the baseline with a marker at each value.
+    fn stem(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        label: String,
+        color: ColorArg,
+        marker: i64,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let (x, y) = (axis_data(x)?, shared_floats(y)?);
+        let options = StemOptions {
+            label,
+            color: color_spec(color)?,
+            marker: enum_value::<Marker>(marker)?,
+            size: size_spec(size)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .stem_shared(x, y, options)
             .map(drop)
             .map_err(core_error)
     }

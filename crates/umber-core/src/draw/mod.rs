@@ -44,12 +44,13 @@ mod marker;
 mod rule;
 mod scatter;
 mod stacked_area;
+mod stem;
 mod step;
 mod stroke;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use chrome::{baseline, chrome};
+pub(crate) use chrome::{baseline, chrome, figure_header};
 
 use crate::Theme;
 use crate::layout::{Area, Layout};
@@ -222,6 +223,13 @@ pub(crate) fn marks(
                     (color, width),
                     &mut items,
                 );
+            }
+            ResolvedMark::Stem {
+                mark: stem_mark,
+                color,
+                size,
+            } => {
+                stem::stem_items(&context, resolved, stem_mark, (color, size), &mut items);
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }

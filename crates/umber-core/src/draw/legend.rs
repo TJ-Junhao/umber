@@ -29,6 +29,16 @@ pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
         return None;
     }
     let mut items = Vec::with_capacity(3 * entries.len() + 2 * direct.len());
+    row(theme, entries, &mut items);
+    for label in direct {
+        items.extend(label.dot.map(|d| end_dot(d, label.color)));
+        items.extend(label.label.as_ref().map(|l| text(l, label.color)));
+    }
+    Some(Item::Group { clip: None, items })
+}
+
+/// Appends row entries, in their original drawing order, to a panel or figure header.
+pub(super) fn row(theme: &Theme, entries: &[RowEntry], items: &mut Vec<Item>) {
     for entry in entries {
         if let Some(pill) = entry.chip {
             items.push(chip(pill, entry.swatch.color));
@@ -36,11 +46,6 @@ pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
         items.push(swatch(theme, entry));
         items.push(text(&entry.label, theme.text_color()));
     }
-    for label in direct {
-        items.extend(label.dot.map(|d| end_dot(d, label.color)));
-        items.extend(label.label.as_ref().map(|l| text(l, label.color)));
-    }
-    Some(Item::Group { clip: None, items })
 }
 
 /// The end dot `d` of a directly labelled line: a filled circle in the line `color`.

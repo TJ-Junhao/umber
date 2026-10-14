@@ -77,6 +77,7 @@ pub(super) fn span_layer(
             }
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
+            | ResolvedMark::Stem { .. }
             | ResolvedMark::Area { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }
@@ -114,6 +115,7 @@ pub(super) fn rule_layer(
             }
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
+            | ResolvedMark::Stem { .. }
             | ResolvedMark::Area { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }

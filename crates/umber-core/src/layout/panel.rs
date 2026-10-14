@@ -15,6 +15,10 @@ use super::{
     baseline_in_line, figure_height_hint, measure, measure_ticks, metrics,
 };
 use crate::resolve::{NormalizedPos, Resolved, coincides};
+use crate::{Align, Figure, FontLibrary, Result};
+
+/// The figure title size as a multiple of the theme's panel title size.
+pub(crate) const FIGURE_TITLE_SCALE: f32 = 1.5;
 
 /// A rectangle on the canvas, in points.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -127,6 +131,39 @@ struct PlacedHeader {
 }
 
 impl Header {
+    /// Measures the shared title, subtitle and legend stack for a panel or a figure.
+    fn measure(
+        title: &str,
+        subtitle: &str,
+        styles: &Styles,
+        row: &LegendRow,
+        lib: &FontLibrary,
+    ) -> Header {
+        let title = (!title.is_empty()).then(|| {
+            let (ascent, descent) = metrics(lib, &styles.title);
+            HeaderLine {
+                label: measure(lib, title, styles.title),
+                line: TITLE_LINE * f64::from(styles.title.size),
+                ascent,
+                descent,
+            }
+        });
+        let subtitle = (!subtitle.is_empty()).then(|| {
+            let (ascent, descent) = metrics(lib, &styles.body);
+            HeaderLine {
+                label: measure(lib, subtitle, styles.body),
+                line: BODY_LINE * f64::from(styles.body.size),
+                ascent,
+                descent,
+            }
+        });
+        Header {
+            title,
+            subtitle,
+            row: (!row.is_empty()).then(|| row.height()),
+        }
+    }
+
     /// The header parts stacked from `top` down: the title line, the title gap and the subtitle
     /// line, the row gap and the legend row, then the header gap, each only when the header has
     /// the parts it separates. The positions are summed top down in this order, so they are
@@ -187,22 +224,23 @@ impl Header {
         self.stack_with_row(0.0, height).bottom
     }
 
-    /// The hint of the error for a figure too short for the plot area, naming only the header
-    /// parts this header has.
-    pub(super) fn height_hint(&self) -> &'static str {
+    /// The hint of the error for a figure too short for the plot area, naming this header's
+    /// parts and the figure header above it, when present.
+    pub(super) fn height_hint(&self, figure_header: bool) -> &'static str {
         figure_height_hint(
             self.title.is_some(),
             self.subtitle.is_some(),
             self.row.is_some(),
+            figure_header,
         )
     }
 
     /// The header stacked from `top` down with a legend row `row` tall (none when `None`), its
-    /// labels starting at `left`.
-    fn place(self, left: f64, top: f64, row: Option<f64>) -> PlacedHeader {
-        let stacked = self.stack_with_row(top, row);
+    /// labels aligned within the header box. The row has its own alignment.
+    fn place(self, box_: HeaderBox, align: Align, row: Option<f64>) -> PlacedHeader {
+        let stacked = self.stack_with_row(box_.top, row);
         let at = |line: HeaderLine, baseline: f64| Label {
-            x: left,
+            x: align.position(line.label.width(), box_.left, box_.right),
             y: baseline,
             ..line.label
         };
@@ -212,6 +250,80 @@ impl Header {
             row: stacked.row,
             bottom: stacked.bottom,
         }
+    }
+}
+
+/// The figure-wide header, placed inside the canvas padding above the grid.
+#[derive(Debug, Clone)]
+pub(crate) struct FigureHeader {
+    /// The title at one and a half times the panel title size.
+    pub title: Option<Label>,
+    /// The subtitle in the body style.
+    pub subtitle: Option<Label>,
+    /// The merged legend, with each wrapped row aligned with the figure title.
+    pub legend: LegendRow,
+    /// Where the grid starts, including the gap below a non-empty header.
+    pub bottom: f64,
+}
+
+impl FigureHeader {
+    /// Measures and places the header independently of the grid's columns.
+    pub fn measure(
+        figure: &Figure,
+        legend: &super::MeasuredLegend<'_>,
+        lib: &FontLibrary,
+    ) -> FigureHeader {
+        let theme = figure.theme();
+        let mut styles = Styles::new(theme);
+        styles.title.size =
+            super::scaled(theme.title_size() * FIGURE_TITLE_SCALE, theme.font_scale());
+        let box_ = HeaderBox {
+            left: PADDING,
+            right: figure.width_in() * 72.0 - PADDING,
+            top: PADDING,
+        };
+        let row = legend.row_within(box_.left, box_.right);
+        let header = Header::measure(
+            figure.title_text(),
+            figure.subtitle_text(),
+            &styles,
+            &row,
+            lib,
+        );
+        let row_height = (!row.is_empty()).then(|| row.height());
+        let placed = header.place(box_, theme.title_align(), row_height);
+        FigureHeader {
+            title: placed.title,
+            subtitle: placed.subtitle,
+            legend: row
+                .aligned(box_.left, box_.right, theme.title_align())
+                .placed(placed.row),
+            bottom: placed.bottom,
+        }
+    }
+
+    /// Checks that every merged entry fits the inner canvas width. A figure without panels
+    /// must still have room for its header and the bottom padding.
+    pub fn check(&self, figure: &Figure, context: &'static str) -> Result<()> {
+        self.legend
+            .check_width(figure.width_in() * 72.0 - 2.0 * PADDING, context)?;
+        if figure.panels().next().is_none()
+            && self.bottom > PADDING
+            && self.bottom + PADDING > figure.height_in() * 72.0
+        {
+            return Err(super::figure_too_short(
+                context,
+                figure.height_in() * 72.0,
+                self.bottom + PADDING,
+                figure_height_hint(
+                    self.title.is_some(),
+                    self.subtitle.is_some(),
+                    !self.legend.is_empty(),
+                    false,
+                ),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -282,6 +394,7 @@ pub(crate) fn measure_panel(
     input: &LayoutInput<'_>,
     resolved: &Resolved,
     span: PanelSpan,
+    show_labels: [bool; 2],
 ) -> PanelBands {
     let LayoutInput {
         theme,
@@ -292,36 +405,22 @@ pub(crate) fn measure_panel(
     } = *input;
     let styles = Styles::new(theme);
 
-    let title = (!axes.title_text().is_empty()).then(|| {
-        let (ascent, descent) = metrics(lib, &styles.title);
-        HeaderLine {
-            label: measure(lib, axes.title_text(), styles.title),
-            line: TITLE_LINE * f64::from(styles.title.size),
-            ascent,
-            descent,
-        }
-    });
-    let subtitle = (!axes.subtitle_text().is_empty()).then(|| {
-        let (ascent, descent) = metrics(lib, &styles.body);
-        HeaderLine {
-            label: measure(lib, axes.subtitle_text(), styles.body),
-            line: BODY_LINE * f64::from(styles.body.size),
-            ascent,
-            descent,
-        }
-    });
     let row = legend.row_within(span.row_left, span.row_right);
-    let heading = Header {
-        title,
-        subtitle,
-        row: (!row.is_empty()).then(|| row.height()),
-    };
+    let heading = Header::measure(axes.title_text(), axes.subtitle_text(), &styles, &row, lib);
 
     // Tick labels.
     let (tick_ascent, tick_descent) = metrics(lib, &styles.tick);
     let tick_size = f64::from(styles.tick.size);
-    let y_labels = measure_ticks(lib, &resolved.y.ticks, styles.tick);
-    let x_labels = measure_ticks(lib, &resolved.x.ticks, styles.tick);
+    let y_labels = if show_labels[1] {
+        measure_ticks(lib, &resolved.y.ticks, styles.tick)
+    } else {
+        Vec::new()
+    };
+    let x_labels = if show_labels[0] {
+        measure_ticks(lib, &resolved.x.ticks, styles.tick)
+    } else {
+        Vec::new()
+    };
     let y_label_width = y_labels
         .iter()
         .map(|(_, label)| label.width())
@@ -433,7 +532,7 @@ pub(crate) fn place_panel(
     } = bands;
     let row = input.legend.row_within(header_box.left, header_box.right);
     let row_height = (!row.is_empty()).then(|| row.height());
-    let header = heading.place(header_box.left, header_box.top, row_height);
+    let header = heading.place(header_box, input.theme.title_align(), row_height);
     let row = if row_height.is_some() {
         row.placed(header.row)
     } else {
@@ -829,7 +928,8 @@ mod tests {
         for (name, figure) in &fixtures {
             let (resolved, layout) = plan_figure(figure, (0, 0), lib);
             with_layout_input(figure, (0, 0), lib, |input, grid| {
-                let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+                let bands =
+                    measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
                 // A figure of one axes has the canvas as its frame.
                 let slot = single_slot(grid, layout.plot, &bands);
                 assert_eq!(layout.frame, slot.frame, "{name}");
@@ -849,7 +949,8 @@ mod tests {
         for (name, figure) in &panel_fixtures() {
             let (resolved, layout) = plan_figure(figure, (0, 0), lib);
             with_layout_input(figure, (0, 0), lib, |input, grid| {
-                let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+                let bands =
+                    measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
                 let header = bands.heading.bottom(0.0);
                 let plot = layout.plot;
                 assert!(
@@ -886,7 +987,7 @@ mod tests {
         );
         let (resolved, layout) = plan_figure(&figure, (0, 0), lib);
         with_layout_input(&figure, (0, 0), lib, |input, grid| {
-            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
             assert!(bands.y_tick_column > Y_LABEL_GAP);
             assert!(
                 close(layout.plot.x, PADDING + bands.y_tick_column),
@@ -909,7 +1010,7 @@ mod tests {
         );
         let (resolved, layout) = plan_figure(&figure, (0, 0), lib);
         with_layout_input(&figure, (0, 0), lib, |input, grid| {
-            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
             let mut slot = single_slot(grid, layout.plot, &bands);
             slot.header.left += 30.0;
             slot.header.right += 30.0;

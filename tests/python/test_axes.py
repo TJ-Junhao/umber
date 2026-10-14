@@ -145,6 +145,7 @@ def test_axes_report_the_package_as_their_module() -> None:
         "band",
         "y_error_bars",
         "x_error_bars",
+        "stem",
     ]
     ticks = ["xticks", "yticks", "xticks_labeled", "yticks_labeled", "xtick_format", "ytick_format"]
     for name in [*TEXTS, "xlim", "ylim", "legend", *marks, *ticks]:

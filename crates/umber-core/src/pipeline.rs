@@ -6,10 +6,11 @@
 //! baseline.
 
 use crate::layout::{
-    self, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize, TickSpacing,
+    self, FigureHeader, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize,
+    TickSpacing,
 };
 use crate::legend::Legend;
-use crate::model::{Axes, Figure};
+use crate::model::{Axes, Figure, ShareGroups, label_visibility};
 use crate::resolve::{self, Limits, Resolved, ResolvedMark};
 use crate::scene::Scene;
 use crate::{FontLibrary, Result, Theme, draw};
@@ -31,9 +32,18 @@ fn panels<'a>(figure: &'a Figure, lib: &FontLibrary) -> Vec<Panel<'a>> {
     let theme = figure.theme();
     figure
         .panels()
-        .map(|axes| {
-            let marks = resolve::resolve_marks(axes.marks(), theme);
-            let legend = measure_legend(theme, axes, &marks, lib);
+        .zip(resolve::resolve_figure_marks(figure))
+        .map(|(axes, marks)| {
+            let legend = if has_merged_legend(figure) {
+                let style = axes.legend_style().unwrap_or(theme.legend_style());
+                MeasuredLegend::measure(
+                    theme,
+                    &Legend::panel(style, &marks, &Limits::of(axes), true),
+                    lib,
+                )
+            } else {
+                measure_legend(theme, axes, &marks, lib)
+            };
             Panel {
                 axes,
                 marks,
@@ -56,6 +66,29 @@ fn measure_legend<'a>(
     MeasuredLegend::measure(theme, &legend, lib)
 }
 
+/// Whether row legends belong to the figure rather than its individual panels.
+fn has_merged_legend(figure: &Figure) -> bool {
+    let grid = figure.grid();
+    grid.rows() * grid.cols() > 1 && grid.legend() == crate::LegendMode::Merged
+}
+
+/// Measures the figure title, subtitle and merged legend once, before the grid solve.
+fn figure_header(figure: &Figure, panels: &[Panel<'_>], lib: &FontLibrary) -> FigureHeader {
+    let legend = if has_merged_legend(figure) {
+        let merged = Legend::merged(figure, panels.iter().map(|panel| panel.marks.as_slice()));
+        MeasuredLegend::measure(figure.theme(), &merged, lib)
+    } else {
+        MeasuredLegend::default()
+    };
+    FigureHeader::measure(figure, &legend, lib)
+}
+
+/// The figure-wide header and the resolved layout of every panel.
+struct FigurePlan {
+    header: FigureHeader,
+    panels: Vec<(Resolved, Layout)>,
+}
+
 /// One side of a plot area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Side {
@@ -75,6 +108,36 @@ impl Side {
             Side::X => 0,
             Side::Y => 1,
         }
+    }
+
+    /// Panel index to the first member of this side's group.
+    fn groups(self, groups: &ShareGroups) -> &[usize] {
+        match self {
+            Self::X => &groups.x,
+            Self::Y => &groups.y,
+        }
+    }
+
+    /// The smallest plot size among members that show this side's labels. Hidden labels
+    /// must not limit the ticks of a wider or taller visible member.
+    fn group_plot(
+        self,
+        groups: &ShareGroups,
+        i: usize,
+        plots: &[PlotSize],
+        show_labels: &[[bool; 2]],
+    ) -> PlotSize {
+        let keys = self.groups(groups);
+        plots
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| keys[*j] == keys[i] && show_labels[*j][self.index()])
+            .map(|(_, plot)| *plot)
+            .reduce(|size, plot| PlotSize {
+                width: size.width.min(plot.width),
+                height: size.height.min(plot.height),
+            })
+            .unwrap_or(plots[i])
     }
 
     /// Whether this side of an axes with `limits` gets automatic ticks: a linear or log axis
@@ -173,6 +236,42 @@ impl TickChoice {
     }
 }
 
+/// Resolves each group once, in row-major panel order, then gives its members identical
+/// scales and ticks. Marks remain per panel for drawing and legend colors.
+fn resolve_groups(
+    panels: &[Panel<'_>],
+    limits: &[Limits<'_>],
+    groups: &ShareGroups,
+    rooms: &[[layout::TickRoom<'_>; 2]],
+) -> Vec<Resolved> {
+    let mut resolved: Vec<Resolved> = Vec::with_capacity(panels.len());
+    for i in 0..panels.len() {
+        let x = if groups.x[i] == i {
+            let marks = panels
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| groups.x[*j] == i)
+                .flat_map(|(_, panel)| panel.marks.iter());
+            resolve::resolve_x(marks, limits[i].x, &rooms[i][0])
+        } else {
+            resolved[groups.x[i]].x.clone()
+        };
+        let (y, baseline) = if groups.y[i] == i {
+            let marks = panels
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| groups.y[*j] == i)
+                .flat_map(|(_, panel)| panel.marks.iter());
+            resolve::resolve_y(marks, limits[i].y, &rooms[i][1])
+        } else {
+            let r = &resolved[groups.y[i]];
+            (r.y.clone(), r.baseline)
+        };
+        resolved.push(Resolved { x, y, baseline });
+    }
+    resolved
+}
+
 /// Resolves and lays out every panel of `figure`, whose records are `panels`.
 ///
 /// Ticks depend on the plot size, and the plot size depends on the tick label widths. A first
@@ -206,8 +305,9 @@ fn plan(
     panels: &[Panel<'_>],
     lib: &FontLibrary,
     context: &'static str,
-) -> Result<Vec<(Resolved, Layout)>> {
+) -> Result<FigurePlan> {
     let theme = figure.theme();
+    let header = figure_header(figure, panels, lib);
     let inputs: Vec<LayoutInput<'_>> = panels
         .iter()
         .map(|panel| LayoutInput {
@@ -221,52 +321,86 @@ fn plan(
     let grid = GridInput {
         width: figure.width_in() * 72.0,
         height: figure.height_in() * 72.0,
+        top: header.bottom,
         grid: figure.grid(),
         theme,
         context,
         panels: &inputs,
     };
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
+    let groups = ShareGroups::new(figure);
+    let show_labels: Vec<_> = panels
+        .iter()
+        .map(|panel| label_visibility(figure, panel.axes.cells()))
+        .collect();
     let measure = |i: usize, resolved: &Resolved| {
         let input = &inputs[i];
-        layout::measure_panel(input, resolved, grid.span(input.axes.cells()))
+        layout::measure_panel(
+            input,
+            resolved,
+            grid.span(input.axes.cells()),
+            show_labels[i],
+        )
     };
 
+    let rooms_for = |plots: &[PlotSize], spacing| {
+        (0..panels.len())
+            .map(|i| {
+                let x = Side::X.group_plot(&groups, i, plots, &show_labels);
+                let y = Side::Y.group_plot(&groups, i, plots, &show_labels);
+                let (x, _) = layout::tick_rooms(x, theme, lib, spacing);
+                let (_, y) = layout::tick_rooms(y, theme, lib, spacing);
+                [x, y]
+            })
+            .collect::<Vec<_>>()
+    };
     // The first pass: ticks for their targets alone, on guessed plot sizes.
-    let first: Vec<PanelBands> = inputs
+    let guesses: Vec<_> = inputs
+        .iter()
+        .map(|input| grid.initial_plot_size(input.axes.cells()))
+        .collect();
+    let first = resolve_groups(
+        panels,
+        &limits,
+        &groups,
+        &rooms_for(&guesses, TickSpacing::Target),
+    );
+    let first: Vec<PanelBands> = first
         .iter()
         .enumerate()
-        .map(|(i, input)| {
-            let guess = grid.initial_plot_size(input.axes.cells());
-            let (x, y) = layout::tick_rooms(guess, theme, lib, TickSpacing::Target);
-            measure(i, &resolve::resolve(&panels[i].marks, &limits[i], &x, &y))
-        })
+        .map(|(i, r)| measure(i, r))
         .collect();
     let first = layout::solve_grid(&grid, &first)?;
+    let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
 
     // The final pass: tick labels kept apart on the plot sizes of the first.
-    let resolve_panel = |i: usize, choices: &[TickChoice; 2]| {
-        let x = choices[0].room(Side::X, theme, lib);
-        let y = choices[1].room(Side::Y, theme, lib);
-        resolve::resolve(&panels[i].marks, &limits[i], &x, &y)
+    let resolve_choices = |choices: &[[TickChoice; 2]]| {
+        let rooms: Vec<_> = choices
+            .iter()
+            .map(|c| {
+                [
+                    c[0].room(Side::X, theme, lib),
+                    c[1].room(Side::Y, theme, lib),
+                ]
+            })
+            .collect();
+        resolve_groups(panels, &limits, &groups, &rooms)
     };
-    let mut choices: Vec<[TickChoice; 2]> = first
-        .panels
-        .iter()
-        .map(|slot| [TickChoice::first(slot.plot.size()); 2])
+    let mut choices: Vec<[TickChoice; 2]> = (0..panels.len())
+        .map(|i| {
+            Side::BOTH
+                .map(|side| TickChoice::first(side.group_plot(&groups, i, &plots, &show_labels)))
+        })
         .collect();
     // First keep the complete previous constrained search. Its fallback may crowd on the
     // size used to choose it yet fit on the solved plot; only that plot decides whether to
     // repair it. This also keeps the layout, not just the ticks, when everything already fits.
-    let mut resolved: Vec<Resolved> = first
-        .panels
-        .iter()
-        .enumerate()
-        .map(|(i, slot)| {
-            let (x, y) = layout::tick_rooms(slot.plot.size(), theme, lib, TickSpacing::Deferred);
-            resolve::resolve(&panels[i].marks, &limits[i], &x, &y)
-        })
-        .collect();
+    let mut resolved = resolve_groups(
+        panels,
+        &limits,
+        &groups,
+        &rooms_for(&plots, TickSpacing::Deferred),
+    );
     let mut bands: Vec<PanelBands> = resolved
         .iter()
         .enumerate()
@@ -276,7 +410,8 @@ fn plan(
         Ok(solution)
             if solution.panels.iter().enumerate().all(|(i, slot)| {
                 Side::BOTH.into_iter().all(|side| {
-                    !side.is_automatic(&limits[i])
+                    !show_labels[i][side.index()]
+                        || !side.is_automatic(&limits[i])
                         || side
                             .room(slot.plot.size(), theme, lib)
                             .slack(side.ticks(&resolved[i]))
@@ -287,11 +422,7 @@ fn plan(
             solution
         }
         _ => {
-            resolved = choices
-                .iter()
-                .enumerate()
-                .map(|(i, panel)| resolve_panel(i, panel))
-                .collect();
+            resolved = resolve_choices(&choices);
             bands = resolved
                 .iter()
                 .enumerate()
@@ -310,10 +441,18 @@ fn plan(
         // The sides whose labels crowd on the solved plots, chosen again.
         let mut next = choices.clone();
         let mut again: Vec<(usize, Side)> = Vec::new();
-        for (i, slot) in solution.panels.iter().enumerate() {
-            let plot = slot.plot.size();
+        let plots: Vec<_> = solution
+            .panels
+            .iter()
+            .map(|slot| slot.plot.size())
+            .collect();
+        for (i, r) in resolved.iter().enumerate() {
             for side in Side::BOTH {
-                let ticks = side.ticks(&resolved[i]);
+                if side.groups(&groups)[i] != i {
+                    continue;
+                }
+                let plot = side.group_plot(&groups, i, &plots, &show_labels);
+                let ticks = side.ticks(r);
                 if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
                 {
                     continue;
@@ -331,14 +470,12 @@ fn plan(
         if again.is_empty() {
             break;
         }
-        let mut tried_resolved = resolved.clone();
-        let mut tried_bands = bands.clone();
-        let mut panels_again: Vec<usize> = again.iter().map(|&(i, _)| i).collect();
-        panels_again.dedup();
-        for i in panels_again {
-            tried_resolved[i] = resolve_panel(i, &next[i]);
-            tried_bands[i] = measure(i, &tried_resolved[i]);
-        }
+        let tried_resolved = resolve_choices(&next);
+        let tried_bands: Vec<_> = tried_resolved
+            .iter()
+            .enumerate()
+            .map(|(i, r)| measure(i, r))
+            .collect();
         for &(i, side) in &again {
             // A choice that crowds even on the plot it was made for is the fallback.
             let choice = &mut next[i][side.index()];
@@ -377,7 +514,11 @@ fn plan(
         })
         .unzip();
     layout::check_panel_contents(&grid, &layouts)?;
-    Ok(resolved.into_iter().zip(layouts).collect())
+    header.check(figure, context)?;
+    Ok(FigurePlan {
+        header,
+        panels: resolved.into_iter().zip(layouts).collect(),
+    })
 }
 
 /// [`plan`] for the axes of `figure` whose top-left cell is at `cell`, with the figure laid out
@@ -404,7 +545,7 @@ pub(crate) fn try_plan_figure(
     let index = panel_index(figure, cell);
     let panels = panels(figure, lib);
     let mut planned = plan(figure, &panels, lib, "Figure.to_scene()")?;
-    Ok(planned.swap_remove(index))
+    Ok(planned.panels.swap_remove(index))
 }
 
 /// [`plan`] for every axes of `figure`, in the order of [`Figure::panels`], with layout errors
@@ -414,7 +555,7 @@ pub(crate) fn try_plan_panels(
     figure: &Figure,
     lib: &FontLibrary,
 ) -> Result<Vec<(Resolved, Layout)>> {
-    plan(figure, &panels(figure, lib), lib, "Figure.to_scene()")
+    plan(figure, &panels(figure, lib), lib, "Figure.to_scene()").map(|planned| planned.panels)
 }
 
 /// The index, in the order of [`Figure::panels`], of the axes of `figure` whose top-left cell
@@ -440,6 +581,7 @@ pub(crate) fn with_layout_input<R>(
 ) -> R {
     let index = panel_index(figure, cell);
     let panels = panels(figure, lib);
+    let header = figure_header(figure, &panels, lib);
     let inputs: Vec<LayoutInput<'_>> = panels
         .iter()
         .map(|panel| LayoutInput {
@@ -453,6 +595,7 @@ pub(crate) fn with_layout_input<R>(
     let grid = GridInput {
         width: figure.width_in() * 72.0,
         height: figure.height_in() * 72.0,
+        top: header.bottom,
         grid: figure.grid(),
         theme: figure.theme(),
         context: "Figure.to_scene()",
@@ -470,7 +613,8 @@ pub(crate) fn with_layout_input<R>(
 /// - the baseline, as an unclipped group of its own.
 ///
 /// Every axes is laid out by one solve of the grid ([`plan`]); a figure of one axes has the
-/// canvas as its frame. Without axes the scene holds the background only. Each axes' marks are
+/// canvas as its frame. The figure header follows the panels as its own unclipped group when
+/// non-empty; without axes the scene holds the background and that header. Each axes' marks are
 /// resolved and its legend is built and measured once, before layout, and the same records
 /// serve layout and drawing.
 ///
@@ -487,10 +631,15 @@ pub(crate) fn scene(
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
     let panels = panels(figure, library);
     if panels.is_empty() {
+        let header = figure_header(figure, &panels, library);
+        header.check(figure, context)?;
+        if let Some(header) = draw::figure_header(theme, &header) {
+            scene.push(header);
+        }
         return Ok(scene);
     }
     let planned = plan(figure, &panels, library, context)?;
-    for (panel, (resolved, layout)) in panels.iter().zip(&planned) {
+    for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         scene.push(draw::chrome(theme, layout));
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
             scene.push(marks);
@@ -500,8 +649,15 @@ pub(crate) fn scene(
         }
         scene.push(draw::baseline(theme, layout));
     }
+    if let Some(header) = draw::figure_header(theme, &planned.header) {
+        scene.push(header);
+    }
     Ok(scene)
 }
+
+#[cfg(test)]
+#[path = "header_tests.rs"]
+mod header_tests;
 
 #[cfg(test)]
 mod tests {
@@ -509,6 +665,43 @@ mod tests {
     use crate::model::{AxisData, Grid, GridIndex, LineOptions, Placement};
     use crate::scene::Item;
     use crate::{LegendStyle, ScaleKind};
+
+    #[test]
+    fn group_plot_uses_the_shortest_member_with_visible_labels_on_each_side() {
+        let groups = ShareGroups {
+            x: vec![0, 0, 0, 3],
+            y: vec![0, 0, 0, 3],
+        };
+        let plots = [
+            PlotSize {
+                width: 100.0,
+                height: 50.0,
+            },
+            PlotSize {
+                width: 400.0,
+                height: 200.0,
+            },
+            PlotSize {
+                width: 300.0,
+                height: 150.0,
+            },
+            PlotSize {
+                width: 10.0,
+                height: 10.0,
+            },
+        ];
+        let show_labels = [[false, true], [true, false], [true, true], [true, true]];
+        for i in 0..3 {
+            assert_eq!(
+                Side::X.group_plot(&groups, i, &plots, &show_labels),
+                plots[2]
+            );
+            assert_eq!(
+                Side::Y.group_plot(&groups, i, &plots, &show_labels),
+                plots[0]
+            );
+        }
+    }
 
     /// A figure in `theme` with a title and two labelled lines.
     fn labelled_figure(theme: Theme) -> Figure {
@@ -899,6 +1092,7 @@ mod tests {
         let grid = GridInput {
             width: figure.width_in() * 72.0,
             height: figure.height_in() * 72.0,
+            top: figure_header(figure, &panels, lib).bottom,
             grid: figure.grid(),
             theme,
             context: "Figure.to_scene()",
@@ -917,7 +1111,7 @@ mod tests {
                 .iter()
                 .zip(&resolved)
                 .map(|(input, resolved)| {
-                    layout::measure_panel(input, resolved, grid.span(input.axes.cells()))
+                    layout::measure_panel(input, resolved, grid.span(input.axes.cells()), [true; 2])
                 })
                 .collect();
             (resolved, bands)

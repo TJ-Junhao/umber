@@ -13,7 +13,9 @@ use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+use super::share::{Setting, SharedAxis};
 use super::stacked_area::StackedAreaMark;
+use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
     AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
@@ -29,6 +31,11 @@ use crate::{ContinuousScale, Error, LegendStyle, Result, TickFormat};
 /// [`Figure::add_axes`], [`Figure::add_axes_at`] and [`Figure::axes_at_mut`] return one.
 /// Every setter checks its input before it stores anything, so a failed call leaves the figure
 /// unchanged. Setters return the handle, so calls chain.
+///
+/// Limits, explicit ticks and tick formats apply to the whole shared group. A member may
+/// replace its own setting, but a different value already set by another member is an
+/// `Error::Usage`. Setting the same value again is allowed. Members added later inherit the
+/// group's settings; text, legend and mark methods always apply to this axes alone.
 ///
 /// # Examples
 ///
@@ -166,8 +173,15 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.xlim = Some(check_x_limits(axes.x, low, high)?);
+        let mut settings = (*self.x_settings).clone();
+        settings.limits = Some(check_x_limits(self.x, low, high)?);
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::Limits,
+            settings,
+            "Axes.xlim()",
+        )?;
         Ok(self)
     }
 
@@ -185,8 +199,15 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.ylim = Some(ContinuousScale::new(axes.y, low, high, "Axes.ylim()")?);
+        let mut settings = (*self.y_settings).clone();
+        settings.limits = Some(ContinuousScale::new(self.y, low, high, "Axes.ylim()")?);
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::Limits,
+            settings,
+            "Axes.ylim()",
+        )?;
         Ok(self)
     }
 
@@ -222,10 +243,14 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xticks(&mut self, positions: &[f64]) -> Result<&mut Self> {
-        let axes = self.axes_mut();
         const CONTEXT: &str = "Axes.xticks()";
-        let transform = check_x_tick_axis(CONTEXT, axes.x, "ticks")?;
-        axes.xticks.set_positions(CONTEXT, transform, positions)?;
+        let transform = check_x_tick_axis(CONTEXT, self.x, "ticks")?;
+        let mut settings = (*self.x_settings).clone();
+        settings
+            .ticks
+            .set_positions(CONTEXT, transform, positions)?;
+        self.figure
+            .set_group(self.index, SharedAxis::X, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
     }
 
@@ -250,9 +275,11 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn yticks(&mut self, positions: &[f64]) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.yticks
-            .set_positions("Axes.yticks()", axes.y, positions)?;
+        const CONTEXT: &str = "Axes.yticks()";
+        let mut settings = (*self.y_settings).clone();
+        settings.ticks.set_positions(CONTEXT, self.y, positions)?;
+        self.figure
+            .set_group(self.index, SharedAxis::Y, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
     }
 
@@ -285,11 +312,14 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Self> {
-        let axes = self.axes_mut();
         const CONTEXT: &str = "Axes.xticks_labeled()";
-        let transform = check_x_tick_axis(CONTEXT, axes.x, "ticks")?;
-        axes.xticks
+        let transform = check_x_tick_axis(CONTEXT, self.x, "ticks")?;
+        let mut settings = (*self.x_settings).clone();
+        settings
+            .ticks
             .set_labeled(CONTEXT, transform, positions, labels)?;
+        self.figure
+            .set_group(self.index, SharedAxis::X, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
     }
 
@@ -314,9 +344,13 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn yticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.yticks
-            .set_labeled("Axes.yticks_labeled()", axes.y, positions, labels)?;
+        const CONTEXT: &str = "Axes.yticks_labeled()";
+        let mut settings = (*self.y_settings).clone();
+        settings
+            .ticks
+            .set_labeled(CONTEXT, self.y, positions, labels)?;
+        self.figure
+            .set_group(self.index, SharedAxis::Y, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
     }
 
@@ -341,10 +375,17 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xtick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
-        let axes = self.axes_mut();
         const CONTEXT: &str = "Axes.xtick_format()";
-        check_x_tick_axis(CONTEXT, axes.x, "tick formats")?;
-        axes.xticks.set_format(CONTEXT, format)?;
+        check_x_tick_axis(CONTEXT, self.x, "tick formats")?;
+        let mut settings = (*self.x_settings).clone();
+        settings.ticks.set_format(CONTEXT, format)?;
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::Format,
+            settings,
+            CONTEXT,
+        )?;
         Ok(self)
     }
 
@@ -368,8 +409,16 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn ytick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.yticks.set_format("Axes.ytick_format()", format)?;
+        const CONTEXT: &str = "Axes.ytick_format()";
+        let mut settings = (*self.y_settings).clone();
+        settings.ticks.set_format(CONTEXT, format)?;
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::Format,
+            settings,
+            CONTEXT,
+        )?;
         Ok(self)
     }
 
@@ -508,6 +557,59 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let series = XySeries::new("Axes.scatter()", axes.x, axes.y, x, y, SCATTER_GAP_HINT)?;
         axes.marks.push(Mark::scatter(series, options));
+        Ok(self)
+    }
+
+    /// Adds a line from the baseline to each value and a scatter marker at the value. Same
+    /// validation as [`AxesMut::scatter`]; NaN skips the point. Category x values sit at band
+    /// centres. A linear y domain includes 0; a log y axis starts stems at its baseline.
+    /// Explicit limits clip stems and markers as they do other marks. Points are not reduced.
+    ///
+    /// The line width is [`Theme::stem_width`](crate::Theme::stem_width); `options.size` sets
+    /// only the marker diameter. Labelled stems take a legend row entry, never a direct label.
+    /// The mark copies `y` once; [`AxesMut::stem_shared`] can store an existing `Arc<[f64]>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Figure, ScaleKind, StemOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.stem(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, -1.0], StemOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stem(&mut self, x: AxisData, y: &[f64], options: StemOptions) -> Result<&mut Self> {
+        self.stem_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds stems as [`AxesMut::stem`] does, storing `y` without copying it. Same rules and
+    /// errors as [`AxesMut::stem`]; a failed call leaves the figure unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::{AxisData, Figure, Mark, ScaleKind, StemOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([2.0, -1.0]);
+    /// axes.stem_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), StemOptions::default())?;
+    /// let Some(Mark::Stem(stem)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(stem.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stem_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: StemOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let series = XySeries::new("Axes.stem()", axes.x, axes.y, x, y, SCATTER_GAP_HINT)?;
+        axes.marks.push(Mark::Stem(StemMark::new(series, options)));
         Ok(self)
     }
 
@@ -708,8 +810,9 @@ impl<'a> AxesMut<'a> {
     /// Adds grouped bars: in each category, one bar per series, side by side in series order.
     /// The group takes 72 % of the category's band, centered in it, with a 2 pt gap between
     /// its bars; when the bars would be narrower than the gap, they touch. Each bar grows from
-    /// the baseline as in [`AxesMut::bar`]. Each series takes its own color; `Auto` colors take
-    /// palette slots in series order. Categories join the x axis in order of first appearance
+    /// the baseline as in [`AxesMut::bar`]. Automatic colors share one palette slot per label
+    /// across the figure; unlabelled series take slots after all labels, per axes.
+    /// Categories join the x axis in order of first appearance
     /// across all marks.
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: an empty

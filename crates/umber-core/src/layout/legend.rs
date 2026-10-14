@@ -1,12 +1,12 @@
 //! Legend layout: measuring and wrapping the legend row, the geometry of chips, and the space
 //! reserved on the right for direct labels.
 //!
-//! The legend row sits in the header, under the subtitle, left-aligned with the title. Its
-//! entries are laid out left to right and wrap onto further rows within the width the panel
-//! gives it: the inner width (the canvas inside the outer padding) for a figure of one axes, the
-//! plot width on a grid. An entry wider than a whole row gets a row of its own and is clipped by
-//! the canvas. All rows have the height of the tallest entry. The entries are measured once;
-//! each layout pass wraps and places them.
+//! A panel legend starts at the header's left edge, independently of the title's alignment.
+//! Its entries wrap within the inner canvas width for one cell, or the panel's plot width on a
+//! larger grid. A merged legend wraps within the inner canvas width and aligns each row with
+//! the figure title. Grid panel and merged entries wider than a whole row are rejected; a
+//! single-cell panel keeps canvas clipping. All rows have the tallest entry's height. Entries
+//! are measured once; each layout pass wraps and places them.
 //!
 //! A plain entry is its swatch and its label. A chip is a pill as tall as the row, holding a dot
 //! and the label inside a horizontal padding. Both styles wrap the same way: an entry box is
@@ -19,13 +19,15 @@
 //! anchors move with the axes, so they are placed in every layout pass.
 
 use super::nudge::separate;
-use super::{Area, BODY_LINE, Frame, Label, Styles, baseline_in_line, measure, metrics};
+use super::{
+    Area, BODY_LINE, Frame, Label, Styles, baseline_in_line, legend_too_wide, measure, metrics,
+};
 use crate::legend::{Legend, RowStyle, Swatch};
 use crate::resolve::{
     Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis,
     ResolvedContinuousAxis,
 };
-use crate::{FontLibrary, Rgba, SizeSpec, TextStyle, Theme, Weight};
+use crate::{Align, FontLibrary, Result, Rgba, SizeSpec, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
 const SWATCH_GAP: f64 = 4.0;
@@ -244,6 +246,49 @@ impl MeasuredRow {
 }
 
 impl LegendRow {
+    /// Aligns each wrapped row independently within `left..right`.
+    pub(super) fn aligned(mut self, left: f64, right: f64, align: Align) -> LegendRow {
+        if align == Align::Left {
+            return self;
+        }
+        for row in self
+            .entries
+            .chunk_by_mut(|a, b| a.swatch.center_y == b.swatch.center_y)
+        {
+            let Some(first) = row.first() else { continue };
+            let start = first.chip.map_or(first.swatch.x, |chip| chip.x);
+            let Some(last) = row.last() else { continue };
+            let end = last
+                .chip
+                .map_or(last.label.x + last.label.width(), |chip| chip.right());
+            let shift = align.position(end - start, left, right) - start;
+            for entry in row {
+                entry.swatch.x += shift;
+                entry.label.x += shift;
+                if let Some(chip) = &mut entry.chip {
+                    chip.x += shift;
+                }
+            }
+        }
+        self
+    }
+
+    /// Rejects a figure legend entry wider than its whole row, including the swatch and chip
+    /// padding. Wrapping cannot contain such an entry.
+    pub(super) fn check_width(&self, width: f64, context: &'static str) -> Result<()> {
+        for entry in &self.entries {
+            let start = entry.chip.map_or(entry.swatch.x, |chip| chip.x);
+            let end = entry
+                .chip
+                .map_or(entry.label.x + entry.label.width(), |chip| chip.right());
+            if end - start > width + super::inset::CONTAINMENT_TOLERANCE {
+                let room = width - (end - start - entry.label.width());
+                return Err(legend_too_wide(context, &entry.label, room, "figure"));
+            }
+        }
+        Ok(())
+    }
+
     /// This row moved down so that its first row's top is at `top`.
     pub(super) fn placed(&self, top: f64) -> LegendRow {
         let entries = self

@@ -18,6 +18,7 @@ mod oracle;
 mod rule;
 mod scatter;
 mod stacked_area;
+mod stem;
 mod step;
 
 use crate::geometry::{Path, PathVerb, Point};

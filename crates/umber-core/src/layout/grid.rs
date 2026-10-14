@@ -43,9 +43,9 @@ use super::inset::{CONTAINMENT_TOLERANCE, TickSpan};
 use super::panel::{HeaderBox, PanelBands, PanelSlot, PanelSpan, end_label_cap};
 use super::program;
 use super::{
-    AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, Label, Layout, LayoutInput, MIN_PLOT, PADDING,
-    PlotSize, X_LABEL_EDGE_GAP, initial_plot_size, solve_single, widest, x_labels_wider_than,
-    y_labels_leave_no_room,
+    AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, LEGEND_HINT, Label, Layout, LayoutInput,
+    MIN_PLOT, PADDING, PlotSize, X_LABEL_EDGE_GAP, initial_plot_size, legend_too_wide,
+    solve_single, widest, widths, x_labels_wider_than, y_labels_leave_no_room,
 };
 use crate::error::{number, quoted};
 use crate::model::{CellRange, Grid};
@@ -75,6 +75,8 @@ pub(crate) struct GridInput<'a> {
     pub width: f64,
     /// The canvas height, in points.
     pub height: f64,
+    /// The top of the grid, below the figure header; the outer padding without a header.
+    pub top: f64,
     /// The grid.
     pub grid: &'a Grid,
     /// The theme, for the panel gap.
@@ -135,7 +137,7 @@ impl GridInput<'_> {
     /// cells' share of it, gaps between them included; at least [`MIN_PLOT`] a side.
     pub fn initial_plot_size(&self, cells: CellRange) -> PlotSize {
         if self.is_single() {
-            return initial_plot_size(self.width, self.height);
+            return initial_plot_size(self.width, self.height - (self.top - PADDING));
         }
         let gap = self.gap();
         let (_, width) = cell_extent(
@@ -146,7 +148,7 @@ impl GridInput<'_> {
             cells.col_span(),
         );
         let (_, height) = cell_extent(
-            self.height,
+            self.height - (self.top - PADDING),
             self.grid.rows(),
             gap,
             cells.row(),
@@ -205,14 +207,14 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
         let header = HeaderBox {
             left: canvas.x + PADDING,
             right: canvas.right() - PADDING,
-            top: canvas.y + PADDING,
+            top: input.top,
         };
         let panels = input
             .panels
             .iter()
             .zip(bands)
             .map(|(panel, bands)| {
-                solve_single(panel, bands, canvas).map(|plot| PanelSlot {
+                solve_single(panel, bands, canvas, input.top).map(|plot| PanelSlot {
                     plot,
                     header,
                     xlabel_baseline: plot.bottom()
@@ -768,10 +770,11 @@ impl Rows {
         let rows = self.above.len();
         let bands = self.above.iter().sum::<f64>() + self.below.iter().sum::<f64>();
         let gaps = self.gap * (rows - 1) as f64;
-        let plot_height = |height: f64| (height - 2.0 * PADDING - bands - gaps) / rows as f64;
+        let padding = input.top + PADDING;
+        let plot_height = |height: f64| (height - padding - bands - gaps) / rows as f64;
         if plot_height(input.height) < MIN_PLOT {
             // The least whole height that the check accepts.
-            let needed = 2.0 * PADDING + bands + gaps + MIN_PLOT * rows as f64;
+            let needed = padding + bands + gaps + MIN_PLOT * rows as f64;
             let least = input.height.floor() + 1.0;
             let mut whole = needed.ceil().max(least);
             while plot_height(whole) < MIN_PLOT {
@@ -785,7 +788,7 @@ impl Rows {
         let plot_height = plot_height(input.height);
         let mut row_top = Vec::with_capacity(rows);
         let mut plot_y = Vec::with_capacity(rows);
-        let mut y = PADDING;
+        let mut y = input.top;
         for r in 0..rows {
             row_top.push(y);
             let top = y + self.above[r];
@@ -1114,11 +1117,6 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
     let too_wide = |cells: CellRange, message: String, hint: &'static str| {
         in_panel(cells, Error::style(input.context, message).with_hint(hint))
     };
-    // The text's width and the room it has, in whole points.
-    let widths = |width: f64, room: f64| {
-        let room = room.floor();
-        (number(width.round().max(room + 1.0)), number(room))
-    };
     for (panel, layout) in input.panels.iter().zip(layouts) {
         let cells = panel.axes.cells();
         let plot = layout.plot;
@@ -1163,12 +1161,11 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
                 let label = &entry.label;
                 // A chip's padding follows its label.
                 let trailing = end - (label.x + label.width());
-                let (w, p) = widths(label.width(), plot.right() - trailing - label.x);
-                let message = format!(
-                    "the legend label {} is {w} pt wide; the panel has {p} pt.",
-                    quoted(&label.text)
-                );
-                return Err(too_wide(cells, message, LEGEND_HINT));
+                let room = plot.right() - trailing - label.x;
+                return Err(in_panel(
+                    cells,
+                    legend_too_wide(input.context, label, room, "panel"),
+                ));
             }
         }
         for (label, name, hint) in axis {
@@ -1193,9 +1190,6 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
     }
     Ok(())
 }
-
-/// The hint of the errors for legend labels that do not fit their panel.
-const LEGEND_HINT: &str = "shorten the label or widen the figure.";
 
 #[cfg(test)]
 mod tests {
@@ -1294,9 +1288,19 @@ mod tests {
 
     /// A `rows × cols` grid at its automatic size in `theme`, filled from `seed`: cells left
     /// empty or holding axes with random spans, texts, legends and tick labels.
-    fn random_grid(rows: usize, cols: usize, seed: u64, theme: Theme) -> Figure {
+    fn random_grid(
+        rows: usize,
+        cols: usize,
+        seed: u64,
+        theme: Theme,
+        sharing: [crate::Share; 2],
+    ) -> Figure {
+        use crate::Share;
         let mut rng = Rng(seed | 1);
-        let grid = Grid::new(rows as i64, cols as i64).unwrap();
+        let grid = Grid::new(rows as i64, cols as i64)
+            .unwrap()
+            .with_share_x(sharing[0])
+            .with_share_y(sharing[1]);
         let (width, height) = grid.auto_size_in();
         let mut f = Figure::with_grid(width, height, theme, grid).unwrap();
         let mut taken = vec![vec![false; cols]; rows];
@@ -1305,11 +1309,19 @@ mod tests {
                 if taken[row][col] || rng.below(5) == 0 {
                     continue;
                 }
-                let mut col_span = 1 + rng.below(3.min(cols - col));
+                let mut col_span = if sharing.contains(&Share::Col) {
+                    1
+                } else {
+                    1 + rng.below(3.min(cols - col))
+                };
                 while (col..col + col_span).any(|c| taken[row][c]) {
                     col_span -= 1;
                 }
-                let mut row_span = 1 + rng.below(3.min(rows - row));
+                let mut row_span = if sharing.contains(&Share::Row) {
+                    1
+                } else {
+                    1 + rng.below(3.min(rows - row))
+                };
                 while (row..row + row_span).any(|r| (col..col + col_span).any(|c| taken[r][c])) {
                     row_span -= 1;
                 }
@@ -1318,7 +1330,7 @@ mod tests {
                         *cell = true;
                     }
                 }
-                let category = rng.below(3) == 0;
+                let category = sharing[0] == Share::None && rng.below(3) == 0;
                 let at = Placement {
                     row: GridIndex::At(row as i64),
                     col: GridIndex::At(col as i64),
@@ -1335,7 +1347,7 @@ mod tests {
                     .subtitle(&rng.text(2))
                     .xlabel(&rng.text(2))
                     .ylabel(&rng.text(1));
-                if rng.below(2) == 0 {
+                if rng.below(2) == 0 && axes.y_ticks().is_none() {
                     let labels: Vec<String> = (0..3).map(|_| rng.text(2)).collect();
                     axes.yticks_labeled(&[0.0, 5.0, 10.0], labels).unwrap();
                 }
@@ -1449,9 +1461,12 @@ mod tests {
             cols in 1_usize..=5,
             seed in any::<u64>(),
             theme in 0_usize..3,
+            share_x in 0_usize..4,
+            share_y in 0_usize..4,
         ) {
             let theme = themes()[theme].clone();
-            let f = random_grid(rows, cols, seed, theme);
+            let modes = [crate::Share::None, crate::Share::Row, crate::Share::Col, crate::Share::All];
+            let f = random_grid(rows, cols, seed, theme, [modes[share_x], modes[share_y]]);
             match layouts(&f) {
                 Ok(layouts) => assert_aligned(&layouts)?,
                 // Random texts may not fit their panels; such a grid fails naming one.
@@ -1906,7 +1921,10 @@ mod tests {
     fn panel_rows_wrap_within_the_plot_and_direct_labels_follow_the_panel() {
         // A header legend row of a panel in one of three columns starts at its plot's left
         // edge and wraps within the plot, not the canvas.
-        let mut f = grid_figure(1, 3, (18.0, 6.0), Theme::pigment());
+        let grid = Grid::new(1, 3)
+            .unwrap()
+            .with_legend(crate::LegendMode::PerPanel);
+        let mut f = Figure::with_grid(18.0, 6.0, Theme::pigment(), grid).unwrap();
         let mut axes = add(&mut f, 0, 1, 1, 1);
         axes.title("Stations");
         for i in 0..12 {
@@ -2315,7 +2333,10 @@ mod tests {
     #[test]
     fn legend_labels_stay_in_their_panel() {
         let build = |theme: Theme, label: String| {
-            let mut f = grid_figure(1, 2, (12.0, 4.0), theme);
+            let grid = Grid::new(1, 2)
+                .unwrap()
+                .with_legend(crate::LegendMode::PerPanel);
+            let mut f = Figure::with_grid(12.0, 4.0, theme, grid).unwrap();
             for col in 0..2 {
                 let mut axes = add(&mut f, 0, col, 1, 1);
                 axes.xlim(0.0, 1.0).unwrap();
@@ -2532,7 +2553,12 @@ mod tests {
                         let limits = crate::resolve::Limits::of(input.axes);
                         let (x, y) = super::super::TickRoom::unlimited(3, 3, lib());
                         let resolved = crate::resolve::resolve(&marks, &limits, &x, &y);
-                        super::super::measure_panel(input, &resolved, grid.span(input.axes.cells()))
+                        super::super::measure_panel(
+                            input,
+                            &resolved,
+                            grid.span(input.axes.cells()),
+                            [true; 2],
+                        )
                     })
                     .collect();
                 let cells: Vec<CellRange> = grid.panels.iter().map(|p| p.axes.cells()).collect();
@@ -2578,6 +2604,7 @@ mod tests {
             let input = GridInput {
                 width: 1000.0,
                 height: 1.0,
+                top: PADDING,
                 grid: &grid,
                 theme: &theme,
                 context: "Figure.to_scene()",

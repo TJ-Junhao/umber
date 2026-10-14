@@ -36,7 +36,7 @@ type ScalarCall = tuple[Callable[[object], object], str, str]
 CALL_HINTS = {
     "Color.hex()": 'pass a string such as "#3366B8".',
     "Color.alpha()": "pass a number from 0.0 to 1.0.",
-    "Scale.log()": "pass a number greater than 1, such as 10.",
+    "Scale.log()": "pass a finite number at least 1.000000000001, such as 10.",
     "Color.rgb()": "pass a whole number such as 3.",
     "Color.palette()": "pass a whole number such as 3.",
 }

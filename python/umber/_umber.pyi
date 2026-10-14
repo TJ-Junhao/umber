@@ -231,6 +231,17 @@ class Figure:
         marker: int,
         size: _SizeArg,
     ) -> None: ...
+    def stem(
+        self,
+        row: int,
+        col: int,
+        x: _AxisValues,
+        y: _FloatArray,
+        label: str,
+        color: _ColorArg,
+        marker: int,
+        size: _SizeArg,
+    ) -> None: ...
     def bar(
         self,
         row: int,

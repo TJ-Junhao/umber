@@ -632,6 +632,60 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.scatter(self._row, self._col, xs, ys, name, spec, shape.value, extent)
             return self
 
+    def stem(
+        self,
+        x: Values[X],
+        y: Values[float],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+        marker: Marker = Marker.CIRCLE,
+        size: Size = Size.AUTO,
+    ) -> Self:
+        """Add a line from the baseline to each value, with a marker at its tip.
+
+        A linear y domain includes zero. On a log y axis, stems start at the baseline.
+        Category x values sit at band centres. A NaN coordinate leaves out that point.
+        Explicit limits clip stems and markers; points are not downsampled. A labelled
+        series takes a legend row entry, including under ``LegendStyle.DIRECT``.
+
+        Args:
+            x: Numbers on a linear or log x axis, names on a category x axis.
+            y: The y values, one per x value.
+            label: The legend label; an empty string leaves the series out of the legend.
+            color: The stem and marker color. ``Color.AUTO`` takes the next palette color.
+            marker: The marker shape, drawn as a scatter marker.
+            size: The marker diameter. ``Size.AUTO`` uses the theme's marker size. The stem
+                width stays at 1.5 points regardless of this size.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If lengths differ, a value is infinite, a magnitude is too large, a
+                value is not positive or is too small on a log axis, or x has the wrong kind.
+            StyleError: If ``label`` is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.stem([0, 1, 2, 3], [4.0, -2.0, 1.0, 0.5], label="Response")
+        """
+        with api_call():
+            context = "Axes.stem()"
+            check_axis_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
+            extent = _size_argument(context, "size", size)
+            xs = self._x_values(context, x)
+            ys = floats(context, "y", y)
+            name = _args.text(context, "label", label)
+            self._native.stem(self._row, self._col, xs, ys, name, spec, shape.value, extent)
+            return self
+
     def bar(
         self: "Axes[str, float]",
         categories: Values[str],
