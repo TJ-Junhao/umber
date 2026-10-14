@@ -11,6 +11,7 @@
 mod axes;
 mod axes_mut;
 mod axis_data;
+mod band;
 mod bar;
 mod figure;
 mod grid;
@@ -24,6 +25,7 @@ mod validation;
 pub use axes::Axes;
 pub use axes_mut::AxesMut;
 pub use axis_data::AxisData;
+pub use band::{BandMark, BandOptions};
 pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};
 pub use figure::Figure;
 pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement, Share};

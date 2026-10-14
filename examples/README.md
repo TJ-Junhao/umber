@@ -7,6 +7,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `area.py`: an area chart with the gradient fill style.
 - `step.py`: step lines in the three positions.
 - `reference_lines.py`: a threshold, an event, a normal range and a window over a line.
+- `band.py`: a mean line over its 95% interval band.
 - `bars.py`: a bar chart, a grouped bar chart and a stacked bar chart.
 - `histogram.py`: a histogram with a chosen number of bins.
 - `themes.py`: the same chart in the Pigment, Graphite and Midnight themes.

@@ -139,11 +139,17 @@ pub(super) fn check_series(
 /// before it that is not NaN. The first value below its predecessor is the error, under
 /// `context`. Category names have no order to check.
 pub(super) fn check_step_order(context: &'static str, x: &AxisData) -> Result<()> {
-    let AxisData::Numbers(values) = x else {
-        return Ok(());
-    };
+    match x {
+        AxisData::Numbers(values) => check_sorted(context, "step", values),
+        AxisData::Categories(_) => Ok(()),
+    }
+}
+
+/// Checks that `x` is in non-decreasing order for the mark `mark` ("step", "band"), skipping
+/// NaN as [`check_step_order`] does; the error is `Error::Data` under `context`.
+fn check_sorted(context: &'static str, mark: &str, x: &[f64]) -> Result<()> {
     let mut previous: Option<(usize, f64)> = None;
-    for (i, &v) in values.iter().enumerate() {
+    for (i, &v) in x.iter().enumerate() {
         if v.is_nan() {
             continue;
         }
@@ -153,7 +159,7 @@ pub(super) fn check_step_order(context: &'static str, x: &AxisData) -> Result<()
             return Err(Error::data(
                 context,
                 format!(
-                    "x[{i}] is {v}, below x[{j}] = {u}; step needs x in non-decreasing order.",
+                    "x[{i}] is {v}, below x[{j}] = {u}; {mark} needs x in non-decreasing order.",
                     v = number(v),
                     u = number(u)
                 ),
@@ -162,6 +168,64 @@ pub(super) fn check_step_order(context: &'static str, x: &AxisData) -> Result<()
             .with_hint("sort the points by x first."));
         }
         previous = Some((i, v));
+    }
+    Ok(())
+}
+
+/// Validates the x, `low` and `high` values of a band for axes with an x axis of scale kind
+/// `x_kind` and a y axis of transform `y_transform`, before it is stored, so a failed call
+/// changes nothing. The checks run in a fixed order and the first failure is the error, under
+/// `context`:
+///
+/// 1. the x axis is not a category axis (`Error::Usage`);
+/// 2. `x`, `low` and `high` have the same length;
+/// 3. `x` against the x axis, then `low` and `high` against the y axis (see [`check_numbers`]);
+/// 4. `x` is in non-decreasing order, NaN apart (see [`check_step_order`]);
+/// 5. no `low[i]` exceeds `high[i]`; an index where either is NaN is not compared.
+pub(super) fn check_band(
+    context: &'static str,
+    x_kind: ScaleKind,
+    y_transform: Transform,
+    (x, low, high): (&[f64], &[f64], &[f64]),
+) -> Result<()> {
+    const GAP_HINT: &str = "use NaN to leave a gap in the band.";
+    let Some(x_transform) = x_kind.transform() else {
+        return Err(Error::usage(
+            context,
+            "this is a category axis; bands along x apply to linear and log axes only.",
+        )
+        .with_parameter("x")
+        .with_hint(X_SCALE_HINT));
+    };
+    for (name, other) in [("low", low), ("high", high)] {
+        if x.len() != other.len() {
+            return Err(Error::data(
+                context,
+                format!(
+                    "x has {} values but {name} has {}; x, low and high must have the same length.",
+                    x.len(),
+                    other.len()
+                ),
+            ));
+        }
+    }
+    check_numbers(context, ("x", "x"), x, x_transform, GAP_HINT)?;
+    check_numbers(context, ("low", "low"), low, y_transform, GAP_HINT)?;
+    check_numbers(context, ("high", "high"), high, y_transform, GAP_HINT)?;
+    check_sorted(context, "band", x)?;
+    for (i, (&a, &b)) in low.iter().zip(high).enumerate() {
+        if a > b {
+            return Err(Error::data(
+                context,
+                format!(
+                    "low[{i}] is {a}, above high[{i}] = {b}; low must not exceed high.",
+                    a = number(a),
+                    b = number(b)
+                ),
+            )
+            .with_parameter("low")
+            .with_hint("check that low and high are not swapped."));
+        }
     }
     Ok(())
 }

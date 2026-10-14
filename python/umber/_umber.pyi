@@ -287,6 +287,16 @@ class Figure:
     def vspan(
         self, row: int, col: int, low: float, high: float, label: str, color: _ColorArg
     ) -> None: ...
+    def band(
+        self,
+        row: int,
+        col: int,
+        x: _FloatArray,
+        low: _FloatArray,
+        high: _FloatArray,
+        label: str,
+        color: _ColorArg,
+    ) -> None: ...
     def to_png(self, dpi: int) -> bytes: ...
     def to_svg(self, text: int) -> str: ...
     # The file variants report render errors in the context of Figure.save_png() and

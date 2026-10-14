@@ -84,7 +84,8 @@ pub(super) fn span_layer(
             | ResolvedMark::Hist { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HLine { .. }
-            | ResolvedMark::VLine { .. } => {}
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::Band { .. } => {}
         }
     }
 }
@@ -118,7 +119,8 @@ pub(super) fn rule_layer(
             | ResolvedMark::Hist { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HSpan { .. }
-            | ResolvedMark::VSpan { .. } => {}
+            | ResolvedMark::VSpan { .. }
+            | ResolvedMark::Band { .. } => {}
         }
     }
 }
