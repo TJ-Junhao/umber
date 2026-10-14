@@ -514,7 +514,7 @@ fn groups_accept_only_matching_log_bases_and_spans() {
 }
 
 #[test]
-fn spanning_panels_join_groups_and_count_in_every_covered_cell() {
+fn spanning_panels_join_groups_but_only_hide_labels_with_matching_spans() {
     let mut f = figure(3, 3, Share::All, Share::All);
     f.add_axes_at(
         Placement {
@@ -554,17 +554,48 @@ fn spanning_panels_join_groups_and_count_in_every_covered_cell() {
     assert_eq!(
         visibility,
         [
-            [false, true],
+            [true, true],
             [false, false],
             [true, true],
-            [true, false],
-            [true, false]
+            [true, true],
+            [true, true]
         ]
     );
     assert!(panels[0].1.xlabel.is_some() && panels[0].1.ylabel.is_some());
     for (r, l) in &panels {
         assert_eq!(r, &panels[0].0);
         assert!(!l.x_grid.is_empty());
+    }
+}
+
+#[test]
+fn equal_spans_hide_labels_only_at_matching_starts_across_empty_cells() {
+    for span in [1, 2] {
+        for (dimension, places) in [
+            (0, [(0, 0, 1, span), (2, 0, 1, span), (3, 1, 1, span)]),
+            (1, [(0, 3, span, 1), (0, 1, span, 1), (1, 0, span, 1)]),
+        ] {
+            let mut f = figure(4, 4, Share::All, Share::All);
+            for (row, col, row_span, col_span) in places.into_iter().rev() {
+                f.add_axes_at(
+                    Placement {
+                        row_span,
+                        col_span,
+                        ..at(row, col)
+                    },
+                    ScaleKind::Linear,
+                    ScaleKind::Linear,
+                )
+                .unwrap();
+            }
+            for ((row, col, _, _), visible) in places.into_iter().zip([false, true, true]) {
+                let axes = f.axes_at(GridIndex::At(row), GridIndex::At(col)).unwrap();
+                assert_eq!(
+                    share::label_visibility(&f, axes.cells())[dimension],
+                    visible
+                );
+            }
+        }
     }
 }
 
@@ -583,7 +614,7 @@ fn category_reference_can_use_another_group_members_category() {
 }
 
 #[test]
-fn shared_x_ticks_use_the_width_of_the_only_labeled_spanning_panel() {
+fn shared_x_ticks_fit_the_labeled_narrow_panels_above_a_wide_panel() {
     let mut f = figure(2, 2, Share::All, Share::None);
     for place in [
         at(0, 0),
@@ -615,9 +646,9 @@ fn shared_x_ticks_use_the_width_of_the_only_labeled_spanning_panel() {
         .unwrap();
     let lib = FontLibrary::bundled();
     let panels = try_plan_panels(&f, &lib).unwrap();
-    assert!(panels[0].1.x_tick_labels.is_empty());
-    assert!(panels[1].1.x_tick_labels.is_empty());
-    assert!(!panels[2].1.x_tick_labels.is_empty());
+    for (_, layout) in &panels {
+        assert!(!layout.x_tick_labels.is_empty());
+    }
     let axes = f.axes_at(GridIndex::At(1), GridIndex::At(0)).unwrap();
     let marks = crate::resolve::resolve_marks(axes.marks(), f.theme());
     let limits = crate::resolve::Limits::of(axes);
@@ -634,7 +665,7 @@ fn shared_x_ticks_use_the_width_of_the_only_labeled_spanning_panel() {
     let narrow = ticks_for(panels[0].1.plot.size());
     assert!(wide.ticks.len() > narrow.ticks.len());
     for (resolved, _) in &panels {
-        assert_eq!(resolved.x, wide);
+        assert_eq!(resolved.x, narrow);
     }
 }
 

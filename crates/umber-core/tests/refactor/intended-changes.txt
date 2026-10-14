@@ -1,1 +1,5 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# The wide top panel keeps its x tick labels: the narrower panels below do not
+# cover exactly the same columns. Tick fitting and layout may change with them.
+share-span-graphite
+share-span-midnight
+share-span-pigment
