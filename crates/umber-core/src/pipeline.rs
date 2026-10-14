@@ -9,7 +9,7 @@ use crate::layout::{
     self, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize, TickSpacing,
 };
 use crate::legend::Legend;
-use crate::model::{Axes, Figure};
+use crate::model::{Axes, Figure, ShareGroups, label_visibility};
 use crate::resolve::{self, Limits, Resolved, ResolvedMark};
 use crate::scene::Scene;
 use crate::{FontLibrary, Result, Theme, draw};
@@ -75,6 +75,36 @@ impl Side {
             Side::X => 0,
             Side::Y => 1,
         }
+    }
+
+    /// Panel index to the first member of this side's group.
+    fn groups(self, groups: &ShareGroups) -> &[usize] {
+        match self {
+            Self::X => &groups.x,
+            Self::Y => &groups.y,
+        }
+    }
+
+    /// The smallest plot size among members that show this side's labels. Hidden labels
+    /// must not limit the ticks of a wider or taller visible member.
+    fn group_plot(
+        self,
+        groups: &ShareGroups,
+        i: usize,
+        plots: &[PlotSize],
+        show_labels: &[[bool; 2]],
+    ) -> PlotSize {
+        let keys = self.groups(groups);
+        plots
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| keys[*j] == keys[i] && show_labels[*j][self.index()])
+            .map(|(_, plot)| *plot)
+            .reduce(|size, plot| PlotSize {
+                width: size.width.min(plot.width),
+                height: size.height.min(plot.height),
+            })
+            .unwrap_or(plots[i])
     }
 
     /// Whether this side of an axes with `limits` gets automatic ticks: a linear or log axis
@@ -173,6 +203,42 @@ impl TickChoice {
     }
 }
 
+/// Resolves each group once, in row-major panel order, then gives its members identical
+/// scales and ticks. Marks remain per panel for drawing and legend colors.
+fn resolve_groups(
+    panels: &[Panel<'_>],
+    limits: &[Limits<'_>],
+    groups: &ShareGroups,
+    rooms: &[[layout::TickRoom<'_>; 2]],
+) -> Vec<Resolved> {
+    let mut resolved: Vec<Resolved> = Vec::with_capacity(panels.len());
+    for i in 0..panels.len() {
+        let x = if groups.x[i] == i {
+            let marks = panels
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| groups.x[*j] == i)
+                .flat_map(|(_, panel)| panel.marks.iter());
+            resolve::resolve_x(marks, limits[i].x, &rooms[i][0])
+        } else {
+            resolved[groups.x[i]].x.clone()
+        };
+        let (y, baseline) = if groups.y[i] == i {
+            let marks = panels
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| groups.y[*j] == i)
+                .flat_map(|(_, panel)| panel.marks.iter());
+            resolve::resolve_y(marks, limits[i].y, &rooms[i][1])
+        } else {
+            let r = &resolved[groups.y[i]];
+            (r.y.clone(), r.baseline)
+        };
+        resolved.push(Resolved { x, y, baseline });
+    }
+    resolved
+}
+
 /// Resolves and lays out every panel of `figure`, whose records are `panels`.
 ///
 /// Ticks depend on the plot size, and the plot size depends on the tick label widths. A first
@@ -227,46 +293,79 @@ fn plan(
         panels: &inputs,
     };
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
+    let groups = ShareGroups::new(figure);
+    let show_labels: Vec<_> = panels
+        .iter()
+        .map(|panel| label_visibility(figure, panel.axes.cells()))
+        .collect();
     let measure = |i: usize, resolved: &Resolved| {
         let input = &inputs[i];
-        layout::measure_panel(input, resolved, grid.span(input.axes.cells()))
+        layout::measure_panel(
+            input,
+            resolved,
+            grid.span(input.axes.cells()),
+            show_labels[i],
+        )
     };
 
+    let rooms_for = |plots: &[PlotSize], spacing| {
+        (0..panels.len())
+            .map(|i| {
+                let x = Side::X.group_plot(&groups, i, plots, &show_labels);
+                let y = Side::Y.group_plot(&groups, i, plots, &show_labels);
+                let (x, _) = layout::tick_rooms(x, theme, lib, spacing);
+                let (_, y) = layout::tick_rooms(y, theme, lib, spacing);
+                [x, y]
+            })
+            .collect::<Vec<_>>()
+    };
     // The first pass: ticks for their targets alone, on guessed plot sizes.
-    let first: Vec<PanelBands> = inputs
+    let guesses: Vec<_> = inputs
+        .iter()
+        .map(|input| grid.initial_plot_size(input.axes.cells()))
+        .collect();
+    let first = resolve_groups(
+        panels,
+        &limits,
+        &groups,
+        &rooms_for(&guesses, TickSpacing::Target),
+    );
+    let first: Vec<PanelBands> = first
         .iter()
         .enumerate()
-        .map(|(i, input)| {
-            let guess = grid.initial_plot_size(input.axes.cells());
-            let (x, y) = layout::tick_rooms(guess, theme, lib, TickSpacing::Target);
-            measure(i, &resolve::resolve(&panels[i].marks, &limits[i], &x, &y))
-        })
+        .map(|(i, r)| measure(i, r))
         .collect();
     let first = layout::solve_grid(&grid, &first)?;
+    let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
 
     // The final pass: tick labels kept apart on the plot sizes of the first.
-    let resolve_panel = |i: usize, choices: &[TickChoice; 2]| {
-        let x = choices[0].room(Side::X, theme, lib);
-        let y = choices[1].room(Side::Y, theme, lib);
-        resolve::resolve(&panels[i].marks, &limits[i], &x, &y)
+    let resolve_choices = |choices: &[[TickChoice; 2]]| {
+        let rooms: Vec<_> = choices
+            .iter()
+            .map(|c| {
+                [
+                    c[0].room(Side::X, theme, lib),
+                    c[1].room(Side::Y, theme, lib),
+                ]
+            })
+            .collect();
+        resolve_groups(panels, &limits, &groups, &rooms)
     };
-    let mut choices: Vec<[TickChoice; 2]> = first
-        .panels
-        .iter()
-        .map(|slot| [TickChoice::first(slot.plot.size()); 2])
+    let mut choices: Vec<[TickChoice; 2]> = (0..panels.len())
+        .map(|i| {
+            Side::BOTH
+                .map(|side| TickChoice::first(side.group_plot(&groups, i, &plots, &show_labels)))
+        })
         .collect();
     // First keep the complete previous constrained search. Its fallback may crowd on the
     // size used to choose it yet fit on the solved plot; only that plot decides whether to
     // repair it. This also keeps the layout, not just the ticks, when everything already fits.
-    let mut resolved: Vec<Resolved> = first
-        .panels
-        .iter()
-        .enumerate()
-        .map(|(i, slot)| {
-            let (x, y) = layout::tick_rooms(slot.plot.size(), theme, lib, TickSpacing::Deferred);
-            resolve::resolve(&panels[i].marks, &limits[i], &x, &y)
-        })
-        .collect();
+    let mut resolved = resolve_groups(
+        panels,
+        &limits,
+        &groups,
+        &rooms_for(&plots, TickSpacing::Deferred),
+    );
     let mut bands: Vec<PanelBands> = resolved
         .iter()
         .enumerate()
@@ -276,7 +375,8 @@ fn plan(
         Ok(solution)
             if solution.panels.iter().enumerate().all(|(i, slot)| {
                 Side::BOTH.into_iter().all(|side| {
-                    !side.is_automatic(&limits[i])
+                    !show_labels[i][side.index()]
+                        || !side.is_automatic(&limits[i])
                         || side
                             .room(slot.plot.size(), theme, lib)
                             .slack(side.ticks(&resolved[i]))
@@ -287,11 +387,7 @@ fn plan(
             solution
         }
         _ => {
-            resolved = choices
-                .iter()
-                .enumerate()
-                .map(|(i, panel)| resolve_panel(i, panel))
-                .collect();
+            resolved = resolve_choices(&choices);
             bands = resolved
                 .iter()
                 .enumerate()
@@ -310,10 +406,18 @@ fn plan(
         // The sides whose labels crowd on the solved plots, chosen again.
         let mut next = choices.clone();
         let mut again: Vec<(usize, Side)> = Vec::new();
-        for (i, slot) in solution.panels.iter().enumerate() {
-            let plot = slot.plot.size();
+        let plots: Vec<_> = solution
+            .panels
+            .iter()
+            .map(|slot| slot.plot.size())
+            .collect();
+        for (i, r) in resolved.iter().enumerate() {
             for side in Side::BOTH {
-                let ticks = side.ticks(&resolved[i]);
+                if side.groups(&groups)[i] != i {
+                    continue;
+                }
+                let plot = side.group_plot(&groups, i, &plots, &show_labels);
+                let ticks = side.ticks(r);
                 if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
                 {
                     continue;
@@ -331,14 +435,12 @@ fn plan(
         if again.is_empty() {
             break;
         }
-        let mut tried_resolved = resolved.clone();
-        let mut tried_bands = bands.clone();
-        let mut panels_again: Vec<usize> = again.iter().map(|&(i, _)| i).collect();
-        panels_again.dedup();
-        for i in panels_again {
-            tried_resolved[i] = resolve_panel(i, &next[i]);
-            tried_bands[i] = measure(i, &tried_resolved[i]);
-        }
+        let tried_resolved = resolve_choices(&next);
+        let tried_bands: Vec<_> = tried_resolved
+            .iter()
+            .enumerate()
+            .map(|(i, r)| measure(i, r))
+            .collect();
         for &(i, side) in &again {
             // A choice that crowds even on the plot it was made for is the fallback.
             let choice = &mut next[i][side.index()];
@@ -509,6 +611,43 @@ mod tests {
     use crate::model::{AxisData, Grid, GridIndex, LineOptions, Placement};
     use crate::scene::Item;
     use crate::{LegendStyle, ScaleKind};
+
+    #[test]
+    fn group_plot_uses_the_shortest_member_with_visible_labels_on_each_side() {
+        let groups = ShareGroups {
+            x: vec![0, 0, 0, 3],
+            y: vec![0, 0, 0, 3],
+        };
+        let plots = [
+            PlotSize {
+                width: 100.0,
+                height: 50.0,
+            },
+            PlotSize {
+                width: 400.0,
+                height: 200.0,
+            },
+            PlotSize {
+                width: 300.0,
+                height: 150.0,
+            },
+            PlotSize {
+                width: 10.0,
+                height: 10.0,
+            },
+        ];
+        let show_labels = [[false, true], [true, false], [true, true], [true, true]];
+        for i in 0..3 {
+            assert_eq!(
+                Side::X.group_plot(&groups, i, &plots, &show_labels),
+                plots[2]
+            );
+            assert_eq!(
+                Side::Y.group_plot(&groups, i, &plots, &show_labels),
+                plots[0]
+            );
+        }
+    }
 
     /// A figure in `theme` with a title and two labelled lines.
     fn labelled_figure(theme: Theme) -> Figure {
@@ -917,7 +1056,7 @@ mod tests {
                 .iter()
                 .zip(&resolved)
                 .map(|(input, resolved)| {
-                    layout::measure_panel(input, resolved, grid.span(input.axes.cells()))
+                    layout::measure_panel(input, resolved, grid.span(input.axes.cells()), [true; 2])
                 })
                 .collect();
             (resolved, bands)

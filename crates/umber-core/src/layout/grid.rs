@@ -1294,9 +1294,19 @@ mod tests {
 
     /// A `rows × cols` grid at its automatic size in `theme`, filled from `seed`: cells left
     /// empty or holding axes with random spans, texts, legends and tick labels.
-    fn random_grid(rows: usize, cols: usize, seed: u64, theme: Theme) -> Figure {
+    fn random_grid(
+        rows: usize,
+        cols: usize,
+        seed: u64,
+        theme: Theme,
+        sharing: [crate::Share; 2],
+    ) -> Figure {
+        use crate::Share;
         let mut rng = Rng(seed | 1);
-        let grid = Grid::new(rows as i64, cols as i64).unwrap();
+        let grid = Grid::new(rows as i64, cols as i64)
+            .unwrap()
+            .with_share_x(sharing[0])
+            .with_share_y(sharing[1]);
         let (width, height) = grid.auto_size_in();
         let mut f = Figure::with_grid(width, height, theme, grid).unwrap();
         let mut taken = vec![vec![false; cols]; rows];
@@ -1305,11 +1315,19 @@ mod tests {
                 if taken[row][col] || rng.below(5) == 0 {
                     continue;
                 }
-                let mut col_span = 1 + rng.below(3.min(cols - col));
+                let mut col_span = if sharing.contains(&Share::Col) {
+                    1
+                } else {
+                    1 + rng.below(3.min(cols - col))
+                };
                 while (col..col + col_span).any(|c| taken[row][c]) {
                     col_span -= 1;
                 }
-                let mut row_span = 1 + rng.below(3.min(rows - row));
+                let mut row_span = if sharing.contains(&Share::Row) {
+                    1
+                } else {
+                    1 + rng.below(3.min(rows - row))
+                };
                 while (row..row + row_span).any(|r| (col..col + col_span).any(|c| taken[r][c])) {
                     row_span -= 1;
                 }
@@ -1318,7 +1336,7 @@ mod tests {
                         *cell = true;
                     }
                 }
-                let category = rng.below(3) == 0;
+                let category = sharing[0] == Share::None && rng.below(3) == 0;
                 let at = Placement {
                     row: GridIndex::At(row as i64),
                     col: GridIndex::At(col as i64),
@@ -1335,7 +1353,7 @@ mod tests {
                     .subtitle(&rng.text(2))
                     .xlabel(&rng.text(2))
                     .ylabel(&rng.text(1));
-                if rng.below(2) == 0 {
+                if rng.below(2) == 0 && axes.y_ticks().is_none() {
                     let labels: Vec<String> = (0..3).map(|_| rng.text(2)).collect();
                     axes.yticks_labeled(&[0.0, 5.0, 10.0], labels).unwrap();
                 }
@@ -1449,9 +1467,12 @@ mod tests {
             cols in 1_usize..=5,
             seed in any::<u64>(),
             theme in 0_usize..3,
+            share_x in 0_usize..4,
+            share_y in 0_usize..4,
         ) {
             let theme = themes()[theme].clone();
-            let f = random_grid(rows, cols, seed, theme);
+            let modes = [crate::Share::None, crate::Share::Row, crate::Share::Col, crate::Share::All];
+            let f = random_grid(rows, cols, seed, theme, [modes[share_x], modes[share_y]]);
             match layouts(&f) {
                 Ok(layouts) => assert_aligned(&layouts)?,
                 // Random texts may not fit their panels; such a grid fails naming one.
@@ -2532,7 +2553,12 @@ mod tests {
                         let limits = crate::resolve::Limits::of(input.axes);
                         let (x, y) = super::super::TickRoom::unlimited(3, 3, lib());
                         let resolved = crate::resolve::resolve(&marks, &limits, &x, &y);
-                        super::super::measure_panel(input, &resolved, grid.span(input.axes.cells()))
+                        super::super::measure_panel(
+                            input,
+                            &resolved,
+                            grid.span(input.axes.cells()),
+                            [true; 2],
+                        )
                     })
                     .collect();
                 let cells: Vec<CellRange> = grid.panels.iter().map(|p| p.axes.cells()).collect();
