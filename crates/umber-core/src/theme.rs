@@ -277,6 +277,7 @@ pub struct Theme {
     cap_width: f32,
     stem_width: f32,
     box_width: f32,
+    violin_width: f32,
     palette: Vec<Rgba>,
 }
 
@@ -372,6 +373,7 @@ impl Theme {
             cap_width: 8.0,
             stem_width: 1.5,
             box_width: 0.5,
+            violin_width: 0.6,
             palette: palette_of([
                 0xC4553A, 0x2E6B70, 0xE2A33B, 0x4F6FA3, 0x86A37A, 0x8B5279, 0x6E4C38, 0xA69F94,
             ]),
@@ -418,6 +420,7 @@ impl Theme {
             cap_width: 8.0,
             stem_width: 1.5,
             box_width: 0.5,
+            violin_width: 0.6,
             palette: palette_of([
                 0x233F86, 0xE4572E, 0xF2A900, 0x17A398, 0x9B5DE5, 0x5BA4E6, 0xD9658F, 0xA3A3A3,
             ]),
@@ -464,6 +467,7 @@ impl Theme {
             cap_width: 8.0,
             stem_width: 1.5,
             box_width: 0.5,
+            violin_width: 0.6,
             palette: palette_of([
                 0x75AEF5, 0xDF7F78, 0x96E7A7, 0xE0AE57, 0xC9A3F5, 0x3ACED6, 0xF5A06F, 0x9DA5B1,
             ]),
@@ -950,6 +954,21 @@ impl Theme {
     #[must_use]
     pub fn bubble_max_radius(&self) -> f32 {
         18.0
+    }
+
+    /// The fraction of a category band occupied by a violin or group of violins.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    /// assert_eq!(Theme::pigment().violin_width(), 0.6);
+    /// assert_eq!(Theme::graphite().violin_width(), 0.6);
+    /// assert_eq!(Theme::midnight().violin_width(), 0.6);
+    /// ```
+    #[must_use]
+    pub fn violin_width(&self) -> f32 {
+        self.violin_width
     }
 
     /// Replace the palette.

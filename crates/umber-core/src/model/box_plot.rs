@@ -105,7 +105,7 @@ impl BoxMark {
         groups: Vec<Vec<f64>>,
         options: BoxOptions,
     ) -> Result<Self> {
-        check_box_groups("Axes.box()", x, y, &categories, &groups)?;
+        check_box_groups("Axes.box()", "box plots", x, y, &categories, &groups)?;
         Ok(Self {
             categories: categories.into(),
             groups: store_groups(groups),
@@ -218,7 +218,26 @@ impl BoxGroupMark {
         categories: Vec<String>,
         distributions: Vec<Distribution>,
     ) -> Result<Self> {
-        check_distributions("Axes.grouped_box()", x, y, &categories, &distributions)?;
+        Self::with_context(
+            "Axes.grouped_box()",
+            "box plots",
+            x,
+            y,
+            categories,
+            distributions,
+        )
+    }
+
+    /// Validates and stores distributions for a category mark with its own error context.
+    pub(super) fn with_context(
+        context: &'static str,
+        kind: &'static str,
+        x: ScaleKind,
+        y: Transform,
+        categories: Vec<String>,
+        distributions: Vec<Distribution>,
+    ) -> Result<Self> {
+        check_distributions(context, kind, x, y, &categories, &distributions)?;
         let distributions: Vec<_> = distributions
             .into_iter()
             .map(|d| StoredDistribution {
@@ -353,6 +372,6 @@ impl<'a> DistributionView<'a> {
 }
 
 /// Moves each group into a shared slice, without changing its values.
-fn store_groups(groups: Vec<Vec<f64>>) -> Arc<[Arc<[f64]>]> {
+pub(super) fn store_groups(groups: Vec<Vec<f64>>) -> Arc<[Arc<[f64]>]> {
     groups.into_iter().map(Arc::from).collect()
 }

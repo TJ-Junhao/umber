@@ -38,6 +38,11 @@ pub(crate) enum Swatch {
         /// The median stroke width, in points.
         width: f32,
     },
+    /// A small filled lens for violin densities.
+    Violin {
+        /// The median stroke width, in points.
+        width: f32,
+    },
     /// A short bar with a cap at each end, for error bars.
     ErrorBar {
         /// Whether the bar runs along y; otherwise along x.
@@ -58,6 +63,7 @@ impl Swatch {
             SeriesKind::Points { size, .. } => Swatch::Dot { diameter: size },
             SeriesKind::Bar | SeriesKind::Span => Swatch::Square,
             SeriesKind::Box { width } => Swatch::Box { width },
+            SeriesKind::Violin { width } => Swatch::Violin { width },
             SeriesKind::ErrorBar { vertical, width } => Swatch::ErrorBar { vertical, width },
         }
     }

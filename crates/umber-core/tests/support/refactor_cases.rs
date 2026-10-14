@@ -105,6 +105,7 @@ mod corpus {
     pub mod stem;
     pub mod step;
     pub mod ticks;
+    pub mod violin;
     pub mod x_end_label;
 }
 
@@ -165,6 +166,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::stem::cases(&lib, &mut sink);
     corpus::bubbles::cases(&lib, &mut sink);
     corpus::r#box::cases(&lib, &mut sink);
+    corpus::violin::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1811,6 +1813,34 @@ mod record {
                     .collect::<Vec<_>>()
                     .join("; ")
             ),
+            Mark::Violin(mark) => format!(
+                "violin categories={:?} groups=[{}] label={} color={}",
+                mark.categories(),
+                mark.groups()
+                    .iter()
+                    .map(|g| floats64(g))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                text(&mark.options().label),
+                color_spec(mark.options().color)
+            ),
+            Mark::GroupedViolin(mark) => format!(
+                "grouped-violin categories={:?} distributions=[{}]",
+                mark.categories(),
+                mark.distributions()
+                    .map(|d| format!(
+                        "label={} groups=[{}] color={}",
+                        text(d.label()),
+                        d.groups()
+                            .iter()
+                            .map(|g| floats64(g))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                        color_spec(d.color())
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
             _ => "unknown-mark".into(),
         }
     }
@@ -2820,6 +2850,12 @@ fn theme_cases() -> String {
         out.push_str(&record::theme(&theme));
         let _ = writeln!(out, "  panel_gap {}", record::f32(theme.panel_gap()));
         let _ = writeln!(out, "  box_width {}", record::f32(theme.box_width()));
+        let _ = writeln!(out, "  violin_width {}", record::f32(theme.violin_width()));
+        let _ = writeln!(
+            out,
+            "  bubble_max_radius {}",
+            record::f32(theme.bubble_max_radius())
+        );
     }
     out
 }

@@ -42,6 +42,7 @@ __all__ = [
     "Theme",
     "__version__",
     "box_stats",
+    "kde_scott",
     "check_alpha",
     "check_log_base",
     "check_palette_index",
@@ -111,6 +112,9 @@ type _DistributionArg = tuple[str, list[_FloatArray], _ColorArg]
 def box_stats(
     values: _FloatArray,
 ) -> tuple[float, float, float, float, float, list[float]] | None: ...
+
+# Test hook: 128 (position, density) pairs, or None below two distinct finite samples.
+def kde_scott(values: _FloatArray) -> list[tuple[float, float]] | None: ...
 
 @final
 class Theme:
@@ -286,6 +290,22 @@ class Figure:
         color: _ColorArg,
     ) -> None: ...
     def grouped_box_plot(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        distributions: list[_DistributionArg],
+    ) -> None: ...
+    def violin(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+    ) -> None: ...
+    def grouped_violin(
         self,
         row: int,
         col: int,

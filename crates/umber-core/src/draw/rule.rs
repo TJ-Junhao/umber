@@ -90,7 +90,8 @@ pub(super) fn span_layer(
             | ResolvedMark::VLine { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. }
-            | ResolvedMark::Box { .. } => {}
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. } => {}
         }
     }
 }
@@ -134,7 +135,8 @@ pub(super) fn rule_layer(
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. }
-            | ResolvedMark::Box { .. } => {}
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. } => {}
         }
     }
 }

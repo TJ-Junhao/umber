@@ -41,5 +41,6 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(size::check_size_points, m)?)?;
     m.add_function(wrap_pyfunction!(ticks::check_tick_format, m)?)?;
     m.add_function(wrap_pyfunction!(test_support::box_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(test_support::kde_scott, m)?)?;
     Ok(())
 }

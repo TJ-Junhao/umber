@@ -31,6 +31,15 @@ pub(crate) fn box_stats(values: &Bound<'_, PyAny>) -> PyResult<Option<BoxStatsTu
     }))
 }
 
+/// Positions and Gaussian densities from the shared production statistics implementation.
+type DensityGrid = Vec<(f64, f64)>;
+
+/// Computes Scott kernel density from a float64 buffer for tests, not the public Python API.
+#[pyfunction]
+pub(crate) fn kde_scott(values: &Bound<'_, PyAny>) -> PyResult<Option<DensityGrid>> {
+    Ok(stats::kde_scott(&crate::values::floats(values)?, 128))
+}
+
 /// Runs `f` with the embedded interpreter attached, one test at a time, so tests that change
 /// module state cannot interleave.
 ///

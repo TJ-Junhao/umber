@@ -84,6 +84,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/band.rs
   crates/umber-core/tests/support/corpus/bars.rs
   crates/umber-core/tests/support/corpus/box.rs
+  crates/umber-core/tests/support/corpus/bubbles.rs
   crates/umber-core/tests/support/corpus/error_bars.rs
   crates/umber-core/tests/support/corpus/grid.rs
   crates/umber-core/tests/support/corpus/header.rs
@@ -99,6 +100,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/stem.rs
   crates/umber-core/tests/support/corpus/step.rs
   crates/umber-core/tests/support/corpus/ticks.rs
+  crates/umber-core/tests/support/corpus/violin.rs
   crates/umber-core/tests/support/corpus/x_end_label.rs
 )
 

@@ -140,6 +140,7 @@ pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionVi
 pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use figure::{StemMark, StemOptions};
+pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use render::SvgText;

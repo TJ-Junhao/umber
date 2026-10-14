@@ -43,7 +43,7 @@ use crate::model::{ErrorBarMark, ErrorBarOrientation};
 use crate::model::{StackedAreaMark, StemMark};
 use crate::scale::{Finish, Padding, TickJudge, is_single_value, log_offset};
 use crate::stacking::{AreaStacks, Stacks};
-use crate::stats::{BoxStats, box_stats};
+use crate::stats::{BoxStats, box_stats, kde_scott, quantile_type7};
 use crate::tick_format::TickFormat;
 use crate::ticks::{AutoTicks, TickValues};
 use crate::{
@@ -600,6 +600,8 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Area(mark) => category_names(mark.x()),
         Mark::Step(mark) => category_names(mark.x()),
         Mark::Bar(mark) => mark.categories(),
+        Mark::Violin(mark) => mark.categories(),
+        Mark::GroupedViolin(mark) => mark.categories(),
         Mark::Box(mark) => mark.categories(),
         Mark::GroupedBox(mark) => mark.categories(),
         Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
@@ -938,6 +940,17 @@ pub(crate) enum ResolvedMark<'a> {
         /// The median stroke width, in points.
         width: f32,
     },
+    /// Plain or grouped violins, with each group's statistics computed once.
+    Violin {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The categories, in input order.
+        categories: &'a [String],
+        /// The distributions in input order.
+        distributions: Vec<ResolvedDistribution<'a, ViolinStats>>,
+        /// The median stroke width, in points.
+        width: f32,
+    },
     /// Error bars.
     ErrorBars {
         /// Drawn geometry, prepared only when choosing an inside legend position.
@@ -953,13 +966,61 @@ pub(crate) enum ResolvedMark<'a> {
 
 /// One distribution resolved once per render, before layout iterates over its domains.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ResolvedDistribution<'a> {
+pub(crate) struct ResolvedDistribution<'a, T = BoxStats> {
     /// The legend label as given.
     pub label: &'a str,
     /// The resolved color, before fill opacity.
     pub color: Rgba,
     /// The summary of each group in category order; none for empty groups.
-    pub groups: Vec<Option<BoxStats>>,
+    pub groups: Vec<Option<T>>,
+}
+
+/// Quartiles and a fixed density grid, with the density scaled to a maximum of one.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ViolinStats {
+    /// Lower quartile in data space.
+    pub q1: f64,
+    /// Median in data space.
+    pub median: f64,
+    /// Upper quartile in data space.
+    pub q3: f64,
+    /// Minimum and maximum finite sample, including constant groups.
+    pub range: [f64; 2],
+    /// Data positions and relative half-widths; empty for a constant group.
+    pub density: Vec<(f64, f64)>,
+}
+
+/// Summarizes a group once per render, before layout iterates over its domains.
+fn violin_stats(values: &[f64]) -> Option<ViolinStats> {
+    let mut sorted: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted.sort_unstable_by(f64::total_cmp);
+    let mut density = kde_scott(&sorted, 128).unwrap_or_default();
+    let peak = density.iter().map(|&(_, d)| d).fold(0.0, f64::max);
+    if peak.is_infinite() {
+        // A subnormal range may have a density beyond f64. Widths need only its ratios.
+        let low = sorted[0];
+        let span = sorted[sorted.len() - 1] - low;
+        let scaled: Vec<f64> = sorted.iter().map(|v| (v - low) / span).collect();
+        let relative = kde_scott(&scaled, 128).unwrap_or_default();
+        let peak = relative.iter().map(|&(_, d)| d).fold(0.0, f64::max);
+        for ((_, width), (_, d)) in density.iter_mut().zip(relative) {
+            *width = d / peak;
+        }
+    } else if peak > 0.0 {
+        for (_, width) in &mut density {
+            *width /= peak;
+        }
+    }
+    Some(ViolinStats {
+        q1: quantile_type7(&sorted, 0.25),
+        median: quantile_type7(&sorted, 0.5),
+        q3: quantile_type7(&sorted, 0.75),
+        range: [sorted[0], sorted[sorted.len() - 1]],
+        density,
+    })
 }
 
 impl<'a> ResolvedMark<'a> {
@@ -986,7 +1047,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::ErrorBars { geometry, .. }
             | ResolvedMark::Bubbles { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
-            | ResolvedMark::Box { geometry, .. } => geometry,
+            | ResolvedMark::Box { geometry, .. }
+            | ResolvedMark::Violin { geometry, .. } => geometry,
         };
         *target = geometry;
         mark
@@ -1014,7 +1076,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::ErrorBars { geometry, .. }
             | ResolvedMark::Bubbles { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
-            | ResolvedMark::Box { geometry, .. } => geometry,
+            | ResolvedMark::Box { geometry, .. }
+            | ResolvedMark::Violin { geometry, .. } => geometry,
         };
         geometry.as_ref().map_or(0.0, |g| g.coverage(area, box_))
     }
@@ -1046,6 +1109,7 @@ impl<'a> ResolvedMark<'a> {
                 }
             },
             ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -1072,7 +1136,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Area { mark, .. } => category_names(mark.x()),
             ResolvedMark::Step { mark, .. } => category_names(mark.x()),
             ResolvedMark::ErrorBars { mark, .. } => category_names(mark.positions()),
-            ResolvedMark::Box { categories, .. } => categories,
+            ResolvedMark::Box { categories, .. } | ResolvedMark::Violin { categories, .. } => {
+                categories
+            }
             ResolvedMark::Bar { mark, .. } => mark.categories(),
             ResolvedMark::Grouped { mark, .. } | ResolvedMark::Stacked { mark, .. } => {
                 mark.categories()
@@ -1125,6 +1191,14 @@ impl<'a> ResolvedMark<'a> {
                 }
                 ErrorBarOrientation::Horizontal => numbers(mark.positions()),
             },
+            ResolvedMark::Violin { distributions, .. } => {
+                return DomainValues::Computed(Box::new(
+                    distributions
+                        .iter()
+                        .flat_map(|d| d.groups.iter().flatten())
+                        .flat_map(|s| s.range),
+                ));
+            }
             ResolvedMark::Box { distributions, .. } => {
                 return DomainValues::Computed(Box::new(
                     distributions
@@ -1190,7 +1264,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. }
-            | ResolvedMark::Box { .. } => false,
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. } => false,
             ResolvedMark::Area { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
@@ -1223,7 +1298,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. }
-            | ResolvedMark::Box { .. } => None,
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. } => None,
         }
     }
 
@@ -1249,7 +1325,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. }
-            | ResolvedMark::Box { .. } => false,
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. } => false,
         }
     }
 
@@ -1337,6 +1414,14 @@ impl<'a> ResolvedMark<'a> {
             } => distributions
                 .iter()
                 .filter_map(|d| LegendEntry::new(d.label, d.color, Swatch::Box { width }))
+                .collect(),
+            ResolvedMark::Violin {
+                ref distributions,
+                width,
+                ..
+            } => distributions
+                .iter()
+                .filter_map(|d| LegendEntry::new(d.label, d.color, Swatch::Violin { width }))
                 .collect(),
             ResolvedMark::Grouped { ref series, .. } | ResolvedMark::Stacked { ref series, .. } => {
                 series
@@ -1480,6 +1565,19 @@ impl<'a> ResolvedMark<'a> {
                     label: d.label,
                     color: d.color,
                     kind: SeriesKind::Box { width: *width },
+                    anchor: None,
+                })
+                .collect(),
+            ResolvedMark::Violin {
+                distributions,
+                width,
+                ..
+            } => distributions
+                .iter()
+                .map(|d| SeriesKey {
+                    label: d.label,
+                    color: d.color,
+                    kind: SeriesKind::Violin { width: *width },
                     anchor: None,
                 })
                 .collect(),
@@ -1906,6 +2004,11 @@ pub(crate) enum SeriesKind {
         /// The median stroke width as drawn, in points.
         width: f32,
     },
+    /// A filled violin lens.
+    Violin {
+        /// The median stroke width as drawn, in points.
+        width: f32,
+    },
     /// Filled bars.
     Bar,
     /// A reference line, drawn across the plot with its dash style and drawn width.
@@ -1941,7 +2044,8 @@ impl SeriesKind {
             | SeriesKind::Rule { .. }
             | SeriesKind::Span
             | SeriesKind::ErrorBar { .. }
-            | SeriesKind::Box { .. } => false,
+            | SeriesKind::Box { .. }
+            | SeriesKind::Violin { .. } => false,
         }
     }
 }
@@ -1980,6 +2084,8 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::Stem(m) => vec![(&m.options().label, m.options().color)],
         Mark::Area(m) => vec![(&m.options().label, m.options().color)],
         Mark::Bar(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Violin(m) => vec![(&m.options().label, m.options().color)],
+        Mark::GroupedViolin(m) => m.distributions().map(|d| (d.label(), d.color())).collect(),
         Mark::Box(m) => vec![(&m.options().label, m.options().color)],
         Mark::GroupedBox(m) => m.distributions().map(|d| (d.label(), d.color())).collect(),
         Mark::GroupedBar(m) | Mark::StackedBar(m) => {
@@ -2093,6 +2199,29 @@ fn resolve_panel_marks<'a>(
                         label: d.label(),
                         color: color_of(d.color(), d.label()),
                         groups: d.groups().iter().map(|g| box_stats(g)).collect(),
+                    })
+                    .collect(),
+                width: theme.drawn_line_width(crate::SizeSpec::Auto),
+            },
+            Mark::Violin(mark) => ResolvedMark::Violin {
+                geometry: None,
+                categories: mark.categories(),
+                distributions: vec![ResolvedDistribution {
+                    label: &mark.options().label,
+                    color: color_of(mark.options().color, &mark.options().label),
+                    groups: mark.groups().iter().map(|g| violin_stats(g)).collect(),
+                }],
+                width: theme.drawn_line_width(crate::SizeSpec::Auto),
+            },
+            Mark::GroupedViolin(mark) => ResolvedMark::Violin {
+                geometry: None,
+                categories: mark.categories(),
+                distributions: mark
+                    .distributions()
+                    .map(|d| ResolvedDistribution {
+                        label: d.label(),
+                        color: color_of(d.color(), d.label()),
+                        groups: d.groups().iter().map(|g| violin_stats(g)).collect(),
                     })
                     .collect(),
                 width: theme.drawn_line_width(crate::SizeSpec::Auto),

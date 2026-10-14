@@ -671,6 +671,17 @@ fn swatch_size(
                 side,
             )
         }
+        (RowStyle::Plain, Swatch::Violin { width }) => {
+            let side = SQUARE_SWATCH_SIDE * size;
+            let thickness = f64::from(width).min(side / 2.0);
+            (
+                Swatch::Violin {
+                    width: thickness as f32,
+                },
+                side,
+                side,
+            )
+        }
         (RowStyle::Plain, Swatch::Square) => {
             let side = SQUARE_SWATCH_SIDE * size;
             (swatch, side, side)
