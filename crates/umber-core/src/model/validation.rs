@@ -220,6 +220,11 @@ pub(super) fn check_band(
     check_numbers(context, ("low", "low"), low, y_transform, GAP_HINT)?;
     check_numbers(context, ("high", "high"), high, y_transform, GAP_HINT)?;
     check_sorted(context, "band", x)?;
+    check_interval_order(context, (low, high))
+}
+
+/// Checks that no lower limit exceeds its upper limit; NaN in either limit is not compared.
+fn check_interval_order(context: &'static str, (low, high): (&[f64], &[f64])) -> Result<()> {
     for (i, (&a, &b)) in low.iter().zip(high).enumerate() {
         if a > b {
             return Err(Error::data(
@@ -278,21 +283,7 @@ fn check_intervals(
         transform,
         ERROR_BAR_GAP_HINT,
     )?;
-    for (i, (&a, &b)) in low.iter().zip(high).enumerate() {
-        if a > b {
-            return Err(Error::data(
-                context,
-                format!(
-                    "low[{i}] is {a}, above high[{i}] = {b}; low must not exceed high.",
-                    a = number(a),
-                    b = number(b)
-                ),
-            )
-            .with_parameter("low")
-            .with_hint("check that low and high are not swapped."));
-        }
-    }
-    Ok(())
+    check_interval_order(context, (low, high))
 }
 
 /// Validates the x, `low` and `high` values of vertical error bars for axes with an x axis of

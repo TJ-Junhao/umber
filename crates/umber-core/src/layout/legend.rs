@@ -73,9 +73,11 @@ pub(crate) struct SwatchBox {
     pub x: f64,
     /// The vertical center.
     pub center_y: f64,
-    /// The width: the length of a line, the diameter of a dot, the side of a square.
+    /// The width: the length of a line, the diameter of a dot, the side of a square, or the
+    /// full stroke envelope of an error bar.
     pub width: f64,
-    /// The height: the line width of a line, the diameter of a dot, the side of a square.
+    /// The height: the line width of a line, the diameter of a dot, the side of a square, or the
+    /// full stroke envelope of an error bar.
     pub height: f64,
 }
 
@@ -556,11 +558,13 @@ fn swatch_size(
                 vertical,
                 width: thickness as f32,
             };
-            // The caps are as wide as the theme's caps; the bar is as long as the label is tall.
+            // End caps add half a stroke at each end; across the bar, the stem can be wider
+            // than the caps. Measure the whole stroke envelope, not just the centre lines.
+            let (along, across) = (length + thickness, cap.max(thickness));
             if vertical {
-                (capped, cap, length)
+                (capped, across, along)
             } else {
-                (capped, length, cap)
+                (capped, along, across)
             }
         }
     }

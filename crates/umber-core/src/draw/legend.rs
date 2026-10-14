@@ -33,7 +33,7 @@ pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
         if let Some(pill) = entry.chip {
             items.push(chip(pill, entry.swatch.color));
         }
-        items.push(swatch(entry));
+        items.push(swatch(theme, entry));
         items.push(text(&entry.label, theme.text_color()));
     }
     for label in direct {
@@ -76,7 +76,7 @@ fn chip_tint(color: Rgba) -> Rgba {
 
 /// The swatch of `entry`, in its series color, inside its swatch box: a line in the series dash
 /// and width, a filled dot, a filled square, or a bar with caps.
-fn swatch(entry: &RowEntry) -> Item {
+fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
     let b = entry.swatch;
     match b.kind {
         Swatch::Line { dash, width } => {
@@ -98,22 +98,22 @@ fn swatch(entry: &RowEntry) -> Item {
         }
         Swatch::Dot { .. } => dot(b.x + b.width / 2.0, b.center_y, b.width, b.color),
         Swatch::ErrorBar { vertical, width } => {
-            let (start, end, cap) = if vertical {
+            // Each end cap reaches half a stroke beyond its centre line along the bar.
+            let inset = f64::from(width) / 2.0;
+            let (start, end) = if vertical {
                 let x = b.x + b.width / 2.0;
                 (
-                    point(x, b.center_y - b.height / 2.0),
-                    point(x, b.center_y + b.height / 2.0),
-                    b.width,
+                    point(x, b.center_y - b.height / 2.0 + inset),
+                    point(x, b.center_y + b.height / 2.0 - inset),
                 )
             } else {
                 (
-                    point(b.x, b.center_y),
-                    point(b.x + b.width, b.center_y),
-                    b.height,
+                    point(b.x + inset, b.center_y),
+                    point(b.x + b.width - inset, b.center_y),
                 )
             };
             let mut path = Path::new();
-            push_bar(&mut path, vertical, (start, end), Some(cap as f32));
+            push_bar(&mut path, vertical, (start, end), Some(theme.cap_width()));
             Item::Stroke {
                 path,
                 style: bar_style(width, b.color),
@@ -231,11 +231,11 @@ mod tests {
 
     #[test]
     fn square_swatch_fills_its_box() {
-        let (_, layout) = layout(Theme::pigment());
+        let (theme, layout) = layout(Theme::pigment());
         let mut entry = layout.legend.entries()[2].clone();
         entry.swatch.kind = Swatch::Square;
         entry.swatch.height = entry.swatch.width;
-        let item = swatch(&entry);
+        let item = swatch(&theme, &entry);
         assert!(
             matches!(&item, Item::Fill { paint: Paint::Solid(c), .. } if *c == entry.swatch.color)
         );
@@ -292,20 +292,27 @@ mod tests {
             };
             assert_eq!(style.cap, LineCap::Butt);
             assert_eq!(style.color, b.color);
-            // The bar fills the box lengthwise, the caps are the theme's cap width across it,
-            // and the line is at most a quarter of the label size thick.
+            // The box includes the stroke of the end caps and of the stem. Caps keep the
+            // theme's cap width, and the line is at most a quarter of the label size thick.
+            let thickness = f64::from(style.width);
             let (long, across) = if vertical {
                 (b.height, b.width)
             } else {
                 (b.width, b.height)
             };
-            assert!((long - 1.1 * size).abs() < 1e-3 && (across - cap).abs() < 1e-3);
-            assert!(f64::from(style.width) <= 0.25 * size + 1e-6);
+            assert!((long - (1.1 * size + thickness)).abs() < 1e-3);
+            assert!((across - cap.max(thickness)).abs() < 1e-3);
+            assert!(thickness <= 0.25 * size + 1e-6);
             let parts: Vec<_> = path.verbs().iter().collect();
             assert_eq!(parts.len(), 6, "a bar and two caps: {parts:?}");
             let (min, max) = path.bounds().unwrap();
             let (w, h) = (f64::from(max.x - min.x), f64::from(max.y - min.y));
-            assert!((w - b.width).abs() < 1e-3 && (h - b.height).abs() < 1e-3);
+            let (expected_w, expected_h) = if vertical {
+                (cap, 1.1 * size)
+            } else {
+                (1.1 * size, cap)
+            };
+            assert!((w - expected_w).abs() < 1e-3 && (h - expected_h).abs() < 1e-3);
             assert!(
                 (f64::from(min.x + max.x) / 2.0 - (b.x + b.width / 2.0)).abs() < 1e-3
                     && (f64::from(min.y + max.y) / 2.0 - b.center_y).abs() < 1e-3
@@ -324,6 +331,94 @@ mod tests {
                 .iter()
                 .all(|entry| matches!(entry.swatch.kind, Swatch::Dot { .. }))
         );
+    }
+
+    /// Checks the stem and both caps against the measured box, including their stroke width.
+    fn error_bar_envelope(vertical: bool) {
+        use crate::geometry::PathVerb;
+        use crate::model::ErrorBarOptions;
+        use crate::{LegendStyle, SizeSpec};
+
+        for base in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            for scale in [0.5, 1.0, 4.0, 10.0] {
+                for width in [0.5, 8.0, 72.0] {
+                    for row_style in [LegendStyle::Header, LegendStyle::Direct] {
+                        let theme = base
+                            .with_font_scale(scale)
+                            .unwrap()
+                            .with_legend_style(row_style)
+                            .unwrap();
+                        let mut f = Figure::new(20.0, 12.0, theme.clone()).unwrap();
+                        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                        let options = ErrorBarOptions {
+                            label: "C".into(),
+                            width: SizeSpec::pt(width).unwrap(),
+                            ..ErrorBarOptions::default()
+                        };
+                        if vertical {
+                            axes.y_error_bars(
+                                AxisData::Numbers(vec![1.0]),
+                                &[0.0],
+                                &[2.0],
+                                options,
+                            )
+                            .unwrap();
+                        } else {
+                            axes.x_error_bars(&[1.0], &[0.0], &[2.0], options).unwrap();
+                        }
+                        let layout =
+                            crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1;
+                        let entry = &layout.legend.entries()[0];
+                        let b = entry.swatch;
+                        let Item::Stroke { path, style } = swatch(&theme, entry) else {
+                            panic!("an error bar swatch is a stroke");
+                        };
+                        assert_eq!(style.cap, LineCap::Butt);
+                        assert_eq!(path.verbs().len(), 6);
+                        let half = f64::from(style.width) / 2.0;
+                        for (i, segment) in path.verbs().chunks_exact(2).enumerate() {
+                            let [PathVerb::MoveTo(a), PathVerb::LineTo(z)] = segment else {
+                                panic!("a stem or cap is a segment");
+                            };
+                            let (dx, dy) = if a.x == z.x {
+                                (half, 0.0)
+                            } else {
+                                assert_eq!(a.y, z.y);
+                                (0.0, half)
+                            };
+                            let left = f64::from(a.x.min(z.x)) - dx;
+                            let right = f64::from(a.x.max(z.x)) + dx;
+                            let top = f64::from(a.y.min(z.y)) - dy;
+                            let bottom = f64::from(a.y.max(z.y)) + dy;
+                            assert!(
+                                left >= b.x - 1e-3
+                                    && right <= b.x + b.width + 1e-3
+                                    && top >= b.center_y - b.height / 2.0 - 1e-3
+                                    && bottom <= b.center_y + b.height / 2.0 + 1e-3,
+                                "vertical={vertical} scale={scale} width={width} segment={i}: \
+                                 ({left}, {top})..({right}, {bottom}) outside {b:?}"
+                            );
+                            assert!(entry.label.x - right >= 4.0 - 1e-3);
+                            if i > 0 {
+                                let length = f64::from((z.x - a.x).abs() + (z.y - a.y).abs());
+                                assert!((length - f64::from(theme.cap_width())).abs() < 1e-3);
+                            }
+                        }
+                        assert!((entry.label.x - (b.x + b.width) - 4.0).abs() < 1e-3);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn horizontal_error_bar_strokes_fit_the_swatch_box_before_the_label_gap() {
+        error_bar_envelope(false);
+    }
+
+    #[test]
+    fn vertical_error_bar_strokes_fit_the_swatch_box_before_the_label_gap() {
+        error_bar_envelope(true);
     }
 
     #[test]
