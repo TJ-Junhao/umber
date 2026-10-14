@@ -95,6 +95,18 @@ fn chip_tint(color: Rgba) -> Rgba {
 fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
     let b = entry.swatch;
     match b.kind {
+        Swatch::Bubble { radius } => Item::Markers {
+            shape: marker_shape(Marker::Circle, 2.0 * radius),
+            positions: vec![point(b.x + b.width / 2.0, b.center_y)],
+            fill: Some(b.color.scale_alpha(theme.marker_alpha())),
+            stroke: Some(crate::scene::StrokeStyle {
+                color: theme.background(),
+                width: super::MARKER_OUTLINE,
+                dash: Vec::new(),
+                cap: LineCap::Butt,
+                join: crate::scene::LineJoin::Miter,
+            }),
+        },
         Swatch::Line { dash, width } => {
             let style = line_style(width, b.color, dash);
             // Round caps reach half the stroke width past the ends; keep them inside the box.

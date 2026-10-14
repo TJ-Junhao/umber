@@ -245,6 +245,17 @@ class Figure:
         marker: int,
         size: _SizeArg,
     ) -> None: ...
+    def bubbles(
+        self,
+        row: int,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        sizes: _FloatArray,
+        label: str,
+        color: _ColorArg,
+        marker: int,
+    ) -> None: ...
     def stem(
         self,
         row: int,

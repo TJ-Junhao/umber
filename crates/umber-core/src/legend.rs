@@ -14,6 +14,11 @@ use crate::{Dash, LegendStyle, Rgba};
 /// The small figure drawn before a legend label, showing how its series is drawn.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Swatch {
+    /// A true-size bubble reference circle, including the marker outline when measured.
+    Bubble {
+        /// The radius of the circle path, in points.
+        radius: f32,
+    },
     /// A short line in the series dash and width.
     Line {
         /// The dash style.
@@ -169,8 +174,8 @@ impl<'a> Legend<'a> {
     ) -> Legend<'a> {
         let keys = marks
             .iter()
-            .flat_map(|mark| mark.keys(limits))
-            .filter(|key| {
+            .flat_map(|mark| mark.keys(limits).into_iter().map(move |key| (mark, key)))
+            .filter(|(_, key)| {
                 !merged || (style == LegendStyle::Direct && key.kind.takes_direct_label())
             });
         let (mut row, mut direct) = (Vec::new(), Vec::new());
@@ -178,7 +183,7 @@ impl<'a> Legend<'a> {
             LegendStyle::Header | LegendStyle::Direct | LegendStyle::None => RowStyle::Plain,
             LegendStyle::Chips => RowStyle::Chips,
         };
-        for key in keys {
+        for (mark, key) in keys {
             let Some(entry) = LegendEntry::of(&key) else {
                 continue;
             };
@@ -193,6 +198,7 @@ impl<'a> Legend<'a> {
                 }
                 (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
                     row.push(entry);
+                    row.extend(mark.size_legend(limits.y.ticks.format()));
                 }
             }
         }
@@ -220,14 +226,16 @@ impl<'a> Legend<'a> {
             if style == LegendStyle::None {
                 continue;
             }
-            for entry in marks
+            for mark in marks
                 .iter()
                 .filter(|mark| style != LegendStyle::Direct || mark.line_width().is_none())
-                .flat_map(ResolvedMark::legend_swatch)
             {
-                let key = (entry.label.clone(), std::mem::discriminant(&entry.swatch));
-                if seen.insert(key) {
-                    row.push(entry);
+                for entry in mark.legend_swatch() {
+                    let key = (entry.label.clone(), std::mem::discriminant(&entry.swatch));
+                    if seen.insert(key) {
+                        row.push(entry);
+                        row.extend(mark.size_legend(axes.y_tick_format()));
+                    }
                 }
             }
         }

@@ -9,7 +9,7 @@ use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
 use crate::{Marker, Rgba};
 
 /// The scatter outline width, in points.
-const MARKER_OUTLINE: f32 = 0.8;
+pub(crate) const MARKER_OUTLINE: f32 = 0.8;
 /// Scatter points whose marker (shape extent plus outline) lies further than this many points
 /// outside the plot area are dropped.
 const MARKER_SLACK: f64 = 1.0;

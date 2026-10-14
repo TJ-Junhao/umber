@@ -90,6 +90,9 @@
 #![forbid(unsafe_code)]
 
 mod binning;
+mod bubble_scale;
+#[cfg(test)]
+mod bubbles_tests;
 pub mod color;
 mod coverage;
 pub mod downsample;
@@ -134,6 +137,7 @@ pub use figure::{
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};
 pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
+pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use figure::{StemMark, StemOptions};
 pub use fonts::{Font, Weight};

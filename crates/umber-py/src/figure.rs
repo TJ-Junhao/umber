@@ -453,6 +453,31 @@ impl Figure {
             .map_err(core_error)
     }
 
+    /// Adds bubbles sharing an area scale on these axes.
+    fn bubbles(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        sizes: &Bound<'_, PyAny>,
+        label: String,
+        color: ColorArg,
+        marker: i64,
+    ) -> PyResult<()> {
+        let (x, y, sizes) = (shared_floats(x)?, shared_floats(y)?, shared_floats(sizes)?);
+        let options = umber_core::BubbleOptions {
+            label,
+            color: color_spec(color)?,
+            marker: enum_value::<Marker>(marker)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .bubbles_shared(x, y, sizes, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Adds stems from the baseline with a marker at each value.
     fn stem(
         &mut self,

@@ -305,6 +305,51 @@ pub(super) fn check_stacked_area(
     Ok(())
 }
 
+/// Checks bubble coordinates and sizes before storage: numeric x, lengths, coordinates, sizes.
+pub(super) fn check_bubbles(
+    context: &'static str,
+    x_kind: ScaleKind,
+    y_transform: Transform,
+    (x, y, sizes): (&[f64], &[f64], &[f64]),
+) -> Result<()> {
+    let Some(x_transform) = x_kind.transform() else {
+        return Err(Error::usage(
+            context,
+            "this is a category axis; bubbles apply to linear and log x axes only.",
+        )
+        .with_parameter("x")
+        .with_hint(X_SCALE_HINT));
+    };
+    for (name, other) in [("y", y), ("sizes", sizes)] {
+        if x.len() != other.len() {
+            return Err(Error::data(
+                context,
+                format!(
+                    "x has {} values but {name} has {}; x and {name} must have the same length.",
+                    x.len(),
+                    other.len()
+                ),
+            ));
+        }
+    }
+    check_numbers(context, ("x", "x"), x, x_transform, SCATTER_GAP_HINT)?;
+    check_numbers(context, ("y", "y"), y, y_transform, SCATTER_GAP_HINT)?;
+    for (i, &value) in sizes.iter().enumerate() {
+        if !value.is_finite() || value < 0.0 {
+            return Err(Error::data(
+                context,
+                format!(
+                    "sizes[{i}] is {}; bubble sizes must be finite and at least 0.",
+                    number(value)
+                ),
+            )
+            .with_parameter("sizes")
+            .with_hint("use 0 for a point to leave out."));
+        }
+    }
+    Ok(())
+}
+
 /// Checks that no lower limit exceeds its upper limit; NaN in either limit is not compared.
 fn check_interval_order(context: &'static str, (low, high): (&[f64], &[f64])) -> Result<()> {
     for (i, (&a, &b)) in low.iter().zip(high).enumerate() {

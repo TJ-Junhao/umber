@@ -937,6 +937,21 @@ impl Theme {
         self.box_width
     }
 
+    /// The maximum bubble radius, in points, shared by all bubble marks on an axes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    /// assert_eq!(Theme::pigment().bubble_max_radius(), 18.0);
+    /// assert_eq!(Theme::graphite().bubble_max_radius(), 18.0);
+    /// assert_eq!(Theme::midnight().bubble_max_radius(), 18.0);
+    /// ```
+    #[must_use]
+    pub fn bubble_max_radius(&self) -> f32 {
+        18.0
+    }
+
     /// Replace the palette.
     ///
     /// Returns a new theme; `self` is unchanged.

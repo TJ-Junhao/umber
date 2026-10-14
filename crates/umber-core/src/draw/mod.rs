@@ -34,6 +34,7 @@ mod band;
 mod bar;
 mod bar_shape;
 mod box_plot;
+mod bubbles;
 mod chrome;
 mod clip;
 mod error_bars;
@@ -44,6 +45,7 @@ mod mapping;
 mod marker;
 mod rule;
 mod scatter;
+pub(crate) use scatter::MARKER_OUTLINE;
 mod stacked_area;
 mod stem;
 mod step;
@@ -232,6 +234,21 @@ pub(crate) fn marks(
                     resolved,
                     bars_mark,
                     (color, width),
+                    &mut items,
+                );
+            }
+            ResolvedMark::Bubbles {
+                mark,
+                color,
+                maximum,
+                radius,
+                ..
+            } => {
+                bubbles::bubble_items(
+                    &context,
+                    resolved,
+                    mark,
+                    (color, maximum, radius),
                     &mut items,
                 );
             }

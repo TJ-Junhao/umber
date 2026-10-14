@@ -175,6 +175,8 @@ impl Default for ScatterOptions {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive] // further mark kinds are added as variants
 pub enum Mark {
+    /// Markers whose areas follow non-negative size values; zero draws nothing.
+    Bubbles(super::bubbles::BubbleMark),
     /// Box plots, one per category.
     Box(BoxMark),
     /// Distributions side by side within each category.
