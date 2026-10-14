@@ -86,7 +86,7 @@ def test_category_x_is_rejected_atomically() -> None:
     with pytest.raises(ub.UsageError) as caught:
         bubbles(ax)([], [], [])
     assert str(caught.value) == (
-        "Axes.bubbles(): this is a category axis; bubbles apply to linear and log x axes only."
+        "Axes.bubbles(): this is a category axis; bubbles apply to linear and log axes only."
     )
     assert details(caught.value) == (
         "x",

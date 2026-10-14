@@ -55,6 +55,34 @@ fn area_proportional_to_value() {
 }
 
 #[test]
+fn zero_size_positions_still_count_in_axis_domains() {
+    let make = |size| {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .bubbles(&[1.0, 1000.0], &[2.0, -1000.0], &[1.0, size], options(""))
+            .unwrap();
+        f
+    };
+    let zero = make(0.0);
+    let visible = make(1.0);
+    let zero_axes = plan_figure(&zero, (0, 0), FontLibrary::global()).0;
+    let visible_axes = plan_figure(&visible, (0, 0), FontLibrary::global()).0;
+    assert_eq!(
+        zero_axes.x.continuous().unwrap().domain(),
+        visible_axes.x.continuous().unwrap().domain()
+    );
+    assert_eq!(zero_axes.y.scale.domain(), visible_axes.y.scale.domain());
+    assert!(zero_axes.x.continuous().unwrap().domain().1 >= 1000.0);
+    assert!(zero_axes.y.scale.domain().0 <= -1000.0);
+    let scene = zero.to_scene(FontLibrary::global()).unwrap();
+    let Item::Group { items, .. } = &scene.items[1] else {
+        panic!("marks")
+    };
+    assert_eq!(items.len(), 2);
+}
+
+#[test]
 fn best_avoids_bubble_area_when_its_center_is_outside() {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
@@ -109,7 +137,7 @@ fn size_legend_containment_errors_include_circle_height() {
                 .unwrap()
                 .ylim(0.0, 1.0)
                 .unwrap();
-            for i in 0..3 {
+            for i in 0..4 {
                 axes.bubbles(&[0.5], &[0.5], &[1.0], options(&format!("Cities {i}")))
                     .unwrap();
             }
@@ -121,7 +149,7 @@ fn size_legend_containment_errors_include_circle_height() {
             };
             assert_eq!(
                 err.to_string(),
-                format!("Figure.to_scene(): the legend is 486 pt tall; {available}.")
+                format!("Figure.to_scene(): the legend is 282 pt tall; {available}.")
             );
             assert!(matches!(err, Error::Style { .. }));
             assert_eq!(err.parameter(), None);
@@ -178,16 +206,19 @@ fn several_bubble_marks_share_one_scale() {
             }
         ));
     }
-    let legend = Legend::new(LegendStyle::Header, &marks, &Limits::of(f.single_axes()));
-    let labels: Vec<_> = legend.row().iter().map(|e| e.label()).collect();
-    assert_eq!(
-        labels,
-        ["Cities", "200", "100", "50", "Towns", "200", "100", "50"]
-    );
-    assert_ne!(legend.row()[0].color(), legend.row()[4].color());
-    for start in [0, 4] {
-        for entry in &legend.row()[start + 1..start + 4] {
-            assert_eq!(entry.color(), legend.row()[start].color());
+    for style in [LegendStyle::Header, LegendStyle::Chips, LegendStyle::Direct] {
+        let legend = Legend::new(style, &marks, &Limits::of(f.single_axes()));
+        let labels: Vec<_> = legend.row().iter().map(|e| e.label()).collect();
+        assert_eq!(labels, ["Cities", "200", "100", "50", "Towns"]);
+        assert_ne!(legend.row()[0].color(), legend.row()[4].color());
+        for (entry, value) in legend.row()[1..4].iter().zip(references(400.0)) {
+            assert_eq!(entry.color(), legend.row()[0].color());
+            assert_eq!(
+                entry.swatch(),
+                Swatch::Bubble {
+                    radius: radius(value, 400.0, 18.0)
+                }
+            );
         }
     }
 }
@@ -312,29 +343,51 @@ fn merged_legend_keeps_references_with_the_first_label() {
     )
     .unwrap();
     for col in 0..2 {
-        f.add_axes_at(
-            Placement {
-                row: GridIndex::At(0),
-                col: GridIndex::At(col),
-                ..Placement::default()
-            },
-            ScaleKind::Linear,
-            ScaleKind::Linear,
-        )
-        .unwrap()
-        .bubbles(
-            &[1.0, 2.0],
-            &[2.0, 3.0],
-            &[100.0, if col == 0 { 870.0 } else { 1.0 }],
-            options("Cities"),
-        )
-        .unwrap();
+        let mut axes = f
+            .add_axes_at(
+                Placement {
+                    row: GridIndex::At(0),
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap();
+        axes.bubbles(&[1.0], &[2.0], &[1.0], options(""))
+            .unwrap()
+            .bubbles(
+                &[1.0, 2.0],
+                &[2.0, 3.0],
+                &[100.0, if col == 0 { 870.0 } else { 1.0 }],
+                options("Cities"),
+            )
+            .unwrap();
+        if col == 1 {
+            axes.bubbles(&[2.0], &[2.0], &[50.0], options("Towns"))
+                .unwrap();
+        }
     }
     let marks = crate::resolve::resolve_figure_marks(&f);
+    for ((axes, panel_marks), expected) in f.panels().zip(&marks).zip([870.0, 100.0]) {
+        assert!(panel_marks.iter().all(|mark| matches!(
+            mark,
+            ResolvedMark::Bubbles { maximum, .. } if *maximum == expected
+        )));
+        let panel = Legend::new(LegendStyle::Header, panel_marks, &Limits::of(axes));
+        for (entry, value) in panel.row()[1..4].iter().zip(references(expected)) {
+            assert_eq!(
+                entry.swatch(),
+                Swatch::Bubble {
+                    radius: radius(value, expected, 18.0)
+                }
+            );
+        }
+    }
     let legend = Legend::merged(&f, marks.iter().map(Vec::as_slice));
     assert_eq!(
         legend.row().iter().map(|e| e.label()).collect::<Vec<_>>(),
-        ["Cities", "500", "200", "100"]
+        ["Cities", "500", "200", "100", "Towns"]
     );
     assert!(try_plan_panels(&f, FontLibrary::global()).is_ok());
     crate::test_support::scene::assert_scene_bounded(&f.to_scene(FontLibrary::global()).unwrap());
@@ -437,7 +490,7 @@ fn invalid_bubbles_are_atomic_and_name_the_first_size() {
     assert!(matches!(err, Error::Usage { .. }));
     assert_eq!(
         err.to_string(),
-        "Axes.bubbles(): this is a category axis; bubbles apply to linear and log x axes only."
+        "Axes.bubbles(): this is a category axis; bubbles apply to linear and log axes only."
     );
     assert_eq!(err.parameter(), Some("x"));
     assert_eq!(

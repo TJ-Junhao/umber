@@ -16,7 +16,7 @@ use crate::{ColorSpec, Marker};
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct BubbleOptions {
-    /// The legend label; empty for no label or size legend.
+    /// The legend label; the first labelled bubble entry is followed by the size references.
     pub label: String,
     /// The marker color.
     pub color: ColorSpec,
@@ -36,8 +36,9 @@ impl Default for BubbleOptions {
 
 /// Validated bubble coordinates, size values and options, shared by clones.
 ///
-/// A zero size or NaN coordinate draws nothing. All bubble marks on an axes share one size
-/// scale, whose largest value maps to the theme's maximum radius.
+/// A zero size or NaN coordinate draws nothing. A zero-size point's position still counts in
+/// the axis domains like any point. All bubble marks on an axes share one size scale, whose
+/// largest value maps to the theme's maximum radius.
 ///
 /// # Examples
 ///

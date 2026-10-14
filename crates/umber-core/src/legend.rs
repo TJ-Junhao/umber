@@ -166,6 +166,8 @@ impl<'a> Legend<'a> {
     ///   [`RowStyle::Plain`], exactly as `Header` would show them. So every labelled series is
     ///   labelled somewhere.
     /// - `None` gives nothing.
+    ///
+    /// Bubble size references follow only the first labelled bubble entry, for the axes' scale.
     pub fn new(style: LegendStyle, marks: &[ResolvedMark<'a>], limits: &Limits) -> Legend<'a> {
         Self::panel(style, marks, limits, false)
     }
@@ -185,6 +187,7 @@ impl<'a> Legend<'a> {
                 !merged || (style == LegendStyle::Direct && key.kind.takes_direct_label())
             });
         let (mut row, mut direct) = (Vec::new(), Vec::new());
+        let mut seen_bubbles = false;
         let row_style = match style {
             LegendStyle::Header | LegendStyle::Direct | LegendStyle::None => RowStyle::Plain,
             LegendStyle::Chips => RowStyle::Chips,
@@ -204,7 +207,10 @@ impl<'a> Legend<'a> {
                 }
                 (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
                     row.push(entry);
-                    row.extend(mark.size_legend(limits.y.ticks.format()));
+                    if !seen_bubbles && matches!(mark, ResolvedMark::Bubbles { .. }) {
+                        row.extend(mark.size_legend(limits.y.ticks.format()));
+                        seen_bubbles = true;
+                    }
                 }
             }
         }
@@ -218,6 +224,8 @@ impl<'a> Legend<'a> {
     /// The figure's row entries in panel and series order, with one entry per label and swatch
     /// kind. The first swatch wins, including its color and stroke or marker size. Direct
     /// line-like series remain in their panels; hidden legends contribute no entries.
+    /// Bubble size references follow only the first retained bubble entry and use its panel's
+    /// scale; merging legends does not share size scales between panels.
     pub fn merged<'m>(
         figure: &Figure,
         marks: impl IntoIterator<Item = &'m [ResolvedMark<'a>]>,
@@ -226,6 +234,7 @@ impl<'a> Legend<'a> {
         'a: 'm,
     {
         let mut seen = HashSet::new();
+        let mut seen_bubbles = false;
         let mut row = Vec::new();
         for (axes, marks) in figure.panels().zip(marks) {
             let style = axes.legend_style().unwrap_or(figure.theme().legend_style());
@@ -240,7 +249,10 @@ impl<'a> Legend<'a> {
                     let key = (entry.label.clone(), std::mem::discriminant(&entry.swatch));
                     if seen.insert(key) {
                         row.push(entry);
-                        row.extend(mark.size_legend(axes.y_tick_format()));
+                        if !seen_bubbles && matches!(mark, ResolvedMark::Bubbles { .. }) {
+                            row.extend(mark.size_legend(axes.y_tick_format()));
+                            seen_bubbles = true;
+                        }
                     }
                 }
             }

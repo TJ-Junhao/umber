@@ -315,7 +315,7 @@ pub(super) fn check_bubbles(
     let Some(x_transform) = x_kind.transform() else {
         return Err(Error::usage(
             context,
-            "this is a category axis; bubbles apply to linear and log x axes only.",
+            "this is a category axis; bubbles apply to linear and log axes only.",
         )
         .with_parameter("x")
         .with_hint(X_SCALE_HINT));
