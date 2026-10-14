@@ -210,6 +210,13 @@ mod tests {
             (&[1.0, 0.0], &[0.0, f64::INFINITY], &[1.0, f64::INFINITY]),
         );
         assert!(text.starts_with("Axes.band(): low[1] is inf"), "{text}");
+        let (_, text, parameter, hint) =
+            refused((LIN, LIN), (&[1.0, 0.0], &[5.0; 2], &[1.0, f64::INFINITY]));
+        assert_eq!(text, "Axes.band(): high[1] is inf; values must be finite.");
+        assert_eq!(
+            (parameter, hint),
+            (Some("high"), Some("use NaN to leave a gap in the band."))
+        );
         // Equal x is accepted.
         let mut f = figure(LIN, LIN);
         f.single_axes_mut()

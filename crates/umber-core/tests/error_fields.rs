@@ -4,9 +4,9 @@
 #![allow(clippy::expect_used)]
 
 use umber_core::{
-    Alpha, AreaOptions, AxisData, AxisValue, BandOptions, BarOptions, Error, Figure, HistOptions,
-    LineOptions, LogBase, Result, Rgba, RuleOptions, ScaleKind, ScatterOptions, Series, SizeSpec,
-    SpanOptions, StepOptions, Theme,
+    Alpha, AreaOptions, AxisData, AxisValue, BandOptions, BarOptions, Error, ErrorBarOptions,
+    Figure, HistOptions, LineOptions, LogBase, Result, Rgba, RuleOptions, ScaleKind,
+    ScatterOptions, Series, SizeSpec, SpanOptions, StepOptions, Theme,
 };
 
 const LOG: ScaleKind = ScaleKind::Log { base: LogBase::TEN };
@@ -579,6 +579,89 @@ fn errors_carry_their_parameter_and_hint() {
             }),
             None,
             None,
+        ),
+        (
+            "y_error_bars, wrong x kind",
+            on_axes(cat, linear, |a| {
+                a.y_error_bars(
+                    AxisData::Numbers(vec![0.0]),
+                    &[0.0],
+                    &[1.0],
+                    ErrorBarOptions::default(),
+                )
+                .map(|_| ())
+            }),
+            None,
+            Some("pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."),
+        ),
+        (
+            "y_error_bars, low above high",
+            on_axes(linear, linear, |a| {
+                a.y_error_bars(
+                    AxisData::Numbers(vec![0.0]),
+                    &[2.0],
+                    &[1.0],
+                    ErrorBarOptions::default(),
+                )
+                .map(|_| ())
+            }),
+            Some("low"),
+            Some("check that low and high are not swapped."),
+        ),
+        (
+            "y_error_bars, infinite high",
+            on_axes(linear, linear, |a| {
+                a.y_error_bars(
+                    AxisData::Numbers(vec![0.0]),
+                    &[0.0],
+                    &[inf],
+                    ErrorBarOptions::default(),
+                )
+                .map(|_| ())
+            }),
+            Some("high"),
+            Some("use NaN to skip a bar."),
+        ),
+        (
+            "y_error_bars, length mismatch",
+            on_axes(linear, linear, |a| {
+                a.y_error_bars(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[0.0],
+                    &[1.0, 2.0],
+                    ErrorBarOptions::default(),
+                )
+                .map(|_| ())
+            }),
+            None,
+            None,
+        ),
+        (
+            "x_error_bars, category x axis",
+            on_axes(cat, linear, |a| {
+                a.x_error_bars(&[0.0], &[0.0], &[1.0], ErrorBarOptions::default())
+                    .map(|_| ())
+            }),
+            None,
+            Some("x_error_bars needs a numeric x axis; use y_error_bars on a category."),
+        ),
+        (
+            "x_error_bars, low above high",
+            on_axes(linear, linear, |a| {
+                a.x_error_bars(&[0.0], &[2.0], &[1.0], ErrorBarOptions::default())
+                    .map(|_| ())
+            }),
+            Some("low"),
+            Some("check that low and high are not swapped."),
+        ),
+        (
+            "x_error_bars, infinite y",
+            on_axes(linear, linear, |a| {
+                a.x_error_bars(&[inf], &[0.0], &[1.0], ErrorBarOptions::default())
+                    .map(|_| ())
+            }),
+            Some("y"),
+            Some("use NaN to skip a bar."),
         ),
     ];
     for (name, err, parameter, hint) in cases {

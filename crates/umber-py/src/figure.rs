@@ -26,9 +26,9 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use umber_core::{
-    AreaOptions, AxesMut, BandOptions, BarOptions, Dash, Grid, GridIndex, HistOptions, LegendMode,
-    LegendStyle, LineOptions, Marker, Placement, RuleOptions, ScatterOptions, Series, Share,
-    SpanOptions, Step, StepOptions, SvgText,
+    AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
+    HistOptions, LegendMode, LegendStyle, LineOptions, Marker, Placement, RuleOptions,
+    ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
 
 use crate::color::{ColorArg, color_spec};
@@ -619,6 +619,58 @@ impl Figure {
         };
         self.axes(row, col)?
             .band_shared(x, low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds vertical error bars at `x` between the limits `low` and `high`.
+    fn y_error_bars(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        low: &Bound<'_, PyAny>,
+        high: &Bound<'_, PyAny>,
+        label: String,
+        color: ColorArg,
+        width: SizeArg,
+        caps: bool,
+    ) -> PyResult<()> {
+        let (x, low, high) = (axis_data(x)?, shared_floats(low)?, shared_floats(high)?);
+        let options = ErrorBarOptions {
+            label,
+            color: color_spec(color)?,
+            width: size_spec(width)?,
+            caps,
+        };
+        self.axes(row, col)?
+            .y_error_bars_shared(x, low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds horizontal error bars at `y` between the limits `low` and `high`.
+    fn x_error_bars(
+        &mut self,
+        row: i64,
+        col: i64,
+        y: &Bound<'_, PyAny>,
+        low: &Bound<'_, PyAny>,
+        high: &Bound<'_, PyAny>,
+        label: String,
+        color: ColorArg,
+        width: SizeArg,
+        caps: bool,
+    ) -> PyResult<()> {
+        let (y, low, high) = (floats(y)?, shared_floats(low)?, shared_floats(high)?);
+        let options = ErrorBarOptions {
+            label,
+            color: color_spec(color)?,
+            width: size_spec(width)?,
+            caps,
+        };
+        self.axes(row, col)?
+            .x_error_bars_shared(y, low, high, options)
             .map(drop)
             .map_err(core_error)
     }

@@ -36,6 +36,7 @@ use crate::model::{
 };
 use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
 use crate::model::{Edge, holds};
+use crate::model::{ErrorBarMark, ErrorBarOrientation};
 use crate::scale::{Finish, Padding, TickJudge, is_single_value, log_offset};
 use crate::stacking::Stacks;
 use crate::tick_format::TickFormat;
@@ -516,8 +517,8 @@ fn category_ticks(scale: &CategoryScale) -> Vec<AxisTick> {
 }
 
 /// The x categories of every mark, in mark order, then in data order.
-fn categories(marks: &[ResolvedMark<'_>]) -> CategoryScale {
-    CategoryScale::from_first_appearance(marks.iter().flat_map(|mark| mark.x_categories()))
+fn categories<'a, 'm: 'a>(marks: impl Iterator<Item = &'a ResolvedMark<'m>>) -> CategoryScale {
+    CategoryScale::from_first_appearance(marks.flat_map(|mark| mark.x_categories()))
 }
 
 /// Checks, before `figure` is rendered in `context`, that every vertical reference line on a
@@ -544,9 +545,16 @@ pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result
         let Some(first) = lines.next() else {
             continue;
         };
+        let cells = axes.cells();
+        let key = figure.x_group_of(cells.row(), cells.col());
         let scale = CategoryScale::from_first_appearance(
-            axes.marks()
-                .iter()
+            figure
+                .panels()
+                .filter(|member| {
+                    let c = member.cells();
+                    figure.x_group_of(c.row(), c.col()) == key
+                })
+                .flat_map(|member| member.marks())
                 .flat_map(mark_categories)
                 .map(String::as_str),
         );
@@ -589,21 +597,35 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
         Mark::Band(_) => &[],
+        Mark::ErrorBars(mark) => category_names(mark.positions()),
     }
 }
 
 /// Resolves both axes from the resolved `marks` and the axes' `limits`, with automatic ticks as
 /// the tick rooms `x_room` and `y_room` ask: about their target number of ticks, with labels
 /// kept apart.
+#[cfg(test)]
 pub(crate) fn resolve(
     marks: &[ResolvedMark<'_>],
     limits: &Limits,
     x_room: &TickRoom<'_>,
     y_room: &TickRoom<'_>,
 ) -> Resolved {
-    let x = match limits.x {
+    let x = resolve_x(marks.iter(), limits.x, x_room);
+    let (y, baseline) = resolve_y(marks.iter(), limits.y, y_room);
+    Resolved { x, y, baseline }
+}
+
+/// Resolves one x group, with members' marks in row-major panel order, then mark order.
+/// The iterator is cloned to inspect the extent and padding without copying any mark data.
+pub(crate) fn resolve_x<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    limits: AxisLimits<'_>,
+    room: &TickRoom<'_>,
+) -> ResolvedAxis {
+    match limits {
         AxisLimits::Continuous(x_limits) => {
-            let data = extent(marks.iter().flat_map(|mark| mark.x_numbers()));
+            let data = extent(marks.clone().flat_map(|mark| mark.x_numbers()));
             // Reference lines and spans do not decide the padding: an axis of lines and
             // references keeps the exact extent of the lines, while an axis of references
             // alone is padded.
@@ -611,7 +633,7 @@ pub(crate) fn resolve(
             // leaves the x axis as it would be without it.
             let contributing = || {
                 marks
-                    .iter()
+                    .clone()
                     .filter(|mark| mark.x_numbers().any(f64::is_finite))
             };
             let only_references = data.is_some() && contributing().all(ResolvedMark::is_reference);
@@ -624,7 +646,7 @@ pub(crate) fn resolve(
             } else {
                 AutoLimits::Nice(Padding::BothSides)
             };
-            continuous(x_limits, data, auto, x_room).axis.into_axis()
+            continuous(x_limits, data, auto, room).axis.into_axis()
         }
         AxisLimits::Category => {
             let scale = categories(marks);
@@ -633,13 +655,21 @@ pub(crate) fn resolve(
                 scale: AxisScale::Category(scale),
             }
         }
-    };
-    let transform = limits.y.transform;
-    let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
+    }
+}
+
+/// Resolves one y group and the baseline shared by its members.
+pub(crate) fn resolve_y<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    limits: ContinuousLimits<'_>,
+    room: &TickRoom<'_>,
+) -> (ResolvedContinuousAxis, NormalizedPos) {
+    let transform = limits.transform;
+    let data = extent(marks.clone().flat_map(|mark| mark.y_values()));
     // Bars and areas grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
     // edge when it is a limit. On a log axis they grow from the baseline.
     // With no data at all, explicit ticks still use the baseline convention of the mark.
-    let bars = marks.iter().any(|mark| {
+    let bars = marks.clone().any(|mark| {
         mark.grows_from_baseline() && (data.is_none() || mark.y_values().any(f64::is_finite))
     });
     let (data, padding) = if bars && transform == Transform::Linear {
@@ -652,9 +682,9 @@ pub(crate) fn resolve(
     let ContinuousAxis {
         axis: y,
         unpadded_low,
-    } = continuous(limits.y, data, auto, y_room);
+    } = continuous(limits, data, auto, room);
     let baseline = baseline(&y.scale, transform, unpadded_low);
-    Resolved { x, y, baseline }
+    (y, baseline)
 }
 
 /// The values one mark contributes to an axis domain, in order (see [`ResolvedMark`]).
@@ -823,6 +853,15 @@ pub(crate) enum ResolvedMark<'a> {
         /// The fill color, before the area opacity.
         color: Rgba,
     },
+    /// Error bars.
+    ErrorBars {
+        /// The mark.
+        mark: &'a ErrorBarMark,
+        /// The color of the bars and their caps.
+        color: Rgba,
+        /// The stroke width of the bars and their caps as drawn, in points.
+        width: f32,
+    },
 }
 
 impl<'a> ResolvedMark<'a> {
@@ -840,6 +879,15 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::VLine { mark, .. } => mark.x_numbers(),
             ResolvedMark::VSpan { mark, .. } => mark.bounds(),
             ResolvedMark::Band { mark, .. } => mark.x(),
+            ResolvedMark::ErrorBars { mark, .. } => match mark.orientation() {
+                ErrorBarOrientation::Vertical => numbers(mark.positions()),
+                // The limits of horizontal bars are x values.
+                ErrorBarOrientation::Horizontal => {
+                    return DomainValues::Computed(Box::new(
+                        mark.low().iter().chain(mark.high()).copied(),
+                    ));
+                }
+            },
             ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -863,6 +911,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
             ResolvedMark::Area { mark, .. } => category_names(mark.x()),
             ResolvedMark::Step { mark, .. } => category_names(mark.x()),
+            ResolvedMark::ErrorBars { mark, .. } => category_names(mark.positions()),
             ResolvedMark::Bar { mark, .. } => mark.categories(),
             ResolvedMark::Grouped { mark, .. } | ResolvedMark::Stacked { mark, .. } => {
                 mark.categories()
@@ -904,6 +953,14 @@ impl<'a> ResolvedMark<'a> {
                     mark.low().iter().chain(mark.high()).copied(),
                 ));
             }
+            ResolvedMark::ErrorBars { mark, .. } => match mark.orientation() {
+                ErrorBarOrientation::Vertical => {
+                    return DomainValues::Computed(Box::new(
+                        mark.low().iter().chain(mark.high()).copied(),
+                    ));
+                }
+                ErrorBarOrientation::Horizontal => numbers(mark.positions()),
+            },
             ResolvedMark::Bar { mark, .. } => mark.heights(),
             ResolvedMark::Grouped { series, .. } => {
                 return DomainValues::Computed(Box::new(
@@ -943,7 +1000,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
-            | ResolvedMark::Band { .. } => false,
+            | ResolvedMark::Band { .. }
+            | ResolvedMark::ErrorBars { .. } => false,
             ResolvedMark::Area { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
@@ -970,13 +1028,14 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
-            | ResolvedMark::Band { .. } => None,
+            | ResolvedMark::Band { .. }
+            | ResolvedMark::ErrorBars { .. } => None,
         }
     }
 
     /// Whether the mark is a reference line or span: it runs across the whole plot, extends a
     /// domain only by its own values, and does not count among the marks that decide how an axis
-    /// is padded (see [`resolve`]).
+    /// is padded (see [`resolve_x`]).
     pub fn is_reference(&self) -> bool {
         match self {
             ResolvedMark::HLine { .. }
@@ -991,14 +1050,15 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::Hist { .. }
             | ResolvedMark::Step { .. }
-            | ResolvedMark::Band { .. } => false,
+            | ResolvedMark::Band { .. }
+            | ResolvedMark::ErrorBars { .. } => false,
         }
     }
 
     /// Whether an x axis padded by the marks reads the exact extent of this mark: the marks
     /// drawn along a line ([`line_width`](Self::line_width)) and bands, which are bounded by
     /// curves over their x values. An x axis whose marks, references apart, all have it keeps
-    /// the exact data extent (see [`resolve`]).
+    /// the exact data extent (see [`resolve_x`]).
     pub fn has_exact_x_extent(&self) -> bool {
         self.line_width().is_some() || matches!(self, ResolvedMark::Band { .. })
     }
@@ -1075,6 +1135,17 @@ impl<'a> ResolvedMark<'a> {
                 label: &mark.options().label,
                 color,
                 kind: SeriesKind::Span,
+                anchor: None,
+            }],
+            // Error bars are listed with a short bar of their own, and never take a direct
+            // label.
+            &ResolvedMark::ErrorBars { mark, color, width } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::ErrorBar {
+                    vertical: mark.orientation() == ErrorBarOrientation::Vertical,
+                    width,
+                },
                 anchor: None,
             }],
         }
@@ -1415,6 +1486,14 @@ pub(crate) enum SeriesKind {
     /// A filled region without an outline: a reference span across the plot, or a band between
     /// two curves.
     Span,
+    /// Error bars, drawn as a short bar with a cap at each end, with the drawn width of their
+    /// lines.
+    ErrorBar {
+        /// Whether the bar runs along y; otherwise along x.
+        vertical: bool,
+        /// The stroke width as drawn, in points.
+        width: f32,
+    },
 }
 
 impl SeriesKind {
@@ -1428,7 +1507,8 @@ impl SeriesKind {
             SeriesKind::Points { .. }
             | SeriesKind::Bar
             | SeriesKind::Rule { .. }
-            | SeriesKind::Span => false,
+            | SeriesKind::Span
+            | SeriesKind::ErrorBar { .. } => false,
         }
     }
 }
@@ -1524,6 +1604,11 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
             Mark::Band(mark) => ResolvedMark::Band {
                 mark,
                 color: color_of(mark.options().color),
+            },
+            Mark::ErrorBars(mark) => ResolvedMark::ErrorBars {
+                mark,
+                color: color_of(mark.options().color),
+                width: theme.drawn_line_width(mark.options().width),
             },
         })
         .collect()
@@ -4311,5 +4396,191 @@ mod tests {
         );
         assert!(!band.kind.takes_direct_label());
         assert_eq!(line.color, theme.palette()[1]);
+    }
+
+    /// A figure of linear axes holding labelled vertical error bars over `x` between `low` and
+    /// `high`.
+    fn bars_figure(x: &[f64], low: &[f64], high: &[f64]) -> Figure {
+        let mut f = figure(LIN, LIN);
+        let options = crate::model::ErrorBarOptions {
+            label: "Interval".to_owned(),
+            ..crate::model::ErrorBarOptions::default()
+        };
+        axes(&mut f)
+            .y_error_bars(nums(x), low, high, options)
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn vertical_error_bars_give_positions_to_x_and_limits_to_y() {
+        let f = bars_figure(&[1.0, 5.0], &[0.0, 2.0], &[3.0, 9.0]);
+        let marks = resolve_marks(f.single_axes().marks(), &Theme::pigment());
+        let [bars] = marks.as_slice() else {
+            panic!("{marks:?}")
+        };
+        assert_eq!(bars.x_numbers().collect::<Vec<_>>(), [1.0, 5.0]);
+        // Every low, then every high.
+        assert_eq!(bars.y_values().collect::<Vec<_>>(), [0.0, 2.0, 3.0, 9.0]);
+        assert_eq!(bars.x_categories().count(), 0);
+        assert!(!bars.grows_from_baseline() && !bars.is_reference());
+        assert_eq!(bars.line_width(), None);
+        // The domains are those of a scatter at the positions and at both limits.
+        let mut scatter = figure(LIN, LIN);
+        axes(&mut scatter)
+            .scatter(nums(&[1.0, 5.0]), &[0.0, 9.0], ScatterOptions::default())
+            .unwrap();
+        assert_eq!(domains(&f), domains(&scatter));
+    }
+
+    #[test]
+    fn horizontal_error_bars_give_limits_to_x_and_positions_to_y() {
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .x_error_bars(
+                &[1.0, 5.0],
+                &[0.0, 2.0],
+                &[3.0, 9.0],
+                crate::model::ErrorBarOptions::default(),
+            )
+            .unwrap();
+        let marks = resolve_marks(f.single_axes().marks(), &Theme::pigment());
+        let [bars] = marks.as_slice() else {
+            panic!("{marks:?}")
+        };
+        assert_eq!(bars.x_numbers().collect::<Vec<_>>(), [0.0, 2.0, 3.0, 9.0]);
+        assert_eq!(bars.y_values().collect::<Vec<_>>(), [1.0, 5.0]);
+        assert_eq!(bars.x_categories().count(), 0);
+        let mut scatter = figure(LIN, LIN);
+        axes(&mut scatter)
+            .scatter(nums(&[0.0, 9.0]), &[1.0, 5.0], ScatterOptions::default())
+            .unwrap();
+        assert_eq!(domains(&f), domains(&scatter));
+    }
+
+    #[test]
+    fn error_bars_on_a_category_axis_give_their_categories_to_x() {
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .y_error_bars(
+                cats(&["b", "a", "b"]),
+                &[1.0, 2.0, 3.0],
+                &[2.0, 3.0, 4.0],
+                crate::model::ErrorBarOptions::default(),
+            )
+            .unwrap();
+        let marks = resolve_marks(f.single_axes().marks(), &Theme::pigment());
+        let [bars] = marks.as_slice() else {
+            panic!("{marks:?}")
+        };
+        assert_eq!(bars.x_categories().collect::<Vec<_>>(), ["b", "a", "b"]);
+        assert_eq!(bars.x_numbers().count(), 0);
+        // The mark names the same categories without being resolved.
+        let found: Vec<&str> = f
+            .single_axes()
+            .marks()
+            .iter()
+            .flat_map(mark_categories)
+            .map(String::as_str)
+            .collect();
+        assert_eq!(found, ["b", "a", "b"]);
+    }
+
+    #[test]
+    fn error_bars_that_give_x_nothing_leave_its_padding_as_it_was() {
+        let line = |f: &mut Figure| {
+            axes(f)
+                .line(nums(&[0.0, 10.0]), &[1.0, 2.0], LineOptions::default())
+                .unwrap();
+        };
+        let mut alone = figure(LIN, LIN);
+        line(&mut alone);
+        assert_eq!(domains(&alone).0, (0.0, 10.0));
+        // Bars with no position, or only gaps, add nothing to either axis: the line's exact x
+        // extent holds, for bars along y and along x.
+        for gap in [vec![], vec![f64::NAN]] {
+            let mut f = figure(LIN, LIN);
+            line(&mut f);
+            axes(&mut f)
+                .y_error_bars(
+                    nums(&gap),
+                    &gap,
+                    &gap,
+                    crate::model::ErrorBarOptions::default(),
+                )
+                .unwrap()
+                .x_error_bars(&gap, &gap, &gap, crate::model::ErrorBarOptions::default())
+                .unwrap();
+            assert_eq!(domains(&f).0, (0.0, 10.0));
+            assert_eq!(domains(&f).1, domains(&alone).1);
+        }
+        // Bars that give x a value pad it as a scatter does.
+        let mut f = figure(LIN, LIN);
+        line(&mut f);
+        axes(&mut f)
+            .y_error_bars(
+                nums(&[5.0]),
+                &[1.0],
+                &[2.0],
+                crate::model::ErrorBarOptions::default(),
+            )
+            .unwrap();
+        assert_ne!(domains(&f).0, (0.0, 10.0));
+    }
+
+    #[test]
+    fn an_error_bar_key_has_its_orientation_and_width_takes_a_slot_and_no_direct_label() {
+        let theme = Theme::pigment();
+        let mut f = bars_figure(&[0.0, 1.0], &[0.0, 0.0], &[1.0, 2.0]);
+        axes(&mut f)
+            .x_error_bars(
+                &[0.5],
+                &[0.0],
+                &[1.0],
+                crate::model::ErrorBarOptions {
+                    label: "Across".to_owned(),
+                    width: crate::SizeSpec::times(2.0).unwrap(),
+                    ..crate::model::ErrorBarOptions::default()
+                },
+            )
+            .unwrap()
+            .line(nums(&[0.0, 1.0]), &[0.5, 1.0], LineOptions::default())
+            .unwrap();
+        let axes = f.single_axes();
+        let resolved = resolve_marks(axes.marks(), &theme);
+        let keys = series_keys(&resolved, &Limits::of(axes));
+        let [vertical, horizontal, line] = keys.as_slice() else {
+            panic!("{keys:?}")
+        };
+        let drawn = theme.line_width();
+        assert_eq!(
+            (
+                vertical.label,
+                vertical.kind,
+                vertical.anchor,
+                vertical.color
+            ),
+            (
+                "Interval",
+                SeriesKind::ErrorBar {
+                    vertical: true,
+                    width: drawn
+                },
+                None,
+                theme.palette()[0]
+            )
+        );
+        assert_eq!(
+            (horizontal.kind, horizontal.color),
+            (
+                SeriesKind::ErrorBar {
+                    vertical: false,
+                    width: 2.0 * drawn
+                },
+                theme.palette()[1]
+            )
+        );
+        assert!(!vertical.kind.takes_direct_label() && !horizontal.kind.takes_direct_label());
+        assert_eq!(line.color, theme.palette()[2]);
     }
 }

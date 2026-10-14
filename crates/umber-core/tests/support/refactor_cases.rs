@@ -88,12 +88,14 @@ mod corpus {
     pub mod area;
     pub mod band;
     pub mod bars;
+    pub mod error_bars;
     pub mod grid;
     pub mod hist;
     pub mod inputs;
     pub mod legend;
     pub mod plot_height;
     pub mod rules;
+    pub mod share;
     pub mod size;
     pub mod step;
     pub mod ticks;
@@ -149,6 +151,8 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::step::cases(&lib, &mut sink);
     corpus::rules::cases(&lib, &mut sink);
     corpus::band::cases(&lib, &mut sink);
+    corpus::error_bars::cases(&lib, &mut sink);
+    corpus::share::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1721,6 +1725,20 @@ mod record {
                 floats64(band.high()),
                 text(&band.options().label),
                 color_spec(band.options().color)
+            ),
+            Mark::ErrorBars(bars) => format!(
+                "error-bars orientation={} positions={} low={} high={} label={} color={} width={:?} caps={}",
+                match bars.orientation() {
+                    umber_core::ErrorBarOrientation::Vertical => "vertical",
+                    umber_core::ErrorBarOrientation::Horizontal => "horizontal",
+                },
+                axis_data(bars.positions()),
+                floats64(bars.low()),
+                floats64(bars.high()),
+                text(&bars.options().label),
+                color_spec(bars.options().color),
+                bars.options().width,
+                bars.options().caps
             ),
             _ => "unknown-mark".into(),
         }

@@ -282,6 +282,7 @@ pub(crate) fn measure_panel(
     input: &LayoutInput<'_>,
     resolved: &Resolved,
     span: PanelSpan,
+    show_labels: [bool; 2],
 ) -> PanelBands {
     let LayoutInput {
         theme,
@@ -320,8 +321,16 @@ pub(crate) fn measure_panel(
     // Tick labels.
     let (tick_ascent, tick_descent) = metrics(lib, &styles.tick);
     let tick_size = f64::from(styles.tick.size);
-    let y_labels = measure_ticks(lib, &resolved.y.ticks, styles.tick);
-    let x_labels = measure_ticks(lib, &resolved.x.ticks, styles.tick);
+    let y_labels = if show_labels[1] {
+        measure_ticks(lib, &resolved.y.ticks, styles.tick)
+    } else {
+        Vec::new()
+    };
+    let x_labels = if show_labels[0] {
+        measure_ticks(lib, &resolved.x.ticks, styles.tick)
+    } else {
+        Vec::new()
+    };
     let y_label_width = y_labels
         .iter()
         .map(|(_, label)| label.width())
@@ -829,7 +838,8 @@ mod tests {
         for (name, figure) in &fixtures {
             let (resolved, layout) = plan_figure(figure, (0, 0), lib);
             with_layout_input(figure, (0, 0), lib, |input, grid| {
-                let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+                let bands =
+                    measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
                 // A figure of one axes has the canvas as its frame.
                 let slot = single_slot(grid, layout.plot, &bands);
                 assert_eq!(layout.frame, slot.frame, "{name}");
@@ -849,7 +859,8 @@ mod tests {
         for (name, figure) in &panel_fixtures() {
             let (resolved, layout) = plan_figure(figure, (0, 0), lib);
             with_layout_input(figure, (0, 0), lib, |input, grid| {
-                let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+                let bands =
+                    measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
                 let header = bands.heading.bottom(0.0);
                 let plot = layout.plot;
                 assert!(
@@ -886,7 +897,7 @@ mod tests {
         );
         let (resolved, layout) = plan_figure(&figure, (0, 0), lib);
         with_layout_input(&figure, (0, 0), lib, |input, grid| {
-            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
             assert!(bands.y_tick_column > Y_LABEL_GAP);
             assert!(
                 close(layout.plot.x, PADDING + bands.y_tick_column),
@@ -909,7 +920,7 @@ mod tests {
         );
         let (resolved, layout) = plan_figure(&figure, (0, 0), lib);
         with_layout_input(&figure, (0, 0), lib, |input, grid| {
-            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()));
+            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
             let mut slot = single_slot(grid, layout.plot, &bands);
             slot.header.left += 30.0;
             slot.header.right += 30.0;

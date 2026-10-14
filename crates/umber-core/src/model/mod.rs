@@ -4,7 +4,7 @@
 //! The model is data only. Every input is validated at the call that receives it, so a model
 //! that exists is always drawable. Marks hold copies of their data that never change, so clones
 //! of a figure share them. Explicit limits are kept as the scales they define, and explicit
-//! ticks and tick formats as set, once per axis. Colors stay as
+//! ticks and tick formats as set, once per shared group. Colors stay as
 //! [`ColorSpec`](crate::ColorSpec)s; resolving them and drawing are later stages that read the
 //! model.
 
@@ -13,25 +13,32 @@ mod axes_mut;
 mod axis_data;
 mod band;
 mod bar;
+mod error_bars;
 mod figure;
 mod grid;
 mod hist;
 mod mark;
 mod rule;
+mod share;
 mod step;
 mod ticks;
 mod validation;
+
+#[cfg(test)]
+mod share_tests;
 
 pub use axes::Axes;
 pub use axes_mut::AxesMut;
 pub use axis_data::AxisData;
 pub use band::{BandMark, BandOptions};
 pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};
+pub use error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use figure::Figure;
 pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement, Share};
 pub use hist::{HistMark, HistOptions};
 pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 pub use rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+pub(crate) use share::{ShareGroups, label_visibility};
 pub(crate) use step::{Edge, holds};
 pub use step::{Step, StepMark, StepOptions};
 pub(crate) use ticks::AxisTicks;
