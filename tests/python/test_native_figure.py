@@ -359,6 +359,7 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "x_error_bars": lambda f, r, c: f.x_error_bars(
         r, c, floats(1), floats(0), floats(2), "", AUTO, NO_SIZE, True
     ),
+    "stem": lambda f, r, c: f.stem(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
 }
 
 
