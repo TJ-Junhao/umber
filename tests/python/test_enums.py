@@ -15,6 +15,8 @@ ENUMS = [
     ub.SvgText,
     ub.Share,
     ub.Legend,
+    ub.LegendPosition,
+    ub.Align,
     ub.Step,
 ]
 

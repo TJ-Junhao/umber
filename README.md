@@ -80,6 +80,7 @@ import copy
 import umber as ub
 
 fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.COL, legend=ub.Legend.MERGED)
+fig.title("Station signals").subtitle("Shared time scales")
 fig.add_axes(row=0, col=0).line([0, 1, 2], [1, 3, 2], label="North")
 fig.add_axes(row=1, col=0).line([0, 1, 2], [2, 1, 3], label="South")
 fig.add_axes(row=0, col=1, row_span=2).line([0, 1, 2], [1, 3, 2], label="North")
@@ -94,6 +95,26 @@ variant.axes_at(row=0, col=1).title("Comparison")  # the original is unchanged
 Use `fig.axes_at(row=..., col=..., x=..., y=...)` to retrieve axes, including those in a copy. The scale kinds and log bases must match creation; for category axes, pass `x=ub.Scale.category()` to get `Axes[str, float]`. A spanning panel is found only at its top-left cell. A row or column can be omitted only when that dimension has size 1. `Figure.axes` has been removed in favor of this typed method.
 
 `fig.cells()` yields immutable `Cell` positions in row-major order, occupied or not; `fig.cells(n)` yields the first `n`. For example, `for cell, values in zip(fig.cells(), datasets): cell.add_axes().line(x, values)` adds one panel per dataset. `AUTO` is a typed sentinel, not `None`, and only parameters that declare it accept it.
+
+## Titles and legends
+
+`fig.title(text)` and `fig.subtitle(text)` set text above the whole grid; `ax.title(text)` and `ax.subtitle(text)` belong to one panel. Each returns the same object for chaining, and an empty string removes the text. The figure title is 1.5 times the panel title size.
+
+`Theme.with_title_align(ub.Align.LEFT)` sets title alignment; `CENTER` and `RIGHT` are also available. Subtitles follow their title. On a multi-panel figure, the merged legend stays below the figure title and subtitle and follows their alignment, without a separate position setting. To place legends by panel, use `Legend.PER_PANEL`.
+
+```python
+import umber as ub
+
+theme = ub.Theme.PIGMENT.with_title_align(ub.Align.CENTER).with_legend_position(
+    ub.LegendPosition.BOTTOM
+)
+fig = ub.Figure(theme=theme).title("Station signals")
+ax = fig.add_axes().line([0, 1, 2], [1, 3, 2], label="North")
+ax.legend(ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT)
+ax.legend(ub.LegendStyle.HEADER, position=ub.AUTO)  # back to the theme's BOTTOM
+```
+
+For single-panel figures and `Legend.PER_PANEL`, `LegendPosition.TOP_LEFT` (default) and `TOP_RIGHT` place a row below the panel title; `RIGHT` places a column beside the plot; `BOTTOM` places a row below the x axis title; `BEST` places the legend inside the plot where it covers the least data. Panel legend positions do not follow title alignment. Omitting `position`, or passing `ub.AUTO`, clears a previous override and uses the theme's position; it does not mean `BEST`. `LegendStyle.DIRECT` accepts only the default `position=ub.AUTO`, since its labels sit at line ends. `LegendStyle.NONE` hides the legend.
 
 ## Themes
 

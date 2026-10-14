@@ -122,8 +122,10 @@ SETTERS: list[tuple[str, object, object]] = [
     ("with_grid_lines", 0, 3),
     ("with_grid_dash", 0, 2),
     ("with_title_font", 0, 4),
+    ("with_title_align", 0, 2),
     ("with_body_font", 1, 3),
     ("with_legend_style", 0, 2),
+    ("with_legend_position", 0, 4),
     ("with_fill_style", 0, 1),
     ("with_font_scale", 0.5, 2.0),
     ("with_line_width", 0.5, 3.0),
@@ -241,6 +243,8 @@ def test_numeric_theme_values_are_validated(
         ("with_title_font", 5, "Font"),
         ("with_body_font", -1, "Font"),
         ("with_legend_style", 4, "LegendStyle"),
+        ("with_title_align", 3, "Align"),
+        ("with_legend_position", 5, "LegendPosition"),
     ],
 )
 def test_unknown_enum_values_are_internal_errors(name: str, value: int, enum: str) -> None:
