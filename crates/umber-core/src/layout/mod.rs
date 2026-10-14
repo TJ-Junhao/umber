@@ -28,7 +28,7 @@ mod program;
 
 pub(crate) use grid::{GridInput, check_panel_contents, solve_grid};
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry};
-pub(crate) use panel::{Frame, PanelBands, measure_panel, place_panel};
+pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -593,11 +593,16 @@ fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str
 ///   label rising above the top tick, and the x tick labels, the x label and the bottom padding
 ///   is shorter than [`MIN_PLOT`]: the message names the height the canvas needs, and the hint
 ///   names only the header parts the axes have (see [`figure_too_short`]).
-fn solve_single(input: &LayoutInput<'_>, bands: &panel::PanelBands, frame: Frame) -> Result<Area> {
+fn solve_single(
+    input: &LayoutInput<'_>,
+    bands: &panel::PanelBands,
+    frame: Frame,
+    top: f64,
+) -> Result<Area> {
     let LayoutInput {
         legend, context, ..
     } = *input;
-    let plot_top = bands.heading.bottom(frame.y + PADDING) + bands.y_label_band + bands.label_rise;
+    let plot_top = bands.heading.bottom(top) + bands.y_label_band + bands.label_rise;
     let cap = panel::end_label_cap(frame.width);
     // The widest y tick label and its gap are added to the padding one at a time, not as the
     // one sum `bands.y_tick_column`, which can round differently.
@@ -648,7 +653,11 @@ fn solve_single(input: &LayoutInput<'_>, bands: &panel::PanelBands, frame: Frame
             context,
             frame.height,
             plot_top - frame.y + MIN_PLOT + below,
-            bands.heading.height_hint(),
+            if top > frame.y + PADDING {
+                "make the figure taller, or remove the figure header."
+            } else {
+                bands.heading.height_hint()
+            },
         ));
     }
     let (x, plot_width) = fit_span(plot_left, plot_right, frame.x, frame.right());

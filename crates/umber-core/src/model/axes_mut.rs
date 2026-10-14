@@ -697,8 +697,9 @@ impl<'a> AxesMut<'a> {
     /// Adds grouped bars: in each category, one bar per series, side by side in series order.
     /// The group takes 72 % of the category's band, centered in it, with a 2 pt gap between
     /// its bars; when the bars would be narrower than the gap, they touch. Each bar grows from
-    /// the baseline as in [`AxesMut::bar`]. Each series takes its own color; `Auto` colors take
-    /// palette slots in series order. Categories join the x axis in order of first appearance
+    /// the baseline as in [`AxesMut::bar`]. Automatic colors share one palette slot per label
+    /// across the figure; unlabelled series take slots after all labels, per axes.
+    /// Categories join the x axis in order of first appearance
     /// across all marks.
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: an empty

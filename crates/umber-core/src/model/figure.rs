@@ -43,6 +43,8 @@ pub struct Figure {
     height_in: f64,
     theme: Theme,
     grid: Grid,
+    title: String,
+    subtitle: String,
     /// The placed axes, in row-major order of their top-left cells. No two cover one cell.
     panels: Vec<Axes>,
     /// Settings stored once per x group, keyed independently of panel insertion order.
@@ -90,10 +92,78 @@ impl Figure {
             height_in,
             theme,
             grid,
+            title: String::new(),
+            subtitle: String::new(),
             panels: Vec::new(),
             x_groups: BTreeMap::new(),
             y_groups: BTreeMap::new(),
         })
+    }
+
+    /// Sets the figure title, above the panels and the merged legend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.title("Revenue");
+    /// assert_eq!(figure.title_text(), "Revenue");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn title(&mut self, text: &str) -> &mut Self {
+        self.title = text.to_owned();
+        self
+    }
+
+    /// Sets the figure subtitle, below its title and above the merged legend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.subtitle("2026");
+    /// assert_eq!(figure.subtitle_text(), "2026");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn subtitle(&mut self, text: &str) -> &mut Self {
+        self.subtitle = text.to_owned();
+        self
+    }
+
+    /// The figure title; empty when none is set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Theme};
+    ///
+    /// let figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// assert_eq!(figure.title_text(), "");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn title_text(&self) -> &str {
+        &self.title
+    }
+
+    /// The figure subtitle; empty when none is set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Theme};
+    ///
+    /// let figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// assert_eq!(figure.subtitle_text(), "");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn subtitle_text(&self) -> &str {
+        &self.subtitle
     }
 
     /// The grid.

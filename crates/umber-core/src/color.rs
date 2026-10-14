@@ -350,7 +350,8 @@ impl Alpha {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColorSpec {
-    /// The next palette color, in series order within the axes; carries an alpha override.
+    /// A palette color shared by label across the figure, in first appearance order. Unlabelled
+    /// series count from the number of label slots, separately in each axes. Carries an alpha override.
     Auto(Alpha),
     /// A fixed palette slot (wraps around the palette length).
     Palette {

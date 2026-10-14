@@ -27,9 +27,12 @@
 //! theme's line width or marker size. Axes are resolved from these records, once per layout
 //! pass, and drawing and the legend read them instead of the marks.
 
+use std::collections::BTreeMap;
+
 use crate::binning::Histogram;
 use crate::error::quoted;
 use crate::layout::TickRoom;
+use crate::legend::{LegendEntry, Swatch};
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
     Mark, ScatterMark, SeriesView, StepMark,
@@ -1063,6 +1066,81 @@ impl<'a> ResolvedMark<'a> {
         self.line_width().is_some() || matches!(self, ResolvedMark::Band { .. })
     }
 
+    /// The labelled series' swatches in series order, without resolving direct-label anchors.
+    /// Empty labels do not produce entries.
+    pub fn legend_swatch(&self) -> Vec<LegendEntry> {
+        let one = |label: &str, color, swatch| {
+            LegendEntry::new(label, color, swatch).into_iter().collect()
+        };
+        match *self {
+            ResolvedMark::Line { mark, color, width } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: mark.options().dash,
+                    width,
+                },
+            ),
+            ResolvedMark::Area { mark, color, width } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: mark.options().dash,
+                    width,
+                },
+            ),
+            ResolvedMark::Step { mark, color, width } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: mark.options().dash,
+                    width,
+                },
+            ),
+            ResolvedMark::HLine { mark, color, width } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: mark.options().dash,
+                    width,
+                },
+            ),
+            ResolvedMark::VLine { mark, color, width } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: mark.options().dash,
+                    width,
+                },
+            ),
+            ResolvedMark::Scatter { mark, color, size } => {
+                one(&mark.options().label, color, Swatch::Dot { diameter: size })
+            }
+            ResolvedMark::Bar { mark, color } => one(&mark.options().label, color, Swatch::Square),
+            ResolvedMark::Grouped { ref series, .. } | ResolvedMark::Stacked { ref series, .. } => {
+                series
+                    .iter()
+                    .filter_map(|(view, color)| {
+                        LegendEntry::new(view.label(), *color, Swatch::Square)
+                    })
+                    .collect()
+            }
+            ResolvedMark::Hist { mark, color, .. } => one(mark.label(), color, Swatch::Square),
+            ResolvedMark::HSpan { mark, color } | ResolvedMark::VSpan { mark, color } => {
+                one(&mark.options().label, color, Swatch::Square)
+            }
+            ResolvedMark::Band { mark, color } => one(&mark.options().label, color, Swatch::Square),
+            ResolvedMark::ErrorBars { mark, color, width } => one(
+                &mark.options().label,
+                color,
+                Swatch::ErrorBar {
+                    vertical: mark.orientation() == ErrorBarOrientation::Vertical,
+                    width,
+                },
+            ),
+        }
+    }
+
     /// The series the mark shows, in order, one key each: what a legend lists for the mark, on
     /// an axes whose axes have the limits `limits`.
     pub fn keys(&self, limits: &Limits) -> Vec<SeriesKey<'a>> {
@@ -1519,52 +1597,112 @@ impl SeriesKind {
 /// [`Theme::drawn_marker_size`]), the stacks of stacked bars computed and the values of
 /// histograms binned. This is the one place where a mark's [`SizeSpec`](crate::SizeSpec) is resolved.
 ///
-/// Every series takes its color in series order, the series of a grouped or stacked mark one
-/// after another: `Auto` colors take palette slots in that order; `Palette` and `Fixed` colors
-/// do not consume a slot.
+/// Label slots precede unlabelled automatic colors; explicit colors do not consume a slot.
+#[cfg(test)]
 pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<ResolvedMark<'a>> {
-    let palette = theme.palette();
-    let mut next_auto = 0_usize;
-    let mut color_of = |spec: ColorSpec| {
-        let color = spec.resolve(palette, next_auto);
-        if matches!(spec, ColorSpec::Auto(_)) {
-            next_auto += 1;
+    let slots = label_slots(marks.iter());
+    resolve_panel_marks(marks, theme, &slots)
+}
+
+/// Resolves every panel in row-major order. Labels with automatic colors take slots in first
+/// appearance order across the figure. Each panel's unlabelled automatic series then count
+/// from the number of label slots. Explicit palette and fixed colors never register a label
+/// or consume a slot.
+pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>> {
+    let slots = label_slots(figure.panels().flat_map(|axes| axes.marks()));
+    figure
+        .panels()
+        .map(|axes| resolve_panel_marks(axes.marks(), figure.theme(), &slots))
+        .collect()
+}
+
+/// The label and requested color of every series, in mark order.
+fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
+    match mark {
+        Mark::Line(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Scatter(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Area(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Bar(m) => vec![(&m.options().label, m.options().color)],
+        Mark::GroupedBar(m) | Mark::StackedBar(m) => {
+            m.series().map(|s| (s.label(), s.color())).collect()
         }
-        color
+        Mark::Hist(m) => vec![(m.label(), m.color())],
+        Mark::Step(m) => vec![(&m.options().label, m.options().color)],
+        Mark::HLine(m) => vec![(&m.options().label, m.options().color)],
+        Mark::VLine(m) => vec![(&m.options().label, m.options().color)],
+        Mark::HSpan(m) | Mark::VSpan(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Band(m) => vec![(&m.options().label, m.options().color)],
+        Mark::ErrorBars(m) => vec![(&m.options().label, m.options().color)],
+    }
+}
+
+/// The palette slots registered by labelled automatic series, in first appearance order.
+fn label_slots<'a>(marks: impl Iterator<Item = &'a Mark>) -> BTreeMap<&'a str, usize> {
+    let mut slots = BTreeMap::new();
+    for (label, color) in marks.flat_map(color_sources) {
+        if !label.is_empty() && matches!(color, ColorSpec::Auto(_)) {
+            let next = slots.len();
+            slots.entry(label).or_insert(next);
+        }
+    }
+    slots
+}
+
+/// Resolves a panel against the label slots of its figure.
+fn resolve_panel_marks<'a>(
+    marks: &'a [Mark],
+    theme: &Theme,
+    slots: &BTreeMap<&str, usize>,
+) -> Vec<ResolvedMark<'a>> {
+    let palette = theme.palette();
+    let mut next_auto = slots.len();
+    let mut color_of = |spec: ColorSpec, label: &str| {
+        let slot = if matches!(spec, ColorSpec::Auto(_)) {
+            if let Some(&slot) = slots.get(label) {
+                slot
+            } else {
+                let slot = next_auto;
+                next_auto += 1;
+                slot
+            }
+        } else {
+            0
+        };
+        spec.resolve(palette, slot)
     };
     marks
         .iter()
         .map(|mark| match mark {
             Mark::Line(mark) => ResolvedMark::Line {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::Scatter(mark) => ResolvedMark::Scatter {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
                 size: theme.drawn_marker_size(mark.options().size),
             },
             Mark::Area(mark) => ResolvedMark::Area {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::Bar(mark) => ResolvedMark::Bar {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::GroupedBar(mark) => ResolvedMark::Grouped {
                 mark,
                 series: mark
                     .series()
-                    .map(|view| (view, color_of(view.color())))
+                    .map(|view| (view, color_of(view.color(), view.label())))
                     .collect(),
             },
             Mark::StackedBar(mark) => {
                 let series: Box<[_]> = mark
                     .series()
-                    .map(|view| (view, color_of(view.color())))
+                    .map(|view| (view, color_of(view.color(), view.label())))
                     .collect();
                 let heights: Vec<&[f64]> = series.iter().map(|(view, _)| view.values()).collect();
                 ResolvedMark::Stacked {
@@ -1576,38 +1714,38 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
             Mark::Hist(mark) => ResolvedMark::Hist {
                 mark,
                 histogram: Histogram::from_values(mark.values(), mark.bin_count()),
-                color: color_of(mark.color()),
+                color: color_of(mark.color(), mark.label()),
             },
             Mark::Step(mark) => ResolvedMark::Step {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::HLine(mark) => ResolvedMark::HLine {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::VLine(mark) => ResolvedMark::VLine {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::HSpan(mark) => ResolvedMark::HSpan {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::VSpan(mark) => ResolvedMark::VSpan {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::Band(mark) => ResolvedMark::Band {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::ErrorBars(mark) => ResolvedMark::ErrorBars {
                 mark,
-                color: color_of(mark.options().color),
+                color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
         })
@@ -2590,14 +2728,14 @@ mod tests {
         let colors = series_colors(&resolved);
         assert_eq!(
             colors,
-            [palette[0], palette[1], fixed, palette[6], palette[2]]
+            [palette[2], palette[0], fixed, palette[6], palette[1]]
         );
         let keys = series_keys(&resolved, &Limits::of(f.single_axes()));
         assert_eq!(
             keys[1],
             SeriesKey {
                 label: "first",
-                color: palette[1],
+                color: palette[0],
                 kind: SeriesKind::Bar,
                 anchor: None,
             }
@@ -2899,7 +3037,7 @@ mod tests {
         let resolved = resolve_marks(f.single_axes().marks(), f.theme());
         assert_eq!(
             series_colors(&resolved),
-            [palette[0], palette[1], palette[2]]
+            [palette[1], palette[0], palette[2]]
         );
         let ResolvedMark::Hist {
             histogram: Some(histogram),
@@ -2913,7 +3051,7 @@ mod tests {
             resolved[1].keys(&Limits::of(f.single_axes())),
             [SeriesKey {
                 label: "sizes",
-                color: palette[1],
+                color: palette[0],
                 kind: SeriesKind::Bar,
                 anchor: None,
             }]
@@ -4201,8 +4339,12 @@ mod tests {
             .takes_direct_label()
         );
         assert!(keys.iter().all(|key| !key.kind.takes_direct_label()));
-        // Colors come from the one palette sequence, in mark order.
-        assert_eq!(series_colors(&resolved), theme.palette()[..4]);
+        // The two labels take the first slots; unlabelled rules and spans follow them.
+        let palette = theme.palette();
+        assert_eq!(
+            series_colors(&resolved),
+            [palette[0], palette[2], palette[1], palette[3]]
+        );
     }
 
     #[test]
