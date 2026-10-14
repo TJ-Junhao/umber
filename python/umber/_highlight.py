@@ -227,7 +227,8 @@ def _bound_argument(
     """Return the node ``parameter`` binds to, if the call's shape fits ``function``.
 
     The binding follows Python's rules for the function's parameters, read from its code
-    object and defaults; its annotations are never touched.
+    object and defaults; its annotations are never touched. The bound ``self`` or ``cls``
+    parameter identifies the whole call.
     """
     if any(isinstance(arg, ast.Starred) for arg in call.args):
         return None
@@ -261,6 +262,8 @@ def _bound_argument(
         # by a callable between the source and the function, such as functools.partial.
         if name not in defaults or name not in arguments or arguments[name] is not defaults[name]:
             return None
+    if binds_first and parameter == names[0]:
+        return call
     return bound.get(parameter)
 
 

@@ -23,9 +23,33 @@ _SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
 _LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
 
 
+def _inches(context: str, name: str, value: float | Auto) -> float | None:
+    """Convert a figure size, leaving AUTO for the native grid to resolve."""
+    if value is AUTO:
+        return None
+    return real(
+        context,
+        name,
+        value,
+        expected="a float or AUTO",
+        hint="pass a number such as 1.5, or ub.AUTO for the default size.",
+    )
+
+
 def _index(context: str, name: str, value: int | Auto) -> tuple[int, int]:
     """Convert a grid index: kind 0 is AUTO, kind 1 is an explicit integer."""
-    return (0, 0) if value is AUTO else (1, integer(context, name, value))
+    if value is AUTO:
+        return (0, 0)
+    return (
+        1,
+        integer(
+            context,
+            name,
+            value,
+            expected="an int or AUTO",
+            hint="pass a whole number such as 0, or ub.AUTO for a single row or column.",
+        ),
+    )
 
 
 @final
@@ -92,8 +116,8 @@ class Figure:
         """
         with api_call():
             context = "Figure()"
-            inches_wide = None if width is AUTO else real(context, "width", width)
-            inches_high = None if height is AUTO else real(context, "height", height)
+            inches_wide = _inches(context, "width", width)
+            inches_high = _inches(context, "height", height)
             row_count = integer(context, "rows", rows)
             col_count = integer(context, "cols", cols)
             instance(context, "share_x", share_x, Share, _SHARE_HINT)

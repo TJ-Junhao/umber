@@ -79,14 +79,14 @@ Bar charts need a category x axis: `fig.add_axes(x=ub.Scale.category())`. Log ax
 import copy
 import umber as ub
 
-fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.ALL, legend=ub.Legend.MERGED)
+fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.COL, legend=ub.Legend.MERGED)
 fig.add_axes(row=0, col=0).line([0, 1, 2], [1, 3, 2], label="North")
-fig.add_axes(row=0, col=1).line([0, 1, 2], [2, 1, 3], label="South")
-fig.add_axes(row=1, col=0, col_span=2).line([0, 1, 2], [1, 3, 2], label="North")
+fig.add_axes(row=1, col=0).line([0, 1, 2], [2, 1, 3], label="South")
+fig.add_axes(row=0, col=1, row_span=2).line([0, 1, 2], [1, 3, 2], label="North")
 fig.save_png("subplots.png")
 
 variant = copy.copy(fig)
-variant.axes_at(row=1, col=0).title("Comparison")  # the original is unchanged
+variant.axes_at(row=0, col=1).title("Comparison")  # the original is unchanged
 ```
 
 `Share.NONE`, `Share.ROW`, `Share.COL` and `Share.ALL` choose which panels share a scale, limits, ticks and tick format. `Legend.PER_PANEL` keeps a separate legend for each panel instead of the default merged legend. Empty cells remain empty; overlapping panels are refused.

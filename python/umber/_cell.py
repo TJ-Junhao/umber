@@ -1,6 +1,6 @@
 """An immutable grid position attached to a figure."""
 
-from typing import final
+from typing import Self, final
 
 import umber
 from umber._args import instance
@@ -92,7 +92,7 @@ class Cell:
             >>> fig.axes_at(col=0, x=ub.Scale.category()) is ax
             True
         """
-        with api_call():
+        with api_call(parameter_map={"row": "self", "col": "self"}):
             instance(
                 "Cell.add_axes()",
                 "x",
@@ -105,6 +105,12 @@ class Cell:
 
     def __repr__(self) -> str:
         return f"Cell(row={self._row}, col={self._col})"
+
+    def __copy__(self) -> Self:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, object]) -> Self:
+        return self
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("a Cell is immutable")

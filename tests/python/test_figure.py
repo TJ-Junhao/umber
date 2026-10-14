@@ -103,15 +103,17 @@ def test_size_out_of_range(width: float, height: float, parameter: str, shown: s
     assert _frames(caught.value) == ["test_size_out_of_range"]
 
 
-@pytest.mark.parametrize(
-    ("width", "height", "name", "shown"),
-    [("6", 4, "width", "str"), (6, None, "height", "None"), (True, 4, "width", "bool")],
-)
-def test_size_must_be_a_number(width: object, height: object, name: str, shown: str) -> None:
+@pytest.mark.parametrize("name", ["width", "height"])
+@pytest.mark.parametrize("value", ["6", None, True, np.bool_(True), 1j, ub.Share.ALL])
+def test_size_must_be_a_number_or_auto(name: str, value: object) -> None:
     with pytest.raises(TypeError) as caught:
-        ub.Figure(cast(float, width), cast(float, height))
-    assert str(caught.value) == f"Figure(): {name} is {shown}; {name} must be a float."
-    assert details(caught.value) == (name, "pass a number such as 1.5.")
+        cast(Any, ub.Figure)(**{name: value})
+    shown = "None" if value is None else type(value).__name__
+    assert str(caught.value) == f"Figure(): {name} is {shown}; {name} must be a float or AUTO."
+    assert details(caught.value) == (
+        name,
+        "pass a number such as 1.5, or ub.AUTO for the default size.",
+    )
 
 
 @pytest.mark.parametrize("theme", ["midnight", None, ub.Color.BLUE])
@@ -167,6 +169,50 @@ def test_a_second_axes_is_refused() -> None:
     assert details(caught.value) == ("row", SECOND_AXES_HINT)
     assert fig._axes == {(0, 0): ax}
     assert fig.to_svg() == before
+
+
+@pytest.mark.parametrize("call", ["cell.add_axes()", "cell.add_axes(x=ub.Scale.linear())"])
+def test_occupied_cell_highlights_the_call(tmp_path: Path, call: str) -> None:
+    setup = "fig = ub.Figure()\ncell = next(fig.cells())\ncell.add_axes()"
+    line = f"{call}.title('Unreachable')"
+    err = _raised(tmp_path, line, setup)
+    assert isinstance(err, ub.UsageError)
+    assert str(err) == SECOND_AXES
+    assert details(err) == ("row", SECOND_AXES_HINT)
+    assert _notes(err) == [_marked(line, call), f"hint: {SECOND_AXES_HINT}"]
+    assert _frames(err) == ["_raised", "<module>"]
+
+
+def test_occupied_cell_partial_does_not_get_a_misleading_highlight(tmp_path: Path) -> None:
+    setup = (
+        "from functools import partial\n"
+        "cell = next(ub.Figure().cells())\n"
+        "cell.add_axes()\n"
+        "add_axes = partial(cell.add_axes, x=ub.Scale.log())"
+    )
+    err = _raised(tmp_path, "add_axes()", setup)
+    assert isinstance(err, ub.UsageError)
+    assert _notes(err) == [f"hint: {SECOND_AXES_HINT}"]
+
+
+def test_cell_category_y_error_still_highlights_y(tmp_path: Path) -> None:
+    line = "cell.add_axes(y=ub.Scale.category())"
+    err = _raised(tmp_path, line, "cell = next(ub.Figure().cells())")
+    assert isinstance(err, ub.UsageError)
+    assert str(err) == CATEGORY_Y
+    assert details(err) == ("y", CATEGORY_Y_HINT)
+    assert _notes(err) == [_marked(line, "y=ub.Scale.category()"), f"hint: {CATEGORY_Y_HINT}"]
+
+
+def test_cell_scale_type_error_still_highlights_x(tmp_path: Path) -> None:
+    line = "cell.add_axes(x=None)"
+    err = _raised(tmp_path, line, "cell = next(ub.Figure().cells())")
+    assert isinstance(err, TypeError)
+    assert str(err) == "Cell.add_axes(): x is None; x must be of type Scale."
+    assert _notes(err) == [
+        _marked(line, "x=None"),
+        "hint: use Scale.linear(), Scale.log() or Scale.category().",
+    ]
 
 
 def test_a_category_y_axis_is_refused() -> None:

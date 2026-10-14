@@ -79,14 +79,14 @@ fig.save_svg("temperature.svg")
 import copy
 import umber as ub
 
-fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.ALL, legend=ub.Legend.MERGED)
+fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.COL, legend=ub.Legend.MERGED)
 fig.add_axes(row=0, col=0).line([0, 1, 2], [1, 3, 2], label="North")
-fig.add_axes(row=0, col=1).line([0, 1, 2], [2, 1, 3], label="South")
-fig.add_axes(row=1, col=0, col_span=2).line([0, 1, 2], [1, 3, 2], label="North")
+fig.add_axes(row=1, col=0).line([0, 1, 2], [2, 1, 3], label="South")
+fig.add_axes(row=0, col=1, row_span=2).line([0, 1, 2], [1, 3, 2], label="North")
 fig.save_png("subplots.png")
 
 variant = copy.copy(fig)
-variant.axes_at(row=1, col=0).title("Comparison")  # 原图不变
+variant.axes_at(row=0, col=1).title("Comparison")  # 原图不变
 ```
 
 `Share.NONE`、`Share.ROW`、`Share.COL` 和 `Share.ALL` 指定哪些 panel 共享 scale、limits、ticks 和 tick format。默认使用合并的 legend；`Legend.PER_PANEL` 则为每个 panel 保留独立 legend。空 cell 保持空白，不允许 panel 相互重叠。

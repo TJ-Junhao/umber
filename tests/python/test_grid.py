@@ -143,8 +143,14 @@ def test_positions_reject_wrong_types(method: str, name: str, value: object) -> 
     fig = ub.Figure()
     with pytest.raises(TypeError) as caught:
         getattr(fig, method)(**{name: value})
-    assert str(caught.value).startswith(f"Figure.{method}(): {name} is ")
-    assert _details(caught.value) == (name, "pass a whole number such as 3.")
+    shown = "None" if value is None else type(value).__name__
+    assert str(caught.value) == (
+        f"Figure.{method}(): {name} is {shown}; {name} must be an int or AUTO."
+    )
+    assert _details(caught.value) == (
+        name,
+        "pass a whole number such as 0, or ub.AUTO for a single row or column.",
+    )
 
 
 @pytest.mark.parametrize("name", ["row_span", "col_span"])
@@ -192,6 +198,26 @@ def test_cells_are_immutable_and_have_no_public_constructor() -> None:
             setattr(cell, name, 4)
         with pytest.raises(AttributeError, match="a Cell is immutable"):
             delattr(cell, name)
+
+
+@pytest.mark.parametrize("duplicate", [copy.copy, copy.deepcopy])
+@pytest.mark.parametrize("occupied", [False, True])
+def test_cell_copies_keep_identity_and_figure(
+    duplicate: Callable[[ub.Cell], ub.Cell], occupied: bool
+) -> None:
+    fig = ub.Figure(rows=2, cols=2)
+    cell = list(fig.cells())[-1]
+    if occupied:
+        cell.add_axes()
+    cloned = duplicate(cell)
+    assert cloned is cell
+    assert (cloned.row, cloned.col) == (1, 1)
+    if occupied:
+        with pytest.raises(ub.UsageError):
+            cloned.add_axes()
+    else:
+        assert cloned.add_axes().figure is fig
+    assert fig.axes_at(row=1, col=1).figure is fig
 
 
 def test_cells_stay_attached_and_include_occupied_positions() -> None:
