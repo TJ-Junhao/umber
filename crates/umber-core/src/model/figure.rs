@@ -569,6 +569,17 @@ fn span_in_grid(dim: Dimension, start: usize, span: i64, size: usize) -> Result<
 
 #[cfg(test)]
 impl Figure {
+    /// Every member points to the allocation held by its x and y groups.
+    pub(super) fn assert_group_settings_shared(&self) {
+        for axes in &self.panels {
+            let cells = axes.cells();
+            let x = &self.x_groups[&self.x_group_of(cells.row(), cells.col())];
+            let y = &self.y_groups[&self.y_group_of(cells.row(), cells.col())];
+            assert!(Arc::ptr_eq(&axes.x_settings, &x.settings));
+            assert!(Arc::ptr_eq(&axes.y_settings, &y.settings));
+        }
+    }
+
     /// The axes of a figure on a 1 × 1 grid. Panics when it has none.
     pub(crate) fn single_axes(&self) -> &Axes {
         self.axes_at(GridIndex::Auto, GridIndex::Auto)

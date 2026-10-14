@@ -292,6 +292,60 @@ fn set(a: &mut AxesMut<'_>, operation: usize, other: bool) -> crate::Result<()> 
 }
 
 #[test]
+fn group_settings_share_their_allocation_after_setters_inheritance_and_clones() {
+    let modes = [Share::None, Share::Row, Share::Col, Share::All];
+    for x in modes {
+        for y in modes {
+            for operation in 0..8 {
+                let mut f = figure(2, 2, x, y);
+                add(&mut f, 1, 1, 10.0);
+                f.assert_group_settings_shared();
+                set(
+                    &mut f.axes_at_mut(GridIndex::At(1), GridIndex::At(1)).unwrap(),
+                    operation,
+                    false,
+                )
+                .unwrap();
+                f.assert_group_settings_shared();
+                for (row, col) in [(0, 1), (1, 0), (0, 0)] {
+                    add(&mut f, row, col, 3.0);
+                    f.assert_group_settings_shared();
+                }
+                let before = f.clone();
+                let mut copy = f.clone();
+                before.assert_group_settings_shared();
+                copy.assert_group_settings_shared();
+                set(
+                    &mut copy
+                        .axes_at_mut(GridIndex::At(1), GridIndex::At(1))
+                        .unwrap(),
+                    operation,
+                    true,
+                )
+                .unwrap();
+                copy.assert_group_settings_shared();
+                f.assert_group_settings_shared();
+                assert_eq!(f, before);
+                assert_ne!(copy, f);
+                for (row, col) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+                    set(
+                        &mut f
+                            .axes_at_mut(GridIndex::At(row), GridIndex::At(col))
+                            .unwrap(),
+                        operation,
+                        false,
+                    )
+                    .unwrap();
+                    f.assert_group_settings_shared();
+                }
+                copy.assert_group_settings_shared();
+                before.assert_group_settings_shared();
+            }
+        }
+    }
+}
+
+#[test]
 fn every_shared_setter_checks_other_members_and_preserves_copies() {
     for operation in 0..8 {
         let mut f = figure(2, 2, Share::All, Share::All);
@@ -526,6 +580,62 @@ fn category_reference_can_use_another_group_members_category() {
         .bar(vec!["other".into()], &[2.0], BarOptions::default())
         .unwrap();
     assert!(f.to_scene(&FontLibrary::bundled()).is_ok());
+}
+
+#[test]
+fn shared_x_ticks_use_the_width_of_the_only_labeled_spanning_panel() {
+    let mut f = figure(2, 2, Share::All, Share::None);
+    for place in [
+        at(0, 0),
+        at(0, 1),
+        Placement {
+            col_span: 2,
+            ..at(1, 0)
+        },
+    ] {
+        f.add_axes_at(place, ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 10000.0]),
+                &[0.0, 10.0],
+                LineOptions::default(),
+            )
+            .unwrap()
+            .yticks(&[0.0, 10.0])
+            .unwrap();
+    }
+    f.axes_at_mut(GridIndex::At(1), GridIndex::At(0))
+        .unwrap()
+        .xtick_format(
+            crate::TickFormat::fixed(0)
+                .unwrap()
+                .affix("elapsed time ", " s")
+                .unwrap(),
+        )
+        .unwrap();
+    let lib = FontLibrary::bundled();
+    let panels = try_plan_panels(&f, &lib).unwrap();
+    assert!(panels[0].1.x_tick_labels.is_empty());
+    assert!(panels[1].1.x_tick_labels.is_empty());
+    assert!(!panels[2].1.x_tick_labels.is_empty());
+    let axes = f.axes_at(GridIndex::At(1), GridIndex::At(0)).unwrap();
+    let marks = crate::resolve::resolve_marks(axes.marks(), f.theme());
+    let limits = crate::resolve::Limits::of(axes);
+    let ticks_for = |plot| {
+        let (x, _) = crate::layout::tick_rooms(
+            plot,
+            f.theme(),
+            &lib,
+            crate::layout::TickSpacing::LabelsApart,
+        );
+        crate::resolve::resolve_x(marks.iter(), limits.x, &x)
+    };
+    let wide = ticks_for(panels[2].1.plot.size());
+    let narrow = ticks_for(panels[0].1.plot.size());
+    assert!(wide.ticks.len() > narrow.ticks.len());
+    for (resolved, _) in &panels {
+        assert_eq!(resolved.x, wide);
+    }
 }
 
 #[test]

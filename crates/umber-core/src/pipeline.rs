@@ -85,18 +85,26 @@ impl Side {
         }
     }
 
-    /// The smallest plot size in this group. Equal-span members are aligned and have equal
-    /// lengths; a wider or taller span must still use ticks that fit its shortest member.
-    fn group_plot(self, groups: &ShareGroups, i: usize, plots: &[PlotSize]) -> PlotSize {
+    /// The smallest plot size among members that show this side's labels. Hidden labels
+    /// must not limit the ticks of a wider or taller visible member.
+    fn group_plot(
+        self,
+        groups: &ShareGroups,
+        i: usize,
+        plots: &[PlotSize],
+        show_labels: &[[bool; 2]],
+    ) -> PlotSize {
         let keys = self.groups(groups);
         plots
             .iter()
             .enumerate()
-            .filter(|(j, _)| keys[*j] == keys[i])
-            .fold(plots[i], |size, (_, plot)| PlotSize {
+            .filter(|(j, _)| keys[*j] == keys[i] && show_labels[*j][self.index()])
+            .map(|(_, plot)| *plot)
+            .reduce(|size, plot| PlotSize {
                 width: size.width.min(plot.width),
                 height: size.height.min(plot.height),
             })
+            .unwrap_or(plots[i])
     }
 
     /// Whether this side of an axes with `limits` gets automatic ticks: a linear or log axis
@@ -286,21 +294,25 @@ fn plan(
     };
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
     let groups = ShareGroups::new(figure);
+    let show_labels: Vec<_> = panels
+        .iter()
+        .map(|panel| label_visibility(figure, panel.axes.cells()))
+        .collect();
     let measure = |i: usize, resolved: &Resolved| {
         let input = &inputs[i];
         layout::measure_panel(
             input,
             resolved,
             grid.span(input.axes.cells()),
-            label_visibility(figure, input.axes.cells()),
+            show_labels[i],
         )
     };
 
     let rooms_for = |plots: &[PlotSize], spacing| {
         (0..panels.len())
             .map(|i| {
-                let x = Side::X.group_plot(&groups, i, plots);
-                let y = Side::Y.group_plot(&groups, i, plots);
+                let x = Side::X.group_plot(&groups, i, plots, &show_labels);
+                let y = Side::Y.group_plot(&groups, i, plots, &show_labels);
                 let (x, _) = layout::tick_rooms(x, theme, lib, spacing);
                 let (_, y) = layout::tick_rooms(y, theme, lib, spacing);
                 [x, y]
@@ -340,7 +352,10 @@ fn plan(
         resolve_groups(panels, &limits, &groups, &rooms)
     };
     let mut choices: Vec<[TickChoice; 2]> = (0..panels.len())
-        .map(|i| Side::BOTH.map(|side| TickChoice::first(side.group_plot(&groups, i, &plots))))
+        .map(|i| {
+            Side::BOTH
+                .map(|side| TickChoice::first(side.group_plot(&groups, i, &plots, &show_labels)))
+        })
         .collect();
     // First keep the complete previous constrained search. Its fallback may crowd on the
     // size used to choose it yet fit on the solved plot; only that plot decides whether to
@@ -360,7 +375,8 @@ fn plan(
         Ok(solution)
             if solution.panels.iter().enumerate().all(|(i, slot)| {
                 Side::BOTH.into_iter().all(|side| {
-                    !side.is_automatic(&limits[i])
+                    !show_labels[i][side.index()]
+                        || !side.is_automatic(&limits[i])
                         || side
                             .room(slot.plot.size(), theme, lib)
                             .slack(side.ticks(&resolved[i]))
@@ -400,7 +416,7 @@ fn plan(
                 if side.groups(&groups)[i] != i {
                     continue;
                 }
-                let plot = side.group_plot(&groups, i, &plots);
+                let plot = side.group_plot(&groups, i, &plots, &show_labels);
                 let ticks = side.ticks(r);
                 if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
                 {
@@ -595,6 +611,43 @@ mod tests {
     use crate::model::{AxisData, Grid, GridIndex, LineOptions, Placement};
     use crate::scene::Item;
     use crate::{LegendStyle, ScaleKind};
+
+    #[test]
+    fn group_plot_uses_the_shortest_member_with_visible_labels_on_each_side() {
+        let groups = ShareGroups {
+            x: vec![0, 0, 0, 3],
+            y: vec![0, 0, 0, 3],
+        };
+        let plots = [
+            PlotSize {
+                width: 100.0,
+                height: 50.0,
+            },
+            PlotSize {
+                width: 400.0,
+                height: 200.0,
+            },
+            PlotSize {
+                width: 300.0,
+                height: 150.0,
+            },
+            PlotSize {
+                width: 10.0,
+                height: 10.0,
+            },
+        ];
+        let show_labels = [[false, true], [true, false], [true, true], [true, true]];
+        for i in 0..3 {
+            assert_eq!(
+                Side::X.group_plot(&groups, i, &plots, &show_labels),
+                plots[2]
+            );
+            assert_eq!(
+                Side::Y.group_plot(&groups, i, &plots, &show_labels),
+                plots[0]
+            );
+        }
+    }
 
     /// A figure in `theme` with a title and two labelled lines.
     fn labelled_figure(theme: Theme) -> Figure {
