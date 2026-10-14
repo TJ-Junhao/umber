@@ -15,7 +15,7 @@ import umber
 from umber import _args, _color, _series, _size, _ticks, _umber
 from umber._args import instance, integer, real, type_name
 from umber._color import Color
-from umber._enums import Dash, LegendStyle, Marker, Step
+from umber._enums import AUTO, Auto, Dash, LegendPosition, LegendStyle, Marker, Step
 from umber._errors import DataError, new_error
 from umber._report import api_call
 from umber._scale import Scale
@@ -60,6 +60,9 @@ _SIZE_HINT: Final = (
     "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
 )
 _LEGEND_HINT: Final = _members_hint(LegendStyle)
+_LEGEND_POSITION_HINT: Final = (
+    _members_hint(LegendPosition) + " Use ub.AUTO for the theme's position."
+)
 _FORMAT_HINT: Final = (
     "use TickFormat.fixed(2), TickFormat.percent(), TickFormat.scientific() or TickFormat.AUTO."
 )
@@ -454,29 +457,42 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.ytick_format(self._row, self._col, _ticks.native(checked))
             return self
 
-    def legend(self, style: LegendStyle) -> Self:
-        """Set the legend style, overriding the theme's.
+    def legend(self, style: LegendStyle, *, position: LegendPosition | Auto = AUTO) -> Self:
+        """Set the legend style and position, overriding the theme's.
 
-        The legend lists the marks that have a non-empty ``label``; ``LegendStyle.NONE``
-        hides it.
+        The legend lists marks with a non-empty ``label``; ``LegendStyle.NONE`` hides it.
+        Positions apply to single-panel figures and ``Legend.PER_PANEL``. A merged grid
+        legend stays under the figure title and subtitle and follows their alignment.
 
         Args:
             style: How the legend is laid out.
+            position: Where the panel legend sits. ``AUTO`` uses the theme's position and
+                clears any previous override. ``LegendPosition.BEST`` instead chooses the
+                position inside the plot that covers the least data.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``style`` is not a ``LegendStyle``.
+            TypeError: If ``style`` is not a ``LegendStyle``, or ``position`` is neither a
+                ``LegendPosition`` nor ``AUTO``.
+            UsageError: If ``style`` is ``DIRECT`` and a ``LegendPosition`` is supplied.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes().line([0, 1], [1, 2], label="North")
+            >>> ax = ax.legend(ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT)
             >>> ax = ax.legend(ub.LegendStyle.DIRECT)
         """
         with api_call():
             member = instance("Axes.legend()", "style", style, LegendStyle, _LEGEND_HINT)
-            self._native.legend(self._row, self._col, member.value)
+            if position is AUTO:
+                self._native.legend(self._row, self._col, member.value)
+            else:
+                placement = instance(
+                    "Axes.legend()", "position", position, LegendPosition, _LEGEND_POSITION_HINT
+                )
+                self._native.legend_at(self._row, self._col, member.value, placement.value)
             return self
 
     def line(

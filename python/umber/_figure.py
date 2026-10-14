@@ -138,6 +138,56 @@ class Figure:
             self._cols = col_count
             self._axes = {}
 
+    def title(self, text: str) -> Self:
+        """Set the figure title, shown above every panel and the merged legend.
+
+        The figure title is 1.5 times the panel title size. Its alignment follows the
+        theme's ``with_title_align()`` setting.
+
+        Args:
+            text: The title, at most 1,000 characters. An empty string removes it.
+
+        Returns:
+            This figure.
+
+        Raises:
+            TypeError: If ``text`` is not a ``str``.
+            StyleError: If ``text`` is too long or holds a lone surrogate.
+
+        Example:
+            >>> import umber as ub
+            >>> fig = ub.Figure(cols=2).title("Revenue")
+            >>> ax = fig.add_axes(col=0).title("North")
+        """
+        with api_call():
+            self._native.figure_title(_args.text("Figure.title()", "text", text))
+            return self
+
+    def subtitle(self, text: str) -> Self:
+        """Set the figure subtitle, shown under its title and above every panel.
+
+        Its alignment follows the figure title, as set by ``Theme.with_title_align()``.
+
+        Args:
+            text: The subtitle, at most 1,000 characters. An empty string removes it.
+
+        Returns:
+            This figure.
+
+        Raises:
+            TypeError: If ``text`` is not a ``str``.
+            StyleError: If ``text`` is too long or holds a lone surrogate.
+
+        Example:
+            >>> import umber as ub
+            >>> fig = ub.Figure().title("Revenue").subtitle("Per quarter")
+            >>> fig.subtitle("Per year") is fig
+            True
+        """
+        with api_call():
+            self._native.figure_subtitle(_args.text("Figure.subtitle()", "text", text))
+            return self
+
     def add_axes(
         self,
         *,

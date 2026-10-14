@@ -8,7 +8,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
-    Dash, FillStyle, Font, GridLines, LegendMode, LegendStyle, Marker, Share, Step, SvgText,
+    Align, Dash, FillStyle, Font, GridLines, LegendMode, LegendPosition, LegendStyle, Marker,
+    Share, Step, SvgText,
 };
 
 use crate::errors::internal_value;
@@ -111,6 +112,20 @@ int_enum!("Legend", LegendMode {
     "PER_PANEL" => LegendMode::PerPanel = 1,
 });
 
+int_enum!("LegendPosition", LegendPosition {
+    "TOP_LEFT" => LegendPosition::TopLeft = 0,
+    "TOP_RIGHT" => LegendPosition::TopRight = 1,
+    "RIGHT" => LegendPosition::Right = 2,
+    "BOTTOM" => LegendPosition::Bottom = 3,
+    "BEST" => LegendPosition::Best = 4,
+});
+
+int_enum!("Align", Align {
+    "LEFT" => Align::Left = 0,
+    "CENTER" => Align::Center = 1,
+    "RIGHT" => Align::Right = 2,
+});
+
 int_enum!("Step", Step {
     "POST" => Step::Post = 0,
     "PRE" => Step::Pre = 1,
@@ -125,7 +140,7 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 10] = [
+const TABLES: [(&str, &[(&str, i64)]); 12] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (Font::PY_NAME, Font::MEMBERS),
@@ -135,6 +150,8 @@ const TABLES: [(&str, &[(&str, i64)]); 10] = [
     (SvgText::PY_NAME, SvgText::MEMBERS),
     (Share::PY_NAME, Share::MEMBERS),
     (LegendMode::PY_NAME, LegendMode::MEMBERS),
+    (LegendPosition::PY_NAME, LegendPosition::MEMBERS),
+    (Align::PY_NAME, Align::MEMBERS),
     (Step::PY_NAME, Step::MEMBERS),
 ];
 
@@ -181,6 +198,8 @@ mod tests {
         round_trips::<SvgText>();
         round_trips::<Share>();
         round_trips::<LegendMode>();
+        round_trips::<LegendPosition>();
+        round_trips::<Align>();
         round_trips::<Step>();
     }
 
@@ -199,6 +218,8 @@ mod tests {
                 "SvgText",
                 "Share",
                 "Legend",
+                "LegendPosition",
+                "Align",
                 "Step"
             ]
         );

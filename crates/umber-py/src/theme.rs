@@ -6,7 +6,7 @@
 //! as the integers of the `enums` module, and numbers are validated by the core.
 
 use pyo3::prelude::*;
-use umber_core::{Dash, FillStyle, Font, GridLines, LegendStyle, Rgba};
+use umber_core::{Align, Dash, FillStyle, Font, GridLines, LegendPosition, LegendStyle, Rgba};
 
 use crate::color::{ColorArg, color_spec, concrete};
 use crate::enums::{IntEnum, enum_value};
@@ -134,6 +134,11 @@ impl Theme {
         self.with_enum::<Font>(value, umber_core::Theme::with_title_font)
     }
 
+    /// This theme with the title alignment `value` (an `Align` value).
+    fn with_title_align(&self, value: i64) -> PyResult<Theme> {
+        self.with_enum::<Align>(value, umber_core::Theme::with_title_align)
+    }
+
     /// This theme with the body font `value` (a `Font` value).
     fn with_body_font(&self, value: i64) -> PyResult<Theme> {
         self.with_enum::<Font>(value, umber_core::Theme::with_body_font)
@@ -142,6 +147,11 @@ impl Theme {
     /// This theme with the legend style `value` (a `LegendStyle` value).
     fn with_legend_style(&self, value: i64) -> PyResult<Theme> {
         self.with_enum::<LegendStyle>(value, umber_core::Theme::with_legend_style)
+    }
+
+    /// This theme with the panel legend position `value` (a `LegendPosition` value).
+    fn with_legend_position(&self, value: i64) -> PyResult<Theme> {
+        self.with_enum::<LegendPosition>(value, umber_core::Theme::with_legend_position)
     }
 
     /// This theme with the fill style `value` (a `FillStyle` value).

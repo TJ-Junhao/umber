@@ -8,7 +8,7 @@ from typing import ClassVar, Final, Never, Self, cast, final
 from umber import _color, _umber
 from umber._args import instance, real, type_name
 from umber._color import Color
-from umber._enums import Dash, FillStyle, Font, GridLines, LegendStyle
+from umber._enums import Align, Dash, FillStyle, Font, GridLines, LegendPosition, LegendStyle
 from umber._errors import new_error
 from umber._report import api_call
 
@@ -319,6 +319,31 @@ class Theme:
             code = _member("Theme.with_title_font()", value, Font)
             return _wrap(self._native.with_title_font(code))
 
+    def with_title_align(self, value: Align) -> "Theme":
+        """Return this theme with figure and panel title alignment set to ``value``.
+
+        Subtitles follow their title; the merged grid legend follows the figure title.
+        Panel legend positions are independent of title alignment. The default is ``LEFT``.
+
+        Args:
+            value: The Align to use.
+
+        Returns:
+            A new theme; this one is unchanged.
+
+        Raises:
+            TypeError: If ``value`` is not an ``Align``.
+
+        Example:
+            >>> import umber as ub
+            >>> theme = ub.Theme.PIGMENT.with_title_align(ub.Align.CENTER)
+            >>> theme == ub.Theme.PIGMENT
+            False
+        """
+        with api_call():
+            code = _member("Theme.with_title_align()", value, Align)
+            return _wrap(self._native.with_title_align(code))
+
     def with_body_font(self, value: Font) -> "Theme":
         """Return this theme with the body font set to ``value``.
 
@@ -362,6 +387,33 @@ class Theme:
         with api_call():
             code = _member("Theme.with_legend_style()", value, LegendStyle)
             return _wrap(self._native.with_legend_style(code))
+
+    def with_legend_position(self, value: LegendPosition) -> "Theme":
+        """Return this theme with the panel legend position set to ``value``.
+
+        Applies to single-panel figures and ``Legend.PER_PANEL``; ``Axes.legend()`` can
+        override it. Direct labels stay at line ends, and a merged grid legend stays under
+        the figure title. The default is ``TOP_LEFT``.
+
+        Args:
+            value: The LegendPosition to use. ``BEST`` places the legend inside the plot,
+                covering the least data.
+
+        Returns:
+            A new theme; this one is unchanged.
+
+        Raises:
+            TypeError: If ``value`` is not a ``LegendPosition``.
+
+        Example:
+            >>> import umber as ub
+            >>> theme = ub.Theme.PIGMENT.with_legend_position(ub.LegendPosition.BOTTOM)
+            >>> theme == ub.Theme.PIGMENT
+            False
+        """
+        with api_call():
+            code = _member("Theme.with_legend_position()", value, LegendPosition)
+            return _wrap(self._native.with_legend_position(code))
 
     def with_fill_style(self, value: FillStyle) -> "Theme":
         """Return this theme with the fill style of areas and histogram bins set to ``value``.
