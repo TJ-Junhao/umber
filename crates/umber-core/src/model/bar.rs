@@ -181,10 +181,10 @@ impl BarMark {
     }
 }
 
-/// One series of a grouped or stacked bar mark, as given to
-/// [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar) and
-/// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar): its label, one value per category, and
-/// its color.
+/// One series of grouped bars, stacked bars or stacked areas, as given to
+/// [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar),
+/// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar) or
+/// [`AxesMut::stacked_area`](super::AxesMut::stacked_area): its label, values and color.
 ///
 /// # Examples
 ///
@@ -202,7 +202,8 @@ impl BarMark {
 pub struct Series {
     /// The legend label; empty for none.
     pub label: String,
-    /// One value per category, in the order of the mark's categories. NaN draws no bar.
+    /// One value per category for bars or per x value for areas, in the same order. NaN skips
+    /// a bar or breaks every stacked area layer.
     pub values: Vec<f64>,
     /// The series color.
     pub color: ColorSpec,
@@ -365,8 +366,8 @@ impl BarGroupMark {
     }
 }
 
-/// A read-only view of one series of a [`BarGroupMark`]: its label, its values (one per
-/// category of the mark) and its color as given.
+/// A read-only view of one series of a [`BarGroupMark`] or
+/// [`StackedAreaMark`](super::StackedAreaMark): its label, values and color as given.
 ///
 /// # Examples
 ///
@@ -391,6 +392,15 @@ pub struct SeriesView<'a> {
 }
 
 impl<'a> SeriesView<'a> {
+    /// A read-only view of a stored series.
+    pub(super) fn of_series(series: &'a Series) -> SeriesView<'a> {
+        SeriesView {
+            label: &series.label,
+            values: &series.values,
+            color: series.color,
+        }
+    }
+
     /// The legend label; empty for none.
     ///
     /// # Examples
@@ -412,8 +422,8 @@ impl<'a> SeriesView<'a> {
         self.label
     }
 
-    /// The values, one per category of the mark, in the mark's category order. NaN draws no
-    /// bar.
+    /// The values, one per category or x value of the mark, in the same order. NaN skips a
+    /// bar or breaks all stacked area layers.
     ///
     /// # Examples
     ///

@@ -1,4 +1,4 @@
-"""``Series``: one named series of values for grouped and stacked bar charts."""
+"""``Series``: named values for grouped bars, stacked bars and stacked areas."""
 
 from collections.abc import Callable
 from operator import attrgetter
@@ -18,12 +18,12 @@ _COLOR_HINT: Final = 'use Color.hex("#3366B8"), Color.rgb() or a named color suc
 
 @final
 class Series:
-    """An immutable series of values, one per category, for grouped and stacked bars.
+    """An immutable series of values for grouped bars, stacked bars and stacked areas.
 
-    Pass a list of series to ``Axes.grouped_bar()`` or ``Axes.stacked_bar()``. The values
-    are copied when the series is made, so changing the original data later has no effect.
+    Pass series to ``Axes.grouped_bar()``, ``Axes.stacked_bar()`` or ``Axes.stacked_area()``.
+    Values are copied when the series is made, so changing the original data has no effect.
     Their type, shape and dtype are checked here; whether they are finite, and positive on a
-    log axis, is checked by the bar chart the series is added to, which reports a bad height
+    log axis, is checked by the chart the series is added to, which reports a bad value
     as ``series[i].values[j]``. A copy of a series is the series itself, and series pickle
     by value.
 
@@ -44,9 +44,9 @@ class Series:
 
         Args:
             label: The name shown in the legend; an empty string leaves the series out of it.
-            values: The values, one per category, in category order. A NaN leaves that
-                category without a bar for this series.
-            color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+            values: One value per category for bars, or per x value for stacked areas, in
+                the same order. NaN skips a bar or breaks every layer of a stacked area.
+            color: The series color. ``Color.AUTO`` takes the next color of the theme palette.
 
         Raises:
             TypeError: If an argument has the wrong type, such as ``values`` given as a

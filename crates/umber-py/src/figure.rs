@@ -491,6 +491,21 @@ impl Figure {
             .map_err(core_error)
     }
 
+    /// Adds non-negative area series stacked over shared x values.
+    fn stacked_area(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        series: SeriesArgs<'_>,
+    ) -> PyResult<()> {
+        let (x, series) = (shared_floats(x)?, Self::series(series)?);
+        self.axes(row, col)?
+            .stacked_area_shared(x, series)
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Adds a histogram of `values` in `bins` bins.
     fn hist(
         &mut self,

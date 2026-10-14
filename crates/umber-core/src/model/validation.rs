@@ -223,6 +223,87 @@ pub(super) fn check_band(
     check_interval_order(context, (low, high))
 }
 
+/// Validates stacked areas before storage: continuous x, a non-empty series list, lengths,
+/// x values, each series' finite non-negative values and y scale, sorted x, then totals.
+/// A gap in any series breaks the whole stack at that index.
+pub(super) fn check_stacked_area(
+    context: &'static str,
+    x_kind: ScaleKind,
+    y_transform: Transform,
+    x: &[f64],
+    series: &[Series],
+) -> Result<()> {
+    let Some(x_transform) = x_kind.transform() else {
+        return Err(Error::usage(
+            context,
+            "this is a category axis; stacked areas apply to linear and log axes only.",
+        )
+        .with_parameter("x")
+        .with_hint(X_SCALE_HINT));
+    };
+    if series.is_empty() {
+        return Err(
+            Error::data(context, "series is empty; pass at least one Series.")
+                .with_parameter("series"),
+        );
+    }
+    for (k, s) in series.iter().enumerate() {
+        if s.values.len() != x.len() {
+            return Err(Error::data(
+                context,
+                format!(
+                    "series[{k}].values has {} values; x has {}.",
+                    s.values.len(),
+                    x.len()
+                ),
+            )
+            .with_parameter("series"));
+        }
+    }
+    check_numbers(context, ("x", "x"), x, x_transform, AREA_GAP_HINT)?;
+    for (k, s) in series.iter().enumerate() {
+        let name = format!("series[{k}].values");
+        let negative = s.values.iter().position(|&v| v.is_finite() && v < 0.0);
+        // Check the prefix first so an earlier invalid value wins. A finite negative gets the
+        // stacked-area hint even on log y, rather than the generic log-axis error.
+        check_numbers(
+            context,
+            (&name, "series"),
+            &s.values[..negative.unwrap_or(s.values.len())],
+            y_transform,
+            AREA_GAP_HINT,
+        )?;
+        if let Some(i) = negative {
+            return Err(Error::data(
+                context,
+                format!(
+                    "{name}[{i}] is {}; stacked areas need values of at least 0.",
+                    number(s.values[i])
+                ),
+            )
+            .with_parameter("series")
+            .with_hint("use stacked_bar for values with mixed signs."));
+        }
+    }
+    check_sorted(context, "stacked_area", x)?;
+    for (i, &x) in x.iter().enumerate() {
+        if x.is_nan() || series.iter().any(|s| s.values[i].is_nan()) {
+            continue;
+        }
+        let mut totals = Totals::default();
+        for s in series {
+            totals.push(s.values[i]);
+        }
+        let total = totals.positive();
+        if total > MAX_MAGNITUDE {
+            return Err(Error::data(context, format!(
+                "the values at x[{i}] stack to {}; each stack must not exceed {MAX_MAGNITUDE:e}.", number(total)
+            )).with_parameter("series"));
+        }
+    }
+    Ok(())
+}
+
 /// Checks that no lower limit exceeds its upper limit; NaN in either limit is not compared.
 fn check_interval_order(context: &'static str, (low, high): (&[f64], &[f64])) -> Result<()> {
     for (i, (&a, &b)) in low.iter().zip(high).enumerate() {

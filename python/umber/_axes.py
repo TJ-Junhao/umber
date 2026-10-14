@@ -809,6 +809,51 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.stacked_bar(self._row, self._col, category_names, arguments)
             return self
 
+    def stacked_area(
+        self: "Axes[float, Y]", x: Values[float], series: Sequence[Series]
+    ) -> "Axes[float, Y]":
+        """Add non-negative series stacked in order over shared x values.
+
+        Each layer fills between the previous cumulative curve and its own, flat at the
+        opacity of an area in every fill style, with its upper curve outlined at the theme's
+        line width. The first layer starts at the baseline. A linear y axis includes zero;
+        on log y the baseline is the lower limit. A NaN in x or any series breaks every layer
+        at that index. Long inputs are reduced per device column, keeping every cumulative
+        curve's envelope and exact crossings at explicit limits.
+
+        Args:
+            x: Numeric x values in non-decreasing order, NaN apart.
+            series: One or more ``Series``, each as long as x, with non-negative values.
+                Their order is the stacking order. Each series takes its own color and an
+                area's legend swatch. Under ``LegendStyle.DIRECT``, each label goes at the
+                end of its cumulative upper curve, as a line's does.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If x has the wrong type or series is not a sequence of ``Series``.
+            DataError: If series is empty, lengths differ, x is not sorted, a value is
+                negative or infinite, a value violates its scale's bounds, or a cumulative
+                total exceeds the supported magnitude. Log values must be positive.
+            UsageError: If the x axis is a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.stacked_area(
+            ...     [2020, 2021, 2022],
+            ...     [ub.Series("Hydro", [12, 13, 12]), ub.Series("Wind", [6, 8, 10])],
+            ... )
+        """
+        with api_call():
+            context = "Axes.stacked_area()"
+            check_floats_type(context, "x", x)
+            arguments = _series_arguments(context, series)
+            xs = floats(context, "x", x)
+            self._native.stacked_area(self._row, self._col, xs, arguments)
+            return self
+
     def hist(
         self: "Axes[float, float]",
         values: Values[float],

@@ -43,6 +43,7 @@ mod mapping;
 mod marker;
 mod rule;
 mod scatter;
+mod stacked_area;
 mod stem;
 mod step;
 mod stroke;
@@ -169,6 +170,16 @@ pub(crate) fn marks(
                     series,
                     stacks,
                     &mut items,
+                );
+            }
+            ResolvedMark::StackedArea {
+                mark,
+                ref series,
+                ref stacks,
+                width,
+            } => {
+                stacked_area::stacked_area_items(
+                    &context, resolved, mark, series, stacks, width, &mut items,
                 );
             }
             ResolvedMark::Hist {

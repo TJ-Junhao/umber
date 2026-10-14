@@ -42,9 +42,22 @@ pub(super) fn band_items(
 ) {
     let (xs, lows, highs) = gapped_points(resolved, mark);
     let (xs, lows, highs) = kept_points(context, xs, lows, highs);
+    band_fill_items(context, &xs, &lows, &highs, color, items);
+}
+
+/// Fills between two already reduced, equally gapped curves in axis space, without an outline.
+/// Bands and stacked area layers share the same clipping and flat paint.
+pub(super) fn band_fill_items(
+    context: &MarkContext<'_>,
+    xs: &[f64],
+    lows: &[f64],
+    highs: &[f64],
+    color: Rgba,
+    items: &mut Vec<Item>,
+) {
     let clip = LineClip::of(context, 0.0);
-    let uppers = clamp_polyline(&xs, &highs, &clip.bounds);
-    let lowers = clamp_polyline(&xs, &lows, &clip.bounds);
+    let uppers = clamp_polyline(xs, highs, &clip.bounds);
+    let lowers = clamp_polyline(xs, lows, &clip.bounds);
     let plot = context.plot;
     let mut path = Path::new();
     for (upper, lower) in uppers.iter().zip(&lowers) {

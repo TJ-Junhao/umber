@@ -257,6 +257,9 @@ class Figure:
     def stacked_bar(
         self, row: int, col: int, categories: list[str], series: list[_SeriesArg]
     ) -> None: ...
+    def stacked_area(
+        self, row: int, col: int, x: _FloatArray, series: list[_SeriesArg]
+    ) -> None: ...
     def hist(
         self, row: int, col: int, values: _FloatArray, bins: int, label: str, color: _ColorArg
     ) -> None: ...

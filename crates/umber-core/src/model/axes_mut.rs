@@ -14,6 +14,7 @@ use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 use super::share::{Setting, SharedAxis};
+use super::stacked_area::StackedAreaMark;
 use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
@@ -673,6 +674,64 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let series = XySeries::new("Axes.area()", axes.x, axes.y, x, y, AREA_GAP_HINT)?;
         axes.marks.push(Mark::area(series, options));
+        Ok(self)
+    }
+
+    /// Adds non-negative series stacked in order over shared x values.
+    ///
+    /// The first layer starts at the baseline, each next layer at the previous cumulative
+    /// curve. Every layer is filled flat at the area opacity, whatever the fill style, and
+    /// its upper curve is drawn at the theme's line width. Its legend swatch and direct label
+    /// follow that curve as an area's do. Linear y includes 0; log y starts at its lower limit.
+    /// Long inputs are reduced per device column, keeping every cumulative curve's envelope.
+    ///
+    /// A category x axis is a usage error. There must be at least one series, each as long as
+    /// x. Values must be finite (NaN is allowed), non-negative and within the supported scale
+    /// bounds; log values must be positive. The cumulative totals must not exceed 1e300.
+    /// x must be in non-decreasing order, NaN apart. A NaN in x or any series breaks all layers
+    /// at that index. A failed call changes nothing.
+    ///
+    /// x is copied; to share its allocation use [`AxesMut::stacked_area_shared`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Series, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.stacked_area(&[0.0, 1.0], vec![
+    ///     Series { label: "Hydro".into(), values: vec![3.0, 4.0], ..Series::default() },
+    ///     Series { label: "Wind".into(), values: vec![1.0, 2.0], ..Series::default() },
+    /// ])?;
+    /// assert!(axes.stacked_area(&[0.0], vec![]).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stacked_area(&mut self, x: &[f64], series: Vec<Series>) -> Result<&mut Self> {
+        self.stacked_area_shared(Arc::from(x), series)
+    }
+
+    /// Adds stacked areas as [`AxesMut::stacked_area`] does, storing `x` itself, not a copy.
+    /// Same rules and errors as [`AxesMut::stacked_area`]. Clones share the x and series data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::{Figure, Mark, ScaleKind, Series, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let x: Arc<[f64]> = Arc::from([0.0, 1.0]);
+    /// axes.stacked_area_shared(Arc::clone(&x), vec![Series {
+    ///     values: vec![2.0, 3.0], ..Series::default()
+    /// }])?;
+    /// let Some(Mark::StackedArea(mark)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(mark.x(), &*x));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stacked_area_shared(&mut self, x: Arc<[f64]>, series: Vec<Series>) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = StackedAreaMark::new("Axes.stacked_area()", axes.x, axes.y, x, series)?;
+        axes.marks.push(Mark::StackedArea(mark));
         Ok(self)
     }
 

@@ -59,6 +59,15 @@ fn every_existing_mark_exposes_its_legend_swatch() {
         },
     )
     .unwrap();
+    a.stacked_area(
+        &[0.0, 1.0],
+        vec![Series {
+            label: "A".into(),
+            values: vec![1.0, 2.0],
+            ..Series::default()
+        }],
+    )
+    .unwrap();
     a.hist(
         &[0.0, 1.0],
         HistOptions {
@@ -295,6 +304,95 @@ fn stems_share_label_slots_before_unlabelled_colors_and_merge_marker_swatches() 
                 diameter: f.theme().marker_size(),
             }
         );
+    }
+}
+
+#[test]
+fn stacked_area_layers_share_colors_and_merge_swatches_but_keep_direct_labels() {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        let mut f = Figure::with_grid(8.0, 4.0, theme, Grid::new(1, 2).unwrap()).unwrap();
+        for col in [1, 0] {
+            let mut axes = f
+                .add_axes_at(
+                    Placement {
+                        col: GridIndex::At(col),
+                        ..Placement::default()
+                    },
+                    ScaleKind::Linear,
+                    ScaleKind::Linear,
+                )
+                .unwrap();
+            let series = ["", "North", if col == 0 { "North" } else { "South" }, ""]
+                .map(|label| crate::Series {
+                    label: label.into(),
+                    values: vec![1.0, 1.0],
+                    ..crate::Series::default()
+                })
+                .to_vec();
+            axes.stacked_area(&[0.0, 1.0], series).unwrap();
+            for label in ["North", ""] {
+                axes.line(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[1.0, 2.0],
+                    LineOptions {
+                        label: label.into(),
+                        ..LineOptions::default()
+                    },
+                )
+                .unwrap();
+            }
+        }
+        let marks = resolve::resolve_figure_marks(&f);
+        let palette = f.theme().palette();
+        for (col, (axes, panel)) in f.panels().zip(&marks).enumerate() {
+            let colors: Vec<_> = panel
+                .iter()
+                .flat_map(|mark| mark.keys(&Limits::of(axes)))
+                .map(|key| key.color)
+                .collect();
+            assert_eq!(
+                colors,
+                [
+                    palette[2],
+                    palette[0],
+                    palette[col],
+                    palette[3],
+                    palette[0],
+                    palette[4]
+                ]
+            );
+            let legend = Legend::new(f.theme().legend_style(), panel, &Limits::of(axes));
+            if f.theme().legend_style() == crate::LegendStyle::Direct {
+                assert!(legend.row().is_empty());
+                assert_eq!(legend.direct().len(), 3);
+                for (entry, y) in legend.direct().iter().zip([2.0, 3.0, 2.0]) {
+                    assert_eq!(entry.anchor().x, resolve::AnchorX::Number(1.0));
+                    assert_eq!(entry.anchor().y, y);
+                }
+            }
+        }
+        let legend = Legend::merged(&f, marks.iter().map(Vec::as_slice));
+        if f.theme().legend_style() == crate::LegendStyle::Direct {
+            assert!(legend.is_empty());
+        } else {
+            assert_eq!(legend.row().len(), 2);
+            for (entry, (slot, label)) in legend
+                .row()
+                .iter()
+                .zip(["North", "South"].into_iter().enumerate())
+            {
+                assert_eq!(entry.label(), label);
+                assert_eq!(entry.color(), palette[slot]);
+                assert_eq!(
+                    entry.swatch(),
+                    Swatch::Line {
+                        dash: crate::Dash::Solid,
+                        width: f.theme().drawn_line_width(crate::SizeSpec::Auto),
+                    }
+                );
+            }
+        }
+        f.to_scene(FontLibrary::global()).unwrap();
     }
 }
 

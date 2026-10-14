@@ -98,6 +98,7 @@ mod corpus {
     pub mod rules;
     pub mod share;
     pub mod size;
+    pub mod stacked_area;
     pub mod stem;
     pub mod step;
     pub mod ticks;
@@ -156,6 +157,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::band::cases(&lib, &mut sink);
     corpus::error_bars::cases(&lib, &mut sink);
     corpus::share::cases(&lib, &mut sink);
+    corpus::stacked_area::cases(&lib, &mut sink);
     corpus::stem::cases(&lib, &mut sink);
 }
 
@@ -1721,6 +1723,19 @@ mod record {
                 floats64(&[span.high()]),
                 text(&span.options().label),
                 color_spec(span.options().color)
+            ),
+            Mark::StackedArea(mark) => format!(
+                "stacked-area x={} series=[{}]",
+                floats64(mark.x()),
+                mark.series()
+                    .map(|s| format!(
+                        "label={} values={} color={}",
+                        text(s.label()),
+                        floats64(s.values()),
+                        color_spec(s.color())
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
             Mark::Band(band) => format!(
                 "band x={} low={} high={} label={} color={}",
