@@ -7,6 +7,7 @@ mod band;
 mod bar;
 mod chrome;
 mod clip;
+mod error_bars;
 mod hist;
 mod line;
 mod mapping;

@@ -47,6 +47,10 @@ pub(super) const ROW_TOP_GAP: f64 = 6.0;
 const LINE_SWATCH_LENGTH: f64 = 10.0;
 /// The side of a square swatch, as a share of the label size.
 const SQUARE_SWATCH_SIDE: f64 = 0.8;
+/// The length of the bar of an error bar swatch, as a multiple of the label size.
+const ERROR_BAR_SWATCH_LENGTH: f64 = 1.1;
+/// The thickest line of an error bar swatch, as a multiple of the label size.
+const ERROR_BAR_SWATCH_THICKNESS: f64 = 0.25;
 /// The gap between a line's end dot and its direct label.
 const DIRECT_GAP: f64 = 6.0;
 /// The smallest distance between the centers of two direct labels, as a multiple of the label
@@ -544,6 +548,20 @@ fn swatch_size(
         (RowStyle::Plain, Swatch::Square) => {
             let side = SQUARE_SWATCH_SIDE * size;
             (swatch, side, side)
+        }
+        (RowStyle::Plain, Swatch::ErrorBar { vertical, width }) => {
+            let thickness = f64::from(width).min(ERROR_BAR_SWATCH_THICKNESS * size);
+            let (length, cap) = (ERROR_BAR_SWATCH_LENGTH * size, f64::from(theme.cap_width()));
+            let capped = Swatch::ErrorBar {
+                vertical,
+                width: thickness as f32,
+            };
+            // The caps are as wide as the theme's caps; the bar is as long as the label is tall.
+            if vertical {
+                (capped, cap, length)
+            } else {
+                (capped, length, cap)
+            }
         }
     }
 }

@@ -39,6 +39,7 @@ _SURROGATE: Final = re.compile(r"[\ud800-\udfff]")
 _TEXT_HINT: Final = "pass a str; convert other values with str()."
 _REAL_HINT: Final = "pass a number such as 1.5."
 _INTEGER_HINT: Final = "pass a whole number such as 3."
+_BOOLEAN_HINT: Final = "pass True or False."
 _PATH_HINT: Final = "pass a str or a pathlib.Path."
 _BYTES_PATH_HINT: Final = "decode a bytes path with os.fsdecode()."
 _TOO_LONG_HINT: Final = "shorten the text; it would not fit the figure."
@@ -321,6 +322,38 @@ def integer(context: str, name: str, value: object) -> int:
     if _number_kind(value) != "int":
         raise _wrong_type(context, name, value, "an int", _INTEGER_HINT)
     return min(max(operator.index(cast(SupportsIndex, value)), _I64_MIN), _I64_MAX)
+
+
+def boolean(context: str, name: str, value: object) -> bool:
+    """Check a flag argument and return it.
+
+    Only ``bool`` is accepted: an int such as ``1`` or a NumPy ``bool`` is a ``TypeError``, so a
+    flag is never set by accident.
+
+    Args:
+        context: The API call, such as ``"Axes.y_error_bars()"``.
+        name: The parameter name.
+        value: The value passed.
+
+    Returns:
+        The value, unchanged.
+
+    Raises:
+        TypeError: The value is not a ``bool``.
+
+    Example:
+        >>> from umber._args import boolean
+        >>> boolean("Axes.y_error_bars()", "caps", False)
+        False
+        >>> try:
+        ...     boolean("Axes.y_error_bars()", "caps", 1)
+        ... except TypeError as err:
+        ...     print(err)
+        Axes.y_error_bars(): caps is int; caps must be a bool.
+    """
+    if not isinstance(value, bool):
+        raise _wrong_type(context, name, value, "a bool", _BOOLEAN_HINT)
+    return value
 
 
 def instance[T](context: str, name: str, value: object, cls: type[T], hint: str) -> T:

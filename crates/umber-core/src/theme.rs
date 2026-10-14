@@ -195,6 +195,7 @@ pub struct Theme {
     bar_corner_radius: f32,
     hist_gap: f32,
     panel_gap: f32,
+    cap_width: f32,
     palette: Vec<Rgba>,
 }
 
@@ -284,6 +285,7 @@ impl Theme {
             bar_corner_radius: 0.0,
             hist_gap: 0.0,
             panel_gap: 24.0,
+            cap_width: 8.0,
             palette: palette_of([
                 0xC4553A, 0x2E6B70, 0xE2A33B, 0x4F6FA3, 0x86A37A, 0x8B5279, 0x6E4C38, 0xA69F94,
             ]),
@@ -324,6 +326,7 @@ impl Theme {
             bar_corner_radius: 0.0,
             hist_gap: 1.2,
             panel_gap: 24.0,
+            cap_width: 8.0,
             palette: palette_of([
                 0x233F86, 0xE4572E, 0xF2A900, 0x17A398, 0x9B5DE5, 0x5BA4E6, 0xD9658F, 0xA3A3A3,
             ]),
@@ -364,6 +367,7 @@ impl Theme {
             bar_corner_radius: 3.5,
             hist_gap: 1.5,
             panel_gap: 24.0,
+            cap_width: 8.0,
             palette: palette_of([
                 0x75AEF5, 0xDF7F78, 0x96E7A7, 0xE0AE57, 0xC9A3F5, 0x3ACED6, 0xF5A06F, 0x9DA5B1,
             ]),
@@ -705,6 +709,23 @@ impl Theme {
     #[must_use]
     pub fn panel_gap(&self) -> f32 {
         self.panel_gap
+    }
+
+    /// The length of the caps of error bars, in points: the width of the line across each end of
+    /// a bar.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    ///
+    /// assert_eq!(Theme::pigment().cap_width(), 8.0);
+    /// assert_eq!(Theme::graphite().cap_width(), 8.0);
+    /// assert_eq!(Theme::midnight().cap_width(), 8.0);
+    /// ```
+    #[must_use]
+    pub fn cap_width(&self) -> f32 {
+        self.cap_width
     }
 
     /// Replace the palette.

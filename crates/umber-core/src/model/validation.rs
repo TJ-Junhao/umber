@@ -111,27 +111,34 @@ pub(super) fn check_series(
             ),
         ));
     }
-    match (x, x_kind.transform()) {
-        (AxisData::Categories(_), None) => {}
-        (AxisData::Numbers(values), Some(x_transform)) => {
-            check_numbers(context, ("x", "x"), values, x_transform, gap_hint)?;
-        }
-        (AxisData::Numbers(_), None) => {
-            return Err(Error::data(
-                context,
-                "x holds numbers but the x axis is a category axis; pass category names.",
-            )
-            .with_hint(X_SCALE_HINT));
-        }
-        (AxisData::Categories(_), Some(_)) => {
-            return Err(Error::data(
-                context,
-                "x holds category names but the x axis is not a category axis; pass numbers.",
-            )
-            .with_hint("pass x=Scale.category() to Figure.add_axes()."));
-        }
-    }
+    check_x_data(context, x_kind, x, gap_hint)?;
     check_numbers(context, ("y", "y"), y, y_transform, gap_hint)
+}
+
+/// Checks the x values of a series against the x axis of scale kind `x_kind`: names need a
+/// category axis, numbers a linear or log axis and are checked by [`check_numbers`].
+fn check_x_data(
+    context: &'static str,
+    x_kind: ScaleKind,
+    x: &AxisData,
+    gap_hint: &'static str,
+) -> Result<()> {
+    match (x, x_kind.transform()) {
+        (AxisData::Categories(_), None) => Ok(()),
+        (AxisData::Numbers(values), Some(x_transform)) => {
+            check_numbers(context, ("x", "x"), values, x_transform, gap_hint)
+        }
+        (AxisData::Numbers(_), None) => Err(Error::data(
+            context,
+            "x holds numbers but the x axis is a category axis; pass category names.",
+        )
+        .with_hint(X_SCALE_HINT)),
+        (AxisData::Categories(_), Some(_)) => Err(Error::data(
+            context,
+            "x holds category names but the x axis is not a category axis; pass numbers.",
+        )
+        .with_hint("pass x=Scale.category() to Figure.add_axes().")),
+    }
 }
 
 /// Checks that the numeric x values of a step mark, `x`, are in non-decreasing order, before the
@@ -228,6 +235,113 @@ pub(super) fn check_band(
         }
     }
     Ok(())
+}
+
+/// The hint for an infinite error bar limit.
+pub(super) const ERROR_BAR_GAP_HINT: &str = "use NaN to skip a bar.";
+
+/// Checks that `positions`, `low` and `high` of an error bar mark have one length. `name` is
+/// what the positions are called in messages (`"x"`, `"y"`).
+fn check_interval_lengths(
+    context: &'static str,
+    name: &str,
+    count: usize,
+    (low, high): (&[f64], &[f64]),
+) -> Result<()> {
+    for (other_name, other) in [("low", low), ("high", high)] {
+        if count != other.len() {
+            return Err(Error::data(
+                context,
+                format!(
+                    "{name} has {count} values but {other_name} has {}; {name}, low and high must have the same length.",
+                    other.len()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks the `low` and `high` limits of error bars against the axis with the transform
+/// `transform` they are values of, `low` and then `high` by [`check_numbers`], and then that no
+/// `low[i]` exceeds `high[i]`; an index where either is NaN is not compared.
+fn check_intervals(
+    context: &'static str,
+    transform: Transform,
+    (low, high): (&[f64], &[f64]),
+) -> Result<()> {
+    check_numbers(context, ("low", "low"), low, transform, ERROR_BAR_GAP_HINT)?;
+    check_numbers(
+        context,
+        ("high", "high"),
+        high,
+        transform,
+        ERROR_BAR_GAP_HINT,
+    )?;
+    for (i, (&a, &b)) in low.iter().zip(high).enumerate() {
+        if a > b {
+            return Err(Error::data(
+                context,
+                format!(
+                    "low[{i}] is {a}, above high[{i}] = {b}; low must not exceed high.",
+                    a = number(a),
+                    b = number(b)
+                ),
+            )
+            .with_parameter("low")
+            .with_hint("check that low and high are not swapped."));
+        }
+    }
+    Ok(())
+}
+
+/// Validates the x, `low` and `high` values of vertical error bars for axes with an x axis of
+/// scale kind `x_kind` and a y axis of transform `y_transform`, before they are stored, so a
+/// failed call changes nothing. The checks run in a fixed order and the first failure is the
+/// error, under `context`:
+///
+/// 1. `x`, `low` and `high` have the same length;
+/// 2. `x` against the x axis (see [`check_series`]);
+/// 3. `low`, then `high`, against the y axis (see [`check_numbers`]);
+/// 4. no `low[i]` exceeds `high[i]`; an index where either is NaN is not compared.
+pub(super) fn check_y_error_bars(
+    context: &'static str,
+    x_kind: ScaleKind,
+    y_transform: Transform,
+    x: &AxisData,
+    limits: (&[f64], &[f64]),
+) -> Result<()> {
+    check_interval_lengths(context, "x", x.len(), limits)?;
+    check_x_data(context, x_kind, x, ERROR_BAR_GAP_HINT)?;
+    check_intervals(context, y_transform, limits)
+}
+
+/// Validates the y, `low` and `high` values of horizontal error bars for axes with an x axis of
+/// scale kind `x_kind` and a y axis of transform `y_transform`, before they are stored, so a
+/// failed call changes nothing. The checks run in a fixed order and the first failure is the
+/// error, under `context`:
+///
+/// 1. the x axis is not a category axis (`Error::Usage`);
+/// 2. `y`, `low` and `high` have the same length;
+/// 3. `y` against the y axis, then `low` and `high` against the x axis (see [`check_numbers`]);
+/// 4. no `low[i]` exceeds `high[i]`; an index where either is NaN is not compared.
+pub(super) fn check_x_error_bars(
+    context: &'static str,
+    x_kind: ScaleKind,
+    y_transform: Transform,
+    y: &[f64],
+    limits: (&[f64], &[f64]),
+) -> Result<()> {
+    let Some(x_transform) = x_kind.transform() else {
+        return Err(Error::usage(
+            context,
+            "this is a category axis; error bars along x apply to linear and log axes only.",
+        )
+        .with_hint("x_error_bars needs a numeric x axis; use y_error_bars on a category."));
+    };
+    check_interval_lengths(context, "y", y.len(), limits)?;
+    check_numbers(context, ("y", "y"), y, y_transform, ERROR_BAR_GAP_HINT)?;
+    check_intervals(context, x_transform, limits)
 }
 
 /// The words that finish the message for a reference line whose value is not finite.

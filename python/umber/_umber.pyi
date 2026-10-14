@@ -297,6 +297,30 @@ class Figure:
         label: str,
         color: _ColorArg,
     ) -> None: ...
+    def y_error_bars(
+        self,
+        row: int,
+        col: int,
+        x: _AxisValues,
+        low: _FloatArray,
+        high: _FloatArray,
+        label: str,
+        color: _ColorArg,
+        width: _SizeArg,
+        caps: bool,
+    ) -> None: ...
+    def x_error_bars(
+        self,
+        row: int,
+        col: int,
+        y: _FloatArray,
+        low: _FloatArray,
+        high: _FloatArray,
+        label: str,
+        color: _ColorArg,
+        width: _SizeArg,
+        caps: bool,
+    ) -> None: ...
     def to_png(self, dpi: int) -> bytes: ...
     def to_svg(self, text: int) -> str: ...
     # The file variants report render errors in the context of Figure.save_png() and

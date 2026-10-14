@@ -5,6 +5,7 @@ use std::fmt;
 use super::axis_data::{AxisData, XySeries};
 use super::band::BandMark;
 use super::bar::{BarGroupMark, BarMark};
+use super::error_bars::ErrorBarMark;
 use super::hist::HistMark;
 use super::rule::{HLineMark, SpanMark, VLineMark};
 use super::step::StepMark;
@@ -113,11 +114,12 @@ impl Default for ScatterOptions {
 /// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar),
 /// [`AxesMut::hist`](super::AxesMut::hist), [`AxesMut::step`](super::AxesMut::step),
 /// [`AxesMut::hline`](super::AxesMut::hline), [`AxesMut::vline`](super::AxesMut::vline),
-/// [`AxesMut::hspan`](super::AxesMut::hspan), [`AxesMut::vspan`](super::AxesMut::vspan) and
-/// [`AxesMut::band`](super::AxesMut::band),
+/// [`AxesMut::hspan`](super::AxesMut::hspan), [`AxesMut::vspan`](super::AxesMut::vspan),
+/// [`AxesMut::band`](super::AxesMut::band), [`AxesMut::y_error_bars`](super::AxesMut::y_error_bars)
+/// and [`AxesMut::x_error_bars`](super::AxesMut::x_error_bars),
 /// which validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
 /// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`], [`HLineMark`], [`VLineMark`],
-/// [`SpanMark`], [`BandMark`]) that keeps the validated values
+/// [`SpanMark`], [`BandMark`], [`ErrorBarMark`]) that keeps the validated values
 /// together and exposes them read-only; it has no
 /// public constructor. Read a mark by matching on its variant.
 ///
@@ -201,6 +203,9 @@ pub enum Mark {
     /// The region between a lower and an upper curve, filled flat at the area opacity with no
     /// outline; NaN in x, low or high breaks it.
     Band(BandMark),
+    /// Vertical or horizontal bars from a lower to an upper limit, with optional caps; a NaN
+    /// in the position or a limit skips the bar.
+    ErrorBars(ErrorBarMark),
 }
 
 impl Mark {

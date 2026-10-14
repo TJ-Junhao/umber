@@ -54,12 +54,12 @@
 //!   methods), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
 //!   [`ScatterOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`] position,
 //!   [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of a vertical line,
-//!   [`BandOptions`],
+//!   [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
 //!   [`BarOptions`], [`Series`] and [`HistOptions`]
 //!   with its bin limit [`MAX_BINS`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`StepMark`],
 //!   [`HLineMark`], [`VLineMark`], [`SpanMark`], [`BarMark`], [`BarGroupMark`], [`SeriesView`],
-//!   [`BandMark`] and [`HistMark`] that [`Axes::marks`] returns;
+//!   [`BandMark`], [`ErrorBarMark`] and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
@@ -127,6 +127,7 @@ pub use figure::{
 };
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};
+pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use render::SvgText;

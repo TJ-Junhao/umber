@@ -6,9 +6,11 @@
 
 use super::bar_shape::rounded_rect;
 use super::chrome::{segment, text};
+use super::error_bars::{bar_style, push_bar};
 use super::line::line_style;
 use super::mapping::point;
 use super::marker::{marker_shape, polygon};
+use crate::geometry::Path;
 use crate::layout::{Area, EndDot, Layout, RowEntry};
 use crate::legend::Swatch;
 use crate::scene::{FillRule, Item, LineCap, Paint};
@@ -73,7 +75,7 @@ fn chip_tint(color: Rgba) -> Rgba {
 }
 
 /// The swatch of `entry`, in its series color, inside its swatch box: a line in the series dash
-/// and width, a filled dot, or a filled square.
+/// and width, a filled dot, a filled square, or a bar with caps.
 fn swatch(entry: &RowEntry) -> Item {
     let b = entry.swatch;
     match b.kind {
@@ -95,6 +97,28 @@ fn swatch(entry: &RowEntry) -> Item {
             }
         }
         Swatch::Dot { .. } => dot(b.x + b.width / 2.0, b.center_y, b.width, b.color),
+        Swatch::ErrorBar { vertical, width } => {
+            let (start, end, cap) = if vertical {
+                let x = b.x + b.width / 2.0;
+                (
+                    point(x, b.center_y - b.height / 2.0),
+                    point(x, b.center_y + b.height / 2.0),
+                    b.width,
+                )
+            } else {
+                (
+                    point(b.x, b.center_y),
+                    point(b.x + b.width, b.center_y),
+                    b.height,
+                )
+            };
+            let mut path = Path::new();
+            push_bar(&mut path, vertical, (start, end), Some(cap as f32));
+            Item::Stroke {
+                path,
+                style: bar_style(width, b.color),
+            }
+        }
         Swatch::Square => {
             let (top_left, bottom_right) = (
                 point(b.x, b.center_y - b.height / 2.0),
@@ -222,6 +246,84 @@ mod tests {
         );
         assert!((f64::from(y0) - (b.center_y - b.height / 2.0)).abs() < 1e-3);
         assert!((f64::from(y1) - (b.center_y + b.height / 2.0)).abs() < 1e-3);
+    }
+
+    /// The legend of a figure with vertical and horizontal error bars labelled, in `theme`.
+    fn error_bar_layout(theme: Theme) -> (Theme, Layout) {
+        use crate::model::ErrorBarOptions;
+        let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let options = |label: &str| ErrorBarOptions {
+            label: label.to_owned(),
+            ..ErrorBarOptions::default()
+        };
+        axes.y_error_bars(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.5, 1.0],
+            &[1.5, 2.0],
+            options("Down"),
+        )
+        .unwrap()
+        .x_error_bars(&[0.5], &[0.0], &[1.0], options("Across"))
+        .unwrap();
+        (
+            theme,
+            crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1,
+        )
+    }
+
+    #[test]
+    fn an_error_bar_swatch_is_a_bar_with_a_cap_at_each_end() {
+        let (theme, layout) = error_bar_layout(Theme::pigment());
+        let Some(Item::Group { clip: None, items }) = legend(&theme, &layout) else {
+            panic!("an unclipped legend group");
+        };
+        let entries = layout.legend.entries();
+        assert_eq!(items.len(), 2 * entries.len());
+        let cap = f64::from(theme.cap_width());
+        let size = f64::from(theme.body_size() * theme.font_scale());
+        for (pair, entry, vertical) in [
+            (&items[0], &entries[0], true),
+            (&items[2], &entries[1], false),
+        ] {
+            let b = entry.swatch;
+            let Item::Stroke { path, style } = pair else {
+                panic!("an error bar swatch is a stroke");
+            };
+            assert_eq!(style.cap, LineCap::Butt);
+            assert_eq!(style.color, b.color);
+            // The bar fills the box lengthwise, the caps are the theme's cap width across it,
+            // and the line is at most a quarter of the label size thick.
+            let (long, across) = if vertical {
+                (b.height, b.width)
+            } else {
+                (b.width, b.height)
+            };
+            assert!((long - 1.1 * size).abs() < 1e-3 && (across - cap).abs() < 1e-3);
+            assert!(f64::from(style.width) <= 0.25 * size + 1e-6);
+            let parts: Vec<_> = path.verbs().iter().collect();
+            assert_eq!(parts.len(), 6, "a bar and two caps: {parts:?}");
+            let (min, max) = path.bounds().unwrap();
+            let (w, h) = (f64::from(max.x - min.x), f64::from(max.y - min.y));
+            assert!((w - b.width).abs() < 1e-3 && (h - b.height).abs() < 1e-3);
+            assert!(
+                (f64::from(min.x + max.x) / 2.0 - (b.x + b.width / 2.0)).abs() < 1e-3
+                    && (f64::from(min.y + max.y) / 2.0 - b.center_y).abs() < 1e-3
+            );
+        }
+        // A chips row draws a dot for them as for any series.
+        let (theme, layout) = error_bar_layout(Theme::midnight());
+        let Some(Item::Group { items, .. }) = legend(&theme, &layout) else {
+            panic!("a legend group");
+        };
+        assert_eq!(items.len(), 3 * layout.legend.entries().len());
+        assert!(
+            layout
+                .legend
+                .entries()
+                .iter()
+                .all(|entry| matches!(entry.swatch.kind, Swatch::Dot { .. }))
+        );
     }
 
     #[test]

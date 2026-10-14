@@ -25,11 +25,18 @@ pub(crate) enum Swatch {
     },
     /// A square, for filled bars.
     Square,
+    /// A short bar with a cap at each end, for error bars.
+    ErrorBar {
+        /// Whether the bar runs along y; otherwise along x.
+        vertical: bool,
+        /// The stroke width the series is drawn at, in points.
+        width: f32,
+    },
 }
 
 impl Swatch {
     /// The swatch of a series drawn as `kind`: a line in its dash and width, a dot of its
-    /// marker diameter, or a square.
+    /// marker diameter, a square, or a bar with caps.
     fn of(kind: SeriesKind) -> Swatch {
         match kind {
             SeriesKind::Line { dash, width } | SeriesKind::Rule { dash, width } => {
@@ -37,6 +44,7 @@ impl Swatch {
             }
             SeriesKind::Points { size, .. } => Swatch::Dot { diameter: size },
             SeriesKind::Bar | SeriesKind::Span => Swatch::Square,
+            SeriesKind::ErrorBar { vertical, width } => Swatch::ErrorBar { vertical, width },
         }
     }
 }
@@ -725,5 +733,55 @@ mod tests {
             let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
             assert_eq!(labels, ["95% interval", "Mean"]);
         }
+    }
+
+    #[test]
+    fn error_bars_take_a_bar_row_entry_under_every_style() {
+        use crate::model::ErrorBarOptions;
+        let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .y_error_bars(
+                nums(&[0.0, 10.0]),
+                &[0.5, 1.5],
+                &[1.5, 2.5],
+                ErrorBarOptions {
+                    label: "y interval".into(),
+                    ..ErrorBarOptions::default()
+                },
+            )
+            .unwrap()
+            .x_error_bars(
+                &[1.0, 2.0],
+                &[0.0, 1.0],
+                &[2.0, 3.0],
+                ErrorBarOptions {
+                    label: "x interval".into(),
+                    ..ErrorBarOptions::default()
+                },
+            )
+            .unwrap()
+            .line(nums(&[0.0, 10.0]), &[1.0, 2.0], line("Mean", Dash::Solid))
+            .unwrap();
+        let bar = |vertical| Swatch::ErrorBar {
+            vertical,
+            width: 1.8,
+        };
+        // Direct: the line is labelled at its end; the bars are in the row, never direct.
+        let legend = legend_of(&f, LegendStyle::Direct);
+        let direct: Vec<&str> = legend.direct().iter().map(DirectEntry::label).collect();
+        assert_eq!(direct, ["Mean"]);
+        let row: Vec<(&str, Swatch)> = legend
+            .row()
+            .iter()
+            .map(|entry| (entry.label(), entry.swatch()))
+            .collect();
+        assert_eq!(row, [("y interval", bar(true)), ("x interval", bar(false))]);
+        for style in [LegendStyle::Header, LegendStyle::Chips] {
+            let legend = legend_of(&f, style);
+            let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
+            assert_eq!(labels, ["y interval", "x interval", "Mean"]);
+        }
+        assert!(legend_of(&f, LegendStyle::None).is_empty());
     }
 }
