@@ -4,8 +4,9 @@
 #![allow(clippy::expect_used)]
 
 use umber_core::{
-    Alpha, AreaOptions, AxisData, BarOptions, Error, Figure, HistOptions, LineOptions, LogBase,
-    Result, Rgba, ScaleKind, ScatterOptions, Series, SizeSpec, StepOptions, Theme,
+    Alpha, AreaOptions, AxisData, AxisValue, BarOptions, Error, Figure, HistOptions, LineOptions,
+    LogBase, Result, Rgba, RuleOptions, ScaleKind, ScatterOptions, Series, SizeSpec, SpanOptions,
+    StepOptions, Theme,
 };
 
 const LOG: ScaleKind = ScaleKind::Log { base: LogBase::TEN };
@@ -483,6 +484,65 @@ fn errors_carry_their_parameter_and_hint() {
             }),
             Some("y"),
             Some("use NaN to leave a gap in the line."),
+        ),
+        (
+            "hline, infinite y",
+            on_axes(linear, linear, |a| {
+                a.hline(inf, RuleOptions::default()).map(|_| ())
+            }),
+            Some("y"),
+            Some("pass a finite number."),
+        ),
+        (
+            "vline, NaN x",
+            on_axes(linear, linear, |a| {
+                a.vline(AxisValue::Number(f64::NAN), RuleOptions::default())
+                    .map(|_| ())
+            }),
+            Some("x"),
+            Some("pass a finite number."),
+        ),
+        (
+            "vline, name on a linear axis",
+            on_axes(linear, linear, |a| {
+                a.vline(AxisValue::Category("Q1".into()), RuleOptions::default())
+                    .map(|_| ())
+            }),
+            Some("x"),
+            Some("pass x=Scale.category() to Figure.add_axes()."),
+        ),
+        (
+            "hspan, low not below high",
+            on_axes(linear, linear, |a| {
+                a.hspan(5.0, 2.0, SpanOptions::default()).map(|_| ())
+            }),
+            Some("high"),
+            Some("swap the two values."),
+        ),
+        (
+            "hspan, infinite low",
+            on_axes(linear, linear, |a| {
+                a.hspan(inf, 2.0, SpanOptions::default()).map(|_| ())
+            }),
+            Some("low"),
+            Some("pass a finite number."),
+        ),
+        (
+            "vspan, category x axis",
+            on_axes(cat, linear, |a| {
+                a.vspan(0.0, 1.0, SpanOptions::default()).map(|_| ())
+            }),
+            None,
+            Some("vspan needs a numeric x axis; use vline on a category."),
+        ),
+        (
+            "vline, zero on a log axis",
+            on_axes(LOG, linear, |a| {
+                a.vline(AxisValue::Number(0.0), RuleOptions::default())
+                    .map(|_| ())
+            }),
+            Some("x"),
+            Some("use a linear axis, or pass a positive value."),
         ),
     ];
     for (name, err, parameter, hint) in cases {

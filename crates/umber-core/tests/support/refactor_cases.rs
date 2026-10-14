@@ -92,6 +92,7 @@ mod corpus {
     pub mod inputs;
     pub mod legend;
     pub mod plot_height;
+    pub mod rules;
     pub mod size;
     pub mod step;
     pub mod ticks;
@@ -145,6 +146,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::plot_height::cases(&lib, &mut sink);
     corpus::grid::cases(&lib, &mut sink);
     corpus::step::cases(&lib, &mut sink);
+    corpus::rules::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1678,6 +1680,37 @@ mod record {
                 text(&step.options().label),
                 color_spec(step.options().color),
                 dash(step.options().dash)
+            ),
+            Mark::HLine(rule) => format!(
+                "hline y={} label={} color={} dash={}",
+                floats64(&[rule.y()]),
+                text(&rule.options().label),
+                color_spec(rule.options().color),
+                dash(rule.options().dash)
+            ),
+            Mark::VLine(rule) => format!(
+                "vline x={} label={} color={} dash={}",
+                match rule.x() {
+                    umber_core::AxisValue::Number(x) => floats64(&[*x]),
+                    umber_core::AxisValue::Category(name) => text(name),
+                },
+                text(&rule.options().label),
+                color_spec(rule.options().color),
+                dash(rule.options().dash)
+            ),
+            Mark::HSpan(span) => format!(
+                "hspan low={} high={} label={} color={}",
+                floats64(&[span.low()]),
+                floats64(&[span.high()]),
+                text(&span.options().label),
+                color_spec(span.options().color)
+            ),
+            Mark::VSpan(span) => format!(
+                "vspan low={} high={} label={} color={}",
+                floats64(&[span.low()]),
+                floats64(&[span.high()]),
+                text(&span.options().label),
+                color_spec(span.options().color)
             ),
             _ => "unknown-mark".into(),
         }

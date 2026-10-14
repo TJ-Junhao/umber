@@ -16,7 +16,7 @@ from umber import _args, _color, _series, _size, _ticks, _umber
 from umber._args import instance, integer, real, type_name
 from umber._color import Color
 from umber._enums import Dash, LegendStyle, Marker, Step
-from umber._errors import new_error
+from umber._errors import DataError, new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._series import Series
@@ -860,6 +860,205 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.step(
                 self._row, self._col, xs, ys, position.value, name, spec, style.value, extent
             )
+            return self
+
+    def hline(
+        self,
+        y: float,
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+        dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
+    ) -> Self:
+        """Add a horizontal reference line across the whole plot at ``y``.
+
+        The line is drawn above the data marks. Without explicit y limits the y axis extends to
+        include ``y``; with limits, a line outside them is not drawn.
+
+        Args:
+            y: The y value of the line; finite, and positive on a log y axis.
+            label: The name shown in the legend; an empty string leaves the line out of it.
+                A reference line always takes an entry in the legend row, also under
+                ``LegendStyle.DIRECT``.
+            color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+            dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If ``y`` is not finite, or not positive on a log axis.
+            StyleError: If ``label`` is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1.0, 3.0, 2.0])
+            >>> ax = ax.hline(2.5, label="Threshold", dash=ub.Dash.DASHED)
+        """
+        with api_call():
+            context = "Axes.hline()"
+            value = real(context, "y", y)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
+            name = _args.text(context, "label", label)
+            self._native.hline(self._row, self._col, value, name, spec, style.value, extent)
+            return self
+
+    def vline(
+        self,
+        x: X,
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+        dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
+    ) -> Self:
+        """Add a vertical reference line across the whole plot at ``x``.
+
+        On a linear or log x axis ``x`` is a number, and without explicit x limits the x axis
+        extends to include it. On a category x axis ``x`` is a category name, and the line is
+        drawn at the centre of that category. A name does not add a category: it must be the
+        name of one of the categories of the other marks of these axes, which is checked when
+        the figure is rendered (``DataError`` from ``to_png()``, ``to_svg()`` and the save
+        methods). The line is drawn above the data marks.
+
+        Args:
+            x: The x value of the line: a finite number, positive on a log axis, or a category
+                name.
+            label: The name shown in the legend; an empty string leaves the line out of it.
+                A reference line always takes an entry in the legend row, also under
+                ``LegendStyle.DIRECT``.
+            color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+            dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, including a number on a category
+                axis or a name on a linear or log axis.
+            DataError: If ``x`` is not finite, or not positive on a log axis.
+            StyleError: If ``label`` is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 30, 60], [1.0, 3.0, 2.0])
+            >>> ax = ax.vline(31, label="Event")
+            >>> cats = ub.Figure().add_axes(x=ub.Scale.category()).bar(["Q1", "Q2"], [4, 6])
+            >>> cats = cats.vline("Q2")
+        """
+        with api_call():
+            context = "Axes.vline()"
+            # The kind of x follows the x axis: a name on a category axis, a number otherwise.
+            if self._x == _CATEGORY:
+                _args.require_text(context, "x", x)
+            position: float | str = cast(str, x) if self._x == _CATEGORY else real(context, "x", x)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
+            if isinstance(position, str):
+                position = _args.checked_text(context, "x", "x", position, DataError)
+            name = _args.text(context, "label", label)
+            self._native.vline(self._row, self._col, position, name, spec, style.value, extent)
+            return self
+
+    def hspan(
+        self,
+        low: float,
+        high: float,
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+    ) -> Self:
+        """Add a horizontal reference span between the y values ``low`` and ``high``.
+
+        The span fills the region between the two values across the whole plot, at the opacity
+        of an area, and is drawn below the data marks. Without explicit y limits the y axis
+        extends to include both values; with limits, the span is clipped to them.
+
+        Args:
+            low: The lower y value; finite, and positive on a log y axis.
+            high: The upper y value; finite and above ``low``.
+            label: The name shown in the legend; an empty string leaves the span out of it.
+                A reference span always takes an entry in the legend row, also under
+                ``LegendStyle.DIRECT``.
+            color: The fill color. ``Color.AUTO`` takes the next color of the theme palette.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
+            StyleError: If ``low`` is not below ``high``, or ``label`` is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1.0, 3.0, 2.0])
+            >>> ax = ax.hspan(1.5, 2.5, label="Normal range")
+        """
+        with api_call():
+            context = "Axes.hspan()"
+            lower = real(context, "low", low)
+            upper = real(context, "high", high)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            name = _args.text(context, "label", label)
+            self._native.hspan(self._row, self._col, lower, upper, name, spec)
+            return self
+
+    def vspan(
+        self: "Axes[float, Y]",
+        low: float,
+        high: float,
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+    ) -> "Axes[float, Y]":
+        """Add a vertical reference span between the x values ``low`` and ``high``.
+
+        The span fills the region between the two values across the whole plot, at the opacity
+        of an area, and is drawn below the data marks. Without explicit x limits the x axis
+        extends to include both values; with limits, the span is clipped to them. It needs a
+        linear or log x axis: on a category axis use ``vline()``.
+
+        Args:
+            low: The lower x value; finite, and positive on a log x axis.
+            high: The upper x value; finite and above ``low``.
+            label: The name shown in the legend; an empty string leaves the span out of it.
+                A reference span always takes an entry in the legend row, also under
+                ``LegendStyle.DIRECT``.
+            color: The fill color. ``Color.AUTO`` takes the next color of the theme palette.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
+            StyleError: If ``low`` is not below ``high``, or ``label`` is too long.
+            UsageError: If the x axis is a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 30, 60], [1.0, 3.0, 2.0])
+            >>> ax = ax.vspan(40, 50, label="Window")
+        """
+        with api_call():
+            context = "Axes.vspan()"
+            lower = real(context, "low", low)
+            upper = real(context, "high", high)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            name = _args.text(context, "label", label)
+            self._native.vspan(self._row, self._col, lower, upper, name, spec)
             return self
 
     def _x_values(self, context: str, x: object) -> FloatArray | list[str]:

@@ -39,6 +39,7 @@ pub(crate) mod legend;
 mod line;
 mod mapping;
 mod marker;
+mod rule;
 mod scatter;
 mod step;
 mod stroke;
@@ -91,6 +92,9 @@ pub(crate) fn marks(
         widest_line: widest_line_width(marks),
     };
     let mut items = Vec::new();
+    // Reference spans lie under the data marks and reference lines over them, whatever the order
+    // of the calls; the data marks keep theirs.
+    rule::span_layer(&context, resolved, marks, &mut items);
     for mark in marks {
         match *mark {
             ResolvedMark::Line {
@@ -187,8 +191,14 @@ pub(crate) fn marks(
             } => {
                 step::step_items(&context, resolved, step_mark, (color, width), &mut items);
             }
+            // Drawn in the layers below and above the data marks.
+            ResolvedMark::HLine { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::VSpan { .. } => {}
         }
     }
+    rule::rule_layer(&context, resolved, marks, &mut items);
     if items.is_empty() {
         return None;
     }

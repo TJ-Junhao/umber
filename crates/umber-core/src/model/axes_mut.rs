@@ -10,12 +10,13 @@ use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
 use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
+use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
-    AREA_GAP_HINT, LINE_GAP_HINT, SCATTER_GAP_HINT, check_step_order, check_x_limits,
-    check_x_tick_axis,
+    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_reference_value,
+    check_span, check_step_order, check_vline_x, check_x_limits, check_x_tick_axis,
 };
-use crate::{ContinuousScale, LegendStyle, Result, TickFormat};
+use crate::{ContinuousScale, Error, LegendStyle, Result, TickFormat};
 
 /// One axes of a figure, held for changing: the setters of its texts, limits, ticks and legend
 /// style, and its mark methods. It borrows the whole figure, and dereferences to the [`Axes`]
@@ -878,6 +879,143 @@ impl<'a> AxesMut<'a> {
         let series = XySeries::new(CONTEXT, axes.x, axes.y, x, y, LINE_GAP_HINT)?;
         check_step_order(CONTEXT, series.x())?;
         axes.marks.push(Mark::Step(StepMark::new(series, options)));
+        Ok(self)
+    }
+
+    /// Adds a horizontal reference line across the whole plot at `y`. It is drawn above all data
+    /// marks, and `y` extends the automatic y domain; explicit y limits clip it like any mark.
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`: `y` is not finite, exceeds
+    /// [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) in magnitude, or is not positive on a log axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::RuleOptions;
+    /// use umber_core::{Dash, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let dashed = RuleOptions { dash: Dash::Dashed, ..RuleOptions::default() };
+    /// axes.hline(66.0, dashed)?;
+    /// assert!(axes.hline(f64::NAN, RuleOptions::default()).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hline(&mut self, y: f64, options: RuleOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.hline()";
+        let axes = self.axes_mut();
+        check_reference_value(CONTEXT, "y", REFERENCE_LINE, y, axes.y)?;
+        axes.marks.push(Mark::HLine(HLineMark::new(y, options)));
+        Ok(self)
+    }
+
+    /// Adds a vertical reference line across the whole plot at `x`: a number on a linear or log
+    /// x axis, where it extends the automatic x domain, and a category name on a category x
+    /// axis, where it sits at the centre of the category's band. It is drawn above all data
+    /// marks; explicit x limits clip it like any mark.
+    ///
+    /// A category name does not extend a category axis. Whether the name is one of the axis's
+    /// categories, the names of its other marks, is known only when the figure is rendered:
+    /// [`Figure::to_scene`](crate::Figure::to_scene), [`Figure::to_png`](crate::Figure::to_png)
+    /// and [`Figure::to_svg`](crate::Figure::to_svg) fail with `Error::Data`, in their own
+    /// context, when it is not.
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`: a number on a category axis, a
+    /// name on a linear or log axis, or a number that is not finite, exceeds
+    /// [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) in magnitude or is not positive on a log axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::RuleOptions;
+    /// use umber_core::{AxisValue, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.vline(AxisValue::Number(31.0), RuleOptions::default())?;
+    /// // A name needs a category axis.
+    /// assert!(axes
+    ///     .vline(AxisValue::Category("Q3".into()), RuleOptions::default())
+    ///     .is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn vline(&mut self, x: AxisValue, options: RuleOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.vline()";
+        let axes = self.axes_mut();
+        check_vline_x(CONTEXT, axes.x, &x)?;
+        axes.marks.push(Mark::VLine(VLineMark::new(x, options)));
+        Ok(self)
+    }
+
+    /// Adds a horizontal reference span: the region between the y values `low` and `high`,
+    /// across the whole plot, filled at the area opacity. It is drawn below all data marks, and
+    /// both values extend the automatic y domain; explicit y limits clip it.
+    ///
+    /// Errors leave the axes unchanged. `Error::Data` when `low` or `high`, checked in that
+    /// order, is not finite, exceeds [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) in magnitude or is
+    /// not positive on a log axis; then `Error::Style`, parameter `high`, when `low` is not
+    /// below `high`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::SpanOptions;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.hspan(42.0, 58.0, SpanOptions::default())?;
+    /// assert!(axes.hspan(5.0, 2.0, SpanOptions::default()).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hspan(&mut self, low: f64, high: f64, options: SpanOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.hspan()";
+        let axes = self.axes_mut();
+        check_span(CONTEXT, (low, high), axes.y)?;
+        axes.marks
+            .push(Mark::HSpan(SpanMark::new(low, high, options)));
+        Ok(self)
+    }
+
+    /// Adds a vertical reference span: the region between the x values `low` and `high`, across
+    /// the whole plot, filled at the area opacity. It is drawn below all data marks, and both
+    /// values extend the automatic x domain; explicit x limits clip it. A span needs a numeric
+    /// x axis: on a category x axis use [`AxesMut::vline`].
+    ///
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis; otherwise as
+    /// [`AxesMut::hspan`], for the x axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::SpanOptions;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.vspan(40.0, 50.0, SpanOptions::default())?;
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut categories = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// assert!(categories.vspan(0.0, 1.0, SpanOptions::default()).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn vspan(&mut self, low: f64, high: f64, options: SpanOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.vspan()";
+        let axes = self.axes_mut();
+        let Some(transform) = axes.x.transform() else {
+            return Err(Error::usage(
+                CONTEXT,
+                "this is a category axis; spans along x apply to linear and log axes only.",
+            )
+            .with_hint("vspan needs a numeric x axis; use vline on a category."));
+        };
+        check_span(CONTEXT, (low, high), transform)?;
+        axes.marks
+            .push(Mark::VSpan(SpanMark::new(low, high, options)));
         Ok(self)
     }
 }

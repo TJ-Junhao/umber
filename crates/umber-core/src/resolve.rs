@@ -28,17 +28,19 @@
 //! pass, and drawing and the legend read them instead of the marks.
 
 use crate::binning::Histogram;
+use crate::error::quoted;
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
     Mark, ScatterMark, SeriesView, StepMark,
 };
+use crate::model::{AxisValue, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
 use crate::model::{Edge, holds};
 use crate::scale::{Padding, is_single_value, log_offset};
 use crate::stacking::Stacks;
 use crate::ticks::{AutoTicks, TickValues};
 use crate::{
-    CategoryScale, ColorSpec, ContinuousScale, Dash, Marker, Rgba, ScaleKind, Theme, Tick,
-    Transform, ticks,
+    CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Marker, Result, Rgba, ScaleKind, Theme,
+    Tick, Transform, ticks,
 };
 
 /// The context of errors that cannot happen here: the model validated every input already.
@@ -484,6 +486,77 @@ fn categories(marks: &[ResolvedMark<'_>]) -> CategoryScale {
     CategoryScale::from_first_appearance(marks.iter().flat_map(|mark| mark.x_categories()))
 }
 
+/// Checks, before `figure` is rendered in `context`, that every vertical reference line on a
+/// category x axis sits at a category of its axes: one that a mark of the same axes names. A
+/// line cannot add a category, and the model cannot know the categories of marks added later,
+/// so this is the one place where an unknown name is found. The first line, in the row-major
+/// order of the axes' top-left cells and the order of the marks, whose name is not a category is
+/// the error: `Error::Data` in `context`, without a parameter, since the call that renders has
+/// no `x`. On a grid of more than one cell the message starts with the axes' top-left cell, as
+/// the layout errors of [`pipeline::scene`](crate::pipeline) do.
+pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result<()> {
+    for axes in figure.panels() {
+        if axes.x_scale() != ScaleKind::Category {
+            continue;
+        }
+        let mut lines = axes.marks().iter().filter_map(|mark| match mark {
+            Mark::VLine(line) => match line.x() {
+                AxisValue::Category(name) => Some(name),
+                AxisValue::Number(_) => None,
+            },
+            _ => None,
+        });
+        // Axes without a vertical line at a category need no lookup, and no marks resolved.
+        let Some(first) = lines.next() else {
+            continue;
+        };
+        let scale = CategoryScale::from_first_appearance(
+            axes.marks()
+                .iter()
+                .flat_map(mark_categories)
+                .map(String::as_str),
+        );
+        if let Some(name) = std::iter::once(first)
+            .chain(lines)
+            .find(|name| scale.index_of(name).is_none())
+        {
+            let error = Error::data(
+                context,
+                format!(
+                    "x is {}; no mark on this axes has that category.",
+                    quoted(name)
+                ),
+            )
+            .with_hint("draw a mark with that category first.");
+            let grid = figure.grid();
+            if grid.rows() * grid.cols() == 1 {
+                return Err(error);
+            }
+            let cells = axes.cells();
+            return Err(error.with_message_prefix(&format!(
+                "row {}, col {}: ",
+                cells.row(),
+                cells.col()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// The categories `mark` names on a category x axis, in data order, repeats included: what
+/// [`ResolvedMark::x_categories`] yields for the same mark, found without resolving it.
+fn mark_categories(mark: &Mark) -> &[String] {
+    match mark {
+        Mark::Line(mark) => category_names(mark.x()),
+        Mark::Scatter(mark) => category_names(mark.x()),
+        Mark::Area(mark) => category_names(mark.x()),
+        Mark::Step(mark) => category_names(mark.x()),
+        Mark::Bar(mark) => mark.categories(),
+        Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
+        Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
+    }
+}
+
 /// Resolves both axes from the resolved `marks` and the axes' `limits`, for about `x_target`
 /// and `y_target` ticks.
 pub(crate) fn resolve(
@@ -495,7 +568,17 @@ pub(crate) fn resolve(
     let x = match limits.x {
         AxisLimits::Continuous(x_limits) => {
             let data = extent(marks.iter().flat_map(|mark| mark.x_numbers()));
-            let all_lines = marks.iter().all(|mark| mark.line_width().is_some());
+            // Reference lines and spans do not decide the padding: an axis of lines and
+            // references keeps the exact extent of the lines, while an axis of references
+            // alone is padded.
+            // Only references that give this axis values pad it; a horizontal reference alone
+            // leaves the x axis as it would be without it.
+            let only_references = data.is_some() && marks.iter().all(ResolvedMark::is_reference);
+            let all_lines = !only_references
+                && marks
+                    .iter()
+                    .filter(|mark| !mark.is_reference())
+                    .all(|mark| mark.line_width().is_some());
             let auto = if all_lines {
                 AutoLimits::Exact
             } else {
@@ -658,6 +741,38 @@ pub(crate) enum ResolvedMark<'a> {
         /// The stroke width as drawn, in points.
         width: f32,
     },
+    /// A horizontal reference line.
+    HLine {
+        /// The mark.
+        mark: &'a HLineMark,
+        /// The line color.
+        color: Rgba,
+        /// The stroke width as drawn, in points.
+        width: f32,
+    },
+    /// A vertical reference line.
+    VLine {
+        /// The mark.
+        mark: &'a VLineMark,
+        /// The line color.
+        color: Rgba,
+        /// The stroke width as drawn, in points.
+        width: f32,
+    },
+    /// A horizontal reference span.
+    HSpan {
+        /// The mark.
+        mark: &'a SpanMark,
+        /// The fill color, before the area opacity.
+        color: Rgba,
+    },
+    /// A vertical reference span.
+    VSpan {
+        /// The mark.
+        mark: &'a SpanMark,
+        /// The fill color, before the area opacity.
+        color: Rgba,
+    },
 }
 
 impl<'a> ResolvedMark<'a> {
@@ -672,9 +787,13 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
             ResolvedMark::Area { mark, .. } => numbers(mark.x()),
             ResolvedMark::Step { mark, .. } => numbers(mark.x()),
+            ResolvedMark::VLine { mark, .. } => mark.x_numbers(),
+            ResolvedMark::VSpan { mark, .. } => mark.bounds(),
             ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
-            | ResolvedMark::Stacked { .. } => &[],
+            | ResolvedMark::Stacked { .. }
+            | ResolvedMark::HLine { .. }
+            | ResolvedMark::HSpan { .. } => &[],
             ResolvedMark::Hist { histogram, .. } => {
                 let range = histogram.as_ref().map(Histogram::range);
                 return DomainValues::Computed(Box::new(
@@ -697,7 +816,13 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Grouped { mark, .. } | ResolvedMark::Stacked { mark, .. } => {
                 mark.categories()
             }
-            ResolvedMark::Hist { .. } => &[],
+            // A reference line at a category does not extend the category axis; it is looked up
+            // in the categories of the other marks (see `check_references`).
+            ResolvedMark::Hist { .. }
+            | ResolvedMark::HLine { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::VSpan { .. } => &[],
         }
         .iter()
         .map(String::as_str)
@@ -718,6 +843,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mark, .. } => mark.y(),
             ResolvedMark::Area { mark, .. } => mark.y(),
             ResolvedMark::Step { mark, .. } => mark.y(),
+            ResolvedMark::HLine { mark, .. } => mark.y_values(),
+            ResolvedMark::HSpan { mark, .. } => mark.bounds(),
+            ResolvedMark::VLine { .. } | ResolvedMark::VSpan { .. } => &[],
             ResolvedMark::Bar { mark, .. } => mark.heights(),
             ResolvedMark::Grouped { series, .. } => {
                 return DomainValues::Computed(Box::new(
@@ -748,7 +876,11 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
-            | ResolvedMark::Step { .. } => false,
+            | ResolvedMark::Step { .. }
+            | ResolvedMark::HLine { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::VSpan { .. } => false,
             ResolvedMark::Area { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
@@ -770,7 +902,31 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
-            | ResolvedMark::Hist { .. } => None,
+            | ResolvedMark::Hist { .. }
+            | ResolvedMark::HLine { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::VSpan { .. } => None,
+        }
+    }
+
+    /// Whether the mark is a reference line or span: it runs across the whole plot, extends a
+    /// domain only by its own values, and does not count among the marks that decide how an axis
+    /// is padded (see [`resolve`]).
+    pub fn is_reference(&self) -> bool {
+        match self {
+            ResolvedMark::HLine { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::VSpan { .. } => true,
+            ResolvedMark::Line { .. }
+            | ResolvedMark::Scatter { .. }
+            | ResolvedMark::Area { .. }
+            | ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. }
+            | ResolvedMark::Hist { .. }
+            | ResolvedMark::Step { .. } => false,
         }
     }
 
@@ -823,6 +979,22 @@ impl<'a> ResolvedMark<'a> {
             // end of the line.
             &ResolvedMark::Step { mark, color, width } => {
                 vec![SeriesKey::of_step(mark, color, width, limits)]
+            }
+            // Reference lines and spans have no anchor, and their kinds say that no direct
+            // label ever goes to them (see `SeriesKind::takes_direct_label`).
+            &ResolvedMark::HLine { mark, color, width } => {
+                vec![SeriesKey::of_rule(mark.options(), color, width)]
+            }
+            &ResolvedMark::VLine { mark, color, width } => {
+                vec![SeriesKey::of_rule(mark.options(), color, width)]
+            }
+            &ResolvedMark::HSpan { mark, color } | &ResolvedMark::VSpan { mark, color } => {
+                vec![SeriesKey {
+                    label: &mark.options().label,
+                    color,
+                    kind: SeriesKind::Span,
+                    anchor: None,
+                }]
             }
         }
     }
@@ -889,6 +1061,22 @@ impl<'a> SeriesKey<'a> {
                 width,
             },
             anchor: Anchor::of_step(step, limits),
+        }
+    }
+}
+
+impl<'a> SeriesKey<'a> {
+    /// The key of a reference line of `options` in `color`, drawn `width` pt wide: a line swatch
+    /// in the rule's dash and width, and no anchor.
+    fn of_rule(options: &'a RuleOptions, color: Rgba, width: f32) -> SeriesKey<'a> {
+        SeriesKey {
+            label: &options.label,
+            color,
+            kind: SeriesKind::Rule {
+                dash: options.dash,
+                width,
+            },
+            anchor: None,
         }
     }
 }
@@ -1136,6 +1324,31 @@ pub(crate) enum SeriesKind {
     },
     /// Filled bars.
     Bar,
+    /// A reference line, drawn across the plot with its dash style and drawn width.
+    Rule {
+        /// The dash style.
+        dash: Dash,
+        /// The stroke width as drawn, in points.
+        width: f32,
+    },
+    /// A reference span, a filled region across the plot.
+    Span,
+}
+
+impl SeriesKind {
+    /// Whether a series of this kind may take a direct label at an [`Anchor`] of its own, where
+    /// the legend style is [`LegendStyle::Direct`](crate::LegendStyle::Direct): lines and, through their lines, steps and
+    /// areas. Reference lines and spans never do, whatever their key holds: they take an entry
+    /// in the legend row under every style, as do points and bars.
+    pub fn takes_direct_label(self) -> bool {
+        match self {
+            SeriesKind::Line { .. } => true,
+            SeriesKind::Points { .. }
+            | SeriesKind::Bar
+            | SeriesKind::Rule { .. }
+            | SeriesKind::Span => false,
+        }
+    }
 }
 
 /// Each mark resolved for drawing in `theme`, in mark order: its colors resolved against the
@@ -1207,6 +1420,24 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
                 mark,
                 color: color_of(mark.options().color),
                 width: theme.drawn_line_width(mark.options().width),
+            },
+            Mark::HLine(mark) => ResolvedMark::HLine {
+                mark,
+                color: color_of(mark.options().color),
+                width: theme.drawn_line_width(mark.options().width),
+            },
+            Mark::VLine(mark) => ResolvedMark::VLine {
+                mark,
+                color: color_of(mark.options().color),
+                width: theme.drawn_line_width(mark.options().width),
+            },
+            Mark::HSpan(mark) => ResolvedMark::HSpan {
+                mark,
+                color: color_of(mark.options().color),
+            },
+            Mark::VSpan(mark) => ResolvedMark::VSpan {
+                mark,
+                color: color_of(mark.options().color),
             },
         })
         .collect()
@@ -3518,5 +3749,293 @@ mod tests {
                 "case {case}: {position:?} {xs:?} {ys:?} {lo}..{hi}"
             );
         }
+    }
+
+    use crate::model::{RuleOptions, SpanOptions};
+
+    fn rule() -> RuleOptions {
+        RuleOptions::default()
+    }
+
+    fn span() -> SpanOptions {
+        SpanOptions::default()
+    }
+
+    fn at(x: f64) -> AxisValue {
+        AxisValue::Number(x)
+    }
+
+    /// A figure of linear axes holding a line over x in 0..=10 and y in 2..=6.
+    fn lined() -> Figure {
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .line(nums(&[0.0, 10.0]), &[2.0, 6.0], LineOptions::default())
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn rules_extend_the_domain() {
+        // The line alone: the exact x extent, the nice y extent.
+        let alone = domains(&lined());
+        assert_eq!(alone.0, (0.0, 10.0));
+        assert!(alone.1.1 < 9.0, "{:?}", alone.1);
+        // A rule or a span widens its own axis only, and a line does not stop the x axis from
+        // keeping the exact extent of its data.
+        let mut f = lined();
+        axes(&mut f).hline(9.0, rule()).unwrap();
+        let (x, (_, y_hi)) = domains(&f);
+        assert_eq!(x, alone.0, "an hline does not touch x");
+        assert!(y_hi >= 9.0, "{y_hi}");
+        let mut f = lined();
+        axes(&mut f).vline(at(15.0), rule()).unwrap();
+        let (x, y) = domains(&f);
+        assert_eq!(x, (0.0, 15.0));
+        assert_eq!(y, alone.1, "a vline does not touch y");
+        let mut f = lined();
+        axes(&mut f)
+            .vspan(-3.0, 4.0, span())
+            .unwrap()
+            .hspan(-2.0, 1.0, span())
+            .unwrap();
+        let ((x_lo, x_hi), (y_lo, _)) = domains(&f);
+        assert_eq!((x_lo, x_hi), (-3.0, 10.0));
+        assert!(y_lo <= -2.0, "{y_lo}");
+    }
+
+    #[test]
+    fn explicit_limits_win_over_rules() {
+        let mut f = lined();
+        axes(&mut f)
+            .hline(90.0, rule())
+            .unwrap()
+            .vspan(-30.0, 40.0, span())
+            .unwrap()
+            .xlim(0.0, 12.0)
+            .unwrap()
+            .ylim(0.0, 8.0)
+            .unwrap();
+        assert_eq!(domains(&f), ((0.0, 12.0), (0.0, 8.0)));
+    }
+
+    #[test]
+    fn references_alone_pad_the_axis_and_beside_lines_do_not() {
+        // A span alone: padded, so the span does not fill the view edge to edge.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f).vspan(2.0, 6.0, span()).unwrap();
+        let (x_lo, x_hi) = domains(&f).0;
+        assert!(x_lo < 2.0 && x_hi > 6.0, "{x_lo}..{x_hi}");
+        // Beside a scatter, the nice padding of the scatter decides.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .scatter(nums(&[0.0, 10.0]), &[1.0, 2.0], ScatterOptions::default())
+            .unwrap();
+        let alone = domains(&f).0;
+        axes(&mut f).vspan(2.0, 6.0, span()).unwrap();
+        assert_eq!(domains(&f).0, alone);
+        // Beside lines, the exact extent of the lines stays.
+        let mut f = lined();
+        axes(&mut f).vspan(2.0, 6.0, span()).unwrap();
+        assert_eq!(domains(&f).0, (0.0, 10.0));
+    }
+
+    #[test]
+    fn rules_have_no_effect_on_the_baseline_or_the_categories() {
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .bar(
+                vec!["a".into(), "b".into()],
+                &[1.0, 2.0],
+                BarOptions::default(),
+            )
+            .unwrap()
+            .vline(AxisValue::Category("zzz".into()), rule())
+            .unwrap();
+        let marks = resolve_marks(f.single_axes().marks(), &Theme::pigment());
+        assert_eq!(marks[1].x_categories().count(), 0);
+        assert_eq!(marks[1].x_numbers().count(), 0);
+        assert_eq!(marks[1].y_values().count(), 0);
+        assert!(!marks[1].grows_from_baseline());
+        assert_eq!(marks[1].line_width(), None);
+        assert!(marks[1].is_reference() && !marks[0].is_reference());
+        // The unknown name added no band.
+        let r = resolve_axes(f.single_axes(), 5, 4);
+        let AxisScale::Category(scale) = &r.x.scale else {
+            panic!()
+        };
+        assert_eq!(scale.categories(), ["a", "b"]);
+    }
+
+    #[test]
+    fn reference_keys_have_rule_and_span_kinds_and_no_anchor() {
+        let theme = Theme::pigment();
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .hline(
+                1.0,
+                RuleOptions {
+                    label: "h".into(),
+                    dash: Dash::Dotted,
+                    width: crate::SizeSpec::times(2.0).unwrap(),
+                    ..rule()
+                },
+            )
+            .unwrap()
+            .vline(at(1.0), rule())
+            .unwrap()
+            .hspan(
+                1.0,
+                2.0,
+                SpanOptions {
+                    label: "s".into(),
+                    ..span()
+                },
+            )
+            .unwrap()
+            .vspan(1.0, 2.0, span())
+            .unwrap();
+        let axes = f.single_axes();
+        let resolved = resolve_marks(axes.marks(), &theme);
+        let keys = series_keys(&resolved, &Limits::of(axes));
+        assert_eq!(keys.len(), 4);
+        let width = theme.drawn_line_width(crate::SizeSpec::times(2.0).unwrap());
+        assert_eq!(
+            keys[0].kind,
+            SeriesKind::Rule {
+                dash: Dash::Dotted,
+                width
+            }
+        );
+        assert_eq!(
+            keys[1].kind,
+            SeriesKind::Rule {
+                dash: Dash::Solid,
+                width: theme.drawn_line_width(crate::SizeSpec::Auto)
+            }
+        );
+        assert_eq!(
+            (keys[2].kind, keys[3].kind),
+            (SeriesKind::Span, SeriesKind::Span)
+        );
+        assert!(keys.iter().all(|key| key.anchor.is_none()));
+        assert_eq!(
+            (keys[0].label, keys[2].label, keys[1].label),
+            ("h", "s", "")
+        );
+        // Only lines take direct labels.
+        assert!(
+            SeriesKind::Line {
+                dash: Dash::Solid,
+                width: 1.0
+            }
+            .takes_direct_label()
+        );
+        assert!(keys.iter().all(|key| !key.kind.takes_direct_label()));
+        // Colors come from the one palette sequence, in mark order.
+        assert_eq!(series_colors(&resolved), theme.palette()[..4]);
+    }
+
+    #[test]
+    fn an_unknown_category_is_refused_before_anything_is_drawn() {
+        let build = |name: &str| {
+            let mut f = figure(ScaleKind::Category, LIN);
+            axes(&mut f)
+                .vline(AxisValue::Category(name.into()), rule())
+                .unwrap()
+                .scatter(cats(&["Q1", "Q2"]), &[1.0, 2.0], ScatterOptions::default())
+                .unwrap();
+            f
+        };
+        assert!(check_references(&build("Q2"), "Figure.to_svg()").is_ok());
+        let err = check_references(&build("Q5"), "Figure.to_svg()").unwrap_err();
+        assert!(matches!(err, crate::Error::Data { .. }));
+        assert_eq!(
+            err.to_string(),
+            "Figure.to_svg(): x is \"Q5\"; no mark on this axes has that category."
+        );
+        assert_eq!(
+            (err.parameter(), err.hint()),
+            (None, Some("draw a mark with that category first."))
+        );
+        // Linear axes have no categories to check.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f).vline(at(3.0), rule()).unwrap();
+        assert!(check_references(&f, "Figure.to_svg()").is_ok());
+    }
+
+    #[test]
+    fn a_reference_on_the_other_axis_leaves_an_axis_with_explicit_ticks_alone() {
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        let build = |x: ScaleKind, reference: Option<&dyn Fn(&mut Figure)>| {
+            let mut f = figure(x, LIN);
+            if x == LIN {
+                axes(&mut f).xticks(&[0.0, 10.0]).unwrap();
+            } else {
+                axes(&mut f).xticks(&[1.0, 100.0]).unwrap();
+            }
+            axes(&mut f).ylim(0.0, 10.0).unwrap();
+            if let Some(add) = reference {
+                add(&mut f);
+            }
+            domains(&f)
+        };
+        let hline = |f: &mut Figure| {
+            axes(f).hline(5.0, rule()).unwrap();
+        };
+        let hspan = |f: &mut Figure| {
+            axes(f).hspan(2.0, 4.0, span()).unwrap();
+        };
+        for x in [LIN, log] {
+            assert_eq!(build(x, None), build(x, Some(&hline)), "hline on {x:?}");
+            assert_eq!(build(x, None), build(x, Some(&hspan)), "hspan on {x:?}");
+        }
+        // The same for y: a vertical reference leaves a y axis with explicit ticks alone.
+        let build_y = |reference: bool| {
+            let mut f = figure(LIN, LIN);
+            axes(&mut f)
+                .yticks(&[0.0, 10.0])
+                .unwrap()
+                .xlim(0.0, 10.0)
+                .unwrap();
+            if reference {
+                axes(&mut f)
+                    .vline(at(5.0), rule())
+                    .unwrap()
+                    .vspan(2.0, 4.0, span())
+                    .unwrap();
+            }
+            domains(&f)
+        };
+        assert_eq!(build_y(false), build_y(true));
+        // A reference that does give the axis values still pads it when alone.
+        let mut f = figure(LIN, LIN);
+        axes(&mut f).vspan(2.0, 6.0, span()).unwrap();
+        let (lo, hi) = domains(&f).0;
+        assert!(lo < 2.0 && hi > 6.0);
+    }
+
+    #[test]
+    fn categories_of_marks_are_found_without_resolving_them() {
+        let mut f = figure(ScaleKind::Category, LIN);
+        axes(&mut f)
+            .bar(
+                vec!["a".into(), "b".into()],
+                &[1.0, 2.0],
+                BarOptions::default(),
+            )
+            .unwrap()
+            .scatter(cats(&["c", "a"]), &[1.0, 2.0], ScatterOptions::default())
+            .unwrap()
+            .hline(1.0, rule())
+            .unwrap();
+        let marks = f.single_axes().marks();
+        let found: Vec<&str> = marks
+            .iter()
+            .flat_map(mark_categories)
+            .map(String::as_str)
+            .collect();
+        let resolved = resolve_marks(marks, &Theme::pigment());
+        let expected: Vec<&str> = resolved.iter().flat_map(|m| m.x_categories()).collect();
+        assert_eq!(found, expected);
     }
 }

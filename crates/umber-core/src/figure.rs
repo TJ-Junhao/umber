@@ -29,10 +29,11 @@ pub use crate::model::{
     LineOptions, MAX_GRID, Mark, Placement, ScatterMark, ScatterOptions, Series, SeriesView, Share,
     Step, StepMark, StepOptions,
 };
+pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 
 use crate::render::{SvgText, check_dpi, render_png, render_svg};
 use crate::scene::Scene;
-use crate::{FontLibrary, Result, pipeline};
+use crate::{FontLibrary, Result, pipeline, resolve};
 
 impl Figure {
     /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.
@@ -84,6 +85,11 @@ impl Figure {
     /// label wider than its plot area (`row 0, col 1: the title is … pt wide; the panel has …
     /// pt.`), or a direct label that would end past the axes' share of the canvas.
     ///
+    /// `Error::Data` in the same context, without a parameter, when a vertical reference line
+    /// ([`AxesMut::vline`]) on a category x axis names a category that no other mark of its axes
+    /// has. This is checked before any axes is laid out, and so is found even when another axes
+    /// does not fit; on a grid the message starts with the axes' cell as above.
+    ///
     /// # Examples
     ///
     /// ```
@@ -106,7 +112,7 @@ impl Figure {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn to_scene(&self, library: &FontLibrary) -> Result<Scene> {
-        pipeline::scene(self, library, "Figure.to_scene()")
+        self.scene(library, "Figure.to_scene()")
     }
 
     /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`].
@@ -135,7 +141,7 @@ impl Figure {
     /// ```
     pub fn to_png(&self, dpi: i64) -> Result<Vec<u8>> {
         let dpi = check_dpi("Figure.to_png()", dpi)?;
-        let scene = pipeline::scene(self, FontLibrary::global(), "Figure.to_png()")?;
+        let scene = self.scene(FontLibrary::global(), "Figure.to_png()")?;
         render_png(&scene, dpi)
     }
 
@@ -159,8 +165,18 @@ impl Figure {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn to_svg(&self, text: SvgText) -> Result<String> {
-        let scene = pipeline::scene(self, FontLibrary::global(), "Figure.to_svg()")?;
+        let scene = self.scene(FontLibrary::global(), "Figure.to_svg()")?;
         Ok(render_svg(&scene, text))
+    }
+}
+
+impl Figure {
+    /// The scene of the figure, rendered in `context`: first the checks that need every mark of
+    /// every axes, which only the render can make (see [`resolve::check_references`]), then the
+    /// pipeline.
+    fn scene(&self, library: &FontLibrary, context: &'static str) -> Result<Scene> {
+        resolve::check_references(self, context)?;
+        pipeline::scene(self, library, context)
     }
 }
 
@@ -328,5 +344,88 @@ mod tests {
         .unwrap();
         assert_eq!(resolved_colors(&f), vec![first.with_alpha(alpha)]);
         assert_eq!(resolved_colors(&f)[0].a, alpha.to_u8());
+    }
+
+    /// A figure of category axes holding a scatter at `Q1` and `Q2` and a vertical line at `at`.
+    fn category_line(at: &str) -> Figure {
+        let mut f = figure();
+        f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .scatter(
+                AxisData::Categories(vec!["Q1".into(), "Q2".into()]),
+                &[1.0, 2.0],
+                crate::model::ScatterOptions::default(),
+            )
+            .unwrap()
+            .vline(
+                crate::AxisValue::Category(at.into()),
+                crate::RuleOptions::default(),
+            )
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn unknown_category_fails_at_render() {
+        let f = category_line("Q5");
+        // The call that added the line succeeded; the three renders each fail in their own
+        // context, with the name quoted and no parameter.
+        let text = "x is \"Q5\"; no mark on this axes has that category.";
+        let lib = FontLibrary::global();
+        let errors = [
+            ("Figure.to_scene()", f.to_scene(lib).unwrap_err()),
+            ("Figure.to_png()", f.to_png(72).unwrap_err()),
+            (
+                "Figure.to_svg()",
+                f.to_svg(crate::SvgText::Editable).unwrap_err(),
+            ),
+        ];
+        for (context, err) in errors {
+            assert!(matches!(err, crate::Error::Data { .. }), "{err:?}");
+            assert_eq!(err.to_string(), format!("{context}: {text}"));
+            assert_eq!(err.parameter(), None);
+            assert_eq!(err.hint(), Some("draw a mark with that category first."));
+        }
+        // A known category renders; so does a name another mark brings later.
+        assert!(category_line("Q2").to_scene(lib).is_ok());
+        let mut f = category_line("Q5");
+        f.single_axes_mut()
+            .scatter(
+                AxisData::Categories(vec!["Q5".into()]),
+                &[3.0],
+                crate::model::ScatterOptions::default(),
+            )
+            .unwrap();
+        assert!(f.to_scene(lib).is_ok());
+        // Rendering is repeatable: the failure leaves the figure as it was.
+        let f = category_line("Q5");
+        let before = f.clone();
+        assert!(f.to_scene(lib).is_err());
+        assert_eq!(f, before);
+    }
+
+    #[test]
+    fn unknown_category_on_a_grid_names_its_cell() {
+        let mut f = Figure::with_grid(12.0, 4.0, Theme::pigment(), crate::Grid::new(1, 2).unwrap())
+            .unwrap();
+        let at = |col| crate::Placement {
+            row: GridIndex::At(0),
+            col: GridIndex::At(col),
+            ..crate::Placement::default()
+        };
+        f.add_axes_at(at(0), ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap();
+        f.add_axes_at(at(1), ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .vline(
+                crate::AxisValue::Category("Q5".into()),
+                crate::RuleOptions::default(),
+            )
+            .unwrap();
+        let err = f.to_scene(FontLibrary::global()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Figure.to_scene(): row 0, col 1: x is \"Q5\"; no mark on this axes has that category."
+        );
     }
 }

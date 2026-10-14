@@ -27,7 +27,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use umber_core::{
     AreaOptions, AxesMut, BarOptions, Dash, Grid, GridIndex, HistOptions, LegendMode, LegendStyle,
-    LineOptions, Marker, Placement, ScatterOptions, Series, Share, Step, StepOptions, SvgText,
+    LineOptions, Marker, Placement, RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step,
+    StepOptions, SvgText,
 };
 
 use crate::color::{ColorArg, color_spec};
@@ -37,7 +38,7 @@ use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
 use crate::ticks::{TickFormatArg, tick_format};
-use crate::values::{axis_data, floats, names, shared_floats};
+use crate::values::{axis_data, axis_value, floats, names, shared_floats};
 
 /// The series of a grouped or stacked bar chart: `(label, values, color)` for each series.
 type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
@@ -509,6 +510,93 @@ impl Figure {
         };
         self.axes(row, col)?
             .step_shared(x, y, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a horizontal reference line at `y`.
+    fn hline(
+        &mut self,
+        row: i64,
+        col: i64,
+        y: f64,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let options = RuleOptions {
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+        };
+        self.axes(row, col)?
+            .hline(y, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a vertical reference line at `x`, a `float` or, on a category x axis, a `str`.
+    fn vline(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let x = axis_value(x)?;
+        let options = RuleOptions {
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+        };
+        self.axes(row, col)?
+            .vline(x, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a horizontal reference span between the y values `low` and `high`.
+    fn hspan(
+        &mut self,
+        row: i64,
+        col: i64,
+        low: f64,
+        high: f64,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let options = SpanOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        self.axes(row, col)?
+            .hspan(low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a vertical reference span between the x values `low` and `high`.
+    fn vspan(
+        &mut self,
+        row: i64,
+        col: i64,
+        low: f64,
+        high: f64,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let options = SpanOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        self.axes(row, col)?
+            .vspan(low, high, options)
             .map(drop)
             .map_err(core_error)
     }

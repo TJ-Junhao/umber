@@ -348,6 +348,10 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "stacked_bar": lambda f, r, c: f.stacked_bar(r, c, ["a"], [("s", floats(1), AUTO)]),
     "hist": lambda f, r, c: f.hist(r, c, floats(1), 3, "", AUTO),
     "step": lambda f, r, c: f.step(r, c, floats(1), floats(1), 0, "", AUTO, 0, NO_SIZE),
+    "hline": lambda f, r, c: f.hline(r, c, 1.0, "", AUTO, 0, NO_SIZE),
+    "vline": lambda f, r, c: f.vline(r, c, 1.0, "", AUTO, 0, NO_SIZE),
+    "hspan": lambda f, r, c: f.hspan(r, c, 1.0, 2.0, "", AUTO),
+    "vspan": lambda f, r, c: f.vspan(r, c, 1.0, 2.0, "", AUTO),
 }
 
 

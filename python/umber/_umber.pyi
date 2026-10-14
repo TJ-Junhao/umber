@@ -261,6 +261,32 @@ class Figure:
         dash: int,
         width: _SizeArg,
     ) -> None: ...
+    def hline(
+        self,
+        row: int,
+        col: int,
+        y: float,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def vline(
+        self,
+        row: int,
+        col: int,
+        x: float | str,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def hspan(
+        self, row: int, col: int, low: float, high: float, label: str, color: _ColorArg
+    ) -> None: ...
+    def vspan(
+        self, row: int, col: int, low: float, high: float, label: str, color: _ColorArg
+    ) -> None: ...
     def to_png(self, dpi: int) -> bytes: ...
     def to_svg(self, text: int) -> str: ...
     # The file variants report render errors in the context of Figure.save_png() and

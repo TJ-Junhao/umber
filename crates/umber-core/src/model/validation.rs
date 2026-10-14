@@ -166,6 +166,125 @@ pub(super) fn check_step_order(context: &'static str, x: &AxisData) -> Result<()
     Ok(())
 }
 
+/// The words that finish the message for a reference line whose value is not finite.
+pub(super) const REFERENCE_LINE: &str = "a reference line needs a finite value";
+
+/// The hint for a reference value that is not finite.
+const REFERENCE_VALUE_HINT: &str = "pass a finite number.";
+
+/// Checks the value `value` of a reference line or span, shown as `name` in messages and held by
+/// the Python parameter `name`, against the transform of the axis it sits on, before the mark is
+/// stored. `requirement` finishes the message for a value that is not finite (`"a reference line
+/// needs a finite value"`). Unlike the values of a series, NaN is refused: there is no gap to
+/// leave in a single line.
+pub(super) fn check_reference_value(
+    context: &'static str,
+    name: &'static str,
+    requirement: &str,
+    value: f64,
+    transform: Transform,
+) -> Result<()> {
+    if !value.is_finite() {
+        return Err(Error::data(
+            context,
+            format!("{name} is {v}; {requirement}.", v = number(value)),
+        )
+        .with_parameter(name)
+        .with_hint(REFERENCE_VALUE_HINT));
+    }
+    if value.abs() > MAX_MAGNITUDE {
+        return Err(Error::data(
+            context,
+            format!(
+                "{name} is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
+                v = number(value)
+            ),
+        )
+        .with_parameter(name));
+    }
+    if matches!(transform, Transform::Log(_)) {
+        if value <= 0.0 {
+            return Err(Error::data(
+                context,
+                format!(
+                    "{name} is {v} on a log axis; values must be positive.",
+                    v = number(value)
+                ),
+            )
+            .with_parameter(name)
+            .with_hint("use a linear axis, or pass a positive value."));
+        }
+        if value < MIN_LOG_VALUE {
+            return Err(Error::data(
+                context,
+                format!(
+                    "{name} is {v} on a log axis; values must be at least {MIN_LOG_VALUE:e}.",
+                    v = number(value)
+                ),
+            )
+            .with_parameter(name)
+            .with_hint("use a linear axis, or rescale the value."));
+        }
+    }
+    Ok(())
+}
+
+/// Checks the ends of a span, `low` and `high`, of the axis with the transform `transform`,
+/// before it is stored: each end is checked as [`check_reference_value`] checks a value, `low`
+/// first, and then `low` must be below `high`.
+pub(super) fn check_span(
+    context: &'static str,
+    (low, high): (f64, f64),
+    transform: Transform,
+) -> Result<()> {
+    const REQUIREMENT: &str = "a reference span needs finite values";
+    check_reference_value(context, "low", REQUIREMENT, low, transform)?;
+    check_reference_value(context, "high", REQUIREMENT, high, transform)?;
+    if low >= high {
+        return Err(Error::style(
+            context,
+            format!(
+                "low is {low}, high is {high}; low must be below high.",
+                low = number(low),
+                high = number(high)
+            ),
+        )
+        .with_parameter("high")
+        .with_hint("swap the two values."));
+    }
+    Ok(())
+}
+
+/// Checks the x of a vertical reference line against the x axis of scale kind `kind`, before the
+/// line is stored: a number needs a linear or log axis and is checked as
+/// [`check_reference_value`] checks a value, a category name needs a category axis. Whether the
+/// name is one of the axis's categories is not known until the figure is rendered.
+pub(super) fn check_vline_x(
+    context: &'static str,
+    kind: ScaleKind,
+    x: &super::rule::AxisValue,
+) -> Result<()> {
+    use super::rule::AxisValue;
+    match (x, kind.transform()) {
+        (AxisValue::Number(x), Some(transform)) => {
+            check_reference_value(context, "x", REFERENCE_LINE, *x, transform)
+        }
+        (AxisValue::Category(_), None) => Ok(()),
+        (AxisValue::Number(_), None) => Err(Error::data(
+            context,
+            "x holds a number but the x axis is a category axis; pass a category name.",
+        )
+        .with_parameter("x")
+        .with_hint(X_SCALE_HINT)),
+        (AxisValue::Category(_), Some(_)) => Err(Error::data(
+            context,
+            "x holds a category name but the x axis is not a category axis; pass a number.",
+        )
+        .with_parameter("x")
+        .with_hint("pass x=Scale.category() to Figure.add_axes().")),
+    }
+}
+
 /// Validates the categories and heights of a bar mark for axes with an x axis of scale kind
 /// `x_kind` and a y axis of transform `y_transform`, before it is stored, so a failed call
 /// changes nothing. The checks run in a fixed order and the first failure is the error, under
