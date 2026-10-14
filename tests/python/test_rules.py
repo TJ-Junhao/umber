@@ -461,7 +461,7 @@ def test_a_category_that_a_later_mark_brings_is_known_at_render() -> None:
     fig = _unknown_category()
     with pytest.raises(ub.DataError):
         fig.to_svg()
-    fig.axes.scatter(["Q5"], [3.0])
+    fig.axes_at(x=ub.Scale.category()).scatter(["Q5"], [3.0])
     assert fig.to_svg()
 
 

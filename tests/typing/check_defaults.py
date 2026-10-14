@@ -5,7 +5,7 @@ Checked by pyright and mypy in strict mode; see ``check_errors.py`` for the mark
 without arguments is ``Axes[float, float]`` under both checkers.
 """
 
-from typing import Any, assert_type
+from typing import assert_type
 
 import umber as ub
 
@@ -20,8 +20,8 @@ assert_type(ub.Figure().add_axes(x=ub.Scale.log(), y=ub.Scale.log()), ub.Axes[fl
 assert_type(ub.Figure().add_axes(x=ub.Scale.category()), ub.Axes[str, float])
 assert_type(ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.log()), ub.Axes[str, float])
 
-# Positive: the axes of an existing figure are not narrowed, and the quick functions are exact.
-assert_type(ub.Figure().axes, ub.Axes[Any, Any])
+# Positive: retrieving axes and the quick functions have exact types.
+assert_type(ub.Figure().axes_at(), ub.Axes[float, float])
 assert_type(ub.line([0.0], [1.0]), ub.Axes[float, float])
 assert_type(ub.scatter([0.0], [1.0]), ub.Axes[float, float])
 assert_type(ub.bar(["A"], [1.0]), ub.Axes[str, float])

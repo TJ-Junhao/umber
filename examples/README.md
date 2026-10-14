@@ -3,6 +3,7 @@
 Each script is self-contained and writes its chart as a PNG next to itself. Run one with `python line.py`.
 
 - `line.py`: two lines with labels, a title, a subtitle and axis labels.
+- `subplots.py`: a 2 × 2 grid with x scales shared by column, a comparison panel spanning both rows and a merged legend.
 - `scatter.py`: two point clouds with different markers and sizes.
 - `area.py`: an area chart with the gradient fill style.
 - `stacked_area.py`: renewable generation in three stacked layers, outlined over flat fills.

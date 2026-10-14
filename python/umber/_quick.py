@@ -2,7 +2,8 @@
 
 Each quick function is ``Figure(theme=theme)``, then ``add_axes()``, then the mark method of
 the same name, and returns the axes. It registers nothing: every call makes a new figure,
-reached through the returned axes' ``figure``. Errors found by the mark method keep its
+reached through the returned axes' ``figure``. Use ``axes_at()`` to reach its panel again,
+passing ``x=Scale.category()`` for a bar chart. Errors found by the mark method keep its
 context, such as ``Axes.line(): …``, and the highlight points at the quick function's call.
 """
 

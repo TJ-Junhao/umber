@@ -124,9 +124,8 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 }
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
-/// pairs. `Share` and `Legend` are bound for the grid figure's constructor but are not public
-/// Python enums yet, so they are not listed.
-const TABLES: [(&str, &[(&str, i64)]); 8] = [
+/// pairs. The Python-only `Auto` sentinel has no core enum table.
+const TABLES: [(&str, &[(&str, i64)]); 10] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (Font::PY_NAME, Font::MEMBERS),
@@ -134,6 +133,8 @@ const TABLES: [(&str, &[(&str, i64)]); 8] = [
     (FillStyle::PY_NAME, FillStyle::MEMBERS),
     (GridLines::PY_NAME, GridLines::MEMBERS),
     (SvgText::PY_NAME, SvgText::MEMBERS),
+    (Share::PY_NAME, Share::MEMBERS),
+    (LegendMode::PY_NAME, LegendMode::MEMBERS),
     (Step::PY_NAME, Step::MEMBERS),
 ];
 
@@ -196,6 +197,8 @@ mod tests {
                 "FillStyle",
                 "GridLines",
                 "SvgText",
+                "Share",
+                "Legend",
                 "Step"
             ]
         );

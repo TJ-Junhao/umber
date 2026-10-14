@@ -56,7 +56,7 @@ def test_the_figure_renders_once_the_labels_are_shortened(tmp_path: Path) -> Non
         fig.to_svg()
     assert str(caught.value) == f"Figure.to_svg(): {MESSAGE}"
     # 42 W's are 214.2 pt wide and fit.
-    fig.axes.xticks_labeled([0, 1], ["0", "W" * 42])
+    fig.axes_at().xticks_labeled([0, 1], ["0", "W" * 42])
     assert fig.to_png(dpi=72)[1:4] == b"PNG"
     assert fig.to_svg().startswith("<svg")
     fig.save_png(tmp_path / "out.png", dpi=72)
@@ -113,9 +113,9 @@ def test_y_labels_fail_the_same_way_without_x_ticks_or_with_an_empty_label() -> 
     expected = str(caught.value)
     assert expected.startswith('Figure.to_svg(): y tick label "W')
     no_ticks = _end_after_wide_y_labels(100)
-    no_ticks.axes.xticks([])
+    no_ticks.axes_at().xticks([])
     empty = _end_after_wide_y_labels(100)
-    empty.axes.xticks_labeled([0.5], [""])
+    empty.axes_at().xticks_labeled([0.5], [""])
     for fig in (no_ticks, empty):
         with pytest.raises(ub.StyleError) as caught:
             fig.to_svg()

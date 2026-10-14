@@ -458,6 +458,50 @@ def test_native_grid_places_and_finds_axes() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("place", "message", "parameter", "hint"),
+    [
+        (
+            (1, 5, 0, 0, 1, 1),
+            "row is 5; this figure has rows 0 to 1.",
+            "row",
+            RANGE_HINT,
+        ),
+        (
+            (1, -1, 0, 0, 1, 1),
+            "row is -1; this figure has rows 0 to 1.",
+            "row",
+            RANGE_HINT,
+        ),
+        (
+            (1, 1, 1, 0, 2, 0),
+            "row 1 with row_span 2 runs past the last row, 1.",
+            "row_span",
+            "use a smaller span or a larger grid.",
+        ),
+        (
+            (1, 0, 1, 0, 2**63 - 1, -1),
+            "row 0 with row_span 9223372036854775807 runs past the last row, 1.",
+            "row_span",
+            "use a smaller span or a larger grid.",
+        ),
+    ],
+)
+def test_native_add_axes_value_errors_follow_parameter_order(
+    place: tuple[int, int, int, int, int, int], message: str, parameter: str, hint: str
+) -> None:
+    fig = grid_figure(2, 2)
+    before = fig.to_svg(EDITABLE)
+    assert_reported(
+        lambda: fig.add_axes(*place, LINEAR, 10.0, LINEAR, 10.0),
+        ub.UsageError,
+        f"Figure.add_axes(): {message}",
+        parameter,
+        hint,
+    )
+    assert fig.to_svg(EDITABLE) == before
+
+
 def test_native_grid_helpers() -> None:
     assert _umber.grid_auto_size(2, 3) == (18.0, 8.0)
     assert _umber.grid_cells(2, 3, 4) == [(0, 0), (0, 1), (0, 2), (1, 0)]
