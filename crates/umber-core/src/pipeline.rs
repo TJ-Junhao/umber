@@ -1,48 +1,49 @@
 //! The render pipeline: from a [`Figure`] to its [`Scene`].
 //!
 //! Scales, ticks and the layout depend on each other: ticks depend on the plot size, and the
-//! plot size depends on the tick label widths. [`plan`] settles them in two passes for one
-//! axes in its frame; [`scene`] then draws each axes' chrome, marks, legend and baseline.
+//! plot size depends on the tick label widths. [`plan`] settles them in two passes for every
+//! panel of a figure at once; [`scene`] then draws each panel's chrome, marks, legend and
+//! baseline.
 
-use crate::error::Error;
-use crate::layout::{self, Edges, Frame, Layout, LayoutInput, MeasuredLegend};
+use crate::layout::{self, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize};
 use crate::legend::Legend;
 use crate::model::{Axes, Figure};
 use crate::resolve::{self, Limits, Resolved, ResolvedMark};
 use crate::scene::Scene;
 use crate::{FontLibrary, Result, Theme, draw};
 
-/// Resolves and lays out the axes of `input` in `frame`, whose sides on the canvas edge `edges`
-/// names, in two passes: ticks depend on the plot size, and the plot size depends on the tick
-/// label widths. The first pass assumes the plot fills the frame inside the padding; the
-/// second uses the plot size of the first, and is final. `marks` are the axes' marks, resolved
-/// once by the caller; each pass resolves the axes from them.
-///
-/// # Errors
-///
-/// As [`layout::lay_out_in`], from either pass: the second pass needs the plot size of the
-/// first.
-pub(crate) fn plan(
-    input: &LayoutInput<'_>,
-    marks: &[ResolvedMark<'_>],
-    frame: Frame,
-    edges: Edges,
-) -> Result<(Resolved, Layout)> {
-    let limits = Limits::of(input.axes);
-    let guess = layout::initial_plot_size(frame.width, frame.height);
-    let (tx, ty) = layout::tick_targets(guess);
-    let first = resolve::resolve(marks, &limits, tx, ty);
-    let first = layout::lay_out_in(input, &first, frame, edges)?;
-    let (tx, ty) = layout::tick_targets(first.plot.size());
-    let resolved = resolve::resolve(marks, &limits, tx, ty);
-    let layout = layout::lay_out_in(input, &resolved, frame, edges)?;
-    Ok((resolved, layout))
+/// One panel's records that layout and drawing share: its axes, its marks resolved against the
+/// theme, and its legend, measured. They are made once, before layout.
+struct Panel<'a> {
+    /// The axes.
+    axes: &'a Axes,
+    /// The axes' marks, resolved.
+    marks: Vec<ResolvedMark<'a>>,
+    /// The axes' legend, measured.
+    legend: MeasuredLegend<'a>,
 }
 
-/// The legend of `axes` with its resolved `marks`, its row and its direct labels, measured once
-/// for a `width` pt canvas. The legend uses the style set on the axes, else the theme's.
+/// The records of every panel of `figure`, in the order of [`Figure::panels`]. The legend uses
+/// the style set on the axes, else the theme's.
+fn panels<'a>(figure: &'a Figure, lib: &FontLibrary) -> Vec<Panel<'a>> {
+    let theme = figure.theme();
+    figure
+        .panels()
+        .map(|axes| {
+            let marks = resolve::resolve_marks(axes.marks(), theme);
+            let legend = measure_legend(theme, axes, &marks, lib);
+            Panel {
+                axes,
+                marks,
+                legend,
+            }
+        })
+        .collect()
+}
+
+/// The legend of `axes` with its resolved `marks`, its row entries and its direct labels,
+/// measured once. The legend uses the style set on the axes, else the theme's.
 fn measure_legend<'a>(
-    width: f64,
     theme: &Theme,
     axes: &Axes,
     marks: &[ResolvedMark<'a>],
@@ -50,23 +51,94 @@ fn measure_legend<'a>(
 ) -> MeasuredLegend<'a> {
     let style = axes.legend_style().unwrap_or(theme.legend_style());
     let legend = Legend::new(style, marks, &Limits::of(axes));
-    MeasuredLegend::measure(width, theme, &legend, lib)
+    MeasuredLegend::measure(theme, &legend, lib)
 }
 
-/// `err`, a layout error of the axes whose top-left cell is at `row`, `col`, naming that cell
-/// first on a grid of more than one cell; unchanged on a 1 × 1 grid.
-fn panel_error(figure: &Figure, axes: &Axes, err: Error) -> Error {
-    let grid = figure.grid();
-    if grid.rows() * grid.cols() == 1 {
-        return err;
-    }
-    let cells = axes.cells();
-    err.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
+/// Resolves and lays out every panel of `figure`, whose records are `panels`, in two passes:
+/// ticks depend on the plot size, and the plot size depends on the tick label widths. The
+/// first pass assumes each plot fills its cells inside the padding (the whole canvas inside the
+/// padding for a figure of one cell); the second uses each panel's plot size from the first,
+/// and is final. Each pass resolves every panel from its marks for its tick targets, measures
+/// it ([`layout::measure_panel`]) and solves the grid ([`layout::solve_grid`]); the panels are
+/// then placed for the final solve ([`layout::place_panel`]), and on a grid the texts of every
+/// panel are checked to stay in its cells ([`layout::check_panel_contents`]). Layout errors are
+/// reported in `context`.
+///
+/// # Errors
+///
+/// As [`layout::solve_grid`], from either pass: the second pass needs the plot sizes of the
+/// first; then as [`layout::check_panel_contents`], for the final layout only.
+fn plan(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    lib: &FontLibrary,
+    context: &'static str,
+) -> Result<Vec<(Resolved, Layout)>> {
+    let theme = figure.theme();
+    let inputs: Vec<LayoutInput<'_>> = panels
+        .iter()
+        .map(|panel| LayoutInput {
+            theme,
+            axes: panel.axes,
+            legend: &panel.legend,
+            lib,
+            context,
+        })
+        .collect();
+    let grid = GridInput {
+        width: figure.width_in() * 72.0,
+        height: figure.height_in() * 72.0,
+        grid: figure.grid(),
+        theme,
+        context,
+        panels: &inputs,
+    };
+    let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
+    let pass = |sizes: Vec<PlotSize>| -> (Vec<Resolved>, Vec<PanelBands>) {
+        let resolved: Vec<Resolved> = panels
+            .iter()
+            .zip(&limits)
+            .zip(sizes)
+            .map(|((panel, limits), size)| {
+                let (tx, ty) = layout::tick_targets(size);
+                resolve::resolve(&panel.marks, limits, tx, ty)
+            })
+            .collect();
+        let bands = inputs
+            .iter()
+            .zip(&resolved)
+            .map(|(input, resolved)| {
+                layout::measure_panel(input, resolved, grid.span(input.axes.cells()))
+            })
+            .collect();
+        (resolved, bands)
+    };
+    let guesses = inputs
+        .iter()
+        .map(|input| grid.initial_plot_size(input.axes.cells()))
+        .collect();
+    let (_, bands) = pass(guesses);
+    let first = layout::solve_grid(&grid, &bands)?;
+    let sizes = first.panels.iter().map(|slot| slot.plot.size()).collect();
+    let (resolved, bands) = pass(sizes);
+    let solution = layout::solve_grid(&grid, &bands)?;
+    let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = inputs
+        .iter()
+        .zip(resolved)
+        .zip(bands)
+        .zip(&solution.panels)
+        .map(|(((input, resolved), bands), slot)| {
+            let layout = layout::place_panel(input, &resolved, bands, slot);
+            (resolved, layout)
+        })
+        .unzip();
+    layout::check_panel_contents(&grid, &layouts)?;
+    Ok(resolved.into_iter().zip(layouts).collect())
 }
 
-/// [`plan`] for the axes of `figure` whose top-left cell is at `cell`, at the figure's size,
-/// with its marks resolved against its theme. Panics when the cell holds no axes or the axes
-/// cannot be laid out.
+/// [`plan`] for the axes of `figure` whose top-left cell is at `cell`, with the figure laid out
+/// as [`scene`] lays it out. Panics when the cell holds no axes or the figure cannot be laid
+/// out.
 #[cfg(test)]
 pub(crate) fn plan_figure(
     figure: &Figure,
@@ -77,49 +149,72 @@ pub(crate) fn plan_figure(
 }
 
 /// [`plan`] for the axes of `figure` whose top-left cell is at `cell`, as [`plan_figure`], with
-/// layout errors reported in `"Figure.to_scene()"`, named by the cell as [`scene`] names them.
-/// Panics when the cell holds no axes.
+/// layout errors reported in `"Figure.to_scene()"` as [`scene`] reports them. Panics when the
+/// cell holds no axes.
 #[cfg(test)]
 pub(crate) fn try_plan_figure(
     figure: &Figure,
     cell: (usize, usize),
     lib: &FontLibrary,
 ) -> Result<(Resolved, Layout)> {
-    with_layout_input(figure, cell, lib, |input, marks, frame, edges| {
-        plan(input, marks, frame, edges).map_err(|err| panel_error(figure, input.axes, err))
-    })
+    let index = panel_index(figure, cell);
+    let panels = panels(figure, lib);
+    let mut planned = plan(figure, &panels, lib, "Figure.to_scene()")?;
+    Ok(planned.swap_remove(index))
+}
+
+/// [`plan`] for every axes of `figure`, in the order of [`Figure::panels`], with layout errors
+/// reported in `"Figure.to_scene()"` as [`scene`] reports them.
+#[cfg(test)]
+pub(crate) fn try_plan_panels(
+    figure: &Figure,
+    lib: &FontLibrary,
+) -> Result<Vec<(Resolved, Layout)>> {
+    plan(figure, &panels(figure, lib), lib, "Figure.to_scene()")
+}
+
+/// The index, in the order of [`Figure::panels`], of the axes of `figure` whose top-left cell
+/// is at `cell`. Panics when the cell holds no axes.
+#[cfg(test)]
+fn panel_index(figure: &Figure, (row, col): (usize, usize)) -> usize {
+    figure
+        .panels()
+        .position(|axes| axes.cells().row() == row && axes.cells().col() == col)
+        .expect("the cell holds axes")
 }
 
 /// `f` called with the layout input of the axes of `figure` whose top-left cell is at `cell`,
-/// at the figure's size, with layout errors reported in `"Figure.to_scene()"`, with the axes'
-/// marks resolved against the figure's theme, and with the axes' frame and edges. Panics when
-/// the cell holds no axes.
+/// with layout errors reported in `"Figure.to_scene()"` and the axes' marks resolved against
+/// the figure's theme, and with the grid input of the whole figure. Panics when the cell holds
+/// no axes.
 #[cfg(test)]
 pub(crate) fn with_layout_input<R>(
     figure: &Figure,
-    (row, col): (usize, usize),
+    cell: (usize, usize),
     lib: &FontLibrary,
-    f: impl FnOnce(&LayoutInput<'_>, &[ResolvedMark<'_>], Frame, Edges) -> R,
+    f: impl FnOnce(&LayoutInput<'_>, &GridInput<'_>) -> R,
 ) -> R {
-    use crate::model::GridIndex;
-    let theme = figure.theme();
-    let at = |i: usize| GridIndex::At(i64::try_from(i).expect("an index on the grid"));
-    let axes = figure
-        .axes_at(at(row), at(col))
-        .expect("the cell holds axes");
-    let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
-    let marks = resolve::resolve_marks(axes.marks(), theme);
-    let legend = measure_legend(width, theme, axes, &marks, lib);
-    let input = LayoutInput {
-        width,
-        theme,
-        axes,
-        legend: &legend,
-        lib,
+    let index = panel_index(figure, cell);
+    let panels = panels(figure, lib);
+    let inputs: Vec<LayoutInput<'_>> = panels
+        .iter()
+        .map(|panel| LayoutInput {
+            theme: figure.theme(),
+            axes: panel.axes,
+            legend: &panel.legend,
+            lib,
+            context: "Figure.to_scene()",
+        })
+        .collect();
+    let grid = GridInput {
+        width: figure.width_in() * 72.0,
+        height: figure.height_in() * 72.0,
+        grid: figure.grid(),
+        theme: figure.theme(),
         context: "Figure.to_scene()",
+        panels: &inputs,
     };
-    let (frame, edges) = layout::panel_frame(width, height, figure.grid(), axes.cells());
-    f(&input, &marks, frame, edges)
+    f(&inputs[index], &grid)
 }
 
 /// The scene of `figure`: `width × 72` by `height × 72` pt on the theme background, holding
@@ -130,16 +225,14 @@ pub(crate) fn with_layout_input<R>(
 /// - the legend, when it has row entries or direct labels, as one unclipped group;
 /// - the baseline, as an unclipped group of its own.
 ///
-/// Each axes is laid out on its own in its frame ([`layout::panel_frame`]); a figure of one
-/// axes has the canvas as its frame. Without axes the scene holds the background only. Each
-/// axes' marks are resolved and its legend is built and measured once, before layout, and the
-/// same records serve layout and drawing.
+/// Every axes is laid out by one solve of the grid ([`plan`]); a figure of one axes has the
+/// canvas as its frame. Without axes the scene holds the background only. Each axes' marks are
+/// resolved and its legend is built and measured once, before layout, and the same records
+/// serve layout and drawing.
 ///
 /// # Errors
 ///
-/// As [`plan`], reported in `context`, the API call that renders, for the first axes that
-/// cannot be laid out; on a grid of more than one cell the message starts with the axes'
-/// top-left cell, `row {r}, col {c}: `.
+/// As [`plan`], reported in `context`, the API call that renders.
 pub(crate) fn scene(
     figure: &Figure,
     library: &FontLibrary,
@@ -148,28 +241,20 @@ pub(crate) fn scene(
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
-    for axes in figure.panels() {
-        let marks = resolve::resolve_marks(axes.marks(), theme);
-        let legend = measure_legend(width, theme, axes, &marks, library);
-        let input = LayoutInput {
-            width,
-            theme,
-            axes,
-            legend: &legend,
-            lib: library,
-            context,
-        };
-        let (frame, edges) = layout::panel_frame(width, height, figure.grid(), axes.cells());
-        let (resolved, layout) =
-            plan(&input, &marks, frame, edges).map_err(|err| panel_error(figure, axes, err))?;
-        scene.push(draw::chrome(theme, &layout));
-        if let Some(marks) = draw::marks(theme, &resolved, &layout, &marks) {
+    let panels = panels(figure, library);
+    if panels.is_empty() {
+        return Ok(scene);
+    }
+    let planned = plan(figure, &panels, library, context)?;
+    for (panel, (resolved, layout)) in panels.iter().zip(&planned) {
+        scene.push(draw::chrome(theme, layout));
+        if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
             scene.push(marks);
         }
-        if let Some(legend) = draw::legend::legend(theme, &layout) {
+        if let Some(legend) = draw::legend::legend(theme, layout) {
             scene.push(legend);
         }
-        scene.push(draw::baseline(theme, &layout));
+        scene.push(draw::baseline(theme, layout));
     }
     Ok(scene)
 }
@@ -336,26 +421,33 @@ mod tests {
     }
 
     #[test]
-    fn each_axes_is_laid_out_in_its_own_cells() {
-        // 2 × 2 at 12 × 8 in: cells are 420 × 276 pt inside the 12 pt padding; (1, 1) is empty.
+    fn grid_panels_line_up_with_titles_over_their_plots() {
+        // 2 × 2 at 12 × 8 in; (1, 1) is empty.
         let f = grid_of_lines(2, 2, &[(1, 0), (0, 0), (0, 1)]);
         let lib = FontLibrary::global();
-        for (row, col) in [(0, 0), (0, 1), (1, 0)] {
-            let (_, layout) = plan_figure(&f, (row, col), lib);
-            let (left, top) = (12.0 + 420.0 * col as f64, 12.0 + 276.0 * row as f64);
-            let plot = layout.plot;
-            assert!(
-                plot.x > left && plot.right() <= left + 420.0,
-                "{row}, {col}: {plot:?}"
-            );
-            assert!(
-                plot.y > top && plot.bottom() < top + 276.0,
-                "{row}, {col}: {plot:?}"
-            );
-            let title = layout.title.expect("a title");
-            assert_eq!(title.x, left, "{row}, {col}");
-            assert!(title.y > top && title.y < plot.y, "{row}, {col}");
+        let layout = |row, col| plan_figure(&f, (row, col), lib).1;
+        let (a, b, c) = (layout(0, 0), layout(0, 1), layout(1, 0));
+        // Equal plots, aligned by column and by row.
+        for l in [&b, &c] {
+            assert!((l.plot.width - a.plot.width).abs() < 1e-9);
+            assert!((l.plot.height - a.plot.height).abs() < 1e-9);
         }
+        assert_eq!(a.plot.x, c.plot.x);
+        assert_eq!(a.plot.y, b.plot.y);
+        assert!(c.plot.y > a.plot.bottom() + 24.0);
+        assert!(b.plot.x > a.plot.right() + 24.0);
+        // Each title starts at its plot's left edge and sits above it, its row's top in the
+        // first row at the padding.
+        for l in [&a, &b, &c] {
+            let title = l.title.as_ref().expect("a title");
+            assert_eq!(title.x, l.plot.x);
+            assert!(title.y < l.plot.y);
+        }
+        assert_eq!(a.header_bottom, b.header_bottom);
+        // Neighbouring frames touch halfway between the cells.
+        assert_eq!(a.frame.right(), b.frame.x);
+        assert_eq!(a.frame.bottom(), c.frame.y);
+        assert_eq!((a.frame.x, a.frame.y), (0.0, 0.0));
         // Chrome, marks and baseline for each axes, in row-major order; nothing for the empty
         // cell.
         let s = scene(&f, lib, "Figure.to_scene()").unwrap();
@@ -387,7 +479,7 @@ mod tests {
         let wide = |f: &mut Figure, row, col| {
             f.axes_at_mut(GridIndex::At(row), GridIndex::At(col))
                 .unwrap()
-                .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])
+                .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(200)])
                 .unwrap();
         };
         let lib = FontLibrary::global();

@@ -1,1 +1,21 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Grid alignment: every plot area of a grid has the same size and the panels line up, with a gap
+# between them; layout errors on a grid are checked per grid column and row.
+grid-1x2-graphite
+grid-1x2-midnight
+grid-1x2-pigment
+grid-2x2-empty-graphite
+grid-2x2-empty-midnight
+grid-2x2-empty-pigment
+grid-2x2-span-graphite
+grid-2x2-span-midnight
+grid-2x2-span-pigment
+grid-3x1-graphite
+grid-3x1-midnight
+grid-3x1-pigment
+step-positions-graphite
+step-positions-midnight
+step-positions-pigment
+errors/grid
+# The new theme getter, the gap between panels.
+api/themes
