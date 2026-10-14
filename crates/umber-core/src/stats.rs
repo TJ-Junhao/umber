@@ -64,6 +64,51 @@ pub(crate) fn box_stats(values: &[f64]) -> Option<BoxStats> {
     })
 }
 
+/// Gaussian kernel density with Scott's sample-standard-deviation bandwidth.
+/// Finite samples alone contribute; fewer than two distinct values or grid points yield none.
+/// Scaling the data range to one keeps the variance finite for very large or small samples.
+pub(crate) fn kde_scott(values: &[f64], grid: usize) -> Option<Vec<(f64, f64)>> {
+    let samples: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+    let low = samples.iter().copied().reduce(f64::min)?;
+    let high = samples.iter().copied().reduce(f64::max)?;
+    if low == high || grid < 2 {
+        return None;
+    }
+    let span = high - low;
+    let scaled: Vec<f64> = samples.iter().map(|v| (v - low) / span).collect();
+    let n = scaled.len() as f64;
+    let mean = scaled.iter().sum::<f64>() / n;
+    let variance = scaled.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    let h = variance.sqrt() * n.powf(-0.2);
+    let normalizer = n * h * (2.0 * std::f64::consts::PI).sqrt();
+    let step = span / (grid - 1) as f64;
+    Some(
+        (0..grid)
+            .map(|i| {
+                let at = if i + 1 == grid {
+                    high
+                } else if step == 0.0 {
+                    low + span * (i as f64 / (grid - 1) as f64)
+                } else {
+                    low + step * i as f64
+                };
+                // Evaluate at the returned grid position, including its rounding at large offsets.
+                let fraction = (at - low) / span;
+                let density = scaled
+                    .iter()
+                    .map(|v| {
+                        let z = (fraction - v) / h;
+                        (-0.5 * z * z).exp()
+                    })
+                    .sum::<f64>()
+                    / normalizer
+                    / span;
+                (at, density)
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -638,11 +638,16 @@ pub(super) fn check_bar_group(
 }
 
 /// Checks the category axis before any distribution data, then the unique category names.
-fn check_box_categories(context: &'static str, x: ScaleKind, categories: &[String]) -> Result<()> {
+fn check_box_categories(
+    context: &'static str,
+    kind: &'static str,
+    x: ScaleKind,
+    categories: &[String],
+) -> Result<()> {
     if x != ScaleKind::Category {
         return Err(Error::usage(
             context,
-            "the x axis is not a category axis; box plots need a category x axis.",
+            format!("the x axis is not a category axis; {kind} need a category x axis."),
         )
         .with_parameter("categories")
         .with_hint("pass x=Scale.category() to Figure.add_axes()."));
@@ -699,14 +704,15 @@ fn check_group_values(
 /// Validates plain box data: axis kind, group count, category uniqueness, then all samples.
 pub(super) fn check_box_groups(
     context: &'static str,
+    kind: &'static str,
     x: ScaleKind,
     y: Transform,
     categories: &[String],
     groups: &[Vec<f64>],
 ) -> Result<()> {
-    check_box_categories(context, x, &[])?;
+    check_box_categories(context, kind, x, &[])?;
     check_group_count(context, "groups", "groups", groups.len(), categories.len())?;
-    check_box_categories(context, x, categories)?;
+    check_box_categories(context, kind, x, categories)?;
     check_group_values(context, "groups", "groups", y, groups)
 }
 
@@ -714,12 +720,13 @@ pub(super) fn check_box_groups(
 /// categories, then every sample, without storing any part of a failed call.
 pub(super) fn check_distributions(
     context: &'static str,
+    kind: &'static str,
     x: ScaleKind,
     y: Transform,
     categories: &[String],
     distributions: &[Distribution],
 ) -> Result<()> {
-    check_box_categories(context, x, &[])?;
+    check_box_categories(context, kind, x, &[])?;
     if distributions.is_empty() {
         return Err(Error::data(
             context,
@@ -736,7 +743,7 @@ pub(super) fn check_distributions(
             categories.len(),
         )?;
     }
-    check_box_categories(context, x, categories)?;
+    check_box_categories(context, kind, x, categories)?;
     for (k, d) in distributions.iter().enumerate() {
         check_group_values(
             context,

@@ -1484,6 +1484,99 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 hint=_PICKLE_HINT,
             )
 
+    def violin(
+        self: "Axes[str, float]",
+        categories: Values[str],
+        groups: Sequence[Values[float]],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+    ) -> "Axes[str, float]":
+        """Add a violin density for each category, ignoring NaN samples.
+
+        Gaussian kernels use Scott bandwidth: the sample standard deviation (ddof 1) times
+        the sample count to the power -1/5. Densities use 128 evenly spaced points from min
+        to max, with no tails outside the data. Every violin has the same maximum width,
+        0.6 of its category band, and the theme's area opacity. Type-7 quartiles are drawn
+        at half their local width; the median spans the full local width. Empty groups
+        draw nothing; fewer than two distinct finite values draw a median line only.
+
+        Args:
+            categories: The category names, each appearing once.
+            groups: One group of numeric samples per category, in category order.
+            label: The legend label; an empty string omits the legend entry.
+            color: The violin color. ``Color.AUTO`` takes the next palette color.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If group counts differ, categories repeat, or samples are not
+                numeric, are infinite, exceed the supported range or are not positive on
+                a log y axis.
+            StyleError: If a label or category name is too long.
+            UsageError: If x is not a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.violin(["North", "South"], [[1, 2, 4, 9], [2, 3, 5]], label="Samples")
+        """
+        with api_call():
+            context = "Axes.violin()"
+            check_names_type(context, "categories", categories)
+            _series.check_groups_type(context, groups)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            category_names = names(context, "categories", categories)
+            values = _series.group_values(context, groups)
+            name = _args.text(context, "label", label)
+            self._native.violin(self._row, self._col, category_names, values, name, spec)
+            return self
+
+    def grouped_violin(
+        self: "Axes[str, float]",
+        categories: Values[str],
+        distributions: Sequence[Distribution],
+    ) -> "Axes[str, float]":
+        """Add distributions side by side within each category band.
+
+        Statistics and NaN handling are as in ``violin()``. The group occupies 0.6 of the band;
+        violins are 2 pt apart, or touch if that gap would leave them narrower than the gap.
+        Each distribution has its own color and legend entry, in input order.
+
+        Args:
+            categories: The category names, each appearing once.
+            distributions: One or more distributions, each with one group per category.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If categories or distributions have the wrong type.
+            DataError: If distributions are empty, group counts differ, categories repeat,
+                or a sample is infinite, exceeds the supported range or is not positive
+                on a log y axis.
+            StyleError: If a category name is too long.
+            UsageError: If x is not a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.grouped_violin(["2026"], [
+            ...     ub.Distribution("North", [[1, 2, 4]]),
+            ...     ub.Distribution("South", [[2, 3, 5]]),
+            ... ])
+        """
+        with api_call():
+            context = "Axes.grouped_violin()"
+            check_names_type(context, "categories", categories)
+            arguments = _distribution_arguments(context, distributions)
+            category_names = names(context, "categories", categories)
+            self._native.grouped_violin(self._row, self._col, category_names, arguments)
+            return self
+
 
 def _color_argument(context: str, value: object) -> tuple[int, int, float]:
     """Check a ``color`` argument and return its native form."""

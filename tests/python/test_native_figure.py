@@ -363,6 +363,8 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "stem": lambda f, r, c: f.stem(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "box_plot": lambda f, r, c: f.box_plot(r, c, ["a"], [floats(1)], "", AUTO),
     "grouped_box_plot": lambda f, r, c: f.grouped_box_plot(r, c, ["a"], [("s", [floats(1)], AUTO)]),
+    "violin": lambda f, r, c: f.violin(r, c, ["a"], [floats(1)], "", AUTO),
+    "grouped_violin": lambda f, r, c: f.grouped_violin(r, c, ["a"], [("s", [floats(1)], AUTO)]),
 }
 
 
@@ -375,7 +377,15 @@ def test_axes_methods_without_axes_report_the_empty_cell(name: str) -> None:
 
 
 # The methods that need a category x axis; the others run on numeric axes.
-CATEGORY_CALLS = {"bar", "grouped_bar", "stacked_bar", "box_plot", "grouped_box_plot"}
+CATEGORY_CALLS = {
+    "bar",
+    "grouped_bar",
+    "stacked_bar",
+    "box_plot",
+    "grouped_box_plot",
+    "violin",
+    "grouped_violin",
+}
 
 
 @pytest.mark.parametrize("name", AXES_CALLS)

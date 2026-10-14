@@ -26,6 +26,8 @@ mod stem;
 mod step;
 mod ticks;
 mod validation;
+mod violin;
+pub use violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 
 #[cfg(test)]
 mod share_tests;

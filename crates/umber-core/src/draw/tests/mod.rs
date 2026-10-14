@@ -21,6 +21,7 @@ mod scatter;
 mod stacked_area;
 mod stem;
 mod step;
+mod violin;
 
 use crate::geometry::{Path, PathVerb, Point};
 use crate::layout::Area;
