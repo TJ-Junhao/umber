@@ -30,6 +30,9 @@ pub(crate) use grid::{GridInput, check_panel_contents, solve_grid};
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry};
 pub(crate) use panel::{Frame, PanelBands, measure_panel, place_panel};
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use crate::error::{number, quoted};
 use crate::model::Axes;
 use crate::resolve::{AxisTick, NormalizedPos};
@@ -335,6 +338,181 @@ pub(crate) fn tick_targets(plot: PlotSize) -> (usize, usize) {
         target(plot.width, 100.0, 3, 8),
         target(plot.height, 45.0, 3, 8),
     )
+}
+
+/// The least gap between adjacent automatic tick labels along their axis, in tick label sizes:
+/// half the size, so that neighbouring labels never read as one.
+const TICK_LABEL_GAP: f64 = 0.5;
+
+/// Whether automatic ticks keep their labels apart on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TickSpacing {
+    /// Ticks are chosen for their target alone. The first layout pass measures with them: its
+    /// plot size is a guess, so the spacing it would give is not the drawn one.
+    Target,
+    /// The previous constrained search, including target retries, with its final choice
+    /// checked on the solved layout rather than on the size used to choose it.
+    Deferred,
+    /// Adjacent labels stay apart (see [`TickRoom`]).
+    LabelsApart,
+}
+
+/// How tick labels take room along their axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LabelExtent {
+    /// Side by side under the plot: each label takes its own width, at least that of a
+    /// tabular digit, which every automatic label holds; this is that width.
+    Width(f64),
+    /// One above the other left of the plot: each label takes one line, this high (ascent and
+    /// descent).
+    Line(f64),
+}
+
+/// What automatic ticks along one side of a plot area ask for: about `target` ticks
+/// ([`tick_targets`]), whose labels stay apart on screen when `spacing` says so, and no more
+/// ticks than [`at_most`](TickRoom::at_most) allows.
+///
+/// Adjacent labels are apart when they leave at least [`TICK_LABEL_GAP`] tick label sizes
+/// between them: between their line boxes (ascent and descent) on the y axis, and between their
+/// measured widths, centered on their ticks, on the x axis.
+pub(crate) struct TickRoom<'a> {
+    /// The preferred number of ticks.
+    pub target: usize,
+    /// Whether the labels keep apart.
+    spacing: TickSpacing,
+    /// The length of the axis on screen, in points.
+    length: f64,
+    /// How the labels take room along the axis.
+    extent: LabelExtent,
+    /// The fonts.
+    lib: &'a FontLibrary,
+    /// The tick label style.
+    style: TextStyle,
+    /// The widths of the labels measured so far: tick searches judge the same labels often.
+    widths: RefCell<HashMap<String, f64>>,
+    /// The most ticks that fit, whatever their labels; `None` for no such limit.
+    most: Option<usize>,
+}
+
+/// The tick rooms of the x and the y axis of a plot area of `plot`, with tick labels in the
+/// tick label style of `theme`, spaced as `spacing` says.
+pub(crate) fn tick_rooms<'a>(
+    plot: PlotSize,
+    theme: &Theme,
+    lib: &'a FontLibrary,
+    spacing: TickSpacing,
+) -> (TickRoom<'a>, TickRoom<'a>) {
+    let (x_target, y_target) = tick_targets(plot);
+    let style = Styles::new(theme).tick;
+    let (ascent, descent) = metrics(lib, &style);
+    let digit = measure(lib, "0", style).width();
+    let room = |target, length, extent| TickRoom {
+        target,
+        spacing,
+        length,
+        extent,
+        lib,
+        style,
+        widths: RefCell::new(HashMap::new()),
+        most: None,
+    };
+    (
+        room(x_target, plot.width, LabelExtent::Width(digit)),
+        room(y_target, plot.height, LabelExtent::Line(ascent + descent)),
+    )
+}
+
+impl TickRoom<'_> {
+    /// Whether the final constrained choice is checked on the solved layout.
+    pub fn deferred(&self) -> bool {
+        self.spacing == TickSpacing::Deferred
+    }
+
+    /// This room with at most `most` ticks fitting, whatever their labels.
+    pub fn at_most(self, most: usize) -> Self {
+        TickRoom {
+            most: Some(most),
+            ..self
+        }
+    }
+
+    /// The least gap between adjacent labels, in points.
+    fn gap(&self) -> f64 {
+        TICK_LABEL_GAP * f64::from(self.style.size)
+    }
+
+    /// The width of `label`.
+    fn width(&self, label: &str) -> f64 {
+        if let Some(&width) = self.widths.borrow().get(label) {
+            return width;
+        }
+        let width = measure(self.lib, label, self.style).width();
+        self.widths.borrow_mut().insert(label.to_owned(), width);
+        width
+    }
+
+    /// The least distance between adjacent ticks, as a share of the axis length, that can keep
+    /// any automatic labels apart: a tabular digit and the gap on the x axis, a line and the
+    /// gap on the y axis; 0 when the labels need not keep apart.
+    pub fn least_share(&self) -> f64 {
+        if self.spacing == TickSpacing::Target {
+            return 0.0;
+        }
+        let (LabelExtent::Width(least) | LabelExtent::Line(least)) = self.extent;
+        (least + self.gap()) / self.length
+    }
+
+    /// The room, in points, that the labels of `ticks`, in axis order, leave between the most
+    /// crowded pair of adjacent labels beyond the least gap: negative when they crowd, infinite
+    /// for fewer than two ticks and when the labels need not keep apart, and negative infinity
+    /// for more ticks than [`at_most`](Self::at_most) allows.
+    pub fn slack(&self, ticks: &[AxisTick]) -> f64 {
+        if self.spacing == TickSpacing::Target {
+            return f64::INFINITY;
+        }
+        if self.most.is_some_and(|most| ticks.len() > most) {
+            return f64::NEG_INFINITY;
+        }
+        let extents: Vec<f64> = match self.extent {
+            LabelExtent::Width(_) => ticks.iter().map(|tick| self.width(&tick.label)).collect(),
+            LabelExtent::Line(line) => vec![line; ticks.len()],
+        };
+        let gap = self.gap();
+        ticks
+            .windows(2)
+            .zip(extents.windows(2))
+            .map(|(pair, extent)| {
+                let distance = (pair[1].pos.get() - pair[0].pos.get()).abs() * self.length;
+                distance - (extent[0] + extent[1]) / 2.0 - gap
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+}
+
+#[cfg(test)]
+impl<'a> TickRoom<'a> {
+    /// Tick rooms for ticks chosen for about `x_target` and `y_target` alone.
+    pub(crate) fn unlimited(
+        x_target: usize,
+        y_target: usize,
+        lib: &'a FontLibrary,
+    ) -> (TickRoom<'a>, TickRoom<'a>) {
+        let size = PlotSize {
+            width: 400.0,
+            height: 300.0,
+        };
+        let (x, y) = tick_rooms(size, &Theme::pigment(), lib, TickSpacing::Target);
+        (
+            TickRoom {
+                target: x_target,
+                ..x
+            },
+            TickRoom {
+                target: y_target,
+                ..y
+            },
+        )
+    }
 }
 
 /// The plot size assumed before any tick label is measured: the `width` by `height` pt figure

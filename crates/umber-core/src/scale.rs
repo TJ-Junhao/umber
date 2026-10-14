@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use crate::error::number;
-use crate::ticks::{self, AutoTicks, Tick, TickCoverage, TickValues};
+use crate::ticks::{self, AutoTicks, Room, Tick, TickCoverage, TickValues};
 use crate::{Error, Result};
 
 /// How values along one axis map to positions.
@@ -640,7 +640,7 @@ impl ContinuousScale {
         let target = ticks::clamp_target(target);
         let widened = match self.transform {
             Transform::Linear => {
-                let values = self.loose_values(target);
+                let values = self.loose_values(target, &ticks::Fit::ANY);
                 values.first().copied().zip(values.last().copied())
             }
             Transform::Log(base) => {
@@ -653,13 +653,13 @@ impl ContinuousScale {
         self.widened(widened)
     }
 
-    /// The loose Extended Wilkinson tick values that cover a linear domain; empty when the
-    /// domain is degenerate. Their ends are the nice limits.
-    fn loose_values(&self, target: usize) -> Vec<f64> {
+    /// The loose Extended Wilkinson tick values that cover a linear domain, chosen among those
+    /// `fit` admits; empty when the domain is degenerate. Their ends are the nice limits.
+    fn loose_values(&self, target: usize, fit: &ticks::Fit<'_>) -> Vec<f64> {
         if is_degenerate(self.lo, self.hi) {
             Vec::new()
         } else {
-            ticks::extended(self.lo, self.hi, target, TickCoverage::Loose)
+            ticks::extended(self.lo, self.hi, target, TickCoverage::Loose, fit)
         }
     }
 
@@ -692,42 +692,139 @@ impl ContinuousScale {
     }
 
     /// [`nice`](Self::nice) together with ticks that agree with it, so both ends of the nice
-    /// domain carry a tick.
+    /// domain carry a tick, chosen among the tick sets `judge` lets through on the nice domain.
     ///
     /// Linear: the loose tick set that produced the nice limits, labelled like
-    /// [`ticks`](Self::ticks). Log: the powers of the base in the nice domain, always including
-    /// both domain ends; more than `2 * target` powers are thinned to `target` evenly spaced
-    /// exponents that keep the first and the last. Log labels use the value policy. A degenerate
-    /// domain, or a loose set with fewer than two values inside the domain, falls back to
-    /// `ticks` of the nice scale. The ticks carry the step their labels were written for.
-    pub(crate) fn nice_with_ticks(&self, target: usize) -> (ContinuousScale, AutoTicks) {
+    /// [`ticks`](Self::ticks): the best scored one whose ticks `judge` lets through on the nice
+    /// domain they span (see [`ticks::extended`]). Log: the powers of the base in the nice
+    /// domain of [`nice`](Self::nice), always including both domain ends; more than
+    /// `2 * target` powers are thinned to `target` evenly spaced exponents that keep the first
+    /// and the last, and `fewer` asks for that many fewer, but at least two (see
+    /// [`log_values_with_ends`](Self::log_values_with_ends)). Log labels use the value policy.
+    /// A degenerate domain, or a loose set with fewer than two values inside the domain, falls
+    /// back to `ticks` of the nice scale. The ticks carry the step their labels were written
+    /// for.
+    fn nice_with_ticks(
+        &self,
+        target: usize,
+        fewer: usize,
+        judge: &dyn TickJudge,
+    ) -> (ContinuousScale, AutoTicks) {
         let target = ticks::clamp_target(target);
-        let nice = self.nice(target);
-        let (lo, hi) = nice.domain();
-        let values = match self.transform {
-            Transform::Linear => strictly_increasing(
-                self.loose_values(target)
-                    .into_iter()
-                    .filter(|v| (lo..=hi).contains(v))
-                    .collect(),
-            ),
-            Transform::Log(base) => nice.log_values_with_ends(base.get(), target),
+        let (nice, ticks) = match self.transform {
+            Transform::Linear => {
+                let slack = |values: &[f64]| match self.nice_from_loose(values.to_vec()) {
+                    (nice, Some(ticks)) => Room::Slack(judge.slack(&nice, &ticks)),
+                    // Judged as the fallback below, once chosen.
+                    (_, None) if judge.deferred() => Room::Slack(f64::INFINITY),
+                    (_, None) => Room::TooFewTicks,
+                };
+                let fit = ticks::Fit {
+                    least_share: judge.least_share(),
+                    slack: &slack,
+                };
+                self.nice_from_loose(self.loose_values(target, &fit))
+            }
+            Transform::Log(base) => {
+                let nice = self.nice(target);
+                let values = nice.log_values_with_ends(base.get(), target, fewer);
+                let ticks = (values.len() >= 2).then(|| {
+                    let labels = ticks::format_values(&values);
+                    Self::labelled(values, labels, TickValues::Exact)
+                });
+                (nice, ticks)
+            }
         };
-        if let (Some(a), Some(b)) = (values.first(), values.get(1)) {
-            let (labels, origin) = match self.transform {
-                Transform::Linear => {
-                    let step = b - a;
-                    (
-                        ticks::format_ticks(&values, step),
-                        TickValues::Grid { step },
-                    )
-                }
-                Transform::Log(_) => (ticks::format_values(&values), TickValues::Exact),
-            };
-            return (nice, Self::labelled(values, labels, origin));
+        match ticks {
+            Some(ticks) => (nice, ticks),
+            None => {
+                let ticks = nice.auto_ticks(target, judge);
+                (nice, ticks)
+            }
         }
-        let ticks = nice.auto_ticks(target);
+    }
+
+    /// The nice scale whose limits are the ends of the loose tick `values` of this linear
+    /// scale, and those values inside it with their labels, or `None` when fewer than two lie
+    /// inside.
+    fn nice_from_loose(&self, values: Vec<f64>) -> (ContinuousScale, Option<AutoTicks>) {
+        let nice = self.widened(values.first().copied().zip(values.last().copied()));
+        let (lo, hi) = nice.domain();
+        let values = strictly_increasing(
+            values
+                .into_iter()
+                .filter(|v| (lo..=hi).contains(v))
+                .collect(),
+        );
+        let ticks = match (values.first(), values.get(1)) {
+            (Some(a), Some(b)) => {
+                let step = b - a;
+                let labels = ticks::format_ticks(&values, step);
+                Some(Self::labelled(values, labels, TickValues::Grid { step }))
+            }
+            _ => None,
+        };
         (nice, ticks)
+    }
+
+    /// The domain, the nice domain before padding, and the ticks of auto limits on this data
+    /// extent: [`nice_with_ticks`](Self::nice_with_ticks) for about `target` ticks, then the
+    /// lowest tick moved below the data and the domain padded as `finish` says, with the ticks
+    /// chosen so that `judge` lets them through on the padded domain.
+    ///
+    /// Linear: the best scored loose tick set that `judge` lets through once finished.
+    /// Log: the powers `nice_with_ticks` chooses, then fewer and fewer of them until `judge`
+    /// lets them through; when none passes, the fewest.
+    pub(crate) fn fitted(
+        &self,
+        target: usize,
+        finish: Finish,
+        judge: &dyn TickJudge,
+    ) -> (ContinuousScale, ContinuousScale, AutoTicks) {
+        let target = ticks::clamp_target(target);
+        let fitted = |fewer: usize| {
+            let finished = Finished {
+                finish,
+                target,
+                fewer,
+                judge,
+            };
+            let (nice, ticks) = self.nice_with_ticks(target, fewer, &finished);
+            nice.finished(ticks, finish, target, fewer)
+        };
+        let mut chosen = fitted(0);
+        if matches!(self.transform, Transform::Log(_)) {
+            let mut fewer = 0;
+            while judge.slack(&chosen.0, &chosen.2) < 0.0
+                && chosen.2.ticks.len() > 2
+                && fewer < 2 * ticks::MAX_TARGET
+            {
+                fewer += 1;
+                let next = fitted(fewer);
+                if next.2.ticks.len() < chosen.2.ticks.len() {
+                    chosen = next;
+                }
+            }
+        }
+        chosen
+    }
+
+    /// This nice scale and its `ticks` finished as `finish` says: the padded domain, the nice
+    /// domain before padding and the ticks, with the lowest tick moved below the data by
+    /// [`below_data`](Self::below_data) for `target` and `fewer`.
+    fn finished(
+        &self,
+        ticks: AutoTicks,
+        finish: Finish,
+        target: usize,
+        fewer: usize,
+    ) -> (ContinuousScale, ContinuousScale, AutoTicks) {
+        let (nice, ticks) = match finish.below_data {
+            Some(data_low) => self.below_data(ticks, data_low, target, fewer),
+            None => (*self, ticks),
+        };
+        let padded = finish.padding.map_or(nice, |padding| nice.padded(padding));
+        (padded, nice, ticks)
     }
 
     /// This nice scale and its `ticks` (as [`nice_with_ticks`](Self::nice_with_ticks) gives
@@ -736,26 +833,26 @@ impl ContinuousScale {
     /// lower limit.
     ///
     /// The data counts as starting on the lower limit when `data_low` lies less than
-    /// [`AUTO_LIMIT_PADDING`] of the domain's span above it (in log space on a log axis): the
-    /// same share the padding keeps marks off the plot edge, so a minimum that only rounds
-    /// to the limit, such as a sampled sine trough, does not sit on the baseline either. When
-    /// it does and the limit carries the first tick, the limit moves down by one tick step and
-    /// gets a tick of its own. On a linear axis the limit moves to `lo - step`, with `step` the
-    /// gap between the first two ticks, and the new tick goes in front of the others. On a log
-    /// axis it moves to `lo / base`, and the ticks are chosen again for the wider domain as
-    /// `nice_with_ticks` chooses them for about `target` ticks, so thinned powers stay evenly
-    /// spaced. All ticks are labelled as `nice_with_ticks` labels them, and carry the step
-    /// their labels were written for. Everything else is
-    /// returned unchanged: a linear domain that holds 0, where the baseline sits at 0 and a
-    /// zero value on it is correct; data further above the lower limit; ticks that do not
-    /// start at the limit or number fewer than two; a step that is not finite and positive;
-    /// and a move that would leave the supported magnitudes or not move the limit at all.
-    /// Auto limits apply it before [`padded`](Self::padded).
-    pub(crate) fn below_data(
+    /// [`AUTO_LIMIT_PADDING`] of the domain's span above it (in log space on a log axis): the same
+    /// share the padding keeps marks off the plot edge, so a minimum that only rounds to the limit,
+    /// such as a sampled sine trough, does not sit on the baseline either. When it does and the
+    /// limit carries the first tick, the limit moves down by one tick step and gets a tick of its
+    /// own. On a linear axis the limit moves to `lo - step`, with `step` the gap between the first
+    /// two ticks, and the new tick goes in front of the others. On a log axis it moves to `lo /
+    /// base`, and the ticks are chosen again for the wider domain as `nice_with_ticks` chooses them
+    /// for about `target` ticks and `fewer`, so thinned powers stay evenly spaced. All ticks are
+    /// labelled as `nice_with_ticks` labels them, and carry the step their labels were written for.
+    /// Everything else is returned unchanged: a linear domain that holds 0, where the baseline sits
+    /// at 0 and a zero value on it is correct; data further above the lower limit; ticks that do
+    /// not start at the limit or number fewer than two; a step that is not finite and positive; and
+    /// a move that would leave the supported magnitudes or not move the limit at all. Auto limits
+    /// apply it before [`padded`](Self::padded).
+    fn below_data(
         &self,
         ticks: AutoTicks,
         data_low: f64,
         target: usize,
+        fewer: usize,
     ) -> (ContinuousScale, AutoTicks) {
         let (lo, hi) = (self.lo, self.hi);
         let unchanged = (*self, ticks);
@@ -799,7 +896,7 @@ impl ContinuousScale {
             // power crowds the new end.
             Transform::Log(base) => {
                 let target = ticks::clamp_target(target);
-                let values = scale.log_values_with_ends(base.get(), target);
+                let values = scale.log_values_with_ends(base.get(), target, fewer);
                 let labels = ticks::format_values(&values);
                 (values, labels, TickValues::Exact)
             }
@@ -841,9 +938,11 @@ impl ContinuousScale {
     /// The ends are normally powers themselves (a nice domain); an end that is not (clamped to
     /// the supported magnitudes) is added as a value of its own. When there are more than
     /// `2 * target` powers, `target` exponents spaced evenly from the first to the last power
-    /// are kept. Interior powers within `0.5 / (target - 1)` of an added end, in normalized
-    /// position, are dropped so that their labels cannot crowd it.
-    fn log_values_with_ends(&self, base: f64, target: usize) -> Vec<f64> {
+    /// are kept; `fewer` keeps that many fewer of the powers otherwise kept, spaced the same
+    /// way, but at least two. Interior powers within `0.5 / (n - 1)` of an added end, in
+    /// normalized position, with `n = target - fewer` but at least 2, are dropped so that their
+    /// labels cannot crowd it.
+    fn log_values_with_ends(&self, base: f64, target: usize, fewer: usize) -> Vec<f64> {
         let (lo, hi) = (self.lo, self.hi);
         let mut values = Vec::new();
         if let (Some(first), Some(last)) = (ceil_exp(lo, base), floor_exp(hi, base))
@@ -852,7 +951,14 @@ impl ContinuousScale {
             let span = last.saturating_sub(first);
             let count = span.saturating_add(1);
             let target_i = target.max(2) as i64;
-            if count <= target_i.saturating_mul(2) {
+            let kept = if count <= target_i.saturating_mul(2) {
+                count
+            } else {
+                target_i
+            };
+            let fewer = i64::try_from(fewer).unwrap_or(i64::MAX);
+            let kept = kept.saturating_sub(fewer).max(2).min(kept);
+            if kept == count {
                 let mut e = first;
                 while e <= last {
                     values.push(power(base, e));
@@ -862,8 +968,8 @@ impl ContinuousScale {
                     }
                 }
             } else {
-                let steps = (target_i - 1) as f64;
-                for i in 0..target_i {
+                let steps = (kept - 1) as f64;
+                for i in 0..kept {
                     let offset = (i as f64 * span as f64 / steps).round() as i64;
                     values.push(power(base, first.saturating_add(offset)));
                 }
@@ -895,9 +1001,10 @@ impl ContinuousScale {
             }
         };
         // An inserted end is not a power, so a power may sit right next to it: drop interior
-        // powers within half a nominal tick gap, `0.5 / (n - 1)`, of an inserted end.
+        // powers within half a nominal tick gap, `0.5 / (n - 1)`, of an inserted end, for
+        // `n = target - fewer` nominal ticks.
         if inserted_lo || inserted_hi {
-            let gap = 0.5 / (target.max(2) - 1) as f64;
+            let gap = 0.5 / (target.saturating_sub(fewer).max(2) - 1) as f64;
             let last = values.len().saturating_sub(1);
             let mut i = 0;
             values.retain(|&v| {
@@ -927,15 +1034,23 @@ impl ContinuousScale {
     /// assert_eq!(labels, ["2.5", "5.0", "7.5"]);
     /// ```
     pub fn ticks(&self, target: usize) -> Vec<Tick> {
-        self.auto_ticks(target).ticks
+        self.auto_ticks(target, &AnySpacing).ticks
     }
 
-    /// [`ticks`](Self::ticks), with the step their labels were written for.
-    pub(crate) fn auto_ticks(&self, target: usize) -> AutoTicks {
+    /// [`ticks`](Self::ticks), chosen among the tick sets `judge` lets through on this scale,
+    /// with the step their labels were written for.
+    ///
+    /// Linear: the previous constrained choice, including target retries, when `judge` lets
+    /// it through; otherwise a search that rejects candidates with fewer than two drawn ticks
+    /// (see [`ticks::extended`]). A deferred judge leaves that check to the solved layout.
+    /// Log: every n-th power as `ticks` chooses them, then fewer and fewer of them until `judge`
+    /// lets them through; when none passes, the fewest. Evenly spaced ticks on a degenerate
+    /// domain: fewer and fewer, down to two.
+    pub(crate) fn auto_ticks(&self, target: usize, judge: &dyn TickJudge) -> AutoTicks {
         let target = ticks::clamp_target(target);
         match self.transform {
-            Transform::Linear => self.linear_ticks(target),
-            Transform::Log(base) => self.log_ticks(base.get(), target),
+            Transform::Linear => self.linear_ticks(target, judge),
+            Transform::Log(base) => self.log_ticks(base.get(), target, judge),
         }
     }
 
@@ -960,87 +1075,152 @@ impl ContinuousScale {
         Self::labelled(values, labels, TickValues::Exact)
     }
 
-    fn linear_ticks(&self, target: usize) -> AutoTicks {
+    fn linear_ticks(&self, target: usize, judge: &dyn TickJudge) -> AutoTicks {
         let (lo, hi) = (self.lo, self.hi);
         if is_degenerate(lo, hi) {
-            let values = strictly_increasing(
-                ticks::evenly_spaced(lo, hi, target)
-                    .into_iter()
-                    .map(|v| v.clamp(lo, hi))
-                    .collect(),
-            );
-            let labels = ticks::format_values(&values);
-            return Self::labelled(values, labels, TickValues::Exact);
-        }
-        let tol = 1e-9 * (hi - lo);
-        let is_log = matches!(self.transform, Transform::Log(_));
-        for t in target..=target + 6 {
-            // On a log scale a tick must be a real positive value inside the domain: snapping
-            // one to an endpoint would put a label on the wrong value (a zero candidate next to
-            // a tiny `lo` would read "0").
-            let inside: Vec<f64> = ticks::extended(lo, hi, t, TickCoverage::Free)
-                .into_iter()
-                .filter(|&v| {
-                    if is_log {
-                        v > 0.0 && v >= lo && v <= hi
-                    } else {
-                        v >= lo - tol && v <= hi + tol
-                    }
-                })
-                .collect();
-            if let (Some(a), Some(b)) = (inside.first(), inside.get(1)) {
-                let step = b - a;
+            let mut count = target;
+            loop {
                 let values = strictly_increasing(
-                    inside
-                        .iter()
-                        .map(|&v| {
-                            if is_log {
-                                v
-                            } else if (v - lo).abs() <= tol {
-                                lo
-                            } else if (v - hi).abs() <= tol {
-                                hi
-                            } else {
-                                v
-                            }
-                        })
+                    ticks::evenly_spaced(lo, hi, count)
+                        .into_iter()
+                        .map(|v| v.clamp(lo, hi))
                         .collect(),
                 );
-                let mut labels = ticks::format_ticks(&values, step);
-                if is_log {
-                    // The grid formatter shows values within `step * 1e-9` of zero as `0`.
-                    for (value, label) in values.iter().zip(labels.iter_mut()) {
-                        if *value > 0.0 && label == "0" {
-                            *label = ticks::format_values(&[*value]).concat();
-                        }
-                    }
-                    // Every value on a log axis is positive, so none stands for zero.
-                    return Self::labelled(values, labels, TickValues::Exact);
+                let labels = ticks::format_values(&values);
+                let ticks = Self::labelled(values, labels, TickValues::Exact);
+                if count <= 2 || judge.slack(self, &ticks) >= 0.0 {
+                    return ticks;
                 }
-                // The labels were written for `step`, measured before the ends were snapped
-                // onto the domain, so the snapped values carry it rather than their own gaps.
-                return Self::labelled(values, labels, TickValues::Grid { step });
+                count -= 1;
             }
         }
-        self.end_ticks()
+        // Linear ticks on a log axis are not evenly spaced on screen, so their step says nothing
+        // about how far apart they are drawn.
+        let least_share = match self.transform {
+            Transform::Linear => judge.least_share(),
+            Transform::Log(_) => 0.0,
+        };
+        let choose = |missing| {
+            let slack = |values: &[f64]| match self.inside_ticks(values) {
+                Some(ticks) => Room::Slack(judge.slack(self, &ticks)),
+                None => missing,
+            };
+            let fit = ticks::Fit {
+                least_share,
+                slack: &slack,
+            };
+            for t in target..=target + 6 {
+                let values = ticks::extended(lo, hi, t, TickCoverage::Free, &fit);
+                if let Some(ticks) = self.inside_ticks(&values) {
+                    return ticks;
+                }
+            }
+            self.end_ticks()
+        };
+        // Keep the previous constrained choice, including all its target retries, when it
+        // fits. An empty candidate used to pass the search and lead to the next target.
+        let previous = choose(Room::Slack(f64::INFINITY));
+        if judge.deferred() || judge.slack(self, &previous) >= 0.0 {
+            return previous;
+        }
+        // Only repair a crowded choice: an empty candidate must not hide a pair that fits.
+        choose(Room::TooFewTicks)
     }
 
-    fn log_ticks(&self, base: f64, target: usize) -> AutoTicks {
+    /// The ticks of a free Extended Wilkinson `candidate` that lie inside this domain, with
+    /// their labels, or `None` when fewer than two do.
+    fn inside_ticks(&self, candidate: &[f64]) -> Option<AutoTicks> {
+        let (lo, hi) = (self.lo, self.hi);
+        let tol = 1e-9 * (hi - lo);
+        let is_log = matches!(self.transform, Transform::Log(_));
+        // On a log scale a tick must be a real positive value inside the domain: snapping one
+        // to an endpoint would put a label on the wrong value (a zero candidate next to a tiny
+        // `lo` would read "0").
+        let inside: Vec<f64> = candidate
+            .iter()
+            .copied()
+            .filter(|&v| {
+                if is_log {
+                    v > 0.0 && v >= lo && v <= hi
+                } else {
+                    v >= lo - tol && v <= hi + tol
+                }
+            })
+            .collect();
+        let (Some(a), Some(b)) = (inside.first(), inside.get(1)) else {
+            return None;
+        };
+        let step = b - a;
+        let values = strictly_increasing(
+            inside
+                .iter()
+                .map(|&v| {
+                    if is_log {
+                        v
+                    } else if (v - lo).abs() <= tol {
+                        lo
+                    } else if (v - hi).abs() <= tol {
+                        hi
+                    } else {
+                        v
+                    }
+                })
+                .collect(),
+        );
+        let mut labels = ticks::format_ticks(&values, step);
+        if is_log {
+            // The grid formatter shows values within `step * 1e-9` of zero as `0`.
+            for (value, label) in values.iter().zip(labels.iter_mut()) {
+                if *value > 0.0 && label == "0" {
+                    *label = ticks::format_values(&[*value]).concat();
+                }
+            }
+            // Every value on a log axis is positive, so none stands for zero.
+            return Some(Self::labelled(values, labels, TickValues::Exact));
+        }
+        // The labels were written for `step`, measured before the ends were snapped onto the
+        // domain, so the snapped values carry it rather than their own gaps.
+        Some(Self::labelled(values, labels, TickValues::Grid { step }))
+    }
+
+    fn log_ticks(&self, base: f64, target: usize, judge: &dyn TickJudge) -> AutoTicks {
         // Fewer than two powers of the base inside the domain cannot form an axis; fall back to
         // ordinary linear ticks over the same domain.
         let (Some(first), Some(last)) = (ceil_exp(self.lo, base), floor_exp(self.hi, base)) else {
-            return self.linear_ticks(target);
+            return self.linear_ticks(target, judge);
         };
         if first >= last {
-            return self.linear_ticks(target);
+            return self.linear_ticks(target, judge);
         }
-        let count = last.saturating_sub(first).saturating_add(1);
+        let span = last.saturating_sub(first);
+        let count = span.saturating_add(1);
         let target_i = target as i64;
         let every = if count > target_i.saturating_mul(2) {
             (count / target_i + i64::from(count % target_i != 0)).max(1)
         } else {
             1
         };
+        let Some(mut chosen) = self.every_power(base, first, last, every) else {
+            return self.linear_ticks(target, judge);
+        };
+        // Fewer and fewer powers, `n` at most, until their labels fit; the fewest when none do.
+        let mut n = chosen.ticks.len();
+        while n > 2 && judge.slack(self, &chosen) < 0.0 {
+            n -= 1;
+            let gaps = n as i64 - 1;
+            let sparser = every.max(span / gaps + i64::from(span % gaps != 0));
+            if let Some(next) = self.every_power(base, first, last, sparser)
+                && next.ticks.len() < chosen.ticks.len()
+            {
+                chosen = next;
+            }
+        }
+        chosen
+    }
+
+    /// Every `every`-th power of `base` from `base^first` up to `base^last` that lies inside the
+    /// domain, labelled by the value policy, or `None` when fewer than two do.
+    fn every_power(&self, base: f64, first: i64, last: i64, every: i64) -> Option<AutoTicks> {
         let (floor, ceiling) = (self.lo * (1.0 - 1e-9), self.hi * (1.0 + 1e-9));
         let mut values = Vec::new();
         let mut e = first;
@@ -1055,10 +1235,81 @@ impl ContinuousScale {
             }
         }
         if values.len() < 2 {
-            return self.linear_ticks(target);
+            return None;
         }
         let labels = ticks::format_values(&values);
-        Self::labelled(values, labels, TickValues::Exact)
+        Some(Self::labelled(values, labels, TickValues::Exact))
+    }
+}
+
+/// Judges automatic ticks by the room their labels leave on the axis.
+pub(crate) trait TickJudge {
+    /// Whether the previous constrained choice is checked by the layout instead of here.
+    fn deferred(&self) -> bool {
+        false
+    }
+
+    /// The least distance between adjacent ticks, as a share of the axis length, that can keep
+    /// any labels apart.
+    fn least_share(&self) -> f64;
+
+    /// The room, in points, that `ticks` leave between the most crowded pair of adjacent
+    /// labels on an axis of `scale`: negative when they crowd, infinite for fewer than two
+    /// ticks. The ticks pass when it is not negative.
+    fn slack(&self, scale: &ContinuousScale, ticks: &AutoTicks) -> f64;
+}
+
+/// A judge that lets every tick set through, so that ticks are chosen for their target alone,
+/// as [`ContinuousScale::nice`] and [`ContinuousScale::ticks`] choose them.
+pub(crate) struct AnySpacing;
+
+impl TickJudge for AnySpacing {
+    fn least_share(&self) -> f64 {
+        0.0
+    }
+
+    fn slack(&self, _: &ContinuousScale, _: &AutoTicks) -> f64 {
+        f64::INFINITY
+    }
+}
+
+/// How auto limits finish a nice domain once its ticks are chosen (see
+/// [`ContinuousScale::fitted`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Finish {
+    /// The smallest data value, when the lowest tick moves strictly below the data that starts
+    /// on it ([`ContinuousScale::below_data`]); `None` to keep the ticks.
+    pub below_data: Option<f64>,
+    /// The sides padded ([`ContinuousScale::padded`]); `None` for a domain that is not padded.
+    pub padding: Option<Padding>,
+}
+
+/// A judge of the ticks of a nice domain: it judges them as `finish` leaves them, for
+/// `target` and `fewer`, with `judge`.
+struct Finished<'a> {
+    /// How the nice domain is finished.
+    finish: Finish,
+    /// The tick target.
+    target: usize,
+    /// How many fewer powers a log axis keeps.
+    fewer: usize,
+    /// The judge of the finished ticks.
+    judge: &'a dyn TickJudge,
+}
+
+impl TickJudge for Finished<'_> {
+    fn deferred(&self) -> bool {
+        self.judge.deferred()
+    }
+
+    fn least_share(&self) -> f64 {
+        // Finishing only widens the domain, so the ticks only move closer together.
+        self.judge.least_share()
+    }
+
+    fn slack(&self, nice: &ContinuousScale, ticks: &AutoTicks) -> f64 {
+        let (padded, _, ticks) = nice.finished(ticks.clone(), self.finish, self.target, self.fewer);
+        self.judge.slack(&padded, &ticks)
     }
 }
 
@@ -1195,8 +1446,8 @@ mod tests {
                     }
                     let scale = ContinuousScale::new(transform, low, high, "test").unwrap();
                     for target in [2, 3, 4, 8] {
-                        let (nice, ticks) = scale.nice_with_ticks(target);
-                        let (lowered, ticks) = nice.below_data(ticks, low, target);
+                        let (nice, ticks) = scale.nice_with_ticks(target, 0, &AnySpacing);
+                        let (lowered, ticks) = nice.below_data(ticks, low, target, 0);
                         let ticks = ticks.ticks;
                         let (lo, hi) = lowered.domain();
                         let context = format!("base {base}, {low:e}..{high:e}: {ticks:?}");
@@ -1236,7 +1487,7 @@ mod tests {
     /// Asserts that `nice_with_ticks` agrees with `nice` and puts a tick on both domain ends.
     #[track_caller]
     fn assert_nice_ticks_agree(scale: ContinuousScale, target: usize) -> Vec<Tick> {
-        let (nice, ticks) = scale.nice_with_ticks(target);
+        let (nice, ticks) = scale.nice_with_ticks(target, 0, &AnySpacing);
         let ticks = ticks.ticks;
         assert_eq!(nice, scale.nice(target));
         let (lo, hi) = nice.domain();
@@ -1306,7 +1557,7 @@ mod tests {
         // Regression case: 1 .. 1e13 keeps 1e13.
         let scale =
             ContinuousScale::new(Transform::Log(LogBase::TEN), 3.0, 4.2e12, "test").unwrap();
-        let (nice, ticks) = scale.nice_with_ticks(5);
+        let (nice, ticks) = scale.nice_with_ticks(5, 0, &AnySpacing);
         let ticks = ticks.ticks;
         assert_eq!(nice.domain(), (1.0, 1e13));
         let labels: Vec<&str> = ticks.iter().map(|t| t.label.as_str()).collect();
@@ -1332,7 +1583,7 @@ mod tests {
             ) else {
                 return Ok(());
             };
-            let (nice, ticks) = scale.nice_with_ticks(target);
+            let (nice, ticks) = scale.nice_with_ticks(target, 0, &AnySpacing);
             let ticks = ticks.ticks;
             prop_assert_eq!(nice, scale.nice(target));
             let (dlo, dhi) = nice.domain();
@@ -1348,7 +1599,7 @@ mod tests {
             let log = Transform::Log(LogBase::new(base).unwrap());
             let scale = ContinuousScale::new(log, 1e-300, 1e300, "test").unwrap();
             for target in [3, 5, 8] {
-                let (nice, ticks) = scale.nice_with_ticks(target);
+                let (nice, ticks) = scale.nice_with_ticks(target, 0, &AnySpacing);
                 let ticks = ticks.ticks;
                 // Both ends are clamped, not powers, and are kept exactly.
                 assert_eq!(nice.domain(), (1e-300, 1e300));
@@ -1429,7 +1680,7 @@ mod tests {
     #[test]
     fn nice_with_ticks_falls_back_on_degenerate_domains() {
         let scale = raw(1.0, 1.0 + 1e-14);
-        let (nice, ticks) = scale.nice_with_ticks(5);
+        let (nice, ticks) = scale.nice_with_ticks(5, 0, &AnySpacing);
         let ticks = ticks.ticks;
         assert_eq!(nice, scale);
         assert_eq!(ticks, scale.ticks(5));

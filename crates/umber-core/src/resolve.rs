@@ -29,14 +29,16 @@
 
 use crate::binning::Histogram;
 use crate::error::quoted;
+use crate::layout::TickRoom;
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
     Mark, ScatterMark, SeriesView, StepMark,
 };
 use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
 use crate::model::{Edge, holds};
-use crate::scale::{Padding, is_single_value, log_offset};
+use crate::scale::{Finish, Padding, TickJudge, is_single_value, log_offset};
 use crate::stacking::Stacks;
+use crate::tick_format::TickFormat;
 use crate::ticks::{AutoTicks, TickValues};
 use crate::{
     CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Marker, Result, Rgba, ScaleKind, Theme,
@@ -261,12 +263,13 @@ struct ContinuousAxis {
 /// data extent fitted as `auto` says; with explicit ticks it is [`enclosing`] the data and the
 /// ticks. Nice axes take the ticks that produced their limits, other automatic axes take
 /// `ticks()`, and explicit ticks are the ones inside the domain ([`explicit_ticks`]). The tick
-/// format then labels every tick except those given with labels of their own.
+/// format then labels every tick except those given with labels of their own. Automatic ticks
+/// keep their labels apart along the axis as `room` asks ([`DrawnTicks`]).
 fn continuous(
     limits: ContinuousLimits<'_>,
     data: Option<(f64, f64)>,
     auto: AutoLimits,
-    target: usize,
+    room: &TickRoom<'_>,
 ) -> ContinuousAxis {
     let ContinuousLimits {
         transform,
@@ -275,7 +278,12 @@ fn continuous(
     } = limits;
     let (scale, unpadded, ticks) = match settings.explicit() {
         None => {
-            let (scale, unpadded, ticks) = automatic(transform, explicit, data, auto, target);
+            let judge = DrawnTicks {
+                format: settings.format(),
+                room,
+            };
+            let (scale, unpadded, ticks) =
+                automatic(transform, explicit, data, auto, room.target, &judge);
             (
                 scale,
                 unpadded,
@@ -308,41 +316,67 @@ fn continuous(
 /// The domain, the domain before padding and the automatic ticks of a continuous axis: the
 /// scale of the explicit limits when set; otherwise the empty-data range (0 to 1, or 1 to 10 on
 /// log) when there is no finite data; otherwise the data extent, fitted as `auto` says. Nice
-/// axes take the ticks that produced their limits; the others take `ticks()`. Only a nice axis
-/// pads its domain, after its ticks are chosen; an extent that counts as a single value is
-/// padded by [`ContinuousScale::from_extent`] alone. The labels are the automatic ones, and
-/// the ticks carry the step they were written for.
+/// axes take the ticks that produced their limits ([`ContinuousScale::fitted`]); the others
+/// take `ticks()`. Only a nice axis pads its domain, after its ticks are chosen; an extent that
+/// counts as a single value is padded by [`ContinuousScale::from_extent`] alone. The ticks are
+/// those `judge` lets through on the final domain, with the automatic labels, and carry the
+/// step they were written for.
 fn automatic(
     transform: Transform,
     limits: Option<ContinuousScale>,
     data: Option<(f64, f64)>,
     auto: AutoLimits,
     target: usize,
+    judge: &dyn TickJudge,
 ) -> (ContinuousScale, ContinuousScale, AutoTicks) {
     if let Some(scale) = limits {
-        (scale, scale, scale.auto_ticks(target))
+        (scale, scale, scale.auto_ticks(target, judge))
     } else if data.is_none() {
         // The fallback range is final on every axis: never widened with `nice`.
         let scale = ContinuousScale::unit(transform);
-        (scale, scale, scale.auto_ticks(target))
+        (scale, scale, scale.auto_ticks(target, judge))
     } else {
         let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
         match auto {
-            AutoLimits::Exact => (scale, scale, scale.auto_ticks(target)),
+            AutoLimits::Exact => (scale, scale, scale.auto_ticks(target, judge)),
             AutoLimits::Nice(padding) | AutoLimits::NiceBelowData(padding) => {
-                let (nice, ticks) = scale.nice_with_ticks(target);
-                let (nice, ticks) = match (auto, data) {
-                    (AutoLimits::NiceBelowData(_), Some((data_low, _))) => {
-                        nice.below_data(ticks, data_low, target)
-                    }
-                    _ => (nice, ticks),
+                let below_data = match (auto, data) {
+                    (AutoLimits::NiceBelowData(_), Some((data_low, _))) => Some(data_low),
+                    _ => None,
                 };
                 let single = data.is_some_and(|(lo, hi)| is_single_value(transform, lo, hi));
-                let padded = if single { nice } else { nice.padded(padding) };
-                (padded, nice, ticks)
+                let finish = Finish {
+                    below_data,
+                    padding: (!single).then_some(padding),
+                };
+                scale.fitted(target, finish, judge)
             }
         }
+    }
+}
+
+/// Judges automatic ticks as the axis draws them: labelled by its tick format, at their
+/// positions along the axis, with labels kept apart as its tick room asks.
+struct DrawnTicks<'a> {
+    /// The axis's tick format.
+    format: &'a TickFormat,
+    /// The axis's tick room.
+    room: &'a TickRoom<'a>,
+}
+
+impl TickJudge for DrawnTicks<'_> {
+    fn deferred(&self) -> bool {
+        self.room.deferred()
+    }
+
+    fn least_share(&self) -> f64 {
+        self.room.least_share()
+    }
+
+    fn slack(&self, scale: &ContinuousScale, ticks: &AutoTicks) -> f64 {
+        let labelled = self.format.relabel(ticks.ticks.clone(), ticks.values);
+        self.room.slack(&positioned(scale, labelled))
     }
 }
 
@@ -558,13 +592,14 @@ fn mark_categories(mark: &Mark) -> &[String] {
     }
 }
 
-/// Resolves both axes from the resolved `marks` and the axes' `limits`, for about `x_target`
-/// and `y_target` ticks.
+/// Resolves both axes from the resolved `marks` and the axes' `limits`, with automatic ticks as
+/// the tick rooms `x_room` and `y_room` ask: about their target number of ticks, with labels
+/// kept apart.
 pub(crate) fn resolve(
     marks: &[ResolvedMark<'_>],
     limits: &Limits,
-    x_target: usize,
-    y_target: usize,
+    x_room: &TickRoom<'_>,
+    y_room: &TickRoom<'_>,
 ) -> Resolved {
     let x = match limits.x {
         AxisLimits::Continuous(x_limits) => {
@@ -589,7 +624,7 @@ pub(crate) fn resolve(
             } else {
                 AutoLimits::Nice(Padding::BothSides)
             };
-            continuous(x_limits, data, auto, x_target).axis.into_axis()
+            continuous(x_limits, data, auto, x_room).axis.into_axis()
         }
         AxisLimits::Category => {
             let scale = categories(marks);
@@ -617,7 +652,7 @@ pub(crate) fn resolve(
     let ContinuousAxis {
         axis: y,
         unpadded_low,
-    } = continuous(limits.y, data, auto, y_target);
+    } = continuous(limits.y, data, auto, y_room);
     let baseline = baseline(&y.scale, transform, unpadded_low);
     Resolved { x, y, baseline }
 }
@@ -1501,7 +1536,7 @@ mod tests {
         AreaOptions, BandOptions, BarOptions, Figure, HistOptions, LineOptions, ScatterOptions,
         Series, Step, StepOptions,
     };
-    use crate::{AxesMut, LogBase, MIN_LOG_VALUE, ScaleKind, Theme, TickFormat};
+    use crate::{AxesMut, FontLibrary, LogBase, MIN_LOG_VALUE, ScaleKind, Theme, TickFormat};
 
     fn nums(v: &[f64]) -> AxisData {
         AxisData::Numbers(v.to_vec())
@@ -1548,7 +1583,8 @@ mod tests {
     /// Both axes of `axes`, resolved from its marks.
     fn resolve_axes(axes: &Axes, x_target: usize, y_target: usize) -> Resolved {
         let marks = resolve_marks(axes.marks(), &Theme::pigment());
-        resolve(&marks, &Limits::of(axes), x_target, y_target)
+        let (x, y) = TickRoom::unlimited(x_target, y_target, FontLibrary::global());
+        resolve(&marks, &Limits::of(axes), &x, &y)
     }
 
     fn domains(figure: &Figure) -> ((f64, f64), (f64, f64)) {
