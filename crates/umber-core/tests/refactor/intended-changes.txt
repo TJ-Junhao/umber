@@ -1,3 +1,2 @@
-# Cases whose committed outputs change on purpose in this change.
-# The theme record gains the bubble_max_radius getter.
-api/themes
+# Cases whose committed outputs change on purpose in this change; none.
+# VERSION is excluded from the output corpus, so the 0.2.0 bump changes no records.
