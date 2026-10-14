@@ -90,6 +90,8 @@ fn log_mark_and_grid(width_in: f64, lo: f64, hi: f64, v: f64) -> (f64, f64, Area
     .unwrap()
     .xlim(lo, hi)
     .unwrap()
+    .xticks(&[v])
+    .unwrap()
     .line(nums(&[v, v]), &[0.0, 1.0], LineOptions::default())
     .unwrap();
     let scene = f.to_scene(FontLibrary::global()).unwrap();
@@ -107,8 +109,9 @@ fn log_mark_and_grid(width_in: f64, lo: f64, hi: f64, v: f64) -> (f64, f64, Area
 
 #[test]
 fn marks_and_gridlines_share_the_log_normalization() {
-    // Edge cases: the narrowest allowed log ratio at 1e299, where `v` is a
-    // resolved tick. The positions are 100-digit references.
+    // Edge cases: the narrowest allowed log ratio at 1e299, with an explicit tick at `v`
+    // so the normalization check is independent of automatic tick choice. The positions are
+    // 100-digit references.
     let cases = [
         (
             200.0,

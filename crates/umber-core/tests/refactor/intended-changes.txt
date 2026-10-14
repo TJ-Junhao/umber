@@ -1,1 +1,8 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Limits near the largest supported magnitude get Extended ticks instead of the degenerate fallback.
+fig-narrow-limits-huge
+fig-stacked-bars-totals-at-bound
+# A thinned log axis moves its lower limit down by the thinned tick step.
+fig-font-scale-max
+fig-log-both-base2
+fig-log-both-base10-small
