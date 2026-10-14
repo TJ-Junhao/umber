@@ -43,9 +43,9 @@ use super::inset::{CONTAINMENT_TOLERANCE, TickSpan};
 use super::panel::{HeaderBox, PanelBands, PanelSlot, PanelSpan, end_label_cap};
 use super::program;
 use super::{
-    AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, Label, Layout, LayoutInput, MIN_PLOT, PADDING,
-    PlotSize, X_LABEL_EDGE_GAP, initial_plot_size, solve_single, widest, x_labels_wider_than,
-    y_labels_leave_no_room,
+    AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, LEGEND_HINT, Label, Layout, LayoutInput,
+    MIN_PLOT, PADDING, PlotSize, X_LABEL_EDGE_GAP, initial_plot_size, legend_too_wide,
+    solve_single, widest, widths, x_labels_wider_than, y_labels_leave_no_room,
 };
 use crate::error::{number, quoted};
 use crate::model::{CellRange, Grid};
@@ -1117,11 +1117,6 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
     let too_wide = |cells: CellRange, message: String, hint: &'static str| {
         in_panel(cells, Error::style(input.context, message).with_hint(hint))
     };
-    // The text's width and the room it has, in whole points.
-    let widths = |width: f64, room: f64| {
-        let room = room.floor();
-        (number(width.round().max(room + 1.0)), number(room))
-    };
     for (panel, layout) in input.panels.iter().zip(layouts) {
         let cells = panel.axes.cells();
         let plot = layout.plot;
@@ -1166,12 +1161,11 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
                 let label = &entry.label;
                 // A chip's padding follows its label.
                 let trailing = end - (label.x + label.width());
-                let (w, p) = widths(label.width(), plot.right() - trailing - label.x);
-                let message = format!(
-                    "the legend label {} is {w} pt wide; the panel has {p} pt.",
-                    quoted(&label.text)
-                );
-                return Err(too_wide(cells, message, LEGEND_HINT));
+                let room = plot.right() - trailing - label.x;
+                return Err(in_panel(
+                    cells,
+                    legend_too_wide(input.context, label, room, "panel"),
+                ));
             }
         }
         for (label, name, hint) in axis {
@@ -1196,9 +1190,6 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
     }
     Ok(())
 }
-
-/// The hint of the errors for legend labels that do not fit their panel.
-const LEGEND_HINT: &str = "shorten the label or widen the figure.";
 
 #[cfg(test)]
 mod tests {

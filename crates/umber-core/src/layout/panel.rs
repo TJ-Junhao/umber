@@ -224,13 +224,14 @@ impl Header {
         self.stack_with_row(0.0, height).bottom
     }
 
-    /// The hint of the error for a figure too short for the plot area, naming only the header
-    /// parts this header has.
-    pub(super) fn height_hint(&self) -> &'static str {
+    /// The hint of the error for a figure too short for the plot area, naming this header's
+    /// parts and the figure header above it, when present.
+    pub(super) fn height_hint(&self, figure_header: bool) -> &'static str {
         figure_height_hint(
             self.title.is_some(),
             self.subtitle.is_some(),
             self.row.is_some(),
+            figure_header,
         )
     }
 
@@ -318,6 +319,7 @@ impl FigureHeader {
                     self.title.is_some(),
                     self.subtitle.is_some(),
                     !self.legend.is_empty(),
+                    false,
                 ),
             ));
         }

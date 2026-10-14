@@ -19,14 +19,15 @@
 //! anchors move with the axes, so they are placed in every layout pass.
 
 use super::nudge::separate;
-use super::{Area, BODY_LINE, Frame, Label, Styles, baseline_in_line, measure, metrics};
-use crate::error::{number, quoted};
+use super::{
+    Area, BODY_LINE, Frame, Label, Styles, baseline_in_line, legend_too_wide, measure, metrics,
+};
 use crate::legend::{Legend, RowStyle, Swatch};
 use crate::resolve::{
     Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis,
     ResolvedContinuousAxis,
 };
-use crate::{Align, Error, FontLibrary, Result, Rgba, SizeSpec, TextStyle, Theme, Weight};
+use crate::{Align, FontLibrary, Result, Rgba, SizeSpec, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
 const SWATCH_GAP: f64 = 4.0;
@@ -281,18 +282,8 @@ impl LegendRow {
                 .chip
                 .map_or(entry.label.x + entry.label.width(), |chip| chip.right());
             if end - start > width + super::inset::CONTAINMENT_TOLERANCE {
-                let room = (width - (end - start - entry.label.width())).floor();
-                let measured = entry.label.width().round().max(room + 1.0);
-                return Err(Error::style(
-                    context,
-                    format!(
-                        "the legend label {} is {} pt wide; the figure has {} pt.",
-                        quoted(&entry.label.text),
-                        number(measured),
-                        number(room),
-                    ),
-                )
-                .with_hint("shorten the label or widen the figure."));
+                let room = width - (end - start - entry.label.width());
+                return Err(legend_too_wide(context, &entry.label, room, "figure"));
             }
         }
         Ok(())

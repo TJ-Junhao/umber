@@ -549,18 +549,69 @@ const Y_LABEL_HINT: &str = "shorten the y tick labels or widen the figure.";
 /// The hint of the error for a figure too narrow for the plot area.
 const FIGURE_WIDTH_HINT: &str = "widen the figure.";
 
-/// The hint of the error for a figure too short for the plot area, naming only the header
-/// parts it has: whether it has a title, a subtitle and a legend row.
-fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str {
-    match (title, subtitle, legend) {
-        (false, false, false) => "make the figure taller.",
-        (true, false, false) => "make the figure taller, or remove the title.",
-        (false, true, false) => "make the figure taller, or remove the subtitle.",
-        (false, false, true) => "make the figure taller, or remove the legend.",
-        (true, true, false) => "make the figure taller, or remove the title or subtitle.",
-        (true, false, true) => "make the figure taller, or remove the title or legend.",
-        (false, true, true) => "make the figure taller, or remove the subtitle or legend.",
-        (true, true, true) => "make the figure taller, or remove the title, subtitle or legend.",
+/// The hint of the errors for legend labels that do not fit their panel or figure.
+const LEGEND_HINT: &str = "shorten the label or widen the figure.";
+
+/// The text's width and the room it has, in whole points.
+fn widths(width: f64, room: f64) -> (impl std::fmt::Display, impl std::fmt::Display) {
+    let room = room.floor();
+    (number(width.round().max(room + 1.0)), number(room))
+}
+
+/// A legend label wider than the room left after its swatch and any chip padding.
+fn legend_too_wide(context: &'static str, label: &Label, room: f64, container: &str) -> Error {
+    let (w, p) = widths(label.width(), room);
+    Error::style(
+        context,
+        format!(
+            "the legend label {} is {w} pt wide; the {container} has {p} pt.",
+            quoted(&label.text)
+        ),
+    )
+    .with_hint(LEGEND_HINT)
+}
+
+/// The hint of the error for a figure too short for the plot area, naming only the measured
+/// header parts and, for a panel below a figure header, that figure header too.
+fn figure_height_hint(
+    title: bool,
+    subtitle: bool,
+    legend: bool,
+    figure_header: bool,
+) -> &'static str {
+    match (figure_header, title, subtitle, legend) {
+        (false, false, false, false) => "make the figure taller.",
+        (false, true, false, false) => "make the figure taller, or remove the title.",
+        (false, false, true, false) => "make the figure taller, or remove the subtitle.",
+        (false, false, false, true) => "make the figure taller, or remove the legend.",
+        (false, true, true, false) => "make the figure taller, or remove the title or subtitle.",
+        (false, true, false, true) => "make the figure taller, or remove the title or legend.",
+        (false, false, true, true) => "make the figure taller, or remove the subtitle or legend.",
+        (false, true, true, true) => {
+            "make the figure taller, or remove the title, subtitle or legend."
+        }
+        (true, false, false, false) => "make the figure taller, or remove the figure header.",
+        (true, true, false, false) => {
+            "make the figure taller, or remove the figure header or title."
+        }
+        (true, false, true, false) => {
+            "make the figure taller, or remove the figure header or subtitle."
+        }
+        (true, false, false, true) => {
+            "make the figure taller, or remove the figure header or legend."
+        }
+        (true, true, true, false) => {
+            "make the figure taller, or remove the figure header, title or subtitle."
+        }
+        (true, true, false, true) => {
+            "make the figure taller, or remove the figure header, title or legend."
+        }
+        (true, false, true, true) => {
+            "make the figure taller, or remove the figure header, subtitle or legend."
+        }
+        (true, true, true, true) => {
+            "make the figure taller, or remove the figure header, title, subtitle or legend."
+        }
     }
 }
 
@@ -592,7 +643,8 @@ fn figure_height_hint(title: bool, subtitle: bool, legend: bool) -> &'static str
 /// - the room between the header (title, subtitle and legend row), the y label and the y tick
 ///   label rising above the top tick, and the x tick labels, the x label and the bottom padding
 ///   is shorter than [`MIN_PLOT`]: the message names the height the canvas needs, and the hint
-///   names only the header parts the axes have (see [`figure_too_short`]).
+///   names the figure header, when present, and only the header parts the axes have (see
+///   [`figure_too_short`]).
 fn solve_single(
     input: &LayoutInput<'_>,
     bands: &panel::PanelBands,
@@ -653,11 +705,7 @@ fn solve_single(
             context,
             frame.height,
             plot_top - frame.y + MIN_PLOT + below,
-            if top > frame.y + PADDING {
-                "make the figure taller, or remove the figure header."
-            } else {
-                bands.heading.height_hint()
-            },
+            bands.heading.height_hint(top > frame.y + PADDING),
         ));
     }
     let (x, plot_width) = fit_span(plot_left, plot_right, frame.x, frame.right());
@@ -1863,6 +1911,91 @@ mod tests {
                 overflow(&f).hint(),
                 Some("make the figure taller, or remove the title.")
             );
+        }
+    }
+
+    #[test]
+    fn the_height_hint_names_the_figure_header_and_only_the_panel_parts() {
+        let cases = [
+            (
+                (false, false, false),
+                "make the figure taller, or remove the figure header.",
+            ),
+            (
+                (true, false, false),
+                "make the figure taller, or remove the figure header or title.",
+            ),
+            (
+                (false, true, false),
+                "make the figure taller, or remove the figure header or subtitle.",
+            ),
+            (
+                (false, false, true),
+                "make the figure taller, or remove the figure header or legend.",
+            ),
+            (
+                (true, true, false),
+                "make the figure taller, or remove the figure header, title or subtitle.",
+            ),
+            (
+                (true, false, true),
+                "make the figure taller, or remove the figure header, title or legend.",
+            ),
+            (
+                (false, true, true),
+                "make the figure taller, or remove the figure header, subtitle or legend.",
+            ),
+            (
+                (true, true, true),
+                "make the figure taller, or remove the figure header, title, subtitle or legend.",
+            ),
+        ];
+        for ((title, subtitle, legend), hint) in cases {
+            let mut f = bare(2.0, 0.3, title, subtitle, legend);
+            f.title("Figure");
+            let err = overflow(&f);
+            assert!(matches!(err, crate::Error::Style { .. }));
+            assert!(
+                err.to_string()
+                    .starts_with("Figure.to_scene(): the figure is 21 pt tall; at least "),
+                "{err}"
+            );
+            assert_eq!(err.hint(), Some(hint), "{title} {subtitle} {legend}");
+        }
+        // A direct or hidden legend still takes no panel header room.
+        for style in [crate::LegendStyle::Direct, crate::LegendStyle::None] {
+            let mut f = bare(2.0, 0.3, true, false, true);
+            f.title("Figure");
+            f.single_axes_mut().legend(style);
+            assert_eq!(
+                overflow(&f).hint(),
+                Some("make the figure taller, or remove the figure header or title.")
+            );
+        }
+    }
+
+    #[test]
+    fn legend_width_errors_round_up_past_the_available_room() {
+        for (room, width, shown) in [(20.2, 21, 20), (19.8, 20, 19), (-0.1, 20, -1)] {
+            let (w, p) = widths(20.4, room);
+            assert_eq!(format!("{w} {p}"), format!("{width} {shown}"));
+        }
+        let lib = FontLibrary::with_fallbacks(Vec::new());
+        let label = measure(&lib, "WWWW", Styles::new(&Theme::pigment()).body);
+        let width = label.width().round();
+        for container in ["figure", "panel"] {
+            for (room, shown) in [(width - 0.6, width - 1.0), (-0.1, -1.0)] {
+                let err = legend_too_wide("Figure.to_scene()", &label, room, container);
+                assert!(matches!(err, crate::Error::Style { .. }));
+                assert_eq!(
+                    err.to_string(),
+                    format!(
+                        "Figure.to_scene(): the legend label \"WWWW\" is {width} pt wide; \
+                         the {container} has {shown} pt."
+                    )
+                );
+                assert_eq!(err.hint(), Some("shorten the label or widen the figure."));
+            }
         }
     }
 
