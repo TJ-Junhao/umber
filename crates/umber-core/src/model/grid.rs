@@ -15,7 +15,10 @@ use crate::{Error, Result};
 /// ```
 pub const MAX_GRID: usize = 32;
 
-/// Which axes of a grid share a scale along one dimension.
+/// Which axes of a grid share a scale along one dimension: one domain, one tick set and one
+/// set of explicit limits, ticks and tick formats. Shared x labels appear only at the lowest
+/// occupied panel of each column for `Col` and `All`; shared y labels only at the leftmost
+/// occupied panel of each row for `Row` and `All`. Axis titles stay on every panel.
 ///
 /// # Examples
 ///

@@ -518,8 +518,8 @@ fn category_ticks(scale: &CategoryScale) -> Vec<AxisTick> {
 }
 
 /// The x categories of every mark, in mark order, then in data order.
-fn categories(marks: &[ResolvedMark<'_>]) -> CategoryScale {
-    CategoryScale::from_first_appearance(marks.iter().flat_map(|mark| mark.x_categories()))
+fn categories<'a, 'm: 'a>(marks: impl Iterator<Item = &'a ResolvedMark<'m>>) -> CategoryScale {
+    CategoryScale::from_first_appearance(marks.flat_map(|mark| mark.x_categories()))
 }
 
 /// Checks, before `figure` is rendered in `context`, that every vertical reference line on a
@@ -546,9 +546,16 @@ pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result
         let Some(first) = lines.next() else {
             continue;
         };
+        let cells = axes.cells();
+        let key = figure.x_group_of(cells.row(), cells.col());
         let scale = CategoryScale::from_first_appearance(
-            axes.marks()
-                .iter()
+            figure
+                .panels()
+                .filter(|member| {
+                    let c = member.cells();
+                    figure.x_group_of(c.row(), c.col()) == key
+                })
+                .flat_map(|member| member.marks())
                 .flat_map(mark_categories)
                 .map(String::as_str),
         );
@@ -599,15 +606,28 @@ fn mark_categories(mark: &Mark) -> &[String] {
 /// Resolves both axes from the resolved `marks` and the axes' `limits`, with automatic ticks as
 /// the tick rooms `x_room` and `y_room` ask: about their target number of ticks, with labels
 /// kept apart.
+#[cfg(test)]
 pub(crate) fn resolve(
     marks: &[ResolvedMark<'_>],
     limits: &Limits,
     x_room: &TickRoom<'_>,
     y_room: &TickRoom<'_>,
 ) -> Resolved {
-    let x = match limits.x {
+    let x = resolve_x(marks.iter(), limits.x, x_room);
+    let (y, baseline) = resolve_y(marks.iter(), limits.y, y_room);
+    Resolved { x, y, baseline }
+}
+
+/// Resolves one x group, with members' marks in row-major panel order, then mark order.
+/// The iterator is cloned to inspect the extent and padding without copying any mark data.
+pub(crate) fn resolve_x<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    limits: AxisLimits<'_>,
+    room: &TickRoom<'_>,
+) -> ResolvedAxis {
+    match limits {
         AxisLimits::Continuous(x_limits) => {
-            let data = extent(marks.iter().flat_map(|mark| mark.x_numbers()));
+            let data = extent(marks.clone().flat_map(|mark| mark.x_numbers()));
             // Reference lines and spans do not decide the padding: an axis of lines and
             // references keeps the exact extent of the lines, while an axis of references
             // alone is padded.
@@ -615,7 +635,7 @@ pub(crate) fn resolve(
             // leaves the x axis as it would be without it.
             let contributing = || {
                 marks
-                    .iter()
+                    .clone()
                     .filter(|mark| mark.x_numbers().any(f64::is_finite))
             };
             let only_references = data.is_some() && contributing().all(ResolvedMark::is_reference);
@@ -628,7 +648,7 @@ pub(crate) fn resolve(
             } else {
                 AutoLimits::Nice(Padding::BothSides)
             };
-            continuous(x_limits, data, auto, x_room).axis.into_axis()
+            continuous(x_limits, data, auto, room).axis.into_axis()
         }
         AxisLimits::Category => {
             let scale = categories(marks);
@@ -637,13 +657,21 @@ pub(crate) fn resolve(
                 scale: AxisScale::Category(scale),
             }
         }
-    };
-    let transform = limits.y.transform;
-    let data = extent(marks.iter().flat_map(|mark| mark.y_values()));
+    }
+}
+
+/// Resolves one y group and the baseline shared by its members.
+pub(crate) fn resolve_y<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    limits: ContinuousLimits<'_>,
+    room: &TickRoom<'_>,
+) -> (ResolvedContinuousAxis, NormalizedPos) {
+    let transform = limits.transform;
+    let data = extent(marks.clone().flat_map(|mark| mark.y_values()));
     // Bars and areas grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
     // edge when it is a limit. On a log axis they grow from the baseline.
     // With no data at all, explicit ticks still use the baseline convention of the mark.
-    let bars = marks.iter().any(|mark| {
+    let bars = marks.clone().any(|mark| {
         mark.grows_from_baseline() && (data.is_none() || mark.y_values().any(f64::is_finite))
     });
     let (data, padding) = if bars && transform == Transform::Linear {
@@ -656,9 +684,9 @@ pub(crate) fn resolve(
     let ContinuousAxis {
         axis: y,
         unpadded_low,
-    } = continuous(limits.y, data, auto, y_room);
+    } = continuous(limits, data, auto, room);
     let baseline = baseline(&y.scale, transform, unpadded_low);
-    Resolved { x, y, baseline }
+    (y, baseline)
 }
 
 /// The values one mark contributes to an axis domain, in order (see [`ResolvedMark`]).
@@ -1025,7 +1053,7 @@ impl<'a> ResolvedMark<'a> {
 
     /// Whether the mark is a reference line or span: it runs across the whole plot, extends a
     /// domain only by its own values, and does not count among the marks that decide how an axis
-    /// is padded (see [`resolve`]).
+    /// is padded (see [`resolve_x`]).
     pub fn is_reference(&self) -> bool {
         match self {
             ResolvedMark::Stem { .. } => false,
@@ -1049,7 +1077,7 @@ impl<'a> ResolvedMark<'a> {
     /// Whether an x axis padded by the marks reads the exact extent of this mark: the marks
     /// drawn along a line ([`line_width`](Self::line_width)) and bands, which are bounded by
     /// curves over their x values. An x axis whose marks, references apart, all have it keeps
-    /// the exact data extent (see [`resolve`]).
+    /// the exact data extent (see [`resolve_x`]).
     pub fn has_exact_x_extent(&self) -> bool {
         self.line_width().is_some() || matches!(self, ResolvedMark::Band { .. })
     }

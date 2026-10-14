@@ -2,8 +2,11 @@
 //! with their getters. [`AxesMut`](super::AxesMut) holds the setters, which validate every
 //! input before storing it.
 
+use std::sync::Arc;
+
 use super::grid::CellRange;
 use super::mark::Mark;
+use super::share::AxisSettings;
 use super::ticks::{AxisTicks, ExplicitTicks};
 use crate::error::number;
 use crate::{ContinuousScale, Error, LegendStyle, Result, ScaleKind, TickFormat, Transform};
@@ -37,14 +40,10 @@ pub struct Axes {
     pub(super) subtitle: String,
     pub(super) xlabel: String,
     pub(super) ylabel: String,
-    /// The explicit x limits, validated as a scale for the x axis.
-    pub(super) xlim: Option<ContinuousScale>,
-    /// The explicit y limits, validated as a scale for the y axis.
-    pub(super) ylim: Option<ContinuousScale>,
-    /// The explicit ticks and the tick format of the x axis; always unset on a category axis.
-    pub(super) xticks: AxisTicks,
-    /// The explicit ticks and the tick format of the y axis.
-    pub(super) yticks: AxisTicks,
+    /// The x group's settings, the same allocation held by the figure and every member.
+    pub(super) x_settings: Arc<AxisSettings>,
+    /// The y group's settings.
+    pub(super) y_settings: Arc<AxisSettings>,
     /// The legend style set for these axes; the theme's applies when unset.
     pub(super) legend: Option<LegendStyle>,
     pub(super) marks: Vec<Mark>,
@@ -53,7 +52,13 @@ pub struct Axes {
 impl Axes {
     /// Empty axes covering `cells`, with an x axis of scale kind `x` and a y axis of transform
     /// `y`.
-    pub(super) fn new(x: ScaleKind, y: Transform, cells: CellRange) -> Axes {
+    pub(super) fn new(
+        x: ScaleKind,
+        y: Transform,
+        cells: CellRange,
+        x_settings: Arc<AxisSettings>,
+        y_settings: Arc<AxisSettings>,
+    ) -> Axes {
         Axes {
             cells,
             x,
@@ -62,10 +67,8 @@ impl Axes {
             subtitle: String::new(),
             xlabel: String::new(),
             ylabel: String::new(),
-            xlim: None,
-            ylim: None,
-            xticks: AxisTicks::default(),
-            yticks: AxisTicks::default(),
+            x_settings,
+            y_settings,
             legend: None,
             marks: Vec::new(),
         }
@@ -254,7 +257,7 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn x_limits(&self) -> Option<(f64, f64)> {
-        self.xlim.map(|scale| scale.domain())
+        self.x_settings.limits.map(|scale| scale.domain())
     }
 
     /// The explicit y limits, if set.
@@ -272,17 +275,17 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn y_limits(&self) -> Option<(f64, f64)> {
-        self.ylim.map(|scale| scale.domain())
+        self.y_settings.limits.map(|scale| scale.domain())
     }
 
     /// The x scale that the explicit x limits define, if set.
     pub(crate) fn x_limit_scale(&self) -> Option<ContinuousScale> {
-        self.xlim
+        self.x_settings.limits
     }
 
     /// The y scale that the explicit y limits define, if set.
     pub(crate) fn y_limit_scale(&self) -> Option<ContinuousScale> {
-        self.ylim
+        self.y_settings.limits
     }
 
     /// The explicit x ticks; `None` when the x axis uses the automatic ticks.
@@ -299,7 +302,7 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn x_ticks(&self) -> Option<&ExplicitTicks> {
-        self.xticks.explicit()
+        self.x_settings.ticks.explicit()
     }
 
     /// The explicit y ticks; `None` when the y axis uses the automatic ticks.
@@ -317,7 +320,7 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn y_ticks(&self) -> Option<&ExplicitTicks> {
-        self.yticks.explicit()
+        self.y_settings.ticks.explicit()
     }
 
     /// The format of the x tick labels; [`TickFormat::AUTO`] when unset.
@@ -334,7 +337,7 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn x_tick_format(&self) -> &TickFormat {
-        self.xticks.format()
+        self.x_settings.ticks.format()
     }
 
     /// The format of the y tick labels; [`TickFormat::AUTO`] when unset.
@@ -351,17 +354,17 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn y_tick_format(&self) -> &TickFormat {
-        self.yticks.format()
+        self.y_settings.ticks.format()
     }
 
     /// The tick settings of the x axis.
     pub(crate) fn x_tick_settings(&self) -> &AxisTicks {
-        &self.xticks
+        &self.x_settings.ticks
     }
 
     /// The tick settings of the y axis.
     pub(crate) fn y_tick_settings(&self) -> &AxisTicks {
-        &self.yticks
+        &self.y_settings.ticks
     }
 
     /// The legend style set with [`AxesMut::legend`](super::AxesMut::legend); `None` when
@@ -402,7 +405,7 @@ impl Axes {
 
 /// `kind` as the Python `Scale` call that makes it: `Scale.linear()`, `Scale.log(2)` or
 /// `Scale.category()`.
-fn scale_name(kind: ScaleKind) -> String {
+pub(super) fn scale_name(kind: ScaleKind) -> String {
     match kind {
         ScaleKind::Linear => "Scale.linear()".to_owned(),
         ScaleKind::Log { base } => format!("Scale.log({})", number(base.get())),

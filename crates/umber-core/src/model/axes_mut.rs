@@ -13,6 +13,7 @@ use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+use super::share::{Setting, SharedAxis};
 use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
@@ -29,6 +30,11 @@ use crate::{ContinuousScale, Error, LegendStyle, Result, TickFormat};
 /// [`Figure::add_axes`], [`Figure::add_axes_at`] and [`Figure::axes_at_mut`] return one.
 /// Every setter checks its input before it stores anything, so a failed call leaves the figure
 /// unchanged. Setters return the handle, so calls chain.
+///
+/// Limits, explicit ticks and tick formats apply to the whole shared group. A member may
+/// replace its own setting, but a different value already set by another member is an
+/// `Error::Usage`. Setting the same value again is allowed. Members added later inherit the
+/// group's settings; text, legend and mark methods always apply to this axes alone.
 ///
 /// # Examples
 ///
@@ -166,8 +172,15 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.xlim = Some(check_x_limits(axes.x, low, high)?);
+        let mut settings = (*self.x_settings).clone();
+        settings.limits = Some(check_x_limits(self.x, low, high)?);
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::Limits,
+            settings,
+            "Axes.xlim()",
+        )?;
         Ok(self)
     }
 
@@ -185,8 +198,15 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.ylim = Some(ContinuousScale::new(axes.y, low, high, "Axes.ylim()")?);
+        let mut settings = (*self.y_settings).clone();
+        settings.limits = Some(ContinuousScale::new(self.y, low, high, "Axes.ylim()")?);
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::Limits,
+            settings,
+            "Axes.ylim()",
+        )?;
         Ok(self)
     }
 
@@ -222,10 +242,14 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xticks(&mut self, positions: &[f64]) -> Result<&mut Self> {
-        let axes = self.axes_mut();
         const CONTEXT: &str = "Axes.xticks()";
-        let transform = check_x_tick_axis(CONTEXT, axes.x, "ticks")?;
-        axes.xticks.set_positions(CONTEXT, transform, positions)?;
+        let transform = check_x_tick_axis(CONTEXT, self.x, "ticks")?;
+        let mut settings = (*self.x_settings).clone();
+        settings
+            .ticks
+            .set_positions(CONTEXT, transform, positions)?;
+        self.figure
+            .set_group(self.index, SharedAxis::X, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
     }
 
@@ -250,9 +274,11 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn yticks(&mut self, positions: &[f64]) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.yticks
-            .set_positions("Axes.yticks()", axes.y, positions)?;
+        const CONTEXT: &str = "Axes.yticks()";
+        let mut settings = (*self.y_settings).clone();
+        settings.ticks.set_positions(CONTEXT, self.y, positions)?;
+        self.figure
+            .set_group(self.index, SharedAxis::Y, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
     }
 
@@ -285,11 +311,14 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Self> {
-        let axes = self.axes_mut();
         const CONTEXT: &str = "Axes.xticks_labeled()";
-        let transform = check_x_tick_axis(CONTEXT, axes.x, "ticks")?;
-        axes.xticks
+        let transform = check_x_tick_axis(CONTEXT, self.x, "ticks")?;
+        let mut settings = (*self.x_settings).clone();
+        settings
+            .ticks
             .set_labeled(CONTEXT, transform, positions, labels)?;
+        self.figure
+            .set_group(self.index, SharedAxis::X, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
     }
 
@@ -314,9 +343,13 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn yticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.yticks
-            .set_labeled("Axes.yticks_labeled()", axes.y, positions, labels)?;
+        const CONTEXT: &str = "Axes.yticks_labeled()";
+        let mut settings = (*self.y_settings).clone();
+        settings
+            .ticks
+            .set_labeled(CONTEXT, self.y, positions, labels)?;
+        self.figure
+            .set_group(self.index, SharedAxis::Y, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
     }
 
@@ -341,10 +374,17 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xtick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
-        let axes = self.axes_mut();
         const CONTEXT: &str = "Axes.xtick_format()";
-        check_x_tick_axis(CONTEXT, axes.x, "tick formats")?;
-        axes.xticks.set_format(CONTEXT, format)?;
+        check_x_tick_axis(CONTEXT, self.x, "tick formats")?;
+        let mut settings = (*self.x_settings).clone();
+        settings.ticks.set_format(CONTEXT, format)?;
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::Format,
+            settings,
+            CONTEXT,
+        )?;
         Ok(self)
     }
 
@@ -368,8 +408,16 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn ytick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
-        let axes = self.axes_mut();
-        axes.yticks.set_format("Axes.ytick_format()", format)?;
+        const CONTEXT: &str = "Axes.ytick_format()";
+        let mut settings = (*self.y_settings).clone();
+        settings.ticks.set_format(CONTEXT, format)?;
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::Format,
+            settings,
+            CONTEXT,
+        )?;
         Ok(self)
     }
 

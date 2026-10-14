@@ -95,6 +95,7 @@ mod corpus {
     pub mod legend;
     pub mod plot_height;
     pub mod rules;
+    pub mod share;
     pub mod size;
     pub mod stem;
     pub mod step;
@@ -152,6 +153,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::rules::cases(&lib, &mut sink);
     corpus::band::cases(&lib, &mut sink);
     corpus::error_bars::cases(&lib, &mut sink);
+    corpus::share::cases(&lib, &mut sink);
     corpus::stem::cases(&lib, &mut sink);
 }
 

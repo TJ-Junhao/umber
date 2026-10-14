@@ -1,8 +1,12 @@
 //! The figure: a size, a theme, a grid and the axes placed on it.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use super::axes::Axes;
 use super::axes_mut::AxesMut;
 use super::grid::{CellRange, Grid, GridIndex, Placement};
+use super::share::{self, AxisSettings, Group, Setting, SharedAxis};
 use super::validation::check_figure_size;
 use crate::{Error, Result, ScaleKind, Theme};
 
@@ -41,6 +45,10 @@ pub struct Figure {
     grid: Grid,
     /// The placed axes, in row-major order of their top-left cells. No two cover one cell.
     panels: Vec<Axes>,
+    /// Settings stored once per x group, keyed independently of panel insertion order.
+    x_groups: BTreeMap<usize, Group>,
+    /// Settings stored once per y group.
+    y_groups: BTreeMap<usize, Group>,
 }
 
 impl Figure {
@@ -83,6 +91,8 @@ impl Figure {
             theme,
             grid,
             panels: Vec::new(),
+            x_groups: BTreeMap::new(),
+            y_groups: BTreeMap::new(),
         })
     }
 
@@ -144,7 +154,9 @@ impl Figure {
     ///   (`col_span`);
     /// - `y` is a category scale, because the y axis is always linear or log (`y`);
     /// - a cell is taken by an axes already added (`row`): the message names the first taken
-    ///   cell in row-major order and the top-left cell of the axes that holds it.
+    ///   cell in row-major order and the top-left cell of the axes that holds it;
+    /// - a shared group would mix scale kinds or log bases (`x`, then `y`);
+    /// - a span would cross groups of a shared dimension (`row_span` or `col_span`, x before y).
     ///
     /// # Examples
     ///
@@ -215,11 +227,17 @@ impl Figure {
             .with_parameter("row")
             .with_hint("each cell holds one axes; pick an empty cell."));
         }
+        share::check_add(self, cells, x, y.kind())?;
+        let x_key = self.x_group_of(row, col);
+        let y_key = self.y_group_of(row, col);
+        let x_settings = Arc::clone(&self.x_groups.entry(x_key).or_default().settings);
+        let y_settings = Arc::clone(&self.y_groups.entry(y_key).or_default().settings);
         // Panels stay in row-major order of their top-left cells, which no two share.
         let index = self
             .panels
             .partition_point(|axes| (axes.cells().row(), axes.cells().col()) < (row, col));
-        self.panels.insert(index, Axes::new(x, y, cells));
+        self.panels
+            .insert(index, Axes::new(x, y, cells, x_settings, y_settings));
         Ok(AxesMut::new(self, index))
     }
 
@@ -354,6 +372,52 @@ impl Figure {
     /// The axes at `index` among the panels, to change; see [`Figure::panel`].
     pub(super) fn panel_mut(&mut self, index: usize) -> &mut Axes {
         &mut self.panels[index]
+    }
+
+    /// The stable x group key of a cell.
+    pub(crate) fn x_group_of(&self, row: usize, col: usize) -> usize {
+        share::group_key(&self.grid, self.grid.share_x(), row, col)
+    }
+
+    /// The stable y group key of a cell.
+    pub(crate) fn y_group_of(&self, row: usize, col: usize) -> usize {
+        share::group_key(&self.grid, self.grid.share_y(), row, col)
+    }
+
+    /// Checks and replaces one group setting, then points every member at the new allocation.
+    /// A failed check leaves the figure, including its groups, unchanged.
+    pub(super) fn set_group(
+        &mut self,
+        index: usize,
+        axis: SharedAxis,
+        setting: Setting,
+        proposed: AxisSettings,
+        context: &'static str,
+    ) -> Result<()> {
+        let cells = self.panels[index].cells();
+        let cell = super::Cell {
+            row: cells.row(),
+            col: cells.col(),
+        };
+        let mode = axis.mode(&self.grid);
+        let key = share::group_key(&self.grid, mode, cell.row, cell.col);
+        let groups = match axis {
+            SharedAxis::X => &mut self.x_groups,
+            SharedAxis::Y => &mut self.y_groups,
+        };
+        let group = groups.entry(key).or_default();
+        group.set(axis, setting, cell, proposed, context)?;
+        let settings = Arc::clone(&group.settings);
+        for axes in &mut self.panels {
+            let c = axes.cells();
+            if share::group_key(&self.grid, mode, c.row(), c.col()) == key {
+                match axis {
+                    SharedAxis::X => axes.x_settings = Arc::clone(&settings),
+                    SharedAxis::Y => axes.y_settings = Arc::clone(&settings),
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The index among the panels of the axes whose top-left cell is at `row`, `col`, with the
@@ -505,6 +569,17 @@ fn span_in_grid(dim: Dimension, start: usize, span: i64, size: usize) -> Result<
 
 #[cfg(test)]
 impl Figure {
+    /// Every member points to the allocation held by its x and y groups.
+    pub(super) fn assert_group_settings_shared(&self) {
+        for axes in &self.panels {
+            let cells = axes.cells();
+            let x = &self.x_groups[&self.x_group_of(cells.row(), cells.col())];
+            let y = &self.y_groups[&self.y_group_of(cells.row(), cells.col())];
+            assert!(Arc::ptr_eq(&axes.x_settings, &x.settings));
+            assert!(Arc::ptr_eq(&axes.y_settings, &y.settings));
+        }
+    }
+
     /// The axes of a figure on a 1 × 1 grid. Panics when it has none.
     pub(crate) fn single_axes(&self) -> &Axes {
         self.axes_at(GridIndex::Auto, GridIndex::Auto)
