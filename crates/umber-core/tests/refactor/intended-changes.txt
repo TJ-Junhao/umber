@@ -1,18 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# Tick labels kept apart: automatic ticks whose labels crowded each other on the plot drawn are
-# chosen again so that adjacent labels keep a gap of half the tick label size.
-fig-direct-font-scale-max
-fig-direct-tiny-50-lines
-fig-font-scale-max
-fig-legend-chips-font-scale-max
-fig-legend-font-scale-max
-fig-narrow-limits-huge
-fig-plot-min-height-graphite
-fig-plot-min-height-midnight
-fig-plot-min-height-pigment
-fig-squeezed-layout-no-x-ticks
-fig-wide-short
-fig-x-end-label-affix-midnight
-grid-4x5-lines-graphite
-grid-4x5-lines-midnight
-grid-4x5-lines-pigment
+# Cases whose committed outputs change on purpose in this change; none.

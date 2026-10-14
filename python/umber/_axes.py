@@ -1118,6 +1118,141 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.band(self._row, self._col, xs, lows, highs, name, spec)
             return self
 
+    def y_error_bars(
+        self,
+        x: Values[X],
+        low: Values[float],
+        high: Values[float],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+        width: Size = Size.AUTO,
+        caps: bool = True,
+    ) -> Self:
+        """Add a vertical error bar at each ``x[i]``, from ``low[i]`` to ``high[i]``.
+
+        On a category x axis the bar is drawn at the centre of the category. With ``caps`` each
+        end of a bar has a short line across it, as wide as the cap width of the theme. Without
+        explicit limits ``low`` and ``high`` extend the y axis and ``x`` the x axis, as the
+        values of a scatter do. With limits, a bar partly outside the plot keeps the part
+        inside, and loses the cap that is outside. A NaN in ``x``, ``low`` or ``high`` skips
+        that bar. Error bars cannot be placed on the bars of ``grouped_bar``: there is no way
+        to address the offset of one series of a group.
+
+        Args:
+            x: The x values: numbers on a linear or log x axis, names on a category x axis.
+            low: The lower end of each bar, one value per x value.
+            high: The upper end of each bar, one value per x value; no value of ``low`` may
+                exceed the value of ``high`` at the same index.
+            label: The name shown in the legend; an empty string leaves the bars out of it.
+                Error bars always take an entry in the legend row, also under
+                ``LegendStyle.DIRECT``.
+            color: The color of the bars and caps. ``Color.AUTO`` takes the next color of the
+                theme palette.
+            width: The line width of the bars and caps. ``Size.AUTO`` is the line width of the
+                theme.
+            caps: Whether each end has a cap.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+                value is not positive on a log axis, names and numbers do not match the x axis,
+                or a value of ``low`` is above the value of ``high`` at the same index.
+            StyleError: If ``label`` is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.y_error_bars(["a", "b"], [3.5, 4.0], [4.5, 6.0], label="95% interval")
+        """
+        with api_call():
+            context = "Axes.y_error_bars()"
+            check_axis_type(context, "x", x)
+            check_floats_type(context, "low", low)
+            check_floats_type(context, "high", high)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            extent = _size_argument(context, "width", width)
+            flag = _args.boolean(context, "caps", caps)
+            xs = self._x_values(context, x)
+            lows = floats(context, "low", low)
+            highs = floats(context, "high", high)
+            name = _args.text(context, "label", label)
+            self._native.y_error_bars(
+                self._row, self._col, xs, lows, highs, name, spec, extent, flag
+            )
+            return self
+
+    def x_error_bars(
+        self: "Axes[float, Y]",
+        y: Values[float],
+        low: Values[float],
+        high: Values[float],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+        width: Size = Size.AUTO,
+        caps: bool = True,
+    ) -> "Axes[float, Y]":
+        """Add a horizontal error bar at each ``y[i]``, from ``low[i]`` to ``high[i]``.
+
+        With ``caps`` each end of a bar has a short line across it, as wide as the cap width of
+        the theme. Without explicit limits ``low`` and ``high`` extend the x axis and ``y`` the
+        y axis, as the values of a scatter do. With limits, a bar partly outside the plot keeps
+        the part inside, and loses the cap that is outside. A NaN in ``y``, ``low`` or ``high``
+        skips that bar. It needs a linear or log x axis.
+
+        Args:
+            y: The y values, numbers.
+            low: The left end of each bar, one value per y value.
+            high: The right end of each bar, one value per y value; no value of ``low`` may
+                exceed the value of ``high`` at the same index.
+            label: The name shown in the legend; an empty string leaves the bars out of it.
+                Error bars always take an entry in the legend row, also under
+                ``LegendStyle.DIRECT``.
+            color: The color of the bars and caps. ``Color.AUTO`` takes the next color of the
+                theme palette.
+            width: The line width of the bars and caps. ``Size.AUTO`` is the line width of the
+                theme.
+            caps: Whether each end has a cap.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+                value is not positive on a log axis, or a value of ``low`` is above the value
+                of ``high`` at the same index.
+            StyleError: If ``label`` is too long.
+            UsageError: If the x axis is a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.x_error_bars([1.0, 2.0], [0.5, 1.2], [1.5, 2.0], caps=False)
+        """
+        with api_call():
+            context = "Axes.x_error_bars()"
+            check_floats_type(context, "y", y)
+            check_floats_type(context, "low", low)
+            check_floats_type(context, "high", high)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            extent = _size_argument(context, "width", width)
+            flag = _args.boolean(context, "caps", caps)
+            ys = floats(context, "y", y)
+            lows = floats(context, "low", low)
+            highs = floats(context, "high", high)
+            name = _args.text(context, "label", label)
+            self._native.x_error_bars(
+                self._row, self._col, ys, lows, highs, name, spec, extent, flag
+            )
+            return self
+
     def _x_values(self, context: str, x: object) -> FloatArray | list[str]:
         """Convert x values; empty data is an empty list of names on a category x axis."""
         values = axis_values(context, "x", x)

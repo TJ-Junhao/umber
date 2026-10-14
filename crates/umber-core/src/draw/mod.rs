@@ -35,6 +35,7 @@ mod bar;
 mod bar_shape;
 mod chrome;
 mod clip;
+mod error_bars;
 mod hist;
 pub(crate) mod legend;
 mod line;
@@ -197,6 +198,19 @@ pub(crate) fn marks(
                 color,
             } => {
                 band::band_items(&context, resolved, band_mark, color, &mut items);
+            }
+            ResolvedMark::ErrorBars {
+                mark: bars_mark,
+                color,
+                width,
+            } => {
+                error_bars::error_bar_items(
+                    &context,
+                    resolved,
+                    bars_mark,
+                    (color, width),
+                    &mut items,
+                );
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }

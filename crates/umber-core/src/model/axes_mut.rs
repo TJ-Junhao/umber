@@ -8,6 +8,7 @@ use super::axes::Axes;
 use super::axis_data::{AxisData, XySeries};
 use super::band::{BandMark, BandOptions};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
+use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
@@ -15,8 +16,8 @@ use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLin
 use super::step::{StepMark, StepOptions};
 use super::validation::{
     AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
-    check_reference_value, check_span, check_step_order, check_vline_x, check_x_limits,
-    check_x_tick_axis,
+    check_reference_value, check_span, check_step_order, check_vline_x, check_x_error_bars,
+    check_x_limits, check_x_tick_axis, check_y_error_bars,
 };
 use crate::{ContinuousScale, Error, LegendStyle, Result, TickFormat};
 
@@ -1100,6 +1101,187 @@ impl<'a> AxesMut<'a> {
         check_band(CONTEXT, axes.x, axes.y, (&x, &low, &high))?;
         axes.marks
             .push(Mark::Band(BandMark::new(x, low, high, options)));
+        Ok(self)
+    }
+
+    /// Adds vertical error bars: for each `i`, a line along y from `low[i]` to `high[i]` at
+    /// `x[i]`, at the band centre of the category on a category x axis. With `caps` set in
+    /// `options`, each end has a cap, a line across the bar of [`Theme::cap_width`] centred on
+    /// it. The line width is the theme's line width times the options' width. Both limits
+    /// extend the automatic y domain, and the positions the automatic x domain as the x values
+    /// of a scatter do. A NaN in `x`, `low` or `high` skips that bar. With explicit limits a bar
+    /// partly outside the plot keeps the part inside, and loses the cap that is outside.
+    ///
+    /// The bars of a grouped bar mark cannot be addressed: there is no way to place a bar at the
+    /// offset of one series of a group.
+    ///
+    /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: `x`,
+    /// `low` and `high` differ in length; a value of `x` does not suit the x axis (names on a
+    /// category axis, numbers otherwise) or is infinite, beyond
+    /// [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not positive on a log axis; the same for `low`
+    /// and then `high` on the y axis; `low[i]` is above `high[i]`, naming the first such index.
+    /// Where either is NaN, the index is not compared.
+    ///
+    /// The mark stores its own copies of the limits, made once. To store limits already held in
+    /// `Arc<[f64]>`s without copying them, use [`AxesMut::y_error_bars_shared`].
+    ///
+    /// [`Theme::cap_width`]: crate::Theme::cap_width
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AxisData, ErrorBarOptions};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let x = AxisData::Categories(vec!["a".into(), "b".into()]);
+    /// axes.y_error_bars(x, &[3.0, 4.0], &[5.0, 6.5], ErrorBarOptions::default())?;
+    /// // A lower limit above the upper one is an error, and the axes keep their one mark.
+    /// let x = AxisData::Categories(vec!["a".into()]);
+    /// assert!(axes.y_error_bars(x, &[5.0], &[1.0], ErrorBarOptions::default()).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn y_error_bars(
+        &mut self,
+        x: AxisData,
+        low: &[f64],
+        high: &[f64],
+        options: ErrorBarOptions,
+    ) -> Result<&mut Self> {
+        self.y_error_bars_shared(x, Arc::from(low), Arc::from(high), options)
+    }
+
+    /// Adds vertical error bars as [`AxesMut::y_error_bars`] does, but stores `low` and `high`
+    /// themselves rather than copies of them, as [`AxesMut::line_shared`] does for `y`. Same
+    /// rules and errors as [`AxesMut::y_error_bars`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AxisData, ErrorBarOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let low: Arc<[f64]> = Arc::from([1.0, 2.0]);
+    /// let high: Arc<[f64]> = Arc::from([3.0, 4.0]);
+    /// let x = AxisData::Numbers(vec![0.0, 1.0]);
+    /// axes.y_error_bars_shared(x, Arc::clone(&low), high, ErrorBarOptions::default())?;
+    /// let Some(Mark::ErrorBars(bars)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(bars.low(), &*low));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn y_error_bars_shared(
+        &mut self,
+        x: AxisData,
+        low: Arc<[f64]>,
+        high: Arc<[f64]>,
+        options: ErrorBarOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.y_error_bars()";
+        let axes = self.axes_mut();
+        check_y_error_bars(CONTEXT, axes.x, axes.y, &x, (&low, &high))?;
+        axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
+            ErrorBarOrientation::Vertical,
+            x,
+            low,
+            high,
+            options,
+        )));
+        Ok(self)
+    }
+
+    /// Adds horizontal error bars: for each `i`, a line along x from `low[i]` to `high[i]` at
+    /// `y[i]`. With `caps` set in `options`, each end has a cap, a line across the bar of
+    /// [`Theme::cap_width`] centred on it. Both limits extend the automatic x domain, and the
+    /// positions the automatic y domain as the y values of a scatter do. Otherwise as
+    /// [`AxesMut::y_error_bars`], with the roles of the axes swapped. They need a linear or log
+    /// x axis.
+    ///
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis; otherwise
+    /// `Error::Data`, checked in this order: `y`, `low` and `high` differ in length; a value of
+    /// `y` is infinite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not positive on a log
+    /// axis; the same for `low` and then `high` on the x axis; `low[i]` is above `high[i]`,
+    /// naming the first such index.
+    ///
+    /// The mark stores its own copies of the values, made once. To store limits already held in
+    /// `Arc<[f64]>`s without copying them, use [`AxesMut::x_error_bars_shared`].
+    ///
+    /// [`Theme::cap_width`]: crate::Theme::cap_width
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::ErrorBarOptions;
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.x_error_bars(&[1.0, 2.0], &[0.5, 1.5], &[1.5, 2.8], ErrorBarOptions::default())?;
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut categories = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// assert!(categories
+    ///     .x_error_bars(&[1.0], &[0.0], &[2.0], ErrorBarOptions::default())
+    ///     .is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn x_error_bars(
+        &mut self,
+        y: &[f64],
+        low: &[f64],
+        high: &[f64],
+        options: ErrorBarOptions,
+    ) -> Result<&mut Self> {
+        self.x_error_bars_shared(y.to_vec(), Arc::from(low), Arc::from(high), options)
+    }
+
+    /// Adds horizontal error bars as [`AxesMut::x_error_bars`] does, but stores `low` and `high`
+    /// themselves rather than copies of them. The positions `y` are stored as given, without a
+    /// copy. Same rules and errors as [`AxesMut::x_error_bars`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{ErrorBarOptions, Mark};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let high: Arc<[f64]> = Arc::from([3.0, 4.0]);
+    /// axes.x_error_bars_shared(
+    ///     vec![0.0, 1.0],
+    ///     Arc::from([1.0, 2.0]),
+    ///     Arc::clone(&high),
+    ///     ErrorBarOptions::default(),
+    /// )?;
+    /// let Some(Mark::ErrorBars(bars)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(bars.high(), &*high));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn x_error_bars_shared(
+        &mut self,
+        y: Vec<f64>,
+        low: Arc<[f64]>,
+        high: Arc<[f64]>,
+        options: ErrorBarOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.x_error_bars()";
+        let axes = self.axes_mut();
+        check_x_error_bars(CONTEXT, axes.x, axes.y, &y, (&low, &high))?;
+        axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
+            ErrorBarOrientation::Horizontal,
+            AxisData::Numbers(y),
+            low,
+            high,
+            options,
+        )));
         Ok(self)
     }
 }

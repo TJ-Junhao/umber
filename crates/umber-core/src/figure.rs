@@ -31,6 +31,7 @@ pub use crate::model::{
 };
 pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use crate::model::{BandMark, BandOptions};
+pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 
 use crate::render::{SvgText, check_dpi, render_png, render_svg};
 use crate::scene::Scene;

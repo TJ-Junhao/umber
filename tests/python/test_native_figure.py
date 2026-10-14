@@ -353,6 +353,12 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "hspan": lambda f, r, c: f.hspan(r, c, 1.0, 2.0, "", AUTO),
     "vspan": lambda f, r, c: f.vspan(r, c, 1.0, 2.0, "", AUTO),
     "band": lambda f, r, c: f.band(r, c, floats(1), floats(0), floats(2), "", AUTO),
+    "y_error_bars": lambda f, r, c: f.y_error_bars(
+        r, c, floats(1), floats(0), floats(2), "", AUTO, NO_SIZE, True
+    ),
+    "x_error_bars": lambda f, r, c: f.x_error_bars(
+        r, c, floats(1), floats(0), floats(2), "", AUTO, NO_SIZE, True
+    ),
 }
 
 
