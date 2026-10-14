@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 740b849a84af8fcda4d08d3680449315cc4c60e3
+# revision: 4531b90ab4b2904746e4bafdd856f52053ab85a0
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 e56c73176662595cd3ef79573282c24d9f1ed87891c0bc128adf8df5c8d02f86  api/constants-error-bars.txt
@@ -213,8 +213,8 @@ ab52e0141b81d4c530d253a096b39b56f7b2645319eda0ba69450bd05fa26a8d  png/fig-direct
 a83c468e5ff3e3bdf531d761d2b54a34171cdfffd94e503f710b748c439e1308  png/fig-direct-ylim-ends-off-plot.dpi72.png
 84234cd02597eec63003877144d5971b00763174051c400edf5ba718fa501923  png/fig-extreme-clipping.dpi200.png
 64006ef1ddcc695942f7fa4d075fae2ff0ffcadc06666f8b08df703aed5afa77  png/fig-extreme-clipping.dpi72.png
-2ffe300bcbe0a96fcd535eeebc2c881277140c898bffe773eb1f87d481aa9de3  png/fig-font-scale-max.dpi200.png
-96c91b529e4b5aedfbdaeb252f5543d414c3b763d105a350cac109655da6dca2  png/fig-font-scale-max.dpi72.png
+1a9ef19d517fda1c44c22ddc6a7d8aa90b1505f54a924b1a8aab6ffb8775074e  png/fig-font-scale-max.dpi200.png
+a2a8f1bdbe83cd6ce6661b1a5197b7de28d3461c78e9412cc3a88f5636d124d9  png/fig-font-scale-max.dpi72.png
 8751b62e5cf2d3cd1ace5c67e107372eaf28b4d93d9323ba3458fadf254ea2ab  png/fig-font-scale-tiny.dpi200.png
 7306e58dbcd636a33764a18f0c0584f8e08f3ba9450fe76a2e9c1059e863303f  png/fig-font-scale-tiny.dpi72.png
 864ea9b17fdaff15160607751d7c5a1bf66530ecf7d62f75094eb9b1c9f4f1e5  png/fig-graphite-empty-axes.dpi200.png
@@ -369,10 +369,10 @@ b91ff7f3e866f0e129dbac72da572c05e6b1ab71ec06249cdb33b3420486170e  png/fig-legend
 3c0f9adf1fc6f89408b946ef1b2a10c96558ee3c6351836790fe10b54a2891a6  png/fig-legend-without-title.dpi72.png
 94eb670317b80119bf1dee202108659e6cd3aca89f2a78077729c04dd8918815  png/fig-line-dashes-and-palette-wrap.dpi200.png
 7f946e7b7d559e4f057de3535ae6fbeedda9c70c79eea3901bcc6e89df6de7e5  png/fig-line-dashes-and-palette-wrap.dpi72.png
-2a21b4e3796b53ff9004de72fbe81f089e22a276238efac611eeacb6bd074460  png/fig-log-both-base10-small.dpi200.png
-470f286e834365bd4655c02d245280fd4c90f4b667d255e907150cc239c5bffe  png/fig-log-both-base10-small.dpi72.png
-5d3b44e72f6bfca4a15a9acb1441a9e15e7dab0a4b7e6b76fa022ae67f4554e9  png/fig-log-both-base2.dpi200.png
-e6a674a43115d5ed08d61bb3413e458c99e3b48aac89a633615bd8e63ccc8fae  png/fig-log-both-base2.dpi72.png
+41b832eb569995a89651ca62820ddeff25f9b63d1d97ab570cf3e582e734aada  png/fig-log-both-base10-small.dpi200.png
+3b62006cb19ab8673aef836b0e1a8d513f8972649ed308c9e3a60ddc5f601f8c  png/fig-log-both-base10-small.dpi72.png
+7f4ea65c010db7add4c55896b26a051398615a184b99148148911ed951dc3a77  png/fig-log-both-base2.dpi200.png
+3cf67342e4d689d3c4c111349aeacff69debccebfa85df7c4874eaf9a38f3688  png/fig-log-both-base2.dpi72.png
 1c86483d58298565d0b6dc3d6ac4a496f47dfd3a8532d346e4d3cc35f7fddb51  png/fig-log-extreme-limits.dpi200.png
 cc61e85f1dbb128667f6a4faea13e257b0e3acbb1c4e0190a5f88b78e73a0b39  png/fig-log-extreme-limits.dpi72.png
 f0c927fbd07ddc7ddc25a8050045279a23fde0ec52bf0845e60ef6ce16200bb8  png/fig-log-y.dpi200.png
@@ -383,8 +383,8 @@ d84d74f63fb78a8ef175e055263ff725873a15dc731522e3ca5ba93599ed6176  png/fig-midnig
 f24ab8d15caf1f9df7f459236bc0786871a3c8ba2e05c602c6a63c5fa2653e50  png/fig-midnight-line-scatter.dpi72.png
 4f1589e675d48bed12ce269aac5f2591c9c004e08fb1c8a798b24472ff13faac  png/fig-nan-gaps.dpi200.png
 e08f044c074d546ace7146d56f60a605bf92736e9af8aeb2970f219c25f3d76d  png/fig-nan-gaps.dpi72.png
-7148aafcddce806d40bac01646b3fab0235f14b9b466eae67c92e8bb6399f9ca  png/fig-narrow-limits-huge.dpi200.png
-19f60c07fa8ce03ffc61474630295fbdbb4d441f0260c4582960caf2bf32c89e  png/fig-narrow-limits-huge.dpi72.png
+aae0479bf855633aeac12777ab426aa7e2b971d6ded3f23f65809f7ea75fe10b  png/fig-narrow-limits-huge.dpi200.png
+6d5b453416aca9b93adadcd98d2439e98ea55c691c9a7bff4b8270634a462d1e  png/fig-narrow-limits-huge.dpi72.png
 385e328dbe48ee04a86532e050351b36ad12dd33d805c69140bee242f1853548  png/fig-narrow-limits-offset.dpi200.png
 2310f1d0cb7a92bf6d876dea359aa7af5df044e46e7203cee2a8dc890c3c9806  png/fig-narrow-limits-offset.dpi72.png
 35cb6803575574e8489fce8d1b9796a582c8d43edbbcffb1b48e4474681a717c  png/fig-narrow-limits-tiny.dpi200.png
@@ -451,8 +451,8 @@ aa2158488cbed7e6eed0a21201cf32a3da79288b92b9dd4b645cdd932ff0a8a1  png/fig-stacke
 24de8e7bdeddcdbc8953d6d75e10a6bb0ba709e6139925ad676568dd4c5ea67c  png/fig-stacked-bars-one-series.dpi72.png
 f815846f0e67b6e5066e392f5eec200c0bae1be481089a260515010e7c013521  png/fig-stacked-bars-pigment.dpi200.png
 bd2f43cc9ce63d770363de01e64e6b4b286d4a8c10ec43eeae206fff9dceb7a7  png/fig-stacked-bars-pigment.dpi72.png
-7a4515e3c0293b0967e7787a5aec5127f5e3cc2e606e9ac082a0cbf3a6ce0444  png/fig-stacked-bars-totals-at-bound.dpi200.png
-f364e918ee4d8657be0705a9ef89bbb81f8cd65e344e36b4f36ef46108f47aa5  png/fig-stacked-bars-totals-at-bound.dpi72.png
+0217c5cf5193b7b8b56350cc8cea2bdbf3c2b7ffdb1a1f166f639bb5d0056d1b  png/fig-stacked-bars-totals-at-bound.dpi200.png
+be029e51b6804cf14022b5d05b46ff00cf418c4e782634df8a56aa197f30be38  png/fig-stacked-bars-totals-at-bound.dpi72.png
 adfef6fe18004e5befb6658ecf06d6597e742d133a84a24af729682819031cea  png/fig-subtitle-only.dpi200.png
 83bdf587dc7e4cba7a223456288f9f8228cf4ac0ad7849d9d0595494a278b191  png/fig-subtitle-only.dpi72.png
 7fd6686887cf17f3def09890f721d6bc14cf2ec61f4386f72c3873c9a084bf9f  png/fig-text-fallback.dpi200.png
@@ -821,7 +821,7 @@ b52e7969855bf3adec2700b848d4cdf8135646215dd67805ccd0ed5672fd122a  scene/fig-dire
 305837e9ce4734b1b36a456319889736c730951fe6d1c437766d12bf2459b1b6  scene/fig-direct-xlim-cuts-ends.txt
 4583c0d37c954f3f43cbfabf205f93d539ab7d15a3e2b0da67f3435bd7160504  scene/fig-direct-ylim-ends-off-plot.txt
 10a89dd78d756b4205d3ebdd8fdf45c9baf95784d7cf34e1352747ff8c658db7  scene/fig-extreme-clipping.txt
-1bb74693d2ebfa836e9fb6968a527096dce1c9bfcbeb2131c1489dc9260c4ec1  scene/fig-font-scale-max.txt
+073a977cbd45b42780f3cafc39f86798677401e0c1243870f1eb9505c181b394  scene/fig-font-scale-max.txt
 519f8940d3f15df0ce736ab50c9b31b18fe50e8c72e4a2d52c1bf41a5238fde9  scene/fig-font-scale-tiny.txt
 f9f98e986cf8378c3f7dc6a0cf4bc510e08cfc82118697ef32c63685a1f953bb  scene/fig-graphite-empty-axes.txt
 ca5d3dcfa2c791c6e7a765e137dfea8f810ef181073dd253cb20b037f36b1929  scene/fig-graphite-line-scatter.txt
@@ -899,14 +899,14 @@ d8a308a1222e33a5fd8ff5715843736ca5b93320969edacae4d4b9f6f4bccd85  scene/fig-lege
 5c23fe169abcf2f02e7497c39b4123c8c778858d9b5abaf547fa829046f02a96  scene/fig-legend-unlabelled-mixed.txt
 6e7e2312cea3a781ee77f6c44c5b3dea85f08813a4c966bc2913c545b52d6155  scene/fig-legend-without-title.txt
 39dc22818d4ba841cec96e46b213018507e297fd7e4ca0dddb85ef6174419216  scene/fig-line-dashes-and-palette-wrap.txt
-e71670007d1d6427b04932fb897fffa30bbae47219a5d3354609d79079be544e  scene/fig-log-both-base10-small.txt
-41841375f71f35e5b678e2e17adde8209f9f6eef0e8170becbc010a47be5a879  scene/fig-log-both-base2.txt
+9ae1a5dc91e3103c1247a4396b4153dff69181f08d542dee5fab4c848bc30cc9  scene/fig-log-both-base10-small.txt
+d0b2fed10e5bc095348e7012e257ce9aa00928007a3058469f865357ce964a39  scene/fig-log-both-base2.txt
 708d916f00b7bec65147f94513eafb0f615072cf5714a333ea7bdc334473671d  scene/fig-log-extreme-limits.txt
 cec583974785fa5b08f98f7151d60492c88676c045efb040505a03b12e3b70a0  scene/fig-log-y.txt
 ec97a9c7451f9b1781a1d6bc5c6e7b01fbc774d72fe647e507e26d01b839316c  scene/fig-midnight-empty-axes.txt
 f955cf96ec87b4595ede00fef620e5d30c96504cdbca61cf69710431ce7f1888  scene/fig-midnight-line-scatter.txt
 5366a394f47e2e1634869ff02a4bffa4473fefc8952d446ec7df48ec82adf3bf  scene/fig-nan-gaps.txt
-039ceb62f12cf4e4f03c4c4e4d500d4240890029e3b1b3c98705071f4303a20a  scene/fig-narrow-limits-huge.txt
+bde5b9db554537f87b4f770942bcfc2b78a6fce04a93c7a79ade4092c8b38cb4  scene/fig-narrow-limits-huge.txt
 49fdf43f73c1ddfb946f09242174bce4f211d5c5fa0338e8553f9640c900cc25  scene/fig-narrow-limits-offset.txt
 011660232f3e2b3cda4ecfada774afdec65fb64502dc195267ae429345280bc4  scene/fig-narrow-limits-tiny.txt
 c2da2335677ab3d940e29b3b7c5bf80b127c47a9f3bff4c95b829e056923a809  scene/fig-no-axes.txt
@@ -940,7 +940,7 @@ b65f6725faabf0829c93dd89302fb3fc310e1e82632a3f39ea91fc3b54eeff02  scene/fig-stac
 2902bbec5eae2fb4ceaad7d9b9d9a25f973569592b1395a3e20ba3c5aee8c69a  scene/fig-stacked-bars-mixed-signs-pigment.txt
 c547ab45f7775324f8ae8e71ee289b0fe1059dcbcc9dd2ccf7b6a8b7b072c033  scene/fig-stacked-bars-one-series.txt
 ee1f99a1da5843cd863f577f7f673841232fa4524b306ec71066652f1a0718dd  scene/fig-stacked-bars-pigment.txt
-1a845370bc8e076f74ed2c7feff4147b75079064f91ed0059f3f3ea63a662c56  scene/fig-stacked-bars-totals-at-bound.txt
+757bf62e6fccf99188b981aaf86e829bedb422da3051e6d8114d634cc6ce1de2  scene/fig-stacked-bars-totals-at-bound.txt
 0e5599813e3ec14debcee8d9dbc3cdee21adc11c10b1409590efb39d23668df1  scene/fig-subtitle-only.txt
 6b3904b5bba1bb1e117301433db65475ea618083183a3cf2018067a7eb438bea  scene/fig-text-fallback.txt
 1cc88e9517e05a04a6b5764f97dee0d7d44214a8b4e081cdd310aa2ec9ab10dc  scene/fig-text-truncated-no-ticks.txt
@@ -1266,8 +1266,8 @@ b0c95266d9a858cfa674b73f3e8832f846aa5e4337f3d259639bbe264c0a4351  svg/fig-direct
 3c9de80b473f730d0f9259f6358cc4c2fef2a6154e193027d7aa688895be6c46  svg/fig-direct-ylim-ends-off-plot.outlines.svg
 b3f8e16481f4a784b106faddb96b6bcd7617924ce1f281eb149e36f42d005ebc  svg/fig-extreme-clipping.editable.svg
 19ecf7c6c189692773e5e20934161cc198dcec36cce64c4975193dc7eb8e7c3a  svg/fig-extreme-clipping.outlines.svg
-8eacd8a4dbab26ee0027be1e2354752646595fd3362c41f2474fa55cf296f53a  svg/fig-font-scale-max.editable.svg
-1501b9b9fbf6e09053fb112d62b927b247ec0ba65dd8359660fa6238719a1147  svg/fig-font-scale-max.outlines.svg
+c76d1d55768c3a71d847eba058f37841e22e510afce2c4a545988ee74a6a6ba8  svg/fig-font-scale-max.editable.svg
+c9cda383d5841a87e0a45ce174798f7e6d56eb549383fe5e18adbd4b55ae600b  svg/fig-font-scale-max.outlines.svg
 903b7f60d0dcc41a1ca86209522e66d544dfae3d12bd2ef9debdd89bcf338e50  svg/fig-font-scale-tiny.editable.svg
 cfbc2c12b93e7213c1ae7c5504ef7ec5f2ef6ce43941c4f0073956d45ea1cb12  svg/fig-font-scale-tiny.outlines.svg
 7e25391afa99e419659829c4652864dc99e88e9f270f635bbbc04307ff7cd49b  svg/fig-graphite-empty-axes.editable.svg
@@ -1422,10 +1422,10 @@ d1bf102c07a85c2b7ede1d1c6902d70e854d7700a51f5eba692ffbee5e3e1ce7  svg/fig-legend
 501391c6d73dadfca58ba1048ab46c611bdee1b355b73e6f8e18afa80e8a5180  svg/fig-legend-without-title.outlines.svg
 3471c5e7e9ceb064918aa71a3d1ba600f826896bbf697bdf0b9caf82b12ca5aa  svg/fig-line-dashes-and-palette-wrap.editable.svg
 7098b96514e22261d579fd766585be683ff405a57ff7b00ddb3d8bda470d4210  svg/fig-line-dashes-and-palette-wrap.outlines.svg
-0fa9aed51f8df072eee0c5440b986407cdc8f801ece271c83a61138a7dc8d101  svg/fig-log-both-base10-small.editable.svg
-b5075edf2858459ac46919ad2dea9bad1efe2857b2fa260b2547a775612e1abb  svg/fig-log-both-base10-small.outlines.svg
-590b6de343274af92c2aa50b09b98d46a1656460d0e37fd7770e41063f634ffc  svg/fig-log-both-base2.editable.svg
-234b3ffa8e3ee5213df6a7170d4ebc623cbb3332a59c393a34b6745247b6e49b  svg/fig-log-both-base2.outlines.svg
+29473305c26d2e4e44e6be97e0578ecdb6fdec3e54e0b910bf679bebdef4e202  svg/fig-log-both-base10-small.editable.svg
+2baaf4b2dbe17879b2f141e4dd61859334aef898732f524c69126f35b9deca9f  svg/fig-log-both-base10-small.outlines.svg
+7933f31e813c89e1714e0c4299a88dd5e903c6a05dc866c445aceaaa1f6ab741  svg/fig-log-both-base2.editable.svg
+985691e884cc371f2369eec4deb0d69c80f364ec92c969b24f80e24eaace4184  svg/fig-log-both-base2.outlines.svg
 eab58e40c949c2605f3e6abeefbc8ff86411af5611eb40010cf18c52fbaf776d  svg/fig-log-extreme-limits.editable.svg
 ce4c92fb40a9ba47de9d12207cd725dbf08e031ef8e6a21dcca69ee23d5a6ac5  svg/fig-log-extreme-limits.outlines.svg
 d857d0934cdbe70a8bf0e530b1111ea6f6862ae21a521406f345642cee45082a  svg/fig-log-y.editable.svg
@@ -1436,8 +1436,8 @@ d857d0934cdbe70a8bf0e530b1111ea6f6862ae21a521406f345642cee45082a  svg/fig-log-y.
 4f1369f681921699b31d5aa9cb28a5d11d7ba2e1203ec81bb8e500ccb39c494e  svg/fig-midnight-line-scatter.outlines.svg
 df50d75b407272bd3b08a7a148ed92a5436a46fab8035657896c910b6e3a6155  svg/fig-nan-gaps.editable.svg
 0a7bce73da6814d87cfa0b70baacb7ccb8f11f09fd23102289364f0aae63b768  svg/fig-nan-gaps.outlines.svg
-53e6f0be5ee6ceb5b4df2e3f51498605a4b706c079fef5f64dde5f096057c231  svg/fig-narrow-limits-huge.editable.svg
-a97a82ddcb67198fbfd5a90c29c7b5551fb883c5ee6010dd54915299b9487c3a  svg/fig-narrow-limits-huge.outlines.svg
+6aa3ab88cd0b6db9867cc592ec297980214657d7f95cd4961176db80c7b6578d  svg/fig-narrow-limits-huge.editable.svg
+91862895bf4f26de5948a4e80822c8234c2b7590a9d99fb74eee7b08b360534c  svg/fig-narrow-limits-huge.outlines.svg
 c0379e8e6d5fff355589ad8f6f3ee29606a3f2a5c1684fcf9001485cf7dbe5e5  svg/fig-narrow-limits-offset.editable.svg
 7d9f9540ec42e33f095f336431864ca978c0533da75494c1aff883715ed06f21  svg/fig-narrow-limits-offset.outlines.svg
 e32f3c54fca5bed2f49447462f3338f39686180efd6b5f7657942811ae6c26c2  svg/fig-narrow-limits-tiny.editable.svg
@@ -1504,8 +1504,8 @@ aa5aa77f8a9dfa914944892805118458ad4d0e1c0477634513485b3e9fc53556  svg/fig-stacke
 1cc6969b1b163f5beda3dfac11e833cdd3305fa4d7c73e1ae2937383871a7d33  svg/fig-stacked-bars-one-series.outlines.svg
 bcb4fa997fedbfb15300d100cbd409f1c7f686d50599246df14e710638e1a7f1  svg/fig-stacked-bars-pigment.editable.svg
 d47802335ad37b2b165ee8831e691101c019fcbcb82493b1fc701b19fa6346aa  svg/fig-stacked-bars-pigment.outlines.svg
-3f196b047f8986733885db9e97e5c0e12261936314ea50868e65bb5752237cd8  svg/fig-stacked-bars-totals-at-bound.editable.svg
-8b71efc5a1a7bb1b85f5d3d25ad3d3173375786d79bbd86be139e36222b12f20  svg/fig-stacked-bars-totals-at-bound.outlines.svg
+93747c705ad8ad46d998f1497b2898febbf0189f92ecf26f79fd190a38057230  svg/fig-stacked-bars-totals-at-bound.editable.svg
+ffce663a0dd3460c6d82d112d233ef2de65866b455a2defd8dcd8150ff4b4698  svg/fig-stacked-bars-totals-at-bound.outlines.svg
 36d270e8442057f94bf98413b9582e2265329ffbc9fb7570b9f453c877ba1009  svg/fig-subtitle-only.editable.svg
 8e4bdb9a4bf846195a5ab0e741780306342bfc0dde2c7f7db9285a91c2f30d39  svg/fig-subtitle-only.outlines.svg
 442fa1d16b4b52c72ce28bb19bc3044028a30434a26b36294861e0de43e2a904  svg/fig-text-fallback.editable.svg

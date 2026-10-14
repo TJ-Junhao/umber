@@ -69,7 +69,7 @@ impl Transform {
     }
 }
 
-/// A logarithm base, guaranteed finite and > 1.
+/// A logarithm base, guaranteed finite and at least 1.000000000001.
 ///
 /// # Examples
 ///
@@ -83,6 +83,10 @@ impl Transform {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LogBase(f64); // private field: only constructible through `new`
 
+/// Keeps exponents for the supported log domain below 2^50 in magnitude:
+/// `ln(1e300) / ln(1 + 1e-12) < 2^50`, safely inside f64's exact integers (2^53).
+const MIN_LOG_BASE: f64 = 1.0 + 1e-12;
+
 impl LogBase {
     /// Base ten.
     ///
@@ -95,7 +99,9 @@ impl LogBase {
     /// ```
     pub const TEN: LogBase = LogBase(10.0);
 
-    /// Creates a base, or `Error::Style` unless `base` is finite and greater than 1.
+    /// Creates a base, or `Error::Style` unless `base` is finite and at least 1.000000000001.
+    /// This lower bound keeps consecutive tick exponents distinguishable across the supported
+    /// range of values.
     ///
     /// # Examples
     ///
@@ -110,18 +116,28 @@ impl LogBase {
     /// );
     /// ```
     pub fn new(base: f64) -> Result<LogBase> {
-        if base.is_finite() && base > 1.0 {
-            Ok(LogBase(base))
-        } else {
-            Err(Error::style(
+        if !base.is_finite() || base <= 1.0 {
+            return Err(Error::style(
                 "Scale.log()",
                 format!(
                     "base is {base}; a log base must be finite and greater than 1.",
                     base = number(base)
                 ),
             )
-            .with_parameter("base"))
+            .with_parameter("base"));
         }
+        if base < MIN_LOG_BASE {
+            return Err(Error::style(
+                "Scale.log()",
+                format!(
+                    "base is {base}; a log base must be at least 1.000000000001 so tick exponents remain distinct.",
+                    base = number(base)
+                ),
+            )
+            .with_parameter("base")
+            .with_hint("use base 10 or 2, or a linear scale for evenly spaced ticks."));
+        }
+        Ok(LogBase(base))
     }
 
     /// The base as a number.
@@ -264,7 +280,7 @@ pub struct ContinuousScale {
 fn is_degenerate(lo: f64, hi: f64) -> bool {
     let span = hi - lo;
     let magnitude = lo.abs().max(hi.abs()).max(f64::MIN_POSITIVE);
-    span < 1e-12 * magnitude || !(1e-200..=1e200).contains(&span)
+    span < 1e-12 * magnitude || !(MIN_LINEAR_WIDTH..=2.0 * MAX_MAGNITUDE).contains(&span)
 }
 
 fn power(base: f64, e: i64) -> f64 {
@@ -838,9 +854,10 @@ impl ContinuousScale {
     /// such as a sampled sine trough, does not sit on the baseline either. When it does and the
     /// limit carries the first tick, the limit moves down by one tick step and gets a tick of its
     /// own. On a linear axis the limit moves to `lo - step`, with `step` the gap between the first
-    /// two ticks, and the new tick goes in front of the others. On a log axis it moves to `lo /
-    /// base`, and the ticks are chosen again for the wider domain as `nice_with_ticks` chooses them
-    /// for about `target` ticks and `fewer`, so thinned powers stay evenly spaced. All ticks are
+    /// two ticks, and the new tick goes in front of the others. On a log axis it moves down by
+    /// the exponent gap between the first two ticks, and the ticks are chosen again for the wider
+    /// domain as `nice_with_ticks` chooses them for about `target` ticks and `fewer`, so thinned
+    /// powers stay evenly spaced. All ticks are
     /// labelled as `nice_with_ticks` labels them, and carry the step their labels were written for.
     /// Everything else is returned unchanged: a linear domain that holds 0, where the baseline sits
     /// at 0 and a zero value on it is correct; data further above the lower limit; ticks that do
@@ -872,7 +889,10 @@ impl ContinuousScale {
         let step = second.value - first.value;
         let (lowered, floor) = match self.transform {
             Transform::Linear => (lo - step, -MAX_MAGNITUDE),
-            Transform::Log(base) => (lo / base.get(), MIN_LOG_VALUE),
+            Transform::Log(base) => {
+                let gap = (log_offset(second.value, first.value) / base.get().ln()).round();
+                (lo / base.get().powf(gap), MIN_LOG_VALUE)
+            }
         };
         let valid_step = step.is_finite() && step > 0.0;
         if !(valid_step && lowered.is_finite() && floor <= lowered && lowered < lo) {
@@ -1425,10 +1445,132 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
+    fn below_data_moves_log_limit_by_the_thinned_step() {
+        let scale = ContinuousScale::new(Transform::Log(LogBase::TEN), 1.0, 1e30, "test").unwrap();
+        for fewer in [0, 1, 2] {
+            let (nice, ticks) = scale.nice_with_ticks(4, fewer, &AnySpacing);
+            let gap = log_offset(ticks.ticks[1].value, ticks.ticks[0].value);
+            assert!(gap > 2.0 * 10f64.ln());
+            let (lowered, ticks) = nice.below_data(ticks, 1.0, 4, fewer);
+            let moved = log_offset(nice.lo, lowered.lo);
+            assert!(
+                (moved / gap - 1.0).abs() < 1e-12,
+                "gap {gap}, moved {moved}"
+            );
+            assert_eq!(ticks.ticks.first().unwrap().value, lowered.lo);
+            assert!(ticks.ticks.windows(2).all(|w| w[0].value < w[1].value));
+        }
+    }
+
+    #[test]
+    fn log_base_rejects_unresolvable_exponents() {
+        for base in [
+            1.0 + 1e-15,
+            next_up(1.0),
+            f64::from_bits(MIN_LOG_BASE.to_bits() - 1),
+        ] {
+            let err = LogBase::new(base).unwrap_err();
+            assert!(matches!(
+                err,
+                Error::Style {
+                    context: "Scale.log()",
+                    ..
+                }
+            ));
+            assert_eq!(err.parameter(), Some("base"));
+            assert_eq!(
+                err.hint(),
+                Some("use base 10 or 2, or a linear scale for evenly spaced ticks.")
+            );
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "Scale.log(): base is {base}; a log base must be at least 1.000000000001 so tick exponents remain distinct."
+                )
+            );
+        }
+        assert_eq!(LogBase::new(MIN_LOG_BASE).unwrap().get(), MIN_LOG_BASE);
+        assert!(MAX_MAGNITUDE.ln() / MIN_LOG_BASE.ln() < 2f64.powi(50));
+    }
+
+    #[test]
+    fn accepted_log_bases_produce_distinct_ticks_at_extreme_magnitudes() {
+        for base in [MIN_LOG_BASE, 1.0 + 1e-9, 1.1, 2.0, 10.0, 1e100, 1e300] {
+            let transform = Transform::Log(LogBase::new(base).unwrap());
+            for (lo, hi) in [
+                (MIN_LOG_VALUE, MAX_MAGNITUDE),
+                (MIN_LOG_VALUE, MIN_LOG_VALUE * (1.0 + 2e-9)),
+                (MAX_MAGNITUDE / (1.0 + 2e-9), MAX_MAGNITUDE),
+                (1e-20, 2e-20),
+                (1.0, 1.0 + 2e-9),
+                (1e20, 2e20),
+            ] {
+                let scale = ContinuousScale::new(transform, lo, hi, "test").unwrap();
+                for target in [2, 5, ticks::MAX_TARGET] {
+                    let ticks = scale.ticks(target);
+                    assert!(ticks.len() >= 2, "base {base}, {lo:e}..{hi:e}");
+                    assert!(
+                        ticks
+                            .windows(2)
+                            .all(|w| w[0].value < w[1].value && w[0].label != w[1].label),
+                        "base {base}, {lo:e}..{hi:e}: {ticks:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[track_caller]
+    fn assert_extreme_round_ticks(factor: f64) {
+        let scale = lin(1.3 * factor, 8.7 * factor);
+        let values: Vec<f64> = scale.ticks(5).iter().map(|t| t.value / factor).collect();
+        let reference = lin(1.3, 8.7).ticks(5);
+        assert_eq!(
+            values.len(),
+            reference.len(),
+            "factor {factor:e}: {values:?}"
+        );
+        for (got, want) in values.iter().zip(reference) {
+            assert!(
+                (got - want.value).abs() < 1e-12,
+                "factor {factor:e}: {values:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tiny_supported_spans_use_round_ticks() {
+        assert_extreme_round_ticks(1e-290);
+    }
+
+    #[test]
+    fn huge_supported_spans_use_round_ticks() {
+        assert_extreme_round_ticks(1e299);
+    }
+
+    #[test]
+    fn supported_linear_span_boundaries_are_not_degenerate() {
+        assert!(!is_degenerate(0.0, MIN_LINEAR_WIDTH));
+        assert!(!is_degenerate(-MAX_MAGNITUDE, MAX_MAGNITUDE));
+        assert!(is_degenerate(0.0, MIN_LINEAR_WIDTH / 10.0));
+        assert!(is_degenerate(1.0, next_up(1.0)));
+        for (lo, hi) in [(0.0, MIN_LINEAR_WIDTH), (-MAX_MAGNITUDE, MAX_MAGNITUDE)] {
+            let ticks = lin(lo, hi).ticks(5);
+            assert!(ticks.len() >= 2);
+            assert!(
+                ticks
+                    .iter()
+                    .all(|t| t.value.is_finite() && (lo..=hi).contains(&t.value))
+            );
+            assert!(ticks.windows(2).all(|w| w[0].value < w[1].value));
+        }
+    }
+
+    #[test]
     fn below_data_keeps_log_ticks_sorted_distinct_and_inside() {
         let mut checked = 0;
         for base in [
-            1.0 + f64::EPSILON,
+            MIN_LOG_BASE,
             1.0 + 1e-9,
             1.001,
             1.1,
@@ -2080,7 +2222,7 @@ mod tests {
 
     #[test]
     fn nice_is_scale_invariant_for_extreme_spans() {
-        for scale in [1e-180, 1e180] {
+        for scale in [1e-290, 1e-180, 1e180, 1e299] {
             let (lo, hi) = lin(1.3 * scale, 8.7 * scale).nice(5).domain();
             assert!(rel_close(lo, 1.0 * scale), "{lo} vs {}", 1.0 * scale);
             assert!(rel_close(hi, 9.0 * scale), "{hi} vs {}", 9.0 * scale);
@@ -2208,7 +2350,7 @@ mod tests {
 
     #[test]
     fn log_singleton_with_near_one_base_still_pads() {
-        for base in [1.0000000001, next_up(1.0), 1.05] {
+        for base in [1.0000000001, MIN_LOG_BASE, 1.05] {
             let t = Transform::Log(LogBase::new(base).unwrap());
             let (lo, hi) = ContinuousScale::from_extent(t, Some((1.0, 1.0)), "t")
                 .unwrap()

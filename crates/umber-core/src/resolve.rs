@@ -2167,10 +2167,10 @@ mod tests {
 
     #[test]
     fn lowering_a_log_limit_keeps_the_ticks_evenly_spaced_and_distinct() {
-        // 1..1e100 on base 10 has its powers thinned; the lower limit moves to 0.1 and the
-        // powers are chosen again for 0.1..1e100, so they stay evenly spaced in log space and
-        // none crowds the new end. Bases near 1 keep distinct positions too.
-        for base in [10.0, 1.000_001, 1.0 + f64::EPSILON] {
+        // 1..1e100 on base 10 has its powers thinned; the first exponent gap is 33, so the
+        // lower limit moves to 1e-33. Powers chosen again for the wider domain stay evenly
+        // spaced in log space. The smallest supported base keeps distinct positions too.
+        for base in [10.0, 1.000_001, 1.0 + 1e-12] {
             let log = ScaleKind::Log {
                 base: LogBase::new(base).unwrap(),
             };
@@ -2187,16 +2187,10 @@ mod tests {
                 r.y.ticks
             );
             assert_eq!(r.baseline, r.y.ticks[0].pos, "base {base}");
-            // At base 1 + EPSILON one step down is a factor of 1 + EPSILON, too small to move
-            // any position; every other base moves the limit visibly below the data.
             let data_low = r.y.scale.normalize(1.0);
-            if base > 1.0 + f64::EPSILON {
-                assert!(r.baseline.get() < data_low, "base {base}: {:?}", r.y.ticks);
-            } else {
-                assert!(r.baseline.get() <= data_low, "base {base}: {:?}", r.y.ticks);
-            }
+            assert!(r.baseline.get() < data_low, "base {base}: {:?}", r.y.ticks);
             if base == 10.0 {
-                assert_eq!(r.y.ticks[0].label, "1e\u{2212}1");
+                assert_eq!(r.y.ticks[0].label, "1e\u{2212}33");
                 let gaps: Vec<f64> = pos.windows(2).map(|w| w[1] - w[0]).collect();
                 let (min, max) = gaps
                     .iter()
