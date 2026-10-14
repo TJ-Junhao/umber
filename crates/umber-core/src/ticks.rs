@@ -160,9 +160,18 @@ pub(crate) struct Fit<'a> {
     /// apart on screen than their step's share of it. A candidate with a smaller step does not
     /// fit and is not judged; 0 judges every candidate.
     pub least_share: f64,
-    /// The room, in points, a candidate's values leave between the most crowded pair of
-    /// adjacent labels; the candidate fits when it is not negative.
-    pub slack: &'a dyn Fn(&[f64]) -> f64,
+    /// The room a candidate's values leave between their labels.
+    pub slack: &'a dyn Fn(&[f64]) -> Room,
+}
+
+/// The room a candidate's labels leave on screen, as [`Fit::slack`] judges it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Room {
+    /// Fewer than two of the candidate's ticks are drawn, so it has no labels to keep apart.
+    TooFewTicks,
+    /// The room, in points, between the most crowded pair of adjacent labels: the labels fit
+    /// when it is not negative.
+    Slack(f64),
 }
 
 impl Fit<'_> {
@@ -172,16 +181,35 @@ impl Fit<'_> {
         slack: &unjudged,
     };
 
-    /// Whether `values`, `step` apart, fit within a searched range `range` wide.
+    /// Whether the best scored candidate, `values` `step` apart in a searched range `range`
+    /// wide, stays the choice: its labels fit, or fewer than two of its ticks are drawn, and the
+    /// caller chooses again for another target as it always has.
+    fn keeps(&self, values: &[f64], step: f64, range: f64) -> bool {
+        self.steps_apart(step, range)
+            && match (self.slack)(values) {
+                Room::TooFewTicks => true,
+                Room::Slack(slack) => slack >= 0.0,
+            }
+    }
+
+    /// Whether a candidate chosen in place of the best scored one, `values` `step` apart in a
+    /// searched range `range` wide, fits: at least two of its ticks are drawn and their labels
+    /// fit.
     fn admits(&self, values: &[f64], step: f64, range: f64) -> bool {
+        self.steps_apart(step, range)
+            && matches!((self.slack)(values), Room::Slack(slack) if slack >= 0.0)
+    }
+
+    /// Whether `step` reaches the least share of a range `range` wide.
+    fn steps_apart(&self, step: f64, range: f64) -> bool {
         // A step a rounding error short of the least share is left to the judge.
-        step >= self.least_share * range * (1.0 - 1e-9) && (self.slack)(values) >= 0.0
+        step >= self.least_share * range * (1.0 - 1e-9)
     }
 }
 
 /// The room left by values that are not judged: unlimited.
-fn unjudged(_: &[f64]) -> f64 {
-    f64::INFINITY
+fn unjudged(_: &[f64]) -> Room {
+    Room::Slack(f64::INFINITY)
 }
 
 /// `k` values from `lmin`, `step` apart, each computed from its index.
@@ -277,7 +305,11 @@ pub(crate) fn extended(
     let target = clamp_target(target);
     let evenly = || {
         let values = evenly_spaced(dmin, dmax, target);
-        if (fit.slack)(&values) >= 0.0 {
+        let fits = match (fit.slack)(&values) {
+            Room::TooFewTicks => true,
+            Room::Slack(slack) => slack >= 0.0,
+        };
+        if fits {
             values
         } else {
             evenly_spaced(dmin, dmax, 2)
@@ -287,13 +319,15 @@ pub(crate) fn extended(
         return evenly();
     }
     let range = dmax - dmin;
-    let admits = |c: &Candidate| fit.admits(&c.values(), c.step, range);
     let Some(best) = search(dmin, dmax, target, tick_coverage, &|_| true).best else {
         return evenly();
     };
-    if admits(&best) {
+    if fit.keeps(&best.values(), best.step, range) {
         return best.values();
     }
+    // A candidate in place of the best needs two ticks drawn: one that does not would only
+    // raise the bar for the others.
+    let admits = |c: &Candidate| fit.admits(&c.values(), c.step, range);
     let round = round_candidates(dmin, dmax, target, tick_coverage);
     let better = |chosen: Option<Candidate>, c: Candidate| match chosen {
         Some(chosen) if chosen.score >= c.score => Some(chosen),
@@ -749,7 +783,7 @@ mod tests {
     }
 
     /// A fit that admits the values `slack` finds room for, judging every candidate.
-    fn judged(slack: &dyn Fn(&[f64]) -> f64) -> Fit<'_> {
+    fn judged(slack: &dyn Fn(&[f64]) -> Room) -> Fit<'_> {
         Fit {
             least_share: 0.0,
             slack,
@@ -775,7 +809,7 @@ mod tests {
         );
         // Asked for ticks at least 1.5 apart, the best scored round candidate that is: not
         // −0.4, 1.2, 2.8, 4.4, 6.0, which scores better.
-        let slack = |values: &[f64]| gap_beyond(values, 1.5);
+        let slack = |values: &[f64]| Room::Slack(gap_beyond(values, 1.5));
         let fit = judged(&slack);
         let loose = extended(-0.01, 5.69, 3, Loose, &fit);
         assert!(close(&loose, &[-2.0, 0.0, 2.0, 4.0, 6.0]), "{loose:?}");
@@ -783,11 +817,11 @@ mod tests {
         let free = extended(-0.01, 5.69, 3, Free, &fit);
         assert!(close(&free, &[0.0, 3.0, 6.0]), "{free:?}");
         // Asked for 4 apart, it does not: a round step of 5.
-        let slack = |values: &[f64]| gap_beyond(values, 4.0);
+        let slack = |values: &[f64]| Room::Slack(gap_beyond(values, 4.0));
         let free = extended(-0.01, 5.69, 3, Free, &judged(&slack));
         assert!(close(&free, &[0.0, 5.0]), "{free:?}");
         // A candidate the unjudged search prefers and that fits is still the choice.
-        let slack = |values: &[f64]| gap_beyond(values, 0.5);
+        let slack = |values: &[f64]| Room::Slack(gap_beyond(values, 0.5));
         assert_eq!(extended(-0.01, 5.69, 3, Loose, &judged(&slack)), any);
     }
 
@@ -797,7 +831,7 @@ mod tests {
         let judged = std::cell::Cell::new(f64::INFINITY);
         let slack = |values: &[f64]| {
             judged.set(judged.get().min(values[1] - values[0]));
-            f64::INFINITY
+            Room::Slack(f64::INFINITY)
         };
         let fit = Fit {
             least_share: 2.0 / 5.7,
@@ -833,8 +867,9 @@ mod tests {
             let coverage = if loose { TickCoverage::Loose } else { TickCoverage::Free };
             let least = least * (high - low);
             let slack = |values: &[f64]| gap_beyond(values, least);
+            let room = |values: &[f64]| Room::Slack(slack(values));
             let best = extended(low, high, target, coverage, &Fit::ANY);
-            let chosen = extended(low, high, target, coverage, &judged(&slack));
+            let chosen = extended(low, high, target, coverage, &judged(&room));
             if slack(&best) >= 0.0 {
                 proptest::prop_assert_eq!(chosen, best);
             } else if chosen.len() > 2 {
@@ -848,7 +883,7 @@ mod tests {
     #[test]
     fn no_fit_falls_back_to_the_widest_two_ticks() {
         use TickCoverage::{Free, Loose};
-        let slack = |_: &[f64]| -1.0;
+        let slack = |_: &[f64]| Room::Slack(-1.0);
         let none = judged(&slack);
         // Two loose ticks always span the whole axis: the best scored pair.
         assert!(close(&extended(0.5, 9.5, 5, Loose, &none), &[0.0, 10.0]));

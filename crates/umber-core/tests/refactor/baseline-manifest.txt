@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: a056f57a87ff386d04473522ae74110ff1542f35
+# revision: bfe1977cff50c8fa262bd550b875aaa890ce1ea3
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -329,8 +329,8 @@ d84d74f63fb78a8ef175e055263ff725873a15dc731522e3ca5ba93599ed6176  png/fig-midnig
 f24ab8d15caf1f9df7f459236bc0786871a3c8ba2e05c602c6a63c5fa2653e50  png/fig-midnight-line-scatter.dpi72.png
 4f1589e675d48bed12ce269aac5f2591c9c004e08fb1c8a798b24472ff13faac  png/fig-nan-gaps.dpi200.png
 e08f044c074d546ace7146d56f60a605bf92736e9af8aeb2970f219c25f3d76d  png/fig-nan-gaps.dpi72.png
-825d5d69916435a15d63b12d8ba48cd398669db565c1694ec0bf3c096cb45df5  png/fig-narrow-limits-huge.dpi200.png
-0c7b81794bd4147c00ae655e756bfba06600f135e9b8e6096b3bf9d6bebb602c  png/fig-narrow-limits-huge.dpi72.png
+7148aafcddce806d40bac01646b3fab0235f14b9b466eae67c92e8bb6399f9ca  png/fig-narrow-limits-huge.dpi200.png
+19f60c07fa8ce03ffc61474630295fbdbb4d441f0260c4582960caf2bf32c89e  png/fig-narrow-limits-huge.dpi72.png
 385e328dbe48ee04a86532e050351b36ad12dd33d805c69140bee242f1853548  png/fig-narrow-limits-offset.dpi200.png
 2310f1d0cb7a92bf6d876dea359aa7af5df044e46e7203cee2a8dc890c3c9806  png/fig-narrow-limits-offset.dpi72.png
 35cb6803575574e8489fce8d1b9796a582c8d43edbbcffb1b48e4474681a717c  png/fig-narrow-limits-tiny.dpi200.png
@@ -826,7 +826,7 @@ cec583974785fa5b08f98f7151d60492c88676c045efb040505a03b12e3b70a0  scene/fig-log-
 ec97a9c7451f9b1781a1d6bc5c6e7b01fbc774d72fe647e507e26d01b839316c  scene/fig-midnight-empty-axes.txt
 f955cf96ec87b4595ede00fef620e5d30c96504cdbca61cf69710431ce7f1888  scene/fig-midnight-line-scatter.txt
 5366a394f47e2e1634869ff02a4bffa4473fefc8952d446ec7df48ec82adf3bf  scene/fig-nan-gaps.txt
-87a2ddaf714e77ebd6cba59f6cd4183ba035affb605b7c40cc955a5d847e2e57  scene/fig-narrow-limits-huge.txt
+039ceb62f12cf4e4f03c4c4e4d500d4240890029e3b1b3c98705071f4303a20a  scene/fig-narrow-limits-huge.txt
 49fdf43f73c1ddfb946f09242174bce4f211d5c5fa0338e8553f9640c900cc25  scene/fig-narrow-limits-offset.txt
 011660232f3e2b3cda4ecfada774afdec65fb64502dc195267ae429345280bc4  scene/fig-narrow-limits-tiny.txt
 c2da2335677ab3d940e29b3b7c5bf80b127c47a9f3bff4c95b829e056923a809  scene/fig-no-axes.txt
@@ -1304,8 +1304,8 @@ d857d0934cdbe70a8bf0e530b1111ea6f6862ae21a521406f345642cee45082a  svg/fig-log-y.
 4f1369f681921699b31d5aa9cb28a5d11d7ba2e1203ec81bb8e500ccb39c494e  svg/fig-midnight-line-scatter.outlines.svg
 df50d75b407272bd3b08a7a148ed92a5436a46fab8035657896c910b6e3a6155  svg/fig-nan-gaps.editable.svg
 0a7bce73da6814d87cfa0b70baacb7ccb8f11f09fd23102289364f0aae63b768  svg/fig-nan-gaps.outlines.svg
-32cc75d3c760fabd60f653b79b2d6487c4e90198ddf95745c0594e96a313c33a  svg/fig-narrow-limits-huge.editable.svg
-27c863393e468c9c2444b5577eee5b86777f0210e4506f1d4c2aeb2d6d20df7f  svg/fig-narrow-limits-huge.outlines.svg
+53e6f0be5ee6ceb5b4df2e3f51498605a4b706c079fef5f64dde5f096057c231  svg/fig-narrow-limits-huge.editable.svg
+a97a82ddcb67198fbfd5a90c29c7b5551fb883c5ee6010dd54915299b9487c3a  svg/fig-narrow-limits-huge.outlines.svg
 c0379e8e6d5fff355589ad8f6f3ee29606a3f2a5c1684fcf9001485cf7dbe5e5  svg/fig-narrow-limits-offset.editable.svg
 7d9f9540ec42e33f095f336431864ca978c0533da75494c1aff883715ed06f21  svg/fig-narrow-limits-offset.outlines.svg
 e32f3c54fca5bed2f49447462f3338f39686180efd6b5f7657942811ae6c26c2  svg/fig-narrow-limits-tiny.editable.svg

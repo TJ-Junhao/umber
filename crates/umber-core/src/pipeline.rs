@@ -56,20 +56,148 @@ fn measure_legend<'a>(
     MeasuredLegend::measure(theme, &legend, lib)
 }
 
-/// Resolves and lays out every panel of `figure`, whose records are `panels`, in two passes: ticks
-/// depend on the plot size, and the plot size depends on the tick label widths. The first pass
-/// assumes each plot fills its cells inside the padding (the whole canvas inside the padding for a
-/// figure of one cell); the second uses each panel's plot size from the first, and is final. Each
-/// pass resolves every panel from its marks for its tick rooms ([`layout::tick_rooms`]: the first
-/// for the tick targets alone, the second with tick labels kept apart on the plot sizes of the
-/// first), measures it ([`layout::measure_panel`]) and solves the grid ([`layout::solve_grid`]);
-/// the panels are then placed for the final solve ([`layout::place_panel`]), and on a grid the
-/// texts of every panel are checked to stay in its cells ([`layout::check_panel_contents`]). Layout
-/// errors are reported in `context`.
+/// One side of a plot area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// The x axis.
+    X,
+    /// The y axis.
+    Y,
+}
+
+impl Side {
+    /// Both sides, x first.
+    const BOTH: [Side; 2] = [Side::X, Side::Y];
+
+    /// The index of this side in a pair.
+    fn index(self) -> usize {
+        match self {
+            Side::X => 0,
+            Side::Y => 1,
+        }
+    }
+
+    /// Whether this side of an axes with `limits` gets automatic ticks: a linear or log axis
+    /// without explicit ticks.
+    fn is_automatic(self, limits: &Limits<'_>) -> bool {
+        match self {
+            Side::X => matches!(
+                limits.x,
+                resolve::AxisLimits::Continuous(x) if x.ticks.explicit().is_none()
+            ),
+            Side::Y => limits.y.ticks.explicit().is_none(),
+        }
+    }
+
+    /// The ticks of this side of `resolved`.
+    fn ticks(self, resolved: &Resolved) -> &[resolve::AxisTick] {
+        match self {
+            Side::X => &resolved.x.ticks,
+            Side::Y => &resolved.y.ticks,
+        }
+    }
+
+    /// The tick room of this side of a plot area of `plot`.
+    fn room<'a>(self, plot: PlotSize, theme: &Theme, lib: &'a FontLibrary) -> layout::TickRoom<'a> {
+        let (x, y) = layout::tick_rooms(plot, theme, lib, TickSpacing::LabelsApart);
+        match self {
+            Side::X => x,
+            Side::Y => y,
+        }
+    }
+}
+
+/// How the final layout chooses the automatic ticks of one side of a panel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TickChoice {
+    /// The plot size the ticks are chosen for.
+    plot: PlotSize,
+    /// The most ticks allowed; `None` before the ticks are first chosen again.
+    most: Option<usize>,
+    /// Whether the ticks may still be chosen again.
+    state: ChoiceState,
+}
+
+/// Whether the ticks of one side may still be chosen again, and how.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChoiceState {
+    /// They may: `last` is the number of ticks the last choice gave, if they were chosen
+    /// again before.
+    Open {
+        /// The number of ticks the last choice gave.
+        last: Option<usize>,
+    },
+    /// They stay: no set the layout can hold keeps the labels apart.
+    Settled,
+}
+
+impl TickChoice {
+    /// The first choice, for the plot size `plot`.
+    fn first(plot: PlotSize) -> TickChoice {
+        TickChoice {
+            plot,
+            most: None,
+            state: ChoiceState::Open { last: None },
+        }
+    }
+
+    /// The tick room of `side`.
+    fn room<'a>(&self, side: Side, theme: &Theme, lib: &'a FontLibrary) -> layout::TickRoom<'a> {
+        let room = side.room(self.plot, theme, lib);
+        match self.most {
+            Some(most) => room.at_most(most),
+            None => room,
+        }
+    }
+
+    /// The choice again for the plot size `plot`, of `ticks` ticks whose labels crowd on it:
+    /// as many ticks at most the first time at that number, one fewer when the last choice
+    /// gave that number already. `None` for two ticks or fewer, which cannot be fewer.
+    fn again(&self, plot: PlotSize, ticks: usize) -> Option<TickChoice> {
+        let ChoiceState::Open { last } = self.state else {
+            return None;
+        };
+        if ticks <= 2 {
+            return None;
+        }
+        let most = if last == Some(ticks) {
+            ticks - 1
+        } else {
+            ticks
+        };
+        Some(TickChoice {
+            plot,
+            most: Some(most),
+            state: ChoiceState::Open { last: Some(ticks) },
+        })
+    }
+}
+
+/// Resolves and lays out every panel of `figure`, whose records are `panels`.
+///
+/// Ticks depend on the plot size, and the plot size depends on the tick label widths. A first
+/// pass resolves every panel for its tick targets alone, as if each plot filled its cells
+/// inside the padding (the whole canvas inside the padding for a figure of one cell), measures
+/// it ([`layout::measure_panel`]) and solves the grid ([`layout::solve_grid`]). The final pass
+/// resolves every panel again with tick labels kept apart on the plot sizes of the first
+/// ([`layout::tick_rooms`]), measures it and solves the grid.
+///
+/// That solve can give a plot smaller than the one the ticks were chosen for. While the labels
+/// of a side with automatic ticks crowd on the solved plot, its ticks are chosen again for that
+/// plot ([`TickChoice::again`]): at most as many ticks the first time at a number of ticks, one
+/// fewer the next, and the grid is solved again. A side whose ticks number two, whose new
+/// choice does not fit even on the plot it was made for, or whose new choice the grid cannot
+/// hold (the solve fails, and the previous solve is kept) keeps its ticks. Each side is chosen
+/// again at most twice per number of ticks, and its ticks never grow in number, so the loop
+/// ends.
+///
+/// The panels are then placed for the final solve ([`layout::place_panel`]), and on a grid the
+/// texts of every panel are checked to stay in its cells ([`layout::check_panel_contents`]).
+/// Layout errors are reported in `context`.
 ///
 /// # Errors
 ///
-/// As [`layout::solve_grid`], from either pass: the second pass needs the plot sizes of the
+/// As [`layout::solve_grid`], from either pass: the final pass needs the plot sizes of the
 /// first; then as [`layout::check_panel_contents`], for the final layout only.
 fn plan(
     figure: &Figure,
@@ -97,34 +225,111 @@ fn plan(
         panels: &inputs,
     };
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
-    let pass = |sizes: Vec<PlotSize>, spacing: TickSpacing| -> (Vec<Resolved>, Vec<PanelBands>) {
-        let resolved: Vec<Resolved> = panels
-            .iter()
-            .zip(&limits)
-            .zip(sizes)
-            .map(|((panel, limits), size)| {
-                let (x, y) = layout::tick_rooms(size, theme, lib, spacing);
-                resolve::resolve(&panel.marks, limits, &x, &y)
-            })
-            .collect();
-        let bands = inputs
-            .iter()
-            .zip(&resolved)
-            .map(|(input, resolved)| {
-                layout::measure_panel(input, resolved, grid.span(input.axes.cells()))
-            })
-            .collect();
-        (resolved, bands)
+    let measure = |i: usize, resolved: &Resolved| {
+        let input = &inputs[i];
+        layout::measure_panel(input, resolved, grid.span(input.axes.cells()))
     };
-    let guesses = inputs
+
+    // The first pass: ticks for their targets alone, on guessed plot sizes.
+    let first: Vec<PanelBands> = inputs
         .iter()
-        .map(|input| grid.initial_plot_size(input.axes.cells()))
+        .enumerate()
+        .map(|(i, input)| {
+            let guess = grid.initial_plot_size(input.axes.cells());
+            let (x, y) = layout::tick_rooms(guess, theme, lib, TickSpacing::Target);
+            measure(i, &resolve::resolve(&panels[i].marks, &limits[i], &x, &y))
+        })
         .collect();
-    let (_, bands) = pass(guesses, TickSpacing::Target);
-    let first = layout::solve_grid(&grid, &bands)?;
-    let sizes = first.panels.iter().map(|slot| slot.plot.size()).collect();
-    let (resolved, bands) = pass(sizes, TickSpacing::LabelsApart);
-    let solution = layout::solve_grid(&grid, &bands)?;
+    let first = layout::solve_grid(&grid, &first)?;
+
+    // The final pass: tick labels kept apart on the plot sizes of the first.
+    let resolve_panel = |i: usize, choices: &[TickChoice; 2]| {
+        let x = choices[0].room(Side::X, theme, lib);
+        let y = choices[1].room(Side::Y, theme, lib);
+        resolve::resolve(&panels[i].marks, &limits[i], &x, &y)
+    };
+    let mut choices: Vec<[TickChoice; 2]> = first
+        .panels
+        .iter()
+        .map(|slot| [TickChoice::first(slot.plot.size()); 2])
+        .collect();
+    let mut resolved: Vec<Resolved> = choices
+        .iter()
+        .enumerate()
+        .map(|(i, panel)| resolve_panel(i, panel))
+        .collect();
+    let mut bands: Vec<PanelBands> = resolved
+        .iter()
+        .enumerate()
+        .map(|(i, resolved)| measure(i, resolved))
+        .collect();
+    let mut solution = layout::solve_grid(&grid, &bands)?;
+
+    // Each side is chosen again at most twice per number of ticks.
+    let rounds: usize = resolved
+        .iter()
+        .map(|r| 2 * (r.x.ticks.len() + r.y.ticks.len()) + 1)
+        .sum();
+    for _ in 0..rounds {
+        // The sides whose labels crowd on the solved plots, chosen again.
+        let mut next = choices.clone();
+        let mut again: Vec<(usize, Side)> = Vec::new();
+        for (i, slot) in solution.panels.iter().enumerate() {
+            let plot = slot.plot.size();
+            for side in Side::BOTH {
+                let ticks = side.ticks(&resolved[i]);
+                if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
+                {
+                    continue;
+                }
+                let choice = &mut next[i][side.index()];
+                match choice.again(plot, ticks.len()) {
+                    Some(new) => {
+                        *choice = new;
+                        again.push((i, side));
+                    }
+                    None => choice.state = ChoiceState::Settled,
+                }
+            }
+        }
+        if again.is_empty() {
+            break;
+        }
+        let mut tried_resolved = resolved.clone();
+        let mut tried_bands = bands.clone();
+        let mut panels_again: Vec<usize> = again.iter().map(|&(i, _)| i).collect();
+        panels_again.dedup();
+        for i in panels_again {
+            tried_resolved[i] = resolve_panel(i, &next[i]);
+            tried_bands[i] = measure(i, &tried_resolved[i]);
+        }
+        for &(i, side) in &again {
+            // A choice that crowds even on the plot it was made for is the fallback.
+            let choice = &mut next[i][side.index()];
+            if choice
+                .room(side, theme, lib)
+                .slack(side.ticks(&tried_resolved[i]))
+                < 0.0
+            {
+                choice.state = ChoiceState::Settled;
+            }
+        }
+        match layout::solve_grid(&grid, &tried_bands) {
+            Ok(tried) => {
+                resolved = tried_resolved;
+                bands = tried_bands;
+                solution = tried;
+                choices = next;
+            }
+            Err(_) => {
+                // The grid cannot hold the new choices: those sides keep their ticks.
+                for &(i, side) in &again {
+                    choices[i][side.index()].state = ChoiceState::Settled;
+                }
+            }
+        }
+    }
+
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = inputs
         .iter()
         .zip(resolved)
@@ -627,6 +832,61 @@ mod tests {
         assert_eq!(y_labels(19), [&m("6"), &m("4"), &m("2"), "0", "2"]);
     }
 
+    /// The labels of `side` of the first panel of `figure` as laid out, and the room they
+    /// leave on the plot drawn.
+    fn final_ticks(figure: &Figure, side: Side) -> (Vec<String>, f64) {
+        let lib = FontLibrary::global();
+        let (resolved, layout) = try_plan_panels(figure, lib).unwrap().remove(0);
+        let ticks = side.ticks(&resolved);
+        let slack = side
+            .room(layout.plot.size(), figure.theme(), lib)
+            .slack(ticks);
+        let labels = ticks.iter().map(|tick| tick.label.clone()).collect();
+        (labels, slack)
+    }
+
+    #[test]
+    fn x_labels_keep_apart_on_the_final_plot() {
+        // 72 × 65 pt: the ticks are chosen for a 35.25 pt wide plot, where 0, 50, 100 fit;
+        // the y tick labels chosen with them, 0 and 10, take 5.1 pt more than the first pass's,
+        // so the plot drawn is 30.15 pt wide and those x labels would crowd by 1.9 pt.
+        let mut f = Figure::new(1.0, 65.0 / 72.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 100.0]),
+                &[0.0, 5.7],
+                LineOptions::default(),
+            )
+            .unwrap();
+        let (labels, slack) = final_ticks(&f, Side::X);
+        assert_eq!(labels, ["0", "100"]);
+        assert!(slack >= 0.0, "{slack}");
+    }
+
+    #[test]
+    fn explicit_log_limits_get_ticks_that_fit() {
+        // Log limits 2 to 50 hold no two powers of 10, so the ticks are linear. Candidates
+        // with fewer than two ticks inside the limits must not stand in for a pair that fits.
+        let mut f = Figure::new(300.0 / 72.0, 80.0 / 72.0, Theme::pigment()).unwrap();
+        let log = ScaleKind::Log {
+            base: crate::LogBase::TEN,
+        };
+        f.add_axes(ScaleKind::Linear, log)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 10.0]),
+                &[2.0, 50.0],
+                LineOptions::default(),
+            )
+            .unwrap()
+            .ylim(2.0, 50.0)
+            .unwrap();
+        let (labels, slack) = final_ticks(&f, Side::Y);
+        assert_eq!(labels, ["10", "50"]);
+        assert!(slack >= 0.0, "{labels:?} crowd by {}", -slack);
+    }
+
     #[test]
     fn log_axes_keep_their_labels_apart() {
         let log = ScaleKind::Log {
@@ -706,45 +966,133 @@ mod tests {
             }
         }
 
-        /// A figure of one axes with a mark of `kind` over the `x` and `y` ranges, on the given
-        /// axes kinds, explicit limits and a percent x format when asked.
-        #[allow(clippy::too_many_arguments)]
-        fn figure(
-            theme: Theme,
-            (x_log, y_log): (bool, bool),
-            (x, y): ((f64, f64), (f64, f64)),
+        /// One random axes: linear or log axes, a mark of `kind` over the `x` and `y` ranges,
+        /// explicit limits on either axis, and a percent x format.
+        #[derive(Debug, Clone)]
+        struct Spec {
+            /// Whether the x and the y axis are log axes.
+            logs: (bool, bool),
+            /// The x and the y data ranges.
+            ranges: ((f64, f64), (f64, f64)),
+            /// The mark.
             kind: Kind,
-            (xlim, ylim): (bool, bool),
+            /// Whether the x and the y axis have explicit limits at the data range.
+            limits: (bool, bool),
+            /// Whether the x axis has a percent format.
             percent: bool,
-        ) -> Figure {
-            let scale = |log: bool| {
-                if log {
-                    ScaleKind::Log { base: LogBase::TEN }
-                } else {
-                    ScaleKind::Linear
-                }
-            };
-            let mut f = Figure::new(6.0, 4.0, theme).unwrap();
-            let mut axes = f.add_axes(scale(x_log), scale(y_log)).unwrap();
+        }
+
+        /// A random [`Spec`].
+        fn spec() -> impl Strategy<Value = Spec> {
+            (
+                (any::<bool>(), any::<bool>())
+                    .prop_flat_map(|(a, b)| (Just((a, b)), (range(a), range(b)))),
+                prop_oneof![Just(Kind::Line), Just(Kind::Scatter), Just(Kind::Area)],
+                (any::<bool>(), any::<bool>()),
+                any::<bool>(),
+            )
+                .prop_map(|((logs, ranges), kind, limits, percent)| Spec {
+                    logs,
+                    ranges,
+                    kind,
+                    limits,
+                    percent,
+                })
+        }
+
+        /// The kind of an axis: log when `log`, else linear.
+        fn scale(log: bool) -> ScaleKind {
+            if log {
+                ScaleKind::Log { base: LogBase::TEN }
+            } else {
+                ScaleKind::Linear
+            }
+        }
+
+        /// Draws `spec` on `axes`.
+        fn draw(axes: &mut crate::AxesMut<'_>, spec: &Spec) {
+            let ((x, y), y_log) = (spec.ranges, spec.logs.1);
             let xs = AxisData::Numbers(vec![x.0, (x.0 + x.1) / 2.0, x.1]);
             let ys = [y.0, (y.0 + y.1) / 2.0, y.1];
-            match kind {
+            match spec.kind {
                 Kind::Line => axes.line(xs, &ys, LineOptions::default()),
                 Kind::Scatter => axes.scatter(xs, &ys, ScatterOptions::default()),
                 Kind::Area if !y_log => axes.area(xs, &ys, AreaOptions::default()),
                 Kind::Area => axes.line(xs, &ys, LineOptions::default()),
             }
             .unwrap();
-            if xlim {
+            if spec.limits.0 {
                 axes.xlim(x.0, x.1).unwrap();
             }
-            if ylim {
+            if spec.limits.1 {
                 axes.ylim(y.0, y.1).unwrap();
             }
-            if percent {
+            if spec.percent {
                 axes.xtick_format(TickFormat::percent(1).unwrap()).unwrap();
             }
+        }
+
+        /// A `width` × `height` in figure of one axes drawn as `spec` says.
+        fn figure(theme: Theme, (width, height): (f64, f64), spec: &Spec) -> Figure {
+            let mut f = Figure::new(width, height, theme).unwrap();
+            let mut axes = f.add_axes(scale(spec.logs.0), scale(spec.logs.1)).unwrap();
+            draw(&mut axes, spec);
             f
+        }
+
+        /// A `rows × cols` figure at `width` × `height` in with one axes per cell, drawn as
+        /// `specs` says, in row-major order.
+        fn grid_figure(
+            theme: Theme,
+            (width, height): (f64, f64),
+            (rows, cols): (i64, i64),
+            specs: &[Spec],
+        ) -> Figure {
+            let grid = Grid::new(rows, cols).unwrap();
+            let mut f = Figure::with_grid(width, height, theme, grid).unwrap();
+            for (i, spec) in (0..rows * cols).zip(specs) {
+                let at = Placement {
+                    row: GridIndex::At(i / cols),
+                    col: GridIndex::At(i % cols),
+                    ..Placement::default()
+                };
+                let mut axes = f
+                    .add_axes_at(at, scale(spec.logs.0), scale(spec.logs.1))
+                    .unwrap();
+                draw(&mut axes, spec);
+            }
+            f
+        }
+
+        /// Checks every side with automatic ticks of every panel of `figure` as laid out: its
+        /// labels keep apart on the plot drawn, or it is a fallback of at most three ticks. A
+        /// figure too small for its texts is skipped.
+        fn check_final(figure: &Figure) -> std::result::Result<(), TestCaseError> {
+            let lib = FontLibrary::global();
+            let Ok(planned) = try_plan_panels(figure, lib) else {
+                return Ok(());
+            };
+            for ((resolved, layout), axes) in planned.iter().zip(figure.panels()) {
+                let limits = Limits::of(axes);
+                for side in Side::BOTH {
+                    if !side.is_automatic(&limits) {
+                        continue;
+                    }
+                    let ticks = side.ticks(resolved);
+                    let slack = side
+                        .room(layout.plot.size(), figure.theme(), lib)
+                        .slack(ticks);
+                    prop_assert!(
+                        slack >= 0.0 || ticks.len() <= 3,
+                        "{:?}: {} ticks crowd by {} pt on {:?}",
+                        side,
+                        ticks.len(),
+                        -slack,
+                        layout.plot
+                    );
+                }
+            }
+            Ok(())
         }
 
         /// One resolved axis: its domain and its ticks.
@@ -810,18 +1158,14 @@ mod tests {
             fn automatic_tick_labels_keep_apart(
                 theme in 0usize..3,
                 font_scale in 0.5f64..2.5,
-                (logs, ranges) in (any::<bool>(), any::<bool>())
-                    .prop_flat_map(|(a, b)| (Just((a, b)), (range(a), range(b)))),
-                kind in prop_oneof![Just(Kind::Line), Just(Kind::Scatter), Just(Kind::Area)],
-                limits in (any::<bool>(), any::<bool>()),
-                percent in any::<bool>(),
+                spec in spec(),
                 width in 20.0f64..800.0,
                 height in 20.0f64..800.0,
             ) {
                 let theme = [Theme::pigment(), Theme::graphite(), Theme::midnight()][theme]
                     .with_font_scale(font_scale)
                     .unwrap();
-                let f = figure(theme, logs, ranges, kind, limits, percent);
+                let f = figure(theme, (6.0, 4.0), &spec);
                 let lib = FontLibrary::global();
                 let size = PlotSize { width, height };
                 let (old, _, _) = resolved_at(&f, size, TickSpacing::Target, lib).remove(0);
@@ -835,6 +1179,35 @@ mod tests {
                 ] {
                     check_axis(name, room, (new.0.as_ref(), &new.1), (old.0.as_ref(), &old.1))?;
                 }
+            }
+
+            #[test]
+            fn final_layouts_keep_tick_labels_apart(
+                theme in 0usize..3,
+                font_scale in 0.5f64..2.5,
+                spec in spec(),
+                width in 0.8f64..8.0,
+                height in 0.6f64..6.0,
+            ) {
+                let theme = [Theme::pigment(), Theme::graphite(), Theme::midnight()][theme]
+                    .with_font_scale(font_scale)
+                    .unwrap();
+                check_final(&figure(theme, (width, height), &spec))?;
+            }
+
+            #[test]
+            fn final_grid_layouts_keep_tick_labels_apart(
+                theme in 0usize..3,
+                font_scale in 0.5f64..1.5,
+                (rows, cols) in (1i64..4, 1i64..4),
+                specs in proptest::collection::vec(spec(), 9),
+                width in 2.0f64..14.0,
+                height in 1.5f64..10.0,
+            ) {
+                let theme = [Theme::pigment(), Theme::graphite(), Theme::midnight()][theme]
+                    .with_font_scale(font_scale)
+                    .unwrap();
+                check_final(&grid_figure(theme, (width, height), (rows, cols), &specs))?;
             }
         }
     }

@@ -366,7 +366,8 @@ enum LabelExtent {
 }
 
 /// What automatic ticks along one side of a plot area ask for: about `target` ticks
-/// ([`tick_targets`]), whose labels stay apart on screen when `spacing` says so.
+/// ([`tick_targets`]), whose labels stay apart on screen when `spacing` says so, and no more
+/// ticks than [`at_most`](TickRoom::at_most) allows.
 ///
 /// Adjacent labels are apart when they leave at least [`TICK_LABEL_GAP`] tick label sizes
 /// between them: between their line boxes (ascent and descent) on the y axis, and between their
@@ -386,6 +387,8 @@ pub(crate) struct TickRoom<'a> {
     style: TextStyle,
     /// The widths of the labels measured so far: tick searches judge the same labels often.
     widths: RefCell<HashMap<String, f64>>,
+    /// The most ticks that fit, whatever their labels; `None` for no such limit.
+    most: Option<usize>,
 }
 
 /// The tick rooms of the x and the y axis of a plot area of `plot`, with tick labels in the
@@ -408,6 +411,7 @@ pub(crate) fn tick_rooms<'a>(
         lib,
         style,
         widths: RefCell::new(HashMap::new()),
+        most: None,
     };
     (
         room(x_target, plot.width, LabelExtent::Width(digit)),
@@ -416,6 +420,14 @@ pub(crate) fn tick_rooms<'a>(
 }
 
 impl TickRoom<'_> {
+    /// This room with at most `most` ticks fitting, whatever their labels.
+    pub fn at_most(self, most: usize) -> Self {
+        TickRoom {
+            most: Some(most),
+            ..self
+        }
+    }
+
     /// The least gap between adjacent labels, in points.
     fn gap(&self) -> f64 {
         TICK_LABEL_GAP * f64::from(self.style.size)
@@ -444,10 +456,14 @@ impl TickRoom<'_> {
 
     /// The room, in points, that the labels of `ticks`, in axis order, leave between the most
     /// crowded pair of adjacent labels beyond the least gap: negative when they crowd, infinite
-    /// for fewer than two ticks and when the labels need not keep apart.
+    /// for fewer than two ticks and when the labels need not keep apart, and negative infinity
+    /// for more ticks than [`at_most`](Self::at_most) allows.
     pub fn slack(&self, ticks: &[AxisTick]) -> f64 {
         if self.spacing == TickSpacing::Target {
             return f64::INFINITY;
+        }
+        if self.most.is_some_and(|most| ticks.len() > most) {
+            return f64::NEG_INFINITY;
         }
         let extents: Vec<f64> = match self.extent {
             LabelExtent::Width(_) => ticks.iter().map(|tick| self.width(&tick.label)).collect(),

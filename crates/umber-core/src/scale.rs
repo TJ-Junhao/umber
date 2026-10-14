@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use crate::error::number;
-use crate::ticks::{self, AutoTicks, Tick, TickCoverage, TickValues};
+use crate::ticks::{self, AutoTicks, Room, Tick, TickCoverage, TickValues};
 use crate::{Error, Result};
 
 /// How values along one axis map to positions.
@@ -714,9 +714,9 @@ impl ContinuousScale {
         let (nice, ticks) = match self.transform {
             Transform::Linear => {
                 let slack = |values: &[f64]| match self.nice_from_loose(values.to_vec()) {
-                    (nice, Some(ticks)) => judge.slack(&nice, &ticks),
+                    (nice, Some(ticks)) => Room::Slack(judge.slack(&nice, &ticks)),
                     // Judged as the fallback below, once chosen.
-                    (_, None) => f64::INFINITY,
+                    (_, None) => Room::TooFewTicks,
                 };
                 let fit = ticks::Fit {
                     least_share: judge.least_share(),
@@ -1092,9 +1092,9 @@ impl ContinuousScale {
             }
         }
         let slack = |values: &[f64]| match self.inside_ticks(values) {
-            Some(ticks) => judge.slack(self, &ticks),
-            // Not chosen: fewer than two ticks lead to a larger target below.
-            None => f64::INFINITY,
+            Some(ticks) => Room::Slack(judge.slack(self, &ticks)),
+            // Fewer than two ticks lead to a larger target below.
+            None => Room::TooFewTicks,
         };
         // Linear ticks on a log axis are not evenly spaced on screen, so their step says nothing
         // about how far apart they are drawn.
