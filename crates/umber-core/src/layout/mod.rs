@@ -350,6 +350,9 @@ pub(crate) enum TickSpacing {
     /// Ticks are chosen for their target alone. The first layout pass measures with them: its
     /// plot size is a guess, so the spacing it would give is not the drawn one.
     Target,
+    /// The previous constrained search, including target retries, with its final choice
+    /// checked on the solved layout rather than on the size used to choose it.
+    Deferred,
     /// Adjacent labels stay apart (see [`TickRoom`]).
     LabelsApart,
 }
@@ -420,6 +423,11 @@ pub(crate) fn tick_rooms<'a>(
 }
 
 impl TickRoom<'_> {
+    /// Whether the final constrained choice is checked on the solved layout.
+    pub fn deferred(&self) -> bool {
+        self.spacing == TickSpacing::Deferred
+    }
+
     /// This room with at most `most` ticks fitting, whatever their labels.
     pub fn at_most(self, most: usize) -> Self {
         TickRoom {

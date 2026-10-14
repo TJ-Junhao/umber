@@ -179,8 +179,10 @@ impl TickChoice {
 /// pass resolves every panel for its tick targets alone, as if each plot filled its cells
 /// inside the padding (the whole canvas inside the padding for a figure of one cell), measures
 /// it ([`layout::measure_panel`]) and solves the grid ([`layout::solve_grid`]). The final pass
-/// resolves every panel again with tick labels kept apart on the plot sizes of the first
-/// ([`layout::tick_rooms`]), measures it and solves the grid.
+/// first tries the previous constrained choices, including target retries, on those sizes
+/// ([`layout::tick_rooms`]). If all their labels fit on the solved plots, both the ticks and
+/// the layout stay unchanged. Otherwise it resolves and solves again, repairing crowded
+/// choices with candidates that draw at least two ticks.
 ///
 /// That solve can give a plot smaller than the one the ticks were chosen for. While the labels
 /// of a side with automatic ticks crowd on the solved plot, its ticks are chosen again for that
@@ -253,17 +255,51 @@ fn plan(
         .iter()
         .map(|slot| [TickChoice::first(slot.plot.size()); 2])
         .collect();
-    let mut resolved: Vec<Resolved> = choices
+    // First keep the complete previous constrained search. Its fallback may crowd on the
+    // size used to choose it yet fit on the solved plot; only that plot decides whether to
+    // repair it. This also keeps the layout, not just the ticks, when everything already fits.
+    let mut resolved: Vec<Resolved> = first
+        .panels
         .iter()
         .enumerate()
-        .map(|(i, panel)| resolve_panel(i, panel))
+        .map(|(i, slot)| {
+            let (x, y) = layout::tick_rooms(slot.plot.size(), theme, lib, TickSpacing::Deferred);
+            resolve::resolve(&panels[i].marks, &limits[i], &x, &y)
+        })
         .collect();
     let mut bands: Vec<PanelBands> = resolved
         .iter()
         .enumerate()
         .map(|(i, resolved)| measure(i, resolved))
         .collect();
-    let mut solution = layout::solve_grid(&grid, &bands)?;
+    let mut solution = match layout::solve_grid(&grid, &bands) {
+        Ok(solution)
+            if solution.panels.iter().enumerate().all(|(i, slot)| {
+                Side::BOTH.into_iter().all(|side| {
+                    !side.is_automatic(&limits[i])
+                        || side
+                            .room(slot.plot.size(), theme, lib)
+                            .slack(side.ticks(&resolved[i]))
+                            >= 0.0
+                })
+            }) =>
+        {
+            solution
+        }
+        _ => {
+            resolved = choices
+                .iter()
+                .enumerate()
+                .map(|(i, panel)| resolve_panel(i, panel))
+                .collect();
+            bands = resolved
+                .iter()
+                .enumerate()
+                .map(|(i, resolved)| measure(i, resolved))
+                .collect();
+            layout::solve_grid(&grid, &bands)?
+        }
+    };
 
     // Each side is chosen again at most twice per number of ticks.
     let rounds: usize = resolved
@@ -845,6 +881,100 @@ mod tests {
         (labels, slack)
     }
 
+    /// The previous two-pass layout: target-only ticks on guessed sizes, then the constrained
+    /// search (including target retries) on the first solve's sizes, with no repair pass.
+    fn previous_plan(figure: &Figure, lib: &FontLibrary) -> Result<Vec<(Resolved, Layout)>> {
+        let panels = panels(figure, lib);
+        let theme = figure.theme();
+        let inputs: Vec<_> = panels
+            .iter()
+            .map(|panel| LayoutInput {
+                theme,
+                axes: panel.axes,
+                legend: &panel.legend,
+                lib,
+                context: "Figure.to_scene()",
+            })
+            .collect();
+        let grid = GridInput {
+            width: figure.width_in() * 72.0,
+            height: figure.height_in() * 72.0,
+            grid: figure.grid(),
+            theme,
+            context: "Figure.to_scene()",
+            panels: &inputs,
+        };
+        let pass = |sizes: Vec<PlotSize>, spacing| {
+            let resolved: Vec<_> = panels
+                .iter()
+                .zip(sizes)
+                .map(|(panel, size)| {
+                    let (x, y) = layout::tick_rooms(size, theme, lib, spacing);
+                    resolve::resolve(&panel.marks, &Limits::of(panel.axes), &x, &y)
+                })
+                .collect();
+            let bands: Vec<_> = inputs
+                .iter()
+                .zip(&resolved)
+                .map(|(input, resolved)| {
+                    layout::measure_panel(input, resolved, grid.span(input.axes.cells()))
+                })
+                .collect();
+            (resolved, bands)
+        };
+        let guesses = inputs
+            .iter()
+            .map(|input| grid.initial_plot_size(input.axes.cells()))
+            .collect();
+        let (_, bands) = pass(guesses, TickSpacing::Target);
+        let first = layout::solve_grid(&grid, &bands)?;
+        let sizes = first.panels.iter().map(|slot| slot.plot.size()).collect();
+        let (resolved, bands) = pass(sizes, TickSpacing::Deferred);
+        let solution = layout::solve_grid(&grid, &bands)?;
+        let layouts: Vec<_> = inputs
+            .iter()
+            .zip(&resolved)
+            .zip(bands)
+            .zip(&solution.panels)
+            .map(|(((input, resolved), bands), slot)| {
+                layout::place_panel(input, resolved, bands, slot)
+            })
+            .collect();
+        layout::check_panel_contents(&grid, &layouts)?;
+        Ok(resolved.into_iter().zip(layouts).collect())
+    }
+
+    #[test]
+    fn fitting_constrained_ticks_keep_their_final_layout() {
+        let theme = Theme::pigment().with_font_scale(1.4).unwrap();
+        let mut f = Figure::new(3.2, 5.35, theme).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![9000.0, 46500.0, 84000.0]),
+                &[-7781.0, -7780.5, -7780.0],
+                LineOptions::default(),
+            )
+            .unwrap()
+            .xtick_format(crate::TickFormat::percent(1).unwrap())
+            .unwrap();
+        let lib = FontLibrary::global();
+        let (previous, previous_layout) = previous_plan(&f, lib).unwrap().remove(0);
+        let (resolved, layout) = try_plan_panels(&f, lib).unwrap().remove(0);
+        assert_eq!(resolved, previous);
+        assert_eq!(format!("{layout:?}"), format!("{previous_layout:?}"));
+        let slack = Side::X
+            .room(layout.plot.size(), f.theme(), lib)
+            .slack(&resolved.x.ticks);
+        assert_eq!(tick_labels(&resolved.x.ticks), ["2500000.0%", "7500000.0%"]);
+        assert!(
+            (layout.plot.width - 141.6240371357311).abs() < 1e-8,
+            "{:?}",
+            layout.plot
+        );
+        assert!((slack - 17.07792527747877).abs() < 1e-8, "{slack}");
+    }
+
     #[test]
     fn x_labels_keep_apart_on_the_final_plot() {
         // 72 × 65 pt: the ticks are chosen for a 35.25 pt wide plot, where 0, 50, 100 fit;
@@ -1095,6 +1225,31 @@ mod tests {
             Ok(())
         }
 
+        /// A previous constrained choice whose labels all fit on its final layout keeps
+        /// every axis (including positions and domains) and the complete layout unchanged.
+        fn check_previous(figure: &Figure) -> std::result::Result<(), TestCaseError> {
+            let lib = FontLibrary::global();
+            let Ok(previous) = previous_plan(figure, lib) else {
+                return Ok(());
+            };
+            if previous.iter().any(|(resolved, layout)| {
+                Side::BOTH.into_iter().any(|side| {
+                    side.room(layout.plot.size(), figure.theme(), lib)
+                        .slack(side.ticks(resolved))
+                        < 0.0
+                })
+            }) {
+                return Ok(());
+            }
+            let current = try_plan_panels(figure, lib)?;
+            prop_assert_eq!(current.len(), previous.len());
+            for ((current, layout), (previous, previous_layout)) in current.iter().zip(&previous) {
+                prop_assert_eq!(current, previous);
+                prop_assert_eq!(format!("{layout:?}"), format!("{previous_layout:?}"));
+            }
+            Ok(())
+        }
+
         /// One resolved axis: its domain and its ticks.
         type Axis<'a> = (Option<&'a crate::ContinuousScale>, &'a [AxisTick]);
 
@@ -1179,6 +1334,35 @@ mod tests {
                 ] {
                     check_axis(name, room, (new.0.as_ref(), &new.1), (old.0.as_ref(), &old.1))?;
                 }
+            }
+
+            #[test]
+            fn fitting_previous_choices_keep_ticks_and_layout(
+                theme in 0usize..3,
+                font_scale in 0.5f64..2.5,
+                spec in spec(),
+                width in 0.8f64..8.0,
+                height in 0.6f64..6.0,
+            ) {
+                let theme = [Theme::pigment(), Theme::graphite(), Theme::midnight()][theme]
+                    .with_font_scale(font_scale)
+                    .unwrap();
+                check_previous(&figure(theme, (width, height), &spec))?;
+            }
+
+            #[test]
+            fn fitting_previous_grid_choices_keep_ticks_and_layout(
+                theme in 0usize..3,
+                font_scale in 0.5f64..1.5,
+                (rows, cols) in (1i64..4, 1i64..4),
+                specs in proptest::collection::vec(spec(), 9),
+                width in 2.0f64..14.0,
+                height in 1.5f64..10.0,
+            ) {
+                let theme = [Theme::pigment(), Theme::graphite(), Theme::midnight()][theme]
+                    .with_font_scale(font_scale)
+                    .unwrap();
+                check_previous(&grid_figure(theme, (width, height), (rows, cols), &specs))?;
             }
 
             #[test]

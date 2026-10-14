@@ -366,6 +366,10 @@ struct DrawnTicks<'a> {
 }
 
 impl TickJudge for DrawnTicks<'_> {
+    fn deferred(&self) -> bool {
+        self.room.deferred()
+    }
+
     fn least_share(&self) -> f64 {
         self.room.least_share()
     }

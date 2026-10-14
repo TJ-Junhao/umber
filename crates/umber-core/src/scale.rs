@@ -716,6 +716,7 @@ impl ContinuousScale {
                 let slack = |values: &[f64]| match self.nice_from_loose(values.to_vec()) {
                     (nice, Some(ticks)) => Room::Slack(judge.slack(&nice, &ticks)),
                     // Judged as the fallback below, once chosen.
+                    (_, None) if judge.deferred() => Room::Slack(f64::INFINITY),
                     (_, None) => Room::TooFewTicks,
                 };
                 let fit = ticks::Fit {
@@ -1039,7 +1040,9 @@ impl ContinuousScale {
     /// [`ticks`](Self::ticks), chosen among the tick sets `judge` lets through on this scale,
     /// with the step their labels were written for.
     ///
-    /// Linear: the best scored tick set that `judge` lets through (see [`ticks::extended`]).
+    /// Linear: the previous constrained choice, including target retries, when `judge` lets
+    /// it through; otherwise a search that rejects candidates with fewer than two drawn ticks
+    /// (see [`ticks::extended`]). A deferred judge leaves that check to the solved layout.
     /// Log: every n-th power as `ticks` chooses them, then fewer and fewer of them until `judge`
     /// lets them through; when none passes, the fewest. Evenly spaced ticks on a degenerate
     /// domain: fewer and fewer, down to two.
@@ -1091,28 +1094,37 @@ impl ContinuousScale {
                 count -= 1;
             }
         }
-        let slack = |values: &[f64]| match self.inside_ticks(values) {
-            Some(ticks) => Room::Slack(judge.slack(self, &ticks)),
-            // Fewer than two ticks lead to a larger target below.
-            None => Room::TooFewTicks,
-        };
         // Linear ticks on a log axis are not evenly spaced on screen, so their step says nothing
         // about how far apart they are drawn.
         let least_share = match self.transform {
             Transform::Linear => judge.least_share(),
             Transform::Log(_) => 0.0,
         };
-        let fit = ticks::Fit {
-            least_share,
-            slack: &slack,
-        };
-        for t in target..=target + 6 {
-            let values = ticks::extended(lo, hi, t, TickCoverage::Free, &fit);
-            if let Some(ticks) = self.inside_ticks(&values) {
-                return ticks;
+        let choose = |missing| {
+            let slack = |values: &[f64]| match self.inside_ticks(values) {
+                Some(ticks) => Room::Slack(judge.slack(self, &ticks)),
+                None => missing,
+            };
+            let fit = ticks::Fit {
+                least_share,
+                slack: &slack,
+            };
+            for t in target..=target + 6 {
+                let values = ticks::extended(lo, hi, t, TickCoverage::Free, &fit);
+                if let Some(ticks) = self.inside_ticks(&values) {
+                    return ticks;
+                }
             }
+            self.end_ticks()
+        };
+        // Keep the previous constrained choice, including all its target retries, when it
+        // fits. An empty candidate used to pass the search and lead to the next target.
+        let previous = choose(Room::Slack(f64::INFINITY));
+        if judge.deferred() || judge.slack(self, &previous) >= 0.0 {
+            return previous;
         }
-        self.end_ticks()
+        // Only repair a crowded choice: an empty candidate must not hide a pair that fits.
+        choose(Room::TooFewTicks)
     }
 
     /// The ticks of a free Extended Wilkinson `candidate` that lie inside this domain, with
@@ -1232,6 +1244,11 @@ impl ContinuousScale {
 
 /// Judges automatic ticks by the room their labels leave on the axis.
 pub(crate) trait TickJudge {
+    /// Whether the previous constrained choice is checked by the layout instead of here.
+    fn deferred(&self) -> bool {
+        false
+    }
+
     /// The least distance between adjacent ticks, as a share of the axis length, that can keep
     /// any labels apart.
     fn least_share(&self) -> f64;
@@ -1281,6 +1298,10 @@ struct Finished<'a> {
 }
 
 impl TickJudge for Finished<'_> {
+    fn deferred(&self) -> bool {
+        self.judge.deferred()
+    }
+
     fn least_share(&self) -> f64 {
         // Finishing only widens the domain, so the ticks only move closer together.
         self.judge.least_share()
