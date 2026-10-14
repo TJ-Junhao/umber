@@ -360,7 +360,13 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(2_000))]
+        // Apply the environment after these defaults so stress runs can override them.
+        #![proptest_config(proptest::test_runner::contextualize_config(ProptestConfig {
+            cases: 2_000,
+            rng_seed: proptest::test_runner::RngSeed::Fixed(38572056803),
+            max_global_rejects: 1_024,
+            ..ProptestConfig::default()
+        }))]
 
         /// Programs built around a known solution are solved, never refused, and the result
         /// meets every row with a total no larger than the known one.

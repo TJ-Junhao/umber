@@ -1459,7 +1459,13 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(256))]
+        // Apply the environment after these defaults so stress runs can override them.
+        #![proptest_config(proptest::test_runner::contextualize_config(ProptestConfig {
+            cases: 256,
+            rng_seed: proptest::test_runner::RngSeed::Fixed(38572056803),
+            max_global_rejects: 1_024,
+            ..ProptestConfig::default()
+        }))]
 
         #[test]
         fn plot_areas_are_equal_and_aligned(
@@ -2185,10 +2191,13 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig {
+        // Apply the environment after these defaults so stress runs can override them.
+        #![proptest_config(proptest::test_runner::contextualize_config(ProptestConfig {
+            cases: 2_000,
             rng_seed: proptest::test_runner::RngSeed::Fixed(38572056803),
-            ..ProptestConfig::with_cases(2_000)
-        })]
+            max_global_rejects: 1_024,
+            ..ProptestConfig::default()
+        }))]
 
         #[test]
         fn fitted_columns_keep_every_label_in_bounds(
