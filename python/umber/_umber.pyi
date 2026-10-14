@@ -140,13 +140,14 @@ class Theme:
 class Figure:
     """A figure with a grid of axes. Every axes method takes the axes' top-left cell first.
 
-    Rendering releases the interpreter.
+    Rendering releases the interpreter. A size of ``None`` is the facade's ``AUTO``; supplied
+    sizes are validated before rows and columns, with default sizes resolved in core.
     """
 
     def __new__(
         cls,
-        width: float,
-        height: float,
+        width: float | None,
+        height: float | None,
         theme: Theme,
         rows: int,
         cols: int,

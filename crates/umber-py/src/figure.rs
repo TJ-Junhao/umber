@@ -141,11 +141,13 @@ impl Figure {
 impl Figure {
     /// An empty figure of `width` by `height` inches with `theme`, on a grid of `rows × cols`
     /// cells whose x and y scales are shared as `share_x` and `share_y` say (`Share` values)
-    /// and whose legend is shown as `legend` says (a `Legend` value).
+    /// and whose legend is shown as `legend` says (a `Legend` value). A missing size is the
+    /// Python facade's `AUTO`; explicit sizes are checked before the grid dimensions.
     #[new]
+    #[pyo3(signature = (width, height, theme, rows, cols, share_x, share_y, legend))]
     fn new(
-        width: f64,
-        height: f64,
+        width: Option<f64>,
+        height: Option<f64>,
         theme: &Theme,
         rows: i64,
         cols: i64,
@@ -153,15 +155,30 @@ impl Figure {
         share_y: i64,
         legend: i64,
     ) -> PyResult<Figure> {
+        // Use the core's size checks before asking it to validate rows and columns. AUTO
+        // sides use a valid single-cell size for this check, not a Python-side size rule.
+        let (single_width, single_height) = grid_auto_size(1, 1)?;
+        umber_core::Figure::new(
+            width.unwrap_or(single_width),
+            height.unwrap_or(single_height),
+            theme.core().clone(),
+        )
+        .map_err(core_error)?;
+        let (auto_width, auto_height) = grid_auto_size(rows, cols)?;
         let (share_x, share_y) = (enum_value::<Share>(share_x)?, enum_value::<Share>(share_y)?);
         let legend = enum_value::<LegendMode>(legend)?;
         let grid = grid(rows, cols)?
             .with_share_x(share_x)
             .with_share_y(share_y)
             .with_legend(legend);
-        umber_core::Figure::with_grid(width, height, theme.core().clone(), grid)
-            .map(Figure)
-            .map_err(core_error)
+        umber_core::Figure::with_grid(
+            width.unwrap_or(auto_width),
+            height.unwrap_or(auto_height),
+            theme.core().clone(),
+            grid,
+        )
+        .map(Figure)
+        .map_err(core_error)
     }
 
     /// An independent copy of this figure. Marks share their data, which never changes, so the

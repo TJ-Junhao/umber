@@ -69,9 +69,10 @@ _FORMAT_HINT: Final = (
 class Axes(Generic[X, Y]):  # noqa: UP046
     """The plot area of a figure: marks, titles, axis labels, limits and the legend.
 
-    An axes is created by ``Figure.add_axes()`` and belongs to that figure. The type
-    parameters are the types of the x and y values: ``Axes[float, float]`` for numeric axes,
-    ``Axes[str, float]`` for a category x axis. Every method validates its arguments at the
+    An axes is created by ``Figure.add_axes()`` or ``Cell.add_axes()`` and belongs to that
+    figure. Retrieve it with ``Figure.axes_at()`` using the same position and scales.
+    The type parameters are the types of the x and y values: ``Axes[float, float]`` for numeric
+    axes, ``Axes[str, float]`` for a category x axis. Every method validates its arguments at the
     call and returns the axes, so calls chain. A failed call changes nothing.
 
     Example:

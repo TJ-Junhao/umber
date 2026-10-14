@@ -36,4 +36,4 @@ fig.save_svg(b"x.svg")  # type: ignore[arg-type]  # pyright: ignore[reportArgume
 
 # Negative: style parameters are keyword-only.
 ax.line(t, t, "label")  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue]
-ub.Figure(6, 4, ub.Theme.PIGMENT)  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue]
+ub.Figure(6, 4, ub.Theme.PIGMENT)  # type: ignore[call-arg, arg-type]  # pyright: ignore[reportCallIssue]
