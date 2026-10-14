@@ -80,6 +80,7 @@ import copy
 import umber as ub
 
 fig = ub.Figure(rows=2, cols=2, share_x=ub.Share.COL, legend=ub.Legend.MERGED)
+fig.title("Station signals").subtitle("Shared time scales")
 fig.add_axes(row=0, col=0).line([0, 1, 2], [1, 3, 2], label="North")
 fig.add_axes(row=1, col=0).line([0, 1, 2], [2, 1, 3], label="South")
 fig.add_axes(row=0, col=1, row_span=2).line([0, 1, 2], [1, 3, 2], label="North")
@@ -94,6 +95,26 @@ variant.axes_at(row=0, col=1).title("Comparison")  # 原图不变
 用 `fig.axes_at(row=..., col=..., x=..., y=...)` 取回已有 axes，也可用于副本。scale kind 和 log base 必须与创建时一致；类别轴需传入 `x=ub.Scale.category()`，返回类型为 `Axes[str, float]`。跨多个 cell 的 panel 只能通过左上角位置取回。仅当某个维度大小为 1 时，才能省略该维度的 row 或 col。旧的 `Figure.axes` 已移除，由这个有精确类型的方法替代。
 
 `fig.cells()` 按 row-major 顺序返回不可变的 `Cell` 位置，包含已占用位置；`fig.cells(n)` 返回前 `n` 个。例如，`for cell, values in zip(fig.cells(), datasets): cell.add_axes().line(x, values)` 为每份数据添加一个 panel。`AUTO` 是有类型的 sentinel，不是 `None`，仅接受它的参数才能使用。
+
+## 标题与 legend
+
+`fig.title(text)` 和 `fig.subtitle(text)` 设置整个 grid 上方的文字；`ax.title(text)` 和 `ax.subtitle(text)` 只属于一个 panel。每个方法都返回原对象，支持链式调用；空字符串可移除文字。figure title 的字号是 panel title 的 1.5 倍。
+
+`Theme.with_title_align(ub.Align.LEFT)` 设置标题对齐方式，也可使用 `CENTER` 和 `RIGHT`。subtitle 跟随对应 title 对齐。多 panel figure 的 merged legend 固定放在 figure title 和 subtitle 下方，跟随它们对齐，没有独立的位置设置。若要按 panel 放置 legend，请使用 `Legend.PER_PANEL`。
+
+```python
+import umber as ub
+
+theme = ub.Theme.PIGMENT.with_title_align(ub.Align.CENTER).with_legend_position(
+    ub.LegendPosition.BOTTOM
+)
+fig = ub.Figure(theme=theme).title("Station signals")
+ax = fig.add_axes().line([0, 1, 2], [1, 3, 2], label="North")
+ax.legend(ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT)
+ax.legend(ub.LegendStyle.HEADER, position=ub.AUTO)  # 恢复 theme 的 BOTTOM
+```
+
+对单 panel figure 和 `Legend.PER_PANEL`，`LegendPosition.TOP_LEFT`（默认）和 `TOP_RIGHT` 将 legend 横排在 panel title 下方；`RIGHT` 放在 plot 右侧纵排；`BOTTOM` 横排在 x axis title 下方；`BEST` 在 plot 内选择遮挡数据最少的位置。panel legend 的位置不跟随标题对齐。省略 `position` 或传入 `ub.AUTO` 会清除之前的覆盖值，使用 theme 的位置，并不等于 `BEST`。`LegendStyle.DIRECT` 只接受默认的 `position=ub.AUTO`，因为标签固定在曲线末端。`LegendStyle.NONE` 隐藏 legend。
 
 ## 主题
 

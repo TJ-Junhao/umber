@@ -15,12 +15,14 @@ from umber._cell import Cell
 from umber._color import Color
 from umber._enums import (
     AUTO,
+    Align,
     Auto,
     Dash,
     FillStyle,
     Font,
     GridLines,
     Legend,
+    LegendPosition,
     LegendStyle,
     Marker,
     Share,
@@ -51,6 +53,7 @@ Example:
 __all__ = [
     "AUTO",
     "MAX_BINS",
+    "Align",
     "Auto",
     "Axes",
     "Cell",
@@ -63,6 +66,7 @@ __all__ = [
     "Font",
     "GridLines",
     "Legend",
+    "LegendPosition",
     "LegendStyle",
     "Marker",
     "Scale",
@@ -100,6 +104,7 @@ def _report_package_as_module(*exported: type | Callable[..., object]) -> None:
 
 
 _report_package_as_module(
+    Align,
     Auto,
     Axes,
     Cell,
@@ -111,6 +116,7 @@ _report_package_as_module(
     Font,
     GridLines,
     Legend,
+    LegendPosition,
     LegendStyle,
     Marker,
     Scale,

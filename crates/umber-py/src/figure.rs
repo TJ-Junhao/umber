@@ -28,8 +28,8 @@ use pyo3::types::PyBytes;
 use umber_core::StemOptions;
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
-    HistOptions, LegendMode, LegendStyle, LineOptions, Marker, Placement, RuleOptions,
-    ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
+    HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
+    RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
 
 use crate::color::{ColorArg, color_spec};
@@ -239,6 +239,16 @@ impl Figure {
         Ok((axes.cells().row(), axes.cells().col()))
     }
 
+    /// Sets the figure title above every panel.
+    fn figure_title(&mut self, text: &str) {
+        self.0.title(text);
+    }
+
+    /// Sets the figure subtitle below its title.
+    fn figure_subtitle(&mut self, text: &str) {
+        self.0.subtitle(text);
+    }
+
     /// Sets the title.
     fn title(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
         self.axes(row, col)?.title(text);
@@ -350,6 +360,16 @@ impl Figure {
         let style = enum_value::<LegendStyle>(style)?;
         self.axes(row, col)?.legend(style);
         Ok(())
+    }
+
+    /// Sets the legend style and position (`LegendStyle` and `LegendPosition` values).
+    fn legend_at(&mut self, row: i64, col: i64, style: i64, position: i64) -> PyResult<()> {
+        let style = enum_value::<LegendStyle>(style)?;
+        let position = enum_value::<LegendPosition>(position)?;
+        self.axes(row, col)?
+            .legend_at(style, position)
+            .map(drop)
+            .map_err(core_error)
     }
 
     /// Adds a line.

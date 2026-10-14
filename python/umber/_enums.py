@@ -79,6 +79,58 @@ class Legend(Enum):
 
 
 @unique
+class LegendPosition(Enum):
+    """Where a panel's legend entries sit.
+
+    Applies to single-panel figures and ``Legend.PER_PANEL``. A merged grid legend stays
+    under the figure title; direct labels stay at their line ends. ``BEST`` chooses a
+    position inside the plot; the sentinel ``AUTO`` instead uses the theme's position.
+
+    Example:
+        >>> import umber as ub
+        >>> theme = ub.Theme.PIGMENT.with_legend_position(ub.LegendPosition.RIGHT)
+    """
+
+    __slots__ = ()
+
+    TOP_LEFT = 0
+    """A row under the panel title, aligned to the plot's left edge (the default)."""
+
+    TOP_RIGHT = 1
+    """A row under the panel title, aligned to the plot's right edge."""
+
+    RIGHT = 2
+    """A column to the right of the plot."""
+
+    BOTTOM = 3
+    """A row below the x tick labels and x axis title."""
+
+    BEST = 4
+    """A column inside the plot at the position covering the least drawn data."""
+
+
+@unique
+class Align(Enum):
+    """Alignment of figure and panel titles, subtitles and the merged grid legend.
+
+    Example:
+        >>> import umber as ub
+        >>> theme = ub.Theme.PIGMENT.with_title_align(ub.Align.CENTER)
+    """
+
+    __slots__ = ()
+
+    LEFT = 0
+    """Align to the left edge (the default)."""
+
+    CENTER = 1
+    """Align to the centre."""
+
+    RIGHT = 2
+    """Align to the right edge."""
+
+
+@unique
 class Dash(Enum):
     """How a line is stroked.
 

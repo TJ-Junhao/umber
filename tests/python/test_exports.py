@@ -11,6 +11,7 @@ import umber
 EXPECTED = [
     "AUTO",
     "MAX_BINS",
+    "Align",
     "Auto",
     "Axes",
     "Cell",
@@ -23,6 +24,7 @@ EXPECTED = [
     "Font",
     "GridLines",
     "Legend",
+    "LegendPosition",
     "LegendStyle",
     "Marker",
     "Scale",
@@ -79,9 +81,11 @@ def test_enums_are_exported_as_enums() -> None:
         if inspect.isclass(obj := getattr(umber, name)) and issubclass(obj, enum.Enum)
     }
     assert enums == {
+        "Align",
         "Auto",
         "Share",
         "Legend",
+        "LegendPosition",
         "Dash",
         "FillStyle",
         "Font",

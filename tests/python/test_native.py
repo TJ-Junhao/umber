@@ -37,6 +37,14 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
         "SvgText": [("OUTLINES", 0), ("EDITABLE", 1)],
         "Share": [("NONE", 0), ("ROW", 1), ("COL", 2), ("ALL", 3)],
         "Legend": [("MERGED", 0), ("PER_PANEL", 1)],
+        "LegendPosition": [
+            ("TOP_LEFT", 0),
+            ("TOP_RIGHT", 1),
+            ("RIGHT", 2),
+            ("BOTTOM", 3),
+            ("BEST", 4),
+        ],
+        "Align": [("LEFT", 0), ("CENTER", 1), ("RIGHT", 2)],
         "Step": [("POST", 0), ("PRE", 1), ("MID", 2)],
     }
 
@@ -52,6 +60,8 @@ def test_enum_members_keys_are_the_bound_enum_names() -> None:
         "SvgText",
         "Share",
         "Legend",
+        "LegendPosition",
+        "Align",
         "Step",
     }
 

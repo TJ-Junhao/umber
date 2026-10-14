@@ -31,8 +31,10 @@ ENUM_SETTERS: list[tuple[str, str, tuple[str, str], str]] = [
     ("with_grid_lines", "GridLines", ("HORIZONTAL", "BOTH"), "Dash.DASHED"),
     ("with_grid_dash", "Dash", ("SOLID", "DOTTED"), "GridLines.BOTH"),
     ("with_title_font", "Font", ("SOURCE_SERIF_4", "INTER"), "Dash.DASHED"),
+    ("with_title_align", "Align", ("LEFT", "CENTER"), "LegendPosition.RIGHT"),
     ("with_body_font", "Font", ("IBM_PLEX_SANS", "GEIST"), "Dash.DASHED"),
     ("with_legend_style", "LegendStyle", ("HEADER", "CHIPS"), "Dash.DASHED"),
+    ("with_legend_position", "LegendPosition", ("TOP_LEFT", "RIGHT"), "Align.RIGHT"),
     ("with_fill_style", "FillStyle", ("SOLID", "GRADIENT"), "Dash.DASHED"),
 ]
 # (setter, parameter name in the native message, two valid values, an invalid value, requirement)
