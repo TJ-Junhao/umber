@@ -14,7 +14,7 @@ use read_fonts::{FontData as RawData, FontRead, FontRef};
 
 use super::{Limits, Source};
 use crate::fonts::Weight;
-use crate::text::cmap::{format2_range, is_unicode};
+use crate::text::cmap::{Format2Byte, format2_byte, format2_range, is_unicode};
 use crate::text::font::FontHandle;
 use crate::text::guard::guarded;
 
@@ -223,28 +223,36 @@ impl RangeScan {
 
     /// Format 2 (high-byte mapping): 256 sub-header keys, one visit each.
     fn format2(&mut self, sub: &Cmap2<'_>) -> bool {
-        for (high, key) in (0..=255u32).zip(sub.sub_header_keys()) {
-            let key = key.get() / 8;
-            let Some((first, count)) = format2_range(sub, key) else {
+        for high in 0..=255u16 {
+            let Some(byte) = format2_byte(sub, high) else {
                 if !self.skip() {
                     return false;
                 }
                 continue;
             };
-            let (first, count) = (u32::from(first), u32::from(count));
-            let ok = if key == 0 {
-                // A single-byte code, valid if the sub-header's range contains it.
-                if first <= high && high < first + count {
-                    self.visit(high, high)
-                } else {
-                    self.skip()
+            let Some((first, count)) = format2_range(sub, byte.key()) else {
+                if !self.skip() {
+                    return false;
                 }
-            } else {
-                let base = (high << 8) + first;
-                if count > 0 && base <= 0xFFFF {
-                    self.visit(base, (base + count - 1).min(0xFFFF))
-                } else {
-                    self.skip()
+                continue;
+            };
+            let (high, first, count) = (u32::from(high), u32::from(first), u32::from(count));
+            let ok = match byte {
+                Format2Byte::Single => {
+                    // A single-byte code, valid if the sub-header's range contains it.
+                    if first <= high && high < first + count {
+                        self.visit(high, high)
+                    } else {
+                        self.skip()
+                    }
+                }
+                Format2Byte::Lead(_) => {
+                    let base = (high << 8) + first;
+                    if count > 0 && base <= 0xFFFF {
+                        self.visit(base, (base + count - 1).min(0xFFFF))
+                    } else {
+                        self.skip()
+                    }
                 }
             };
             if !ok {

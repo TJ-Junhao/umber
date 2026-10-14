@@ -5,6 +5,11 @@ Checked by pyright and mypy in strict mode; see ``check_errors.py`` for the mark
 
 import umber as ub
 
+
+def generic_step[X, Y](axes: ub.Axes[X, Y], x: ub.Values[X], y: ub.Values[Y]) -> ub.Axes[X, Y]:
+    return axes.step(x, y)
+
+
 numeric = ub.Figure().add_axes()
 cats = ub.Figure().add_axes(x=ub.Scale.category())
 t = [0.0, 1.0]

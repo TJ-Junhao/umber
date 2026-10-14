@@ -1,12 +1,10 @@
 """``Scale``: how data values map to positions along an axis."""
 
-import math
-import numbers
 from collections.abc import Callable
 from operator import attrgetter
 from typing import Final, Generic, Self, TypeVar, cast, final
 
-from umber import _umber
+from umber import _args, _umber
 from umber._errors import new_error
 from umber._report import api_call
 
@@ -86,19 +84,7 @@ class Scale(Generic[T]):  # noqa: UP046
             Scale.log(2.0)
         """
         with api_call():
-            if isinstance(base, bool) or not isinstance(base, numbers.Real):
-                raise new_error(
-                    TypeError,
-                    "Scale.log()",
-                    f"base is {type(base).__name__}; base must be a float.",
-                    parameter="base",
-                    hint="pass a number greater than 1, such as 10.",
-                )
-            try:
-                value = float(base)
-            except OverflowError:
-                # An int beyond the float range: the native check rejects the infinity.
-                value = math.inf if cast(int, base) > 0 else -math.inf
+            value = _args.real("Scale.log()", "base", base)
             _umber.check_log_base(value)
             return cast(Scale[float], _new(_LOG, value))
 

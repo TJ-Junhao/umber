@@ -77,17 +77,46 @@ pub(super) fn subtable_glyph(sub: &CmapSubtable<'_>, cp: u32) -> Option<GlyphId>
     }
 }
 
+/// Whether a format 2 byte stands alone or leads a two-byte code.
+#[derive(Clone, Copy)]
+pub(super) enum Format2Byte {
+    /// A byte whose sub-header key is zero, mapped through sub-header 0.
+    Single,
+    /// A lead byte and its sub-header key divided by 8.
+    Lead(u16),
+}
+
+impl Format2Byte {
+    /// The sub-header key divided by 8.
+    pub(super) fn key(self) -> u16 {
+        match self {
+            Self::Single => 0,
+            Self::Lead(key) => key,
+        }
+    }
+}
+
+/// A byte stands alone exactly when its own sub-header key is zero.
+pub(super) fn format2_byte(sub: &Cmap2<'_>, byte: u16) -> Option<Format2Byte> {
+    Some(match sub.sub_header_keys().get(usize::from(byte))?.get() {
+        0 => Format2Byte::Single,
+        key => Format2Byte::Lead(key / 8),
+    })
+}
+
 /// Looks `cp` up in a format 2 (high-byte mapping) subtable.
 ///
-/// Codes below 0xFF use sub-header 0, as single bytes; others use the sub-header of their high
-/// byte. Glyph 0 means no glyph.
+/// Codes through 0xFF must be single bytes; larger codes must start with a lead byte.
+/// Glyph 0 means no glyph.
 fn format2_glyph(sub: &Cmap2<'_>, cp: u32) -> Option<GlyphId> {
     let code = u16::try_from(cp).ok()?;
     let (high, low) = (code >> 8, code & 0xFF);
-    let key = if code < 0xFF {
-        0
-    } else {
-        sub.sub_header_keys().get(usize::from(high))?.get() / 8
+    let single = code <= 0xFF;
+    let byte = format2_byte(sub, if single { low } else { high })?;
+    let key = match (single, byte) {
+        (true, Format2Byte::Single) => 0,
+        (false, Format2Byte::Lead(key)) => key,
+        _ => return None,
     };
     let data = sub.offset_data();
     let header = format2_header(key);
