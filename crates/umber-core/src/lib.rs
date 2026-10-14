@@ -90,6 +90,7 @@
 
 mod binning;
 pub mod color;
+mod coverage;
 pub mod downsample;
 mod draw;
 mod error;
@@ -99,6 +100,8 @@ pub mod fonts;
 pub mod geometry;
 mod layout;
 mod legend;
+#[cfg(test)]
+mod legend_position_tests;
 mod model;
 mod pipeline;
 pub mod render;
@@ -142,7 +145,7 @@ pub use scene::{
 };
 pub use size::{Factor, Points, SizeSpec};
 pub use text::{FontLibrary, TextLayout, TextStyle};
-pub use theme::{Align, Dash, FillStyle, GridLines, LegendStyle, Marker, Theme};
+pub use theme::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, Marker, Theme};
 pub use tick_format::{Decimals, NumberStyle, TickFormat};
 pub use ticks::Tick;
 

@@ -44,8 +44,8 @@ use super::panel::{HeaderBox, PanelBands, PanelSlot, PanelSpan, end_label_cap};
 use super::program;
 use super::{
     AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, LEGEND_HINT, Label, Layout, LayoutInput,
-    MIN_PLOT, PADDING, PlotSize, X_LABEL_EDGE_GAP, initial_plot_size, legend_too_wide,
-    solve_single, widest, widths, x_labels_wider_than, y_labels_leave_no_room,
+    MIN_PLOT, PADDING, PlotSize, X_LABEL_EDGE_GAP, initial_plot_size, solve_single, widest, widths,
+    x_labels_wider_than, y_labels_leave_no_room,
 };
 use crate::error::{number, quoted};
 use crate::model::{CellRange, Grid};
@@ -262,7 +262,8 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                     right,
                     top: rows.row_top[cells.row()],
                 },
-                xlabel_baseline: bottom + rows.below[last_row] - bands.body_descent,
+                xlabel_baseline: bottom + (rows.below[last_row] - rows.legends[last_row])
+                    - bands.body_descent,
                 frame: Frame {
                     x: frame_left,
                     y: frame_top,
@@ -378,7 +379,7 @@ impl Columns {
             let first = cells.col();
             let last = first + cells.col_span() - 1;
             left[first] = left[first].max(bands.y_tick_column);
-            right[last] = right[last].max(bands.direct_reserve);
+            right[last] = right[last].max(bands.right());
         }
         Columns {
             canvas: input.width,
@@ -716,6 +717,8 @@ struct Rows {
     above: Vec<f64>,
     /// `B[r]`: the band below each row's plots.
     below: Vec<f64>,
+    /// The part of each bottom band occupied by legends, after the aligned x axis labels.
+    legends: Vec<f64>,
 }
 
 /// The rows placed.
@@ -729,6 +732,8 @@ struct PlacedRows {
     plot_height: f64,
     /// Each row's band below the plots.
     below: Vec<f64>,
+    /// The part of each bottom band occupied by legends, after the aligned x axis labels.
+    legends: Vec<f64>,
 }
 
 impl Rows {
@@ -744,19 +749,25 @@ impl Rows {
         let rows = input.grid.rows();
         let mut above = vec![0.0_f64; rows];
         let mut below = vec![0.0_f64; rows];
+        let mut legends = vec![0.0_f64; rows];
         for (((cells, bands), panel), &(left, right)) in
             cells.iter().zip(bands).zip(input.panels).zip(spans)
         {
             let first = cells.row();
             let last = first + cells.row_span() - 1;
-            let row = panel.legend.row_within(left, right);
+            let row = panel.legend.header_within(left, right);
             above[first] = above[first].max(bands.above_with_row(&row));
-            below[last] = below[last].max(bands.below());
+            below[last] = below[last].max(bands.below() - bands.bottom_legend);
+            legends[last] = legends[last].max(panel.legend.bottom_reserve(left, right));
+        }
+        for (below, legend) in below.iter_mut().zip(&legends) {
+            *below += legend;
         }
         Rows {
             gap: input.gap(),
             above,
             below,
+            legends,
         }
     }
 
@@ -800,6 +811,7 @@ impl Rows {
             plot_y,
             plot_height,
             below: self.below,
+            legends: self.legends,
         })
     }
 }
@@ -900,7 +912,13 @@ fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -
         for (cells, panel) in cells.iter().zip(input.panels) {
             let last = cells.col() + cells.col_span() - 1;
             let cap = wider.span(*cells).reserve_cap;
-            right[last] = right[last].max(panel.legend.direct.reserve(cap));
+            right[last] = right[last].max(
+                panel
+                    .legend
+                    .direct
+                    .reserve(cap)
+                    .max(panel.legend.right_reserve()),
+            );
         }
         Columns {
             canvas: width,
@@ -920,7 +938,11 @@ fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -
             (
                 last,
                 cells.col_span(),
-                panel.legend.direct.reserve(f64::INFINITY),
+                panel
+                    .legend
+                    .direct
+                    .reserve(f64::INFINITY)
+                    .max(panel.legend.right_reserve()),
             )
         })
         .collect();
@@ -1112,6 +1134,9 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 /// Both legend errors have the hint `shorten the label or widen the figure.`
 pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) -> Result<()> {
     if input.is_single() {
+        for (panel, layout) in input.panels.iter().zip(layouts) {
+            super::placement::check(panel, layout, true)?;
+        }
         return Ok(());
     }
     let too_wide = |cells: CellRange, message: String, hint: &'static str| {
@@ -1153,21 +1178,7 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
                 return Err(too_wide(cells, message, hint));
             }
         }
-        for entry in layout.legend.entries() {
-            let end = entry
-                .chip
-                .map_or(entry.label.x + entry.label.width(), |chip| chip.right());
-            if end > plot.right() + CONTAINMENT_TOLERANCE {
-                let label = &entry.label;
-                // A chip's padding follows its label.
-                let trailing = end - (label.x + label.width());
-                let room = plot.right() - trailing - label.x;
-                return Err(in_panel(
-                    cells,
-                    legend_too_wide(input.context, label, room, "panel"),
-                ));
-            }
-        }
+        super::placement::check(panel, layout, false).map_err(|err| in_panel(cells, err))?;
         for (label, name, hint) in axis {
             if let Some(label) = label
                 && label.width() > plot.width + CONTAINMENT_TOLERANCE
@@ -2699,6 +2710,7 @@ mod tests {
                 gap: 24.0,
                 above: (0..rows).map(|_| rng.unit() * 300.0).collect(),
                 below: (0..rows).map(|_| rng.unit() * 100.0).collect(),
+                legends: vec![0.0; rows],
             };
             let grid = Grid::new(rows as i64, 2).unwrap();
             let input = GridInput {

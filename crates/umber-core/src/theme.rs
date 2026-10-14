@@ -111,6 +111,35 @@ pub enum LegendStyle {
     None,
 }
 
+/// Where a panel's legend entries sit.
+///
+/// Direct labels stay at their line ends. A merged grid legend stays in the figure header.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{LegendPosition, Theme};
+///
+/// assert_eq!(LegendPosition::default(), LegendPosition::TopLeft);
+/// let theme = Theme::pigment().with_legend_position(LegendPosition::Best)?;
+/// assert_eq!(theme.legend_position(), LegendPosition::Best);
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LegendPosition {
+    /// A row under the panel title, left-aligned.
+    #[default]
+    TopLeft,
+    /// A row under the panel title, aligned to the plot's right edge.
+    TopRight,
+    /// A vertical list to the right of the plot.
+    Right,
+    /// A row below the x tick labels and x axis title.
+    Bottom,
+    /// A vertical list inside the plot, covering the least drawn data.
+    Best,
+}
+
 /// Horizontal alignment of titles, subtitles and the figure's merged legend.
 ///
 /// # Examples
@@ -223,6 +252,8 @@ pub struct Theme {
     body_size: f32,
     font_scale: f32,
     legend_style: LegendStyle,
+    legend_position: LegendPosition,
+    legend_background_alpha: f32,
     fill_style: FillStyle,
     line_width: f32,
     marker_size: f32,
@@ -315,6 +346,8 @@ impl Theme {
             font_scale: 1.0,
             title_align: Align::Left,
             legend_style: LegendStyle::Header,
+            legend_position: LegendPosition::TopLeft,
+            legend_background_alpha: 0.85,
             fill_style: FillStyle::Solid,
             line_width: 2.0,
             marker_size: 6.0,
@@ -358,6 +391,8 @@ impl Theme {
             font_scale: 1.0,
             title_align: Align::Left,
             legend_style: LegendStyle::Direct,
+            legend_position: LegendPosition::TopLeft,
+            legend_background_alpha: 0.85,
             fill_style: FillStyle::Solid,
             line_width: 1.8,
             marker_size: 5.6,
@@ -401,6 +436,8 @@ impl Theme {
             font_scale: 1.0,
             title_align: Align::Left,
             legend_style: LegendStyle::Chips,
+            legend_position: LegendPosition::TopLeft,
+            legend_background_alpha: 0.85,
             fill_style: FillStyle::Gradient,
             line_width: 1.9,
             marker_size: 6.2,
@@ -674,6 +711,53 @@ impl Theme {
     #[must_use]
     pub fn legend_style(&self) -> LegendStyle {
         self.legend_style
+    }
+
+    /// The default position of panel legend entries.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{LegendPosition, Theme};
+    /// assert_eq!(Theme::pigment().legend_position(), LegendPosition::TopLeft);
+    /// ```
+    #[must_use]
+    pub fn legend_position(&self) -> LegendPosition {
+        self.legend_position
+    }
+
+    /// Returns a theme with panel legend entries at `value`.
+    ///
+    /// Direct labels and merged grid legends keep their own placement.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{LegendPosition, Theme};
+    /// let base = Theme::pigment();
+    /// let theme = base.with_legend_position(LegendPosition::Right)?;
+    /// assert_eq!(theme.legend_position(), LegendPosition::Right);
+    /// assert_eq!(base.legend_position(), LegendPosition::TopLeft);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn with_legend_position(&self, value: LegendPosition) -> Result<Theme> {
+        Ok(Theme {
+            legend_position: value,
+            ..self.clone()
+        })
+    }
+
+    /// The background opacity of a legend inside the plot, 0.85 in every preset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    /// assert_eq!(Theme::midnight().legend_background_alpha(), 0.85);
+    /// ```
+    #[must_use]
+    pub fn legend_background_alpha(&self) -> f32 {
+        self.legend_background_alpha
     }
 
     /// How area and histogram fills are painted.

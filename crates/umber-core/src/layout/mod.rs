@@ -24,6 +24,7 @@ mod inset;
 mod legend;
 mod nudge;
 mod panel;
+pub(crate) mod placement;
 mod program;
 
 pub(crate) use grid::{GridInput, check_panel_contents, solve_grid};
@@ -654,7 +655,7 @@ fn solve_single(
     let LayoutInput {
         legend, context, ..
     } = *input;
-    let plot_top = bands.heading.bottom(top) + bands.y_label_band + bands.label_rise;
+    let mut plot_top = bands.heading.bottom(top) + bands.y_label_band + bands.label_rise;
     let cap = panel::end_label_cap(frame.width);
     // The widest y tick label and its gap are added to the padding one at a time, not as the
     // one sum `bands.y_tick_column`, which can round differently.
@@ -663,7 +664,7 @@ fn solve_single(
     } else {
         frame.x + PADDING + bands.y_label_width + Y_LABEL_GAP
     };
-    let right = frame.right() - PADDING - bands.direct_reserve;
+    let right = frame.right() - PADDING - bands.right();
     let room = inset::Room {
         left,
         right,
@@ -677,6 +678,21 @@ fn solve_single(
     // the right padding, x tick labels or not; only then are the x tick labels fitted.
     if matches!(inset::fit_x_labels(&room, &[]), inset::XInset::Overflowing) {
         let direct = legend.direct.reserve(f64::INFINITY);
+        if bands.right_legend > 0.0 {
+            let y_room = right - MIN_PLOT - (frame.x + PADDING) - Y_LABEL_GAP;
+            if let Some(label) = widest(&bands.y_labels)
+                && y_room >= 0.0
+            {
+                return Err(y_labels_leave_no_room(context, label, y_room));
+            }
+            return Err(figure_too_small(
+                context,
+                Direction::Width,
+                frame.width,
+                2.0 * PADDING + bands.y_tick_column + bands.right_legend + MIN_PLOT,
+                FIGURE_WIDTH_HINT,
+            ));
+        }
         return Err(no_room_for_plot(
             context,
             frame,
@@ -697,7 +713,11 @@ fn solve_single(
         }
     };
     // Everything under the plot: the x tick labels, the x label and the bottom padding.
-    let below = bands.x_band + bands.x_title_band + PADDING;
+    if legend.position == crate::LegendPosition::TopRight {
+        plot_top = top + bands.above_with_row(&legend.header_within(plot_left, plot_right));
+    }
+    let below =
+        bands.x_band + bands.x_title_band + PADDING + legend.bottom_reserve(plot_left, plot_right);
     let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {

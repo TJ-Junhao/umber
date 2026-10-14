@@ -62,11 +62,11 @@ pub(super) fn span_layer(
 ) {
     for mark in marks {
         match *mark {
-            ResolvedMark::HSpan { mark, color } => {
+            ResolvedMark::HSpan { mark, color, .. } => {
                 let ends = mark.bounds().iter().map(|&v| axis_y_value(&resolved.y, v));
                 span_item(context, Along::Y, ends, color, items);
             }
-            ResolvedMark::VSpan { mark, color } => {
+            ResolvedMark::VSpan { mark, color, .. } => {
                 let ends = mark.bounds().iter().map(|&v| {
                     axis_x(&resolved.x, &AxisData::Numbers(vec![v]))
                         .first()
@@ -103,12 +103,16 @@ pub(super) fn rule_layer(
 ) {
     for mark in marks {
         match *mark {
-            ResolvedMark::HLine { mark, color, width } => {
+            ResolvedMark::HLine {
+                mark, color, width, ..
+            } => {
                 let at = axis_y_value(&resolved.y, mark.y());
                 let style = rule_style(width, color, mark.options().dash);
                 rule_item(context, Along::Y, at, &style, items);
             }
-            ResolvedMark::VLine { mark, color, width } => {
+            ResolvedMark::VLine {
+                mark, color, width, ..
+            } => {
                 let at = vline_position(resolved, mark.x());
                 let style = rule_style(width, color, mark.options().dash);
                 rule_item(context, Along::X, at, &style, items);
