@@ -154,6 +154,20 @@ mod tests {
     }
 
     #[test]
+    fn infinite_values_use_gap_hint_before_negative_checks() {
+        for y in [LIN, LOG] {
+            for value in [f64::INFINITY, f64::NEG_INFINITY] {
+                data(
+                    refused(LIN, y, &[0.0, 1.0, 2.0], vec![series(&[1.0, value, -2.0])]),
+                    &format!("series[0].values[1] is {value}; values must be finite."),
+                    "series",
+                    Some("use NaN to leave a gap in the area."),
+                );
+            }
+        }
+    }
+
+    #[test]
     fn lengths_and_empty_series_are_checked_before_values() {
         data(
             refused(LIN, LIN, &[], vec![]),

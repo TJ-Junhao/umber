@@ -132,6 +132,21 @@ def test_data_errors_are_exact_and_atomic(
     assert ax.figure.to_svg() == before
 
 
+@pytest.mark.parametrize("value", [float("inf"), float("-inf")], ids=["inf", "-inf"])
+@pytest.mark.parametrize("log_y", [False, True], ids=["linear", "log"])
+def test_infinite_values_are_non_finite_and_atomic(value: float, log_y: bool) -> None:
+    ax = ub.Figure(3, 2).add_axes(y=ub.Scale.log() if log_y else ub.Scale.linear())
+    ax.stacked_area([0, 1], [ub.Series("kept", [1, 2])])
+    before = ax.figure.to_svg()
+    with pytest.raises(ub.DataError) as caught:
+        ax.stacked_area([0, 1], [ub.Series("s", [1, value])])
+    assert str(caught.value) == (
+        f"Axes.stacked_area(): series[0].values[1] is {value}; values must be finite."
+    )
+    assert details(caught.value) == ("series", "use NaN to leave a gap in the area.")
+    assert ax.figure.to_svg() == before
+
+
 def test_category_axis_is_a_usage_error() -> None:
     ax = ub.Figure().add_axes(x=ub.Scale.category())
     with pytest.raises(ub.UsageError) as caught:
@@ -188,6 +203,14 @@ def test_types_precede_conversion_and_native_validation() -> None:
         ('ax.stacked_area([0, 1], [ub.Series("a", [1, -2])])', '[ub.Series("a", [1, -2])]'),
         ('ax.stacked_area([1, 0], [ub.Series("a", [1, 2])])', "[1, 0]"),
         ('ax.stacked_area(x=[0, 1], series=[ub.Series("a", [1])])', 'series=[ub.Series("a", [1])]'),
+        (
+            'ax.stacked_area(x=[0, 1], series=[ub.Series("a", [1, float("inf")])])',
+            'series=[ub.Series("a", [1, float("inf")])]',
+        ),
+        (
+            'ax.stacked_area(x=[0, 1], series=[ub.Series("a", [1, float("-inf")])])',
+            'series=[ub.Series("a", [1, float("-inf")])]',
+        ),
     ],
 )
 def test_error_highlights_the_right_argument(tmp_path: Path, call: str, argument: str) -> None:

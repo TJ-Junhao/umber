@@ -263,8 +263,8 @@ pub(super) fn check_stacked_area(
     check_numbers(context, ("x", "x"), x, x_transform, AREA_GAP_HINT)?;
     for (k, s) in series.iter().enumerate() {
         let name = format!("series[{k}].values");
-        let negative = s.values.iter().position(|&v| v < 0.0);
-        // Check the prefix first so an earlier invalid value wins. A negative gets the
+        let negative = s.values.iter().position(|&v| v.is_finite() && v < 0.0);
+        // Check the prefix first so an earlier invalid value wins. A finite negative gets the
         // stacked-area hint even on log y, rather than the generic log-axis error.
         check_numbers(
             context,
