@@ -802,7 +802,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def step(
         self,
         x: Values[X],
-        y: Values[float],
+        y: Values[Y],
         *,
         where: Step = Step.POST,
         label: str = "",

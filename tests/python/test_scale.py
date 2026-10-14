@@ -100,7 +100,7 @@ def test_log_error_highlights_a_keyword_argument() -> None:
 def test_log_rejects_other_types(base: object) -> None:
     with pytest.raises(TypeError) as caught:
         ub.Scale.log(cast(float, base))
-    name = type(base).__name__
+    name = "None" if base is None else type(base).__name__
     assert str(caught.value) == f"Scale.log(): base is {name}; base must be a float."
     assert details(caught.value) == ("base", "pass a number greater than 1, such as 10.")
 

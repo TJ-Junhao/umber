@@ -231,11 +231,12 @@ def test_alpha_rejects_a_string() -> None:
     assert str(caught.value) == "Color.alpha(): a is str; a must be a float."
     assert details(caught.value) == ("a", "pass a number from 0.0 to 1.0.")
     assert _notes(caught.value)[0].startswith('  ub.Color.BLUE.alpha(cast(float, "0.5"))\n')
+    assert _notes(caught.value)[1] == "hint: pass a number from 0.0 to 1.0."
 
 
 @pytest.mark.parametrize("value", [1.5, "1", None, True])
 def test_rgb_and_palette_reject_non_integers(value: object) -> None:
-    name = type(value).__name__
+    name = "None" if value is None else type(value).__name__
     number = cast(int, value)
     calls: list[tuple[Callable[[], object], str]] = [
         (lambda: ub.Color.rgb(number, 0, 0), "r"),
@@ -248,7 +249,7 @@ def test_rgb_and_palette_reject_non_integers(value: object) -> None:
             call()
         context = "Color.palette()" if parameter == "index" else "Color.rgb()"
         assert str(caught.value) == (
-            f"{context}: {parameter} is {name}; {parameter} must be a int."
+            f"{context}: {parameter} is {name}; {parameter} must be an int."
         )
         assert details(caught.value) == (parameter, "pass a whole number such as 3.")
 
