@@ -40,8 +40,9 @@ impl Default for BandOptions {
 /// A band mark: the region between a lower and an upper curve over validated x values, and its
 /// [`BandOptions`].
 ///
-/// The x, low and high values are stored together and never change; clones share them. At every
-/// index where all three are finite, low does not exceed high.
+/// The x, low and high values are stored together and never change; clones share them. The x
+/// values are in non-decreasing order, and at every index where both are finite, low does not
+/// exceed high.
 ///
 /// # Examples
 ///
@@ -179,6 +180,46 @@ mod tests {
         };
         assert_eq!(f, before);
         (kind, err.to_string(), err.parameter(), err.hint())
+    }
+
+    #[test]
+    fn band_unsorted_x_names_index() {
+        let order = "band needs x in non-decreasing order.";
+        let (kind, text, parameter, hint) =
+            refused((LIN, LIN), (&[0.0, 3.0, 2.0], &[0.0; 3], &[1.0; 3]));
+        assert_eq!(kind, "data");
+        assert_eq!(
+            text,
+            format!("Axes.band(): x[2] is 2, below x[1] = 3; {order}")
+        );
+        assert_eq!(
+            (parameter, hint),
+            (Some("x"), Some("sort the points by x first."))
+        );
+        // A gap in x is skipped: the value is compared with the last one before the gap.
+        let (_, text, ..) = refused((LIN, LIN), (&[0.0, NAN, -1.5], &[0.0; 3], &[1.0; 3]));
+        assert_eq!(
+            text,
+            format!("Axes.band(): x[2] is -1.5, below x[0] = 0; {order}")
+        );
+        // The order is checked after the values and before low against high.
+        let (_, text, ..) = refused((LIN, LIN), (&[1.0, 0.0], &[5.0; 2], &[1.0; 2]));
+        assert!(text.starts_with("Axes.band(): x[1] is 0, below"), "{text}");
+        let (_, text, ..) = refused(
+            (LIN, LIN),
+            (&[1.0, 0.0], &[0.0, f64::INFINITY], &[1.0, f64::INFINITY]),
+        );
+        assert!(text.starts_with("Axes.band(): low[1] is inf"), "{text}");
+        // Equal x is accepted.
+        let mut f = figure(LIN, LIN);
+        f.single_axes_mut()
+            .band(
+                &[0.0, 1.0, 1.0],
+                &[0.0; 3],
+                &[1.0; 3],
+                BandOptions::default(),
+            )
+            .unwrap();
     }
 
     #[test]

@@ -10,19 +10,22 @@ use super::line::{LineClip, downsample_columns};
 use super::mapping::{PlotPoint, axis_x_value, axis_y};
 use crate::Rgba;
 use crate::geometry::Path;
+use crate::layout::Area;
 use crate::m4_indices;
 use crate::model::BandMark;
 use crate::resolve::Resolved;
 use crate::scene::{FillRule, Item, Paint};
 
-/// The overlap with the plot, in points, at or below which a polygon only touches it.
-const TOUCH: f64 = 1e-6;
+/// The area in square points, at or below which a polygon is taken to only touch the plot.
+const MIN_AREA: f64 = 1e-9;
 
 /// The scene item of one band in `color`: the fill of all its polygons as one path with a
 /// closed subpath each, and nothing when no part of the band is visible.
 ///
-/// A polygon runs along the upper curve from left to right and back along the lower curve. A
-/// NaN in x, low or high leaves no point there, so it ends one polygon and starts the next; a
+/// A polygon runs along the upper curve from left to right and back along the lower curve. With
+/// x sorted and low not above high it is simple and every polygon is wound the same way, so
+/// polygons of separate runs never cancel under the non-zero rule, and where they overlap the
+/// fill is drawn once. A NaN in x, low or high leaves no point there, so it ends one polygon and starts the next; a
 /// run of a single point has no area and is not drawn. Both curves are clamped into the clip
 /// as an area's line is, so a part of the band beyond the top or bottom of the plot still
 /// fills the plot up to that edge, and a band that leaves the plot across a side starts a new
@@ -50,23 +53,14 @@ pub(super) fn band_items(
         if !same_span(upper, lower) || is_flat(upper, lower) {
             continue;
         }
-        let mut points: Vec<PlotPoint> = upper
+        let points: Vec<PlotPoint> = upper
             .iter()
             .chain(lower.iter().rev())
             .map(|p| clip.plot_point(p.at))
             .collect();
         // A polygon that only touches the plot, or lies in the margin around it, shows nothing.
-        let (x0, x1) = extent(points.iter().map(|p| p.x));
-        let (y0, y1) = extent(points.iter().map(|p| p.y));
-        if x1.min(plot.right()) - x0.max(plot.x) <= TOUCH
-            || y1.min(plot.bottom()) - y0.max(plot.y) <= TOUCH
-        {
+        if clipped_area(&points, plot) <= MIN_AREA {
             continue;
-        }
-        // Every polygon is wound the same way, so that polygons of separate runs never cancel
-        // each other under the non-zero rule, and where they overlap the fill is drawn once.
-        if signed_area(&points) < 0.0 {
-            points.reverse();
         }
         let mut scene = points.iter().map(|p| p.to_scene());
         let Some(first) = scene.next() else {
@@ -85,20 +79,53 @@ pub(super) fn band_items(
     }
 }
 
-/// The smallest and largest of `values`.
-fn extent(values: impl Iterator<Item = f64>) -> (f64, f64) {
-    values.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
-        (lo.min(v), hi.max(v))
-    })
-}
-
-/// Twice the signed area of the closed polygon through `points`; its sign is its winding.
-fn signed_area(points: &[PlotPoint]) -> f64 {
-    points
+/// The area, in square points, of the part of the polygon `points` inside `plot`: the polygon
+/// clipped to the plot's rectangle edge by edge (Sutherland-Hodgman). The polygon of a band is
+/// simple, so the clipped polygon's area is the area of the intersection.
+fn clipped_area(points: &[PlotPoint], plot: Area) -> f64 {
+    // Each edge: whether a point is inside, and where a segment crosses it.
+    type Inside = Box<dyn Fn(PlotPoint) -> bool>;
+    let (left, right, top, bottom) = (plot.x, plot.right(), plot.y, plot.bottom());
+    let edges: [(Inside, bool, f64); 4] = [
+        (Box::new(move |p| p.x >= left), true, left),
+        (Box::new(move |p| p.x <= right), true, right),
+        (Box::new(move |p| p.y >= top), false, top),
+        (Box::new(move |p| p.y <= bottom), false, bottom),
+    ];
+    let mut polygon = points.to_vec();
+    for (inside, vertical, at) in &edges {
+        let mut next = Vec::with_capacity(polygon.len() + 2);
+        for (&a, &b) in polygon.iter().zip(polygon.iter().cycle().skip(1)) {
+            let cross = || {
+                let t = if *vertical {
+                    (at - a.x) / (b.x - a.x)
+                } else {
+                    (at - a.y) / (b.y - a.y)
+                };
+                PlotPoint {
+                    x: a.x + t * (b.x - a.x),
+                    y: a.y + t * (b.y - a.y),
+                }
+            };
+            match (inside(a), inside(b)) {
+                (true, true) => next.push(b),
+                (true, false) => next.push(cross()),
+                (false, true) => {
+                    next.push(cross());
+                    next.push(b);
+                }
+                (false, false) => {}
+            }
+        }
+        polygon = next;
+    }
+    polygon
         .iter()
-        .zip(points.iter().cycle().skip(1))
+        .zip(polygon.iter().cycle().skip(1))
         .map(|(a, b)| a.x * b.y - b.x * a.y)
-        .sum()
+        .sum::<f64>()
+        .abs()
+        / 2.0
 }
 
 /// The x, low and high values of `mark` in axis space, with NaN in all three wherever any of
@@ -120,9 +147,9 @@ fn gapped_points(resolved: &Resolved, mark: &BandMark) -> (Vec<f64>, Vec<f64>, V
 }
 
 /// The points of the band `(xs, lows, highs)` that keep its envelope over the plot's device
-/// columns; all of them when the band is short or its x is not sorted.
+/// columns; all of them when the band is short.
 ///
-/// On a sorted x, the points inside the x domain are reduced, and of the points outside it
+/// The x values are sorted. The points inside the x domain are reduced, and of the points outside it
 /// only the neighbour on each side is kept, so the segments that cross the limits stay exact
 /// and points out of view never share a column with the first or last points in view.
 ///
@@ -141,12 +168,7 @@ fn kept_points(
     let columns = downsample_columns(context.plot.width);
     let (lo, hi) = (context.maps.x.lo, context.maps.x.hi);
     let n = xs.len();
-    let sorted = xs
-        .iter()
-        .filter(|x| !x.is_nan())
-        .zip(xs.iter().filter(|x| !x.is_nan()).skip(1))
-        .all(|(a, b)| a <= b);
-    if n <= 4 * columns || !sorted {
+    if n <= 4 * columns {
         return (xs, lows, highs);
     }
     let first = xs.iter().position(|&x| x >= lo).unwrap_or(n);

@@ -213,6 +213,24 @@ def test_types_are_checked_in_the_order_x_low_high_label_color() -> None:
 DATA_ERRORS: list[tuple[Any, object, object, object, str, object, object]] = [
     (
         _axes,
+        [0, 3, 2],
+        [0.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0],
+        "Axes.band(): x[2] is 2, below x[1] = 3; band needs x in non-decreasing order.",
+        "x",
+        "sort the points by x first.",
+    ),
+    (
+        _axes,
+        [0.0, np.nan, -1.5],
+        [0.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0],
+        "Axes.band(): x[2] is -1.5, below x[0] = 0; band needs x in non-decreasing order.",
+        "x",
+        "sort the points by x first.",
+    ),
+    (
+        _axes,
         [0, 1, 2],
         [0.0, 5.0, 1.0],
         [1.0, 4.0, 2.0],

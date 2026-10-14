@@ -1033,6 +1033,10 @@ impl<'a> AxesMut<'a> {
     /// or not valid on its axis (positive on a log axis); `low[i]` is above `high[i]`, naming the
     /// first such index. Where either is NaN, the index is not compared.
     ///
+    /// `x` must be in non-decreasing order, NaN apart, as for [`AxesMut::step`]: the first
+    /// value below the one before it is an `Error::Data` naming its index, checked after the
+    /// values and before the curves are compared.
+    ///
     /// The mark stores its own copies of the values, made once. To store values already held in
     /// `Arc<[f64]>`s without copying them, use [`AxesMut::band_shared`].
     ///

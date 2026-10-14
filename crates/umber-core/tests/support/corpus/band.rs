@@ -249,19 +249,6 @@ fn figures() -> Vec<(String, Figure)> {
         .unwrap();
     out.push(("band-with-scatter".to_owned(), f));
 
-    // A band whose x runs backwards and forwards: one polygon, filled once.
-    let mut f = figure(6.0, 4.0, Theme::pigment(), linear(), linear());
-    labelled(&mut f, "Unsorted x");
-    axes(&mut f)
-        .band(
-            &[0.0, 3.0, 1.0, 4.0, 2.0],
-            &[1.0, 2.0, 0.0, 1.0, 2.0],
-            &[2.0, 4.0, 3.0, 3.0, 4.0],
-            labelled_band("Back and forth", 0),
-        )
-        .unwrap();
-    out.push(("band-unsorted-x".to_owned(), f));
-
     // Two panels of a grid.
     let grid = Grid::new(1, 2).unwrap();
     let (width, height) = grid.auto_size_in();
@@ -384,6 +371,30 @@ fn band_errors() -> String {
             vec![0.0, 1.0, 2.0, 3.0],
             vec![nan, 3.0, 9.0, 8.0],
             vec![0.0, nan, 2.0, 1.0],
+        ),
+        (
+            "unsorted x",
+            vec![0.0, 3.0, 2.0],
+            vec![0.0; 3],
+            vec![1.0; 3],
+        ),
+        (
+            "unsorted x after a gap",
+            vec![0.0, nan, -1.5],
+            vec![0.0; 3],
+            vec![1.0; 3],
+        ),
+        (
+            "unsorted x and swapped",
+            vec![1.0, 0.0],
+            vec![5.0; 2],
+            vec![1.0; 2],
+        ),
+        (
+            "unsorted x and infinite high",
+            vec![1.0, 0.0],
+            vec![0.0; 2],
+            vec![1.0, inf],
         ),
         ("swapped, large", vec![0.0], vec![1.0e7], vec![1.0e6]),
     ];

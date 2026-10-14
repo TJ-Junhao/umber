@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: e01cbdb593748c79a7a74e75910197b55531879e
+# revision: 7a491d10a1153b8120d17da5144272e29ca46e5f
 # platform: Darwin arm64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
@@ -9,7 +9,7 @@ ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-
 e4cb07e8137eb0758811130f153cda386b472e48f6a607df059306d18ea88f4e  api/themes.txt
 5a0770fed2366600342f31c39541ac3e7afce9106ac883a969e9cfa9d5fe55ed  errors/api.txt
 f5570630344f0834c355bafc5594c3d4df960728f63559772a50696dc9ecbe3b  errors/area.txt
-624b0039967b9d5e97afb7b8c6e687a8a42862f5197a37733d4139fcc5b9c8bb  errors/band.txt
+94717fc6826658510737da48aa28fe1f80977cd5d1813ba280b3eb3b540a4e39  errors/band.txt
 18bbdce171fb9a8ba22e913661415e5c903264745b74777578bedb8665b6f553  errors/bars.txt
 3ab6761c3e667986d388c2015265480c0012fe2a1b10468c2c67f203dfde44eb  errors/grid-room.txt
 7041b804de4381cc0f924b18cc2b2817363297606e225df4f60616f22953c11a  errors/grid.txt
@@ -59,8 +59,6 @@ d1b070116eaced35ac0f98d764e659aa07eec75e899e2c1524099bde73f61ad6  png/band-mean-
 db0eb1acabb983a1ae573fc8d29d6bb067aee1e64820ee249b7844863143a3ce  png/band-mean-pigment.dpi72.png
 cd0c5d01324815d3c0c66cc174c9b303c7aa3aa302f64469bdf118f54fd0e3c2  png/band-outside-limits.dpi200.png
 01aae7bd9ebc363ce1d333cf2ccc214e816a3c552a949cce965959f99f16f622  png/band-outside-limits.dpi72.png
-f32e559f0311fea287458df8d7afe81a9f1bd378fd8e0c6718076f691ccbdd21  png/band-unsorted-x.dpi200.png
-a92c958d15affb54b987f046fb5564cb051c0c51f27fa66e615f7c51ec2f30df  png/band-unsorted-x.dpi72.png
 aa9b469a85da23ca10b0ef45add1ab096e51379dab8e1c5798d86c87de496f81  png/band-with-scatter.dpi200.png
 ac4859f1c9bfcba5abeddd2395dd4bd9b0805d06cb6a1618c84dee125f638bbe  png/band-with-scatter.dpi72.png
 fb05525cae7bbe8a100fe91f00fd4491c44548b2ed974b5caedeab733d7282ba  png/fig-all-nan.dpi200.png
@@ -693,7 +691,6 @@ ef1881f25e1c7e7514bb713445f921461cae2c18174608f40c3dc3477428d607  scene/band-lim
 5686808a8664590b1c144f0e0c95d7f03cbde305ba6a7ed483a7bf7b6e60a562  scene/band-mean-midnight.txt
 72afc718e3737ec891b95ea9d4de7b1916fa39c5ce201408971ed2f6fabd49a5  scene/band-mean-pigment.txt
 8f68e75a250566a310e5d1f43e0f65c5080df2e65e6b851bc49631e5d667e380  scene/band-outside-limits.txt
-e6eb029eaae40d472c04a97f0b108c400315b52f830cad859f6a45857e950ba9  scene/band-unsorted-x.txt
 2ee6715935050b3f12596170301486d180f4e632a364b5e3c9f1ed8b787676dd  scene/band-with-scatter.txt
 53efbf7da6ac4be26e4028633ecadc785e7d4c7f8a6d13e51e91bc665a7fba85  scene/fig-all-nan.txt
 45d1c8626a18b4041109bea940173ba760cc2767a78bd4a450dff0df3eeaaf90  scene/fig-area-200k-points.txt
@@ -1037,8 +1034,6 @@ d480626b5df5ff1aab507c0872f8238490b66eba0d71c29f0f0e5fa1178091c9  svg/band-mean-
 d3b566bbfb18da462a5c13cfc9e3ef1b454b6a900083838d438d6d0ede7e8e5a  svg/band-mean-pigment.outlines.svg
 ff8db91260238f5ccaef15024a297e6197fbbcdb792cba568c6006f7438e5c3b  svg/band-outside-limits.editable.svg
 68dc5cfddadfe100c98525ca14eecfd2eda7af4313acd0aa2e3c435b46e7a249  svg/band-outside-limits.outlines.svg
-27be119b4bc2d5a273324463b3efe66c99726d208db7a504fa8237caf01be569  svg/band-unsorted-x.editable.svg
-a0061f2e05f06c21a41914b456af44f78f7ffed5aabb91696deb52bf45778857  svg/band-unsorted-x.outlines.svg
 854156afeff7c47a8fc7bb59a3d648e2b15e92b850a826b362fbffe5d477c3a4  svg/band-with-scatter.editable.svg
 00a9563fa042bfff8e3fc67ccfc873bfdd6718c707ea6d5431f7ae0e2e30f476  svg/band-with-scatter.outlines.svg
 e24ae5322e5034976f03f8539e3bde8ff9b038ceef9dbb218b1b69390262727c  svg/fig-all-nan.editable.svg

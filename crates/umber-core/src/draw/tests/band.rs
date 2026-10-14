@@ -3,7 +3,7 @@
 
 use super::super::area::AREA_ALPHA;
 use super::super::line::downsample_columns;
-use super::{Pixels, mark_group, nums, plot_of, subpaths};
+use super::{mark_group, nums, plot_of, subpaths};
 use crate::geometry::PathVerb;
 use crate::model::{BandOptions, Figure, LineOptions};
 use crate::scene::{FillRule, Item, Paint};
@@ -355,62 +355,60 @@ fn limited(xlim: (f64, f64), ylim: (f64, f64), band: Option<(&[f64], &[f64], &[f
 }
 
 #[test]
-fn runs_that_run_in_opposite_directions_do_not_cancel() {
+fn every_polygon_is_wound_the_same_way_and_separate_runs_do_not_cancel() {
+    // Runs side by side, a pinch where low meets high, and a band cut by the limits: with x
+    // sorted and low not above high, each polygon has the winding of the others.
+    let nan = NAN;
     let f = limited(
-        (0.0, 2.0),
-        (-1.0, 2.0),
-        Some((&[0.0, 2.0, NAN, 2.0, 0.0], &[0.0; 5], &[1.0; 5])),
+        (0.0, 8.0),
+        (-1.0, 3.0),
+        Some((
+            &[0.0, 2.0, nan, 3.0, 4.0, 5.0, nan, 6.0, 12.0],
+            &[0.0, 0.0, nan, 1.0, 1.0, 0.5, nan, -4.0, -4.0],
+            &[1.0, 1.0, nan, 2.0, 1.0, 2.0, nan, 5.0, 5.0],
+        )),
     );
     let parts = polygons(&f);
-    assert_eq!(parts.len(), 2);
-    assert!(
-        signed_area(&parts[0]) * signed_area(&parts[1]) > 0.0,
-        "{parts:?}"
-    );
-    let empty = limited((0.0, 2.0), (-1.0, 2.0), None);
+    assert_eq!(parts.len(), 3);
+    let signs: Vec<bool> = parts.iter().map(|p| signed_area(p) > 0.0).collect();
+    assert!(signs.iter().all(|&s| s == signs[0]), "{signs:?}");
+    let empty = limited((0.0, 8.0), (-1.0, 3.0), None);
     assert_ne!(f.to_png(72).unwrap(), empty.to_png(72).unwrap());
 }
 
 #[test]
-fn overlapping_runs_are_filled_once() {
-    // Two runs that overlap over x in 1..=2, one running backwards.
-    let f = limited(
-        (0.0, 3.0),
-        (-1.0, 2.0),
-        Some((&[0.0, 2.0, NAN, 3.0, 1.0], &[0.0; 5], &[1.0; 5])),
-    );
-    let parts = polygons(&f);
-    assert_eq!(parts.len(), 2);
-    assert!(signed_area(&parts[0]) * signed_area(&parts[1]) > 0.0);
-    let plot = plot_of(&f);
-    let pixels = Pixels::decode(&f.to_png(72).unwrap());
-    let at = |x: f64| {
-        pixels.at_point(
-            (
-                plot.x + x / 3.0 * plot.width,
-                plot.bottom() - 0.5 / 3.0 * plot.height,
-            ),
-            72.0,
-        )
-    };
-    assert_eq!(at(1.5), at(0.5));
-    assert_eq!(at(1.5), at(2.5));
-}
-
-#[test]
 fn a_band_that_only_touches_a_limit_leaves_no_pixel() {
-    let cases: [(&[f64], &[f64], &[f64]); 4] = [
+    #[allow(clippy::type_complexity)]
+    let cases: [(&[f64], &[f64], &[f64]); 7] = [
         // Above the high y limit, below the low one, left of the low x limit, right of the high.
         (&[1.0, 2.0], &[2.0, 2.0], &[3.0, 3.0]),
         (&[1.0, 2.0], &[0.0, 0.0], &[1.0, 1.0]),
         (&[0.0, 1.0], &[1.0, 1.0], &[2.0, 2.0]),
         (&[2.0, 3.0], &[1.0, 1.0], &[2.0, 2.0]),
+        // Touching the top edge, with a tail out of view whose bounding box overlaps the plot.
+        (&[0.0, 1.0, 2.0], &[1.0, 2.0, 2.0], &[2.0, 3.0, 3.0]),
+        // Touching the plot only at a corner.
+        (&[0.0, 2.0], &[1.0, 3.0], &[2.0, 4.0]),
+        (&[2.0, 4.0], &[0.0, -2.0], &[1.0, -1.0]),
     ];
     let empty = limited((1.0, 2.0), (1.0, 2.0), None).to_png(72).unwrap();
     for (x, low, high) in cases {
         let f = limited((1.0, 2.0), (1.0, 2.0), Some((x, low, high)));
         assert_eq!(f.to_png(72).unwrap(), empty, "{x:?} {low:?} {high:?}");
         assert_eq!(items(&f), [], "{x:?} {low:?} {high:?}");
+    }
+}
+
+#[test]
+fn a_thin_band_beside_a_limit_is_still_drawn() {
+    let tiny = 1e-3;
+    for (x, low, high) in [
+        // Just inside the top edge, and just inside the left edge.
+        (&[1.0, 2.0][..], &[2.0 - tiny; 2][..], &[3.0; 2][..]),
+        (&[0.0, 1.0 + tiny][..], &[1.0; 2][..], &[2.0; 2][..]),
+    ] {
+        let f = limited((1.0, 2.0), (1.0, 2.0), Some((x, low, high)));
+        assert_eq!(polygons(&f).len(), 1, "{x:?} {low:?} {high:?}");
     }
 }
 

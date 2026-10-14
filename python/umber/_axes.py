@@ -1079,7 +1079,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         envelope at the resolution of the plot. It needs a linear or log x axis.
 
         Args:
-            x: The x values, numbers.
+            x: The x values, numbers in non-decreasing order, NaN apart.
             low: The lower curve, one value per x value.
             high: The upper curve, one value per x value; no value of ``low`` may exceed the
                 value of ``high`` at the same index.
@@ -1094,8 +1094,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
-                value is not positive on a log axis, or a value of ``low`` is above the value
-                of ``high`` at the same index.
+                value is not positive on a log axis, ``x`` is not in non-decreasing order, or a
+                value of ``low`` is above the value of ``high`` at the same index.
             StyleError: If ``label`` is too long.
             UsageError: If the x axis is a category axis.
 
