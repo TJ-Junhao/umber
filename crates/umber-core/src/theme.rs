@@ -111,6 +111,40 @@ pub enum LegendStyle {
     None,
 }
 
+/// Horizontal alignment of titles, subtitles and the figure's merged legend.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Align, Theme};
+///
+/// assert_eq!(Align::default(), Align::Left);
+/// let theme = Theme::pigment().with_title_align(Align::Center)?;
+/// assert_eq!(theme.title_align(), Align::Center);
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Align {
+    /// Start at the left edge.
+    #[default]
+    Left,
+    /// Center between the edges.
+    Center,
+    /// End at the right edge.
+    Right,
+}
+
+impl Align {
+    /// The left edge of an item `width` wide aligned within `left..right`.
+    pub(crate) fn position(self, width: f64, left: f64, right: f64) -> f64 {
+        match self {
+            Align::Left => left,
+            Align::Center => (left + right) / 2.0 - width / 2.0,
+            Align::Right => right - width,
+        }
+    }
+}
+
 /// How area and histogram fills are painted. It never decides whether something is filled:
 /// lines are never filled, and the fill under a line is the explicit
 /// [`AxesMut::area`](crate::AxesMut::area) mark.
@@ -185,6 +219,7 @@ pub struct Theme {
     title_font: Font,
     body_font: Font,
     title_size: f32,
+    title_align: Align,
     body_size: f32,
     font_scale: f32,
     legend_style: LegendStyle,
@@ -278,6 +313,7 @@ impl Theme {
             title_size: 15.0,
             body_size: 8.5,
             font_scale: 1.0,
+            title_align: Align::Left,
             legend_style: LegendStyle::Header,
             fill_style: FillStyle::Solid,
             line_width: 2.0,
@@ -320,6 +356,7 @@ impl Theme {
             title_size: 15.0,
             body_size: 8.5,
             font_scale: 1.0,
+            title_align: Align::Left,
             legend_style: LegendStyle::Direct,
             fill_style: FillStyle::Solid,
             line_width: 1.8,
@@ -362,6 +399,7 @@ impl Theme {
             title_size: 14.5,
             body_size: 8.5,
             font_scale: 1.0,
+            title_align: Align::Left,
             legend_style: LegendStyle::Chips,
             fill_style: FillStyle::Gradient,
             line_width: 1.9,
@@ -376,6 +414,41 @@ impl Theme {
                 0x75AEF5, 0xDF7F78, 0x96E7A7, 0xE0AE57, 0xC9A3F5, 0x3ACED6, 0xF5A06F, 0x9DA5B1,
             ]),
         }
+    }
+
+    /// The alignment of titles, subtitles and the merged legend. Panel legends keep their
+    /// own placement.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Align, Theme};
+    ///
+    /// assert_eq!(Theme::pigment().title_align(), Align::Left);
+    /// ```
+    #[must_use]
+    pub fn title_align(&self) -> Align {
+        self.title_align
+    }
+
+    /// Returns a copy with titles, subtitles and the merged legend aligned as `value` says.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Align, Theme};
+    ///
+    /// let base = Theme::pigment();
+    /// let aligned = base.with_title_align(Align::Right)?;
+    /// assert_eq!(aligned.title_align(), Align::Right);
+    /// assert_eq!(base.title_align(), Align::Left);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn with_title_align(&self, value: Align) -> Result<Theme> {
+        Ok(Theme {
+            title_align: value,
+            ..self.clone()
+        })
     }
 
     /// The series palette, in assignment order.

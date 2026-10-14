@@ -49,7 +49,7 @@ mod stroke;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use chrome::{baseline, chrome};
+pub(crate) use chrome::{baseline, chrome, figure_header};
 
 use crate::Theme;
 use crate::layout::{Area, Layout};

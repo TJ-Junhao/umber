@@ -141,7 +141,7 @@ pub use scene::{
 };
 pub use size::{Factor, Points, SizeSpec};
 pub use text::{FontLibrary, TextLayout, TextStyle};
-pub use theme::{Dash, FillStyle, GridLines, LegendStyle, Marker, Theme};
+pub use theme::{Align, Dash, FillStyle, GridLines, LegendStyle, Marker, Theme};
 pub use tick_format::{Decimals, NumberStyle, TickFormat};
 pub use ticks::Tick;
 

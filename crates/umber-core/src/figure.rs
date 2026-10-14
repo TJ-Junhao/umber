@@ -47,8 +47,9 @@ impl Figure {
     /// by half of the widest line stroke when the axes hold lines or areas, as far as the room
     /// beside the plot allows, so line ends stay whole), the legend as one unclipped group when
     /// it shows anything, and last the baseline as an unclipped group of its own, so marks
-    /// never cover it. Without axes it holds the background only. The same figure always gives
-    /// the same scene.
+    /// never cover it. A non-empty figure header follows as one unclipped group: the figure
+    /// title, subtitle and merged legend. Without axes it holds the background and any figure
+    /// title or subtitle. The same figure always gives the same scene.
     ///
     /// A 1 × 1 grid is laid out on the whole canvas. On a larger grid every axes' plot area
     /// has the same size and the axes line up: each grid column has room left of its plots
@@ -57,10 +58,18 @@ impl Figure {
     /// y tick label, and below them for the x tick labels and x axis labels, and the theme's
     /// [`panel_gap`](crate::Theme::panel_gap) separates neighbouring cells. An axes spanning
     /// several cells covers their plots and everything between them. An empty cell keeps its
-    /// share of the canvas and draws nothing. Panel titles, subtitles and legend rows start at
-    /// the left edge of their plot area, and a legend row wraps within it; the x axis labels of
-    /// a grid row share a baseline. An x tick label may reach halfway into the gap next to its
-    /// axes; beyond that, the plots of the grid narrow so that it fits.
+    /// share of the canvas and draws nothing. Panel titles and subtitles align over their
+    /// span using [`Theme::title_align`](crate::Theme::title_align); panel legend rows stay
+    /// left-aligned and wrap within it. The figure title, subtitle and merged legend align
+    /// within the canvas padding above the grid. Their height joins the grid's height need.
+    /// The x axis labels of a grid row share a baseline. An x tick label may reach halfway
+    /// into the gap next to its axes; beyond that, the plots of the grid narrow so that it fits.
+    ///
+    /// Automatic colors share one palette slot per label, in first appearance order across
+    /// row-major panels. Unlabelled automatic series take slots after all label slots, per
+    /// panel. Explicit colors do not consume slots. On a grid with a merged legend, entries
+    /// with the same label and swatch kind merge, keeping the first swatch. Direct line labels
+    /// remain on their panels. A 1 × 1 grid keeps its panel legend in either legend mode.
     ///
     /// # Errors
     ///
@@ -86,7 +95,9 @@ impl Figure {
     /// `row {r}, col {c}: `, the axes' top-left cell: its y tick labels, its x tick labels,
     /// and texts that would run into the next cell: a title, subtitle, legend row entry or axis
     /// label wider than its plot area (`row 0, col 1: the title is … pt wide; the panel has …
-    /// pt.`), or a direct label that would end past the axes' share of the canvas.
+    /// pt.`), or a direct label that would end past the axes' share of the canvas. A merged
+    /// legend entry wider than the inner canvas also fails, naming its label and suggesting
+    /// shortening the label or widening the figure.
     ///
     /// `Error::Data` in the same context, without a parameter, when a vertical reference line
     /// ([`AxesMut::vline`]) on a category x axis names a category that no other mark of its axes
@@ -188,13 +199,13 @@ mod tests {
     use super::*;
     use crate::{Alpha, ColorSpec, Rgba, ScaleKind, Theme, resolve};
 
-    /// Each mark's color, resolved against the theme's palette, in mark order. `Auto` colors
-    /// take palette slots in series order; `Palette` and `Fixed` colors do not consume a slot.
+    /// Each series' color in panel and mark order, with label slots shared across the figure.
     fn resolved_colors(figure: &Figure) -> Vec<Rgba> {
         figure
             .panels()
-            .flat_map(|axes| {
-                resolve::resolve_marks(axes.marks(), figure.theme())
+            .zip(resolve::resolve_figure_marks(figure))
+            .flat_map(|(axes, marks)| {
+                marks
                     .into_iter()
                     .flat_map(|resolved| resolved.keys(&resolve::Limits::of(axes)))
                     .map(|key| key.color)

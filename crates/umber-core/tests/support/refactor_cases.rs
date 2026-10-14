@@ -90,6 +90,7 @@ mod corpus {
     pub mod bars;
     pub mod error_bars;
     pub mod grid;
+    pub mod header;
     pub mod hist;
     pub mod inputs;
     pub mod legend;
@@ -149,6 +150,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::x_end_label::cases(&lib, &mut sink);
     corpus::plot_height::cases(&lib, &mut sink);
     corpus::grid::cases(&lib, &mut sink);
+    corpus::header::cases(&lib, &mut sink);
     corpus::step::cases(&lib, &mut sink);
     corpus::rules::cases(&lib, &mut sink);
     corpus::band::cases(&lib, &mut sink);
