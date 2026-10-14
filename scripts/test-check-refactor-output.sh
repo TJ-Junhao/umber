@@ -8,6 +8,43 @@ set -u
 script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-refactor-output.sh"
 failures=0
 
+# Every corpus module must travel with the driver when comparing against another revision.
+root="$(dirname "$(dirname "$script")")"
+driver_files=()
+in_driver=0
+while IFS= read -r line; do
+  if [[ "$line" == 'driver_files=(' ]]; then
+    in_driver=1
+  elif [[ "$in_driver" -eq 1 && "$line" == ')' ]]; then
+    in_driver=0
+  elif [[ "$in_driver" -eq 1 ]]; then
+    driver_files+=("${line// /}")
+  fi
+done <"$script"
+in_corpus=0
+while IFS= read -r line; do
+  if [[ "$line" == 'mod corpus {' ]]; then
+    in_corpus=1
+  elif [[ "$in_corpus" -eq 1 && "$line" == '}' ]]; then
+    in_corpus=0
+  elif [[ "$in_corpus" -eq 1 && "$line" =~ ^[[:space:]]*pub[[:space:]]+mod[[:space:]]+([a-zA-Z_][a-zA-Z_0-9]*)\; ]]; then
+    module="${BASH_REMATCH[1]}"
+    path="crates/umber-core/tests/support/corpus/$module.rs"
+    found=0
+    for file in "${driver_files[@]}"; do
+      if [[ "$file" == "$path" ]]; then found=1; fi
+    done
+    if [[ "$found" -eq 0 ]]; then
+      printf 'FAIL corpus module missing from driver_files: %s\n' "$path" >&2
+      failures=$((failures + 1))
+    else
+      printf 'ok   corpus module %s\n' "$module"
+    fi
+  fi
+done <"$root/crates/umber-core/tests/support/refactor_cases.rs"
+# The driver list can be checked without constructing the command-line fixtures below.
+if [[ "${1:-}" == --drivers-only ]]; then exit "$failures"; fi
+
 # Stand-ins for cargo and git that leave a marker, so a case that starts a build or creates a
 # worktree is caught even when it would also exit 2.
 shims="$(mktemp -d "${TMPDIR:-/tmp}/umber-gate-cli.XXXXXX")"
