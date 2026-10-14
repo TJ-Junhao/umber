@@ -111,6 +111,40 @@ pub enum LegendStyle {
     None,
 }
 
+/// Horizontal alignment of titles, subtitles and the figure's merged legend.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Align, Theme};
+///
+/// assert_eq!(Align::default(), Align::Left);
+/// let theme = Theme::pigment().with_title_align(Align::Center)?;
+/// assert_eq!(theme.title_align(), Align::Center);
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Align {
+    /// Start at the left edge.
+    #[default]
+    Left,
+    /// Center between the edges.
+    Center,
+    /// End at the right edge.
+    Right,
+}
+
+impl Align {
+    /// The left edge of an item `width` wide aligned within `left..right`.
+    pub(crate) fn position(self, width: f64, left: f64, right: f64) -> f64 {
+        match self {
+            Align::Left => left,
+            Align::Center => (left + right) / 2.0 - width / 2.0,
+            Align::Right => right - width,
+        }
+    }
+}
+
 /// How area and histogram fills are painted. It never decides whether something is filled:
 /// lines are never filled, and the fill under a line is the explicit
 /// [`AxesMut::area`](crate::AxesMut::area) mark.
@@ -185,6 +219,7 @@ pub struct Theme {
     title_font: Font,
     body_font: Font,
     title_size: f32,
+    title_align: Align,
     body_size: f32,
     font_scale: f32,
     legend_style: LegendStyle,
@@ -196,6 +231,7 @@ pub struct Theme {
     hist_gap: f32,
     panel_gap: f32,
     cap_width: f32,
+    stem_width: f32,
     palette: Vec<Rgba>,
 }
 
@@ -277,6 +313,7 @@ impl Theme {
             title_size: 15.0,
             body_size: 8.5,
             font_scale: 1.0,
+            title_align: Align::Left,
             legend_style: LegendStyle::Header,
             fill_style: FillStyle::Solid,
             line_width: 2.0,
@@ -286,6 +323,7 @@ impl Theme {
             hist_gap: 0.0,
             panel_gap: 24.0,
             cap_width: 8.0,
+            stem_width: 1.5,
             palette: palette_of([
                 0xC4553A, 0x2E6B70, 0xE2A33B, 0x4F6FA3, 0x86A37A, 0x8B5279, 0x6E4C38, 0xA69F94,
             ]),
@@ -318,6 +356,7 @@ impl Theme {
             title_size: 15.0,
             body_size: 8.5,
             font_scale: 1.0,
+            title_align: Align::Left,
             legend_style: LegendStyle::Direct,
             fill_style: FillStyle::Solid,
             line_width: 1.8,
@@ -327,6 +366,7 @@ impl Theme {
             hist_gap: 1.2,
             panel_gap: 24.0,
             cap_width: 8.0,
+            stem_width: 1.5,
             palette: palette_of([
                 0x233F86, 0xE4572E, 0xF2A900, 0x17A398, 0x9B5DE5, 0x5BA4E6, 0xD9658F, 0xA3A3A3,
             ]),
@@ -359,6 +399,7 @@ impl Theme {
             title_size: 14.5,
             body_size: 8.5,
             font_scale: 1.0,
+            title_align: Align::Left,
             legend_style: LegendStyle::Chips,
             fill_style: FillStyle::Gradient,
             line_width: 1.9,
@@ -368,10 +409,46 @@ impl Theme {
             hist_gap: 1.5,
             panel_gap: 24.0,
             cap_width: 8.0,
+            stem_width: 1.5,
             palette: palette_of([
                 0x75AEF5, 0xDF7F78, 0x96E7A7, 0xE0AE57, 0xC9A3F5, 0x3ACED6, 0xF5A06F, 0x9DA5B1,
             ]),
         }
+    }
+
+    /// The alignment of titles, subtitles and the merged legend. Panel legends keep their
+    /// own placement.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Align, Theme};
+    ///
+    /// assert_eq!(Theme::pigment().title_align(), Align::Left);
+    /// ```
+    #[must_use]
+    pub fn title_align(&self) -> Align {
+        self.title_align
+    }
+
+    /// Returns a copy with titles, subtitles and the merged legend aligned as `value` says.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Align, Theme};
+    ///
+    /// let base = Theme::pigment();
+    /// let aligned = base.with_title_align(Align::Right)?;
+    /// assert_eq!(aligned.title_align(), Align::Right);
+    /// assert_eq!(base.title_align(), Align::Left);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn with_title_align(&self, value: Align) -> Result<Theme> {
+        Ok(Theme {
+            title_align: value,
+            ..self.clone()
+        })
     }
 
     /// The series palette, in assignment order.
@@ -726,6 +803,22 @@ impl Theme {
     #[must_use]
     pub fn cap_width(&self) -> f32 {
         self.cap_width
+    }
+
+    /// The width of the line from the baseline to each stem value, in points.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    ///
+    /// assert_eq!(Theme::pigment().stem_width(), 1.5);
+    /// assert_eq!(Theme::graphite().stem_width(), 1.5);
+    /// assert_eq!(Theme::midnight().stem_width(), 1.5);
+    /// ```
+    #[must_use]
+    pub fn stem_width(&self) -> f32 {
+        self.stem_width
     }
 
     /// Replace the palette.

@@ -90,6 +90,7 @@ mod corpus {
     pub mod bars;
     pub mod error_bars;
     pub mod grid;
+    pub mod header;
     pub mod hist;
     pub mod inputs;
     pub mod legend;
@@ -97,6 +98,7 @@ mod corpus {
     pub mod rules;
     pub mod share;
     pub mod size;
+    pub mod stem;
     pub mod step;
     pub mod ticks;
     pub mod x_end_label;
@@ -148,11 +150,13 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::x_end_label::cases(&lib, &mut sink);
     corpus::plot_height::cases(&lib, &mut sink);
     corpus::grid::cases(&lib, &mut sink);
+    corpus::header::cases(&lib, &mut sink);
     corpus::step::cases(&lib, &mut sink);
     corpus::rules::cases(&lib, &mut sink);
     corpus::band::cases(&lib, &mut sink);
     corpus::error_bars::cases(&lib, &mut sink);
     corpus::share::cases(&lib, &mut sink);
+    corpus::stem::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1739,6 +1743,15 @@ mod record {
                 color_spec(bars.options().color),
                 bars.options().width,
                 bars.options().caps
+            ),
+            Mark::Stem(stem) => format!(
+                "stem x={} y={} label={} color={} marker={} size={:?}",
+                axis_data(stem.x()),
+                floats64(stem.y()),
+                text(&stem.options().label),
+                color_spec(stem.options().color),
+                marker(stem.options().marker),
+                stem.options().size
             ),
             _ => "unknown-mark".into(),
         }

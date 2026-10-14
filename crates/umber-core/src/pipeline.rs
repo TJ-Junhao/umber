@@ -6,7 +6,8 @@
 //! baseline.
 
 use crate::layout::{
-    self, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize, TickSpacing,
+    self, FigureHeader, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize,
+    TickSpacing,
 };
 use crate::legend::Legend;
 use crate::model::{Axes, Figure, ShareGroups, label_visibility};
@@ -31,9 +32,18 @@ fn panels<'a>(figure: &'a Figure, lib: &FontLibrary) -> Vec<Panel<'a>> {
     let theme = figure.theme();
     figure
         .panels()
-        .map(|axes| {
-            let marks = resolve::resolve_marks(axes.marks(), theme);
-            let legend = measure_legend(theme, axes, &marks, lib);
+        .zip(resolve::resolve_figure_marks(figure))
+        .map(|(axes, marks)| {
+            let legend = if has_merged_legend(figure) {
+                let style = axes.legend_style().unwrap_or(theme.legend_style());
+                MeasuredLegend::measure(
+                    theme,
+                    &Legend::panel(style, &marks, &Limits::of(axes), true),
+                    lib,
+                )
+            } else {
+                measure_legend(theme, axes, &marks, lib)
+            };
             Panel {
                 axes,
                 marks,
@@ -54,6 +64,29 @@ fn measure_legend<'a>(
     let style = axes.legend_style().unwrap_or(theme.legend_style());
     let legend = Legend::new(style, marks, &Limits::of(axes));
     MeasuredLegend::measure(theme, &legend, lib)
+}
+
+/// Whether row legends belong to the figure rather than its individual panels.
+fn has_merged_legend(figure: &Figure) -> bool {
+    let grid = figure.grid();
+    grid.rows() * grid.cols() > 1 && grid.legend() == crate::LegendMode::Merged
+}
+
+/// Measures the figure title, subtitle and merged legend once, before the grid solve.
+fn figure_header(figure: &Figure, panels: &[Panel<'_>], lib: &FontLibrary) -> FigureHeader {
+    let legend = if has_merged_legend(figure) {
+        let merged = Legend::merged(figure, panels.iter().map(|panel| panel.marks.as_slice()));
+        MeasuredLegend::measure(figure.theme(), &merged, lib)
+    } else {
+        MeasuredLegend::default()
+    };
+    FigureHeader::measure(figure, &legend, lib)
+}
+
+/// The figure-wide header and the resolved layout of every panel.
+struct FigurePlan {
+    header: FigureHeader,
+    panels: Vec<(Resolved, Layout)>,
 }
 
 /// One side of a plot area.
@@ -272,8 +305,9 @@ fn plan(
     panels: &[Panel<'_>],
     lib: &FontLibrary,
     context: &'static str,
-) -> Result<Vec<(Resolved, Layout)>> {
+) -> Result<FigurePlan> {
     let theme = figure.theme();
+    let header = figure_header(figure, panels, lib);
     let inputs: Vec<LayoutInput<'_>> = panels
         .iter()
         .map(|panel| LayoutInput {
@@ -287,6 +321,7 @@ fn plan(
     let grid = GridInput {
         width: figure.width_in() * 72.0,
         height: figure.height_in() * 72.0,
+        top: header.bottom,
         grid: figure.grid(),
         theme,
         context,
@@ -479,7 +514,11 @@ fn plan(
         })
         .unzip();
     layout::check_panel_contents(&grid, &layouts)?;
-    Ok(resolved.into_iter().zip(layouts).collect())
+    header.check(figure, context)?;
+    Ok(FigurePlan {
+        header,
+        panels: resolved.into_iter().zip(layouts).collect(),
+    })
 }
 
 /// [`plan`] for the axes of `figure` whose top-left cell is at `cell`, with the figure laid out
@@ -506,7 +545,7 @@ pub(crate) fn try_plan_figure(
     let index = panel_index(figure, cell);
     let panels = panels(figure, lib);
     let mut planned = plan(figure, &panels, lib, "Figure.to_scene()")?;
-    Ok(planned.swap_remove(index))
+    Ok(planned.panels.swap_remove(index))
 }
 
 /// [`plan`] for every axes of `figure`, in the order of [`Figure::panels`], with layout errors
@@ -516,7 +555,7 @@ pub(crate) fn try_plan_panels(
     figure: &Figure,
     lib: &FontLibrary,
 ) -> Result<Vec<(Resolved, Layout)>> {
-    plan(figure, &panels(figure, lib), lib, "Figure.to_scene()")
+    plan(figure, &panels(figure, lib), lib, "Figure.to_scene()").map(|planned| planned.panels)
 }
 
 /// The index, in the order of [`Figure::panels`], of the axes of `figure` whose top-left cell
@@ -542,6 +581,7 @@ pub(crate) fn with_layout_input<R>(
 ) -> R {
     let index = panel_index(figure, cell);
     let panels = panels(figure, lib);
+    let header = figure_header(figure, &panels, lib);
     let inputs: Vec<LayoutInput<'_>> = panels
         .iter()
         .map(|panel| LayoutInput {
@@ -555,6 +595,7 @@ pub(crate) fn with_layout_input<R>(
     let grid = GridInput {
         width: figure.width_in() * 72.0,
         height: figure.height_in() * 72.0,
+        top: header.bottom,
         grid: figure.grid(),
         theme: figure.theme(),
         context: "Figure.to_scene()",
@@ -572,7 +613,8 @@ pub(crate) fn with_layout_input<R>(
 /// - the baseline, as an unclipped group of its own.
 ///
 /// Every axes is laid out by one solve of the grid ([`plan`]); a figure of one axes has the
-/// canvas as its frame. Without axes the scene holds the background only. Each axes' marks are
+/// canvas as its frame. The figure header follows the panels as its own unclipped group when
+/// non-empty; without axes the scene holds the background and that header. Each axes' marks are
 /// resolved and its legend is built and measured once, before layout, and the same records
 /// serve layout and drawing.
 ///
@@ -589,10 +631,15 @@ pub(crate) fn scene(
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
     let panels = panels(figure, library);
     if panels.is_empty() {
+        let header = figure_header(figure, &panels, library);
+        header.check(figure, context)?;
+        if let Some(header) = draw::figure_header(theme, &header) {
+            scene.push(header);
+        }
         return Ok(scene);
     }
     let planned = plan(figure, &panels, library, context)?;
-    for (panel, (resolved, layout)) in panels.iter().zip(&planned) {
+    for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         scene.push(draw::chrome(theme, layout));
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
             scene.push(marks);
@@ -602,8 +649,15 @@ pub(crate) fn scene(
         }
         scene.push(draw::baseline(theme, layout));
     }
+    if let Some(header) = draw::figure_header(theme, &planned.header) {
+        scene.push(header);
+    }
     Ok(scene)
 }
+
+#[cfg(test)]
+#[path = "header_tests.rs"]
+mod header_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1038,6 +1092,7 @@ mod tests {
         let grid = GridInput {
             width: figure.width_in() * 72.0,
             height: figure.height_in() * 72.0,
+            top: figure_header(figure, &panels, lib).bottom,
             grid: figure.grid(),
             theme,
             context: "Figure.to_scene()",

@@ -14,6 +14,7 @@ use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 use super::share::{Setting, SharedAxis};
+use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
     AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
@@ -558,6 +559,59 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
+    /// Adds a line from the baseline to each value and a scatter marker at the value. Same
+    /// validation as [`AxesMut::scatter`]; NaN skips the point. Category x values sit at band
+    /// centres. A linear y domain includes 0; a log y axis starts stems at its baseline.
+    /// Explicit limits clip stems and markers as they do other marks. Points are not reduced.
+    ///
+    /// The line width is [`Theme::stem_width`](crate::Theme::stem_width); `options.size` sets
+    /// only the marker diameter. Labelled stems take a legend row entry, never a direct label.
+    /// The mark copies `y` once; [`AxesMut::stem_shared`] can store an existing `Arc<[f64]>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Figure, ScaleKind, StemOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.stem(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, -1.0], StemOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stem(&mut self, x: AxisData, y: &[f64], options: StemOptions) -> Result<&mut Self> {
+        self.stem_shared(x, Arc::from(y), options)
+    }
+
+    /// Adds stems as [`AxesMut::stem`] does, storing `y` without copying it. Same rules and
+    /// errors as [`AxesMut::stem`]; a failed call leaves the figure unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::{AxisData, Figure, Mark, ScaleKind, StemOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y: Arc<[f64]> = Arc::from([2.0, -1.0]);
+    /// axes.stem_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), StemOptions::default())?;
+    /// let Some(Mark::Stem(stem)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(stem.y(), &*y));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stem_shared(
+        &mut self,
+        x: AxisData,
+        y: Arc<[f64]>,
+        options: StemOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let series = XySeries::new("Axes.stem()", axes.x, axes.y, x, y, SCATTER_GAP_HINT)?;
+        axes.marks.push(Mark::Stem(StemMark::new(series, options)));
+        Ok(self)
+    }
+
     /// Adds an area: the line through the points, drawn as [`AxesMut::line`] draws it, over the
     /// region between the line and the baseline, filled in the line's color as the theme's
     /// [`FillStyle`](crate::FillStyle) paints it. The fill is drawn first and the line over it.
@@ -697,8 +751,9 @@ impl<'a> AxesMut<'a> {
     /// Adds grouped bars: in each category, one bar per series, side by side in series order.
     /// The group takes 72 % of the category's band, centered in it, with a 2 pt gap between
     /// its bars; when the bars would be narrower than the gap, they touch. Each bar grows from
-    /// the baseline as in [`AxesMut::bar`]. Each series takes its own color; `Auto` colors take
-    /// palette slots in series order. Categories join the x axis in order of first appearance
+    /// the baseline as in [`AxesMut::bar`]. Automatic colors share one palette slot per label
+    /// across the figure; unlabelled series take slots after all labels, per axes.
+    /// Categories join the x axis in order of first appearance
     /// across all marks.
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: an empty

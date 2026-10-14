@@ -44,6 +44,19 @@ pub(super) fn text(label: &Label, color: Rgba) -> Item {
     ))
 }
 
+/// The figure title, subtitle and merged legend as one unclipped group, omitted when empty.
+pub(crate) fn figure_header(theme: &Theme, header: &crate::layout::FigureHeader) -> Option<Item> {
+    let mut items = Vec::new();
+    if let Some(title) = &header.title {
+        items.push(text(title, theme.text_color()));
+    }
+    if let Some(subtitle) = &header.subtitle {
+        items.push(text(subtitle, theme.muted_color()));
+    }
+    super::legend::row(theme, header.legend.entries(), &mut items);
+    (!items.is_empty()).then_some(Item::Group { clip: None, items })
+}
+
 /// The axes chrome as one unclipped group: gridlines, tick labels, header and axis labels, in
 /// that order. The baseline is not part of it; see [`baseline`].
 pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {

@@ -1,10 +1,13 @@
 //! The legend model: one entry per labelled series, with its swatch, and for each legend
 //! style which entries go to the legend row and which become direct labels.
 //!
-//! The model reads series through [`SeriesKey`], never through the marks themselves, so a new
-//! mark kind reaches the legend through its keys alone. A key's anchor, the point a direct
-//! label is attached to, is found by resolve as well.
+//! Per-panel entries read [`SeriesKey`], including the anchors of direct labels. The merged
+//! row reads [`ResolvedMark::legend_swatch`] without computing anchors. Resolve owns both
+//! descriptions, so the legend model never inspects raw mark data.
 
+use std::collections::HashSet;
+
+use crate::model::Figure;
 use crate::resolve::{Anchor, Limits, ResolvedMark, SeriesKey, SeriesKind};
 use crate::{Dash, LegendStyle, Rgba};
 
@@ -58,13 +61,18 @@ pub(crate) struct LegendEntry {
 }
 
 impl LegendEntry {
+    /// An entry for a non-empty label; `None` for an unlabelled series.
+    pub fn new(label: &str, color: Rgba, swatch: Swatch) -> Option<LegendEntry> {
+        (!label.is_empty()).then(|| LegendEntry {
+            label: label.to_owned(),
+            color,
+            swatch,
+        })
+    }
+
     /// The entry of `key`; `None` when the series is unlabelled.
     fn of(key: &SeriesKey<'_>) -> Option<LegendEntry> {
-        (!key.label.is_empty()).then(|| LegendEntry {
-            label: key.label.to_owned(),
-            color: key.color,
-            swatch: Swatch::of(key.kind),
-        })
+        Self::new(key.label, key.color, Swatch::of(key.kind))
     }
 
     /// The label; never empty.
@@ -142,7 +150,23 @@ impl<'a> Legend<'a> {
     ///   labelled somewhere.
     /// - `None` gives nothing.
     pub fn new(style: LegendStyle, marks: &[ResolvedMark<'a>], limits: &Limits) -> Legend<'a> {
-        let keys = marks.iter().flat_map(|mark| mark.keys(limits));
+        Self::panel(style, marks, limits, false)
+    }
+
+    /// The panel's legend. With a merged figure legend, only direct series remain here,
+    /// including the row fallback for a direct series without a visible anchor.
+    pub fn panel(
+        style: LegendStyle,
+        marks: &[ResolvedMark<'a>],
+        limits: &Limits,
+        merged: bool,
+    ) -> Legend<'a> {
+        let keys = marks
+            .iter()
+            .flat_map(|mark| mark.keys(limits))
+            .filter(|key| {
+                !merged || (style == LegendStyle::Direct && key.kind.takes_direct_label())
+            });
         let (mut row, mut direct) = (Vec::new(), Vec::new());
         let row_style = match style {
             LegendStyle::Header | LegendStyle::Direct | LegendStyle::None => RowStyle::Plain,
@@ -170,6 +194,45 @@ impl<'a> Legend<'a> {
             row,
             row_style,
             direct,
+        }
+    }
+
+    /// The figure's row entries in panel and series order, with one entry per label and swatch
+    /// kind. The first swatch wins, including its color and stroke or marker size. Direct
+    /// line-like series remain in their panels; hidden legends contribute no entries.
+    pub fn merged<'m>(
+        figure: &Figure,
+        marks: impl IntoIterator<Item = &'m [ResolvedMark<'a>]>,
+    ) -> Legend<'a>
+    where
+        'a: 'm,
+    {
+        let mut seen = HashSet::new();
+        let mut row = Vec::new();
+        for (axes, marks) in figure.panels().zip(marks) {
+            let style = axes.legend_style().unwrap_or(figure.theme().legend_style());
+            if style == LegendStyle::None {
+                continue;
+            }
+            for entry in marks
+                .iter()
+                .filter(|mark| style != LegendStyle::Direct || mark.line_width().is_none())
+                .flat_map(ResolvedMark::legend_swatch)
+            {
+                let key = (entry.label.clone(), std::mem::discriminant(&entry.swatch));
+                if seen.insert(key) {
+                    row.push(entry);
+                }
+            }
+        }
+        Legend {
+            row,
+            row_style: if figure.theme().legend_style() == LegendStyle::Chips {
+                RowStyle::Chips
+            } else {
+                RowStyle::Plain
+            },
+            direct: Vec::new(),
         }
     }
 
@@ -253,8 +316,8 @@ mod tests {
         // Series order; the unlabelled line is skipped and the repeated label is kept.
         assert_eq!(labels, ["North", "Samples", "North"]);
         let colors: Vec<Rgba> = legend.row().iter().map(LegendEntry::color).collect();
-        // The unlabelled line still takes its palette slot.
-        assert_eq!(colors, [palette[0], palette[2], palette[3]]);
+        // Unlabelled colors follow all labels, and repeated labels share a slot.
+        assert_eq!(colors, [palette[0], palette[1], palette[0]]);
         assert!(!legend.is_empty());
     }
 
@@ -465,13 +528,10 @@ mod tests {
         let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
         assert_eq!(labels, ["2024", "2026", "North", "South", "East"]);
         assert!(legend.row().iter().all(|e| e.swatch() == Swatch::Square));
-        // Every series takes a palette slot, the unlabelled one included.
+        // Label slots come first; the unlabelled series follows them.
         let palette = f.theme().palette();
         let colors: Vec<Rgba> = legend.row().iter().map(LegendEntry::color).collect();
-        assert_eq!(
-            colors,
-            [palette[0], palette[2], palette[3], palette[4], palette[5]]
-        );
+        assert_eq!(colors, palette[..5]);
     }
 
     #[test]
@@ -506,7 +566,7 @@ mod tests {
             .iter()
             .map(|e| (e.label(), e.color()))
             .collect();
-        assert_eq!(direct, [("North", palette[0]), ("North", palette[3])]);
+        assert_eq!(direct, [("North", palette[0]), ("North", palette[0])]);
         // The scatter goes to a row exactly as the header row shows it.
         let header = legend_of(&f, LegendStyle::Header);
         assert_eq!(legend.row_style(), RowStyle::Plain);
