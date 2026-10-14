@@ -592,6 +592,73 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
+    /// Adds markers whose areas are proportional to `sizes`, on a numeric x axis.
+    ///
+    /// All bubble marks on these axes share one size scale. The largest size maps to
+    /// [`Theme::bubble_max_radius`](crate::Theme::bubble_max_radius). Zero sizes and NaN
+    /// coordinates draw nothing; a zero-size point's position still counts in the axis domains
+    /// like any point. The remaining markers draw in input order with the scatter outline.
+    /// Three true-size reference circles appear once, after the first labelled bubble entry,
+    /// using the axes' y tick format. An all-zero or empty scale has only label entries.
+    ///
+    /// A merged figure legend also shows only one set, after its first labelled bubble entry,
+    /// using that panel's scale and y tick format. Panels do not share a size scale unless
+    /// their size values give them the same maximum.
+    ///
+    /// A category x axis gives `Error::Usage`. Different lengths or non-finite or negative
+    /// sizes give `Error::Data`; coordinates follow the scatter rules. Errors change nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BubbleOptions, Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.bubbles(&[1.0, 2.0], &[3.0, 4.0], &[100.0, 400.0], BubbleOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn bubbles(
+        &mut self,
+        x: &[f64],
+        y: &[f64],
+        sizes: &[f64],
+        options: super::bubbles::BubbleOptions,
+    ) -> Result<&mut Self> {
+        self.bubbles_shared(Arc::from(x), Arc::from(y), Arc::from(sizes), options)
+    }
+
+    /// Adds bubbles as [`AxesMut::bubbles`] does, storing existing shared arrays without copying.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::{BubbleOptions, Figure, Mark, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let sizes: Arc<[f64]> = Arc::from([100.0]);
+    /// axes.bubbles_shared(Arc::from([1.0]), Arc::from([2.0]), Arc::clone(&sizes), BubbleOptions::default())?;
+    /// let Some(Mark::Bubbles(mark)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(mark.sizes(), &*sizes));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn bubbles_shared(
+        &mut self,
+        x: Arc<[f64]>,
+        y: Arc<[f64]>,
+        sizes: Arc<[f64]>,
+        options: super::bubbles::BubbleOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        super::validation::check_bubbles("Axes.bubbles()", axes.x, axes.y, (&x, &y, &sizes))?;
+        axes.marks
+            .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
+                x, y, sizes, options,
+            )));
+        Ok(self)
+    }
+
     /// Adds a line from the baseline to each value and a scatter marker at the value. Same
     /// validation as [`AxesMut::scatter`]; NaN skips the point. Category x values sit at band
     /// centres. A linear y domain includes 0; a log y axis starts stems at its baseline.

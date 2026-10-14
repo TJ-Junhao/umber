@@ -5,6 +5,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `line.py`: two lines with labels, a title, a subtitle and axis labels.
 - `subplots.py`: a 2 × 2 grid with a centered figure title and subtitle, x scales shared by column, a comparison panel spanning both rows and a merged legend.
 - `scatter.py`: two point clouds with different markers and sizes.
+- `bubbles.py`: cities with population encoded by marker area and reference circles showing the size scale.
 - `area.py`: an area chart with the gradient fill style.
 - `stacked_area.py`: renewable generation in three stacked layers, outlined over flat fills.
 - `step.py`: step lines in the three positions.
@@ -14,6 +15,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `error_bars.py`: group means with intervals on a category axis, and measurements with uncertainty in x and y.
 - `bars.py`: a bar chart, a grouped bar chart and a stacked bar chart.
 - `box.py`: plain and grouped box plots, with Tukey whiskers and outliers.
+- `violin.py`: plain and grouped violin plots comparing sample distributions across regions.
 - `histogram.py`: a histogram with a chosen number of bins.
 - `themes.py`: the same chart in the Pigment, Graphite and Midnight themes.
 - `ticks.py`: custom x tick labels and a percent y tick format.

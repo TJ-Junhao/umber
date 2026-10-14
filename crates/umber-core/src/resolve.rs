@@ -606,6 +606,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::GroupedBox(mark) => mark.categories(),
         Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
+        Mark::Bubbles(_) => &[],
         Mark::Band(_) | Mark::StackedArea(_) => &[],
         Mark::ErrorBars(mark) => category_names(mark.positions()),
     }
@@ -755,6 +756,21 @@ impl Iterator for DomainValues<'_> {
 /// order is part of the output.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ResolvedMark<'a> {
+    /// Bubbles sharing the largest size value across this axes.
+    Bubbles {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated data and options.
+        mark: &'a crate::model::BubbleMark,
+        /// The resolved marker color.
+        color: Rgba,
+        /// The axes-wide maximum size value.
+        maximum: f64,
+        /// The maximum radius, in points.
+        radius: f32,
+        /// The diameter of the label's dot swatch.
+        size: f32,
+    },
     /// A line mark.
     Line {
         /// Drawn geometry, prepared only when choosing an inside legend position.
@@ -1029,6 +1045,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VSpan { geometry, .. }
             | ResolvedMark::Band { geometry, .. }
             | ResolvedMark::ErrorBars { geometry, .. }
+            | ResolvedMark::Bubbles { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
             | ResolvedMark::Violin { geometry, .. } => geometry,
@@ -1057,6 +1074,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VSpan { geometry, .. }
             | ResolvedMark::Band { geometry, .. }
             | ResolvedMark::ErrorBars { geometry, .. }
+            | ResolvedMark::Bubbles { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
             | ResolvedMark::Violin { geometry, .. } => geometry,
@@ -1073,6 +1091,7 @@ impl<'a> ResolvedMark<'a> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => numbers(mark.x()),
             ResolvedMark::Scatter { mark, .. } => numbers(mark.x()),
+            ResolvedMark::Bubbles { mark, .. } => mark.x(),
             ResolvedMark::Stem { mark, .. } => numbers(mark.x()),
             ResolvedMark::Area { mark, .. } => numbers(mark.x()),
             ResolvedMark::Step { mark, .. } => numbers(mark.x()),
@@ -1112,6 +1131,7 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => category_names(mark.x()),
             ResolvedMark::Scatter { mark, .. } => category_names(mark.x()),
+            ResolvedMark::Bubbles { .. } => &[],
             ResolvedMark::Stem { mark, .. } => category_names(mark.x()),
             ResolvedMark::Area { mark, .. } => category_names(mark.x()),
             ResolvedMark::Step { mark, .. } => category_names(mark.x()),
@@ -1151,6 +1171,7 @@ impl<'a> ResolvedMark<'a> {
         let values: &[f64] = match self {
             ResolvedMark::Line { mark, .. } => mark.y(),
             ResolvedMark::Scatter { mark, .. } => mark.y(),
+            ResolvedMark::Bubbles { mark, .. } => mark.y(),
             ResolvedMark::Stem { mark, .. } => mark.y(),
             ResolvedMark::Area { mark, .. } => mark.y(),
             ResolvedMark::Step { mark, .. } => mark.y(),
@@ -1232,6 +1253,7 @@ impl<'a> ResolvedMark<'a> {
         match self {
             // With no finite y value, a stem does not change the y domain or its padding,
             // even when explicit ticks are the only values on that axis.
+            ResolvedMark::Bubbles { .. } => false,
             ResolvedMark::Stem { mark, .. } => mark.y().iter().any(|v| v.is_finite()),
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
@@ -1259,6 +1281,7 @@ impl<'a> ResolvedMark<'a> {
     /// half their stroke.
     pub fn line_width(&self) -> Option<f32> {
         match *self {
+            ResolvedMark::Bubbles { .. } => None,
             ResolvedMark::Stem { .. } => None,
             ResolvedMark::Line { width, .. }
             | ResolvedMark::Area { width, .. }
@@ -1285,6 +1308,7 @@ impl<'a> ResolvedMark<'a> {
     /// is padded (see [`resolve_x`]).
     pub fn is_reference(&self) -> bool {
         match self {
+            ResolvedMark::Bubbles { .. } => false,
             ResolvedMark::Stem { .. } => false,
             ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
@@ -1374,6 +1398,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter {
                 mark, color, size, ..
             } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
+            ResolvedMark::Bubbles {
+                mark, color, size, ..
+            } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
             ResolvedMark::Stem {
                 mark, color, size, ..
             } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
@@ -1439,10 +1466,58 @@ impl<'a> ResolvedMark<'a> {
         }
     }
 
+    /// Reference circles following a labelled bubble series, using its axes' y tick format.
+    pub fn size_legend(&self, format: &TickFormat) -> Vec<LegendEntry> {
+        let Self::Bubbles {
+            mark,
+            color,
+            maximum,
+            radius,
+            ..
+        } = self
+        else {
+            return Vec::new();
+        };
+        if mark.options().label.is_empty() || *maximum <= 0.0 {
+            return Vec::new();
+        }
+        let values = crate::bubble_scale::references(*maximum);
+        let labels = crate::ticks::format_given(&values);
+        let ticks = values
+            .into_iter()
+            .zip(labels)
+            .map(|(value, label)| crate::Tick { value, label })
+            .collect();
+        format
+            .relabel(ticks, crate::ticks::TickValues::Exact)
+            .into_iter()
+            .filter_map(|tick| {
+                LegendEntry::new(
+                    &tick.label,
+                    *color,
+                    Swatch::Bubble {
+                        radius: crate::bubble_scale::radius(tick.value, *maximum, *radius),
+                    },
+                )
+            })
+            .collect()
+    }
+
     /// The series the mark shows, in order, one key each: what a legend lists for the mark, on
     /// an axes whose axes have the limits `limits`.
     pub fn keys(&self, limits: &Limits) -> Vec<SeriesKey<'a>> {
         match self {
+            &ResolvedMark::Bubbles {
+                mark, color, size, ..
+            } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Points {
+                    marker: mark.options().marker,
+                    size,
+                },
+                anchor: None,
+            }],
             &ResolvedMark::Stem {
                 mark, color, size, ..
             } => vec![SeriesKey {
@@ -2005,6 +2080,7 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
     match mark {
         Mark::Line(m) => vec![(&m.options().label, m.options().color)],
         Mark::Scatter(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Bubbles(m) => vec![(&m.options().label, m.options().color)],
         Mark::Stem(m) => vec![(&m.options().label, m.options().color)],
         Mark::Area(m) => vec![(&m.options().label, m.options().color)],
         Mark::Bar(m) => vec![(&m.options().label, m.options().color)],
@@ -2044,6 +2120,15 @@ fn resolve_panel_marks<'a>(
     theme: &Theme,
     slots: &BTreeMap<&str, usize>,
 ) -> Vec<ResolvedMark<'a>> {
+    let bubble_maximum = marks
+        .iter()
+        .filter_map(|mark| match mark {
+            Mark::Bubbles(mark) => Some(mark.sizes()),
+            _ => None,
+        })
+        .flatten()
+        .copied()
+        .fold(0.0, f64::max);
     let palette = theme.palette();
     let mut next_auto = slots.len();
     let mut color_of = |spec: ColorSpec, label: &str| {
@@ -2074,6 +2159,14 @@ fn resolve_panel_marks<'a>(
                 geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 size: theme.drawn_marker_size(mark.options().size),
+            },
+            Mark::Bubbles(mark) => ResolvedMark::Bubbles {
+                mark,
+                geometry: None,
+                color: color_of(mark.options().color, &mark.options().label),
+                maximum: bubble_maximum,
+                radius: theme.bubble_max_radius(),
+                size: theme.drawn_marker_size(crate::SizeSpec::Auto),
             },
             Mark::Stem(mark) => ResolvedMark::Stem {
                 mark,

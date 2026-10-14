@@ -87,7 +87,7 @@ pub(crate) struct SwatchBox {
 /// them.
 #[derive(Debug, Clone)]
 pub(crate) struct RowEntry {
-    /// The swatch; in a chips row always a dot.
+    /// The swatch; a dot in a chips row, except for true-size bubble references.
     pub swatch: SwatchBox,
     /// The label, in the body style, to the right of the swatch.
     pub label: Label,
@@ -147,6 +147,8 @@ impl MeasuredRow {
     ///
     /// A chip is a pill one body line plus `2 × 3` pt tall, holding a dot of `0.6 ×` the label
     /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
+    /// Bubble references have no pill or horizontal padding and retain their true circle size,
+    /// including the outline. Both row styles grow to contain the tallest reference circle.
     pub fn measure(theme: &Theme, legend: &Legend, lib: &FontLibrary) -> Option<MeasuredRow> {
         if legend.row().is_empty() {
             return None;
@@ -230,7 +232,9 @@ impl MeasuredRow {
             entry.swatch.center_y = top + row_height / 2.0;
             entry.label.x = entry.swatch.x + entry.swatch.width + SWATCH_GAP;
             entry.label.y = baseline_in_line(top, row_height, ascent, descent);
-            entry.chip = (row_style == RowStyle::Chips).then_some(Area {
+            entry.chip = (row_style == RowStyle::Chips
+                && !matches!(entry.swatch.kind, Swatch::Bubble { .. }))
+            .then_some(Area {
                 x,
                 y: top,
                 width: entry_width,
@@ -604,6 +608,9 @@ fn entry_extent(
     row_height: f64,
     entry: &RowEntry,
 ) -> (f64, f64) {
+    if matches!(entry.swatch.kind, Swatch::Bubble { .. }) {
+        return (0.0, entry.swatch.width + SWATCH_GAP + entry.label.width());
+    }
     let width = padding_x + entry.swatch.width + SWATCH_GAP + entry.label.width() + padding_x;
     match row_style {
         RowStyle::Chips if width < row_height => {
@@ -623,8 +630,8 @@ fn entry_extent(
 /// series' width (see [`MeasuredRow::measure`]), and stroked at the series' width up to the side
 /// of a square swatch (`0.8 ×` the label size) and up to its own length: a thicker line shows
 /// as a bar of that height, and its round caps fit the box, so its stroke never spills out of
-/// its box onto the label. A chips row always draws a dot of
-/// `0.6 ×` the label size, whatever the series.
+/// its box onto the label. A chips row draws a dot of `0.6 ×` the label size for series
+/// entries. Bubble references keep their true radius and stroke envelope in either style.
 fn swatch_size(
     theme: &Theme,
     row_style: RowStyle,
@@ -632,6 +639,10 @@ fn swatch_size(
     size: f64,
 ) -> (Swatch, f64, f64) {
     match (row_style, swatch) {
+        (_, Swatch::Bubble { radius }) => {
+            let diameter = 2.0 * f64::from(radius) + f64::from(crate::draw::MARKER_OUTLINE);
+            (swatch, diameter, diameter)
+        }
         (RowStyle::Chips, _) => {
             let d = CHIP_DOT * size;
             (Swatch::Dot { diameter: d as f32 }, d, d)

@@ -649,6 +649,67 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.scatter(self._row, self._col, xs, ys, name, spec, shape.value, extent)
             return self
 
+    def bubbles(
+        self: "Axes[float, Y]",
+        x: Values[float],
+        y: Values[float],
+        sizes: Values[float],
+        *,
+        label: str = "",
+        color: Color = Color.AUTO,
+        marker: Marker = Marker.CIRCLE,
+    ) -> "Axes[float, Y]":
+        """Add markers whose areas are proportional to non-negative size values.
+
+        Bubble marks on these axes share one size scale. The largest value has a radius of
+        18 points. Zero sizes and NaN coordinates draw nothing; a zero-size point's position
+        still counts in the axis domains like any point. Markers draw in data order, without
+        downsampling, with the theme's marker outline. Three reference circles at their true
+        radius appear once, after the first labelled bubble entry, formatted like the y ticks.
+        An empty or all-zero size scale shows only label entries.
+
+        A merged figure legend also shows only one set, after its first labelled bubble entry,
+        using that panel's scale and y tick format. Panels do not share a size scale unless
+        their size values give them the same maximum.
+
+        Args:
+            x: Numeric x coordinates on a linear or log axis.
+            y: The y coordinates, one per x coordinate.
+            sizes: Finite non-negative values, one per point; area is proportional to value.
+            label: The legend label; empty skips this mark's legend entry.
+            color: The marker color. ``Color.AUTO`` takes the next palette color.
+            marker: The marker shape; size references are always circles.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If lengths differ, coordinates are invalid for their axes, or a size
+                is negative or non-finite.
+            UsageError: If the x axis is a category axis.
+            StyleError: If ``label`` is too long.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.bubbles([1, 2, 3], [4, 2, 5], [100, 400, 870], label="Cities")
+        """
+        with api_call():
+            context = "Axes.bubbles()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            check_floats_type(context, "sizes", sizes)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
+            xs = floats(context, "x", x)
+            ys = floats(context, "y", y)
+            values = floats(context, "sizes", sizes)
+            name = _args.text(context, "label", label)
+            self._native.bubbles(self._row, self._col, xs, ys, values, name, spec, shape.value)
+            return self
+
     def stem(
         self,
         x: Values[X],

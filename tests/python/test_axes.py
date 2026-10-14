@@ -132,6 +132,7 @@ def test_axes_report_the_package_as_their_module() -> None:
         "line",
         "area",
         "scatter",
+        "bubbles",
         "bar",
         "grouped_bar",
         "stacked_bar",

@@ -347,6 +347,7 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "line": lambda f, r, c: f.line(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "area": lambda f, r, c: f.area(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "scatter": lambda f, r, c: f.scatter(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
+    "bubbles": lambda f, r, c: f.bubbles(r, c, floats(1), floats(1), floats(1), "", AUTO, 0),
     "bar": lambda f, r, c: f.bar(r, c, ["a"], floats(1), "", AUTO),
     "grouped_bar": lambda f, r, c: f.grouped_bar(r, c, ["a"], [("s", floats(1), AUTO)]),
     "stacked_bar": lambda f, r, c: f.stacked_bar(r, c, ["a"], [("s", floats(1), AUTO)]),

@@ -89,6 +89,7 @@ mod corpus {
     pub mod band;
     pub mod bars;
     pub mod r#box;
+    pub mod bubbles;
     pub mod error_bars;
     pub mod grid;
     pub mod header;
@@ -163,6 +164,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::share::cases(&lib, &mut sink);
     corpus::stacked_area::cases(&lib, &mut sink);
     corpus::stem::cases(&lib, &mut sink);
+    corpus::bubbles::cases(&lib, &mut sink);
     corpus::r#box::cases(&lib, &mut sink);
     corpus::violin::cases(&lib, &mut sink);
 }
@@ -1765,6 +1767,15 @@ mod record {
                 bars.options().width,
                 bars.options().caps
             ),
+            Mark::Bubbles(mark) => format!(
+                "bubbles x={} y={} sizes={} label={} color={} marker={}",
+                floats64(mark.x()),
+                floats64(mark.y()),
+                floats64(mark.sizes()),
+                text(&mark.options().label),
+                color_spec(mark.options().color),
+                marker(mark.options().marker)
+            ),
             Mark::Stem(stem) => format!(
                 "stem x={} y={} label={} color={} marker={} size={:?}",
                 axis_data(stem.x()),
@@ -2840,6 +2851,11 @@ fn theme_cases() -> String {
         let _ = writeln!(out, "  panel_gap {}", record::f32(theme.panel_gap()));
         let _ = writeln!(out, "  box_width {}", record::f32(theme.box_width()));
         let _ = writeln!(out, "  violin_width {}", record::f32(theme.violin_width()));
+        let _ = writeln!(
+            out,
+            "  bubble_max_radius {}",
+            record::f32(theme.bubble_max_radius())
+        );
     }
     out
 }
