@@ -250,26 +250,23 @@ impl ShareGroups {
     }
 }
 
-/// Whether the panel shows x and y tick labels. A span counts in every covered column/row;
-/// its labels remain if it reaches the occupied outer edge in any of them.
+/// Whether the panel shows x and y tick labels. Shared x labels hide only behind an occupied
+/// panel below covering exactly the same columns; shared y labels likewise to the left with
+/// exactly the same rows. Matching columns/rows also put the panels in the same shared group.
 pub(crate) fn label_visibility(figure: &Figure, cells: CellRange) -> [bool; 2] {
     let show_x = !matches!(figure.grid().share_x(), Share::Col | Share::All)
-        || (cells.col()..cells.col() + cells.col_span()).any(|col| {
-            !figure.panels().any(|a| {
-                let c = a.cells();
-                c.col() <= col
-                    && col < c.col() + c.col_span()
-                    && c.row() >= cells.row() + cells.row_span()
-            })
+        || !figure.panels().any(|a| {
+            let c = a.cells();
+            c.col() == cells.col()
+                && c.col_span() == cells.col_span()
+                && c.row() >= cells.row() + cells.row_span()
         });
     let show_y = !matches!(figure.grid().share_y(), Share::Row | Share::All)
-        || (cells.row()..cells.row() + cells.row_span()).any(|row| {
-            !figure.panels().any(|a| {
-                let c = a.cells();
-                c.row() <= row
-                    && row < c.row() + c.row_span()
-                    && c.col() + c.col_span() <= cells.col()
-            })
+        || !figure.panels().any(|a| {
+            let c = a.cells();
+            c.row() == cells.row()
+                && c.row_span() == cells.row_span()
+                && c.col() + c.col_span() <= cells.col()
         });
     [show_x, show_y]
 }
