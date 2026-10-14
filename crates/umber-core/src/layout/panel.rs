@@ -340,6 +340,10 @@ pub(crate) struct PanelBands {
     /// The room direct labels reserve right of the plot, at most the panel's
     /// [`PanelSpan::reserve_cap`]; 0 without direct labels.
     pub direct_reserve: f64,
+    /// The column legend and its gap to the plot; uncapped.
+    pub right_legend: f64,
+    /// The bottom legend and its gap to the x axis.
+    pub bottom_legend: f64,
     /// The x tick label row and its gap; 0 without x tick labels.
     pub x_band: f64,
     /// The x axis label row and its gap; 0 without an x axis label.
@@ -384,7 +388,17 @@ impl PanelBands {
     /// Everything below the plot: the x tick label row and the x label row, or the bottom y
     /// tick label reaching below the plot when that reaches further.
     pub(super) fn below(&self) -> f64 {
+        self.axis_below() + self.bottom_legend
+    }
+
+    /// The room below the plot for the axes alone, before a bottom legend.
+    pub(super) fn axis_below(&self) -> f64 {
         (self.x_band + self.x_title_band).max(self.label_drop)
+    }
+
+    /// The widest reserve beside the plot: direct labels or the column legend.
+    pub(super) fn right(&self) -> f64 {
+        self.direct_reserve.max(self.right_legend)
     }
 }
 
@@ -405,7 +419,7 @@ pub(crate) fn measure_panel(
     } = *input;
     let styles = Styles::new(theme);
 
-    let row = legend.row_within(span.row_left, span.row_right);
+    let row = legend.header_within(span.row_left, span.row_right);
     let heading = Header::measure(axes.title_text(), axes.subtitle_text(), &styles, &row, lib);
 
     // Tick labels.
@@ -477,6 +491,8 @@ pub(crate) fn measure_panel(
         label_rise,
         y_tick_column,
         direct_reserve: legend.direct.reserve(span.reserve_cap),
+        right_legend: legend.right_reserve(),
+        bottom_legend: legend.bottom_reserve(span.row_left, span.row_right),
         x_band,
         x_title_band,
         label_drop,
@@ -530,13 +546,41 @@ pub(crate) fn place_panel(
         tick_size,
         ..
     } = bands;
-    let row = input.legend.row_within(header_box.left, header_box.right);
+    let position = input.legend.position;
+    let row = if position == crate::LegendPosition::TopRight {
+        input
+            .legend
+            .header_within(plot.x, plot.right())
+            .aligned(plot.x, plot.right(), Align::Right)
+    } else {
+        input
+            .legend
+            .header_within(header_box.left, header_box.right)
+    };
     let row_height = (!row.is_empty()).then(|| row.height());
     let header = heading.place(header_box, input.theme.title_align(), row_height);
-    let row = if row_height.is_some() {
-        row.placed(header.row)
-    } else {
-        LegendRow::default()
+    let row = match position {
+        crate::LegendPosition::TopLeft | crate::LegendPosition::TopRight => row.placed(header.row),
+        crate::LegendPosition::Right => input
+            .legend
+            .column(plot.right() + super::placement::RIGHT_GAP)
+            .placed(plot.y),
+        crate::LegendPosition::Bottom => {
+            let axis_bottom = if xlabel.is_some() {
+                xlabel_baseline + bands.body_descent
+            } else {
+                plot.bottom() + bands.x_band
+            };
+            input
+                .legend
+                .row_within(header_box.left, header_box.right)
+                .placed(axis_bottom + super::placement::BOTTOM_GAP)
+        }
+        // The final resolved mark geometry chooses the position after layout.
+        crate::LegendPosition::Best => input
+            .legend
+            .column(plot.x + 2.0 * super::placement::BEST_PADDING)
+            .placed(plot.y + 2.0 * super::placement::BEST_PADDING),
     };
 
     for (pos, label) in &mut y_labels {

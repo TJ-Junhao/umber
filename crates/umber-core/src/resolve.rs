@@ -755,6 +755,8 @@ impl Iterator for DomainValues<'_> {
 pub(crate) enum ResolvedMark<'a> {
     /// A line mark.
     Line {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a LineMark,
         /// The line color.
@@ -764,6 +766,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A scatter mark.
     Scatter {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a ScatterMark,
         /// The marker color.
@@ -773,6 +777,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// An area mark.
     Area {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a AreaMark,
         /// The color of the line and of its fill.
@@ -782,6 +788,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A bar mark.
     Bar {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a BarMark,
         /// The bar color.
@@ -789,6 +797,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A grouped bar mark.
     Grouped {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a BarGroupMark,
         /// Each series of the mark, in order, with its resolved color.
@@ -796,6 +806,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A stacked bar mark.
     Stacked {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a BarGroupMark,
         /// Each series of the mark, in order, with its resolved color.
@@ -806,6 +818,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// Non-negative area layers, filled between cumulative curves.
     StackedArea {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a StackedAreaMark,
         /// Each series and its resolved color, in stacking order.
@@ -817,6 +831,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A histogram mark.
     Hist {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a HistMark,
         /// The mark's values binned; `None` when it has no finite value.
@@ -826,6 +842,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A step mark.
     Step {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a StepMark,
         /// The line color.
@@ -835,6 +853,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A horizontal reference line.
     HLine {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a HLineMark,
         /// The line color.
@@ -844,6 +864,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A vertical reference line.
     VLine {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a VLineMark,
         /// The line color.
@@ -853,6 +875,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A horizontal reference span.
     HSpan {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a SpanMark,
         /// The fill color, before the area opacity.
@@ -860,6 +884,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A vertical reference span.
     VSpan {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a SpanMark,
         /// The fill color, before the area opacity.
@@ -867,6 +893,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A band between two curves.
     Band {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a BandMark,
         /// The fill color, before the area opacity.
@@ -874,6 +902,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// A stem mark, drawn from the baseline with a scatter marker at each value.
     Stem {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a StemMark,
         /// The color of the stems and their markers.
@@ -883,6 +913,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// Plain or grouped boxes, with each group's statistics computed once.
     Box {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The categories, in input order.
         categories: &'a [String],
         /// The distributions in input order.
@@ -892,6 +924,8 @@ pub(crate) enum ResolvedMark<'a> {
     },
     /// Error bars.
     ErrorBars {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a ErrorBarMark,
         /// The color of the bars and their caps.
@@ -913,6 +947,60 @@ pub(crate) struct ResolvedDistribution<'a> {
 }
 
 impl<'a> ResolvedMark<'a> {
+    /// A copy carrying the final drawn geometry for inside-legend scoring. No geometry is
+    /// built for legends outside the plot; all candidates reuse this one projection.
+    pub fn for_coverage(&self, geometry: Option<crate::coverage::Geometry>) -> Self {
+        let geometry = geometry.map(Box::new);
+        let mut mark = self.clone();
+        let target = match &mut mark {
+            ResolvedMark::Line { geometry, .. }
+            | ResolvedMark::Scatter { geometry, .. }
+            | ResolvedMark::Area { geometry, .. }
+            | ResolvedMark::Bar { geometry, .. }
+            | ResolvedMark::Grouped { geometry, .. }
+            | ResolvedMark::Stacked { geometry, .. }
+            | ResolvedMark::StackedArea { geometry, .. }
+            | ResolvedMark::Hist { geometry, .. }
+            | ResolvedMark::Step { geometry, .. }
+            | ResolvedMark::HLine { geometry, .. }
+            | ResolvedMark::VLine { geometry, .. }
+            | ResolvedMark::HSpan { geometry, .. }
+            | ResolvedMark::VSpan { geometry, .. }
+            | ResolvedMark::Band { geometry, .. }
+            | ResolvedMark::ErrorBars { geometry, .. }
+            | ResolvedMark::Stem { geometry, .. }
+            | ResolvedMark::Box { geometry, .. } => geometry,
+        };
+        *target = geometry;
+        mark
+    }
+
+    /// Drawn points and crossing segments (one each), plus filled overlap in square points,
+    /// inside `box_` and the plot `area`. Uses the final downsampled geometry prepared by
+    /// [`ResolvedMark::for_coverage`], in drawing order, with no wildcard over mark kinds.
+    pub fn coverage(&self, area: &crate::layout::Area, box_: &crate::layout::Frame) -> f64 {
+        let geometry = match self {
+            ResolvedMark::Line { geometry, .. }
+            | ResolvedMark::Scatter { geometry, .. }
+            | ResolvedMark::Area { geometry, .. }
+            | ResolvedMark::Bar { geometry, .. }
+            | ResolvedMark::Grouped { geometry, .. }
+            | ResolvedMark::Stacked { geometry, .. }
+            | ResolvedMark::StackedArea { geometry, .. }
+            | ResolvedMark::Hist { geometry, .. }
+            | ResolvedMark::Step { geometry, .. }
+            | ResolvedMark::HLine { geometry, .. }
+            | ResolvedMark::VLine { geometry, .. }
+            | ResolvedMark::HSpan { geometry, .. }
+            | ResolvedMark::VSpan { geometry, .. }
+            | ResolvedMark::Band { geometry, .. }
+            | ResolvedMark::ErrorBars { geometry, .. }
+            | ResolvedMark::Stem { geometry, .. }
+            | ResolvedMark::Box { geometry, .. } => geometry,
+        };
+        geometry.as_ref().map_or(0.0, |g| g.coverage(area, box_))
+    }
+
     /// The values the mark contributes to a continuous x domain, in data order; none when its
     /// x values are categories. See [`ResolvedMark`] for the contract.
     ///
@@ -1156,7 +1244,9 @@ impl<'a> ResolvedMark<'a> {
             LegendEntry::new(label, color, swatch).into_iter().collect()
         };
         match *self {
-            ResolvedMark::Line { mark, color, width } => one(
+            ResolvedMark::Line {
+                mark, color, width, ..
+            } => one(
                 &mark.options().label,
                 color,
                 Swatch::Line {
@@ -1164,7 +1254,9 @@ impl<'a> ResolvedMark<'a> {
                     width,
                 },
             ),
-            ResolvedMark::Area { mark, color, width } => one(
+            ResolvedMark::Area {
+                mark, color, width, ..
+            } => one(
                 &mark.options().label,
                 color,
                 Swatch::Line {
@@ -1172,7 +1264,9 @@ impl<'a> ResolvedMark<'a> {
                     width,
                 },
             ),
-            ResolvedMark::Step { mark, color, width } => one(
+            ResolvedMark::Step {
+                mark, color, width, ..
+            } => one(
                 &mark.options().label,
                 color,
                 Swatch::Line {
@@ -1180,7 +1274,9 @@ impl<'a> ResolvedMark<'a> {
                     width,
                 },
             ),
-            ResolvedMark::HLine { mark, color, width } => one(
+            ResolvedMark::HLine {
+                mark, color, width, ..
+            } => one(
                 &mark.options().label,
                 color,
                 Swatch::Line {
@@ -1188,7 +1284,9 @@ impl<'a> ResolvedMark<'a> {
                     width,
                 },
             ),
-            ResolvedMark::VLine { mark, color, width } => one(
+            ResolvedMark::VLine {
+                mark, color, width, ..
+            } => one(
                 &mark.options().label,
                 color,
                 Swatch::Line {
@@ -1196,11 +1294,14 @@ impl<'a> ResolvedMark<'a> {
                     width,
                 },
             ),
-            ResolvedMark::Scatter { mark, color, size } => {
-                one(&mark.options().label, color, Swatch::Dot { diameter: size })
-            }
-            ResolvedMark::Stem { mark, color, size } => {
-                one(&mark.options().label, color, Swatch::Dot { diameter: size })
+            ResolvedMark::Scatter {
+                mark, color, size, ..
+            } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
+            ResolvedMark::Stem {
+                mark, color, size, ..
+            } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
+            ResolvedMark::Bar { mark, color, .. } => {
+                one(&mark.options().label, color, Swatch::Square)
             }
             ResolvedMark::Box {
                 ref distributions,
@@ -1210,7 +1311,6 @@ impl<'a> ResolvedMark<'a> {
                 .iter()
                 .filter_map(|d| LegendEntry::new(d.label, d.color, Swatch::Box { width }))
                 .collect(),
-            ResolvedMark::Bar { mark, color } => one(&mark.options().label, color, Swatch::Square),
             ResolvedMark::Grouped { ref series, .. } | ResolvedMark::Stacked { ref series, .. } => {
                 series
                     .iter()
@@ -1235,11 +1335,15 @@ impl<'a> ResolvedMark<'a> {
                 })
                 .collect(),
             ResolvedMark::Hist { mark, color, .. } => one(mark.label(), color, Swatch::Square),
-            ResolvedMark::HSpan { mark, color } | ResolvedMark::VSpan { mark, color } => {
+            ResolvedMark::HSpan { mark, color, .. } | ResolvedMark::VSpan { mark, color, .. } => {
                 one(&mark.options().label, color, Swatch::Square)
             }
-            ResolvedMark::Band { mark, color } => one(&mark.options().label, color, Swatch::Square),
-            ResolvedMark::ErrorBars { mark, color, width } => one(
+            ResolvedMark::Band { mark, color, .. } => {
+                one(&mark.options().label, color, Swatch::Square)
+            }
+            ResolvedMark::ErrorBars {
+                mark, color, width, ..
+            } => one(
                 &mark.options().label,
                 color,
                 Swatch::ErrorBar {
@@ -1254,7 +1358,9 @@ impl<'a> ResolvedMark<'a> {
     /// an axes whose axes have the limits `limits`.
     pub fn keys(&self, limits: &Limits) -> Vec<SeriesKey<'a>> {
         match self {
-            &ResolvedMark::Stem { mark, color, size } => vec![SeriesKey {
+            &ResolvedMark::Stem {
+                mark, color, size, ..
+            } => vec![SeriesKey {
                 label: &mark.options().label,
                 color,
                 kind: SeriesKind::Points {
@@ -1263,15 +1369,21 @@ impl<'a> ResolvedMark<'a> {
                 },
                 anchor: None,
             }],
-            &ResolvedMark::Line { mark, color, width } => {
+            &ResolvedMark::Line {
+                mark, color, width, ..
+            } => {
                 vec![SeriesKey::of_line(mark, color, width, limits)]
             }
             // An area is labelled as the line that bounds it: the line's swatch, and a direct
             // label at the line's anchor.
-            &ResolvedMark::Area { mark, color, width } => {
+            &ResolvedMark::Area {
+                mark, color, width, ..
+            } => {
                 vec![SeriesKey::of_line(mark.line(), color, width, limits)]
             }
-            &ResolvedMark::Scatter { mark, color, size } => {
+            &ResolvedMark::Scatter {
+                mark, color, size, ..
+            } => {
                 let options = mark.options();
                 vec![SeriesKey {
                     label: &options.label,
@@ -1296,7 +1408,7 @@ impl<'a> ResolvedMark<'a> {
                     anchor: None,
                 })
                 .collect(),
-            &ResolvedMark::Bar { mark, color } => vec![SeriesKey {
+            &ResolvedMark::Bar { mark, color, .. } => vec![SeriesKey {
                 label: &mark.options().label,
                 color,
                 kind: SeriesKind::Bar,
@@ -1316,6 +1428,7 @@ impl<'a> ResolvedMark<'a> {
                 series,
                 stacks,
                 width,
+                ..
             } => series
                 .iter()
                 .zip(stacks.curves())
@@ -1337,18 +1450,24 @@ impl<'a> ResolvedMark<'a> {
             }],
             // A step line is labelled as a line is: the line's swatch, and a direct label at the
             // end of the line.
-            &ResolvedMark::Step { mark, color, width } => {
+            &ResolvedMark::Step {
+                mark, color, width, ..
+            } => {
                 vec![SeriesKey::of_step(mark, color, width, limits)]
             }
             // Reference lines and spans have no anchor, and their kinds say that no direct
             // label ever goes to them (see `SeriesKind::takes_direct_label`).
-            &ResolvedMark::HLine { mark, color, width } => {
+            &ResolvedMark::HLine {
+                mark, color, width, ..
+            } => {
                 vec![SeriesKey::of_rule(mark.options(), color, width)]
             }
-            &ResolvedMark::VLine { mark, color, width } => {
+            &ResolvedMark::VLine {
+                mark, color, width, ..
+            } => {
                 vec![SeriesKey::of_rule(mark.options(), color, width)]
             }
-            &ResolvedMark::HSpan { mark, color } | &ResolvedMark::VSpan { mark, color } => {
+            &ResolvedMark::HSpan { mark, color, .. } | &ResolvedMark::VSpan { mark, color, .. } => {
                 vec![SeriesKey {
                     label: &mark.options().label,
                     color,
@@ -1358,7 +1477,7 @@ impl<'a> ResolvedMark<'a> {
             }
             // A band is a filled region and is listed as a span is: a square swatch, and an
             // entry in the legend row under every style.
-            &ResolvedMark::Band { mark, color } => vec![SeriesKey {
+            &ResolvedMark::Band { mark, color, .. } => vec![SeriesKey {
                 label: &mark.options().label,
                 color,
                 kind: SeriesKind::Span,
@@ -1366,7 +1485,9 @@ impl<'a> ResolvedMark<'a> {
             }],
             // Error bars are listed with a short bar of their own, and never take a direct
             // label.
-            &ResolvedMark::ErrorBars { mark, color, width } => vec![SeriesKey {
+            &ResolvedMark::ErrorBars {
+                mark, color, width, ..
+            } => vec![SeriesKey {
                 label: &mark.options().label,
                 color,
                 kind: SeriesKind::ErrorBar {
@@ -1838,25 +1959,30 @@ fn resolve_panel_marks<'a>(
         .map(|mark| match mark {
             Mark::Line(mark) => ResolvedMark::Line {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::Scatter(mark) => ResolvedMark::Scatter {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 size: theme.drawn_marker_size(mark.options().size),
             },
             Mark::Stem(mark) => ResolvedMark::Stem {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 size: theme.drawn_marker_size(mark.options().size),
             },
             Mark::Area(mark) => ResolvedMark::Area {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::Box(mark) => ResolvedMark::Box {
+                geometry: None,
                 categories: mark.categories(),
                 distributions: vec![ResolvedDistribution {
                     label: &mark.options().label,
@@ -1866,6 +1992,7 @@ fn resolve_panel_marks<'a>(
                 width: theme.drawn_line_width(crate::SizeSpec::Auto),
             },
             Mark::GroupedBox(mark) => ResolvedMark::Box {
+                geometry: None,
                 categories: mark.categories(),
                 distributions: mark
                     .distributions()
@@ -1879,10 +2006,12 @@ fn resolve_panel_marks<'a>(
             },
             Mark::Bar(mark) => ResolvedMark::Bar {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::GroupedBar(mark) => ResolvedMark::Grouped {
                 mark,
+                geometry: None,
                 series: mark
                     .series()
                     .map(|view| (view, color_of(view.color(), view.label())))
@@ -1896,6 +2025,7 @@ fn resolve_panel_marks<'a>(
                 let heights: Vec<&[f64]> = series.iter().map(|(view, _)| view.values()).collect();
                 ResolvedMark::Stacked {
                     mark,
+                    geometry: None,
                     stacks: Stacks::new(mark.categories().len(), &heights),
                     series,
                 }
@@ -1908,6 +2038,7 @@ fn resolve_panel_marks<'a>(
                 let values: Vec<&[f64]> = series.iter().map(|(view, _)| view.values()).collect();
                 ResolvedMark::StackedArea {
                     mark,
+                    geometry: None,
                     stacks: AreaStacks::new(mark.x(), &values),
                     series,
                     width: theme.drawn_line_width(crate::SizeSpec::Auto),
@@ -1915,38 +2046,46 @@ fn resolve_panel_marks<'a>(
             }
             Mark::Hist(mark) => ResolvedMark::Hist {
                 mark,
+                geometry: None,
                 histogram: Histogram::from_values(mark.values(), mark.bin_count()),
                 color: color_of(mark.color(), mark.label()),
             },
             Mark::Step(mark) => ResolvedMark::Step {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::HLine(mark) => ResolvedMark::HLine {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::VLine(mark) => ResolvedMark::VLine {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
             Mark::HSpan(mark) => ResolvedMark::HSpan {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::VSpan(mark) => ResolvedMark::VSpan {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::Band(mark) => ResolvedMark::Band {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::ErrorBars(mark) => ResolvedMark::ErrorBars {
                 mark,
+                geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },

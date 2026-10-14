@@ -103,6 +103,8 @@ pub(crate) struct RowEntry {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LegendRow {
     entries: Vec<RowEntry>,
+    /// The background box of a legend inside the plot; absent for outside legends.
+    pub background: Option<Area>,
     /// The height of one row.
     row_height: f64,
     /// The number of rows; 0 without entries.
@@ -239,6 +241,7 @@ impl MeasuredRow {
         }
         LegendRow {
             entries,
+            background: None,
             row_height,
             rows: row + 1,
         }
@@ -307,6 +310,22 @@ impl LegendRow {
         LegendRow { entries, ..*self }
     }
 
+    /// The widest row, including swatches and chip padding.
+    pub fn width(&self) -> f64 {
+        self.entries
+            .chunk_by(|a, b| a.swatch.center_y == b.swatch.center_y)
+            .filter_map(|row| {
+                let first = row.first()?;
+                let last = row.last()?;
+                let left = first.chip.map_or(first.swatch.x, |c| c.x);
+                let right = last
+                    .chip
+                    .map_or(last.label.x + last.label.width(), |c| c.right());
+                Some(right - left)
+            })
+            .fold(0.0, f64::max)
+    }
+
     /// The entries, in series order.
     pub fn entries(&self) -> &[RowEntry] {
         &self.entries
@@ -330,6 +349,8 @@ impl LegendRow {
 /// once; each layout pass wraps the row to the width the panel gives it and places both.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct MeasuredLegend<'a> {
+    /// The effective panel position; merged legends and direct fallbacks keep the default.
+    pub position: crate::LegendPosition,
     /// The legend row's entries, not yet wrapped; `None` without row entries.
     pub row: Option<MeasuredRow>,
     /// The direct labels, not yet placed.
@@ -344,8 +365,44 @@ impl<'a> MeasuredLegend<'a> {
             return MeasuredLegend::default();
         }
         MeasuredLegend {
+            position: crate::LegendPosition::TopLeft,
             row: MeasuredRow::measure(theme, legend, lib),
             direct: DirectLabels::measure(theme, legend, lib),
+        }
+    }
+
+    /// The header row, absent when the entries sit beside, below or inside the plot.
+    pub fn header_within(&self, left: f64, right: f64) -> LegendRow {
+        match self.position {
+            crate::LegendPosition::TopLeft | crate::LegendPosition::TopRight => {
+                self.row_within(left, right)
+            }
+            crate::LegendPosition::Right
+            | crate::LegendPosition::Bottom
+            | crate::LegendPosition::Best => LegendRow::default(),
+        }
+    }
+
+    /// One entry per row, starting at `left`.
+    pub fn column(&self, left: f64) -> LegendRow {
+        self.row_within(left, left)
+    }
+
+    /// The uncapped room for a column legend beside the plot, including its gap.
+    pub fn right_reserve(&self) -> f64 {
+        if self.position == crate::LegendPosition::Right && self.row.is_some() {
+            super::placement::RIGHT_GAP + self.column(0.0).width()
+        } else {
+            0.0
+        }
+    }
+
+    /// The room under the x axis for a bottom legend wrapped within `left..right`.
+    pub fn bottom_reserve(&self, left: f64, right: f64) -> f64 {
+        if self.position == crate::LegendPosition::Bottom && self.row.is_some() {
+            super::placement::BOTTOM_GAP + self.row_within(left, right).height()
+        } else {
+            0.0
         }
     }
 

@@ -23,7 +23,7 @@ use super::validation::{
     check_reference_value, check_span, check_step_order, check_vline_x, check_x_error_bars,
     check_x_limits, check_x_tick_axis, check_y_error_bars,
 };
-use crate::{ContinuousScale, Error, LegendStyle, Result, TickFormat};
+use crate::{ContinuousScale, Error, LegendPosition, LegendStyle, Result, TickFormat};
 
 /// One axes of a figure, held for changing: the setters of its texts, limits, ticks and legend
 /// style, and its mark methods. It borrows the whole figure, and dereferences to the [`Axes`]
@@ -440,7 +440,37 @@ impl<'a> AxesMut<'a> {
     pub fn legend(&mut self, style: LegendStyle) -> &mut Self {
         let axes = self.axes_mut();
         axes.legend = Some(style);
+        axes.legend_position = None;
         self
+    }
+
+    /// Sets the legend style and position of these axes, overriding the theme.
+    ///
+    /// `Error::Usage` for [`LegendStyle::Direct`]: direct labels sit at their line ends and
+    /// take no position. A failed call changes nothing. [`AxesMut::legend`] resets the
+    /// position to the theme's default.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LegendPosition, LegendStyle, ScaleKind, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.legend_at(LegendStyle::Header, LegendPosition::Bottom)?;
+    /// assert_eq!(axes.legend_position(), Some(LegendPosition::Bottom));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn legend_at(&mut self, style: LegendStyle, position: LegendPosition) -> Result<&mut Self> {
+        if style == LegendStyle::Direct {
+            return Err(Error::usage(
+                "Axes.legend()",
+                format!("position is {}; direct labels sit at the ends of their lines and take no position.", position.display()),
+            ).with_parameter("position").with_hint("drop position=, or use another legend style."));
+        }
+        let axes = self.axes_mut();
+        axes.legend = Some(style);
+        axes.legend_position = Some(position);
+        Ok(self)
     }
 
     /// Adds a line. Errors leave the axes unchanged: `Error::Data` for mismatched lengths, an

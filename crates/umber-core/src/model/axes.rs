@@ -9,7 +9,9 @@ use super::mark::Mark;
 use super::share::AxisSettings;
 use super::ticks::{AxisTicks, ExplicitTicks};
 use crate::error::number;
-use crate::{ContinuousScale, Error, LegendStyle, Result, ScaleKind, TickFormat, Transform};
+use crate::{
+    ContinuousScale, Error, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat, Transform,
+};
 
 /// A plotting area with its scales, texts, limits and marks.
 ///
@@ -46,6 +48,8 @@ pub struct Axes {
     pub(super) y_settings: Arc<AxisSettings>,
     /// The legend style set for these axes; the theme's applies when unset.
     pub(super) legend: Option<LegendStyle>,
+    /// The legend position set for these axes; the theme's applies when unset.
+    pub(super) legend_position: Option<LegendPosition>,
     pub(super) marks: Vec<Mark>,
 }
 
@@ -70,6 +74,7 @@ impl Axes {
             x_settings,
             y_settings,
             legend: None,
+            legend_position: None,
             marks: Vec::new(),
         }
     }
@@ -383,6 +388,23 @@ impl Axes {
     #[must_use]
     pub fn legend_style(&self) -> Option<LegendStyle> {
         self.legend
+    }
+
+    /// The position set with [`AxesMut::legend_at`](super::AxesMut::legend_at), or `None`
+    /// when the theme's position applies.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert_eq!(axes.legend_position(), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn legend_position(&self) -> Option<LegendPosition> {
+        self.legend_position
     }
 
     /// The marks, in the order they were added.

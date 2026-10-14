@@ -99,6 +99,107 @@ fn box_geometry_matches_the_theme_ratios() {
 }
 
 #[test]
+fn box_coverage_counts_fills_whiskers_medians_and_outliers() {
+    for grouped in [false, true] {
+        let mut f = figure(Theme::pigment(), ScaleKind::Linear);
+        let mut axes = f.single_axes_mut();
+        axes.legend_at(LegendStyle::Header, crate::LegendPosition::Best)
+            .unwrap()
+            .ylim(-2.0, 14.0)
+            .unwrap();
+        let samples = vec![0.0, 1.0, 2.0, 3.0, 4.0, 12.0];
+        if grouped {
+            axes.grouped_box_plot(
+                vec!["A".into()],
+                ["North", "South"]
+                    .into_iter()
+                    .map(|label| Distribution {
+                        label: label.into(),
+                        groups: vec![samples.clone()],
+                        ..Default::default()
+                    })
+                    .collect(),
+            )
+            .unwrap();
+        } else {
+            axes.box_plot(
+                vec!["A".into()],
+                vec![samples],
+                BoxOptions {
+                    label: "North".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
+        let marks = resolve_marks(f.single_axes().marks(), f.theme());
+        let item = crate::draw::marks(f.theme(), &resolved, &layout, &marks).unwrap();
+        let prepared = marks[0].for_coverage(Some(crate::coverage::Geometry::of(&item)));
+        let score = |x, y| {
+            let candidate = crate::layout::Frame {
+                x,
+                y,
+                width: 2.0,
+                height: 2.0,
+            };
+            assert_eq!(marks[0].coverage(&layout.plot, &candidate), 0.0);
+            prepared.coverage(&layout.plot, &candidate)
+        };
+        let Item::Group { items, .. } = item else {
+            panic!("box group expected")
+        };
+        assert_eq!(items.len(), if grouped { 8 } else { 4 });
+        for group in items.chunks_exact(4) {
+            let [
+                Item::Fill { path: fill, .. },
+                Item::Stroke { path: outline, .. },
+                Item::Stroke { path: median, .. },
+                Item::Markers { positions, .. },
+            ] = group
+            else {
+                panic!("fill, outline, median and outlier expected")
+            };
+            let (a, _) = fill.bounds().unwrap();
+            assert_eq!(score(f64::from(a.x) + 2.0, f64::from(a.y) + 2.0), 4.0);
+            let segments = subpaths(outline);
+            let whisker = &segments[0];
+            assert_eq!(
+                score(
+                    f64::from(whisker[0].x) - 1.0,
+                    (f64::from(whisker[0].y) + f64::from(whisker[1].y)) / 2.0 - 1.0,
+                ),
+                1.0
+            );
+            let cap = &segments[1];
+            assert_eq!(
+                score(
+                    f64::from(cap[0].x) * 0.75 + f64::from(cap[1].x) * 0.25 - 1.0,
+                    f64::from(cap[0].y) - 1.0,
+                ),
+                1.0
+            );
+            let (a, b) = median.bounds().unwrap();
+            assert_eq!(
+                score(
+                    (f64::from(a.x) + f64::from(b.x)) / 2.0 - 1.0,
+                    f64::from(a.y) - 1.0,
+                ),
+                5.0
+            );
+            assert_eq!(
+                score(
+                    f64::from(positions[0].x) - 1.0,
+                    f64::from(positions[0].y) - 1.0
+                ),
+                1.0
+            );
+        }
+        assert_eq!(score(layout.plot.right() + 1.0, layout.plot.y), 0.0);
+    }
+}
+
+#[test]
 fn boxes_with_inliers_inside_the_box_keep_their_geometry() {
     for (samples, q1, median, q3, outlier) in [
         ([0.0, 100.0, 100.0, 100.0], 75.0, 100.0, 100.0, 0.0),

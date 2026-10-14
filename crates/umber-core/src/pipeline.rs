@@ -63,7 +63,11 @@ fn measure_legend<'a>(
 ) -> MeasuredLegend<'a> {
     let style = axes.legend_style().unwrap_or(theme.legend_style());
     let legend = Legend::new(style, marks, &Limits::of(axes));
-    MeasuredLegend::measure(theme, &legend, lib)
+    let mut measured = MeasuredLegend::measure(theme, &legend, lib);
+    if style != crate::LegendStyle::Direct {
+        measured.position = axes.legend_position().unwrap_or(theme.legend_position());
+    }
+    measured
 }
 
 /// Whether row legends belong to the figure rather than its individual panels.
@@ -508,8 +512,25 @@ fn plan(
         .zip(resolved)
         .zip(bands)
         .zip(&solution.panels)
-        .map(|(((input, resolved), bands), slot)| {
-            let layout = layout::place_panel(input, &resolved, bands, slot);
+        .zip(panels)
+        .map(|((((input, resolved), bands), slot), panel)| {
+            let mut layout = layout::place_panel(input, &resolved, bands, slot);
+            if input.legend.position == crate::LegendPosition::Best
+                && !layout.legend.is_empty()
+                && layout::placement::best_fits(input.legend, &layout.plot)
+            {
+                let marks: Vec<_> = panel
+                    .marks
+                    .iter()
+                    .map(|mark| {
+                        let geometry =
+                            draw::marks(theme, &resolved, &layout, std::slice::from_ref(mark))
+                                .map(|item| crate::coverage::Geometry::of(&item));
+                        mark.for_coverage(geometry)
+                    })
+                    .collect();
+                layout.legend = layout::placement::best(input.legend, &layout.plot, &marks);
+            }
             (resolved, layout)
         })
         .unzip();

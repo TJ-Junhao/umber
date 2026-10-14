@@ -29,6 +29,17 @@ pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
         return None;
     }
     let mut items = Vec::with_capacity(3 * entries.len() + 2 * direct.len());
+    if let Some(box_) = layout.legend.background {
+        items.push(Item::Fill {
+            path: rounded_rect(box_.x, box_.right(), box_.bottom(), box_.y, 0.0, 0.0),
+            paint: Paint::Solid(
+                theme
+                    .background()
+                    .scale_alpha(theme.legend_background_alpha()),
+            ),
+            rule: FillRule::NonZero,
+        });
+    }
     row(theme, entries, &mut items);
     for label in direct {
         items.extend(label.dot.map(|d| end_dot(d, label.color)));
