@@ -102,6 +102,38 @@ pub fn m4_indices(xs: &[f64], ys: &[f64], x_range: (f64, f64), columns: usize) -
     out
 }
 
+/// M4 downsampling inside `x_range`, with the adjacent point outside each limit retained.
+/// This keeps segments crossing the limits exact instead of letting off-screen extrema share
+/// the first and last visible columns. Short or unsorted inputs are left unchanged.
+pub(crate) fn visible_m4_indices(
+    xs: &[f64],
+    ys: &[f64],
+    x_range: (f64, f64),
+    columns: usize,
+) -> Vec<usize> {
+    let n = xs.len().min(ys.len());
+    let xs = &xs[..n];
+    let (lo, hi) = x_range;
+    if columns == 0
+        || n <= columns.saturating_mul(4)
+        || !(lo.is_finite() && hi.is_finite() && lo < hi)
+        || !is_sorted_ignoring_nan(xs)
+    {
+        return (0..n).collect();
+    }
+    let first = xs.iter().position(|&x| x >= lo).unwrap_or(n);
+    let end = xs.iter().position(|&x| x > hi).unwrap_or(n);
+    let (first, end) = (first.min(end), end);
+    let mut kept: Vec<usize> = first.checked_sub(1).into_iter().collect();
+    kept.extend(
+        m4_indices(&xs[first..end], &ys[first..end], x_range, columns)
+            .into_iter()
+            .map(|i| first + i),
+    );
+    kept.extend((end < n).then_some(end));
+    kept
+}
+
 fn is_sorted_ignoring_nan(xs: &[f64]) -> bool {
     let mut prev = f64::NEG_INFINITY;
     for &x in xs {
@@ -120,6 +152,37 @@ fn is_sorted_ignoring_nan(xs: &[f64]) -> bool {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn visible_columns_keep_only_the_adjacent_outside_points() {
+        let xs: Vec<f64> = (0..30).map(f64::from).collect();
+        let mut ys = vec![1.0; 30];
+        ys[2] = 100.0;
+        ys[27] = -100.0;
+        assert_eq!(
+            visible_m4_indices(&xs, &ys, (10.0, 20.0), 2),
+            [9, 10, 14, 15, 20, 21]
+        );
+        // No point inside: the one segment across the view is still exact.
+        assert_eq!(visible_m4_indices(&xs, &ys, (10.25, 10.75), 2), [10, 11]);
+    }
+
+    #[test]
+    fn visible_columns_keep_boundary_gaps_and_leave_unsorted_x_alone() {
+        let mut xs: Vec<f64> = (0..30).map(f64::from).collect();
+        let ys = vec![1.0; 30];
+        xs[9] = f64::NAN;
+        xs[20] = f64::NAN;
+        assert_eq!(
+            visible_m4_indices(&xs, &ys, (10.0, 20.0), 2),
+            [9, 10, 14, 15, 19, 20, 21]
+        );
+        xs.swap(3, 4);
+        assert_eq!(
+            visible_m4_indices(&xs, &ys, (10.0, 20.0), 2),
+            (0..30).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn small_inputs_are_untouched() {

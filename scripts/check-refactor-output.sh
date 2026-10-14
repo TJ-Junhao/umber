@@ -81,13 +81,16 @@ driver_files=(
   crates/umber-core/examples/refactor_outputs.rs
   crates/umber-core/tests/support/refactor_cases.rs
   crates/umber-core/tests/support/corpus/area.rs
+  crates/umber-core/tests/support/corpus/band.rs
   crates/umber-core/tests/support/corpus/bars.rs
   crates/umber-core/tests/support/corpus/grid.rs
   crates/umber-core/tests/support/corpus/hist.rs
   crates/umber-core/tests/support/corpus/inputs.rs
   crates/umber-core/tests/support/corpus/legend.rs
   crates/umber-core/tests/support/corpus/plot_height.rs
+  crates/umber-core/tests/support/corpus/rules.rs
   crates/umber-core/tests/support/corpus/size.rs
+  crates/umber-core/tests/support/corpus/step.rs
   crates/umber-core/tests/support/corpus/ticks.rs
   crates/umber-core/tests/support/corpus/x_end_label.rs
 )
