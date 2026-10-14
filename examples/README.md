@@ -13,6 +13,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `stem.py`: a damped impulse response drawn as stems, with positive and negative samples.
 - `error_bars.py`: group means with intervals on a category axis, and measurements with uncertainty in x and y.
 - `bars.py`: a bar chart, a grouped bar chart and a stacked bar chart.
+- `box.py`: plain and grouped box plots, with Tukey whiskers and outliers.
 - `histogram.py`: a histogram with a chosen number of bins.
 - `themes.py`: the same chart in the Pigment, Graphite and Midnight themes.
 - `ticks.py`: custom x tick labels and a percent y tick format.

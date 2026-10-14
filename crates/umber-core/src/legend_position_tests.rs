@@ -520,8 +520,8 @@ fn new_positions_reject_legends_that_cannot_fit() {
 #[test]
 fn every_existing_mark_provides_drawn_coverage() {
     use crate::{
-        AreaOptions, AxisValue, BandOptions, BarOptions, ErrorBarOptions, HistOptions, RuleOptions,
-        Series, SpanOptions, StemOptions, StepOptions,
+        AreaOptions, AxisValue, BandOptions, BarOptions, BoxOptions, Distribution, ErrorBarOptions,
+        HistOptions, RuleOptions, Series, SpanOptions, StemOptions, StepOptions,
     };
     let mut numeric = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let mut axes = numeric
@@ -593,6 +593,18 @@ fn every_existing_mark_provides_drawn_coverage() {
         .unwrap();
     axes.grouped_bar(categories(), series()).unwrap();
     axes.stacked_bar(categories(), series()).unwrap();
+    let groups = || vec![vec![0.0, 1.0, 2.0, 3.0, 4.0, 12.0], vec![2.0]];
+    axes.box_plot(categories(), groups(), BoxOptions::default())
+        .unwrap();
+    axes.grouped_box_plot(
+        categories(),
+        vec![Distribution {
+            label: "Boxes".into(),
+            groups: groups(),
+            ..Default::default()
+        }],
+    )
+    .unwrap();
     for f in [numeric, categorical] {
         let (resolved, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
         let p = layout.plot;

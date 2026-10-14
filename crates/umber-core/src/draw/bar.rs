@@ -14,7 +14,7 @@ use crate::{CategoryScale, Rgba, Theme};
 /// in the band.
 const BAR_SHARE: f64 = 0.72;
 /// The gap between neighbouring bars of a group, in points.
-const GROUP_GAP: f64 = 2.0;
+pub(super) const GROUP_GAP: f64 = 2.0;
 /// The gap between neighbouring segments on one side of a stack, in points: the background
 /// shows through it, so adjacent fills never meet in an antialiased seam.
 const STACK_GAP: f64 = 1.0;
@@ -41,7 +41,7 @@ fn bar_span(categories: &CategoryScale, index: usize) -> (f64, f64) {
 /// axis and its index in the mark, sorted by the axis index. Each category appears once in a
 /// mark, so the order is total. Bars are drawn in this order, whatever order the mark lists
 /// its categories in.
-fn in_axis_order(categories: &CategoryScale, names: &[String]) -> Vec<(usize, usize)> {
+pub(super) fn in_axis_order(categories: &CategoryScale, names: &[String]) -> Vec<(usize, usize)> {
     let mut order: Vec<(usize, usize)> = names
         .iter()
         .enumerate()
@@ -54,7 +54,7 @@ fn in_axis_order(categories: &CategoryScale, names: &[String]) -> Vec<(usize, us
 /// The width of each bar of a group of `count` bars and the gap between them, in axis units:
 /// the group spans `group`, and neighbours are `gap` apart, unless that leaves bars narrower
 /// than the gap; then the gap is 0 and the bars touch.
-fn group_slots(group: f64, count: usize, gap: f64) -> (f64, f64) {
+pub(super) fn group_slots(group: f64, count: usize, gap: f64) -> (f64, f64) {
     let n = count.max(1) as f64;
     let width = (group - (n - 1.0) * gap) / n;
     if width < gap {

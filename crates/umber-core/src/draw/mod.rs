@@ -33,6 +33,7 @@ mod area;
 mod band;
 mod bar;
 mod bar_shape;
+mod box_plot;
 mod chrome;
 mod clip;
 mod error_bars;
@@ -241,6 +242,21 @@ pub(crate) fn marks(
                 ..
             } => {
                 stem::stem_items(&context, resolved, stem_mark, (color, size), &mut items);
+            }
+            ResolvedMark::Box {
+                categories,
+                ref distributions,
+                width,
+                ..
+            } => {
+                box_plot::box_items(
+                    &context,
+                    resolved,
+                    categories,
+                    distributions,
+                    width,
+                    &mut items,
+                );
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }

@@ -25,12 +25,12 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use umber_core::StemOptions;
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
     HistOptions, LegendMode, LegendStyle, LineOptions, Marker, Placement, RuleOptions,
     ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
+use umber_core::{BoxOptions, Distribution, StemOptions};
 
 use crate::color::{ColorArg, color_spec};
 use crate::enums::enum_value;
@@ -43,6 +43,9 @@ use crate::values::{axis_data, axis_value, floats, names, shared_floats};
 
 /// The series of a grouped or stacked bar chart: `(label, values, color)` for each series.
 type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
+
+/// Named sample groups and their color, in distribution order.
+type DistributionArgs<'py> = Vec<(String, Vec<Bound<'py, PyAny>>, ColorArg)>;
 
 /// The `kind` of a grid index argument that is `AUTO`.
 const AUTO_INDEX: i64 = 0;
@@ -489,6 +492,55 @@ impl Figure {
         let (categories, series) = (names(categories)?, Self::series(series)?);
         self.axes(row, col)?
             .grouped_bar(categories, series)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a box plot for each category.
+    fn box_plot(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        groups: Vec<Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
+        let options = BoxOptions {
+            label,
+            color: color_spec(color)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .box_plot(categories, groups, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds distributions side by side in each category.
+    fn grouped_box_plot(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        distributions: DistributionArgs<'_>,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let distributions = distributions
+            .into_iter()
+            .map(|(label, groups, color)| {
+                Ok(Distribution {
+                    label,
+                    groups: groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?,
+                    color: color_spec(color)?,
+                    ..Default::default()
+                })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        self.axes(row, col)?
+            .grouped_box_plot(categories, distributions)
             .map(drop)
             .map_err(core_error)
     }
