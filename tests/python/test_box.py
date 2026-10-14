@@ -2,7 +2,6 @@
 
 import copy
 import pickle
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -39,6 +38,7 @@ def test_returns_self_and_has_keyword_only_options() -> None:
     assert ax.box(["A"], [[1, 2]]) is ax
     assert ax.grouped_box(["A"], [ub.Distribution("B", [[3, 4]])]) is ax
     assert not hasattr(ub, "box")
+    assert not hasattr(ub, "box_stats")
     with pytest.raises(TypeError):
         box(ax)(["A"], [[1]], "label")
     with pytest.raises(TypeError):
@@ -313,45 +313,48 @@ def test_native_rendering_parity(
     assert fig.to_png(dpi=60) == native.to_png(60)
 
 
-def test_quantiles_match_numpy_type7(tmp_path: Path) -> None:
-    # Compile the production private module, not a reimplementation or rounded SVG output.
-    stats = Path(__file__).resolve().parents[2] / "crates/umber-core/src/stats.rs"
-    source = tmp_path / "quantiles.rs"
-    source.write_text(
-        f'#[path = "{stats}"]\nmod stats;\n'
-        + r"""
-use std::io::{self, BufRead};
-fn main() {
-    for line in io::stdin().lock().lines() {
-        let values: Vec<f64> = line.unwrap().split_whitespace()
-            .map(|v| f64::from_bits(v.parse().unwrap())).collect();
-        let s = stats::box_stats(&values).unwrap();
-        println!("{} {} {}", s.q1.to_bits(), s.median.to_bits(), s.q3.to_bits());
-    }
-}
-"""
-    )
-    executable = tmp_path / "quantiles"
-    subprocess.run(
-        ["rustc", "--edition=2024", "-O", str(source), "-o", str(executable)], check=True
-    )
+def assert_box_stats_match_numpy(values: npt.NDArray[np.float64]) -> None:
+    observed = _umber.box_stats(values)
+    samples = np.sort(values[~np.isnan(values)])
+    if samples.size == 0:
+        assert observed is None
+        return
+    assert observed is not None
+    q1, median, q3 = np.percentile(samples, [25, 50, 75], method="linear")
+    reach = 1.5 * (q3 - q1)
+    inside = (samples >= q1 - reach) & (samples <= q3 + reach)
+    inliers = samples[inside]
+    # A whisker stops at the quartile if its most extreme inlier lies inside the box.
+    low_whisker = min(q1, inliers[0])
+    high_whisker = max(q3, inliers[-1])
+    np.testing.assert_array_equal(observed[:5], [q1, median, q3, low_whisker, high_whisker])
+    np.testing.assert_array_equal(observed[5], samples[~inside])
+
+
+def test_quantiles_match_numpy_type7() -> None:
     rng = np.random.default_rng(7107)
-    arrays: list[npt.NDArray[np.float64]] = []
     for i in range(1000):
         values = rng.normal(size=int(rng.integers(1, 513))) * 10.0 ** int(rng.integers(-280, 281))
         if i % 3 == 0:
             values = np.round(values, decimals=2)
-        arrays.append(values)
-    encoded = "\n".join(" ".join(str(int(bits)) for bits in a.view(np.uint64)) for a in arrays)
-    result = subprocess.run(
-        [str(executable)], input=encoded, capture_output=True, text=True, check=True
-    )
-    observed = [
-        np.array([int(v) for v in line.split()], dtype=np.uint64).view(np.float64)
-        for line in result.stdout.splitlines()
-    ]
-    assert len(observed) == 1000
-    for values, quartiles in zip(arrays, observed, strict=True):
-        np.testing.assert_array_equal(
-            quartiles, np.percentile(values, [25, 50, 75], method="linear")
-        )
+        assert_box_stats_match_numpy(values)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [],
+        [np.nan],
+        [3.0],
+        [3.0, 3.0],
+        [100.0, 0.0, 1.0, np.nan, 2.0, 3.0, 4.0, -100.0],
+        [-6.0, 0.0, 0.0, 2.0, 4.0, 4.0, 10.0],
+        [100.0, -100.0, 100.0, -100.0, *range(12)],
+        [0.0, 100.0, 100.0, 100.0],
+        [0.0, 0.0, 0.0, 100.0],
+        [0.0, 90.0, 100.0, 100.0],
+        [0.0, 0.0, 10.0, 100.0],
+    ],
+)
+def test_box_stats_match_numpy_tukey_edge_cases(values: list[float]) -> None:
+    assert_box_stats_match_numpy(np.array(values, dtype=np.float64))

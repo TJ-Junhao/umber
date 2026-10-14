@@ -41,6 +41,7 @@ __all__ = [
     "Figure",
     "Theme",
     "__version__",
+    "box_stats",
     "check_alpha",
     "check_log_base",
     "check_palette_index",
@@ -105,6 +106,11 @@ type _AxisValues = _FloatArray | list[str]
 type _SeriesArg = tuple[str, _FloatArray, _ColorArg]
 # A named distribution: (label, one array per category, color).
 type _DistributionArg = tuple[str, list[_FloatArray], _ColorArg]
+
+# Test hook: (q1, median, q3, low_whisker, high_whisker, outliers), or None without samples.
+def box_stats(
+    values: _FloatArray,
+) -> tuple[float, float, float, float, float, list[float]] | None: ...
 
 @final
 class Theme:
