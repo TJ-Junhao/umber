@@ -43,6 +43,7 @@ mod mapping;
 mod marker;
 mod rule;
 mod scatter;
+mod stem;
 mod step;
 mod stroke;
 #[cfg(test)]
@@ -211,6 +212,13 @@ pub(crate) fn marks(
                     (color, width),
                     &mut items,
                 );
+            }
+            ResolvedMark::Stem {
+                mark: stem_mark,
+                color,
+                size,
+            } => {
+                stem::stem_items(&context, resolved, stem_mark, (color, size), &mut items);
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }

@@ -8,6 +8,7 @@ use super::bar::{BarGroupMark, BarMark};
 use super::error_bars::ErrorBarMark;
 use super::hist::HistMark;
 use super::rule::{HLineMark, SpanMark, VLineMark};
+use super::stem::StemMark;
 use super::step::StepMark;
 use crate::{ColorSpec, Dash, Marker, SizeSpec};
 
@@ -206,6 +207,9 @@ pub enum Mark {
     /// Vertical or horizontal bars from a lower to an upper limit, with optional caps; a NaN
     /// in the position or a limit skips the bar.
     ErrorBars(ErrorBarMark),
+    /// A line from the baseline to each value, with a scatter marker at the value; NaN skips
+    /// the point.
+    Stem(StemMark),
 }
 
 impl Mark {
