@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+from xml.etree import ElementTree
 
 import numpy as np
 import numpy.typing as npt
@@ -137,6 +138,43 @@ def test_y_tick_format_applies_to_size_references() -> None:
     svg = ax.figure.to_svg(text=ub.SvgText.EDITABLE)
     for label in ["~100% share", "~50% share", "~20% share"]:
         assert f">{label}</text>" in svg
+
+
+@pytest.mark.parametrize(
+    ("maximum", "tick_format", "expected"),
+    [
+        (1.0, ub.TickFormat.fixed(0), ["1"]),
+        (0.9, ub.TickFormat.fixed(0), ["0.5"]),
+        (0.9, ub.TickFormat.fixed(0).affix(prefix="~", suffix=" units"), ["0.5"]),
+        (0.09, ub.TickFormat.fixed(2), ["0.05", "0.02", "0.01"]),
+        (0.01, ub.TickFormat.percent(0).affix(prefix="~", suffix=" share"), ["~1% share"]),
+        (0.009, ub.TickFormat.percent(0).affix(prefix="~", suffix=" share"), ["0.005"]),
+    ],
+)
+def test_size_legend_formats_keep_nonzero_distinct_labels(
+    maximum: float, tick_format: ub.TickFormat, expected: list[str]
+) -> None:
+    ax = axes().bubbles([1], [2], [maximum], label="S").ytick_format(tick_format)
+    ax.xticks([]).yticks([])
+    svg = ElementTree.fromstring(ax.figure.to_svg(text=ub.SvgText.EDITABLE))
+    labels = [element.text for element in svg.iter("{http://www.w3.org/2000/svg}text")]
+    assert labels == ["S", *expected]
+
+
+@pytest.mark.parametrize("bits", range(1, 9))
+@pytest.mark.parametrize("tick_format", [ub.TickFormat.fixed(0), ub.TickFormat.percent(0)])
+def test_subnormal_size_legend_uses_one_nonzero_automatic_label(
+    bits: int, tick_format: ub.TickFormat
+) -> None:
+    maximum = bits * float.fromhex("0x0.0000000000001p-1022")
+    ax = axes().bubbles([1], [2], [maximum], label="S").ytick_format(tick_format)
+    ax.xticks([]).yticks([])
+    svg = ElementTree.fromstring(ax.figure.to_svg(text=ub.SvgText.EDITABLE))
+    labels = [element.text for element in svg.iter("{http://www.w3.org/2000/svg}text")]
+    assert len(labels) == 2
+    assert labels[0] == "S"
+    assert labels[1] is not None
+    assert 0 < float(labels[1].replace("−", "-")) <= maximum
 
 
 def test_empty_zero_and_nan_coordinates_render() -> None:

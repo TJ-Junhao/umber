@@ -230,12 +230,19 @@ fn subnormal_size_legends_have_no_zero_or_repeated_entries() {
         let maximum = f64::from_bits(bits);
         let f = figure(Theme::pigment(), maximum);
         let marks = resolve_marks(f.single_axes().marks(), f.theme());
-        let entries = marks[0].size_legend(&TickFormat::default());
-        assert!(!entries.is_empty());
-        for (i, entry) in entries.iter().enumerate() {
-            assert_ne!(entry.label(), "0");
-            assert!(entries[..i].iter().all(|e| e.label() != entry.label()));
-            assert!(matches!(entry.swatch(), Swatch::Bubble { radius } if radius > 0.0));
+        for format in [
+            TickFormat::default(),
+            TickFormat::fixed(0).unwrap(),
+            TickFormat::percent(0).unwrap(),
+        ] {
+            let entries = marks[0].size_legend(&format);
+            assert!(!entries.is_empty());
+            for (i, entry) in entries.iter().enumerate() {
+                assert_ne!(entry.label(), "0");
+                assert_ne!(entry.label(), "0%");
+                assert!(entries[..i].iter().all(|e| e.label() != entry.label()));
+                assert!(matches!(entry.swatch(), Swatch::Bubble { radius } if radius > 0.0));
+            }
         }
     }
 }
@@ -417,6 +424,64 @@ fn size_legend_uses_y_tick_format_and_direct_fallback() {
             .collect::<Vec<_>>(),
         ["Cities", "~100% share", "~50% share", "~20% share"]
     );
+}
+
+#[test]
+fn size_legend_formats_keep_nonzero_distinct_labels() {
+    for (maximum, format, labels, values) in [
+        (1.0, TickFormat::fixed(0).unwrap(), vec!["1"], vec![1.0]),
+        (0.9, TickFormat::fixed(0).unwrap(), vec!["0.5"], vec![0.5]),
+        (
+            0.9,
+            TickFormat::fixed(0).unwrap().affix("~", " units").unwrap(),
+            vec!["0.5"],
+            vec![0.5],
+        ),
+        (
+            0.09,
+            TickFormat::fixed(2).unwrap(),
+            vec!["0.05", "0.02", "0.01"],
+            vec![0.05, 0.02, 0.01],
+        ),
+        (
+            0.01,
+            TickFormat::percent(0)
+                .unwrap()
+                .affix("~", " share")
+                .unwrap(),
+            vec!["~1% share"],
+            vec![0.01],
+        ),
+        (
+            0.009,
+            TickFormat::percent(0)
+                .unwrap()
+                .affix("~", " share")
+                .unwrap(),
+            vec!["0.005"],
+            vec![0.005],
+        ),
+    ] {
+        let f = figure(Theme::pigment(), maximum);
+        let marks = resolve_marks(f.single_axes().marks(), f.theme());
+        let entries = marks[0].size_legend(&format);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.label())
+                .collect::<Vec<_>>(),
+            labels,
+            "maximum {maximum}, format {format:?}"
+        );
+        for (entry, value) in entries.iter().zip(values) {
+            assert_eq!(
+                entry.swatch(),
+                Swatch::Bubble {
+                    radius: radius(value, maximum, f.theme().bubble_max_radius()),
+                }
+            );
+        }
+    }
 }
 
 #[test]

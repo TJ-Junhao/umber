@@ -169,8 +169,7 @@ fn clip_y(points: &[AxisPoint], at: f64, above: bool) -> Vec<AxisPoint> {
 mod tests {
     use super::*;
     use crate::model::{Figure, ViolinOptions};
-    use crate::resolve::{ResolvedMark, resolve_marks};
-    use crate::{FontLibrary, LogBase, ScaleKind, Theme};
+    use crate::{FontLibrary, LogBase, PathVerb, ScaleKind, Theme};
 
     #[test]
     fn log_quantile_widths_meet_the_outline_in_axis_space() {
@@ -183,30 +182,63 @@ mod tests {
             .unwrap()
             .violin(vec!["A".into()], vec![values], ViolinOptions::default())
             .unwrap();
-        let (resolved, layout) =
-            crate::pipeline::plan_figure(&figure, (0, 0), FontLibrary::global());
-        let marks = resolve_marks(figure.single_axes().marks(), figure.theme());
-        let [ResolvedMark::Violin { distributions, .. }] = marks.as_slice() else {
-            panic!("violin")
+        let scene = figure.to_scene(FontLibrary::global()).unwrap();
+        let Item::Group { items, .. } = &scene.items[1] else {
+            panic!("marks")
         };
-        let stats = distributions[0].groups[0].as_ref().unwrap();
-        let half = layout.plot.width * f64::from(figure.theme().violin_width()) / 2.0;
-        for (value, fraction) in [(stats.q1, 0.5), (stats.q3, 0.5), (stats.median, 1.0)] {
-            let pair = stats
-                .density
-                .windows(2)
-                .find(|p| p[0].0 <= value && value <= p[1].0)
-                .unwrap();
-            let a = axis_y_value(&resolved.y, pair[0].0);
-            let b = axis_y_value(&resolved.y, pair[1].0);
-            let t = (axis_y_value(&resolved.y, value) - a) / (b - a);
-            let outline = pair[0].1 + (pair[1].1 - pair[0].1) * t;
-            let width = local_width(
-                &axis_density(stats, &resolved),
-                axis_y_value(&resolved.y, value),
-            );
-            let error = half * fraction * (width - outline).abs();
-            assert!(error <= 1e-6, "quantile {value}: endpoint error {error} pt");
+        let [
+            Item::Fill { path: outline, .. },
+            Item::Stroke { .. },
+            quantiles @ ..,
+        ] = items.as_slice()
+        else {
+            panic!("violin outline and quantile lines")
+        };
+        assert_eq!(quantiles.len(), 3);
+        let (lo, hi) = outline.bounds().unwrap();
+        let cx = (f64::from(lo.x) + f64::from(hi.x)) / 2.0;
+        let polygon: Vec<_> = outline
+            .verbs()
+            .iter()
+            .filter_map(|verb| match verb {
+                PathVerb::MoveTo(p) | PathVerb::LineTo(p) => Some((f64::from(p.x), f64::from(p.y))),
+                PathVerb::Close => None,
+                _ => panic!("polygon expected"),
+            })
+            .collect();
+        for (i, (item, fraction)) in quantiles.iter().zip([0.5, 0.5, 1.0]).enumerate() {
+            let Item::Stroke { path, .. } = item else {
+                panic!("quantile stroke")
+            };
+            let [PathVerb::MoveTo(left), PathVerb::LineTo(right)] = path.verbs() else {
+                panic!("two-point quantile line")
+            };
+            assert_eq!(left.y, right.y);
+            let y = f64::from(left.y);
+            let outline_x = polygon
+                .iter()
+                .zip(polygon.iter().cycle().skip(1))
+                .filter(|(a, b)| a.0 >= cx && b.0 >= cx && y >= a.1.min(b.1) && y <= a.1.max(b.1))
+                .map(|(a, b)| {
+                    if a.1 == b.1 {
+                        a.0.max(b.0)
+                    } else {
+                        a.0 + (b.0 - a.0) * (y - a.1) / (b.1 - a.1)
+                    }
+                })
+                .reduce(f64::max)
+                .expect("outline intersects the quantile height");
+            let half = fraction * (outline_x - cx);
+            for (end, actual, expected) in [
+                ("left", f64::from(left.x), cx - half),
+                ("right", f64::from(right.x), cx + half),
+            ] {
+                let error = (actual - expected).abs();
+                assert!(
+                    error <= 1e-4,
+                    "quantile {i} {end}: endpoint error {error} pt"
+                );
+            }
         }
     }
 }

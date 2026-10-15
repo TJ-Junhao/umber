@@ -1473,13 +1473,37 @@ impl<'a> ResolvedMark<'a> {
         }
         let values = crate::bubble_scale::references(*maximum);
         let labels = crate::ticks::format_given(&values);
-        let ticks = values
+        let ticks: Vec<_> = values
             .into_iter()
             .zip(labels)
             .map(|(value, label)| crate::Tick { value, label })
             .collect();
-        format
-            .relabel(ticks, crate::ticks::TickValues::Exact)
+        let largest = ticks.first().cloned();
+        let zero = format
+            .relabel(
+                vec![crate::Tick {
+                    value: 0.0,
+                    label: "0".into(),
+                }],
+                crate::ticks::TickValues::Exact,
+            )
+            .pop();
+        let mut ticks = format.relabel(ticks, crate::ticks::TickValues::Exact);
+        let mut seen = Vec::new();
+        ticks.retain(|tick| {
+            if zero.as_ref().is_some_and(|zero| tick.label == zero.label)
+                || seen.contains(&tick.label)
+            {
+                return false;
+            }
+            seen.push(tick.label.clone());
+            true
+        });
+        // A coarse format must not hide a positive scale or label its circles as zero.
+        if ticks.is_empty() {
+            ticks.extend(largest);
+        }
+        ticks
             .into_iter()
             .filter_map(|tick| {
                 LegendEntry::new(
