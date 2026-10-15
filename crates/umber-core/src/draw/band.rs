@@ -6,10 +6,10 @@
 use super::MarkContext;
 use super::area::AREA_ALPHA;
 use super::clip::{ClampedPoint, clamp_polyline};
-use super::line::{LineClip, downsample_columns};
+use super::line::{LineClip, downsample_columns, downsample_range};
 use super::mapping::{PlotPoint, axis_x_value, axis_y};
 use crate::Rgba;
-use crate::downsample::visible_m4_indices;
+use crate::downsample::clipped_m4_indices;
 use crate::geometry::Path;
 use crate::layout::Area;
 use crate::model::BandMark;
@@ -179,13 +179,14 @@ fn kept_points(
     highs: Vec<f64>,
 ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let columns = downsample_columns(context.plot.width);
-    let (lo, hi) = (context.maps.x.lo, context.maps.x.hi);
+    let domain = (context.maps.x.lo, context.maps.x.hi);
+    let clip_range = downsample_range(context);
     let n = xs.len();
     if n <= 4 * columns {
         return (xs, lows, highs);
     }
-    let mut kept = visible_m4_indices(&xs, &lows, (lo, hi), columns);
-    kept.extend(visible_m4_indices(&xs, &highs, (lo, hi), columns));
+    let mut kept = clipped_m4_indices(&xs, &lows, domain, columns, clip_range);
+    kept.extend(clipped_m4_indices(&xs, &highs, domain, columns, clip_range));
     kept.sort_unstable();
     kept.dedup();
     let pick = |v: &[f64]| -> Vec<f64> { kept.iter().map(|&i| v[i]).collect() };

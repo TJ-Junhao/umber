@@ -85,6 +85,27 @@ pub(crate) fn best_fits(legend: &MeasuredLegend<'_>, plot: &Area) -> bool {
             && column.height() + 4.0 * BEST_PADDING <= plot.height + CONTAINMENT_TOLERANCE)
 }
 
+/// Attributes a narrow plot to its right legend only when its text has non-negative room.
+/// Otherwise the y tick labels or the canvas width must account for the missing space.
+pub(super) fn check_right_width(
+    context: &'static str,
+    legend: &LegendRow,
+    available: f64,
+) -> Result<()> {
+    let width = available - RIGHT_GAP;
+    let text_fits = legend.entries().iter().all(|entry| {
+        let start = entry.chip.map_or(entry.swatch.x, |c| c.x);
+        let end = entry
+            .chip
+            .map_or(entry.label.x + entry.label.width(), |c| c.right());
+        width - (end - start - entry.label.width()) >= 0.0
+    });
+    if text_fits {
+        check_width(context, legend, width)?;
+    }
+    Ok(())
+}
+
 /// Checks entry widths, including the swatch and chip padding, before or after placement.
 pub(super) fn check_width(context: &'static str, legend: &LegendRow, width: f64) -> Result<()> {
     for entry in legend.entries() {

@@ -868,13 +868,11 @@ fn columns_too_narrow(
         let last = cell.col() + cell.col_span() - 1;
         if band.right_legend > 0.0 && band.right_legend == columns.right[last] {
             let available = band.right_legend - deficit;
-            if available >= 0.0
-                && let Err(err) = super::placement::check_width(
-                    input.context,
-                    &panel.legend.column(0.0),
-                    available - super::placement::RIGHT_GAP,
-                )
-            {
+            if let Err(err) = super::placement::check_right_width(
+                input.context,
+                &panel.legend.column(0.0),
+                available,
+            ) {
                 return in_panel(*cell, err);
             }
         }
@@ -2454,6 +2452,63 @@ mod tests {
             assert!(named_height(&err).is_none(), "{err}");
         }
         assert_eq!(named_height(&render_error(&tall(need - 1.0))), Some(need));
+    }
+
+    fn assert_bottom_legend_below_y_tick_labels(font_scale: f64) {
+        let theme = Theme::midnight().with_font_scale(font_scale).unwrap();
+        let grid = Grid::new(2, 1)
+            .unwrap()
+            .with_legend(crate::LegendMode::PerPanel);
+        let mut f = Figure::with_grid(4.0, 6.0, theme, grid).unwrap();
+        for row in 0..2 {
+            add(&mut f, row, 0, 1, 1)
+                .xticks(&[])
+                .unwrap()
+                .ylim(0.0, 1.0)
+                .unwrap()
+                .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
+                .unwrap()
+                .legend_at(LegendStyle::Header, crate::LegendPosition::Bottom)
+                .unwrap()
+                .line(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[0.0, 1.0],
+                    LineOptions {
+                        label: "a".into(),
+                        ..LineOptions::default()
+                    },
+                )
+                .unwrap();
+        }
+        let all = layouts(&f).unwrap();
+        assert_eq!(all.len(), 2);
+        for (row, (_, layout)) in all.iter().enumerate() {
+            assert!(layout.x_tick_labels.is_empty());
+            assert!(layout.xlabel.is_none());
+            assert_eq!(layout.y_tick_labels.len(), 2);
+            let label = &layout.y_tick_labels[0];
+            let bottom = label.y + crate::layout::metrics(lib(), &label.style).1;
+            assert_eq!(layout.legend.entries().len(), 1);
+            let entry = &layout.legend.entries()[0];
+            // A single entry occupies one row, with its swatch centered in the band.
+            let top = entry.swatch.center_y - layout.legend.height() / 2.0;
+            assert!(
+                top + 1e-9 >= bottom + crate::layout::placement::BOTTOM_GAP,
+                "font_scale={font_scale}, row={row}: legend band top {top}, \
+                 y label bottom {bottom}, clearance {}",
+                top - bottom
+            );
+        }
+    }
+
+    #[test]
+    fn bottom_legend_clears_y_tick_labels_at_font_scale_one() {
+        assert_bottom_legend_below_y_tick_labels(1.0);
+    }
+
+    #[test]
+    fn bottom_legend_clears_y_tick_labels_at_font_scale_two() {
+        assert_bottom_legend_below_y_tick_labels(2.0);
     }
 
     #[test]

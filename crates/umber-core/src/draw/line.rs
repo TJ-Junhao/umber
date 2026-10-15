@@ -4,7 +4,7 @@
 use super::MarkContext;
 use super::clip::{Bounds, clip_polyline};
 use super::mapping::{AxisMaps, AxisPoint, PlotPoint, axis_x, axis_y};
-use crate::downsample::visible_m4_indices;
+use crate::downsample::clipped_m4_indices;
 use crate::geometry::Path;
 use crate::layout::Area;
 use crate::model::LineMark;
@@ -26,6 +26,14 @@ pub(super) fn downsample_columns(width: f64) -> usize {
     } else {
         1
     }
+}
+
+/// The x range visible through the marks clip, including half the widest stroke at each end.
+pub(super) fn downsample_range(context: &MarkContext<'_>) -> (f64, f64) {
+    context
+        .maps
+        .x
+        .expanded(f64::from(context.widest_line) / 2.0)
 }
 
 /// The points of `line` in axis space, reduced by [`downsample`] on a continuous x axis.
@@ -51,9 +59,7 @@ pub(super) fn downsample(
     xs: Vec<f64>,
     ys: Vec<f64>,
 ) -> (Vec<f64>, Vec<f64>) {
-    let columns = downsample_columns(context.plot.width);
-    let xm = context.maps.x;
-    let kept = visible_m4_indices(&xs, &ys, (xm.lo, xm.hi), columns);
+    let kept = downsample_indices(context, &xs, &ys);
     if kept.len() < xs.len() {
         let pick =
             |v: &[f64]| -> Vec<f64> { kept.iter().filter_map(|&i| v.get(i).copied()).collect() };
@@ -61,6 +67,13 @@ pub(super) fn downsample(
     } else {
         (xs, ys)
     }
+}
+
+/// The samples of a continuous line, including the strips covered by the marks clip.
+pub(super) fn downsample_indices(context: &MarkContext<'_>, xs: &[f64], ys: &[f64]) -> Vec<usize> {
+    let columns = downsample_columns(context.plot.width);
+    let xm = context.maps.x;
+    clipped_m4_indices(xs, ys, (xm.lo, xm.hi), columns, downsample_range(context))
 }
 
 /// A rectangle in plot points that mapped line points are clamped into.

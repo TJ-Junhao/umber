@@ -225,12 +225,12 @@ impl Header {
     }
 
     /// The hint of the error for a figure too short for the plot area, naming this header's
-    /// parts and the figure header above it, when present.
-    pub(super) fn height_hint(&self, figure_header: bool) -> &'static str {
+    /// parts, a bottom legend and the figure header above it, when present.
+    pub(super) fn height_hint(&self, figure_header: bool, bottom_legend: bool) -> &'static str {
         figure_height_hint(
             self.title.is_some(),
             self.subtitle.is_some(),
-            self.row.is_some(),
+            self.row.is_some() || bottom_legend,
             figure_header,
         )
     }
@@ -534,6 +534,7 @@ pub(crate) fn place_panel(
         xlabel_baseline,
         frame,
     } = *slot;
+    let axis_below = bands.axis_below();
     let PanelBands {
         label_rise,
         heading,
@@ -567,9 +568,9 @@ pub(crate) fn place_panel(
             .placed(plot.y),
         crate::LegendPosition::Bottom => {
             let axis_bottom = if xlabel.is_some() {
-                xlabel_baseline + bands.body_descent
+                (xlabel_baseline + bands.body_descent).max(plot.bottom() + axis_below)
             } else {
-                plot.bottom() + bands.x_band
+                plot.bottom() + axis_below
             };
             input
                 .legend
