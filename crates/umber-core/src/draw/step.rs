@@ -2,7 +2,7 @@
 //! horizontal and vertical segments, and the stepped path is clipped and stroked as a line is.
 
 use super::MarkContext;
-use super::line::{downsample, line_items, line_style};
+use super::line::{downsample_indices, line_items, line_style};
 use super::mapping::{axis_x, axis_y};
 use crate::Rgba;
 use crate::model::{Step, StepMark, holds};
@@ -35,6 +35,34 @@ pub(super) fn step_items(
     let (xs, ys) = stepped(&xs, &ys, mark.options().position);
     let style = line_style(width, color, mark.options().dash);
     line_items(context, &xs, &ys, &style, items);
+}
+
+/// Reduces the levels while retaining the neighbours that bound holds at a clipped gap.
+/// A retained NaN may have a finite level just outside the sampled range; that level and the
+/// original neighbours of the outermost retained points still determine its hold's ends.
+fn downsample(context: &MarkContext<'_>, xs: Vec<f64>, ys: Vec<f64>) -> (Vec<f64>, Vec<f64>) {
+    let mut kept = downsample_indices(context, &xs, &ys);
+    let n = xs.len();
+    if kept.len() == n {
+        return (xs, ys);
+    }
+    let neighbours: Vec<_> = kept
+        .iter()
+        .filter(|&&i| xs[i].is_nan() || ys[i].is_nan())
+        .flat_map(|&i| [i.checked_sub(1), (i + 1 < n).then_some(i + 1)])
+        .flatten()
+        .collect();
+    kept.extend(neighbours);
+    kept.sort_unstable();
+    kept.dedup();
+    let before = kept.first().and_then(|i| i.checked_sub(1));
+    let after = kept.last().copied().filter(|i| i + 1 < n).map(|i| i + 1);
+    if let Some(i) = before {
+        kept.insert(0, i);
+    }
+    kept.extend(after);
+    let pick = |values: &[f64]| kept.iter().map(|&i| values[i]).collect();
+    (pick(&xs), pick(&ys))
 }
 
 /// The vertices of the step path through the axis-space points `(xs, ys)`, as x and y vectors,

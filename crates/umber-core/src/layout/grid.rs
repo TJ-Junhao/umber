@@ -868,13 +868,11 @@ fn columns_too_narrow(
         let last = cell.col() + cell.col_span() - 1;
         if band.right_legend > 0.0 && band.right_legend == columns.right[last] {
             let available = band.right_legend - deficit;
-            if available >= 0.0
-                && let Err(err) = super::placement::check_width(
-                    input.context,
-                    &panel.legend.column(0.0),
-                    available - super::placement::RIGHT_GAP,
-                )
-            {
+            if let Err(err) = super::placement::check_right_width(
+                input.context,
+                &panel.legend.column(0.0),
+                available,
+            ) {
                 return in_panel(*cell, err);
             }
         }

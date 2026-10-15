@@ -680,13 +680,7 @@ fn solve_single(
         let direct = legend.direct.reserve(f64::INFINITY);
         if bands.right_legend > 0.0 {
             let available = frame.right() - PADDING - left - MIN_PLOT;
-            if available >= 0.0 {
-                placement::check_width(
-                    context,
-                    &legend.column(0.0),
-                    available - placement::RIGHT_GAP,
-                )?;
-            }
+            placement::check_right_width(context, &legend.column(0.0), available)?;
             let y_room = right - MIN_PLOT - (frame.x + PADDING) - Y_LABEL_GAP;
             if let Some(label) = widest(&bands.y_labels)
                 && y_room >= 0.0
@@ -724,7 +718,13 @@ fn solve_single(
     if legend.position == crate::LegendPosition::TopRight {
         plot_top = top + bands.above_with_row(&legend.header_within(plot_left, plot_right));
     }
-    let below = bands.x_band + bands.x_title_band + PADDING + bands.bottom_legend;
+    let axis_below = if bands.bottom_legend > 0.0 {
+        bands.axis_below()
+    } else {
+        // Keep the original single-panel extent when no bottom legend needs the label drop.
+        bands.x_band + bands.x_title_band
+    };
+    let below = axis_below + PADDING + bands.bottom_legend;
     let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {
@@ -732,7 +732,9 @@ fn solve_single(
             context,
             frame.height,
             plot_top - frame.y + MIN_PLOT + below,
-            bands.heading.height_hint(top > frame.y + PADDING),
+            bands
+                .heading
+                .height_hint(top > frame.y + PADDING, bands.bottom_legend > 0.0),
         ));
     }
     let (x, plot_width) = fit_span(plot_left, plot_right, frame.x, frame.right());
@@ -1763,6 +1765,136 @@ mod tests {
             (layout.plot.width - MIN_PLOT).abs() < 1e-9,
             "{:?}",
             layout.plot
+        );
+    }
+
+    fn narrow_with_right_legend(grid: bool, wide_y: bool) -> Figure {
+        let width = if wide_y { 143.0 } else { 35.0 } / 72.0;
+        let mut f = Figure::with_grid(
+            width,
+            4.0,
+            Theme::midnight(),
+            crate::Grid::new(if grid { 2 } else { 1 }, 1)
+                .unwrap()
+                .with_legend(crate::LegendMode::PerPanel),
+        )
+        .unwrap();
+        let mut axes = f
+            .add_axes_at(
+                crate::Placement {
+                    row: crate::GridIndex::At(0),
+                    col: crate::GridIndex::At(0),
+                    ..crate::Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap();
+        axes.xticks(&[]).unwrap();
+        if wide_y {
+            axes.yticks_labeled(&[0.0], vec!["W".repeat(20)]).unwrap();
+        } else {
+            axes.yticks(&[]).unwrap();
+        }
+        axes.legend_at(crate::LegendStyle::Header, crate::LegendPosition::Right)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[0.0, 1.0],
+                LineOptions {
+                    label: "a".into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn right_legend_without_text_room_names_the_y_tick_label() {
+        for grid in [false, true] {
+            let err = overflow(&narrow_with_right_legend(grid, true));
+            assert!(
+                err.to_string().contains("y tick label \"WWWW"),
+                "grid={grid}: {err}"
+            );
+            assert_eq!(
+                err.hint(),
+                Some("shorten the y tick labels or widen the figure.")
+            );
+        }
+    }
+
+    #[test]
+    fn right_legend_without_text_room_names_the_canvas_width() {
+        for grid in [false, true] {
+            let err = overflow(&narrow_with_right_legend(grid, false));
+            assert!(
+                err.to_string().contains("the figure is 35 pt wide"),
+                "grid={grid}: {err}"
+            );
+            assert_eq!(err.hint(), Some("widen the figure."));
+        }
+    }
+
+    fn bottom_without_x_labels(height: f64) -> Figure {
+        let theme = Theme::midnight().with_font_scale(2.0).unwrap();
+        let mut f = Figure::new(4.0, height, theme).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .ylim(0.0, 1.0)
+            .unwrap()
+            .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
+            .unwrap()
+            .legend_at(crate::LegendStyle::Header, crate::LegendPosition::Bottom)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[0.0, 1.0],
+                LineOptions {
+                    label: "a".into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn bottom_legend_starts_below_the_lowest_y_tick_label() {
+        let f = bottom_without_x_labels(4.0);
+        let layout = plan_of(&f).1;
+        let label = &layout.y_tick_labels[0];
+        let bottom = label.y + metrics(lib(), &label.style).1;
+        let entry = &layout.legend.entries()[0];
+        let top = entry.label.y - metrics(lib(), &entry.label.style).0;
+        assert!(
+            top >= bottom + placement::BOTTOM_GAP,
+            "legend top {top}, y label bottom {bottom}"
+        );
+    }
+
+    #[test]
+    fn bottom_legend_reserves_the_lowest_y_tick_label_drop() {
+        let f = bottom_without_x_labels(4.0);
+        let layout = plan_of(&f).1;
+        let label = &layout.y_tick_labels[0];
+        let bottom = label.y + metrics(lib(), &label.style).1;
+        let required = bottom + placement::BOTTOM_GAP + layout.legend.height() + PADDING;
+        assert!(
+            required <= f.height_in() * 72.0 + 1e-9,
+            "required {required}"
+        );
+    }
+
+    #[test]
+    fn bottom_legend_is_named_in_the_height_hint() {
+        let err = overflow(&bottom_without_x_labels(0.4));
+        assert_eq!(
+            err.hint(),
+            Some("make the figure taller, or remove the legend.")
         );
     }
 

@@ -134,6 +134,41 @@ pub(crate) fn visible_m4_indices(
     kept
 }
 
+/// Keeps the plot's device columns unchanged while also sampling the strips inside an extended
+/// marks clip. Each strip is reduced separately, so extrema outside the plot cannot displace
+/// its boundary neighbours or shift its device columns.
+pub(crate) fn clipped_m4_indices(
+    xs: &[f64],
+    ys: &[f64],
+    x_range: (f64, f64),
+    columns: usize,
+    clip_range: (f64, f64),
+) -> Vec<usize> {
+    let mut kept = visible_m4_indices(xs, ys, x_range, columns);
+    let n = xs.len().min(ys.len());
+    if kept.len() == n || clip_range == x_range {
+        return kept;
+    }
+    let xs = &xs[..n];
+    let ys = &ys[..n];
+    let (lo, hi) = x_range;
+    let first = xs.iter().position(|&x| x >= lo).unwrap_or(n);
+    let end = xs.iter().position(|&x| x > hi).unwrap_or(n);
+    for (start, end, range) in [(0, first, (clip_range.0, lo)), (end, n, (hi, clip_range.1))] {
+        let strip_columns = (columns as f64 * (range.1 - range.0) / (hi - lo))
+            .ceil()
+            .clamp(1.0, columns as f64) as usize;
+        kept.extend(
+            visible_m4_indices(&xs[start..end], &ys[start..end], range, strip_columns)
+                .into_iter()
+                .map(|i| start + i),
+        );
+    }
+    kept.sort_unstable();
+    kept.dedup();
+    kept
+}
+
 fn is_sorted_ignoring_nan(xs: &[f64]) -> bool {
     let mut prev = f64::NEG_INFINITY;
     for &x in xs {
@@ -152,6 +187,29 @@ fn is_sorted_ignoring_nan(xs: &[f64]) -> bool {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn clipped_columns_keep_the_plot_samples_and_both_outer_extrema() {
+        let xs: Vec<_> = (0..20_000).map(|i| f64::from(i) / 1000.0).collect();
+        let mut ys: Vec<_> = xs.iter().map(|x| x.sin()).collect();
+        ys[9_900] = 20.0;
+        ys[11_100] = -20.0;
+        let domain = (10.0, 11.0);
+        let original = visible_m4_indices(&xs, &ys, domain, 20);
+        let kept = clipped_m4_indices(&xs, &ys, domain, 20, (9.8, 11.2));
+        assert!(kept.contains(&9_900) && kept.contains(&11_100));
+        let inside = |indices: Vec<usize>| {
+            indices
+                .into_iter()
+                .filter(|&i| xs[i] >= domain.0 && xs[i] <= domain.1)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(inside(kept), inside(original));
+        assert_eq!(
+            clipped_m4_indices(&xs, &ys, domain, 0, (9.8, 11.2)),
+            (0..xs.len()).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn visible_columns_keep_only_the_adjacent_outside_points() {

@@ -1,2 +1,3 @@
-# Cases whose committed outputs change on purpose in this change; none.
-# VERSION is excluded from the output corpus, so the 0.2.0 bump changes no records.
+# Cases whose committed outputs change on purpose in this change.
+# Preserve cumulative-curve extrema in the half-stroke strips beyond the x limits.
+stacked-area-long-limits

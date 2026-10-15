@@ -3,9 +3,9 @@
 
 use super::MarkContext;
 use super::band::band_fill_items;
-use super::line::{downsample_columns, line_items, line_style};
+use super::line::{downsample_columns, downsample_range, line_items, line_style};
 use super::mapping::{axis_x_value, axis_y};
-use crate::downsample::visible_m4_indices;
+use crate::downsample::clipped_m4_indices;
 use crate::model::{SeriesView, StackedAreaMark};
 use crate::resolve::Resolved;
 use crate::scene::Item;
@@ -43,7 +43,7 @@ pub(super) fn stacked_area_items(
     }
     let columns = downsample_columns(context.plot.width);
     let domain = (context.maps.x.lo, context.maps.x.hi);
-    let (xs, curves) = kept_points(xs, curves, domain, columns);
+    let (xs, curves) = kept_points(xs, curves, domain, columns, downsample_range(context));
     let baseline = context.maps.y.at(context.baseline);
     let baseline: Vec<_> = xs
         .iter()
@@ -66,13 +66,14 @@ fn kept_points(
     curves: Vec<Vec<f64>>,
     domain: (f64, f64),
     columns: usize,
+    clip_range: (f64, f64),
 ) -> (Vec<f64>, Vec<Vec<f64>>) {
     if xs.len() <= 4 * columns {
         return (xs, curves);
     }
     let mut kept: Vec<_> = curves
         .iter()
-        .flat_map(|curve| visible_m4_indices(&xs, curve, domain, columns))
+        .flat_map(|curve| clipped_m4_indices(&xs, curve, domain, columns, clip_range))
         .collect();
     kept.sort_unstable();
     kept.dedup();
@@ -95,7 +96,7 @@ mod tests {
         b[6_001] = 200.0;
         a[5_500] = f64::NAN;
         b[5_500] = f64::NAN;
-        let (kept, curves) = kept_points(xs, vec![a, b], (50.0, 60.0), 10);
+        let (kept, curves) = kept_points(xs, vec![a, b], (50.0, 60.0), 10, (50.0, 60.0));
         for x in [49.99, 50.0, 50.01, 50.02, 55.0, 60.0, 60.01] {
             assert!(kept.contains(&x), "missing {x}");
         }
