@@ -626,10 +626,12 @@ fn figure_height_hint(
 /// would reach further, the plot edge on that side moves in by exactly the overflow. Each side
 /// moves in by at most [`END_LABEL_SHARE`] of the inner width beyond the padding; labels that
 /// need more are an error. Direct labels reserve room under the same cap. Under the plot are
-/// the x tick labels, the x label and the bottom padding.
+/// the x tick labels, the x label and the bottom padding. A Bottom legend sits below the
+/// greater of the x label bands and the lowest y tick label's drop, with its gap and height
+/// reserved before the bottom padding.
 ///
-/// The canvas starts at 0, so every sum here is evaluated as for a figure of one axes before
-/// figures had grids, and the plot area is the same to the bit.
+/// The canvas starts at 0, so without a Bottom legend every sum here is evaluated as for a
+/// figure of one axes before figures had grids, and the plot area is the same to the bit.
 ///
 /// # Errors
 ///
@@ -642,9 +644,11 @@ fn figure_height_hint(
 ///   wide, with each side of the plot inset by at most [`END_LABEL_SHARE`] of the inner width:
 ///   the message names the widest x tick label, its width and the width up to which labels fit;
 /// - the room between the header (title, subtitle and legend row), the y label and the y tick
-///   label rising above the top tick, and the x tick labels, the x label and the bottom padding
-///   is shorter than [`MIN_PLOT`]: the message names the height the canvas needs, and the hint
-///   names the figure header, when present, and only the header parts the axes have (see
+///   label rising above the top tick, and the bottom bands is shorter than [`MIN_PLOT`]. The
+///   bottom bands include the x tick labels, the x label and the bottom padding; with a Bottom
+///   legend they also reserve the lowest y tick label's drop when it reaches further, then the
+///   legend's gap and height. The message names the height the canvas needs, and the hint names
+///   the figure header, when present, the header parts the axes have and any Bottom legend (see
 ///   [`figure_too_short`]).
 fn solve_single(
     input: &LayoutInput<'_>,
