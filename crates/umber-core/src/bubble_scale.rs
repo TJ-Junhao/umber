@@ -40,8 +40,13 @@ pub(crate) fn nice_125_round(value: f64) -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Three reference values, largest first. An all-zero scale has no positive reference.
-pub(crate) fn references(maximum: f64) -> [f64; 3] {
+/// Up to three distinct positive reference values, largest first; none for an all-zero scale.
+pub(crate) fn references(maximum: f64) -> Vec<f64> {
     let top = nice_125_below(maximum);
-    [top, nice_125_round(top / 2.0), nice_125_round(top / 4.0)]
+    let mut values: Vec<_> = [top, nice_125_round(top / 2.0), nice_125_round(top / 4.0)]
+        .into_iter()
+        .filter(|v| *v > 0.0)
+        .collect();
+    values.dedup();
+    values
 }

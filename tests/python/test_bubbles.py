@@ -175,13 +175,24 @@ def test_highlight_names_the_argument(tmp_path: Path, call: str, argument: str) 
         float.fromhex("0x0.0000000000001p-1022"),
         1e-300,
         1e300,
-        float.fromhex("0x1.fffffffffffffp+1023"),
     ],
 )
 def test_finite_size_extremes_render(maximum: float) -> None:
     ax = axes().bubbles([1, 2], [2, 3], [maximum / 4, maximum], label="Sizes")
     assert ax.figure.to_svg()
     assert ax.figure.to_png(dpi=60)
+
+
+def test_size_magnitude_limit_is_atomic() -> None:
+    ax = axes().bubbles([1], [2], [1e300], label="Sizes")
+    before = ax.figure.to_svg()
+    with pytest.raises(ub.DataError) as caught:
+        ax.bubbles([1], [2], [2e300])
+    assert str(caught.value) == (
+        "Axes.bubbles(): sizes[0] is 2e300; magnitudes must not exceed 1e300."
+    )
+    assert details(caught.value) == ("sizes", None)
+    assert ax.figure.to_svg() == before
 
 
 def test_log_axes_and_coordinate_errors_are_atomic() -> None:

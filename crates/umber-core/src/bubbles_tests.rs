@@ -93,7 +93,7 @@ fn best_avoids_bubble_area_when_its_center_is_outside() {
         .unwrap()
         .ylim(0.0, 1.0)
         .unwrap()
-        .bubbles(&[f64::NAN], &[f64::NAN], &[1.0], options("Cities"))
+        .bubbles(&[2.0], &[2.0], &[1.0], options("Cities"))
         .unwrap();
     let initial = plan_figure(&f, (0, 0), FontLibrary::global()).1;
     let plot = initial.plot;
@@ -187,6 +187,92 @@ fn size_legend_values_are_nice() {
         assert_eq!(radius(maximum, maximum, 18.0), 18.0);
         assert!(refs.iter().all(|v| radius(*v, maximum, 18.0).is_finite()));
     }
+}
+
+#[test]
+fn bubble_sizes_above_the_magnitude_limit_are_atomic() {
+    let mut f = figure(Theme::pigment(), 1e300);
+    let before = f.to_svg(SvgText::Outlines).unwrap();
+    for value in [1.1e300, f64::MAX] {
+        let error = f
+            .single_axes_mut()
+            .bubbles(&[1.0], &[2.0], &[value], options("Large"))
+            .unwrap_err();
+        assert!(matches!(error, Error::Data { .. }));
+        assert_eq!(error.parameter(), Some("sizes"));
+        assert_eq!(error.hint(), None);
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Axes.bubbles(): sizes[0] is {}; magnitudes must not exceed 1e300.",
+                crate::error::number(value)
+            )
+        );
+        assert_eq!(f.to_svg(SvgText::Outlines).unwrap(), before);
+    }
+}
+
+#[test]
+fn subnormal_size_references_are_positive_and_unique() {
+    assert!(references(0.0).is_empty());
+    for bits in 1..=8 {
+        let maximum = f64::from_bits(bits);
+        let refs = references(maximum);
+        assert!(!refs.is_empty());
+        assert!(refs.iter().all(|v| *v > 0.0 && *v <= maximum), "{refs:?}");
+        assert!(refs.windows(2).all(|p| p[0] > p[1]), "{refs:?}");
+    }
+}
+
+#[test]
+fn subnormal_size_legends_have_no_zero_or_repeated_entries() {
+    for bits in 1..=8 {
+        let maximum = f64::from_bits(bits);
+        let f = figure(Theme::pigment(), maximum);
+        let marks = resolve_marks(f.single_axes().marks(), f.theme());
+        let entries = marks[0].size_legend(&TickFormat::default());
+        assert!(!entries.is_empty());
+        for (i, entry) in entries.iter().enumerate() {
+            assert_ne!(entry.label(), "0");
+            assert!(entries[..i].iter().all(|e| e.label() != entry.label()));
+            assert!(matches!(entry.swatch(), Swatch::Bubble { radius } if radius > 0.0));
+        }
+    }
+}
+
+#[test]
+fn bubble_maximum_ignores_nan_coordinates_across_marks() {
+    let mut f = figure(Theme::pigment(), 100.0);
+    f.single_axes_mut()
+        .bubbles(
+            &[f64::NAN, 4.0],
+            &[4.0, f64::NAN],
+            &[1e300, 1e300],
+            options("Missing"),
+        )
+        .unwrap();
+    let marks = resolve_marks(f.single_axes().marks(), f.theme());
+    for mark in &marks {
+        assert!(
+            matches!(mark, ResolvedMark::Bubbles { maximum: 100.0, .. }),
+            "{mark:?}"
+        );
+    }
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
+    let Item::Group { items, .. } = &scene.items[1] else {
+        panic!("marks")
+    };
+    let radii: Vec<_> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Fill { path, .. } => {
+                let (lo, hi) = path.bounds().unwrap();
+                Some((hi.x - lo.x) / 2.0)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(radii, [9.0, 18.0]);
 }
 
 #[test]

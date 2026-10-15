@@ -346,6 +346,16 @@ pub(super) fn check_bubbles(
             .with_parameter("sizes")
             .with_hint("use 0 for a point to leave out."));
         }
+        if value > MAX_MAGNITUDE {
+            return Err(Error::data(
+                context,
+                format!(
+                    "sizes[{i}] is {}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
+                    number(value)
+                ),
+            )
+            .with_parameter("sizes"));
+        }
     }
     Ok(())
 }

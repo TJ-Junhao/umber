@@ -64,18 +64,18 @@ fn violin_group(
         top: y0,
         bottom: y1,
     };
-    if !stats.density.is_empty() {
-        let points: Vec<_> =
-            stats
-                .density
-                .iter()
-                .map(|&(y, w)| AxisPoint::new(center + half * w, axis_y_value(&resolved.y, y)))
-                .chain(
-                    stats.density.iter().rev().map(|&(y, w)| {
-                        AxisPoint::new(center - half * w, axis_y_value(&resolved.y, y))
-                    }),
-                )
-                .collect();
+    let density = axis_density(stats, resolved);
+    if !density.is_empty() {
+        let points: Vec<_> = density
+            .iter()
+            .map(|&(y, w)| AxisPoint::new(center + half * w, y))
+            .chain(
+                density
+                    .iter()
+                    .rev()
+                    .map(|&(y, w)| AxisPoint::new(center - half * w, y)),
+            )
+            .collect();
         // Category x is always inside its band. Cut only y, beyond the scene clip so that
         // the polygon's closing edges cannot create visible horizontal outline strokes.
         let points = clip_y(&clip_y(&points, y0, true), y1, false);
@@ -107,8 +107,8 @@ fn violin_group(
         ]
     };
     for (value, fraction, stroke) in quantiles {
-        let half = half * local_width(&stats.density, value) * fraction;
         let y = axis_y_value(&resolved.y, value);
+        let half = half * local_width(&density, y) * fraction;
         if let Some((a, b)) = clip_segment(
             AxisPoint::new(center - half, y),
             AxisPoint::new(center + half, y),
@@ -125,7 +125,16 @@ fn violin_group(
     }
 }
 
-/// Interpolates a relative half-width in data space; constant groups use the entire slot.
+/// Maps the density once so the outline and its quantile widths use the same axis space.
+fn axis_density(stats: &ViolinStats, resolved: &Resolved) -> Vec<(f64, f64)> {
+    stats
+        .density
+        .iter()
+        .map(|&(y, width)| (axis_y_value(&resolved.y, y), width))
+        .collect()
+}
+
+/// Interpolates a relative half-width in axis space; constant groups use the entire slot.
 fn local_width(density: &[(f64, f64)], value: f64) -> f64 {
     let after = density.partition_point(|&(y, _)| y < value);
     let Some(&(b, wb)) = density.get(after) else {
@@ -154,4 +163,50 @@ fn clip_y(points: &[AxisPoint], at: f64, above: bool) -> Vec<AxisPoint> {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Figure, ViolinOptions};
+    use crate::resolve::{ResolvedMark, resolve_marks};
+    use crate::{FontLibrary, LogBase, ScaleKind, Theme};
+
+    #[test]
+    fn log_quantile_widths_meet_the_outline_in_axis_space() {
+        let mut values = vec![1.0; 50];
+        values.extend([10.0; 50]);
+        values.push(1e8);
+        let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        figure
+            .add_axes(ScaleKind::Category, ScaleKind::Log { base: LogBase::TEN })
+            .unwrap()
+            .violin(vec!["A".into()], vec![values], ViolinOptions::default())
+            .unwrap();
+        let (resolved, layout) =
+            crate::pipeline::plan_figure(&figure, (0, 0), FontLibrary::global());
+        let marks = resolve_marks(figure.single_axes().marks(), figure.theme());
+        let [ResolvedMark::Violin { distributions, .. }] = marks.as_slice() else {
+            panic!("violin")
+        };
+        let stats = distributions[0].groups[0].as_ref().unwrap();
+        let half = layout.plot.width * f64::from(figure.theme().violin_width()) / 2.0;
+        for (value, fraction) in [(stats.q1, 0.5), (stats.q3, 0.5), (stats.median, 1.0)] {
+            let pair = stats
+                .density
+                .windows(2)
+                .find(|p| p[0].0 <= value && value <= p[1].0)
+                .unwrap();
+            let a = axis_y_value(&resolved.y, pair[0].0);
+            let b = axis_y_value(&resolved.y, pair[1].0);
+            let t = (axis_y_value(&resolved.y, value) - a) / (b - a);
+            let outline = pair[0].1 + (pair[1].1 - pair[0].1) * t;
+            let width = local_width(
+                &axis_density(stats, &resolved),
+                axis_y_value(&resolved.y, value),
+            );
+            let error = half * fraction * (width - outline).abs();
+            assert!(error <= 1e-6, "quantile {value}: endpoint error {error} pt");
+        }
+    }
 }

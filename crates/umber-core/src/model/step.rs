@@ -38,15 +38,14 @@ pub(crate) enum Edge {
 }
 
 impl Edge {
-    /// The x of this end, given the x values `xs` of the points and `mid`, which finds the
-    /// middle of two x values. The result stays between them, including when rounding a log
-    /// midpoint would put it just outside two equal values.
-    pub(crate) fn position(self, xs: &[f64], mid: impl Fn(f64, f64) -> f64) -> f64 {
+    /// The x of this end in axis space, using the arithmetic mean for a midpoint.
+    /// Drawing and anchors share this calculation after mapping their x values.
+    pub(crate) fn position(self, xs: &[f64]) -> f64 {
         match self {
             Edge::At(k) => xs[k],
             Edge::Mid(i, k) => {
                 let (a, b) = (xs[i], xs[k]);
-                mid(a, b).clamp(a.min(b), a.max(b))
+                ((a + b) / 2.0).clamp(a.min(b), a.max(b))
             }
         }
     }
