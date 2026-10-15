@@ -77,6 +77,23 @@ def type_name(value: object) -> str:
         return "object"
 
 
+def is_text_or_buffer(value: object) -> bool:
+    """Whether a value is text or a binary buffer rather than a data container.
+
+    Args:
+        value: Any object.
+
+    Returns:
+        Whether the value is a ``str``, ``bytes``, ``bytearray`` or ``memoryview``.
+
+    Example:
+        >>> from umber._args import is_text_or_buffer
+        >>> is_text_or_buffer(bytearray()), is_text_or_buffer([])
+        (True, False)
+    """
+    return isinstance(value, str | bytes | bytearray | memoryview)
+
+
 def _numpy_scalar_types() -> frozenset[type]:
     """The NumPy number, bool, datetime and timedelta scalar types, if NumPy is imported."""
     np = sys.modules.get("numpy")
@@ -163,8 +180,10 @@ def checked_text(
     label: str,
     value: str,
     unencodable: type[DataError] | type[StyleError],
+    *,
+    check_length: bool = True,
 ) -> str:
-    """Apply the length cap and the UTF-8 rule to a string, and return it as a plain ``str``.
+    """Apply text rules to a string and return it as a plain ``str``.
 
     Args:
         context: The API call, such as ``"Axes.bar()"``.
@@ -174,12 +193,14 @@ def checked_text(
         value: The string, possibly of a ``str`` subclass.
         unencodable: The error class for a string holding a lone surrogate: ``StyleError``
             for text arguments, ``DataError`` for names in data.
+        check_length: Whether to apply the length cap here; false when core checks it in
+            the context of the other arguments. UTF-8 encoding is always checked.
 
     Returns:
         The string as a plain ``str``.
 
     Raises:
-        StyleError: The string is longer than ``MAX_TEXT_LENGTH`` characters.
+        StyleError: ``check_length`` is true and the string exceeds ``MAX_TEXT_LENGTH``.
         DataError: The string holds a lone surrogate and ``unencodable`` is ``DataError``.
 
     Example:
@@ -191,7 +212,7 @@ def checked_text(
     # The checks run on the plain ``str`` that is passed on, so a subclass that overrides
     # ``__len__`` or ``__str__`` cannot change what they see.
     plain = str.__str__(value)
-    if len(plain) > MAX_TEXT_LENGTH:
+    if check_length and len(plain) > MAX_TEXT_LENGTH:
         message = (
             f"{label} has {len(plain):,} characters; "
             f"text must be at most {MAX_TEXT_LENGTH:,} characters."
