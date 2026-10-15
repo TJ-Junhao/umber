@@ -1,2 +1,1 @@
 # Cases whose committed outputs change on purpose in this change; none.
-# VERSION is excluded from the output corpus, so the 0.2.0 bump changes no records.

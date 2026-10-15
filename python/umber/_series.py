@@ -7,7 +7,7 @@ from typing import Final, Self, cast, final
 import numpy as np
 
 from umber import _color
-from umber._args import instance, require_text, text, type_name
+from umber._args import instance, is_text_or_buffer, require_text, text, type_name
 from umber._color import Color
 from umber._errors import UmberError, details, new_error
 from umber._report import api_call
@@ -266,7 +266,7 @@ def check_groups_type(context: str, value: object) -> None:
         >>> from umber._series import check_groups_type
         >>> check_groups_type("Axes.box()", [[1, 2], []])
     """
-    if isinstance(value, str | bytes) or not isinstance(value, Sequence):
+    if is_text_or_buffer(value) or not isinstance(value, Sequence):
         raise new_error(
             TypeError,
             context,
