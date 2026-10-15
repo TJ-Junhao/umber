@@ -125,6 +125,8 @@ def generated() -> Iterator[float]:
         (np.str_("1.5"), "str_", SINGLE_HINT),
         (b"12", "bytes", SINGLE_HINT),
         (bytearray(b"12"), "bytearray", SINGLE_HINT),
+        (memoryview(b"12"), "memoryview", SINGLE_HINT),
+        (memoryview(np.array([1.0, 2.0])), "memoryview", SINGLE_HINT),
         (3, "int", SINGLE_HINT),
         (2.5, "float", SINGLE_HINT),
         (True, "bool", SINGLE_HINT),
@@ -227,7 +229,6 @@ def test_masked_arrays_are_refused(values: object) -> None:
         (ArrayLike(), [1.0, 2.0]),
         ([np.float32(0.5), np.int16(2)], [0.5, 2.0]),
         ([float("nan"), float("inf")], [float("nan"), float("inf")]),
-        (memoryview(np.array([1.0, 2.0])), [1.0, 2.0]),
     ],
 )
 def test_floats_converts_sequences(values: object, expected: list[float]) -> None:

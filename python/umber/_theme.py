@@ -6,7 +6,7 @@ from operator import attrgetter
 from typing import ClassVar, Final, Never, Self, cast, final
 
 from umber import _color, _umber
-from umber._args import instance, real, type_name
+from umber._args import instance, is_text_or_buffer, real, type_name
 from umber._color import Color
 from umber._enums import Align, Dash, FillStyle, Font, GridLines, LegendPosition, LegendStyle
 from umber._errors import new_error
@@ -125,7 +125,7 @@ class Theme:
         with api_call():
             context = "Theme.with_palette()"
             given = cast(object, colors)
-            if isinstance(given, str | bytes) or not isinstance(given, Sequence):
+            if is_text_or_buffer(given) or not isinstance(given, Sequence):
                 raise new_error(
                     TypeError,
                     context,

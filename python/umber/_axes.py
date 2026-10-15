@@ -13,7 +13,7 @@ from typing_extensions import TypeVar
 # ``umber.Figure`` through the package once it has loaded.
 import umber
 from umber import _args, _color, _series, _size, _ticks, _umber
-from umber._args import instance, integer, real, type_name
+from umber._args import instance, integer, is_text_or_buffer, real, type_name
 from umber._color import Color
 from umber._enums import AUTO, Auto, Dash, LegendPosition, LegendStyle, Marker, Step
 from umber._errors import DataError, new_error
@@ -356,7 +356,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "positions", positions)
             check_names_type(context, "labels", labels)
             places = floats(context, "positions", positions)
-            texts = names(context, "labels", labels)
+            texts = names(context, "labels", labels, check_length=False)
             self._native.xticks_labeled(self._row, self._col, places, texts)
             return self
 
@@ -395,7 +395,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "positions", positions)
             check_names_type(context, "labels", labels)
             places = floats(context, "positions", positions)
-            texts = names(context, "labels", labels)
+            texts = names(context, "labels", labels, check_length=False)
             self._native.yticks_labeled(self._row, self._col, places, texts)
             return self
 
@@ -1669,7 +1669,7 @@ def _series_arguments(
     context: str, value: object
 ) -> list[tuple[str, FloatArray, tuple[int, int, float]]]:
     """Check a ``series`` argument and return the native form of each series."""
-    if isinstance(value, str | bytes) or not isinstance(value, Sequence):
+    if is_text_or_buffer(value) or not isinstance(value, Sequence):
         message = f"series is {type_name(value)}; series must be a sequence of Series."
         raise new_error(TypeError, context, message, parameter="series", hint=_SERIES_HINT)
     items = cast(Sequence[object], value)
@@ -1689,7 +1689,7 @@ def _distribution_arguments(
 ) -> list[tuple[str, list[FloatArray], tuple[int, int, float]]]:
     """Check distributions and return their native arguments without copying samples."""
     hint = 'pass a list of distributions, e.g. [Distribution("North", [[1, 2]])].'
-    if isinstance(value, str | bytes) or not isinstance(value, Sequence):
+    if is_text_or_buffer(value) or not isinstance(value, Sequence):
         raise new_error(
             TypeError,
             context,
