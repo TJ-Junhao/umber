@@ -343,7 +343,14 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "ylabel": lambda f, r, c: f.ylabel(r, c, "t"),
     "xlim": lambda f, r, c: f.xlim(r, c, 0.0, 1.0),
     "ylim": lambda f, r, c: f.ylim(r, c, 0.0, 1.0),
+    "xticks": lambda f, r, c: f.xticks(r, c, floats(0, 1)),
+    "yticks": lambda f, r, c: f.yticks(r, c, floats(0, 1)),
+    "xticks_labeled": lambda f, r, c: f.xticks_labeled(r, c, floats(0, 1), ["zero", "one"]),
+    "yticks_labeled": lambda f, r, c: f.yticks_labeled(r, c, floats(0, 1), ["zero", "one"]),
+    "xtick_format": lambda f, r, c: f.xtick_format(r, c, (1, 1, "", "")),
+    "ytick_format": lambda f, r, c: f.ytick_format(r, c, (1, 1, "", "")),
     "legend": lambda f, r, c: f.legend(r, c, 0),
+    "legend_at": lambda f, r, c: f.legend_at(r, c, 0, 2),
     "line": lambda f, r, c: f.line(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "area": lambda f, r, c: f.area(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "scatter": lambda f, r, c: f.scatter(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
@@ -371,6 +378,19 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "violin": lambda f, r, c: f.violin(r, c, ["a"], [floats(1)], "", AUTO),
     "grouped_violin": lambda f, r, c: f.grouped_violin(r, c, ["a"], [("s", [floats(1)], AUTO)]),
 }
+
+
+def test_axes_calls_cover_ticks_and_legend_position() -> None:
+    required = {
+        "xticks",
+        "yticks",
+        "xticks_labeled",
+        "yticks_labeled",
+        "xtick_format",
+        "ytick_format",
+        "legend_at",
+    }
+    assert not (required - AXES_CALLS.keys())
 
 
 @pytest.mark.parametrize("name", AXES_CALLS)

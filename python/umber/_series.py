@@ -1,4 +1,7 @@
-"""Immutable ``Series`` for bars and stacked areas, and ``Distribution`` for grouped boxes."""
+"""Immutable ``Series`` for bars and stacked areas, and ``Distribution`` for grouped charts.
+
+Pass distributions to ``Axes.grouped_box()`` or ``Axes.grouped_violin()``.
+"""
 
 from collections.abc import Callable, Sequence
 from operator import attrgetter
@@ -146,10 +149,11 @@ def native(series: Series) -> tuple[str, FloatArray, tuple[int, int, float]]:
 class Distribution:
     """An immutable named distribution, with one group of samples per category.
 
-    Pass distributions to ``Axes.grouped_box()``. Samples are copied when the distribution
-    is made; changing the original data has no effect. Type, shape and dtype are checked
-    here; finiteness and log-axis constraints are checked when adding the mark. NaN is
-    ignored. Copies return the same immutable distribution; pickle stores it by value.
+    Pass distributions to ``Axes.grouped_box()`` or ``Axes.grouped_violin()``. Samples are
+    copied when the distribution is made; changing the original data has no effect. Type,
+    shape and dtype are checked here; finiteness and log-axis constraints are checked when
+    adding the mark. NaN is ignored. Copies return the same immutable distribution; pickle
+    stores it by value.
 
     Example:
         >>> import umber as ub
