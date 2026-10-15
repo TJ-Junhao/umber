@@ -795,6 +795,70 @@ def test_labeled_types_are_checked_before_any_conversion(axis: str) -> None:
     assert _parameter(first.value) == "positions"
 
 
+def test_category_axis_is_checked_before_label_length() -> None:
+    ax: AnyAxes = ub.Figure().add_axes(x=ub.Scale.category())
+    fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), *ONE_CELL)
+    fig.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
+    labels = ["x" * 1001]
+    before = ax.figure.to_svg()
+    with pytest.raises(ub.UsageError) as expected:
+        fig.xticks_labeled(0, 0, _floats(0), labels)
+    with pytest.raises(ub.UsageError) as caught:
+        ax.xticks_labeled([0.0], labels)
+    assert str(caught.value) == str(expected.value)
+    assert details(caught.value) == details(expected.value)
+    assert ax.figure.to_svg() == before
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+@pytest.mark.parametrize("formatted", [False, True])
+@pytest.mark.parametrize("positions", [[float("nan")], [1.0, 0.0], [0.0, 1.0]])
+def test_labeled_value_errors_follow_core_order(
+    axis: str, formatted: bool, positions: list[float]
+) -> None:
+    ax = _axes()
+    fig = _native()
+    if formatted:
+        getattr(ax, f"{axis}tick_format")(ub.TickFormat.fixed(1))
+        getattr(fig, f"{axis}tick_format")(0, 0, native(ub.TickFormat.fixed(1)))
+    before = ax.figure.to_svg()
+    labels = ["x" * 1001]
+    with pytest.raises(ub.StyleError) as expected:
+        getattr(fig, f"{axis}ticks_labeled")(0, 0, _floats(*positions), labels)
+    with pytest.raises(ub.StyleError) as caught:
+        getattr(ax, f"{axis}ticks_labeled")(positions, labels)
+    assert str(caught.value) == str(expected.value)
+    assert details(caught.value) == details(expected.value)
+    assert ax.figure.to_svg() == before
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_labeled_conversion_checks_encoding_and_plain_strings(axis: str) -> None:
+    ax = _axes()
+    method = getattr(ax, f"{axis}ticks_labeled")
+    with pytest.raises(ub.DataError) as caught:
+        method([0], ["a\ud800"])
+    assert str(caught.value) == (
+        f"Axes.{axis}ticks_labeled(): labels[0] has a lone surrogate at index 1; "
+        "text must be valid Unicode."
+    )
+    assert _parameter(caught.value) == "labels"
+
+    class Label(str):
+        def __str__(self) -> str:
+            return "changed"
+
+        def __len__(self) -> int:
+            return 0
+
+    with pytest.raises(ub.StyleError) as long:
+        method([0], [Label("x" * 1001)])
+    assert str(long.value) == (
+        f"Axes.{axis}ticks_labeled(): labels[0] has 1,001 characters; {TEXT_CAP}"
+    )
+    method([0], [Label("x" * 1000)])
+
+
 def test_affix_types_are_checked_before_any_text_validation() -> None:
     with pytest.raises(TypeError) as caught:
         ub.TickFormat.AUTO.affix("x" * 1001, cast(str, None))

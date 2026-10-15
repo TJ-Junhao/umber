@@ -594,19 +594,23 @@ impl<'a> AxesMut<'a> {
 
     /// Adds markers whose areas are proportional to `sizes`, on a numeric x axis.
     ///
-    /// All bubble marks on these axes share one size scale. The largest size maps to
-    /// [`Theme::bubble_max_radius`](crate::Theme::bubble_max_radius). Zero sizes and NaN
-    /// coordinates draw nothing; a zero-size point's position still counts in the axis domains
-    /// like any point. The remaining markers draw in input order with the scatter outline.
-    /// Three true-size reference circles appear once, after the first labelled bubble entry,
-    /// using the axes' y tick format. An all-zero or empty scale has only label entries.
+    /// All bubble marks on these axes share one size scale. The largest size among points with
+    /// finite x and y coordinates maps to [`Theme::bubble_max_radius`](crate::Theme::bubble_max_radius).
+    /// Zero sizes and NaN coordinates draw nothing; a zero-size point's position still counts
+    /// in the axis domains like any point. The remaining markers draw in input order with the
+    /// scatter outline. Up to three true-size reference circles appear once, after the first
+    /// labelled bubble entry, using the axes' y tick format. Repeated labels keep the larger
+    /// circle; labels that round to zero are omitted. If all labels round to zero, only the
+    /// largest reference circle remains, with an automatic label for its size, without the y
+    /// format or its affixes. An all-zero or empty scale has only label entries.
     ///
     /// A merged figure legend also shows only one set, after its first labelled bubble entry,
     /// using that panel's scale and y tick format. Panels do not share a size scale unless
     /// their size values give them the same maximum.
     ///
-    /// A category x axis gives `Error::Usage`. Different lengths or non-finite or negative
-    /// sizes give `Error::Data`; coordinates follow the scatter rules. Errors change nothing.
+    /// A category x axis gives `Error::Usage`. Different lengths, non-finite or negative sizes,
+    /// or sizes above 1e300 give `Error::Data`; coordinates follow the scatter rules.
+    /// Errors change nothing.
     ///
     /// # Examples
     ///

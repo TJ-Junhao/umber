@@ -36,9 +36,10 @@ impl Default for BubbleOptions {
 
 /// Validated bubble coordinates, size values and options, shared by clones.
 ///
-/// A zero size or NaN coordinate draws nothing. A zero-size point's position still counts in
-/// the axis domains like any point. All bubble marks on an axes share one size scale, whose
-/// largest value maps to the theme's maximum radius.
+/// Sizes are finite values from 0 to 1e300. A zero size or NaN coordinate draws nothing.
+/// A zero-size point's position still counts in the axis domains like any point. All bubble
+/// marks on an axes share one size scale; the largest size among points with finite x and y
+/// coordinates maps to the theme's maximum radius.
 ///
 /// # Examples
 ///

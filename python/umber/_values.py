@@ -17,7 +17,7 @@ from typing import Any, Final, cast
 import numpy as np
 import numpy.typing as npt
 
-from umber._args import checked_text, short_repr, type_name
+from umber._args import checked_text, is_text_or_buffer, short_repr, type_name
 from umber._errors import DataError, new_error
 
 type FloatArray = npt.NDArray[np.float64]
@@ -91,7 +91,7 @@ def _check_container(
     # Types are tested with ``issubclass`` where only an error follows, so that ``values``
     # keeps its declared type for the messages.
     kind = type(values)
-    if issubclass(kind, str | bytes | bytearray):
+    if is_text_or_buffer(values):
         raise _container_error(context, name, values, str_hint)
     if issubclass(kind, numbers.Number | np.generic):
         raise _container_error(context, name, values, _SINGLE_HINT)
@@ -228,7 +228,7 @@ def _is_nested(value: object) -> bool:
     """Whether a value is a sequence or an array of at least one dimension (not masked)."""
     if isinstance(value, np.ndarray):
         return value.ndim > 0 and not isinstance(value, np.ma.MaskedArray)
-    return isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray)
+    return not is_text_or_buffer(value) and isinstance(value, Sequence)
 
 
 _CHUNK: Final = 256
@@ -397,7 +397,9 @@ def _name_error(context: str, name: str, index: int, value: object, *, mixed: bo
     return _data_error(context, name, message, hint)
 
 
-def _names(context: str, name: str, data: _Data, *, mixed: bool) -> list[str]:
+def _names(
+    context: str, name: str, data: _Data, *, mixed: bool, check_length: bool = True
+) -> list[str]:
     if isinstance(data, np.ndarray):
         _check_one_dimensional(context, name, data)
         if data.size == 0:
@@ -412,7 +414,11 @@ def _names(context: str, name: str, data: _Data, *, mixed: bool) -> list[str]:
     for index, value in enumerate(items):
         if not isinstance(value, str):
             raise _name_error(context, name, index, value, mixed=mixed)
-        result.append(checked_text(context, name, f"{name}[{index}]", value, DataError))
+        result.append(
+            checked_text(
+                context, name, f"{name}[{index}]", value, DataError, check_length=check_length
+            )
+        )
     return result
 
 
@@ -462,17 +468,18 @@ def floats(context: str, name: str, values: object) -> FloatArray:
     return _floats(context, name, data, mixed=False)
 
 
-def names(context: str, name: str, values: object) -> list[str]:
+def names(context: str, name: str, values: object, *, check_length: bool = True) -> list[str]:
     """Convert names, such as bar categories, to a ``list`` of ``str``.
 
     Sequences of ``str`` (``str`` subclasses become ``str``), NumPy string or object arrays
-    and pandas or polars Series of strings are accepted. Each name follows the text rules:
-    at most ``MAX_TEXT_LENGTH`` characters, and no lone surrogates.
+    and pandas or polars Series of strings are accepted. Lone surrogates are refused. The
+    ``MAX_TEXT_LENGTH`` cap is applied here unless the native call checks it instead.
 
     Args:
         context: The API call, such as ``"Axes.bar()"``.
         name: The parameter name.
         values: The data passed.
+        check_length: Whether to check name length here; false when the native call checks it.
 
     Returns:
         The names; empty data gives an empty list.
@@ -489,7 +496,7 @@ def names(context: str, name: str, values: object) -> list[str]:
         ['North', 'South']
     """
     data = _data(context, name, values, str_hint=_NAMES_HINT, masked_hint=_MASKED_NAMES_HINT)
-    return _names(context, name, data, mixed=False)
+    return _names(context, name, data, mixed=False, check_length=check_length)
 
 
 def axis_values(context: str, name: str, values: object) -> FloatArray | list[str]:

@@ -64,7 +64,8 @@ pub(crate) fn box_stats(values: &[f64]) -> Option<BoxStats> {
     })
 }
 
-/// Gaussian kernel density with Scott's sample-standard-deviation bandwidth.
+/// Relative Gaussian kernel density with Scott's sample-standard-deviation bandwidth.
+/// Densities are measured on the unit data range, without division by the original span.
 /// Finite samples alone contribute; fewer than two distinct values or grid points yield none.
 /// Scaling the data range to one keeps the variance finite for very large or small samples.
 pub(crate) fn kde_scott(values: &[f64], grid: usize) -> Option<Vec<(f64, f64)>> {
@@ -101,8 +102,7 @@ pub(crate) fn kde_scott(values: &[f64], grid: usize) -> Option<Vec<(f64, f64)>> 
                         (-0.5 * z * z).exp()
                     })
                     .sum::<f64>()
-                    / normalizer
-                    / span;
+                    / normalizer;
                 (at, density)
             })
             .collect(),
@@ -112,6 +112,38 @@ pub(crate) fn kde_scott(values: &[f64], grid: usize) -> Option<Vec<(f64, f64)>> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kde_subnormal_span_has_finite_densities_at_returned_positions() {
+        let density = kde_scott(&[0.0, 0.0, f64::from_bits(1)], 128).unwrap();
+        assert!(density.iter().all(|p| p.1.is_finite()), "{density:?}");
+        for pair in density.windows(2) {
+            if pair[0].0 == pair[1].0 {
+                assert_eq!(pair[0].1, pair[1].1);
+            }
+        }
+    }
+
+    #[test]
+    fn kde_large_span_preserves_relative_tail_densities() {
+        let mut values = vec![0.0; 256];
+        values.extend([-1.0, 1.0]);
+        let base = kde_scott(&values, 128).unwrap();
+        let large = kde_scott(&values.iter().map(|v| v * 1e300).collect::<Vec<_>>(), 128).unwrap();
+        let base_peak = base.iter().map(|p| p.1).fold(0.0, f64::max);
+        let large_peak = large.iter().map(|p| p.1).fold(0.0, f64::max);
+        for (a, b) in base.iter().zip(&large) {
+            let expected = a.1 / base_peak;
+            let actual = b.1 / large_peak;
+            assert!(expected > 0.0);
+            let error = (actual / expected - 1.0).abs();
+            assert!(
+                error < 1e-9,
+                "at {}: {actual:e} vs {expected:e}, relative error {error}",
+                b.0
+            );
+        }
+    }
 
     #[test]
     fn whiskers_and_outliers_tukey() {
