@@ -45,7 +45,6 @@ pub(super) fn step_items(
 /// the arithmetic mean in axis space, so the geometric mean of the values on a log axis.
 /// Repeated vertices are dropped, so a hold that is empty adds one vertex.
 fn stepped(xs: &[f64], ys: &[f64], position: Step) -> (Vec<f64>, Vec<f64>) {
-    let mid = |a: f64, b: f64| (a + b) / 2.0;
     let (mut out_x, mut out_y) = (Vec::new(), Vec::new());
     let mut previous: Option<usize> = None;
     for hold in holds(xs, ys, position) {
@@ -56,7 +55,7 @@ fn stepped(xs: &[f64], ys: &[f64], position: Step) -> (Vec<f64>, Vec<f64>) {
         previous = Some(hold.point);
         let y = ys[hold.point];
         for edge in [hold.from, hold.to] {
-            let x = edge.position(xs, mid);
+            let x = edge.position(xs);
             if out_x.last() != Some(&x) || out_y.last() != Some(&y) {
                 out_x.push(x);
                 out_y.push(y);

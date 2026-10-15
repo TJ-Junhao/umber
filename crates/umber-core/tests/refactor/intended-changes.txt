@@ -1,1 +1,4 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+violin-log-y-graphite # Violin quantile widths now interpolate in the outline's axis space.
+violin-log-y-midnight # Violin quantile widths now interpolate in the outline's axis space.
+violin-log-y-pigment # Violin quantile widths now interpolate in the outline's axis space.

@@ -999,17 +999,7 @@ fn violin_stats(values: &[f64]) -> Option<ViolinStats> {
     sorted.sort_unstable_by(f64::total_cmp);
     let mut density = kde_scott(&sorted, 128).unwrap_or_default();
     let peak = density.iter().map(|&(_, d)| d).fold(0.0, f64::max);
-    if peak.is_infinite() {
-        // A subnormal range may have a density beyond f64. Widths need only its ratios.
-        let low = sorted[0];
-        let span = sorted[sorted.len() - 1] - low;
-        let scaled: Vec<f64> = sorted.iter().map(|v| (v - low) / span).collect();
-        let relative = kde_scott(&scaled, 128).unwrap_or_default();
-        let peak = relative.iter().map(|&(_, d)| d).fold(0.0, f64::max);
-        for ((_, width), (_, d)) in density.iter_mut().zip(relative) {
-            *width = d / peak;
-        }
-    } else if peak > 0.0 {
+    if peak > 0.0 {
         for (_, width) in &mut density {
             *width /= peak;
         }
@@ -1483,13 +1473,37 @@ impl<'a> ResolvedMark<'a> {
         }
         let values = crate::bubble_scale::references(*maximum);
         let labels = crate::ticks::format_given(&values);
-        let ticks = values
+        let ticks: Vec<_> = values
             .into_iter()
             .zip(labels)
             .map(|(value, label)| crate::Tick { value, label })
             .collect();
-        format
-            .relabel(ticks, crate::ticks::TickValues::Exact)
+        let largest = ticks.first().cloned();
+        let zero = format
+            .relabel(
+                vec![crate::Tick {
+                    value: 0.0,
+                    label: "0".into(),
+                }],
+                crate::ticks::TickValues::Exact,
+            )
+            .pop();
+        let mut ticks = format.relabel(ticks, crate::ticks::TickValues::Exact);
+        let mut seen = Vec::new();
+        ticks.retain(|tick| {
+            if zero.as_ref().is_some_and(|zero| tick.label == zero.label)
+                || seen.contains(&tick.label)
+            {
+                return false;
+            }
+            seen.push(tick.label.clone());
+            true
+        });
+        // A coarse format must not hide a positive scale or label its circles as zero.
+        if ticks.is_empty() {
+            ticks.extend(largest);
+        }
+        ticks
             .into_iter()
             .filter_map(|tick| {
                 LegendEntry::new(
@@ -1890,30 +1904,37 @@ impl<'a> Anchor<'a> {
                     ),
                     AxisLimits::Category => (None, false),
                 };
-                let mid = |a: f64, b: f64| {
-                    if log {
-                        ((a.ln() + b.ln()) / 2.0).exp()
-                    } else {
-                        (a + b) / 2.0
-                    }
-                };
-                let line = holds(xs, step.y(), position);
+                let origin = range.map_or_else(
+                    || xs.iter().copied().find(|v| v.is_finite()).unwrap_or(1.0),
+                    |(lo, _)| lo,
+                );
+                let to_axis = |v| if log { log_offset(v, origin) } else { v };
+                let mapped: Vec<_> = xs.iter().map(|&v| to_axis(v)).collect();
+                let line = holds(&mapped, step.y(), position);
                 // The last hold that is visible: it overlaps the x domain, ends included.
-                let (lo, hi) = range.unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
+                let (lo, hi) = range
+                    .map(|(lo, hi)| (to_axis(lo), to_axis(hi)))
+                    .unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
                 let (hold, from, to) = line
                     .iter()
-                    .map(|hold| {
-                        let at = |edge: Edge| edge.position(xs, mid);
-                        (hold, at(hold.from), at(hold.to))
-                    })
+                    .map(|hold| (hold, hold.from.position(&mapped), hold.to.position(&mapped)))
                     .rfind(|&(_, from, to)| to >= lo && from <= hi)?;
                 let y = step.y()[hold.point];
                 // A hold that goes on past the high end is cut by it; one that ends inside the
                 // domain ends the line there.
                 let (x, end) = if to > hi && from <= hi {
-                    (hi, EndKind::Edge)
+                    (range.map_or(f64::INFINITY, |(_, hi)| hi), EndKind::Edge)
                 } else {
-                    (to, EndKind::Point)
+                    let x = match hold.to {
+                        Edge::At(k) => xs[k],
+                        Edge::Mid(i, k) if log => {
+                            // Convert back relative to a neighbour, keeping narrow spans precise.
+                            (xs[i] * (to - mapped[i]).exp())
+                                .clamp(xs[i].min(xs[k]), xs[i].max(xs[k]))
+                        }
+                        Edge::Mid(_, _) => to,
+                    };
+                    (x, EndKind::Point)
                 };
                 Some(Anchor {
                     x: AnchorX::Number(x),
@@ -2123,11 +2144,16 @@ fn resolve_panel_marks<'a>(
     let bubble_maximum = marks
         .iter()
         .filter_map(|mark| match mark {
-            Mark::Bubbles(mark) => Some(mark.sizes()),
+            Mark::Bubbles(mark) => Some(mark),
             _ => None,
         })
-        .flatten()
-        .copied()
+        .flat_map(|mark| {
+            mark.x()
+                .iter()
+                .zip(mark.y())
+                .zip(mark.sizes())
+                .filter_map(|((&x, &y), &size)| (!x.is_nan() && !y.is_nan()).then_some(size))
+        })
         .fold(0.0, f64::max);
     let palette = theme.palette();
     let mut next_auto = slots.len();
@@ -4451,6 +4477,41 @@ mod tests {
     }
 
     #[test]
+    fn violin_subnormal_span_repeated_positions_have_equal_widths() {
+        let stats = violin_stats(&[0.0, 0.0, f64::from_bits(1)]).unwrap();
+        assert!(stats.density.iter().all(|p| p.1.is_finite() && p.1 > 0.0));
+        assert_eq!(stats.density.iter().map(|p| p.1).fold(0.0, f64::max), 1.0);
+        for pair in stats.density.windows(2) {
+            if pair[0].0 == pair[1].0 {
+                assert_eq!(pair[0].1, pair[1].1, "same y must have the same width");
+            }
+        }
+    }
+
+    #[test]
+    fn log_mid_step_anchor_matches_axis_space_on_a_narrow_interval() {
+        let low = 1e200;
+        let high = low * (1.0 + 2e-9);
+        let anchor = step_anchor(
+            ScaleKind::Log { base: LogBase::TEN },
+            nums(&[low, high]),
+            &[1.0, f64::NAN],
+            Step::Mid,
+            Some((low, high)),
+        )
+        .unwrap();
+        let AnchorX::Number(x) = anchor.x else {
+            panic!("numeric anchor")
+        };
+        let position = log_offset(x, low) / log_offset(high, low);
+        assert!(
+            (position - 0.5).abs() < 1e-6,
+            "axis-space midpoint: {position}"
+        );
+        assert_eq!(anchor.end, EndKind::Point);
+    }
+
+    #[test]
     fn log_mid_step_anchor_at_repeated_low_limit() {
         let anchor = step_anchor(
             ScaleKind::Log { base: LogBase::TEN },
@@ -4615,7 +4676,6 @@ mod tests {
         lo: f64,
         hi: f64,
     ) -> Option<(f64, f64, bool)> {
-        let mid = |a: f64, b: f64| (a + b) / 2.0;
         let mut found = None;
         let mut visit = |px: f64, (qx, qy): (f64, f64)| {
             // x never decreases along the path.
@@ -4631,8 +4691,8 @@ mod tests {
         let mut previous: Option<(usize, f64)> = None;
         for hold in holds(xs, ys, position) {
             let y = ys[hold.point];
-            let from = (hold.from.position(xs, mid), y);
-            let to = (hold.to.position(xs, mid), y);
+            let from = (hold.from.position(xs), y);
+            let to = (hold.to.position(xs), y);
             if let Some((_, end)) = previous.filter(|&(p, _)| p + 1 == hold.point) {
                 visit(end, from);
             }

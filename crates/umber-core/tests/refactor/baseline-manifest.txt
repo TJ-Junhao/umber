@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 0b4830b6d04ebc414714b1719ec3d9091eb58c64
+# revision: 07945734cf706f879ce866d29b0547c91ac27201
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 e56c73176662595cd3ef79573282c24d9f1ed87891c0bc128adf8df5c8d02f86  api/constants-error-bars.txt
@@ -1127,11 +1127,11 @@ c8763d868b5b81ec438997e3c829f963f26f2671a661f50f23026674aaffbb3b  png/violin-lim
 53a78dc9ec73ab43733ecba4ab6da0190b7e215aded9fe0dc4b69eb5324f2ee4  png/violin-limits-pigment.dpi200.png
 3e39b5b65775df09d0a3d15e56597a0df2fe3a1048bdf0e95f77b9c155be501c  png/violin-limits-pigment.dpi72.png
 1d09377ae9826de5db85715c86782419829f361dba1e72914a044d6a8a4bc004  png/violin-log-y-graphite.dpi200.png
-0e6c88b7ee3ec2fbbecb26421beff4e224aa4b82557436ac16820a9886c57ca7  png/violin-log-y-graphite.dpi72.png
+f9f1e237d4317d7905870b8d7bf9bc9a075c64c5a74a013e6d9a925dbec28223  png/violin-log-y-graphite.dpi72.png
 717d1eb8c6dd4cf8dd934245dd8d19f835f26f766a42917719977c9bdd2b4a76  png/violin-log-y-midnight.dpi200.png
-10a3f17c92a74b463038d8b07772e2b1a3f45cdb4b61b1d876f01cd2a379b6e7  png/violin-log-y-midnight.dpi72.png
+05147b6c1f10572a78cb20cc28cecc8478b627851cd676ab6a866bde6eb64dca  png/violin-log-y-midnight.dpi72.png
 c721885cc4448eaad81516aaaaad27eb7359734cf20afdd37aa3638a544958aa  png/violin-log-y-pigment.dpi200.png
-80bf5d2c3d60b2f2da6259168b9e3c47ccdb14d2154e7f41e67649cb6958051f  png/violin-log-y-pigment.dpi72.png
+475a55cbd14465b071b63f3881c1d1264a6fc2bbc8acc6448e86213ff12cc588  png/violin-log-y-pigment.dpi72.png
 b68c440e566201f4bd63f9053ed63d668cdc8d4a74ae38889e17a2a4ab950198  png/violin-midnight.dpi200.png
 1ce0ec92e4c91f42fb43239f0adf2c49638db650b745c85d52adaa3c3757b985  png/violin-midnight.dpi72.png
 c473ff0638a11181adaa98fb929ba002d444090a7be39cdff2602d70d8714c2a  png/violin-narrow-gaps.dpi200.png
@@ -1683,9 +1683,9 @@ f7f4446841b4c76a8f3a68c1b306275812a38c6d572dc5deaf9d7ff46dfcb480  scene/violin-d
 5c0c5ae42a0d3856c5ef618aaaec0c49bed2cc52e8786e9f9a7de14200ff248b  scene/violin-limits-graphite.txt
 ba006974b8555efe9fbece2eaa1650d02980da7c34438f07c3e7b6a4369dd48e  scene/violin-limits-midnight.txt
 b97e05b1ad053c259d6359f14ae6d1f421ebb935f35257ce6de9a57c8b832ef9  scene/violin-limits-pigment.txt
-f4e4c3106867682bf75b2d5a1bba4939e5e62acd5371c2a4b965637a1dc63c28  scene/violin-log-y-graphite.txt
-325ae477adbad5d79568f834945914e7028a19dd8649874a0773cdc609bcf0dd  scene/violin-log-y-midnight.txt
-8169ccd9fd142f6bf511f63c6664c8625c2c3090ecb46613ed522b7b76967b14  scene/violin-log-y-pigment.txt
+029acbeae9c91663952604fdd42cf58a923cda1733854e829cf7717d1d0395c9  scene/violin-log-y-graphite.txt
+10e85598e4e1a22f07ba8a7e5909a3ae735e7877c2a2cf826e15ca27d44fdbf2  scene/violin-log-y-midnight.txt
+c1ba1f005459716d79ca105ae0402018af495d3daea5ed868ac61878288d99ca  scene/violin-log-y-pigment.txt
 6eeb20ac6c5b55a633bcbb9832668f980b142d0168021a940df7ea22974abab5  scene/violin-midnight.txt
 80b383d9be539b129ee511e2005d9c1960a794fe244487a65ebb22b8da3f74ab  scene/violin-narrow-gaps.txt
 abc6e74fbd2f39e9a9477e1a3608267518a8608dc3c1e5e89a1beb1ee98fc293  scene/violin-pigment.txt
@@ -2779,12 +2779,12 @@ f6eaa07de8c5e26b5f47379711faa711597dea01a0e72b4fd868a3e6d68bd374  svg/violin-lim
 5d814c9e56e9fa0a7824374c03cb75ef2802de1735dce410a8cf91b7ecedfd06  svg/violin-limits-midnight.outlines.svg
 8c69137bcd32d9382bdc3bae2a653481e2be1e69fe2d74d8524fc4c5b4aeb366  svg/violin-limits-pigment.editable.svg
 9d4c7e8e97d6ddc712202e46cca9daa1bbc9bf01d7f6188487525d2a273cdd1a  svg/violin-limits-pigment.outlines.svg
-5e554b5e8b7c97328ce71407e2f18438cf03899f7594f4d55ce884a851c7a9c8  svg/violin-log-y-graphite.editable.svg
-0cc2d031ab8e89fea39314a3bce69e263c45945b3b990ff32af68c81d99548c3  svg/violin-log-y-graphite.outlines.svg
-79acdc2032e45dce6477076bc40bdffad18f749d9271a976e116407aaca0b12a  svg/violin-log-y-midnight.editable.svg
-9814d8f688d91d12694c1e58d5deeece8dc3676fe5b3036412023263e3e33753  svg/violin-log-y-midnight.outlines.svg
-b46c8c52ba7b77f240fa844029c9a225d79149f469fd025241e66c45ac531f4d  svg/violin-log-y-pigment.editable.svg
-d990c69bf3b3aff60197632e0999b9e22651cef18ebf07f67b3842d09fc0b402  svg/violin-log-y-pigment.outlines.svg
+62daacec0d194dac2a1ae2dd13ae5901fe7e8abd567edfb1aa5f180d84887da1  svg/violin-log-y-graphite.editable.svg
+7f096a47b3a9a4ffc5b27bda8ab6d62e2a4d8fd5cb58abdd04a0e0f85cf1f8a8  svg/violin-log-y-graphite.outlines.svg
+0cd326bc0c54300c318203e16a04fa1e5e3746cde972a72797a1b170b20674a7  svg/violin-log-y-midnight.editable.svg
+227713d3363dbc2337ebc80bc5354be751007672f99a17180a203816d3cf160e  svg/violin-log-y-midnight.outlines.svg
+305a5b4a681a1c5b7ecb8a16c47862db8a50af5649d6944a4a868d3d1ac2c155  svg/violin-log-y-pigment.editable.svg
+e3c154af9f37eda195e35adced8a02c2f5829b9911483be58cc5eb42347b3fbf  svg/violin-log-y-pigment.outlines.svg
 0e5b3ef7818eab6ebd2aed3fc40dde61ed415eff8e286b40cb8b21f11c6f6d3f  svg/violin-midnight.editable.svg
 956dcb5f2e26c7f5d55ae793c10bc760dd2defde3f25222da670c411f0353c20  svg/violin-midnight.outlines.svg
 91d0e52f102c668615d1e3267c03a805ea41e11aa4016bfaf5a170a56ec6b7a1  svg/violin-narrow-gaps.editable.svg

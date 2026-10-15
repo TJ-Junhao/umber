@@ -64,18 +64,18 @@ fn violin_group(
         top: y0,
         bottom: y1,
     };
-    if !stats.density.is_empty() {
-        let points: Vec<_> =
-            stats
-                .density
-                .iter()
-                .map(|&(y, w)| AxisPoint::new(center + half * w, axis_y_value(&resolved.y, y)))
-                .chain(
-                    stats.density.iter().rev().map(|&(y, w)| {
-                        AxisPoint::new(center - half * w, axis_y_value(&resolved.y, y))
-                    }),
-                )
-                .collect();
+    let density = axis_density(stats, resolved);
+    if !density.is_empty() {
+        let points: Vec<_> = density
+            .iter()
+            .map(|&(y, w)| AxisPoint::new(center + half * w, y))
+            .chain(
+                density
+                    .iter()
+                    .rev()
+                    .map(|&(y, w)| AxisPoint::new(center - half * w, y)),
+            )
+            .collect();
         // Category x is always inside its band. Cut only y, beyond the scene clip so that
         // the polygon's closing edges cannot create visible horizontal outline strokes.
         let points = clip_y(&clip_y(&points, y0, true), y1, false);
@@ -107,8 +107,8 @@ fn violin_group(
         ]
     };
     for (value, fraction, stroke) in quantiles {
-        let half = half * local_width(&stats.density, value) * fraction;
         let y = axis_y_value(&resolved.y, value);
+        let half = half * local_width(&density, y) * fraction;
         if let Some((a, b)) = clip_segment(
             AxisPoint::new(center - half, y),
             AxisPoint::new(center + half, y),
@@ -125,7 +125,16 @@ fn violin_group(
     }
 }
 
-/// Interpolates a relative half-width in data space; constant groups use the entire slot.
+/// Maps the density once so the outline and its quantile widths use the same axis space.
+fn axis_density(stats: &ViolinStats, resolved: &Resolved) -> Vec<(f64, f64)> {
+    stats
+        .density
+        .iter()
+        .map(|&(y, width)| (axis_y_value(&resolved.y, y), width))
+        .collect()
+}
+
+/// Interpolates a relative half-width in axis space; constant groups use the entire slot.
 fn local_width(density: &[(f64, f64)], value: f64) -> f64 {
     let after = density.partition_point(|&(y, _)| y < value);
     let Some(&(b, wb)) = density.get(after) else {
@@ -154,4 +163,82 @@ fn clip_y(points: &[AxisPoint], at: f64, above: bool) -> Vec<AxisPoint> {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Figure, ViolinOptions};
+    use crate::{FontLibrary, LogBase, PathVerb, ScaleKind, Theme};
+
+    #[test]
+    fn log_quantile_widths_meet_the_outline_in_axis_space() {
+        let mut values = vec![1.0; 50];
+        values.extend([10.0; 50]);
+        values.push(1e8);
+        let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        figure
+            .add_axes(ScaleKind::Category, ScaleKind::Log { base: LogBase::TEN })
+            .unwrap()
+            .violin(vec!["A".into()], vec![values], ViolinOptions::default())
+            .unwrap();
+        let scene = figure.to_scene(FontLibrary::global()).unwrap();
+        let Item::Group { items, .. } = &scene.items[1] else {
+            panic!("marks")
+        };
+        let [
+            Item::Fill { path: outline, .. },
+            Item::Stroke { .. },
+            quantiles @ ..,
+        ] = items.as_slice()
+        else {
+            panic!("violin outline and quantile lines")
+        };
+        assert_eq!(quantiles.len(), 3);
+        let (lo, hi) = outline.bounds().unwrap();
+        let cx = (f64::from(lo.x) + f64::from(hi.x)) / 2.0;
+        let polygon: Vec<_> = outline
+            .verbs()
+            .iter()
+            .filter_map(|verb| match verb {
+                PathVerb::MoveTo(p) | PathVerb::LineTo(p) => Some((f64::from(p.x), f64::from(p.y))),
+                PathVerb::Close => None,
+                _ => panic!("polygon expected"),
+            })
+            .collect();
+        for (i, (item, fraction)) in quantiles.iter().zip([0.5, 0.5, 1.0]).enumerate() {
+            let Item::Stroke { path, .. } = item else {
+                panic!("quantile stroke")
+            };
+            let [PathVerb::MoveTo(left), PathVerb::LineTo(right)] = path.verbs() else {
+                panic!("two-point quantile line")
+            };
+            assert_eq!(left.y, right.y);
+            let y = f64::from(left.y);
+            let outline_x = polygon
+                .iter()
+                .zip(polygon.iter().cycle().skip(1))
+                .filter(|(a, b)| a.0 >= cx && b.0 >= cx && y >= a.1.min(b.1) && y <= a.1.max(b.1))
+                .map(|(a, b)| {
+                    if a.1 == b.1 {
+                        a.0.max(b.0)
+                    } else {
+                        a.0 + (b.0 - a.0) * (y - a.1) / (b.1 - a.1)
+                    }
+                })
+                .reduce(f64::max)
+                .expect("outline intersects the quantile height");
+            let half = fraction * (outline_x - cx);
+            for (end, actual, expected) in [
+                ("left", f64::from(left.x), cx - half),
+                ("right", f64::from(right.x), cx + half),
+            ] {
+                let error = (actual - expected).abs();
+                assert!(
+                    error <= 1e-4,
+                    "quantile {i} {end}: endpoint error {error} pt"
+                );
+            }
+        }
+    }
 }

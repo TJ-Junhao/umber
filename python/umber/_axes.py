@@ -661,11 +661,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> "Axes[float, Y]":
         """Add markers whose areas are proportional to non-negative size values.
 
-        Bubble marks on these axes share one size scale. The largest value has a radius of
-        18 points. Zero sizes and NaN coordinates draw nothing; a zero-size point's position
-        still counts in the axis domains like any point. Markers draw in data order, without
-        downsampling, with the theme's marker outline. Three reference circles at their true
-        radius appear once, after the first labelled bubble entry, formatted like the y ticks.
+        Bubble marks on these axes share one size scale. The largest size among points with
+        finite x and y coordinates has a radius of 18 points. Zero sizes and NaN coordinates
+        draw nothing; a zero-size point's position still counts in the axis domains like any
+        point. Markers draw in data order, without downsampling, with the theme's marker outline.
+        Up to three reference circles at their true radius appear once, after the first labelled
+        bubble entry, formatted like the y ticks. Repeated labels keep the larger circle; labels
+        that round to zero are omitted. If all labels round to zero, only the largest reference
+        circle remains, with an automatic label for its size, without the y format or its affixes.
         An empty or all-zero size scale shows only label entries.
 
         A merged figure legend also shows only one set, after its first labelled bubble entry,
@@ -675,7 +678,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Args:
             x: Numeric x coordinates on a linear or log axis.
             y: The y coordinates, one per x coordinate.
-            sizes: Finite non-negative values, one per point; area is proportional to value.
+            sizes: Finite values from 0 to 1e300, one per point; area is proportional to value.
             label: The legend label; empty skips this mark's legend entry.
             color: The marker color. ``Color.AUTO`` takes the next palette color.
             marker: The marker shape; size references are always circles.
@@ -686,7 +689,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If lengths differ, coordinates are invalid for their axes, or a size
-                is negative or non-finite.
+                is negative, non-finite, or above 1e300.
             UsageError: If the x axis is a category axis.
             StyleError: If ``label`` is too long.
 
