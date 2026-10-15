@@ -52,17 +52,18 @@
 //!   [`Placement`], [`CellRange`] and [`Cell`]; [`Axes`] (the getters of its cells, scales,
 //!   texts, limits, ticks and marks), [`AxesMut`] (text, limit and tick setters and mark
 //!   methods), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
-//!   [`ScatterOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`] position,
-//!   [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of a vertical line,
-//!   [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
-//!   [`BoxOptions`] and [`Distribution`], [`BarOptions`], [`Series`] and [`HistOptions`]
-//!   with its bin limit [`MAX_BINS`], and the
-//!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`AreaMark`], [`StepMark`],
-//!   [`HLineMark`], [`VLineMark`], [`SpanMark`], [`BarMark`], [`BarGroupMark`], [`SeriesView`],
-//!   [`BoxMark`], [`BoxGroupMark`], [`DistributionView`],
-//!   [`BandMark`], [`ErrorBarMark`] and [`HistMark`] that [`Axes::marks`] returns;
+//!   [`ScatterOptions`], [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
+//!   position, [`StemOptions`], [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of
+//!   a vertical line, [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
+//!   [`BoxOptions`], [`ViolinOptions`] and [`Distribution`], [`BarOptions`], [`Series`] and
+//!   [`HistOptions`] with its bin limit [`MAX_BINS`], and the
+//!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`BubbleMark`], [`AreaMark`],
+//!   [`StackedAreaMark`], [`StepMark`], [`StemMark`], [`HLineMark`], [`VLineMark`], [`SpanMark`],
+//!   [`BarMark`], [`BarGroupMark`], [`SeriesView`], [`BoxMark`], [`BoxGroupMark`],
+//!   [`ViolinMark`], [`ViolinGroupMark`], [`DistributionView`], [`BandMark`], [`ErrorBarMark`]
+//!   and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
-//!   [`Marker`], [`FillStyle`], [`GridLines`] and [`LegendStyle`];
+//!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
 //! - per-series line widths and marker sizes: [`SizeSpec`], with its [`Factor`] and [`Points`];
 //! - tick labels: [`TickFormat`], with its [`NumberStyle`] and [`Decimals`];
