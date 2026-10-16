@@ -1206,7 +1206,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def mesh(
-        self,
+        self: SXY,
         x_edges: Values[X],
         y_edges: Values[Y],
         values: object,
@@ -1214,14 +1214,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         cmap: Cmap | Auto = AUTO,
         scale: Scale[float] = Scale.linear(),  # noqa: B008
         center: float | Auto = AUTO,
-    ) -> Self:
+    ) -> SXY:
         """Add rectangular cells whose colors map a row-major matrix of values.
 
-        Cells span their edges exactly, without padding their extents. Other marks on a
-        numeric axis keep their usual padding; the domain is the union. On a time axis the
-        domain is the union of the edges and the other marks' times, without padding. NaN
-        values leave cells blank. Neither axis may be a category axis; the outer edge ranges
-        of a numeric axis must meet the axis precision limits, as for ``xlim()`` and
+        Cells span their edges exactly, without padding their extents. Other marks on the
+        axes, on a numeric or a time axis, keep their usual padding; the domain is the union.
+        NaN values leave cells blank. Neither axis may be a category axis; the outer edge
+        ranges of a numeric axis must meet the axis precision limits, as for ``xlim()`` and
         ``ylim()``. All color-mapped marks share one color scale.
 
         Args:
@@ -1242,7 +1241,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If the matrix shape or edges are invalid (a missing time among time
                 edges included), or a value is invalid.
             StyleError: If the color center is invalid.
-            UsageError: If an axis is a category axis, or color scales conflict.
+            UsageError: If an axis is a category axis (type checkers refuse such axes, so this is
+                raised only for calls they do not check), or color scales conflict.
 
         Example:
             >>> import umber as ub

@@ -33,3 +33,6 @@ ax.hexbin(x, y, gridsize=2.5)  # type: ignore[arg-type]  # pyright: ignore[repor
 ax.mesh(x, y, [[1, 2], [3, 4]], cmap="viridis")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 ax.hist2d(x, y, scale=ub.Scale.category())  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 ax.hexbin(x, y, 4)  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue]
+categories.mesh(x, y, [[1, 2], [3, 4]])  # type: ignore[misc, arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows = ub.Figure().add_axes(y=ub.Scale.category())
+rows.mesh(x, y, [[1, 2], [3, 4]])  # type: ignore[misc, arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]

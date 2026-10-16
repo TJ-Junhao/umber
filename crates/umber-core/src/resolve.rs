@@ -1063,6 +1063,62 @@ pub(crate) fn time_extents<'a, 'm: 'a>(
     (data, time_extent(ends.chain(given)))
 }
 
+/// Whether `mark` gives mesh cells along the time axis `which`.
+fn holds_cells(mark: &ResolvedMark<'_>, which: ValueAxis) -> bool {
+    matches!(mark, ResolvedMark::Mesh { .. }) && mark.times(which).next().is_some()
+}
+
+/// The time scale of an axis that holds mesh cells, whose seconds count from `origin`, the
+/// earliest of all its times: the union of the exact extent of the cells and the domain that
+/// the other marks, the explicit ticks and `bubbles` give it, fitted and padded as
+/// [`time_axis`] fits an axis without cells.
+fn time_cells_scale<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>>,
+    which: ValueAxis,
+    role: AxisRole,
+    ticks: &AxisTicks,
+    bubbles: Option<(f64, f64)>,
+    origin: Instant,
+) -> TimeScale {
+    let (cells, others): (Vec<_>, Vec<_>) = marks.partition(|mark| holds_cells(mark, which));
+    let cell_extent = time_extent(cells.iter().flat_map(|mark| mark.times(which)));
+    let (other_data, other_extent) = time_extents(others.iter().copied(), which, ticks);
+    let seconds = |t: Instant| seconds_between(origin, t);
+    let around = other_extent.map(|(low, high)| {
+        let single = low == high;
+        let (from, to) = if single {
+            (
+                seconds(low) - SINGLE_TIME_REACH,
+                seconds(low) + SINGLE_TIME_REACH,
+            )
+        } else {
+            (seconds(low), seconds(high))
+        };
+        let (from, to) = union(Some((from, to)), bubbles).unwrap_or((from, to));
+        let exact = single
+            || (role == AxisRole::Positions
+                && exact_time_extent(others.iter().copied(), which, other_data.is_some()));
+        let pad = if exact {
+            0.0
+        } else {
+            AUTO_LIMIT_PADDING * (to - from)
+        };
+        (from - pad, to + pad)
+    });
+    let cell_seconds = cell_extent.map(|(low, high)| (seconds(low), seconds(high)));
+    let (from, to) = union(cell_seconds, around).unwrap_or((0.0, 0.0));
+    // The cells' own edges keep their whole microseconds.
+    let before = match cell_extent {
+        Some((low, _)) if cell_seconds.is_some_and(|(s, _)| s == from) => low,
+        _ => shifted(origin, from),
+    };
+    let after = match cell_extent {
+        Some((_, high)) if cell_seconds.is_some_and(|(_, s)| s == to) => high,
+        _ => shifted(origin, to),
+    };
+    time_scale(origin, from, to, (before, after))
+}
+
 /// Resolves the time axis `which` of one group from the times its `marks` give along it, as
 /// [`resolve_axis`] resolves a continuous axis, and returns it with its base position, the low
 /// end of the axis: a time axis has no 0 to grow from, and its padding lies below the data.
@@ -1070,10 +1126,11 @@ pub(crate) fn time_extents<'a, 'm: 'a>(
 /// The domain is the explicit limits when set. Otherwise it fits the data together with the
 /// explicit ticks, if set, and `bubbles`, the extent in seconds from the origin that fits the
 /// group's bubbles, if the final layout widened the data to it: the exact extent on a
-/// positions axis whose marks, references apart, are all lines (as [`resolve_axis`] decides)
-/// and on an axis that holds cells, else the extent padded by 5 % of its span on each side. A
-/// single instant reaches half an hour on each side, and an axis without data spans
-/// 1970-01-01. The origin is the low end of the data, or the lower limit, so that the seconds
+/// positions axis whose marks, references apart, are all lines (as [`resolve_axis`] decides),
+/// else the extent padded by 5 % of its span on each side. On an axis that holds mesh cells, the
+/// cells keep their exact extent and the other marks their own, and the domain is the union
+/// ([`time_cells_scale`]). A single instant reaches half an hour on each side, and an axis
+/// without data spans 1970-01-01. The origin is the low end of the data, or the lower limit, so that the seconds
 /// of nearby times keep their precision.
 ///
 /// Automatic ticks are the calendar ticks of [`time_ticks`] inside the domain; when their labels
@@ -1107,16 +1164,14 @@ fn time_axis<'a, 'm: 'a>(
                     let reach = (shifted(low, from), shifted(low, to));
                     time_scale(low, from, to, reach)
                 }
+                Some((low, _)) if marks.clone().any(|mark| holds_cells(mark, which)) => {
+                    time_cells_scale(marks, which, role, limits.ticks, bubbles, low)
+                }
                 Some((low, high)) => {
                     let span = seconds_between(low, high);
                     let (from, to) = union(Some((0.0, span)), bubbles).unwrap_or((0.0, span));
-                    let cells = marks.clone().any(|mark| {
-                        matches!(mark, ResolvedMark::Mesh { .. })
-                            && mark.times(which).next().is_some()
-                    });
-                    let exact = cells
-                        || (role == AxisRole::Positions
-                            && exact_time_extent(marks, which, data.is_some()));
+                    let exact = role == AxisRole::Positions
+                        && exact_time_extent(marks, which, data.is_some());
                     let pad = if exact {
                         0.0
                     } else {

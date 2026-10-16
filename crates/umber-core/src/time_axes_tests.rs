@@ -1476,3 +1476,123 @@ fn bubbles_time_checks_axes_then_lengths_then_values_then_sizes() {
         assert_eq!(parts(&err).1, message);
     }
 }
+
+/// A mesh between `edges` on the time axis of `f` (the x axis when `on_x`) and a scatter at
+/// `points`, which pad as they do without the mesh.
+fn mesh_and_scatter(f: &mut Figure, on_x: bool, edges: [Instant; 2], points: [Instant; 2]) {
+    let numbers = |v: &[f64]| AxisData::Numbers(v.to_vec());
+    let (mesh_x, mesh_y, scatter_x, scatter_y) = if on_x {
+        (
+            times(&edges),
+            numbers(&[0.0, 1.0]),
+            times(&points),
+            numbers(&[0.5, 0.5]),
+        )
+    } else {
+        (
+            numbers(&[0.0, 1.0]),
+            times(&edges),
+            numbers(&[0.5, 0.5]),
+            times(&points),
+        )
+    };
+    f.single_axes_mut()
+        .mesh_time(mesh_x, mesh_y, &[1.0], MeshOptions::default())
+        .unwrap()
+        .scatter_shared(scatter_x, scatter_y, ScatterOptions::default())
+        .unwrap();
+}
+
+#[test]
+fn a_mesh_keeps_its_edges_exact_and_other_marks_keep_their_padding() {
+    let (jan1, jan10, jan20, jan31) = (
+        date(2026, 1, 1),
+        date(2026, 1, 10),
+        date(2026, 1, 20),
+        date(2026, 1, 31),
+    );
+    for on_x in [true, false] {
+        let (x, y) = if on_x { (TIME, LIN) } else { (LIN, TIME) };
+        let domain = |f: &Figure| {
+            let r = resolved(f);
+            let axis = if on_x { &r.x } else { &r.y };
+            time_scale(&axis.scale).instants()
+        };
+        // Edges inside the padded scatter: the domain is the scatter's, markers whole.
+        let mut f = figure(Theme::pigment(), x, y);
+        mesh_and_scatter(&mut f, on_x, [jan10, jan20], [jan1, jan31]);
+        let mut alone = figure(Theme::pigment(), x, y);
+        let numbers = |v: &[f64]| AxisData::Numbers(v.to_vec());
+        let (sx, sy) = if on_x {
+            (times(&[jan1, jan31]), numbers(&[0.5, 0.5]))
+        } else {
+            (numbers(&[0.5, 0.5]), times(&[jan1, jan31]))
+        };
+        alone
+            .single_axes_mut()
+            .scatter_shared(sx, sy, ScatterOptions::default())
+            .unwrap();
+        let (low, high) = domain(&f);
+        assert!(low < jan1 && high > jan31, "on_x {on_x}: {low:?} {high:?}");
+        assert_eq!(domain(&f), domain(&alone), "on_x {on_x}");
+        // Edges outside it: the domain reaches them exactly.
+        let mut f = figure(Theme::pigment(), x, y);
+        mesh_and_scatter(
+            &mut f,
+            on_x,
+            [date(2025, 12, 1), date(2026, 3, 1)],
+            [jan10, jan20],
+        );
+        assert_eq!(
+            domain(&f),
+            (date(2025, 12, 1), date(2026, 3, 1)),
+            "on_x {on_x}"
+        );
+    }
+}
+
+#[test]
+fn a_mesh_on_a_shared_time_axis_leaves_the_other_panels_padding() {
+    let (jan1, jan10, jan20, jan31) = (
+        date(2026, 1, 1),
+        date(2026, 1, 10),
+        date(2026, 1, 20),
+        date(2026, 1, 31),
+    );
+    let grid = Grid::new(1, 2).unwrap().with_share_x(Share::All);
+    let mut f = Figure::with_grid(6.0, 2.5, Theme::pigment(), grid).unwrap();
+    for col in 0..2 {
+        f.add_axes_at(
+            Placement {
+                row: GridIndex::At(0),
+                col: GridIndex::At(col),
+                ..Placement::default()
+            },
+            TIME,
+            LIN,
+        )
+        .unwrap();
+    }
+    let numbers = |v: &[f64]| AxisData::Numbers(v.to_vec());
+    f.axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+        .unwrap()
+        .mesh_time(
+            times(&[jan10, jan20]),
+            numbers(&[0.0, 1.0]),
+            &[1.0],
+            MeshOptions::default(),
+        )
+        .unwrap();
+    f.axes_at_mut(GridIndex::At(0), GridIndex::At(1))
+        .unwrap()
+        .scatter_shared(
+            times(&[jan1, jan31]),
+            numbers(&[0.5, 0.5]),
+            ScatterOptions::default(),
+        )
+        .unwrap();
+    let plans = crate::pipeline::try_plan_panels(&f, FontLibrary::global()).unwrap();
+    let (low, high) = time_scale(&plans[0].0.x.scale).instants();
+    assert!(low < jan1 && high > jan31, "{low:?} {high:?}");
+    assert_eq!(plans[0].0.x, plans[1].0.x);
+}

@@ -256,7 +256,7 @@ def test_mesh_category_axes_name_the_axis(axis: str) -> None:
     )
     before = ax.figure.to_svg()
     with pytest.raises(ub.UsageError) as caught:
-        call(ax.mesh)([0, 1], [0, 1], [[1]])
+        call(cast(Any, ax).mesh)([0, 1], [0, 1], [[1]])
     assert str(caught.value) == f"Axes.mesh(): {axis} must be a numeric or time axis."
     assert details(caught.value) == (
         axis,
