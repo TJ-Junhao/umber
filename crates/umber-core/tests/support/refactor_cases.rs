@@ -102,6 +102,7 @@ mod corpus {
     pub mod inputs;
     pub mod legend;
     pub mod legend_position;
+    pub mod mesh;
     pub mod plot_height;
     pub mod rules;
     pub mod share;
@@ -178,6 +179,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::horizontal::cases(&lib, &mut sink);
     corpus::colorbar::cases(&lib, &mut sink);
     corpus::time::cases(&lib, &mut sink);
+    corpus::mesh::cases(&lib, &mut sink);
     corpus::heatmap::cases(&lib, &mut sink);
 }
 

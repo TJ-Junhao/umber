@@ -377,6 +377,40 @@ class Figure:
     def hist(
         self, row: int, col: int, values: _FloatArray, bins: int, label: str, color: _ColorArg
     ) -> None: ...
+    def mesh(
+        self,
+        row: int,
+        col: int,
+        x_edges: _FloatArray,
+        y_edges: _FloatArray,
+        values: _FloatArray,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
+    ) -> None: ...
+    def hist2d(
+        self,
+        row: int,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        bins: tuple[int, int],
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+    ) -> None: ...
+    def hexbin(
+        self,
+        row: int,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        gridsize: int,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+    ) -> None: ...
     def step(
         self,
         row: int,

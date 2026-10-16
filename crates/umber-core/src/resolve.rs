@@ -137,7 +137,6 @@ impl ResolvedAxis {
     }
 
     /// The continuous scale, if this is not a category axis.
-    #[cfg(test)]
     pub fn continuous(&self) -> Option<&ContinuousScale> {
         match &self.scale {
             AxisScale::Continuous(scale) => Some(scale),
@@ -900,6 +899,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::GroupedBox(mark) => mark.categories(),
         Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
+        Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) => &[],
         Mark::Bubbles(_) => &[],
         Mark::Band(_) | Mark::StackedArea(_) => &[],
         Mark::ErrorBars(mark) => match mark.orientation() {
@@ -975,8 +975,38 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
     };
     let transform = limits.transform;
     let (data, padding) = axis_data(marks.clone(), which, transform);
-    let data = union(data, bubbles);
-    let auto = if role == AxisRole::Value {
+    let mut data = union(data, bubbles);
+    let is_cell = |mark: &&ResolvedMark<'_>| {
+        matches!(
+            mark,
+            ResolvedMark::Mesh { .. } | ResolvedMark::Hist2d { .. } | ResolvedMark::Hexbin { .. }
+        )
+    };
+    let cells = extent(
+        marks
+            .clone()
+            .filter(is_cell)
+            .flat_map(|mark| mark.numbers(which)),
+    );
+    let auto = if cells.is_some() {
+        if limits.explicit.is_none() {
+            let other: Vec<_> = marks.clone().filter(|mark| !is_cell(mark)).collect();
+            let other_data = axis_extent(other.iter().copied(), which, transform);
+            data = cells;
+            if other_data.is_some() || bubbles.is_some() {
+                let (axis, _) = resolve_axis(
+                    other.into_iter(),
+                    which,
+                    role,
+                    AxisLimits::Continuous(limits),
+                    room,
+                    bubbles,
+                );
+                data = union(data, axis.continuous().map(ContinuousScale::domain));
+            }
+        }
+        AutoLimits::Exact
+    } else if role == AxisRole::Value {
         AutoLimits::NiceBelowData(padding)
     } else {
         let contributing = || {
@@ -1348,6 +1378,31 @@ impl Iterator for DomainValues<'_> {
 /// order is part of the output.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ResolvedMark<'a> {
+    /// Numeric cells and their color values.
+    Mesh {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated edges and values.
+        mark: &'a crate::model::MeshMark,
+        /// The color mapping.
+        mapped: MappedColors<'a>,
+    },
+    /// Sparse equal-width count cells.
+    Hist2d {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated counts and mapping.
+        mark: &'a crate::model::Hist2dMark,
+    },
+    /// Sparse regular hexagons, fitted to the final plot aspect.
+    Hexbin {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated coordinates and mapping.
+        mark: &'a crate::model::HexbinMark,
+        /// Non-empty cells and their whole-cell bounds.
+        bins: crate::bin2d::HexBins,
+    },
     /// Bubbles sharing the largest size value across this axes.
     Bubbles {
         /// Drawn geometry for inside-legend scoring.
@@ -1650,6 +1705,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { geometry, .. }
             | ResolvedMark::StackedArea { geometry, .. }
             | ResolvedMark::Hist { geometry, .. }
+            | ResolvedMark::Mesh { geometry, .. }
+            | ResolvedMark::Hist2d { geometry, .. }
+            | ResolvedMark::Hexbin { geometry, .. }
             | ResolvedMark::Step { geometry, .. }
             | ResolvedMark::HLine { geometry, .. }
             | ResolvedMark::VLine { geometry, .. }
@@ -1680,6 +1738,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { geometry, .. }
             | ResolvedMark::StackedArea { geometry, .. }
             | ResolvedMark::Hist { geometry, .. }
+            | ResolvedMark::Mesh { geometry, .. }
+            | ResolvedMark::Hist2d { geometry, .. }
+            | ResolvedMark::Hexbin { geometry, .. }
             | ResolvedMark::Step { geometry, .. }
             | ResolvedMark::HLine { geometry, .. }
             | ResolvedMark::VLine { geometry, .. }
@@ -1703,6 +1764,13 @@ impl<'a> ResolvedMark<'a> {
     /// ([`Histogram::range`]), and nothing when it has no finite value.
     pub fn x_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
+            ResolvedMark::Mesh { mark, .. } => &mark.x_edges,
+            ResolvedMark::Hist2d { mark, .. } => &mark.bins.x_edges,
+            ResolvedMark::Hexbin { mark, bins, .. } => match bins {
+                crate::bin2d::HexBins::Uncounted => &mark.extents[0],
+                crate::bin2d::HexBins::Empty => &[],
+                crate::bin2d::HexBins::Occupied(_) => bins.domain(0),
+            },
             ResolvedMark::Line { mark, .. } => mark.x().numbers(),
             ResolvedMark::Scatter { mark, .. } => mark.x().numbers(),
             ResolvedMark::Bubbles { mark, .. } => mark.x(),
@@ -1814,7 +1882,10 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::VLine { mark, .. } => DomainTimes::whole(mark.x().times()),
             ResolvedMark::VSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
-            ResolvedMark::Bubbles { .. }
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -1844,7 +1915,10 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::HLine { mark, .. } => DomainTimes::whole(mark.y().times()),
             ResolvedMark::HSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
-            ResolvedMark::Bubbles { .. }
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }
@@ -1864,7 +1938,10 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => mark.x().categories(),
             ResolvedMark::Scatter { mark, .. } => mark.x().categories(),
-            ResolvedMark::Bubbles { .. } => &[],
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. } => &[],
             ResolvedMark::Stem { mark, .. } => mark.x().categories(),
             ResolvedMark::Heatmap { mark, .. } => mark.x_categories(),
             ResolvedMark::Area { mark, .. } => mark.x().categories(),
@@ -1957,7 +2034,10 @@ impl<'a> ResolvedMark<'a> {
                 ErrorBarOrientation::Horizontal => mark.positions().categories(),
                 ErrorBarOrientation::Vertical => &[],
             },
-            ResolvedMark::Bubbles { .. }
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Bar { .. }
@@ -1983,6 +2063,13 @@ impl<'a> ResolvedMark<'a> {
     /// log axis the domain spans the smallest positive count to the largest.
     pub fn y_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
+            ResolvedMark::Mesh { mark, .. } => &mark.y_edges,
+            ResolvedMark::Hist2d { mark, .. } => &mark.bins.y_edges,
+            ResolvedMark::Hexbin { mark, bins, .. } => match bins {
+                crate::bin2d::HexBins::Uncounted => &mark.extents[1],
+                crate::bin2d::HexBins::Empty => &[],
+                crate::bin2d::HexBins::Occupied(_) => bins.domain(1),
+            },
             ResolvedMark::Line { mark, .. } => mark.y().numbers(),
             ResolvedMark::Scatter { mark, .. } => mark.y().numbers(),
             ResolvedMark::Bubbles { mark, .. } => mark.y(),
@@ -2071,7 +2158,10 @@ impl<'a> ResolvedMark<'a> {
         match self {
             // With no finite y value, a stem does not change the y domain or its padding,
             // even when explicit ticks are the only values on that axis.
-            ResolvedMark::Bubbles { .. } => false,
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. } => false,
             ResolvedMark::Stem { mark, .. } => mark.y().numbers().iter().any(|v| v.is_finite()),
             ResolvedMark::Heatmap { .. } => false,
             ResolvedMark::Line { .. }
@@ -2100,7 +2190,10 @@ impl<'a> ResolvedMark<'a> {
     /// half their stroke.
     pub fn line_width(&self) -> Option<f32> {
         match *self {
-            ResolvedMark::Bubbles { .. } => None,
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. } => None,
             ResolvedMark::Stem { .. } => None,
             ResolvedMark::Heatmap { .. } => None,
             ResolvedMark::Line { width, .. }
@@ -2128,7 +2221,10 @@ impl<'a> ResolvedMark<'a> {
     /// is padded (see [`resolve_axis`]).
     pub fn is_reference(&self) -> bool {
         match self {
-            ResolvedMark::Bubbles { .. } => false,
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. } => false,
             ResolvedMark::Stem { .. } => false,
             ResolvedMark::Heatmap { .. } => false,
             ResolvedMark::HLine { .. }
@@ -2181,6 +2277,7 @@ impl<'a> ResolvedMark<'a> {
             | Self::VSpan { .. }
             | Self::Box { .. }
             | Self::Violin { .. } => SwatchFill::Area,
+            Self::Mesh { .. } | Self::Hist2d { .. } | Self::Hexbin { .. } => SwatchFill::Solid,
             Self::Hist { .. } => SwatchFill::Histogram,
             Self::Bar { .. } | Self::Grouped { .. } | Self::Stacked { .. } => SwatchFill::Solid,
             Self::Bubbles { .. } | Self::Scatter { .. } | Self::Stem { .. } => SwatchFill::Marker,
@@ -2308,6 +2405,9 @@ impl<'a> ResolvedMark<'a> {
                     )
                 })
                 .collect(),
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. } => Vec::new(),
             ResolvedMark::Hist { mark, color, .. } => one(mark.label(), color, Swatch::Square),
             ResolvedMark::HSpan { mark, color, .. } | ResolvedMark::VSpan { mark, color, .. } => {
                 one(&mark.options().label, color, Swatch::Square)
@@ -2514,6 +2614,9 @@ impl<'a> ResolvedMark<'a> {
                     },
                 })
                 .collect(),
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. } => Vec::new(),
             &ResolvedMark::Hist { mark, color, .. } => vec![SeriesKey {
                 label: mark.label(),
                 color,
@@ -2581,7 +2684,10 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { orientation, .. }
             | ResolvedMark::Box { orientation, .. }
             | ResolvedMark::Violin { orientation, .. } => Some(orientation),
-            ResolvedMark::Bubbles { .. }
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Area { .. }
@@ -2647,7 +2753,10 @@ impl<'a> ResolvedMark<'a> {
                     .filter(|&height| height == 0.0);
                 return DomainValues::Computed(Box::new(stacks.ends().chain(zeros)));
             }
-            ResolvedMark::Bubbles { .. }
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Area { .. }
@@ -2669,6 +2778,9 @@ impl<'a> ResolvedMark<'a> {
     /// The spec and values of a color-mapped mark; `None` for a mark drawn in its own colors.
     pub(crate) fn color_values(&self) -> Option<(&ColorScaleSpec, &[f64])> {
         match self {
+            ResolvedMark::Mesh { mapped, .. } => Some((&mapped.spec, mapped.values)),
+            ResolvedMark::Hist2d { mark, .. } => Some((&mark.colors, &mark.bins.counts)),
+            ResolvedMark::Hexbin { mark, bins, .. } => Some((&mark.colors, bins.counts())),
             ResolvedMark::Scatter { mapped, .. } | ResolvedMark::Bubbles { mapped, .. } => {
                 mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
             }
@@ -3234,6 +3346,7 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
             m.series().map(|s| (s.label(), s.color())).collect()
         }
         Mark::StackedArea(m) => m.series().map(|s| (s.label(), s.color())).collect(),
+        Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) => Vec::new(),
         Mark::Hist(m) => vec![(m.label(), m.color())],
         Mark::Step(m) => vec![(&m.options().label, m.options().color)],
         Mark::HLine(m) => vec![(&m.options().label, m.options().color)],
@@ -3452,6 +3565,20 @@ fn resolve_panel_marks<'a>(
                     width: theme.drawn_line_width(crate::SizeSpec::Auto),
                 }
             }
+            Mark::Mesh(mark) => ResolvedMark::Mesh {
+                geometry: None,
+                mark,
+                mapped: MappedColors::of(&mark.colors),
+            },
+            Mark::Hist2d(mark) => ResolvedMark::Hist2d {
+                geometry: None,
+                mark,
+            },
+            Mark::Hexbin(mark) => ResolvedMark::Hexbin {
+                geometry: None,
+                mark,
+                bins: crate::bin2d::HexBins::Uncounted,
+            },
             Mark::Hist(mark) => ResolvedMark::Hist {
                 mark,
                 geometry: None,
