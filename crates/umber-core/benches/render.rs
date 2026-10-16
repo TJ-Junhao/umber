@@ -18,8 +18,9 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use umber_core::figure::{AxisData, HistOptions, LineOptions, ScatterOptions};
 use umber_core::render::{SvgText, render_png, render_svg};
 use umber_core::{
-    AreaOptions, BandOptions, Figure, FontLibrary, Grid, GridIndex, LegendPosition, LegendStyle,
-    Placement, ScaleKind, Series, Share, Theme,
+    AreaOptions, BandOptions, Figure, FontLibrary, Grid, GridIndex, HeatmapOptions, HexbinOptions,
+    Hist2dOptions, Instant, LegendPosition, LegendStyle, Placement, ScaleKind, Series, Share,
+    Theme,
 };
 
 const DPI: u32 = 200;
@@ -102,6 +103,83 @@ fn hist_figure(n: usize) -> Figure {
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .hist(&values, HistOptions::default())
+        .unwrap();
+    figure
+}
+
+/// A 1000x1000 heatmap on two category axes.
+fn heatmap_figure() -> Figure {
+    let names =
+        |prefix: &str| -> Vec<String> { (0..1000).map(|i| format!("{prefix}{i}")).collect() };
+    let values: Vec<f64> = (0..1_000_000).map(unit).collect();
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Category, ScaleKind::Category)
+        .unwrap()
+        .heatmap(&names("x"), &names("y"), &values, HeatmapOptions::default())
+        .unwrap();
+    figure
+}
+
+/// Correlated points: y follows x plus bell-shaped noise, so the bins hold uneven counts.
+fn correlated(n: usize) -> (Vec<f64>, Vec<f64>) {
+    let x: Vec<f64> = (0..n)
+        .map(|i| (0..4).map(|k| unit(5 * i + k)).sum::<f64>())
+        .collect();
+    let y = x
+        .iter()
+        .enumerate()
+        .map(|(i, v)| 0.7 * v + 0.3 * unit(5 * i + 4) * 4.0)
+        .collect();
+    (x, y)
+}
+
+fn hist2d_figure(n: usize) -> Figure {
+    let (x, y) = correlated(n);
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .hist2d(
+            &x,
+            &y,
+            Hist2dOptions {
+                bins: (100, 100),
+                ..Hist2dOptions::default()
+            },
+        )
+        .unwrap();
+    figure
+}
+
+fn hexbin_figure(n: usize) -> Figure {
+    let (x, y) = correlated(n);
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .hexbin(
+            &x,
+            &y,
+            HexbinOptions {
+                gridsize: 50,
+                ..HexbinOptions::default()
+            },
+        )
+        .unwrap();
+    figure
+}
+
+/// The `line_figure` wave on a time x axis, one point per second.
+fn time_line_figure(n: usize) -> Figure {
+    let times: Vec<Option<Instant>> = (0..n)
+        .map(|i| Some(Instant::from_micros(i as i64 * 1_000_000).unwrap()))
+        .collect();
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Time, ScaleKind::Linear)
+        .unwrap()
+        .line(AxisData::Times(times), &wave(n), LineOptions::default())
         .unwrap();
     figure
 }
@@ -267,6 +345,24 @@ fn benches(c: &mut Criterion) {
     let hist = hist_figure(1_000_000);
     group.bench_function("hist_1m_png", |b| {
         b.iter(|| black_box(hist.to_png(i64::from(DPI)).unwrap()));
+    });
+
+    // The v0.3 charts: color-mapped marks and a time axis, 6x4 in at 200 dpi.
+    let heatmap = heatmap_figure();
+    group.bench_function("heatmap_1000x1000_png", |b| {
+        b.iter(|| black_box(heatmap.to_png(i64::from(DPI)).unwrap()));
+    });
+    let hist2d = hist2d_figure(1_000_000);
+    group.bench_function("hist2d_1m_png", |b| {
+        b.iter(|| black_box(hist2d.to_png(i64::from(DPI)).unwrap()));
+    });
+    let hexbin = hexbin_figure(1_000_000);
+    group.bench_function("hexbin_1m_png", |b| {
+        b.iter(|| black_box(hexbin.to_png(i64::from(DPI)).unwrap()));
+    });
+    let time_line = time_line_figure(1_000_000);
+    group.bench_function("time_line_1m_png", |b| {
+        b.iter(|| black_box(time_line.to_png(i64::from(DPI)).unwrap()));
     });
 
     let text = text_figure();
