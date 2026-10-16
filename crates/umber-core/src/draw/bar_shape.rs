@@ -2,8 +2,12 @@
 //! clipping of their ends in axis space, the mapping to plot points, and the outline itself, a
 //! rectangle whose end away from the baseline may be rounded; and the rounded rectangle that
 //! outline is built on, which also draws the pills of the chips legend.
+//!
+//! A frame's axes are those of its axis maps (see [`super::mapping`]): "x" is the axis the bars
+//! stand on and "y" the axis they grow along, the plot's own for vertical bars, and swapped
+//! for horizontal ones.
 
-use super::mapping::{AxisMap, AxisMaps, AxisPoint};
+use super::mapping::{AxisMap, AxisMaps};
 use crate::Transform;
 use crate::geometry::{Path, Point};
 use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis};
@@ -115,9 +119,11 @@ impl BarFrame {
     }
 
     /// The outline of one bar across `(left, right)` in x axis space, from `from` to `to` in y
-    /// axis space, in plot points. The end at `to` is rounded when `round` holds and `to` lies
-    /// inside the clip range. `None` when either end is NaN, the ends are equal, the whole bar
-    /// lies beyond one end of the clip range, or the outline is empty.
+    /// axis space, in plot points: built in the frame's plot points and then placed in the
+    /// scene, its axes swapped in the frame of horizontal bars. The end at `to` is rounded when
+    /// `round` holds and `to` lies inside the clip range. `None` when either end is NaN, the
+    /// ends are equal, the whole bar lies beyond one end of the clip range, or the outline is
+    /// empty.
     pub(super) fn outline(
         &self,
         (left, right): (f64, f64),
@@ -133,17 +139,16 @@ impl BarFrame {
             return None;
         }
         let round_end = round && self.contains_y(to);
-        let at_from = self.maps.to_plot(AxisPoint::new(left, visible_from));
-        let at_to = self.maps.to_plot(AxisPoint::new(right, visible_to));
+        let (x, y) = (self.maps.x, self.maps.y);
         let path = bar_outline(
-            at_from.x,
-            at_to.x,
-            at_from.y,
-            at_to.y,
+            x.plot_at(left),
+            x.plot_at(right),
+            y.plot_at(visible_from),
+            y.plot_at(visible_to),
             self.radius,
             round_end,
         );
-        (!path.is_empty()).then_some(path)
+        (!path.is_empty()).then(|| self.maps.path_to_scene(path))
     }
 }
 

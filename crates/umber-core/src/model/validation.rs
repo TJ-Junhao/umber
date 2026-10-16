@@ -452,19 +452,20 @@ pub(super) fn check_y_error_bars(
 }
 
 /// Validates the y, `low` and `high` values of horizontal error bars for axes with an x axis of
-/// scale kind `x_kind` and a y axis of transform `y_transform`, before they are stored, so a
-/// failed call changes nothing. The checks run in a fixed order and the first failure is the
-/// error, under `context`:
+/// scale kind `x_kind` and a y axis of scale kind `y_kind`, before they are stored, so a failed
+/// call changes nothing. The checks run in a fixed order and the first failure is the error,
+/// under `context`:
 ///
 /// 1. the x axis is not a category axis (`Error::Usage`);
 /// 2. `y`, `low` and `high` have the same length;
-/// 3. `y` against the y axis, then `low` and `high` against the x axis (see [`check_numbers`]);
+/// 3. `y` against the y axis: names on a category axis, numbers on a linear or log one (see
+///    [`check_axis_data`]), then `low` and `high` against the x axis (see [`check_numbers`]);
 /// 4. no `low[i]` exceeds `high[i]`; an index where either is NaN is not compared.
 pub(super) fn check_x_error_bars(
     context: &'static str,
     x_kind: ScaleKind,
-    y_transform: Transform,
-    y: &[f64],
+    y_kind: ScaleKind,
+    y: &AxisData,
     limits: (&[f64], &[f64]),
 ) -> Result<()> {
     let Some(x_transform) = x_kind.transform() else {
@@ -475,7 +476,7 @@ pub(super) fn check_x_error_bars(
         .with_hint("x_error_bars needs a numeric x axis; use y_error_bars on a category."));
     };
     check_interval_lengths(context, "y", y.len(), limits)?;
-    check_numbers(context, ("y", "y"), y, y_transform, ERROR_BAR_GAP_HINT)?;
+    check_axis_data(context, SharedAxis::Y, y_kind, y, ERROR_BAR_GAP_HINT)?;
     check_intervals(context, x_transform, limits)
 }
 
@@ -1022,6 +1023,51 @@ pub(super) fn check_numeric_y(context: &'static str, kind: ScaleKind) -> Result<
         .with_parameter("y")
         .with_hint("use a linear or log y axis.")
     })
+}
+
+/// The transform of the x axis, of scale kind `kind`, for the mark method `context` on a
+/// category y axis, where it draws beside a numeric x axis only: `Error::Usage` naming `x` on a
+/// category axis. Two category axes take no mark of these methods.
+pub(super) fn check_numeric_x(context: &'static str, kind: ScaleKind) -> Result<Transform> {
+    kind.transform().ok_or_else(|| {
+        Error::usage(
+            context,
+            format!("x is a category scale; {context} needs a numeric x axis."),
+        )
+        .with_parameter("x")
+        .with_hint("use a linear or log x axis.")
+    })
+}
+
+/// For the mark method `context`, which draws on a numeric y axis and also on a category y
+/// axis beside a numeric x axis, on axes with an x axis of scale kind `x` and a y axis of
+/// scale kind `y`: `Error::Usage` naming `x` on two category axes (see [`check_numeric_x`]).
+pub(super) fn check_not_two_categories(
+    context: &'static str,
+    x: ScaleKind,
+    y: ScaleKind,
+) -> Result<()> {
+    if y == ScaleKind::Category {
+        check_numeric_x(context, x)?;
+    }
+    Ok(())
+}
+
+/// For the mark method `context` of the bar, box and violin families, on axes with an x axis
+/// of scale kind `x` and a y axis of scale kind `y`: the scale kind of the axis the categories
+/// lie along and the transform of the axis the values are measured on. On a numeric y axis they
+/// are `x` and the y transform, and the mark's own checks then require a category x axis; on a
+/// category y axis the marks are horizontal, so they are `y` and the transform of the x axis,
+/// which must be numeric (see [`check_numeric_x`]).
+pub(super) fn check_band_axes(
+    context: &'static str,
+    x: ScaleKind,
+    y: ScaleKind,
+) -> Result<(ScaleKind, Transform)> {
+    match y.transform() {
+        Some(values) => Ok((x, values)),
+        None => Ok((y, check_numeric_x(context, x)?)),
+    }
 }
 
 /// Checks explicit tick `positions` for an axis of `transform`, index by index, and reports the

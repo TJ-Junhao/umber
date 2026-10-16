@@ -7,7 +7,7 @@ from typing import Any, Final, Never, Self, final
 
 from umber import _args, _axes, _cell, _scale, _theme, _umber
 from umber._args import instance, integer, real
-from umber._axes import Axes, X
+from umber._axes import Axes, X, Y
 from umber._cell import Cell
 from umber._enums import AUTO, Auto, Legend, Share, SvgText
 from umber._errors import new_error
@@ -16,8 +16,7 @@ from umber._scale import Scale
 from umber._theme import Theme
 
 _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
-_X_SCALE_HINT: Final = "use Scale.linear(), Scale.log() or Scale.category()."
-_Y_SCALE_HINT: Final = "use Scale.linear() or Scale.log()."
+_SCALE_HINT: Final = "use Scale.linear(), Scale.log() or Scale.category()."
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
 _SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
 _LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
@@ -195,10 +194,11 @@ class Figure:
         col: int | Auto = AUTO,
         row_span: int = 1,
         col_span: int = 1,
-        # mypy rejects ``Scale[float]`` as the default of ``Scale[X]``; pyright accepts it.
+        # mypy rejects ``Scale[float]`` as the default of ``Scale[X]`` and ``Scale[Y]``; pyright
+        # accepts it.
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[float] = Scale.linear(),  # noqa: B008
-    ) -> Axes[X, float]:
+        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+    ) -> Axes[X, Y]:
         """Add axes at a grid position and return them.
 
         Args:
@@ -208,8 +208,8 @@ class Figure:
             col_span: The number of columns occupied, at least 1.
             x: The x scale. ``Scale.linear()`` and ``Scale.log()`` make a numeric x axis;
                 ``Scale.category()`` makes an axis of names, as bar charts need.
-            y: The y scale: ``Scale.linear()`` or ``Scale.log()``. The y axis is always
-                numeric.
+            y: The y scale, as for ``x``. A category y axis beside a numeric x axis makes
+                bars, boxes and violins horizontal and a scatter a dot plot.
 
         Returns:
             The new axes.
@@ -217,7 +217,7 @@ class Figure:
         Raises:
             TypeError: If an index, span or scale has the wrong type.
             UsageError: If a position is missing, out of range or occupied, a span is invalid,
-                ``y`` is a category scale, or shared axes would have incompatible scales.
+                or shared axes would have incompatible scales.
 
         Note:
             A wrong explicit annotation, such as ``Axes[str, float]`` on the result of
@@ -227,6 +227,7 @@ class Figure:
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.log())
+            >>> rows = ub.Figure().add_axes(y=ub.Scale.category()).bar(["A", "B"], [3, 5])
         """
         with api_call():
             context = "Figure.add_axes()"
@@ -234,8 +235,8 @@ class Figure:
             col_index = _index(context, "col", col)
             rows = integer(context, "row_span", row_span)
             cols = integer(context, "col_span", col_span)
-            instance(context, "x", x, Scale, _X_SCALE_HINT)
-            instance(context, "y", y, Scale, _Y_SCALE_HINT)
+            instance(context, "x", x, Scale, _SCALE_HINT)
+            instance(context, "y", y, Scale, _SCALE_HINT)
             top, left = self._native.add_axes(
                 *row_index, *col_index, rows, cols, *_scale.native(x), *_scale.native(y)
             )
@@ -249,8 +250,8 @@ class Figure:
         row: int | Auto = AUTO,
         col: int | Auto = AUTO,
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[float] = Scale.linear(),  # noqa: B008
-    ) -> Axes[X, float]:
+        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+    ) -> Axes[X, Y]:
         """Return existing axes with the given position and scales, including those of a copy.
 
         Args:
@@ -258,7 +259,8 @@ class Figure:
             col: The zero-based left column; ``AUTO`` means 0 only on a one-column figure.
             x: The x scale used to create the axes, including the log base. This type witness
                 determines whether the result accepts numeric or category x values.
-            y: The y scale used to create the axes, including the log base.
+            y: The y scale used to create the axes, including the log base; a type witness
+                as ``x`` is.
 
         Returns:
             The axes at this top-left cell; other cells covered by a span do not match.
@@ -283,8 +285,8 @@ class Figure:
             context = "Figure.axes_at()"
             row_index = _index(context, "row", row)
             col_index = _index(context, "col", col)
-            instance(context, "x", x, Scale, _X_SCALE_HINT)
-            instance(context, "y", y, Scale, _Y_SCALE_HINT)
+            instance(context, "x", x, Scale, _SCALE_HINT)
+            instance(context, "y", y, Scale, _SCALE_HINT)
             position = self._native.axes_at(
                 *row_index, *col_index, *_scale.native(x), *_scale.native(y)
             )

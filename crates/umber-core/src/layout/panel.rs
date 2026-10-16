@@ -673,13 +673,18 @@ pub(crate) fn place_panel(
     let off_baseline = |axis: ValueAxis| {
         move |tick: &&AxisTick| baseline.axis != axis || !coincides(tick.pos, baseline.pos)
     };
-    let y_grid = resolved
-        .y
-        .ticks
-        .iter()
-        .filter(off_baseline(ValueAxis::Y))
-        .map(|tick| plot.y_at(tick.pos))
-        .collect();
+    // A category axis has no gridlines, along y as along x.
+    let y_grid = if resolved.y.is_category() {
+        Vec::new()
+    } else {
+        resolved
+            .y
+            .ticks
+            .iter()
+            .filter(off_baseline(ValueAxis::Y))
+            .map(|tick| plot.y_at(tick.pos))
+            .collect()
+    };
     let x_grid = if resolved.x.is_category() {
         Vec::new()
     } else {

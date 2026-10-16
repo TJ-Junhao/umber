@@ -6,7 +6,9 @@ Checked by pyright and mypy in strict mode; see ``check_errors.py`` for the mark
 import umber as ub
 
 
-def generic_step[X, Y](axes: ub.Axes[X, Y], x: ub.Values[X], y: ub.Values[Y]) -> ub.Axes[X, Y]:
+def generic_step[X](
+    axes: ub.Axes[X, float], x: ub.Values[X], y: ub.Values[float]
+) -> ub.Axes[X, float]:
     return axes.step(x, y)
 
 

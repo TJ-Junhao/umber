@@ -210,7 +210,9 @@ pub enum FillStyle {
     Gradient,
 }
 
-/// Which gridlines are drawn.
+/// Which gridlines are drawn. The choice describes a chart whose values lie along y; a chart
+/// whose values lie along x, one with a category y axis beside a numeric x axis, mirrors it, so
+/// that there `Horizontal` draws the lines at the x ticks and `Vertical` those at the y ticks.
 ///
 /// # Examples
 ///

@@ -39,9 +39,9 @@ NATIVE_THEMES = [_umber.Theme.pigment, _umber.Theme.graphite, _umber.Theme.midni
 type AnyAxes = ub.Axes[Any, Any]
 
 
-def test_step_y_annotation_matches_the_other_point_marks() -> None:
+def test_step_y_annotation_matches_the_other_line_marks() -> None:
     y = get_type_hints(ub.Axes.step)["y"]
-    for method in (ub.Axes.line, ub.Axes.area, ub.Axes.scatter):
+    for method in (ub.Axes.line, ub.Axes.area, ub.Axes.stem):
         assert y == get_type_hints(method)["y"]
 
 

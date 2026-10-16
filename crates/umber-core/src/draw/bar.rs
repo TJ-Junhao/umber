@@ -1,4 +1,8 @@
 //! Bar drawing: category bands, the offsets of grouped bars and the segments of stacked bars.
+//!
+//! Bars are drawn in the frame of their orientation (see [`super::mapping`]): the axis they
+//! lie along first, as x, and their value axis second, as y. Horizontal bars are the same code
+//! with the axes swapped.
 
 use super::MarkContext;
 use super::bar_shape::BarFrame;
@@ -29,8 +33,9 @@ fn corner_radius(theme: &Theme) -> f64 {
     }
 }
 
-/// The x range `(left, right)` of the bar, stack or group of category `index`, in axis space:
-/// [`BAR_SHARE`] of the category's band, centered in it.
+/// The range `(left, right)` across the bar, stack or group of category `index`, along the
+/// category axis in axis space: [`BAR_SHARE`] of the category's band, centered in it. On a
+/// category y axis `left` is the top.
 fn bar_span(categories: &CategoryScale, index: usize) -> (f64, f64) {
     let (start, end) = categories.band(index);
     let (center, half) = ((start + end) / 2.0, (end - start) * BAR_SHARE / 2.0);
@@ -64,16 +69,16 @@ pub(super) fn group_slots(group: f64, count: usize, gap: f64) -> (f64, f64) {
     }
 }
 
-/// The [`BarFrame`] of bars `width` x axis units wide, rounded by the theme's corner radius; on a
-/// category x axis an axis unit is the plot width.
-fn frame(context: &MarkContext<'_>, y: &ResolvedAxis, width: f64) -> BarFrame {
+/// The [`BarFrame`] of bars `width` category axis units wide, rounded by the theme's corner
+/// radius, whose value axis is `values`.
+fn frame(context: &MarkContext<'_>, values: &ResolvedAxis, width: f64) -> BarFrame {
     let radius = corner_radius(context.theme);
     BarFrame::new(
         context.maps,
-        y,
+        values,
         context.baseline.pos,
         radius,
-        width * context.plot.width,
+        context.maps.x.points(width),
     )
 }
 
@@ -88,36 +93,39 @@ fn push_bar(outline: Option<Path>, color: Rgba, items: &mut Vec<Item>) {
     }
 }
 
-/// The scene items of one bar mark, one `Fill` per visible bar in `color`, in category order
-/// (see [`in_axis_order`]). Each bar runs from the base of its [`BarFrame`] to its height,
+/// The scene items of one bar mark lying along the category axis `along` with its values on
+/// `values`, drawn in the frame of `context`: one `Fill` per visible bar in `color`, in category
+/// order (see [`in_axis_order`]). Each bar runs from the base of its [`BarFrame`] to its height,
 /// clipped and rounded as the frame describes. A NaN height, or one equal to the base, draws
 /// nothing.
 pub(super) fn bar_items(
     context: &MarkContext<'_>,
-    x: &ResolvedAxis,
-    y: &ResolvedAxis,
+    along: &ResolvedAxis,
+    values: &ResolvedAxis,
     mark: &BarMark,
     color: Rgba,
     items: &mut Vec<Item>,
 ) {
-    let AxisScale::Category(categories) = &x.scale else {
+    let AxisScale::Category(categories) = &along.scale else {
         return;
     };
     // Every band has the same width, so every bar of the mark has the same width.
     let (left, right) = bar_span(categories, 0);
-    let bars = frame(context, y, right - left);
+    let bars = frame(context, values, right - left);
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let Some(&height) = mark.heights().get(i) else {
             continue;
         };
-        let end = axis_value(y, height);
+        let end = axis_value(values, height);
         let outline = bars.outline(bar_span(categories, index), bars.base(), end, true);
         push_bar(outline, color, items);
     }
 }
 
-/// The scene items of one grouped bar mark, one `Fill` per visible bar, in category order (see
-/// [`in_axis_order`]) and within a category in series order, each in its series' color.
+/// The scene items of one grouped bar mark, along `along` with its values on `values` as in
+/// [`bar_items`]: one `Fill` per visible bar, in category order (see [`in_axis_order`]) and
+/// within a category in series order, from the left, or on a category y axis from the top,
+/// each in its series' color.
 ///
 /// The group takes the span of a plain bar ([`BAR_SHARE`] of the band); its bars are
 /// [`GROUP_GAP`] apart, or touch when that would leave them narrower than the gap (see
@@ -125,18 +133,19 @@ pub(super) fn bar_items(
 /// [`BarFrame`] describes; a NaN height, or one equal to the base, draws nothing.
 pub(super) fn grouped_items(
     context: &MarkContext<'_>,
-    x: &ResolvedAxis,
-    y: &ResolvedAxis,
+    along: &ResolvedAxis,
+    values: &ResolvedAxis,
     mark: &BarGroupMark,
     series: &[(SeriesView<'_>, Rgba)],
     items: &mut Vec<Item>,
 ) {
-    let AxisScale::Category(categories) = &x.scale else {
+    let AxisScale::Category(categories) = &along.scale else {
         return;
     };
     let (start, end) = bar_span(categories, 0);
-    let (width, gap) = group_slots(end - start, series.len(), GROUP_GAP / context.plot.width);
-    let bars = frame(context, y, width);
+    let gap = context.maps.x.length(GROUP_GAP);
+    let (width, gap) = group_slots(end - start, series.len(), gap);
+    let bars = frame(context, values, width);
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let (group_left, _) = bar_span(categories, index);
         for (j, (view, color)) in series.iter().enumerate() {
@@ -144,15 +153,16 @@ pub(super) fn grouped_items(
                 continue;
             };
             let left = group_left + j as f64 * (width + gap);
-            let end = axis_value(y, height);
+            let end = axis_value(values, height);
             let outline = bars.outline((left, left + width), bars.base(), end, true);
             push_bar(outline, *color, items);
         }
     }
 }
 
-/// The scene items of one stacked bar mark, one `Fill` per visible segment, in category order
-/// (see [`in_axis_order`]) and within a category in series order, each in its series' color.
+/// The scene items of one stacked bar mark, along `along` with its values on `values` as in
+/// [`bar_items`]: one `Fill` per visible segment, in category order (see [`in_axis_order`]) and
+/// within a category in series order, each in its series' color.
 ///
 /// A stack takes the span of a plain bar. Each segment of `stacks` runs from its bottom to its
 /// top; a segment that starts at 0 starts at the base of its [`BarFrame`] instead, so on a log
@@ -162,18 +172,18 @@ pub(super) fn grouped_items(
 /// rounding are as the frame describes.
 pub(super) fn stacked_items(
     context: &MarkContext<'_>,
-    x: &ResolvedAxis,
-    y: &ResolvedAxis,
+    along: &ResolvedAxis,
+    values: &ResolvedAxis,
     mark: &BarGroupMark,
     series: &[(SeriesView<'_>, Rgba)],
     stacks: &Stacks,
     items: &mut Vec<Item>,
 ) {
-    let AxisScale::Category(categories) = &x.scale else {
+    let AxisScale::Category(categories) = &along.scale else {
         return;
     };
     let (left, right) = bar_span(categories, 0);
-    let bars = frame(context, y, right - left);
+    let bars = frame(context, values, right - left);
     let half_gap = context.maps.y.length(STACK_GAP / 2.0);
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let span = bar_span(categories, index);
@@ -184,9 +194,9 @@ pub(super) fn stacked_items(
             let from = if segment.bottom == 0.0 {
                 bars.base()
             } else {
-                axis_value(y, segment.bottom)
+                axis_value(values, segment.bottom)
             };
-            let to = axis_value(y, segment.top);
+            let to = axis_value(values, segment.top);
             let inner = (segment.bottom != 0.0, !segment.outermost);
             let Some((from, to)) = inset_segment(from, to, inner, half_gap) else {
                 continue;
@@ -197,7 +207,7 @@ pub(super) fn stacked_items(
     }
 }
 
-/// The segment from `from` to `to` (y axis space) with each inner end, one shared with a
+/// The segment from `from` to `to` (value axis space) with each inner end, one shared with a
 /// neighbouring segment on the same side of 0, moved inwards by `half_gap` (axis units); `inner`
 /// says whether the `from` and the `to` end are inner. The base at 0 and the outermost end stay
 /// where they are. The insets are taken from the true ends, before clipping, so two neighbours
