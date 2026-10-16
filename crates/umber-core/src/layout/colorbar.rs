@@ -32,18 +32,21 @@ impl ColorbarSide {
         )
     }
 
-    /// The required side of a shared bar, or the theme/figure choice for all panels.
+    /// A shared bar's side. The resolved default can hide any mode; visible row and column
+    /// bars keep their required side, while all-panel bars follow the theme/figure choice.
     pub(crate) fn shared(figure: &crate::Figure) -> Option<Self> {
-        let position = match figure.grid().share_color() {
-            crate::Share::None => return None,
-            crate::Share::Row => ColorbarPosition::Right,
-            crate::Share::Col => ColorbarPosition::Bottom,
-            crate::Share::All => figure
+        let side = Self::of(
+            figure
                 .colorbar_options()
                 .position
                 .unwrap_or(figure.theme().colorbar_position()),
-        };
-        Self::of(position)
+        )?;
+        match figure.grid().share_color() {
+            crate::Share::None => None,
+            crate::Share::Row => Some(Self::Right),
+            crate::Share::Col => Some(Self::Bottom),
+            crate::Share::All => Some(side),
+        }
     }
 
     /// A visible position as a side.

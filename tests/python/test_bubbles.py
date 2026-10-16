@@ -262,7 +262,7 @@ def test_log_axes_and_coordinate_errors_are_atomic() -> None:
 def test_native_rendering_parity(marker: ub.Marker) -> None:
     fig = ub.Figure(6, 4)
     fig.add_axes().bubbles([1, 2], [2, 3], [100, 870], label="Cities", marker=marker)
-    native = _umber.Figure(6.0, 4.0, _umber.Theme.pigment(), 1, 1, 0, 0, 0)
+    native = _umber.Figure(6.0, 4.0, _umber.Theme.pigment(), 1, 1, 0, 0, 0, 0)
     native.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
     native.bubbles(
         0,

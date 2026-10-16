@@ -103,8 +103,10 @@ class Figure:
             cols: The number of columns, from 1 to 32.
             share_x: Which panels share their x scale, limits, ticks and tick format.
             share_y: Which panels share their y scale, limits, ticks and tick format.
-            share_color: Which panels share their color range and colorbar. Members must
-                use the same colormap, scale and center; ``clim()`` sets the group limits.
+            share_color: Which panels share their color range and colorbar. Only panels
+                with color-mapped marks take part. Members must use the same colormap,
+                scale and center; ``clim()`` sets the group limits. A color-mapped mark
+                cannot span different row or column color groups.
             legend: One merged legend or a separate legend per panel.
             theme: The theme that styles the figure.
 
@@ -159,8 +161,10 @@ class Figure:
 
         Args:
             label: The horizontal label above each bar, at most 1,000 characters.
-            position: ``AUTO`` uses the required side for ``ROW`` or ``COL`` and the
-                theme's side for ``ALL``. Only ``ALL`` accepts ``NONE`` to hide the bar.
+            position: ``AUTO`` hides the bars in every sharing mode if the theme's
+                colorbar position is ``NONE``. Otherwise it uses the required side for
+                ``ROW`` or ``COL`` and the theme's side for ``ALL``. An explicit position
+                overrides the theme; only ``ALL`` accepts ``NONE`` to hide the bar.
             format: The tick format. ``AUTO`` follows the first color-mapped panel's y
                 tick format in each group's row-major order.
 

@@ -221,7 +221,7 @@ class Figure:
         share_x: int,
         share_y: int,
         legend: int,
-        share_color: int = 0,
+        share_color: int,
     ) -> Figure: ...
     def clone(self) -> Figure: ...
     # A grid index is ``(kind, index)``: kind 0 is AUTO, 1 is the index given. Both return the

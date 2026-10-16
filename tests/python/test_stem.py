@@ -264,7 +264,7 @@ def test_stems_match_native_rendering(
 ) -> None:
     fig = ub.Figure(4, 3, theme=theme)
     fig.add_axes().stem([0, 1, 2], [3, -2, 1], marker=marker, label="Response", size=ub.Size.pt(8))
-    native = _umber.Figure(4.0, 3.0, native_theme(), 1, 1, 0, 0, 0)
+    native = _umber.Figure(4.0, 3.0, native_theme(), 1, 1, 0, 0, 0, 0)
     native.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
     native.stem(
         0,
@@ -283,7 +283,7 @@ def test_stems_match_native_rendering(
 def test_category_stems_match_native_rendering() -> None:
     fig = ub.Figure(4, 3)
     fig.add_axes(x=ub.Scale.category()).stem(["b", "a", "b"], [3, -2, 1], label="Response")
-    native = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), 1, 1, 0, 0, 0)
+    native = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), 1, 1, 0, 0, 0, 0)
     native.add_axes(0, 0, 0, 0, 1, 1, 2, 10.0, 0, 10.0)
     native.stem(
         0, 0, ["b", "a", "b"], np.array([3.0, -2.0, 1.0]), "Response", (0, 0, 1.0), 0, (0, 0.0)

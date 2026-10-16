@@ -370,6 +370,11 @@ impl Theme {
 
     /// Returns a copy with the default colorbar position set to `position`.
     ///
+    /// `None` hides colorbars by default in every sharing mode. `Right` and `Bottom` select
+    /// the side for unshared panels and [`crate::Share::All`]; row and column groups keep their
+    /// required side. Axes or figure colorbar settings can override the default with an allowed
+    /// position.
+    ///
     /// # Examples
     ///
     /// ```

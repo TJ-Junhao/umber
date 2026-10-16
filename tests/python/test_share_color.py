@@ -116,7 +116,14 @@ def test_conflicting_member_rejected_atomically(which: str) -> None:
         ax.scatter([1, 2], [1, 2], color=color)
     found = details(caught.value)
     assert found is not None and found[0] == "color" and found[1]
-    assert "shared" in str(caught.value)
+    given, existing = {
+        "cmap": ("Cmap.MAGMA", "the theme's colormap"),
+        "scale": ("Scale.log(10)", "Scale.linear()"),
+        "center": ("center 1", "no center"),
+    }[which]
+    assert str(caught.value) == (
+        f"Axes.scatter(): color uses {given}; row 0, col 1 maps colors with {existing}."
+    )
     assert fig.to_svg() == before
 
 
@@ -129,8 +136,12 @@ def test_shared_clim_provenance_and_copy() -> None:
     other = copy.deepcopy(fig)
     other.axes_at(col=1).clim(0, 30)
     assert fig.to_svg() == before and other.to_svg() != before
-    with pytest.raises(ub.UsageError, match="shared with row 0, col 1"):
+    with pytest.raises(ub.UsageError, match="shared with row 0, col 1") as caught:
         b.clim(0, 30)
+    assert details(caught.value) == (
+        "low",
+        "set it once for the group, or share colors across fewer panels.",
+    )
     assert fig.to_svg() == before
     b.clim(0, 20)
     with pytest.raises(ub.UsageError):
@@ -299,25 +310,43 @@ def test_shared_room_minimum_with_other_contents(mode: ub.Share, case: str) -> N
 
 
 @pytest.mark.parametrize("mode", [ub.Share.ROW, ub.Share.COL])
-def test_shared_color_spans_stay_within_group(mode: ub.Share) -> None:
+@pytest.mark.parametrize("mark", ["scatter", "bubbles"])
+def test_shared_color_spans_stay_within_group(mode: ub.Share, mark: str, tmp_path: Path) -> None:
     fig = ub.Figure(rows=2, cols=2, share_color=mode)
-    before = fig.to_svg()
-    with pytest.raises(ub.UsageError):
-        fig.add_axes(
-            row=0,
-            col=0,
-            row_span=2 if mode is ub.Share.ROW else 1,
-            col_span=2 if mode is ub.Share.COL else 1,
-        )
-    assert fig.to_svg() == before
     ax = fig.add_axes(
+        row=0,
+        col=0,
+        row_span=2 if mode is ub.Share.ROW else 1,
+        col_span=2 if mode is ub.Share.COL else 1,
+    ).line([0, 1], [1, 2])
+    before = fig.to_svg()
+    args = "[0, 1], [1, 2]" + (", [2, 3]" if mark == "bubbles" else "")
+    argument = "color=ub.ColorBy([1, 2])"
+    line = f"ax.{mark}({args}, {argument})"
+    path = tmp_path / "spanning_color_call.py"
+    path.write_text(line + "\n")
+    with pytest.raises(ub.UsageError) as caught:
+        exec(compile(line, str(path), "exec"), {"ax": ax, "ub": ub})
+    dimension, group = ("rows", "row") if mode is ub.Share.ROW else ("columns", "column")
+    assert str(caught.value) == (
+        f"Axes.{mark}(): the panel spans {dimension} that share colors in different groups."
+    )
+    assert details(caught.value) == (
+        "color",
+        f"share colors by ALL, or place the color-mapped mark on a panel inside one {group}.",
+    )
+    marked = f"  {line}\n{' ' * (2 + line.index(argument))}{'^' * len(argument)}"
+    assert getattr(caught.value, "__notes__", [])[0] == marked
+    assert fig.to_svg() == before
+
+    other = ub.Figure(rows=2, cols=2, share_color=mode)
+    other.add_axes(
         row=0,
         col=0,
         row_span=2 if mode is ub.Share.COL else 1,
         col_span=2 if mode is ub.Share.ROW else 1,
-    )
-    ax.scatter([0, 1], [1, 2], color=ub.ColorBy([1, 2]))
-    assert len(geometry(fig)[0]) == 1
+    ).scatter([0, 1], [1, 2], color=ub.ColorBy([1, 2]))
+    assert len(geometry(other)[0]) == 1
 
 
 @pytest.mark.parametrize("mode", [ub.Share.ROW, ub.Share.COL])
@@ -394,3 +423,117 @@ def test_mixed_grid_with_shared_colorbars() -> None:
             bottom["x"] + bottom["width"] / 2, abs=0.002
         )
     assert fig.to_svg() == fig.to_svg()
+
+
+@pytest.mark.parametrize(
+    ("mode", "position"),
+    [
+        (ub.Share.NONE, ub.ColorbarPosition.RIGHT),
+        (ub.Share.ALL, ub.ColorbarPosition.NONE),
+        (ub.Share.ALL, ub.ColorbarPosition.RIGHT),
+        (ub.Share.ALL, ub.ColorbarPosition.BOTTOM),
+        (ub.Share.ROW, ub.ColorbarPosition.RIGHT),
+        (ub.Share.COL, ub.ColorbarPosition.BOTTOM),
+    ],
+)
+def test_shared_width_error_names_x_label_and_available_room_renders(
+    mode: ub.Share, position: ub.ColorbarPosition
+) -> None:
+    def make(label: str) -> ub.Figure:
+        fig = ub.Figure(5, 4, cols=2, share_color=mode)
+        if mode is not ub.Share.NONE:
+            fig.colorbar(position=position)
+        for col in range(2):
+            colored(fig, 0, col, [0, 1]).xticks_labeled([0, 1], [label, label])
+        return fig
+
+    label = "W" * 24
+    with pytest.raises(ub.StyleError) as caught:
+        make(label).to_svg()
+    message = str(caught.value)
+    assert f'row 0, col 0: x tick label "{label}"' in message
+    match = re.search(r"is (\d+) pt wide; at most (\d+) pt fits", message)
+    assert match is not None, message
+    # The reported label width is rounded; its upper bound gives a safe shorter label.
+    count = int(len(label) * int(match[2]) / (int(match[1]) + 0.5))
+    assert count > 0
+    assert "<svg" in make(label[:count]).to_svg()
+
+
+@pytest.mark.parametrize("mode", [ub.Share.ROW, ub.Share.COL])
+@pytest.mark.parametrize("trailing", [False, True])
+def test_unmapped_spanning_panel_keeps_bars_outside(mode: ub.Share, trailing: bool) -> None:
+    fig = ub.Figure(12, 8, rows=2, cols=2, share_color=mode)
+    for i in range(2):
+        row, col = (i, 0 if trailing else 1) if mode is ub.Share.ROW else (0 if trailing else 1, i)
+        colored(fig, row, col, [1, 2])
+    row, col = (0, 1 if trailing else 0) if mode is ub.Share.ROW else (1 if trailing else 0, 0)
+    fig.add_axes(
+        row=row,
+        col=col,
+        row_span=2 if mode is ub.Share.ROW else 1,
+        col_span=2 if mode is ub.Share.COL else 1,
+    ).line([0, 1], [1, 2])
+    bars, plots = geometry(fig)
+    assert len(bars) == 2 and len(plots) == 3
+    for bar in bars:
+        if mode is ub.Share.ROW:
+            assert bar["x1"] > max(p["x"] + p["width"] for p in plots)
+        else:
+            assert bar["y1"] > max(p["y"] + p["height"] for p in plots)
+
+
+@pytest.mark.parametrize("mode", list(ub.Share))
+def test_theme_none_hides_colorbars_in_every_share_mode(mode: ub.Share) -> None:
+    theme = ub.Theme.PIGMENT.with_colorbar_position(ub.ColorbarPosition.NONE)
+    fig = ub.Figure(12, 8, rows=2, cols=2, share_color=mode, theme=theme)
+    for row in range(2):
+        for col in range(2):
+            colored(fig, row, col, [1, 2])
+    assert not geometry(fig)[0]
+    if mode is ub.Share.NONE:
+        for row in range(2):
+            for col in range(2):
+                fig.axes_at(row=row, col=col).colorbar(position=ub.ColorbarPosition.RIGHT)
+        assert len(geometry(fig)[0]) == 4
+    else:
+        position = ub.ColorbarPosition.BOTTOM if mode is ub.Share.COL else ub.ColorbarPosition.RIGHT
+        fig.colorbar(position=position)
+        assert len(geometry(fig)[0]) == (1 if mode is ub.Share.ALL else 2)
+        fig.colorbar()
+        assert not geometry(fig)[0]
+
+
+@pytest.mark.parametrize("mode", [ub.Share.ROW, ub.Share.COL, ub.Share.ALL])
+@pytest.mark.parametrize("position", [ub.ColorbarPosition.RIGHT, ub.ColorbarPosition.BOTTOM])
+def test_theme_visible_side_only_selects_all_colorbar_side(
+    mode: ub.Share, position: ub.ColorbarPosition
+) -> None:
+    theme = ub.Theme.PIGMENT.with_colorbar_position(position)
+    fig = ub.Figure(12, 8, rows=2, cols=2, share_color=mode, theme=theme)
+    colored(fig, 0, 0, [1, 2])
+    bars, _ = geometry(fig)
+    assert len(bars) == 1
+    vertical = mode is ub.Share.ROW or (
+        mode is ub.Share.ALL and position is ub.ColorbarPosition.RIGHT
+    )
+    assert (bars[0]["x1"] == bars[0]["x2"]) is vertical
+
+
+@pytest.mark.parametrize(("low", "high", "parameter"), [(2, 4, "low"), (-2, 0, "high")])
+def test_shared_clim_names_panel_with_center(low: float, high: float, parameter: str) -> None:
+    fig = ub.Figure(cols=2, share_color=ub.Share.ALL)
+    fig.add_axes(col=1).scatter([0, 1], [1, 2], color=ub.ColorBy([1, 2], center=1))
+    ax = fig.add_axes(col=0)
+    before = fig.to_svg()
+    with pytest.raises(ub.StyleError) as caught:
+        ax.clim(low, high)
+    assert str(caught.value) == (
+        "Axes.clim(): row 0, col 1: center is 1; "
+        f"it must lie inside the color range {low} to {high}."
+    )
+    assert details(caught.value) == (
+        parameter,
+        "set color limits that hold center, or choose another center.",
+    )
+    assert fig.to_svg() == before

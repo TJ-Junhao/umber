@@ -547,8 +547,9 @@ fn merged_legend_follows_figure_title_alignment() {
     for align in [Align::Center, Align::Right] {
         let mut f = figure(Theme::pigment().with_title_align(align).unwrap());
         f.title("Figure").subtitle("Summary");
-        let panels = panels(&f, &lib);
-        let planned = plan(&f, &panels, &lib, "Figure.to_scene()").unwrap();
+        let groups = ShareGroups::new(&f);
+        let panels = panels(&f, &groups, &lib);
+        let planned = plan(&f, &panels, &groups, &lib, "Figure.to_scene()").unwrap();
         let entries = planned.header.legend.entries();
         let left = entries.first().unwrap().swatch.x;
         let last = entries.last().unwrap();
@@ -578,8 +579,9 @@ fn figure_title_is_one_and_a_half_title_sizes() {
     for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
         let mut f = figure(theme.with_font_scale(1.4).unwrap());
         f.title("Figure");
-        let panels = panels(&f, &lib);
-        let planned = plan(&f, &panels, &lib, "Figure.to_scene()").unwrap();
+        let groups = ShareGroups::new(&f);
+        let panels = panels(&f, &groups, &lib);
+        let planned = plan(&f, &panels, &groups, &lib, "Figure.to_scene()").unwrap();
         let title = planned.header.title.unwrap();
         assert_eq!(
             title.style.size,
@@ -726,7 +728,15 @@ fn merged_rows_wrap_and_align_independently_in_both_styles() {
                 )
                 .unwrap();
             }
-            let planned = plan(&f, &panels(&f, &lib), &lib, "Figure.to_scene()").unwrap();
+            let groups = ShareGroups::new(&f);
+            let planned = plan(
+                &f,
+                &panels(&f, &groups, &lib),
+                &groups,
+                &lib,
+                "Figure.to_scene()",
+            )
+            .unwrap();
             let rows: Vec<_> = planned
                 .header
                 .legend
@@ -807,7 +817,15 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
             )
             .unwrap();
     }
-    let planned = plan(&f, &panels(&f, &lib), &lib, "Figure.to_scene()").unwrap();
+    let groups = ShareGroups::new(&f);
+    let planned = plan(
+        &f,
+        &panels(&f, &groups, &lib),
+        &groups,
+        &lib,
+        "Figure.to_scene()",
+    )
+    .unwrap();
     assert_eq!(planned.header.legend.entries().len(), 1);
     assert_eq!(planned.header.legend.entries()[0].label.text, "Samples");
     assert_eq!(planned.panels[0].1.direct.len(), 1);
@@ -819,7 +837,15 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
     f.axes_at_mut(GridIndex::Auto, GridIndex::At(1))
         .unwrap()
         .legend(LegendStyle::None);
-    let planned = plan(&f, &panels(&f, &lib), &lib, "Figure.to_scene()").unwrap();
+    let groups = ShareGroups::new(&f);
+    let planned = plan(
+        &f,
+        &panels(&f, &groups, &lib),
+        &groups,
+        &lib,
+        "Figure.to_scene()",
+    )
+    .unwrap();
     let labels: Vec<_> = planned
         .header
         .legend
@@ -867,7 +893,15 @@ fn per_panel_legends_do_not_follow_title_alignment() {
                 },
             )
             .unwrap();
-            let planned = plan(&f, &panels(&f, &lib), &lib, "Figure.to_scene()").unwrap();
+            let groups = ShareGroups::new(&f);
+            let planned = plan(
+                &f,
+                &panels(&f, &groups, &lib),
+                &groups,
+                &lib,
+                "Figure.to_scene()",
+            )
+            .unwrap();
             assert!(planned.header.legend.is_empty());
             let p = &planned.panels[0].1;
             let (left, right) = if cols == 1 {
@@ -915,7 +949,15 @@ fn figure_header_joins_single_and_grid_height_needs() {
         assert!(matches!(err, crate::Error::Style { .. }));
         assert!(err.to_string().contains("at least 62 pt"), "{err}");
         let f = make(62.0, "Figure");
-        let planned = plan(&f, &panels(&f, &lib), &lib, "Figure.to_scene()").unwrap();
+        let groups = ShareGroups::new(&f);
+        let planned = plan(
+            &f,
+            &panels(&f, &groups, &lib),
+            &groups,
+            &lib,
+            "Figure.to_scene()",
+        )
+        .unwrap();
         assert_eq!(planned.header.bottom, PADDING + 22.5 * 1.25 + 8.0);
         assert_eq!(planned.panels[0].1.plot.y, planned.header.bottom);
         assert!(planned.panels[0].1.plot.height >= 1.0);

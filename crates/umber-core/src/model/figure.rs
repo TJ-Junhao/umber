@@ -108,9 +108,12 @@ impl Figure {
 
     /// Replaces the shared colorbars' label, position and tick format.
     ///
-    /// Row colorbars sit on the right and column colorbars below. For all panels sharing,
-    /// an unset position follows the theme. An unset format follows the first color-mapped
-    /// panel in each group's row-major order. Settings may be given before adding marks.
+    /// Row colorbars sit on the right and column colorbars below. An unset position hides
+    /// bars in every sharing mode when the theme's position is [`crate::ColorbarPosition::None`].
+    /// Otherwise only all-panel sharing follows the theme's side. An explicit position
+    /// overrides the theme, but only all-panel sharing accepts [`crate::ColorbarPosition::None`].
+    /// An unset format follows the first color-mapped panel in each group's row-major order.
+    /// Settings may precede marks.
     ///
     /// # Errors
     ///
@@ -576,18 +579,32 @@ impl Figure {
         parameter: &'static str,
     ) -> Result<()> {
         let cell = self.panels[index].cells();
+        let crossed = match self.grid.share_color() {
+            super::Share::Row if cell.row_span() > 1 => Some((
+                "rows",
+                "share colors by ALL, or place the color-mapped mark on a panel inside one row.",
+            )),
+            super::Share::Col if cell.col_span() > 1 => Some((
+                "columns",
+                "share colors by ALL, or place the color-mapped mark on a panel inside one column.",
+            )),
+            _ => None,
+        };
+        if let Some((dimension, hint)) = crossed {
+            return Err(Error::usage(
+                context,
+                format!("the panel spans {dimension} that share colors in different groups."),
+            )
+            .with_parameter(parameter)
+            .with_hint(hint));
+        }
         let key = self.color_group_of(cell.row(), cell.col());
         for other in self.panels.iter().filter(|axes| {
             let c = axes.cells();
             self.color_group_of(c.row(), c.col()) == key && c != cell
         }) {
             if let Some(existing) = other.marks().iter().find_map(super::Mark::color_scale) {
-                spec.check_same(&existing, context, parameter).map_err(|error| {
-                    error.with_message_prefix(&format!(
-                        "colors are shared with row {}, col {}: ",
-                        other.cells().row(), other.cells().col()
-                    )).with_hint("use the same cmap, scale and center for every color-mapped mark in the shared group.")
-                })?;
+                spec.check_shared(&existing, other.cells(), context, parameter)?;
             }
         }
         Ok(())
@@ -600,14 +617,32 @@ impl Figure {
             row: c.row(),
             col: c.col(),
         };
-        let mode = self.grid.share_color();
-        let key = self.color_group_of(cell.row, cell.col);
+        let key_of = |cells: CellRange| {
+            share::group_key(
+                &self.grid,
+                self.grid.share_color(),
+                cells.row(),
+                cells.col(),
+            )
+        };
+        let key = key_of(c);
         for axes in &self.panels {
-            let c = axes.cells();
-            if self.color_group_of(c.row(), c.col()) == key
+            let other = axes.cells();
+            if key_of(other) == key
                 && let Some(spec) = axes.marks().iter().find_map(super::Mark::color_scale)
             {
-                spec.check_range(limits, "Axes.clim()", None)?;
+                spec.check_range(limits, "Axes.clim()", None)
+                    .map_err(|error| {
+                        if other == c {
+                            error
+                        } else {
+                            error.with_message_prefix(&format!(
+                                "row {}, col {}: ",
+                                other.row(),
+                                other.col(),
+                            ))
+                        }
+                    })?;
             }
         }
         self.color_groups
@@ -615,8 +650,7 @@ impl Figure {
             .or_default()
             .set(cell, limits)?;
         for axes in &mut self.panels {
-            let c = axes.cells();
-            if share::group_key(&self.grid, mode, c.row(), c.col()) == key {
+            if key_of(axes.cells()) == key {
                 axes.color_limits = Some(limits);
             }
         }

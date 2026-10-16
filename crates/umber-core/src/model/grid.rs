@@ -188,6 +188,11 @@ impl Grid {
 
     /// This grid with color ranges and colorbars shared as `share` says.
     ///
+    /// Only panels with a color-mapped mark join a color group; those panels cannot span
+    /// different row or column groups. Unmapped panels may span groups. Row colorbars sit
+    /// right and column colorbars below; all-panel bars follow the figure or theme position.
+    /// The theme's hidden position applies to every mode unless the figure overrides it.
+    ///
     /// # Examples
     ///
     /// ```

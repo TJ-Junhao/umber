@@ -58,16 +58,7 @@ impl ColorScaleSpec {
         context: &'static str,
         parameter: &'static str,
     ) -> Result<()> {
-        let differs = if self.cmap != existing.cmap {
-            Some((cmap_name(&self.cmap), cmap_name(&existing.cmap)))
-        } else if self.scale != existing.scale {
-            Some((scale_name(self.scale), scale_name(existing.scale)))
-        } else if self.center != existing.center {
-            Some((center_name(self.center), center_name(existing.center)))
-        } else {
-            None
-        };
-        let Some((given, axes)) = differs else {
+        let Some((given, axes)) = self.difference(existing) else {
             return Ok(());
         };
         Err(Error::usage(
@@ -76,6 +67,44 @@ impl ColorScaleSpec {
         )
         .with_parameter(parameter)
         .with_hint(SAME_SCALE_HINT))
+    }
+
+    /// Checks a shared member's mapping, naming the panel that owns the conflicting mapping.
+    pub fn check_shared(
+        &self,
+        existing: &ColorScaleSpec,
+        cells: crate::CellRange,
+        context: &'static str,
+        parameter: &'static str,
+    ) -> Result<()> {
+        let Some((given, other)) = self.difference(existing) else {
+            return Ok(());
+        };
+        Err(Error::usage(
+            context,
+            format!(
+                "{parameter} uses {given}; row {}, col {} maps colors with {other}.",
+                cells.row(),
+                cells.col(),
+            ),
+        )
+        .with_parameter(parameter)
+        .with_hint(
+            "use the same cmap, scale and center for every color-mapped mark in the shared group.",
+        ))
+    }
+
+    /// The first mismatch, colormap before scale before center, as the values messages name.
+    fn difference(&self, existing: &ColorScaleSpec) -> Option<(String, String)> {
+        if self.cmap != existing.cmap {
+            Some((cmap_name(&self.cmap), cmap_name(&existing.cmap)))
+        } else if self.scale != existing.scale {
+            Some((scale_name(self.scale), scale_name(existing.scale)))
+        } else if self.center != existing.center {
+            Some((center_name(self.center), center_name(existing.center)))
+        } else {
+            None
+        }
     }
 
     /// Checks the color limits `(low, high)`, which [`check_limits`] accepted, against this

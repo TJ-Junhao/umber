@@ -5,7 +5,7 @@ import sysconfig
 import threading
 from collections.abc import Callable
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -28,9 +28,9 @@ type ErrorCase = tuple[
 ]
 
 AUTO = (0, 0, 1.0)
-# A native figure of one cell (rows, cols, share_x, share_y, legend), and the position of its
-# axes: row and column AUTO (grid index kind 0) spanning one cell.
-ONE_CELL = (1, 1, 0, 0, 0)
+# A native figure of one cell (rows, cols, share_x, share_y, legend, share_color), and the
+# axes position: row and column AUTO (grid index kind 0) spanning one cell.
+ONE_CELL = (1, 1, 0, 0, 0, 0)
 ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
 RED = (2, 0xD64933FF, 1.0)
@@ -436,7 +436,7 @@ def test_native_axes_calls_carry_their_cell(name: str) -> None:
 
 def grid_figure(rows: int, cols: int) -> _umber.Figure:
     """A 6 by 4 inch native figure on a `rows × cols` grid, nothing shared, legend merged."""
-    return _umber.Figure(6.0, 4.0, _umber.Theme.pigment(), rows, cols, 0, 0, 0)
+    return _umber.Figure(6.0, 4.0, _umber.Theme.pigment(), rows, cols, 0, 0, 0, 0)
 
 
 def at(
@@ -555,24 +555,35 @@ def test_native_grid_helpers() -> None:
     )
 
 
+def test_native_figure_requires_share_color() -> None:
+    constructor = cast(Callable[..., object], _umber.Figure)
+    with pytest.raises(TypeError, match="share_color"):
+        constructor(6.0, 4.0, _umber.Theme.pigment(), 1, 1, 0, 0, 0)
+
+
 def test_native_grid_arguments_are_checked() -> None:
     theme = _umber.Theme.pigment()
     assert_reported(
-        lambda: _umber.Figure(6.0, 4.0, theme, 1, 33, 0, 0, 0),
+        lambda: _umber.Figure(6.0, 4.0, theme, 1, 33, 0, 0, 0, 0),
         ub.StyleError,
         "Figure(): cols is 33; cols must be between 1 and 32.",
         "cols",
         "split the figure into several figures.",
     )
     assert_internal(
-        lambda: _umber.Figure(6.0, 4.0, theme, 1, 1, 4, 0, 0),
+        lambda: _umber.Figure(6.0, 4.0, theme, 1, 1, 4, 0, 0, 0),
         ValueError,
         "4 is not a value of Share",
     )
     assert_internal(
-        lambda: _umber.Figure(6.0, 4.0, theme, 1, 1, 0, 0, 2),
+        lambda: _umber.Figure(6.0, 4.0, theme, 1, 1, 0, 0, 2, 0),
         ValueError,
         "2 is not a value of Legend",
+    )
+    assert_internal(
+        lambda: _umber.Figure(6.0, 4.0, theme, 1, 1, 0, 0, 0, 4),
+        ValueError,
+        "4 is not a value of Share",
     )
     fig = grid_figure(1, 1)
     assert_internal(

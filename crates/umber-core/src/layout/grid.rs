@@ -258,7 +258,11 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
     let columns = Columns::measure(input, &cells, bands);
     let open = columns.place(&columns.no_growth());
     if open.plot_width < MIN_PLOT {
-        return Err(columns_too_narrow(input, &cells, bands, &columns));
+        return Err(if input.colorbars.is_empty() {
+            columns_too_narrow(input, &cells, bands, &columns)
+        } else {
+            shared_width_error(input, &cells, bands)
+        });
     }
     let mut bounds = columns.label_bounds(&cells, bands, f64::INFINITY);
     bounds.extend(columns.colorbar_bounds(input));
@@ -1078,9 +1082,6 @@ fn columns_too_narrow(
     columns: &Columns,
 ) -> Error {
     let cols = columns.count();
-    if !input.colorbars.is_empty() {
-        return shared_width_error(input, cells, bands);
-    }
     let placed = columns.place(&columns.no_growth());
     let deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
     let plain: Vec<_> = cells
@@ -1163,6 +1164,19 @@ fn shared_width_error(input: &GridInput<'_>, cells: &[CellRange], bands: &[Panel
         bounds.extend(columns.colorbar_bounds(&input));
         fit_columns(&columns, &bounds).is_ok()
     };
+    let bars_are_cause = fits(input.width, &[]);
+    if !bars_are_cause {
+        // Keep the panels' attribution, but include the bars in the room offered by the error.
+        let columns = Columns::measure(input, cells, bands);
+        if columns.place(&columns.no_growth()).plot_width < MIN_PLOT {
+            return columns_too_narrow(input, cells, bands, &columns);
+        }
+        let mut bounds = columns.label_bounds(cells, bands, f64::INFINITY);
+        bounds.extend(columns.colorbar_bounds(input));
+        if let Err(stuck) = fit_columns(&columns, &bounds) {
+            return x_labels_do_not_fit(input, cells, bands, &columns, &stuck);
+        }
+    }
     let mut high = (input.width * 2.0).max(72.0);
     while !fits(high, input.colorbars) && high < 1.0e9 {
         high *= 2.0;
@@ -1178,7 +1192,7 @@ fn shared_width_error(input: &GridInput<'_>, cells: &[CellRange], bands: &[Panel
     }
     let needed = high.ceil();
     let error = grid_too_narrow(input.context, input.width, needed, input.grid.cols());
-    if fits(input.width, &[]) {
+    if bars_are_cause {
         error.with_message_prefix("the shared colorbar leaves too little width: ")
     } else {
         error
@@ -1205,9 +1219,9 @@ fn needed_width(
 ) -> f64 {
     let cols = columns.count();
     let gap = columns.gap;
-    // Direct labels beside a colorbar are uncapped; the whole right band stays fixed.
+    // Direct labels beside a panel or shared colorbar are uncapped; their band stays fixed.
     let reserve = |panel: &LayoutInput<'_>, band: &PanelBands, cap: f64| {
-        if band.right_colorbar > 0.0 {
+        if band.right_colorbar > 0.0 || !input.colorbars.is_empty() {
             band.right()
         } else {
             panel.legend.direct.reserve(cap).max(band.right_legend)

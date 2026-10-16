@@ -163,7 +163,7 @@ impl Figure {
     /// and whose legend is shown as `legend` says (a `Legend` value). A missing size is the
     /// Python facade's `AUTO`; explicit sizes are checked before the grid dimensions.
     #[new]
-    #[pyo3(signature = (width, height, theme, rows, cols, share_x, share_y, legend, share_color=0))]
+    #[pyo3(signature = (width, height, theme, rows, cols, share_x, share_y, legend, share_color))]
     fn new(
         width: Option<f64>,
         height: Option<f64>,
