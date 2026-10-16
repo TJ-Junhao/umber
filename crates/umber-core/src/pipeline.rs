@@ -696,8 +696,11 @@ fn plan(
 }
 
 /// Resolves cell geometry against the solved plot, then settles its limits and measured
-/// labels together. Once rows are chosen, an automatic hexagon lattice keeps its assignments;
-/// only the symmetric extra room changes as the plot aspect settles.
+/// labels together. Automatic y limits keep the chosen lattice and vary only its room.
+/// An explicit y window needs a fresh count when the plot narrows, including when the
+/// colorbar first appears. A wider plot can grow automatic x limits without changing rows;
+/// with both limits fixed, any aspect change needs a recount. Fitting never stretches the
+/// coordinate map of counted cells.
 fn plan_cells(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -714,13 +717,8 @@ fn plan_cells(
         return Ok(planned);
     }
     let groups = ShareGroups::new(figure);
-    for pass in 0..64 {
-        let aspects: Vec<_> = planned
-            .panels
-            .iter()
-            .map(|(_, layout)| layout.plot.width / layout.plot.height)
-            .collect();
-        let scales: Vec<_> = planned
+    let axis_scales = |planned: &FigurePlan| {
+        planned
             .panels
             .iter()
             .map(|(r, _)| {
@@ -730,7 +728,22 @@ fn plan_cells(
                         .unwrap_or_else(|| crate::ContinuousScale::unit(crate::Transform::Linear))
                 })
             })
+            .collect::<Vec<_>>()
+    };
+    // Recount from the original metric, not from domains already enlarged for end caps.
+    let counting_scales = axis_scales(&planned);
+    let mut counting_aspects: Vec<_> = planned
+        .panels
+        .iter()
+        .map(|(_, layout)| layout.plot.width / layout.plot.height)
+        .collect();
+    for pass in 0..64 {
+        let aspects: Vec<_> = planned
+            .panels
+            .iter()
+            .map(|(_, layout)| layout.plot.width / layout.plot.height)
             .collect();
+        let scales = axis_scales(&planned);
         for (i, panel) in panels.iter_mut().enumerate() {
             let limits = [panel.axes.x_limits(), panel.axes.y_limits()];
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
@@ -740,9 +753,16 @@ fn plan_cells(
                 .marks
                 .iter()
                 .all(|m| matches!(m, ResolvedMark::Hexbin { .. }));
+            let aspect_change = aspects[i] / counting_aspects[i] - 1.0;
+            let recount = limits[1].is_some()
+                && if limits[0].is_some() {
+                    aspect_change.abs() >= 1e-12
+                } else {
+                    aspect_change < -1e-12
+                };
             for mark in &mut panel.marks {
                 if let ResolvedMark::Hexbin { mark, bins, .. } = mark {
-                    if pass == 0 {
+                    if pass == 0 || recount {
                         *bins = if independent {
                             crate::bin2d::HexBins::new(
                                 &mark.x,
@@ -756,7 +776,7 @@ fn plan_cells(
                                 &mark.x,
                                 &mark.y,
                                 mark.gridsize,
-                                scales[i],
+                                counting_scales[i],
                                 aspects[i],
                                 limits,
                             )
@@ -782,6 +802,9 @@ fn plan_cells(
                         }
                     }
                 }
+            }
+            if pass == 0 || recount {
+                counting_aspects[i] = aspects[i];
             }
             panel.color = ResolvedColorScale::resolve(
                 &panel.marks,

@@ -161,10 +161,17 @@ impl MeshMark {
                         context,
                         format!(
                             "{name} spans {} to {}; {}.",
-                            number(edges[0]), number(edges[edges.len() - 1]),
+                            number(edges[0]),
+                            number(edges[edges.len() - 1]),
                             match transform {
-                                Transform::Linear => "the range must be at least 1e-10 of their magnitude (and at least 1e-290)",
-                                Transform::Log(_) => "the ratio of the last edge to the first must be at least 1 + 1e-9",
+                                Transform::Linear => {
+                                    "the range must be at least 1e-10 of their magnitude \
+                                     (and at least 1e-290)"
+                                }
+                                Transform::Log(_) => {
+                                    "the ratio of the last edge to the first \
+                                     must be at least 1 + 1e-9"
+                                }
                             },
                         ),
                     )
@@ -546,6 +553,175 @@ mod tests {
                 assert!((side - sides[0]).abs() < 1e-4, "{sides:?}");
             }
         }
+    }
+
+    fn contains_point(polygon: &[Point], x: f64, y: f64) -> bool {
+        let mut positive = false;
+        let mut negative = false;
+        for (a, b) in polygon.iter().zip(polygon.iter().cycle().skip(1)) {
+            let dx = f64::from(b.x) - f64::from(a.x);
+            let dy = f64::from(b.y) - f64::from(a.y);
+            let cross = dx * (y - f64::from(a.y)) - dy * (x - f64::from(a.x));
+            let tolerance = 1e-4 * dx.hypot(dy);
+            positive |= cross > tolerance;
+            negative |= cross < -tolerance;
+        }
+        polygon.len() >= 3 && !(positive && negative)
+    }
+
+    fn assert_hexbin_points_covered(limits: [bool; 2], columns: i64) {
+        let mut failures = Vec::new();
+        for (normal, width, height, gridsize, ylim) in [
+            (true, 6.0, 4.0, 30, (0.0, 1.0)),
+            (true, 6.0, 4.0, 30, (-1.0, 1.0)),
+            (true, 4.0, 7.0, 100, (0.0, 2.0)),
+            (false, 6.0, 4.0, 10, (-1.0, 1.0)),
+            (false, 6.0, 4.0, 30, (-1.0, 1.0)),
+        ] {
+            let grid = crate::Grid::new(1, columns)
+                .unwrap()
+                .with_share_x(crate::Share::All)
+                .with_share_y(crate::Share::All);
+            let mut f =
+                Figure::with_grid(width * columns as f64, height, Theme::pigment(), grid).unwrap();
+            let (mut x, mut y) = dense_points(normal, 0.0);
+            x.extend([f64::NAN, 0.0]);
+            y.extend([0.0, f64::NAN]);
+            for col in 0..columns {
+                let mut ax = f
+                    .add_axes_at(
+                        crate::Placement {
+                            col: crate::GridIndex::At(col),
+                            ..Default::default()
+                        },
+                        ScaleKind::Linear,
+                        ScaleKind::Linear,
+                    )
+                    .unwrap();
+                if limits[0] {
+                    ax.xlim(-1.0, 1.0).unwrap();
+                }
+                if limits[1] {
+                    ax.ylim(ylim.0, ylim.1).unwrap();
+                }
+                ax.hexbin(
+                    &x,
+                    &y,
+                    HexbinOptions {
+                        gridsize,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            }
+            crate::bin2d::COUNT_CALLS.with(|calls| calls.set(0));
+            let polygons = cells(&f);
+            let count_calls = crate::bin2d::COUNT_CALLS.with(|calls| calls.get());
+            for col in 0..columns {
+                let (resolved, layout) = plan_figure(&f, (0, col as usize), FontLibrary::global());
+                let plot = layout.plot;
+                let xs = resolved.x.continuous_scale();
+                let ys = resolved.y.continuous_scale();
+                let mut in_window = 0;
+                let mut uncovered = 0;
+                for (&x, &y) in x
+                    .iter()
+                    .zip(&y)
+                    .filter(|(x, y)| x.is_finite() && y.is_finite())
+                {
+                    let x = xs.normalize(x);
+                    let y = ys.normalize(y);
+                    if !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) {
+                        continue;
+                    }
+                    in_window += 1;
+                    let x = plot.x + x * plot.width;
+                    let y = plot.bottom() - y * plot.height;
+                    if !polygons.iter().any(|polygon| contains_point(polygon, x, y)) {
+                        uncovered += 1;
+                    }
+                }
+                let whole: Vec<_> = polygons
+                    .iter()
+                    .filter(|polygon| {
+                        !polygon.is_empty()
+                            && polygon.iter().all(|p| {
+                                f64::from(p.x) > plot.x + 1e-4
+                                    && f64::from(p.x) < plot.right() - 1e-4
+                                    && f64::from(p.y) > plot.y + 1e-4
+                                    && f64::from(p.y) < plot.bottom() - 1e-4
+                            })
+                    })
+                    .collect();
+                assert!(in_window > 0);
+                assert!(!whole.is_empty());
+                let irregular = whole
+                    .iter()
+                    .filter(|polygon| {
+                        let sides: Vec<_> = polygon
+                            .iter()
+                            .zip(polygon.iter().cycle().skip(1))
+                            .map(|(a, b)| f64::from((a.x - b.x).hypot(a.y - b.y)))
+                            .collect();
+                        polygon.len() != 6
+                            || sides[0] <= 0.0
+                            || sides.iter().any(|side| (side - sides[0]).abs() >= 1e-4)
+                    })
+                    .count();
+                let result = format!(
+                    "limits={limits:?} columns={columns} col={col} normal={normal} \
+                     {width}x{height} g{gridsize} ylim={ylim:?}: \
+                     uncovered={uncovered}/{in_window}, irregular={irregular}/{}, \
+                     count_calls={count_calls}",
+                    whole.len(),
+                );
+                eprintln!("{result}");
+                if uncovered != 0 || irregular != 0 {
+                    failures.push(result);
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn hexbin_points_covered_without_limits() {
+        assert_hexbin_points_covered([false, false], 1);
+    }
+
+    #[test]
+    fn hexbin_points_covered_with_xlim() {
+        assert_hexbin_points_covered([true, false], 1);
+    }
+
+    #[test]
+    fn hexbin_points_covered_with_ylim() {
+        assert_hexbin_points_covered([false, true], 1);
+    }
+
+    #[test]
+    fn hexbin_points_covered_with_both_limits() {
+        assert_hexbin_points_covered([true, true], 1);
+    }
+
+    #[test]
+    fn hexbin_points_covered_without_limits_shared() {
+        assert_hexbin_points_covered([false, false], 2);
+    }
+
+    #[test]
+    fn hexbin_points_covered_with_xlim_shared() {
+        assert_hexbin_points_covered([true, false], 2);
+    }
+
+    #[test]
+    fn hexbin_points_covered_with_ylim_shared() {
+        assert_hexbin_points_covered([false, true], 2);
+    }
+
+    #[test]
+    fn hexbin_points_covered_with_both_limits_shared() {
+        assert_hexbin_points_covered([true, true], 2);
     }
 
     #[test]

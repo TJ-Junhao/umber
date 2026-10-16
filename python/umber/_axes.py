@@ -1318,6 +1318,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Automatic limits include whole hexagons without changing the plot's shape. Explicit
         limits clip cells. Pairs containing NaN are skipped and empty cells stay blank.
+        With a narrow explicit ``xlim`` and automatic y limits, hexagons keep their size;
+        the y range may grow far beyond the data to keep every hexagon whole and regular.
+        Set ``ylim()`` or choose a larger ``gridsize`` to control that range.
 
         Args:
             x: The x coordinates on numeric axes.

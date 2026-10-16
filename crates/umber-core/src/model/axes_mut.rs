@@ -1903,6 +1903,9 @@ impl<'a> AxesMut<'a> {
     /// Counts paired finite coordinates in pointy-top hexagons, regular on screen.
     /// Automatic limits contain whole cells with the least symmetric extra room needed
     /// on one axis for the plot aspect. Explicit limits clip.
+    /// With a narrow explicit `xlim` and automatic y limits, hexagons keep their size;
+    /// the y range may grow far beyond the data to keep every hexagon whole and regular.
+    /// Set `ylim()` or choose a larger `gridsize` to control that range.
     ///
     /// # Errors
     ///

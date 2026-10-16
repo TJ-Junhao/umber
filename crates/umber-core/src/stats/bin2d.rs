@@ -180,7 +180,7 @@ pub(crate) enum HexBins {
     Occupied(HexCells),
 }
 
-/// Counted cells. Layout changes their room and explicit-window projection, never assignments.
+/// Counted cells. Fitting changes their domains, never their coordinate map or assignments.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HexCells {
     coordinates: [Coordinate; 2],
@@ -249,7 +249,7 @@ impl HexBins {
         bins
     }
 
-    /// Counts once in the metric of the pass-zero axes, including shared or explicit limits.
+    /// Counts in the metric of the solved axes, including shared or explicit limits.
     pub fn on_axes(
         x: &[f64],
         y: &[f64],
@@ -270,12 +270,16 @@ impl HexBins {
                 Transform::Log(_) => crate::scale::log_offset(hi, lo),
             }
         };
-        let relative = |i: usize| span(coordinates[i].scale) / span(scales[i]);
-        coordinates[1].length *= relative(1) / relative(0) / aspect;
+        let relative: [f64; 2] =
+            std::array::from_fn(|i| span(coordinates[i].scale) / span(scales[i]));
+        coordinates[1].length *= relative[1] / relative[0] / aspect;
         if limits[0].is_some() && limits[1].is_none() {
             // Reserve the end caps before fixing rows; a window shorter than one cell
             // is rejected by fitting, rather than changing its assignments on every pass.
             coordinates[1].length = (coordinates[1].length - 2.0).max(0.1);
+        } else if limits[0].is_none() && limits[1].is_some() {
+            // The automatic x domain must also leave room for both column end caps.
+            coordinates[1].length += 2.0 * relative[1] / aspect;
         }
         Self::count(x, y, coordinates)
     }
@@ -410,16 +414,20 @@ impl HexBins {
                 ];
             }
             [None, Some((lo, hi))] => {
-                cells.domains = [[c[0].value(bounds[0]), c[0].value(bounds[1])], [lo, hi]];
+                let width = (c[1].at(hi) - c[1].at(lo)) * aspect;
+                if width < cells.bounds[1] - cells.bounds[0] - 1e-9 {
+                    return Err(window_error(
+                        context,
+                        "set xlim(), or choose a larger gridsize.",
+                    ));
+                }
+                let mid = (cells.bounds[0] + cells.bounds[1]) / 2.0;
+                cells.domains = [
+                    [c[0].value(mid - width / 2.0), c[0].value(mid + width / 2.0)],
+                    [lo, hi],
+                ];
             }
             [None, None] => cells.fit_bounds(bounds, aspect),
-        }
-        if limits[1].is_some() {
-            // An explicit vertical window fixes the room, not the discrete row assignments.
-            let [[x0, x1], [y0, y1]] = cells.domains;
-            let width = c[0].at(x1) - c[0].at(x0);
-            let relative = c[1].scale.normalize(y1) - c[1].scale.normalize(y0);
-            cells.coordinates[1].length = width / aspect / relative;
         }
         Ok(())
     }
@@ -460,5 +468,77 @@ impl HexCells {
     pub fn vertices(&self, center: [f64; 2]) -> [[f64; 2]; 6] {
         let c = self.coordinates;
         hex_vertices(center).map(|[x, y]| [c[0].value(x), c[1].value(y)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn window_bins(limits: [Option<(f64, f64)>; 2]) -> (HexBins, [ContinuousScale; 2]) {
+        let scales = [(-2.0, 4.0), (-1.0, 5.0)]
+            .map(|(lo, hi)| ContinuousScale::new(Transform::Linear, lo, hi, "hexbin").unwrap());
+        let bins = HexBins::on_axes(
+            &[0.0, 1.0, 2.0],
+            &[0.0, 2.0, 4.0],
+            BinCount::new(10).unwrap(),
+            scales,
+            1.0,
+            limits,
+        );
+        (bins, scales)
+    }
+
+    #[test]
+    fn fitting_hexbin_windows_preserves_counted_coordinates() {
+        for xlim in [None, Some((-2.0, 4.0))] {
+            let limits = [xlim, Some((-1.0, 5.0))];
+            let (mut bins, scales) = window_bins(limits);
+            let HexBins::Occupied(before) = bins.clone() else {
+                panic!("nonempty cells");
+            };
+            bins.fit_on_axes(1.2, scales, limits, "hexbin").unwrap();
+            let HexBins::Occupied(after) = bins else {
+                panic!("nonempty cells");
+            };
+            assert_eq!(after.coordinates, before.coordinates);
+            assert_eq!(after.centers, before.centers);
+            assert_eq!(after.counts, before.counts);
+            for &center in &before.centers {
+                assert_eq!(after.vertices(center), before.vertices(center));
+            }
+            if xlim.is_none() {
+                let c = after.coordinates;
+                let [[lo, hi], [bottom, top]] = after.domains;
+                assert!(
+                    (c[0].at(hi) - c[0].at(lo) - (c[1].at(top) - c[1].at(bottom)) * 1.2).abs()
+                        < 1e-10
+                );
+                assert!(
+                    (c[0].at(lo) + c[0].at(hi) - after.bounds[0] - after.bounds[1]).abs() < 1e-10
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hexbin_ylim_window_rejects_narrow_automatic_x() {
+        let limits = [None, Some((-1.0, 5.0))];
+        let (mut bins, scales) = window_bins(limits);
+        let before = bins.clone();
+        let error = bins
+            .fit_on_axes(0.01, scales, limits, "hexbin")
+            .unwrap_err();
+        assert_eq!(error.parameter(), Some("gridsize"));
+        assert!(
+            error
+                .to_string()
+                .contains("hexagons of this size do not fit the window")
+        );
+        assert_eq!(
+            error.hint(),
+            Some("set xlim(), or choose a larger gridsize.")
+        );
+        assert_eq!(bins, before);
     }
 }
