@@ -20,6 +20,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `horizontal.py`: horizontal grouped bars, horizontal box plots and a dot plot on a category y axis.
 - `histogram.py`: a histogram with a chosen number of bins.
 - `density.py`: rectangular and hexagonal density counts with log colors, and a numeric mesh centered on zero.
+- `heatmap.py`: an annotated correlation matrix on a diverging colormap centered at zero, and visits by day and hour with an empty cell.
 - `themes.py`: the same chart in the Pigment, Graphite and Midnight themes.
 - `ticks.py`: custom x tick labels and a percent y tick format.
 - `time_series.py`: a week of hourly demand on a time axis, with its range, a window and an event.

@@ -12,6 +12,7 @@ use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
 use super::color_by::{check_point_color, check_scatter_label};
 use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
+use super::heatmap::{HeatmapMark, HeatmapOptions};
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
@@ -70,7 +71,7 @@ pub struct ColorbarOptions {
 /// [`vline`](AxesMut::vline) and [`vspan`](AxesMut::vspan) also draw on a category y axis
 /// beside a linear or log x axis: bars, boxes and violins then lie along y and grow along x,
 /// and a scatter is a dot plot. On two category axes these return `Error::Usage`, naming `x`,
-/// before any other check.
+/// before any other check. [`heatmap`](AxesMut::heatmap) draws on two category axes only.
 ///
 /// A time axis, on x or y, takes the times of lines, steps, areas, scatters, stems, reference
 /// lines and spans, the x of bands and stacked areas and the positions of error bars; the
@@ -2471,6 +2472,99 @@ impl<'a> AxesMut<'a> {
             SharedValues::Times(high),
             options,
         )));
+        Ok(self)
+    }
+
+    /// Adds a heatmap on two category axes: one cell per pair of an x and a y category, filled
+    /// with the color its value maps to through the color scale of the axes. `values` holds the
+    /// cells row by row, one row of `x.len()` values per y category, so it has
+    /// `y.len() * x.len()` values; a NaN value leaves its cell empty. The x categories run left
+    /// to right and the y categories top to bottom, each joining its axis in order of first
+    /// appearance across the axes' heatmaps, and the cells fill their category bands exactly.
+    /// No gridlines or baseline cross the cells, and the colorbar explains the colors.
+    ///
+    /// The colormap, scale and center of `options` work as those of a
+    /// [`ColorBy`](crate::ColorBy); every color-mapped mark of an axes shares them, and
+    /// [`AxesMut::clim`] sets the color range. With `options.annotate`, each cell shows its
+    /// value at its center, in the tick font, in black or white, whichever contrasts more with
+    /// the cell's color. The value is written in `options.format`, or else in the y tick format,
+    /// whose automatic labels write each value with the decimals of the step between the
+    /// automatic ticks of the color range, or with up to 12 significant digits on a log color
+    /// scale.
+    ///
+    /// The mark stores its own copy of `values`, made once. To store values already held in
+    /// an `Arc` without copying them, use [`AxesMut::heatmap_shared`].
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. In this order: `Error::Usage` unless both axes are
+    /// category axes; `Error::Data` for a category named twice, for `values` of a length
+    /// other than `y.len() * x.len()`, and for a value that is infinite, beyond 1e300 in
+    /// magnitude, or not positive (or below 1e-300) on a log scale, named by row and column;
+    /// `Error::Style` for a center that is not finite or comes with a log scale;
+    /// `Error::Usage` for a format without `annotate`, and `Error::Style` for
+    /// [`TickFormat::iso`]; `Error::Usage` when the colormap, scale or center differ from
+    /// those of the axes' other color-mapped marks; and `Error::Style` when the color limits
+    /// are not positive on a log scale or do not hold the center.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, HeatmapOptions, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Category)?;
+    /// let days = ["Mon".to_owned(), "Tue".to_owned(), "Wed".to_owned()];
+    /// let periods = ["Day".to_owned(), "Night".to_owned()];
+    /// let visits = [12.0, 18.0, 15.0, 4.0, f64::NAN, 6.0];
+    /// axes.heatmap(&days, &periods, &visits, HeatmapOptions { annotate: true, ..HeatmapOptions::default() })?;
+    /// assert_eq!(axes.marks().len(), 1);
+    ///
+    /// // Two rows of three values are six, not five.
+    /// let err = axes.heatmap(&days, &periods, &visits[..5], HeatmapOptions::default()).unwrap_err();
+    /// assert_eq!(err.parameter(), Some("values"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn heatmap(
+        &mut self,
+        x: &[String],
+        y: &[String],
+        values: &[f64],
+        options: HeatmapOptions,
+    ) -> Result<&mut Self> {
+        self.heatmap_shared(x.to_vec(), y.to_vec(), Arc::from(values), options)
+    }
+
+    /// Adds a heatmap as [`AxesMut::heatmap`] does, but stores `values` itself rather than a
+    /// copy of it. Same rules and errors as [`AxesMut::heatmap`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::{Figure, HeatmapOptions, Mark, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Category)?;
+    /// let values: Arc<[f64]> = Arc::from([1.0, 2.0]);
+    /// let x = vec!["a".to_owned(), "b".to_owned()];
+    /// axes.heatmap_shared(x, vec!["r".to_owned()], Arc::clone(&values), HeatmapOptions::default())?;
+    /// let Some(Mark::Heatmap(heatmap)) = axes.marks().first() else { unreachable!() };
+    /// assert!(std::ptr::eq(heatmap.values(), &*values));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn heatmap_shared(
+        &mut self,
+        x: Vec<String>,
+        y: Vec<String>,
+        values: Arc<[f64]>,
+        options: HeatmapOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.heatmap()";
+        let axes = self.axes_mut();
+        let mark = HeatmapMark::new(CONTEXT, axes, (x, y), values, options)?;
+        axes.marks.push(Mark::Heatmap(mark));
         Ok(self)
     }
 }

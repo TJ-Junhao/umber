@@ -96,6 +96,7 @@ mod corpus {
     pub mod error_bars;
     pub mod grid;
     pub mod header;
+    pub mod heatmap;
     pub mod hist;
     pub mod horizontal;
     pub mod inputs;
@@ -181,6 +182,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::colorbar::cases(&lib, &mut sink);
     corpus::time::cases(&lib, &mut sink);
     corpus::mesh::cases(&lib, &mut sink);
+    corpus::heatmap::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

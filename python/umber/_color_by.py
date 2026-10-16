@@ -71,24 +71,9 @@ class ColorBy:
         with api_call():
             context = "ColorBy()"
             check_floats_type(context, "values", values)
-            colormap = None if cmap is AUTO else instance(context, "cmap", cmap, Cmap, CMAP_HINT)
-            instance(context, "scale", scale, Scale, _SCALE_HINT)
-            if scale == Scale.category():
-                raise new_error(
-                    TypeError,
-                    context,
-                    "scale is Scale.category(); scale must be Scale.linear() or Scale.log().",
-                    parameter="scale",
-                    hint=_SCALE_HINT,
-                )
-            middle = (
-                None
-                if center is AUTO
-                else real(context, "center", center, expected="a float or AUTO", hint=_CENTER_HINT)
-            )
+            native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
             data = floats(context, "values", values)
-            native_cmap = None if colormap is None else _cmap.native(colormap)
-            native = _umber.ColorBy(data, native_cmap, *_scale.native(scale), middle)
+            native = _umber.ColorBy(data, native_cmap, kind, base, middle)
             object.__setattr__(self, "_native", native)
 
     def __copy__(self) -> Self:
@@ -115,6 +100,51 @@ class ColorBy:
 
 
 _NATIVE: Final = attrgetter("_native")
+
+
+def native_color_scale(
+    context: str, cmap: Cmap | Auto, scale: Scale[float], center: float | Auto
+) -> tuple[_umber.Cmap | None, int, float, float | None]:
+    """Check the ``cmap``, ``scale`` and ``center`` arguments of a color mapping, in that order.
+
+    Args:
+        context: The API call, such as ``"Axes.heatmap()"``.
+        cmap: A ``Cmap``, or ``AUTO`` for the theme's colormap.
+        scale: ``Scale.linear()`` or a ``Scale.log()``.
+        center: A number, or ``AUTO`` for a sequential mapping.
+
+    Returns:
+        The native colormap (``None`` for the theme's), the native scale argument
+        ``(kind, base)`` and the center (``None`` for a sequential mapping).
+
+    Raises:
+        TypeError: If an argument has the wrong type, or ``scale`` is ``Scale.category()`` or
+            ``Scale.time()``.
+
+    Example:
+        >>> import umber as ub
+        >>> from umber._color_by import native_color_scale
+        >>> native_color_scale("ColorBy()", ub.AUTO, ub.Scale.log(), 2)
+        (None, 1, 10.0, 2.0)
+    """
+    colormap = None if cmap is AUTO else instance(context, "cmap", cmap, Cmap, CMAP_HINT)
+    instance(context, "scale", scale, Scale, _SCALE_HINT)
+    if scale == Scale.category() or scale == Scale.time():
+        raise new_error(
+            TypeError,
+            context,
+            f"scale is {scale!r}; scale must be Scale.linear() or Scale.log().",
+            parameter="scale",
+            hint=_SCALE_HINT,
+        )
+    middle = (
+        None
+        if center is AUTO
+        else real(context, "center", center, expected="a float or AUTO", hint=_CENTER_HINT)
+    )
+    native_cmap = None if colormap is None else _cmap.native(colormap)
+    kind, base = _scale.native(scale)
+    return native_cmap, kind, base, middle
 
 
 def native_point_color(context: str, value: object) -> tuple[int, int, float] | _umber.ColorBy:

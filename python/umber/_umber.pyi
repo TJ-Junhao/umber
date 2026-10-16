@@ -547,3 +547,17 @@ class Figure:
     def colorbar(
         self, row: int, col: int, label: str, position: int | None, format: _TickFormatArg | None
     ) -> None: ...
+    def heatmap(
+        self,
+        row: int,
+        col: int,
+        x_categories: list[str],
+        y_categories: list[str],
+        values: _FloatArray,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
+        annotate: bool,
+        format: _TickFormatArg | None,
+    ) -> None: ...

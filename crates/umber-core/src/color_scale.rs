@@ -11,10 +11,10 @@ use crate::error::number;
 use crate::model::{CmapChoice, ColorBy};
 use crate::resolve::{AxisTick, NormalizedPos, ResolvedMark};
 use crate::scale::{log_offset, too_narrow};
-use crate::ticks::format_given;
+use crate::ticks::{self, TickValues, format_given};
 use crate::{
     Cmap, ContinuousScale, Error, LogBase, MAX_MAGNITUDE, MIN_LOG_VALUE, Result, Rgba, Theme, Tick,
-    Transform,
+    TickFormat, Transform,
 };
 
 /// The context of errors that cannot happen here: the model validated every input already.
@@ -58,12 +58,16 @@ impl ColorScaleSpec {
         context: &'static str,
         parameter: &'static str,
     ) -> Result<()> {
-        let Some((given, axes)) = self.difference(existing) else {
+        let Some(differs) = self.first_difference(existing) else {
             return Ok(());
         };
         Err(Error::usage(
             context,
-            format!("{parameter} uses {given}; this axes already maps colors with {axes}."),
+            format!(
+                "{parameter} uses {}; this axes already maps colors with {}.",
+                self.describe(differs),
+                existing.describe(differs)
+            ),
         )
         .with_parameter(parameter)
         .with_hint(SAME_SCALE_HINT))
@@ -77,15 +81,17 @@ impl ColorScaleSpec {
         context: &'static str,
         parameter: &'static str,
     ) -> Result<()> {
-        let Some((given, other)) = self.difference(existing) else {
+        let Some(differs) = self.first_difference(existing) else {
             return Ok(());
         };
         Err(Error::usage(
             context,
             format!(
-                "{parameter} uses {given}; row {}, col {} maps colors with {other}.",
+                "{parameter} uses {}; row {}, col {} maps colors with {}.",
+                self.describe(differs),
                 cells.row(),
                 cells.col(),
+                existing.describe(differs),
             ),
         )
         .with_parameter(parameter)
@@ -94,16 +100,56 @@ impl ColorScaleSpec {
         ))
     }
 
-    /// The first mismatch, colormap before scale before center, as the values messages name.
-    fn difference(&self, existing: &ColorScaleSpec) -> Option<(String, String)> {
+    /// Checks that this spec, of a new mark that takes its colormap, scale and center as the
+    /// arguments `cmap`, `scale` and `center`, is the spec `existing` of the axes' color
+    /// scale: `Error::Usage` under `context` about the first of them that differs.
+    pub fn check_same_arguments(
+        &self,
+        existing: &ColorScaleSpec,
+        context: &'static str,
+    ) -> Result<()> {
+        let Some(differs) = self.first_difference(existing) else {
+            return Ok(());
+        };
+        // The argument is named by itself: `center is 0`, not `center is center 0`.
+        let given = match (differs, self.center) {
+            (Part::Center, Some(center)) => number(center).to_string(),
+            (Part::Center, None) => "not given".to_owned(),
+            (part, _) => self.describe(part),
+        };
+        Err(Error::usage(
+            context,
+            format!(
+                "{} is {given}; this axes already maps colors with {}.",
+                differs.argument(),
+                existing.describe(differs)
+            ),
+        )
+        .with_parameter(differs.argument())
+        .with_hint(SAME_SCALE_HINT))
+    }
+
+    /// The first of colormap, scale and center in which this spec differs from `existing`;
+    /// `None` when the specs are the same.
+    fn first_difference(&self, existing: &ColorScaleSpec) -> Option<Part> {
         if self.cmap != existing.cmap {
-            Some((cmap_name(&self.cmap), cmap_name(&existing.cmap)))
+            Some(Part::Cmap)
         } else if self.scale != existing.scale {
-            Some((scale_name(self.scale), scale_name(existing.scale)))
+            Some(Part::Scale)
         } else if self.center != existing.center {
-            Some((center_name(self.center), center_name(existing.center)))
+            Some(Part::Center)
         } else {
             None
+        }
+    }
+
+    /// The `part` of this spec as messages write it: `Cmap.VIRIDIS`, `Scale.log(10)`,
+    /// `center 0` or `no center`.
+    fn describe(&self, part: Part) -> String {
+        match part {
+            Part::Cmap => cmap_name(&self.cmap),
+            Part::Scale => scale_name(self.scale),
+            Part::Center => center_name(self.center),
         }
     }
 
@@ -189,6 +235,28 @@ fn center_name(center: Option<f64>) -> String {
     match center {
         Some(center) => format!("center {}", number(center)),
         None => "no center".to_owned(),
+    }
+}
+
+/// One of the three parts of a [`ColorScaleSpec`], each set by the argument of its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Part {
+    /// The colormap.
+    Cmap,
+    /// The scale.
+    Scale,
+    /// The center.
+    Center,
+}
+
+impl Part {
+    /// The argument that sets this part.
+    fn argument(self) -> &'static str {
+        match self {
+            Part::Cmap => "cmap",
+            Part::Scale => "scale",
+            Part::Center => "center",
+        }
     }
 }
 
@@ -324,6 +392,21 @@ impl Norm {
     /// tick at the value when the range is one value.
     fn ticks(&self) -> Vec<AxisTick> {
         self.ticks_for(TICK_TARGET, &crate::TickFormat::default())
+    }
+
+    /// The step between the automatic ticks of the range at the default density, on a linear
+    /// or centered norm whose range gives at least two; `None` on a log norm, whose ticks are
+    /// not evenly spaced, and for a range of one value.
+    fn tick_step(&self) -> Option<f64> {
+        if matches!(self, Norm::Log { .. }) {
+            return None;
+        }
+        let (low, high) = self.range();
+        let scale = ContinuousScale::new(Transform::Linear, low, high, CONTEXT).ok()?;
+        match scale.ticks(TICK_TARGET).as_slice() {
+            [first, second, ..] => Some(second.value - first.value),
+            _ => None,
+        }
     }
 
     /// Ticks for the requested density, labelled before their on-screen fit is checked.
@@ -474,6 +557,25 @@ impl ResolvedColorScale {
             ticks,
             ..self.clone()
         }
+    }
+
+    /// One label for each of the finite `values`, such as the values written on heatmap cells,
+    /// in `format`. Automatic labels write each value as the automatic ticks of the color range
+    /// are written ([`ticks::format_annotations`]): with the decimals of the step between the
+    /// ticks at the default density on a linear or centered scale, and with up to 12
+    /// significant digits on a log scale or a range of one value.
+    pub(crate) fn value_labels(&self, values: &[f64], format: &TickFormat) -> Vec<String> {
+        let labels = ticks::format_annotations(values, self.norm.tick_step());
+        let ticks = values
+            .iter()
+            .zip(labels)
+            .map(|(&value, label)| Tick { value, label })
+            .collect();
+        format
+            .relabel(ticks, TickValues::Exact)
+            .into_iter()
+            .map(|tick| tick.label)
+            .collect()
     }
 
     /// The color of the value `v`; `None` for a value that maps to no color (NaN).

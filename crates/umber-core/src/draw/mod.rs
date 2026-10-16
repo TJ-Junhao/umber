@@ -42,6 +42,7 @@ mod clip;
 pub(crate) mod colorbar;
 mod error_bars;
 pub(crate) mod fill;
+mod heatmap;
 mod hexbin;
 mod hist;
 pub(crate) mod legend;
@@ -61,6 +62,7 @@ mod tests;
 mod violin;
 
 pub(crate) use chrome::{baseline, chrome, figure_header};
+pub(crate) use heatmap::annotations as heatmap_annotations;
 
 use crate::Theme;
 use crate::layout::{Area, Layout};
@@ -338,6 +340,11 @@ pub(crate) fn marks(
                     width,
                     &mut items,
                 );
+            }
+            ResolvedMark::Heatmap {
+                mark: heatmap_mark, ..
+            } => {
+                heatmap::heatmap_items(&context, resolved, heatmap_mark, &mut items);
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }
