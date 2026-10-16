@@ -1451,12 +1451,23 @@ pub(crate) struct TimeScale {
     origin: Instant,
     /// The domain, in seconds from the origin.
     scale: ContinuousScale,
+    /// The earliest and the latest whole microsecond inside the domain, kept exactly.
+    instants: (Instant, Instant),
 }
 
 impl TimeScale {
-    /// The scale whose domain is `scale`, in seconds from `origin`. `scale` is linear.
-    pub(crate) fn new(origin: Instant, scale: ContinuousScale) -> TimeScale {
-        TimeScale { origin, scale }
+    /// The scale whose domain is `scale`, in seconds from `origin`, with `instants` the
+    /// earliest and the latest whole microsecond inside it. `scale` is linear.
+    pub(crate) fn new(
+        origin: Instant,
+        scale: ContinuousScale,
+        instants: (Instant, Instant),
+    ) -> TimeScale {
+        TimeScale {
+            origin,
+            scale,
+            instants,
+        }
     }
 
     /// The linear scale of seconds from the origin.
@@ -1474,13 +1485,10 @@ impl TimeScale {
         self.scale.normalize(self.seconds(t))
     }
 
-    /// The earliest and the latest whole microsecond inside the domain, kept inside the
-    /// supported range.
+    /// The earliest and the latest whole microsecond inside the domain, as given exactly when
+    /// the scale was made, so that a tick on a limit is never lost to the rounding of seconds.
     pub(crate) fn instants(&self) -> (Instant, Instant) {
-        let (low, high) = self.scale.domain();
-        // `as` saturates beyond the range of i64, and the clamp keeps the result in range.
-        let at = |micros: f64| Instant::clamped(self.origin.micros().saturating_add(micros as i64));
-        (at((low * 1e6).ceil()), at((high * 1e6).floor()))
+        self.instants
     }
 }
 

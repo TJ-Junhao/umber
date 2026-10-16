@@ -369,3 +369,33 @@ def test_micros_returns_an_aligned_int64_array() -> None:
     with pytest.raises(ub.DataError) as caught:
         _time.micros("Axes.line()", "x", np.zeros((2, 2), dtype="datetime64[s]"))
     assert str(caught.value) == ("Axes.line(): x has 2 dimensions; values must be one-dimensional.")
+
+
+def test_byte_order_and_unit_multipliers_convert_exactly() -> None:
+    swapped = np.array(["1970-01-01T00:00:00.000001", "NaT"], dtype=">M8[us]")
+    np.testing.assert_array_equal(_time.micros("Axes.line()", "x", swapped), [1, NAT])
+    swapped_ns = np.array([1500, 2500], dtype=">M8[ns]")
+    np.testing.assert_array_equal(_time.micros("Axes.line()", "x", swapped_ns), [2, 2])
+    # 2500-01-01 in tens of nanoseconds: valid, though its nanoseconds overflow int64.
+    tens = np.array([1672522560000000000, NAT], dtype="datetime64[10ns]")
+    np.testing.assert_array_equal(
+        _time.micros("Axes.line()", "x", tens), [_us(dt.datetime(2500, 1, 1)), NAT]
+    )
+    halves = np.array([3, 5, -3], dtype="datetime64[500ns]")
+    np.testing.assert_array_equal(_time.micros("Axes.line()", "x", halves), [2, 2, -2])
+    np.testing.assert_array_equal(
+        _time.micros("Axes.line()", "x", np.array([2, NAT], dtype="datetime64[3h]")),
+        [6 * 3600 * 10**6, NAT],
+    )
+    # Values too far from 1970 for microseconds give the documented error, never a raw one.
+    for far in [
+        np.array([0, 2**62], dtype="datetime64[10s]"),
+        np.array([0, 2**62], dtype="datetime64[3M]"),
+        np.array([0, -(2**62)], dtype=">M8[D]"),
+    ]:
+        with pytest.raises(ub.DataError) as caught:
+            _time.micros("Axes.line()", "x", far)
+        message, parameter, _ = _parts(caught.value)
+        assert message.startswith("Axes.line(): x[1] is "), message
+        assert message.endswith("; times must lie between 0001-01-01 and 9999-12-31."), message
+        assert parameter == "x"

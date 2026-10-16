@@ -9,6 +9,7 @@ rounded to the nearest microsecond, halves to even.
 """
 
 import datetime
+import math
 from collections.abc import Sequence
 from typing import Any, Final, cast
 
@@ -40,7 +41,7 @@ _TEXT_HINT: Final = "parse the text first, e.g. with datetime.fromisoformat()."
 _SCALAR_HINT: Final = "pass a datetime, date or numpy.datetime64."
 _MISSING_HINT: Final = "use numpy.datetime64('NaT') for a missing time."
 
-# Microseconds per unit, for the NumPy units coarser than a microsecond whose length is fixed.
+# Microseconds per unit, for the NumPy units of a fixed length from a microsecond up.
 _COARSE: Final = {
     "W": 7 * _MICROS_PER_DAY,
     "D": _MICROS_PER_DAY,
@@ -48,6 +49,7 @@ _COARSE: Final = {
     "m": 60_000_000,
     "s": 1_000_000,
     "ms": 1_000,
+    "us": 1,
 }
 # Units per microsecond, for the NumPy units finer than a microsecond.
 _FINE: Final = {"ns": 10**3, "ps": 10**6, "fs": 10**9, "as": 10**12}
@@ -226,44 +228,84 @@ def _one(context: str, name: str, label: str, value: object) -> int:
 def _datetime64_micros(
     context: str, name: str, array: npt.NDArray[Any], label: str | None = None
 ) -> MicrosArray:
-    """Convert a ``datetime64`` array of any unit to microseconds, rounding finer units.
+    """Convert a ``datetime64`` array of any unit and byte order to microseconds.
 
-    Messages name the element at ``i`` as ``name[i]``, or as ``label`` when one is given for
-    an array of one element.
+    The counts are read in native byte order, then scaled by the unit and its multiplier
+    straight to microseconds, in integer arithmetic: values finer than a microsecond are
+    rounded to the nearest one, halves to even. A value too far from 1970 for int64
+    microseconds raises ``DataError``. Messages name the element at ``i`` as ``name[i]``, or
+    as ``label`` when one is given for an array of one element.
     """
     unit, count = np.datetime_data(array.dtype)
     if unit == "generic":
         # A unitless datetime64 array holds only NaT.
         return np.full(len(array), MISSING, dtype=np.int64)
-    if count != 1:
-        array = array.astype(f"datetime64[{unit}]")
-    values = array.view(np.int64)
-    missing = values == MISSING
-    if unit == "us":
-        out = values.astype(np.int64, copy=True)
-    elif unit in _FINE:
-        factor = _FINE[unit]
-        quotient, remainder = np.divmod(values, factor)
-        up = (2 * remainder > factor) | ((2 * remainder == factor) & (quotient % 2 == 1))
-        out = quotient + up.astype(np.int64)
+    native = array.astype(array.dtype.newbyteorder("="), copy=False)
+    counts = native.view(np.int64)
+    missing = counts == MISSING
+    present = np.where(missing, 0, counts)
+    if unit in _CALENDAR_REACH:
+        out = _calendar_micros(context, name, label, native, present, unit, count)
     else:
-        reach = _CALENDAR_REACH.get(unit)
-        limit = np.iinfo(np.int64).max // _COARSE[unit] if reach is None else reach
-        beyond = np.flatnonzero(~missing & (np.abs(values) > limit))
-        if beyond.size:
-            at = int(beyond[0])
-            raise _beyond_error(context, name, label or f"{name}[{at}]", array[at])
-        out = array.astype("datetime64[us]").view(np.int64).copy()
+        if unit in _FINE:
+            numerator, denominator = count, _FINE[unit]
+        else:
+            numerator, denominator = count * _COARSE[unit], 1
+        common = math.gcd(numerator, denominator)
+        numerator, denominator = numerator // common, denominator // common
+        quotient, remainder = np.divmod(present, denominator)
+        # |remainder * numerator| < denominator * numerator, far inside int64 for NumPy units.
+        part, rest = np.divmod(remainder * numerator, denominator)
+        # The part below the quotient adds less than `numerator`.
+        limit = (np.iinfo(np.int64).max - numerator) // numerator
+        _check_reach(context, name, label, native, np.abs(quotient) > limit)
+        out = quotient * numerator + part
+        up = (2 * rest > denominator) | ((2 * rest == denominator) & (out % 2 == 1))
+        out = out + up.astype(np.int64)
     out[missing] = MISSING
     return np.require(out, dtype="=i8", requirements=["A", "C"])
 
 
-def _beyond_error(context: str, name: str, label: str, value: np.datetime64) -> DataError:
+def _calendar_micros(
+    context: str,
+    name: str,
+    label: str | None,
+    array: npt.NDArray[Any],
+    present: npt.NDArray[np.int64],
+    unit: str,
+    count: int,
+) -> MicrosArray:
+    """Microseconds of counts of ``count`` years or months, which have no fixed length."""
+    reach = _CALENDAR_REACH[unit] // count
+    _check_reach(context, name, label, array, np.abs(present) > reach)
+    base = (present * count).astype(f"datetime64[{unit}]")
+    return base.astype("datetime64[us]").view(np.int64).copy()
+
+
+def _check_reach(
+    context: str,
+    name: str,
+    label: str | None,
+    array: npt.NDArray[Any],
+    beyond: npt.NDArray[np.bool_],
+) -> None:
+    """Raise the range error for the first value marked in ``beyond``, if any."""
+    found = np.flatnonzero(beyond)
+    if found.size:
+        at = int(found[0])
+        raise _beyond_error(context, name, label or f"{name}[{at}]", array[at : at + 1])
+
+
+def _beyond_error(context: str, name: str, label: str, value: npt.NDArray[Any]) -> DataError:
     """The error for a time too far from 1970 to hold in int64 microseconds.
 
     Such a time is far outside the range the core library accepts, and it is reported in the
     core library's words, since it cannot reach the core library to be checked there.
     """
-    shown = np.datetime_as_string(value, unit="D")
+    try:
+        shown = str(np.datetime_as_string(value, unit="D")[0])
+    except (OverflowError, ValueError):
+        unit, count = np.datetime_data(value.dtype)
+        shown = f"{int(value.view(np.int64)[0])} times {count} {unit} from 1970"
     message = f"{label} is {shown}; times must lie between 0001-01-01 and 9999-12-31."
     return new_error(DataError, context, message, parameter=name, hint=None)

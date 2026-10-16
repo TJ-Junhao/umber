@@ -563,9 +563,15 @@ fn x_position(axis: &ResolvedAxis, x: AnchorX<'_>) -> f64 {
             }
         }
         (AxisScale::Time(scale), AnchorX::Time(t)) => scale.normalize(t),
+        (AxisScale::Time(scale), AnchorX::TimeBetween(a, b)) => {
+            (scale.normalize(a) + scale.normalize(b)) / 2.0
+        }
         (AxisScale::Continuous(_), AnchorX::Category(_) | AnchorX::Between(..))
         | (AxisScale::Category(_), AnchorX::Number(_))
-        | (AxisScale::Continuous(_) | AxisScale::Category(_), AnchorX::Time(_))
+        | (
+            AxisScale::Continuous(_) | AxisScale::Category(_),
+            AnchorX::Time(_) | AnchorX::TimeBetween(..),
+        )
         | (AxisScale::Time(_), AnchorX::Number(_) | AnchorX::Category(_) | AnchorX::Between(..)) => {
             f64::NAN
         }

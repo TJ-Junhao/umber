@@ -655,6 +655,76 @@ pub(crate) fn concise_labels(ticks: &[Instant], step: TimeStep) -> Vec<String> {
         .collect()
 }
 
+/// The labels of explicit ticks `ticks`, in axis order, labelled for `step` (see
+/// [`label_step`]), by the concise rule applied to their own sequence: each label shows the
+/// unit of the step, and also every larger unit that changes from the tick before it, years
+/// included. The first label shows the next larger unit, and the year too when the ticks span
+/// more than one year. So `Jan 2 2025, Jan 2 2026` for two ticks a year apart, and `Jan 2, 9,
+/// Feb 2` within a year.
+pub(crate) fn explicit_labels(ticks: &[Instant], step: TimeStep) -> Vec<String> {
+    /// The calendar units a label can show, the largest first.
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Part {
+        Clock,
+        Day,
+        Month,
+        Year,
+    }
+    let level = match step {
+        TimeStep::Years(_) => Part::Year,
+        TimeStep::Months(_) => Part::Month,
+        TimeStep::Days(_) => Part::Day,
+        _ => Part::Clock,
+    };
+    // The largest unit in which `b` differs from `a`, if any.
+    let changed = |a: Civil, b: Civil| {
+        if a.year != b.year {
+            Some(Part::Year)
+        } else if a.month != b.month {
+            Some(Part::Month)
+        } else if a.day != b.day {
+            Some(Part::Day)
+        } else {
+            None
+        }
+    };
+    let civil: Vec<Civil> = ticks.iter().map(|t| t.civil()).collect();
+    let next_larger = match level {
+        Part::Clock => Part::Day,
+        Part::Day => Part::Month,
+        Part::Month | Part::Year => Part::Year,
+    };
+    let span = match (civil.first(), civil.last()) {
+        (Some(&first), Some(&last)) => changed(first, last),
+        _ => None,
+    };
+    civil
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| {
+            let top = match i.checked_sub(1) {
+                None => span.map_or(next_larger, |s| s.max(next_larger)),
+                Some(j) => changed(civil[j], c).map_or(level, |p| p.max(level)),
+            };
+            let month = MONTHS[usize::from(c.month) - 1];
+            let date = if top == Part::Year {
+                format!("{month} {} {:04}", c.day, c.year)
+            } else {
+                format!("{month} {}", c.day)
+            };
+            match level {
+                Part::Year => format!("{:04}", c.year),
+                Part::Month if top == Part::Year => format!("{month} {:04}", c.year),
+                Part::Month => month.to_owned(),
+                Part::Day if top > Part::Day => date,
+                Part::Day => c.day.to_string(),
+                Part::Clock if top > Part::Clock => format!("{date} {}", clock(c, step)),
+                Part::Clock => clock(c, step),
+            }
+        })
+        .collect()
+}
+
 /// The ISO 8601 label of `t`, written down to the unit of `step`: `2026` for years, `2026-03`
 /// for months, `2026-03-03` for days, `2026-03-03T06:00` for hours and minutes, and the
 /// seconds, with the decimals a sub-second step needs, below that.

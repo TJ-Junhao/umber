@@ -915,3 +915,74 @@ fn failed_time_calls_change_nothing() {
     }
     assert_eq!(f.to_svg(crate::SvgText::Outlines).unwrap(), svg);
 }
+
+#[test]
+fn a_step_label_at_a_midpoint_keeps_the_midpoint() {
+    // A step that changes level halfway between two times one microsecond apart ends there:
+    // the midpoint lies half a microsecond after the first time, in the middle of the plot.
+    let t = date(2026, 1, 1);
+    let mut f = figure(Theme::graphite(), TIME, LIN);
+    f.single_axes_mut()
+        .step_shared(
+            times(&[t, plus(t, 1)]),
+            AxisData::Numbers(vec![1.0, f64::NAN]),
+            StepOptions {
+                position: crate::Step::Mid,
+                label: "series".into(),
+                ..StepOptions::default()
+            },
+        )
+        .unwrap();
+    let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+    let dot = layout.direct[0].dot.expect("the step ends inside the plot");
+    let middle = layout.plot.x + layout.plot.width / 2.0;
+    assert!((dot.x - middle).abs() < 1e-6, "{} vs {middle}", dot.x);
+}
+
+#[test]
+fn explicit_time_ticks_show_the_larger_units_that_change() {
+    let (a, b) = (date(2025, 1, 2), date(2026, 1, 2));
+    for y in [false, true] {
+        let mut f = if y {
+            figure(Theme::pigment(), LIN, TIME)
+        } else {
+            figure(Theme::pigment(), TIME, LIN)
+        };
+        let mut axes = f.single_axes_mut();
+        if y {
+            axes.yticks_time(&[a, b]).unwrap();
+        } else {
+            axes.xticks_time(&[a, b]).unwrap();
+        }
+        let r = resolved(&f);
+        let ticks = if y { &r.y.ticks } else { &r.x.ticks };
+        assert_eq!(labels(ticks), ["Jan 2 2025", "Jan 2 2026"]);
+    }
+    // Within one year the concise labels need no year after the first tick.
+    let mut f = figure(Theme::pigment(), TIME, LIN);
+    f.single_axes_mut()
+        .xticks_time(&[date(2026, 1, 2), date(2026, 1, 9), date(2026, 2, 2)])
+        .unwrap();
+    assert_eq!(labels(&resolved(&f).x.ticks), ["Jan 2", "9", "Feb 2"]);
+    // Clock ticks across days show the date where it changes.
+    f.single_axes_mut()
+        .xticks_time(&[at(2026, 1, 1, 22, 0, 0), at(2026, 1, 2, 2, 0, 0)])
+        .unwrap();
+    assert_eq!(
+        labels(&resolved(&f).x.ticks),
+        ["Jan 1 22:00", "Jan 2 02:00"]
+    );
+}
+
+#[test]
+fn the_ticks_of_exact_limits_reach_both_limits() {
+    let origin = date(2026, 1, 1);
+    let (low, high) = (plus(origin, 1), plus(origin, 250));
+    let mut f = Figure::new(20.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(TIME, LIN).unwrap().xlim_time(low, high).unwrap();
+    let r = resolved(&f);
+    let (step, ticks) = time_ticks(low, high);
+    assert_eq!(labels(&r.x.ticks), concise_labels(&ticks, step));
+    assert_eq!(ticks.last(), Some(&high));
+    assert_eq!(r.x.ticks.last().map(|t| t.pos.get()), Some(1.0));
+}

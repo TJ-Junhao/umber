@@ -66,7 +66,9 @@ use crate::stacking::{AreaStacks, Stacks};
 use crate::stats::{BoxStats, box_stats, kde_scott, quantile_type7};
 use crate::tick_format::TickFormat;
 use crate::ticks::{AutoTicks, TickValues};
-use crate::time::{TimeStep, coarser_ticks, concise_labels, iso_label, label_step, time_ticks};
+use crate::time::{
+    TimeStep, coarser_ticks, concise_labels, explicit_labels, iso_label, label_step, time_ticks,
+};
 use crate::{
     CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Instant, Marker, NumberStyle, Result,
     Rgba, ScaleKind, Theme, Tick, Transform, ticks,
@@ -1000,7 +1002,8 @@ const SINGLE_TIME_REACH: f64 = 1_800.0;
 /// crowd as `room` judges them, the nearest coarser step whose labels keep apart, or the
 /// coarsest with two ticks, is used. Labels are concise, or ISO 8601 for
 /// [`TickFormat::iso`], and take the format's affix. Explicit ticks are those inside the domain,
-/// labelled for the unit they share ([`label_step`]) or with their own labels.
+/// labelled for the unit they share ([`label_step`]) by the concise rule on their own sequence
+/// ([`explicit_labels`]), or with their own labels.
 fn time_axis<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
     which: ValueAxis,
@@ -1010,15 +1013,23 @@ fn time_axis<'a, 'm: 'a>(
 ) -> (ResolvedAxis, NormalizedPos) {
     let given = limits.ticks.explicit();
     let scale = match limits.explicit {
-        Some((low, high)) => time_scale(low, 0.0, seconds_between(low, high)),
+        Some((low, high)) => time_scale(low, 0.0, seconds_between(low, high), (low, high)),
         None => {
             let data = time_extent(marks.clone().flat_map(|mark| mark.times(which)));
             let ticks = given.map(tick_times).unwrap_or_default();
             let ends = data.into_iter().flat_map(|(low, high)| [low, high]);
             match time_extent(ends.chain(ticks)) {
-                None => time_scale(Instant::clamped(0), 0.0, EMPTY_TIME_SPAN),
+                None => {
+                    let epoch = Instant::clamped(0);
+                    let day = shifted(epoch, EMPTY_TIME_SPAN);
+                    time_scale(epoch, 0.0, EMPTY_TIME_SPAN, (epoch, day))
+                }
                 Some((low, high)) if low == high => {
-                    time_scale(low, -SINGLE_TIME_REACH, SINGLE_TIME_REACH)
+                    let reach = (
+                        shifted(low, -SINGLE_TIME_REACH),
+                        shifted(low, SINGLE_TIME_REACH),
+                    );
+                    time_scale(low, -SINGLE_TIME_REACH, SINGLE_TIME_REACH, reach)
                 }
                 Some((low, high)) => {
                     let span = seconds_between(low, high);
@@ -1029,7 +1040,8 @@ fn time_axis<'a, 'm: 'a>(
                     } else {
                         AUTO_LIMIT_PADDING * span
                     };
-                    time_scale(low, -pad, span + pad)
+                    let reach = (shifted(low, -pad), shifted(high, pad));
+                    time_scale(low, -pad, span + pad, reach)
                 }
             }
         }
@@ -1046,11 +1058,20 @@ fn time_axis<'a, 'm: 'a>(
     (axis, NormalizedPos::LOW)
 }
 
-/// The time scale from `low` to `high` seconds measured from `origin`.
-fn time_scale(origin: Instant, low: f64, high: f64) -> TimeScale {
+/// The time scale from `low` to `high` seconds measured from `origin`, whose earliest and
+/// latest whole microseconds are `instants`.
+fn time_scale(origin: Instant, low: f64, high: f64, instants: (Instant, Instant)) -> TimeScale {
     let seconds = ContinuousScale::new(Transform::Linear, low, high, CONTEXT)
         .unwrap_or_else(|_| ContinuousScale::unit(Transform::Linear));
-    TimeScale::new(origin, seconds)
+    TimeScale::new(origin, seconds, instants)
+}
+
+/// The whole microsecond nearest to `t` moved by `seconds` towards it, so that it stays inside
+/// a domain that reaches `seconds` from `t`, kept inside the supported range.
+fn shifted(t: Instant, seconds: f64) -> Instant {
+    // Truncation moves towards `t`; `as` saturates beyond the range of i64.
+    let micros = (seconds * 1e6) as i64;
+    Instant::clamped(t.micros().saturating_add(micros))
 }
 
 /// The earliest and the latest of `times`; `None` when there is none.
@@ -1092,12 +1113,13 @@ fn automatic_time_ticks(
 ) -> Vec<AxisTick> {
     let (low, high) = scale.instants();
     let (step, ticks) = time_ticks(low, high);
-    let mut chosen = time_labelled(scale, &ticks, step, format);
+    let mut chosen = time_labelled(scale, &ticks, step, format, concise_labels(&ticks, step));
     if room.slack(&chosen) >= 0.0 {
         return chosen;
     }
     for (step, ticks) in coarser_ticks(step, low, high) {
-        chosen = time_labelled(scale, &ticks, step, format);
+        let concise = concise_labels(&ticks, step);
+        chosen = time_labelled(scale, &ticks, step, format, concise);
         if room.slack(&chosen) >= 0.0 {
             break;
         }
@@ -1120,7 +1142,9 @@ fn explicit_time_ticks(
     match given {
         ExplicitTicks::TimePositions(times) => {
             let times: Vec<Instant> = times.iter().copied().filter(|&t| inside(t)).collect();
-            time_labelled(scale, &times, label_step(&times), format)
+            let step = label_step(&times);
+            let concise = explicit_labels(&times, step);
+            time_labelled(scale, &times, step, format, concise)
         }
         ExplicitTicks::TimeLabeled(ticks) => ticks
             .iter()
@@ -1135,13 +1159,14 @@ fn explicit_time_ticks(
     }
 }
 
-/// The ticks at `times` on the time axis `scale`, labelled for `step`: concise labels, or ISO
-/// 8601 ones for [`TickFormat::iso`], with the affix of `format` around each.
+/// The ticks at `times` on the time axis `scale`, labelled for `step`: the `concise` labels,
+/// or ISO 8601 ones for [`TickFormat::iso`], with the affix of `format` around each.
 fn time_labelled(
     scale: &TimeScale,
     times: &[Instant],
     step: TimeStep,
     format: &TickFormat,
+    concise: Vec<String>,
 ) -> Vec<AxisTick> {
     let labels = match format.style() {
         NumberStyle::Iso => times.iter().map(|&t| iso_label(t, step)).collect(),
@@ -1149,7 +1174,7 @@ fn time_labelled(
         NumberStyle::Auto
         | NumberStyle::Fixed(_)
         | NumberStyle::Percent(_)
-        | NumberStyle::Scientific => concise_labels(times, step),
+        | NumberStyle::Scientific => concise,
     };
     let ticks = times
         .iter()
@@ -2462,6 +2487,9 @@ pub(crate) enum AnchorX<'a> {
     Between(&'a str, &'a str),
     /// A time on a time axis.
     Time(Instant),
+    /// Midway between two times on a time axis, where a step line that changes level between
+    /// them ends; the middle is taken along the axis, not rounded to a microsecond.
+    TimeBetween(Instant, Instant),
 }
 
 /// How a direct label's anchor ends its line: whether the line ends there, so that an end dot
@@ -2705,8 +2733,8 @@ impl<'a> Anchor<'a> {
 
     /// The anchor of `step` over the times `times` of a time x axis, found as
     /// [`Anchor::of_step`] finds it over numbers, with the holds measured in seconds from the
-    /// lower explicit limit, or from the first time. A midpoint is the time halfway between its
-    /// two neighbours.
+    /// lower explicit limit, or from the first time. A midpoint is the point halfway between its
+    /// two neighbours along the axis ([`AnchorX::TimeBetween`]).
     fn of_time_step(
         step: &'a StepMark,
         times: &[Option<Instant>],
@@ -2734,23 +2762,16 @@ impl<'a> Anchor<'a> {
             .rfind(|&(_, from, to)| to >= lo && from <= hi)?;
         let y = step.y().numbers()[hold.point];
         let (x, end) = match range {
-            Some((_, high)) if to > hi && from <= hi => (high, EndKind::Edge),
+            Some((_, high)) if to > hi && from <= hi => (AnchorX::Time(high), EndKind::Edge),
             _ => {
                 let x = match hold.to {
-                    Edge::At(k) => times[k]?,
-                    Edge::Mid(i, k) => {
-                        let (a, b) = (times[i]?.micros(), times[k]?.micros());
-                        Instant::clamped(a + (b - a) / 2)
-                    }
+                    Edge::At(k) => AnchorX::Time(times[k]?),
+                    Edge::Mid(i, k) => AnchorX::TimeBetween(times[i]?, times[k]?),
                 };
                 (x, EndKind::Point)
             }
         };
-        Some(Anchor {
-            x: AnchorX::Time(x),
-            y,
-            end,
-        })
+        Some(Anchor { x, y, end })
     }
 }
 
@@ -4478,6 +4499,7 @@ mod tests {
             AnchorX::Category(name) => panic!("expected a number anchor, got {name}"),
             AnchorX::Between(a, b) => panic!("expected a number anchor, got {a} to {b}"),
             AnchorX::Time(t) => panic!("expected a number anchor, got {t:?}"),
+            AnchorX::TimeBetween(a, b) => panic!("expected a number anchor, got {a:?} to {b:?}"),
         })
     }
 
@@ -4640,7 +4662,10 @@ mod tests {
                     .map(|key| {
                         let anchor = key.anchor.map(|a| match a.x {
                             AnchorX::Number(ax) => (ax, a.y, a.end),
-                            AnchorX::Category(_) | AnchorX::Between(..) | AnchorX::Time(_) => {
+                            AnchorX::Category(_)
+                            | AnchorX::Between(..)
+                            | AnchorX::Time(_)
+                            | AnchorX::TimeBetween(..) => {
                                 panic!("numbers expected")
                             }
                         });
@@ -5263,6 +5288,7 @@ mod tests {
                 AnchorX::Category(name) => panic!("category {name}"),
                 AnchorX::Between(a, b) => panic!("between {a} and {b}"),
                 AnchorX::Time(t) => panic!("time {t:?}"),
+                AnchorX::TimeBetween(a, b) => panic!("between {a:?} and {b:?}"),
             })
         };
         let edge = |x, y| Some((x, y, EndKind::Edge));
@@ -5304,6 +5330,7 @@ mod tests {
             AnchorX::Category(name) => AnchorX::Category(leak(name)),
             AnchorX::Between(a, b) => AnchorX::Between(leak(a), leak(b)),
             AnchorX::Time(t) => AnchorX::Time(t),
+            AnchorX::TimeBetween(a, b) => AnchorX::TimeBetween(a, b),
         };
         Some(Anchor { x, ..anchor })
     }
