@@ -2,7 +2,7 @@
 
 Run from any directory:
 
-    python scripts/release/check_version.py v0.2.0
+    python scripts/release/check_version.py v0.3.0
 
 The tag must be ``v`` followed by the version of the ``umber-py`` crate, which maturin uses as
 the Python package version. ``pyproject.toml`` must declare the version as dynamic, so the
