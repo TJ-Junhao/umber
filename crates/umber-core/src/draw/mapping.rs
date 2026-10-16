@@ -8,7 +8,7 @@
 use crate::geometry::Point;
 use crate::layout::Area;
 use crate::model::AxisData;
-use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis, ResolvedContinuousAxis};
+use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis};
 use crate::scale::log_offset;
 use crate::{ContinuousScale, Transform};
 
@@ -66,11 +66,11 @@ pub(super) struct AxisMaps {
 }
 
 impl AxisMaps {
-    /// The maps of the resolved axes onto `plot`.
-    pub(super) fn new(x: &ResolvedAxis, y: &ResolvedContinuousAxis, plot: Area) -> AxisMaps {
+    /// The maps of the resolved axes onto `plot`: x from left to right, y from the bottom up.
+    pub(super) fn new(x: &ResolvedAxis, y: &ResolvedAxis, plot: Area) -> AxisMaps {
         AxisMaps {
-            x: AxisMap::x(x, plot),
-            y: AxisMap::y(y, plot),
+            x: AxisMap::new(x, plot.x, plot.width),
+            y: AxisMap::new(y, plot.bottom(), -plot.height),
         }
     }
 
@@ -99,8 +99,10 @@ pub(super) struct AxisMap {
 }
 
 impl AxisMap {
-    /// The map of the x axis `axis` onto `plot`.
-    fn x(axis: &ResolvedAxis, plot: Area) -> AxisMap {
+    /// The map of `axis` onto the plot coordinates from `start`, at its low end, to
+    /// `start + extent`, at its high end. A category axis spans `0..1`, the band centers'
+    /// range.
+    fn new(axis: &ResolvedAxis, start: f64, extent: f64) -> AxisMap {
         let (lo, hi) = match &axis.scale {
             AxisScale::Continuous(scale) => continuous_domain(scale),
             AxisScale::Category(_) => (0.0, 1.0),
@@ -108,19 +110,8 @@ impl AxisMap {
         AxisMap {
             lo,
             hi,
-            start: plot.x,
-            extent: plot.width,
-        }
-    }
-
-    /// The map of the y axis `axis` onto `plot`, bottom up.
-    fn y(axis: &ResolvedContinuousAxis, plot: Area) -> AxisMap {
-        let (lo, hi) = continuous_domain(&axis.scale);
-        AxisMap {
-            lo,
-            hi,
-            start: plot.bottom(),
-            extent: -plot.height,
+            start,
+            extent,
         }
     }
 
@@ -153,8 +144,7 @@ impl AxisMap {
 
 /// The axis-space domain of the continuous `scale`: the limits on a linear axis, and
 /// `0..ln(hi / lo)` on a log axis (with [`log_offset`], exactly as `ContinuousScale::normalize`
-/// measures, so marks and gridlines agree). A category axis spans `0..1`, the band centers'
-/// range.
+/// measures, so marks and gridlines agree).
 fn continuous_domain(scale: &ContinuousScale) -> (f64, f64) {
     let (lo, hi) = scale.domain();
     match scale.transform() {
@@ -163,10 +153,10 @@ fn continuous_domain(scale: &ContinuousScale) -> (f64, f64) {
     }
 }
 
-/// The axis-space x values of `x`. Category names map to their band center; NaN, and names the
-/// scale does not know (impossible after resolve), map to NaN.
-pub(super) fn axis_x(axis: &ResolvedAxis, x: &AxisData) -> Vec<f64> {
-    match (&axis.scale, x) {
+/// The axis-space values of `data` on `axis`. Category names map to their band center; NaN,
+/// and names the scale does not know (impossible after resolve), map to NaN.
+pub(super) fn axis_values(axis: &ResolvedAxis, data: &AxisData) -> Vec<f64> {
+    match (&axis.scale, data) {
         (AxisScale::Continuous(scale), AxisData::Numbers(values)) => {
             continuous_values(scale, values)
         }
@@ -179,23 +169,21 @@ pub(super) fn axis_x(axis: &ResolvedAxis, x: &AxisData) -> Vec<f64> {
     }
 }
 
-/// The axis-space y values of `y`; NaN maps to NaN.
-pub(super) fn axis_y(axis: &ResolvedContinuousAxis, y: &[f64]) -> Vec<f64> {
-    continuous_values(&axis.scale, y)
+/// The axis-space values of the numbers `values` on `axis`, each as [`axis_value`] maps it.
+pub(super) fn axis_numbers(axis: &ResolvedAxis, values: &[f64]) -> Vec<f64> {
+    match &axis.scale {
+        AxisScale::Continuous(scale) => continuous_values(scale, values),
+        AxisScale::Category(_) => vec![f64::NAN; values.len()],
+    }
 }
 
-/// The axis-space value of the number `v` on the x axis `axis`, as [`axis_x`] maps numbers;
-/// NaN on a category axis.
-pub(super) fn axis_x_value(axis: &ResolvedAxis, v: f64) -> f64 {
+/// The axis-space value of the number `v` on `axis`, as [`axis_values`] maps numbers; NaN on a
+/// category axis, which has no numbers.
+pub(super) fn axis_value(axis: &ResolvedAxis, v: f64) -> f64 {
     match &axis.scale {
         AxisScale::Continuous(scale) => continuous_value(scale, v),
         AxisScale::Category(_) => f64::NAN,
     }
-}
-
-/// The axis-space value of the number `v` on the y axis `axis`, as [`axis_y`] maps numbers.
-pub(super) fn axis_y_value(axis: &ResolvedContinuousAxis, v: f64) -> f64 {
-    continuous_value(&axis.scale, v)
 }
 
 /// `values` in the axis space of `scale`, each as [`continuous_value`] maps it.

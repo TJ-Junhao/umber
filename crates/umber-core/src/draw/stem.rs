@@ -6,7 +6,7 @@
 use super::MarkContext;
 use super::clip::{Bounds, clip_segment};
 use super::error_bars::bar_style;
-use super::mapping::{AxisPoint, axis_x, axis_y};
+use super::mapping::{AxisPoint, axis_values};
 use super::scatter::scatter_item;
 use crate::Rgba;
 use crate::geometry::Path;
@@ -25,8 +25,8 @@ pub(super) fn stem_items(
     (color, size): (Rgba, f32),
     items: &mut Vec<Item>,
 ) {
-    let xs = axis_x(&resolved.x, mark.x());
-    let ys = axis_y(&resolved.y, mark.y());
+    let xs = axis_values(&resolved.x, mark.x());
+    let ys = axis_values(&resolved.y, mark.y());
     let width = context.theme.stem_width();
     let (left, right) = context.maps.x.expanded(f64::from(width) / 2.0);
     let bounds = Bounds {
@@ -35,7 +35,7 @@ pub(super) fn stem_items(
         top: context.maps.y.lo,
         bottom: context.maps.y.hi,
     };
-    let baseline = context.maps.y.at(context.baseline);
+    let baseline = context.maps.y.at(context.baseline.pos);
     let mut path = Path::new();
     for (&x, &y) in xs.iter().zip(&ys) {
         if !x.is_finite() || !y.is_finite() {

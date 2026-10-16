@@ -1647,12 +1647,21 @@ mod record {
         }
     }
 
+    /// The y values of a series: numbers as a plain float list, the record's format for y,
+    /// and names as [`axis_data`] writes them.
+    fn y_data(d: &AxisData) -> String {
+        match d {
+            AxisData::Numbers(v) => floats64(v),
+            AxisData::Categories(_) => axis_data(d),
+        }
+    }
+
     fn mark(m: &Mark) -> String {
         match m {
             Mark::Line(line) => format!(
                 "line x={} y={} label={} color={} dash={}",
                 axis_data(line.x()),
-                floats64(line.y()),
+                y_data(line.y()),
                 text(&line.options().label),
                 color_spec(line.options().color),
                 dash(line.options().dash)
@@ -1660,7 +1669,7 @@ mod record {
             Mark::Scatter(scatter) => format!(
                 "scatter x={} y={} label={} color={} marker={}",
                 axis_data(scatter.x()),
-                floats64(scatter.y()),
+                y_data(scatter.y()),
                 text(&scatter.options().label),
                 color_spec(scatter.options().color),
                 marker(scatter.options().marker)
@@ -1668,7 +1677,7 @@ mod record {
             Mark::Area(area) => format!(
                 "area x={} y={} label={} color={} dash={}",
                 axis_data(area.x()),
-                floats64(area.y()),
+                y_data(area.y()),
                 text(&area.options().label),
                 color_spec(area.options().color),
                 dash(area.options().dash)
@@ -1695,7 +1704,7 @@ mod record {
             Mark::Step(step) => format!(
                 "step x={} y={} position={} label={} color={} dash={}",
                 axis_data(step.x()),
-                floats64(step.y()),
+                y_data(step.y()),
                 step_position(step.options().position),
                 text(&step.options().label),
                 color_spec(step.options().color),
@@ -1779,7 +1788,7 @@ mod record {
             Mark::Stem(stem) => format!(
                 "stem x={} y={} label={} color={} marker={} size={:?}",
                 axis_data(stem.x()),
-                floats64(stem.y()),
+                y_data(stem.y()),
                 text(&stem.options().label),
                 color_spec(stem.options().color),
                 marker(stem.options().marker),
@@ -2498,7 +2507,8 @@ fn series_errors(rec: &mut Log) {
         });
     }
 
-    // The y axis is never a category axis: the axes refuse it, so no series meets one.
+    // Axes with a category y axis are created, and their mark methods refuse them, so no series
+    // meets one.
     rec.section("Axes.line and Axes.scatter, category y");
     rec.new_figure("linear/category", linear(), ScaleKind::Category);
 

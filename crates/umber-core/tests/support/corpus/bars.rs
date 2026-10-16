@@ -508,7 +508,8 @@ fn group_errors() -> String {
             },
         );
 
-        // The y axis is never a category axis: the axes refuse it, so no bars meet one.
+        // Axes with a category y axis are created, and their mark methods refuse them, so no
+        // bars meet one.
         rec.section(&format!("Axes.{kind}_bar, category/category"));
         rec.new_figure(
             "category/category",
@@ -630,7 +631,8 @@ fn bar_errors() -> String {
         a.bar(names(&["a", "a"]), &[0.0, 0.0], bar()).map(drop)
     });
 
-    // The y axis is never a category axis: the axes refuse it, so no bars meet one.
+    // Axes with a category y axis are created, and their mark methods refuse them, so no
+    // bars meet one.
     rec.section("Axes.bar, category/category");
     rec.new_figure(
         "category/category",

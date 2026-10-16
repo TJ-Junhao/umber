@@ -263,8 +263,8 @@ fn baseline_is_drawn_last_over_the_marks() {
                 && style.width == theme.baseline_width()
                 && path.verbs()
                     == [
-                        PathVerb::MoveTo(point(layout.plot.x, layout.baseline_y)),
-                        PathVerb::LineTo(point(layout.plot.right(), layout.baseline_y)),
+                        PathVerb::MoveTo(point(layout.plot.x, layout.baseline_y())),
+                        PathVerb::LineTo(point(layout.plot.right(), layout.baseline_y())),
                     ]
         }
         _ => false,
@@ -306,4 +306,60 @@ fn baseline_is_drawn_last_over_the_marks() {
         panic!("unexpected scene order: {:?}", scene.items);
     };
     assert!(matches!(baseline.as_slice(), [only] if is_baseline(only)));
+}
+
+#[test]
+fn a_baseline_on_the_x_axis_runs_from_top_to_bottom() {
+    use crate::draw::mapping::point;
+    use crate::resolve::ValueAxis;
+    use crate::scene::Item;
+    // A category y axis beside a linear x axis: the values, and the baseline, lie along x. It
+    // sits at x = 0 inside the explicit limits, in place of the gridline there.
+    let theme = Theme::graphite();
+    let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Category)
+        .unwrap()
+        .xlim(-2.0, 6.0)
+        .unwrap();
+    let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
+    assert_eq!(resolved.baseline.axis, ValueAxis::X);
+    assert_eq!(resolved.baseline.pos.get(), 0.25);
+    assert_eq!(layout.baseline.axis, ValueAxis::X);
+    let x = layout.plot.x + 0.25 * layout.plot.width;
+    assert_eq!(layout.baseline.at, x);
+    assert!(layout.x_grid.iter().all(|&grid| (grid - x).abs() > 1e-6));
+    assert_eq!(layout.x_grid.len() + 1, resolved.x.ticks.len());
+    // The category y axis has no categories, so no gridlines and no tick labels.
+    assert!(layout.y_grid.is_empty() && layout.y_tick_labels.is_empty());
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
+    let Some(Item::Group {
+        clip: None,
+        items: baseline,
+    }) = scene.items.last()
+    else {
+        panic!("unexpected scene order: {:?}", scene.items);
+    };
+    let [Item::Stroke { path, style }] = baseline.as_slice() else {
+        panic!("one baseline stroke expected, got {baseline:?}");
+    };
+    assert_eq!(style.color, theme.baseline_color());
+    assert_eq!(
+        path.verbs(),
+        [
+            PathVerb::MoveTo(point(x, layout.plot.y)),
+            PathVerb::LineTo(point(x, layout.plot.bottom())),
+        ]
+    );
+}
+
+#[test]
+fn two_category_axes_have_their_baseline_at_the_bottom() {
+    use crate::resolve::ValueAxis;
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Category, ScaleKind::Category)
+        .unwrap();
+    let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
+    assert_eq!(resolved.baseline.axis, ValueAxis::Y);
+    assert_eq!(layout.baseline_y(), layout.plot.bottom());
+    assert!(layout.x_grid.is_empty() && layout.y_grid.is_empty());
 }

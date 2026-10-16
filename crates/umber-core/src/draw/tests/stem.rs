@@ -50,12 +50,15 @@ fn linear_stem_domain_includes_zero() {
             .stem(nums(&[1.0, 2.0]), &values, StemOptions::default())
             .unwrap();
         let (resolved, _) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
-        let (lo, hi) = resolved.y.scale.domain();
+        let (lo, hi) = resolved.y.continuous_scale().domain();
         assert!(lo <= 0.0 && hi >= 0.0, "{lo}..{hi}");
         for y in values {
             assert!((lo..=hi).contains(&y));
         }
-        near(resolved.baseline.get(), resolved.y.scale.normalize(0.0));
+        near(
+            resolved.baseline.pos.get(),
+            resolved.y.continuous_scale().normalize(0.0),
+        );
     }
 }
 
@@ -75,7 +78,7 @@ fn log_stem_starts_at_baseline() {
             panic!("stem stroke expected")
         };
         for part in subpaths(path) {
-            near(f64::from(part[0].y), layout.baseline_y);
+            near(f64::from(part[0].y), layout.baseline_y());
         }
         if explicit {
             let parts = subpaths(path);

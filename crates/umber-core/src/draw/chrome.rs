@@ -5,6 +5,7 @@ use super::mapping::point;
 use super::stroke::stroke_width;
 use crate::geometry::{Path, Point};
 use crate::layout::{Label, Layout};
+use crate::resolve::ValueAxis;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle, TextItem};
 use crate::{Dash, GridLines, Rgba, Theme};
 
@@ -101,14 +102,17 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
 
 /// The baseline as its own unclipped group, drawn after the marks so that it stays visible
 /// where marks reach it: a solid line across the plot area at the layout's baseline, in the
-/// theme's baseline color and width.
+/// theme's baseline color and width. A baseline on the y axis runs from left to right, one on
+/// the x axis from top to bottom.
 pub(crate) fn baseline(theme: &Theme, layout: &Layout) -> Item {
     let plot = layout.plot;
+    let at = layout.baseline.at;
+    let path = match layout.baseline.axis {
+        ValueAxis::Y => segment(point(plot.x, at), point(plot.right(), at)),
+        ValueAxis::X => segment(point(at, plot.y), point(at, plot.bottom())),
+    };
     let stroke = Item::Stroke {
-        path: segment(
-            point(plot.x, layout.baseline_y),
-            point(plot.right(), layout.baseline_y),
-        ),
+        path,
         style: StrokeStyle {
             color: theme.baseline_color(),
             width: stroke_width(theme.baseline_width()),

@@ -3,7 +3,7 @@
 
 use super::MarkContext;
 use super::clip::{Bounds, clip_polyline};
-use super::mapping::{AxisMaps, AxisPoint, PlotPoint, axis_x, axis_y};
+use super::mapping::{AxisMaps, AxisPoint, PlotPoint, axis_values};
 use crate::downsample::clipped_m4_indices;
 use crate::geometry::Path;
 use crate::layout::Area;
@@ -42,8 +42,8 @@ pub(super) fn line_points(
     resolved: &Resolved,
     line: &LineMark,
 ) -> (Vec<f64>, Vec<f64>) {
-    let xs = axis_x(&resolved.x, line.x());
-    let ys = axis_y(&resolved.y, line.y());
+    let xs = axis_values(&resolved.x, line.x());
+    let ys = axis_values(&resolved.y, line.y());
     if resolved.x.is_category() {
         (xs, ys)
     } else {

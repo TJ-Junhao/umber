@@ -143,7 +143,7 @@ impl Default for ScatterOptions {
 /// match axes.marks() {
 ///     [Mark::Line(line)] => {
 ///         assert_eq!(line.x(), &AxisData::Numbers(vec![0.0, 1.0]));
-///         assert_eq!(line.y(), &[2.0, 3.0]);
+///         assert_eq!(line.y(), &AxisData::Numbers(vec![2.0, 3.0]));
 ///         assert!(line.options().label.is_empty());
 ///     }
 ///     other => panic!("unexpected marks {other:?}"),
@@ -267,7 +267,7 @@ impl Mark {
 /// axes.line(AxisData::Categories(vec!["a".into()]), &[1.0], LineOptions::default())?;
 /// let Some(Mark::Line(line)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(line.x(), &AxisData::Categories(vec!["a".into()]));
-/// assert_eq!(line.y(), &[1.0]);
+/// assert_eq!(line.y(), &AxisData::Numbers(vec![1.0]));
 /// assert_eq!(line.options().dash, Dash::Solid);
 /// # Ok::<(), umber_core::Error>(())
 /// ```
@@ -302,7 +302,7 @@ impl LineMark {
 
     /// The y values, as many as the x values.
     #[must_use]
-    pub fn y(&self) -> &[f64] {
+    pub fn y(&self) -> &AxisData {
         self.series.y()
     }
 
@@ -344,7 +344,7 @@ impl fmt::Debug for LineMark {
 /// axes.scatter(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], ScatterOptions::default())?;
 /// let Some(Mark::Scatter(scatter)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(scatter.x(), &AxisData::Numbers(vec![0.0, 1.0]));
-/// assert_eq!(scatter.y(), &[2.0, 3.0]);
+/// assert_eq!(scatter.y(), &AxisData::Numbers(vec![2.0, 3.0]));
 /// assert_eq!(scatter.options().marker, Marker::Circle);
 /// # Ok::<(), umber_core::Error>(())
 /// ```
@@ -390,7 +390,7 @@ impl ScatterMark {
 
     /// The y values, as many as the x values.
     #[must_use]
-    pub fn y(&self) -> &[f64] {
+    pub fn y(&self) -> &AxisData {
         self.series.y()
     }
 
@@ -433,7 +433,7 @@ impl fmt::Debug for ScatterMark {
 /// axes.area(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], AreaOptions::default())?;
 /// let Some(Mark::Area(area)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(area.x(), &AxisData::Numbers(vec![0.0, 1.0]));
-/// assert_eq!(area.y(), &[2.0, 3.0]);
+/// assert_eq!(area.y(), &AxisData::Numbers(vec![2.0, 3.0]));
 /// assert_eq!(area.options().dash, Dash::Solid);
 /// # Ok::<(), umber_core::Error>(())
 /// ```
@@ -459,7 +459,7 @@ impl AreaMark {
 
     /// The y values, as many as the x values.
     #[must_use]
-    pub fn y(&self) -> &[f64] {
+    pub fn y(&self) -> &AxisData {
         self.line.y()
     }
 

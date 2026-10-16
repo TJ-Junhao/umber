@@ -141,3 +141,51 @@ fn marks_and_gridlines_share_the_log_normalization() {
         );
     }
 }
+
+#[test]
+fn both_axes_map_through_their_scales() {
+    use super::super::mapping::{AxisMaps, AxisPoint, axis_numbers, axis_value, axis_values};
+    use crate::resolve::{AxisScale, ResolvedAxis};
+    use crate::{CategoryScale, ContinuousScale, Transform};
+    let plot = Area {
+        x: 10.0,
+        y: 20.0,
+        width: 200.0,
+        height: 100.0,
+    };
+    let names = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<String>>();
+    let category = ResolvedAxis {
+        scale: AxisScale::Category(CategoryScale::from_first_appearance(["a", "b"])),
+        ticks: Vec::new(),
+    };
+    let linear = ResolvedAxis {
+        scale: AxisScale::Continuous(
+            ContinuousScale::new(Transform::Linear, 0.0, 4.0, "test").unwrap(),
+        ),
+        ticks: Vec::new(),
+    };
+    // A category y axis maps band centers bottom up, as a category x axis maps them left to
+    // right, and a linear axis maps its values the same way on either side.
+    let names_ab = AxisData::Categories(names(&["a", "b", "z"]));
+    let centers = axis_values(&category, &names_ab);
+    assert_eq!(&centers[..2], &[0.25, 0.75]);
+    assert!(centers[2].is_nan());
+    for (x, y) in [(&linear, &category), (&category, &linear)] {
+        let maps = AxisMaps::new(x, y, plot);
+        let low = maps.to_plot(AxisPoint::new(maps.x.lo, maps.y.lo));
+        let high = maps.to_plot(AxisPoint::new(maps.x.hi, maps.y.hi));
+        assert_eq!((low.x, low.y), (plot.x, plot.bottom()));
+        assert_eq!((high.x, high.y), (plot.right(), plot.y));
+    }
+    let maps = AxisMaps::new(&linear, &category, plot);
+    let point = maps.to_plot(AxisPoint::new(axis_value(&linear, 1.0), centers[1]));
+    assert_eq!((point.x, point.y), (60.0, 45.0));
+    // Numbers have no place on a category axis.
+    assert!(axis_value(&category, 1.0).is_nan());
+    assert!(
+        axis_numbers(&category, &[1.0, 2.0])
+            .iter()
+            .all(|v| v.is_nan())
+    );
+    assert_eq!(axis_numbers(&linear, &[1.0, f64::NAN])[0], 1.0);
+}

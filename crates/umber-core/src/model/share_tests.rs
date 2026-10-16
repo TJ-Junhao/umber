@@ -146,7 +146,7 @@ fn shared_error_bar_categories_follow_panel_order_and_allow_references() {
         panic!("category scale")
     };
     assert_eq!(scale.categories(), ["b", "c", "a"]);
-    let (low, high) = panels[0].0.y.scale.domain();
+    let (low, high) = panels[0].0.y.continuous_scale().domain();
     assert!(low <= -10.0 && high >= 40.0);
     assert!(f.to_scene(&lib).is_ok());
 }
@@ -659,7 +659,15 @@ fn shared_x_ticks_fit_the_labeled_narrow_panels_above_a_wide_panel() {
             &lib,
             crate::layout::TickSpacing::LabelsApart,
         );
-        crate::resolve::resolve_x(marks.iter(), limits.x, &x, None)
+        let (axis, _) = crate::resolve::resolve_axis(
+            marks.iter(),
+            crate::resolve::ValueAxis::X,
+            limits.orientation(),
+            limits.x,
+            &x,
+            None,
+        );
+        axis
     };
     let wide = ticks_for(panels[2].1.plot.size());
     let narrow = ticks_for(panels[0].1.plot.size());
@@ -737,7 +745,7 @@ proptest! {
             let x = &all[groups.x[i]].0.x;
             let y = &all[groups.y[i]].0.y;
             prop_assert_eq!(bits(r.x.continuous().unwrap()), bits(x.continuous().unwrap()));
-            prop_assert_eq!(bits(&r.y.scale), bits(&y.scale));
+            prop_assert_eq!(bits(r.y.continuous_scale()), bits(y.continuous_scale()));
             prop_assert_eq!(ticks(&r.x.ticks), ticks(&x.ticks));
             prop_assert_eq!(ticks(&r.y.ticks), ticks(&y.ticks));
         }

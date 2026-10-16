@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use super::axis_data::AxisData;
 use super::bar::{Arrangement, Series};
 use super::box_plot::Distribution;
+use super::share::SharedAxis;
 use crate::binning::{BinCount, MAX_BINS};
 use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
@@ -14,7 +15,7 @@ use crate::stacking::Totals;
 use crate::{ContinuousScale, Error, Result, ScaleKind, Transform};
 
 /// The hint for an x axis of the wrong kind for limits or numeric data.
-const X_SCALE_HINT: &str = "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes().";
+const X_SCALE_HINT: &str = SharedAxis::X.numeric_scale_hint();
 
 /// The hint for an infinite line value.
 pub(super) const LINE_GAP_HINT: &str = "use NaN to leave a gap in the line.";
@@ -92,14 +93,13 @@ fn check_numbers(
 }
 
 /// Validates a whole series for axes with an x axis of scale kind `x_kind` and a y axis of
-/// transform `y_transform`, before it is stored, so a failed call changes nothing. An infinite
-/// value gets `gap_hint`.
+/// scale kind `y_kind`, before it is stored, so a failed call changes nothing: the lengths, then
+/// `x` against its axis, then `y` against its axis (see [`check_axis_data`]). An infinite value
+/// gets `gap_hint`.
 pub(super) fn check_series(
     context: &'static str,
-    x_kind: ScaleKind,
-    y_transform: Transform,
-    x: &AxisData,
-    y: &[f64],
+    (x_kind, y_kind): (ScaleKind, ScaleKind),
+    (x, y): (&AxisData, &AxisData),
     gap_hint: &'static str,
 ) -> Result<()> {
     if x.len() != y.len() {
@@ -112,33 +112,40 @@ pub(super) fn check_series(
             ),
         ));
     }
-    check_x_data(context, x_kind, x, gap_hint)?;
-    check_numbers(context, ("y", "y"), y, y_transform, gap_hint)
+    check_axis_data(context, SharedAxis::X, x_kind, x, gap_hint)?;
+    check_axis_data(context, SharedAxis::Y, y_kind, y, gap_hint)
 }
 
-/// Checks the x values of a series against the x axis of scale kind `x_kind`: names need a
-/// category axis, numbers a linear or log axis and are checked by [`check_numbers`].
-fn check_x_data(
+/// Checks the values `data` of a series along `axis` against that axis, of scale kind `kind`:
+/// names need a category axis, numbers a linear or log axis and are checked by
+/// [`check_numbers`].
+fn check_axis_data(
     context: &'static str,
-    x_kind: ScaleKind,
-    x: &AxisData,
+    axis: SharedAxis,
+    kind: ScaleKind,
+    data: &AxisData,
     gap_hint: &'static str,
 ) -> Result<()> {
-    match (x, x_kind.transform()) {
+    let name = axis.name();
+    match (data, kind.transform()) {
         (AxisData::Categories(_), None) => Ok(()),
-        (AxisData::Numbers(values), Some(x_transform)) => {
-            check_numbers(context, ("x", "x"), values, x_transform, gap_hint)
+        (AxisData::Numbers(values), Some(transform)) => {
+            check_numbers(context, (name, name), values, transform, gap_hint)
         }
         (AxisData::Numbers(_), None) => Err(Error::data(
             context,
-            "x holds numbers but the x axis is a category axis; pass category names.",
+            format!(
+                "{name} holds numbers but the {name} axis is a category axis; pass category names."
+            ),
         )
-        .with_hint(X_SCALE_HINT)),
+        .with_hint(axis.numeric_scale_hint())),
         (AxisData::Categories(_), Some(_)) => Err(Error::data(
             context,
-            "x holds category names but the x axis is not a category axis; pass numbers.",
+            format!(
+                "{name} holds category names but the {name} axis is not a category axis; pass numbers."
+            ),
         )
-        .with_hint("pass x=Scale.category() to Figure.add_axes().")),
+        .with_hint(axis.category_scale_hint())),
     }
 }
 
@@ -429,7 +436,7 @@ fn check_intervals(
 /// error, under `context`:
 ///
 /// 1. `x`, `low` and `high` have the same length;
-/// 2. `x` against the x axis (see [`check_series`]);
+/// 2. `x` against the x axis (see [`check_axis_data`]);
 /// 3. `low`, then `high`, against the y axis (see [`check_numbers`]);
 /// 4. no `low[i]` exceeds `high[i]`; an index where either is NaN is not compared.
 pub(super) fn check_y_error_bars(
@@ -440,7 +447,7 @@ pub(super) fn check_y_error_bars(
     limits: (&[f64], &[f64]),
 ) -> Result<()> {
     check_interval_lengths(context, "x", x.len(), limits)?;
-    check_x_data(context, x_kind, x, ERROR_BAR_GAP_HINT)?;
+    check_axis_data(context, SharedAxis::X, x_kind, x, ERROR_BAR_GAP_HINT)?;
     check_intervals(context, y_transform, limits)
 }
 
@@ -925,19 +932,24 @@ fn check_stacked_totals(
     Ok(())
 }
 
-/// Checks explicit limits for an x axis of `kind` and returns the scale they define, with the
-/// limits unchanged as its domain. The y axis is always linear or log, so its limits need no
-/// such check.
-pub(super) fn check_x_limits(kind: ScaleKind, low: f64, high: f64) -> Result<ContinuousScale> {
-    const CONTEXT: &str = "Axes.xlim()";
+/// Checks explicit limits for the setter `context` of `axis`, of scale kind `kind`, and returns
+/// the scale they define, with the limits unchanged as its domain: `Error::Usage` on a category
+/// axis, whose extent is its categories, then the limits as [`ContinuousScale::new`] checks
+/// them.
+pub(super) fn check_limits(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+    (low, high): (f64, f64),
+) -> Result<ContinuousScale> {
     let Some(transform) = kind.transform() else {
         return Err(Error::usage(
-            CONTEXT,
+            context,
             "this is a category axis; limits apply to linear and log axes only.",
         )
-        .with_hint(X_SCALE_HINT));
+        .with_hint(axis.numeric_scale_hint()));
     };
-    ContinuousScale::new(transform, low, high, CONTEXT)
+    ContinuousScale::new(transform, low, high, context)
 }
 
 /// The longest text, in characters, of a tick label or of a tick format's prefix or suffix.
@@ -981,11 +993,12 @@ pub(crate) fn check_text(
     .with_hint("shorten the text; it would not fit the figure."))
 }
 
-/// The transform of an x axis of `kind` for the tick setter `context`, or `Error::Usage` on a
-/// category axis, whose ticks are its categories. `what` names what the setter sets, as
-/// `"ticks"` or `"tick formats"`.
-pub(super) fn check_x_tick_axis(
+/// The transform of `axis`, of scale kind `kind`, for the tick setter `context`, or
+/// `Error::Usage` on a category axis, whose ticks are its categories. `what` names what the
+/// setter sets, as `"ticks"` or `"tick formats"`.
+pub(super) fn check_tick_axis(
     context: &'static str,
+    axis: SharedAxis,
     kind: ScaleKind,
     what: &str,
 ) -> Result<Transform> {
@@ -994,7 +1007,20 @@ pub(super) fn check_x_tick_axis(
             context,
             format!("this is a category axis; {what} apply to linear and log axes only."),
         )
-        .with_hint(X_SCALE_HINT)
+        .with_hint(axis.numeric_scale_hint())
+    })
+}
+
+/// The transform of the y axis, of scale kind `kind`, for the mark method `context`, which
+/// draws on a numeric y axis only: `Error::Usage` naming `y` on a category axis.
+pub(super) fn check_numeric_y(context: &'static str, kind: ScaleKind) -> Result<Transform> {
+    kind.transform().ok_or_else(|| {
+        Error::usage(
+            context,
+            format!("y is a category scale; {context} needs a numeric y axis."),
+        )
+        .with_parameter("y")
+        .with_hint("use a linear or log y axis.")
     })
 }
 

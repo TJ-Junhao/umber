@@ -4,7 +4,9 @@ use super::super::fill::AREA_ALPHA;
 use super::super::line::downsample_columns;
 use super::{mark_group, plot_of, subpaths};
 use crate::model::{Figure, Series};
-use crate::resolve::{AnchorX, EndKind, Limits, ResolvedMark, SeriesKind, resolve_marks};
+use crate::resolve::{
+    AnchorX, EndKind, Limits, ResolvedMark, SeriesKind, ValueAxis, resolve_marks,
+};
 use crate::scene::{Item, Paint};
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{Dash, FillStyle, FontLibrary, LogBase, ScaleKind, Theme};
@@ -228,8 +230,8 @@ fn resolved_layers_have_area_keys_and_direct_anchors_at_each_upper_end() {
     };
     assert!(mark.grows_from_baseline() && mark.has_exact_x_extent() && !mark.is_reference());
     assert_eq!(mark.x_numbers().collect::<Vec<_>>(), [0.0, 1.0, 2.0]);
-    assert_eq!(mark.x_categories().count(), 0);
-    let values = mark.y_values().collect::<Vec<_>>();
+    assert_eq!(mark.categories(ValueAxis::X).count(), 0);
+    let values = mark.y_numbers().collect::<Vec<_>>();
     assert_eq!(&values[..2], &[1.0, 2.0]);
     assert_eq!(&values[3..5], &[4.0, 6.0]);
     assert!(values[2].is_nan() && values[5].is_nan());

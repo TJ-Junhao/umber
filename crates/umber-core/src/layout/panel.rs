@@ -11,10 +11,10 @@ use super::inset::TickSpan;
 use super::legend::{self, LegendRow};
 use super::{
     AXIS_LABEL_GAP, Area, BODY_LINE, END_LABEL_SHARE, HEADER_GAP, Label, Layout, LayoutInput,
-    PADDING, Styles, TITLE_GAP, TITLE_LINE, X_LABEL_GAP, Y_LABEL_CENTER, Y_LABEL_GAP,
-    baseline_in_line, figure_height_hint, measure, measure_ticks, metrics,
+    PADDING, PlacedBaseline, Styles, TITLE_GAP, TITLE_LINE, X_LABEL_GAP, Y_LABEL_CENTER,
+    Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, measure_ticks, metrics,
 };
-use crate::resolve::{NormalizedPos, Resolved, coincides};
+use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
 use crate::{Align, Figure, FontLibrary, Result};
 
 /// The figure title size as a multiple of the theme's panel title size.
@@ -608,12 +608,15 @@ pub(crate) fn place_panel(
 
     let direct = input.legend.direct.placed(resolved, plot, frame);
     let baseline = resolved.baseline;
-    let baseline_y = plot.y_at(baseline);
+    // The baseline is drawn in place of the gridline it coincides with.
+    let off_baseline = |axis: ValueAxis| {
+        move |tick: &&AxisTick| baseline.axis != axis || !coincides(tick.pos, baseline.pos)
+    };
     let y_grid = resolved
         .y
         .ticks
         .iter()
-        .filter(|tick| !coincides(tick.pos, baseline))
+        .filter(off_baseline(ValueAxis::Y))
         .map(|tick| plot.y_at(tick.pos))
         .collect();
     let x_grid = if resolved.x.is_category() {
@@ -623,6 +626,7 @@ pub(crate) fn place_panel(
             .x
             .ticks
             .iter()
+            .filter(off_baseline(ValueAxis::X))
             .map(|tick| plot.x_at(tick.pos))
             .collect()
     };
@@ -640,7 +644,7 @@ pub(crate) fn place_panel(
         y_tick_labels: y_labels.into_iter().map(|(_, label)| label).collect(),
         y_grid,
         x_grid,
-        baseline_y,
+        baseline: PlacedBaseline::on(&plot, baseline),
         frame,
     }
 }
@@ -923,7 +927,8 @@ mod tests {
             for (i, x) in layout.x_grid.iter().enumerate() {
                 bits.num(&format!("x_grid[{i}]"), *x);
             }
-            bits.num("baseline_y", layout.baseline_y);
+            bits.text(format!("baseline.axis {:?}", layout.baseline.axis));
+            bits.num("baseline.at", layout.baseline.at);
             let frame = layout.frame;
             bits.area(
                 "frame",

@@ -2,10 +2,10 @@
 
 use super::MarkContext;
 use super::bar_shape::BarFrame;
-use super::mapping::axis_y_value;
+use super::mapping::axis_value;
 use crate::geometry::Path;
 use crate::model::{BarGroupMark, BarMark, SeriesView};
-use crate::resolve::{AxisScale, ResolvedAxis, ResolvedContinuousAxis};
+use crate::resolve::{AxisScale, ResolvedAxis};
 use crate::scene::{FillRule, Item, Paint};
 use crate::stacking::Stacks;
 use crate::{CategoryScale, Rgba, Theme};
@@ -66,12 +66,12 @@ pub(super) fn group_slots(group: f64, count: usize, gap: f64) -> (f64, f64) {
 
 /// The [`BarFrame`] of bars `width` x axis units wide, rounded by the theme's corner radius; on a
 /// category x axis an axis unit is the plot width.
-fn frame(context: &MarkContext<'_>, y: &ResolvedContinuousAxis, width: f64) -> BarFrame {
+fn frame(context: &MarkContext<'_>, y: &ResolvedAxis, width: f64) -> BarFrame {
     let radius = corner_radius(context.theme);
     BarFrame::new(
         context.maps,
         y,
-        context.baseline,
+        context.baseline.pos,
         radius,
         width * context.plot.width,
     )
@@ -95,7 +95,7 @@ fn push_bar(outline: Option<Path>, color: Rgba, items: &mut Vec<Item>) {
 pub(super) fn bar_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
-    y: &ResolvedContinuousAxis,
+    y: &ResolvedAxis,
     mark: &BarMark,
     color: Rgba,
     items: &mut Vec<Item>,
@@ -110,7 +110,7 @@ pub(super) fn bar_items(
         let Some(&height) = mark.heights().get(i) else {
             continue;
         };
-        let end = axis_y_value(y, height);
+        let end = axis_value(y, height);
         let outline = bars.outline(bar_span(categories, index), bars.base(), end, true);
         push_bar(outline, color, items);
     }
@@ -126,7 +126,7 @@ pub(super) fn bar_items(
 pub(super) fn grouped_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
-    y: &ResolvedContinuousAxis,
+    y: &ResolvedAxis,
     mark: &BarGroupMark,
     series: &[(SeriesView<'_>, Rgba)],
     items: &mut Vec<Item>,
@@ -144,7 +144,7 @@ pub(super) fn grouped_items(
                 continue;
             };
             let left = group_left + j as f64 * (width + gap);
-            let end = axis_y_value(y, height);
+            let end = axis_value(y, height);
             let outline = bars.outline((left, left + width), bars.base(), end, true);
             push_bar(outline, *color, items);
         }
@@ -163,7 +163,7 @@ pub(super) fn grouped_items(
 pub(super) fn stacked_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
-    y: &ResolvedContinuousAxis,
+    y: &ResolvedAxis,
     mark: &BarGroupMark,
     series: &[(SeriesView<'_>, Rgba)],
     stacks: &Stacks,
@@ -184,9 +184,9 @@ pub(super) fn stacked_items(
             let from = if segment.bottom == 0.0 {
                 bars.base()
             } else {
-                axis_y_value(y, segment.bottom)
+                axis_value(y, segment.bottom)
             };
-            let to = axis_y_value(y, segment.top);
+            let to = axis_value(y, segment.top);
             let inner = (segment.bottom != 0.0, !segment.outermost);
             let Some((from, to)) = inset_segment(from, to, inner, half_gap) else {
                 continue;

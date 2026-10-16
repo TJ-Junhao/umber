@@ -93,7 +93,7 @@ fn plain_bars_take_their_share_of_the_band_from_the_baseline() {
         } else {
             (lo.y, hi.y)
         };
-        assert_near(base, layout.baseline_y);
+        assert_near(base, layout.baseline_y());
         assert!((end - base) * (height as f32) < 0.0, "y points down");
         // Graphite has no corner radius: square corners.
         assert_eq!(cubics(path), 0);
@@ -198,7 +198,7 @@ fn negative_bar_rounds_its_bottom() {
     // The base sits on the baseline, at the top of the plot (the domain ends at 0), and the
     // bar grows downwards; its square corners are at the base.
     let (lo, hi) = bounds(path);
-    assert_near(lo.y, layout.baseline_y);
+    assert_near(lo.y, layout.baseline_y());
     assert_near(lo.y, layout.plot.y);
     assert!(hi.y > lo.y);
     let base_corners = path
@@ -263,11 +263,14 @@ fn log_bars_grow_from_the_baseline() {
     let f = bar_figure(Theme::graphite(), log, &["a", "b"], &[3.0, 1000.0]);
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     let layout = layout_of(&f);
-    assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
+    assert!(
+        layout.baseline_y() < layout.plot.bottom() - 1.0,
+        "{layout:?}"
+    );
     let fills = bars(&scene);
     assert_eq!(fills.len(), 2);
     for (path, _) in &fills {
-        assert_near(bounds(path).1.y, layout.baseline_y);
+        assert_near(bounds(path).1.y, layout.baseline_y());
     }
     // A bar as high as the nice lower limit, 10, moves that limit a decade down, to 1: the
     // bar rises above the baseline and is drawn.
@@ -278,8 +281,8 @@ fn log_bars_grow_from_the_baseline() {
     assert_eq!(fills.len(), 2);
     for (path, _) in &fills {
         let (top, base) = bounds(path);
-        assert_near(base.y, layout.baseline_y);
-        assert!(f64::from(top.y) < layout.baseline_y - 1.0, "{top:?}");
+        assert_near(base.y, layout.baseline_y());
+        assert!(f64::from(top.y) < layout.baseline_y() - 1.0, "{top:?}");
     }
     // Explicit limits are not padded: the baseline, and the bars, start at the plot bottom.
     let mut f = bar_figure(Theme::graphite(), log, &["a", "b"], &[10.0, 1000.0]);
@@ -288,9 +291,9 @@ fn log_bars_grow_from_the_baseline() {
     let layout = layout_of(&f);
     let fills = bars(&scene);
     assert_eq!(fills.len(), 2);
-    assert_near(layout.plot.bottom() as f32, layout.baseline_y);
+    assert_near(layout.plot.bottom() as f32, layout.baseline_y());
     for (path, _) in &fills {
-        assert_near(bounds(path).1.y, layout.baseline_y);
+        assert_near(bounds(path).1.y, layout.baseline_y());
     }
 }
 
@@ -410,7 +413,7 @@ fn stacked_signs_stack_separately() {
         panic!("expected three segments, got {fills:?}")
     };
     let (up, down, top) = (*up, *down, *top);
-    let base = layout.baseline_y;
+    let base = layout.baseline_y();
     // Points per unit, from the outermost positive segment, whose end at 7 is not inset.
     let (top_lo, top_hi) = bounds(top);
     let unit = (base - f64::from(top_lo.y)) / 7.0;
@@ -496,10 +499,13 @@ fn log_stacks_start_at_the_baseline() {
     assert_eq!(fills.len(), 4);
     // The first segment of each stack starts at the baseline, at the nice lower limit 1, above
     // the padded plot bottom; the second starts where the first ends.
-    assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
+    assert!(
+        layout.baseline_y() < layout.plot.bottom() - 1.0,
+        "{layout:?}"
+    );
     for pair in fills.chunks(2) {
         let (first, second) = (bounds(pair[0].0), bounds(pair[1].0));
-        assert_near(first.1.y, layout.baseline_y);
+        assert_near(first.1.y, layout.baseline_y());
         // One point apart: the stack gap.
         assert_near(first.0.y - second.1.y, 1.0);
         assert!(second.0.y < first.0.y);
@@ -544,7 +550,7 @@ fn one_stack(
     let f = group_figure(theme, ScaleKind::Linear, true, &["a"], heights);
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
-    let base = layout_of(&f).baseline_y;
+    let base = layout_of(&f).baseline_y();
     let fills = bars(&scene);
     let spans: Vec<(Point, Point)> = fills.iter().map(|(path, _)| bounds(path)).collect();
     let curves: Vec<usize> = fills.iter().map(|(path, _)| cubics(path)).collect();

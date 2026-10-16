@@ -7,7 +7,7 @@ use super::MarkContext;
 use super::clip::{ClampedPoint, clamp_polyline};
 use super::fill::AREA_ALPHA;
 use super::line::{LineClip, downsample_columns, downsample_range};
-use super::mapping::{PlotPoint, axis_x_value, axis_y};
+use super::mapping::{PlotPoint, axis_numbers, axis_value};
 use crate::Rgba;
 use crate::downsample::clipped_m4_indices;
 use crate::geometry::Path;
@@ -147,10 +147,10 @@ fn gapped_points(resolved: &Resolved, mark: &BandMark) -> (Vec<f64>, Vec<f64>, V
     let mut xs: Vec<f64> = mark
         .x()
         .iter()
-        .map(|&v| axis_x_value(&resolved.x, v))
+        .map(|&v| axis_value(&resolved.x, v))
         .collect();
-    let mut lows = axis_y(&resolved.y, mark.low());
-    let mut highs = axis_y(&resolved.y, mark.high());
+    let mut lows = axis_numbers(&resolved.y, mark.low());
+    let mut highs = axis_numbers(&resolved.y, mark.high());
     for ((x, low), high) in xs.iter_mut().zip(&mut lows).zip(&mut highs) {
         if x.is_nan() || low.is_nan() || high.is_nan() {
             (*x, *low, *high) = (f64::NAN, f64::NAN, f64::NAN);

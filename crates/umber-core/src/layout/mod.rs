@@ -36,7 +36,7 @@ use std::collections::HashMap;
 
 use crate::error::{number, quoted};
 use crate::model::Axes;
-use crate::resolve::{AxisTick, NormalizedPos};
+use crate::resolve::{AxisTick, Baseline, NormalizedPos, ValueAxis};
 use crate::{Error, FontLibrary, Result, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
@@ -173,17 +173,50 @@ pub(crate) struct Layout {
     pub y_tick_labels: Vec<Label>,
     /// The y coordinates of horizontal gridlines, without the baseline's.
     pub y_grid: Vec<f64>,
-    /// The x coordinates of vertical gridlines; none on a category axis.
+    /// The x coordinates of vertical gridlines, without the baseline's; none on a category axis.
     pub x_grid: Vec<f64>,
-    /// The y coordinate of the baseline.
-    pub baseline_y: f64,
+    /// The baseline, across the plot area.
+    pub baseline: PlacedBaseline,
     /// The part of the canvas that belongs to the axes: the whole canvas for a figure of one
     /// axes; on a grid, the axes' cells with their bands, reaching halfway into the gap next to
     /// a neighbouring cell and to the canvas edge on the grid's outer sides.
     pub frame: Frame,
 }
 
+/// The baseline as laid out: the line across the plot area at the baseline's position along
+/// its axis, the value axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PlacedBaseline {
+    /// The axis the baseline sits on: y for a horizontal line, x for a vertical one.
+    pub axis: ValueAxis,
+    /// The plot coordinate of the baseline along that axis: a y for a baseline on the y axis,
+    /// an x for one on the x axis.
+    pub at: f64,
+}
+
+impl PlacedBaseline {
+    /// The baseline `baseline` placed on the plot area `plot`.
+    pub fn on(plot: &Area, baseline: Baseline) -> PlacedBaseline {
+        let at = match baseline.axis {
+            ValueAxis::X => plot.x_at(baseline.pos),
+            ValueAxis::Y => plot.y_at(baseline.pos),
+        };
+        PlacedBaseline {
+            axis: baseline.axis,
+            at,
+        }
+    }
+}
+
 impl Layout {
+    /// The y coordinate of a baseline on the y axis, for tests of vertical marks.
+    #[cfg(test)]
+    #[track_caller]
+    pub fn baseline_y(&self) -> f64 {
+        assert_eq!(self.baseline.axis, ValueAxis::Y, "a baseline on the x axis");
+        self.baseline.at
+    }
+
     /// The free room left of the plot area: up to the right edge of the furthest-reaching y
     /// tick label, or to the frame's left edge when there are no y tick labels. Never negative.
     pub fn room_left(&self) -> f64 {
@@ -1020,13 +1053,13 @@ mod tests {
             let mut f = figure(theme);
             f.single_axes_mut().ylim(0.0, 100.0).unwrap();
             let (resolved, layout) = plan_of(&f);
-            assert_eq!(resolved.baseline.get(), 0.0);
+            assert_eq!(resolved.baseline.pos.get(), 0.0);
             // The baseline replaces the gridline at 0.
             assert!(
                 layout
                     .y_grid
                     .iter()
-                    .all(|&y| (y - layout.baseline_y).abs() > 1e-6)
+                    .all(|&y| (y - layout.baseline_y()).abs() > 1e-6)
             );
             assert_eq!(layout.y_grid.len() + 1, resolved.y.ticks.len());
             // Every tick has a label, the baseline's included, right-aligned 6 pt left of the

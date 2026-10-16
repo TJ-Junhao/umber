@@ -196,8 +196,6 @@ impl Figure {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// assert!(figure.add_axes(ScaleKind::Linear, ScaleKind::Category).is_err());
-    /// assert_eq!(figure.panels().count(), 0);
     /// figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?.title("Sales");
     /// let err = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap_err();
     /// assert_eq!(
@@ -221,7 +219,6 @@ impl Figure {
     /// - `at.col` is `Auto` on a grid of more than one column, or outside the grid (`col`);
     /// - `at.row_span` is below 1, or the rows spanned run past the last row (`row_span`);
     /// - `at.col_span` is below 1, or the columns spanned run past the last column (`col_span`);
-    /// - `y` is a category scale, because the y axis is always linear or log (`y`);
     /// - a cell is taken by an axes already added (`row`): the message names the first taken
     ///   cell in row-major order and the top-left cell of the axes that holds it;
     /// - a shared group would mix scale kinds or log bases (`x`, then `y`);
@@ -267,14 +264,6 @@ impl Figure {
         let row_span = span_in_grid(Dimension::ROW, row, row_span, rows)?;
         let col_span = positive_span(Dimension::COL, at.col_span)?;
         let col_span = span_in_grid(Dimension::COL, col, col_span, cols)?;
-        let Some(y) = y.transform() else {
-            return Err(Error::usage(
-                ADD_AXES,
-                "y is a category scale; the y axis must be linear or log.",
-            )
-            .with_parameter("y")
-            .with_hint("pass y=Scale.linear() or y=Scale.log()."));
-        };
         let cells = CellRange::new(row, col, row_span, col_span);
         let taken = cells.iter().find_map(|cell| {
             self.panels
@@ -296,7 +285,7 @@ impl Figure {
             .with_parameter("row")
             .with_hint("each cell holds one axes; pick an empty cell."));
         }
-        share::check_add(self, cells, x, y.kind())?;
+        share::check_add(self, cells, x, y)?;
         let x_key = self.x_group_of(row, col);
         let y_key = self.y_group_of(row, col);
         let x_settings = Arc::clone(&self.x_groups.entry(x_key).or_default().settings);
@@ -831,9 +820,9 @@ mod tests {
                 grid(3, 3),
                 at(1, 0, 1, 1),
                 category,
-                "y is a category scale; the y axis must be linear or log.",
-                "y",
-                "pass y=Scale.linear() or y=Scale.log().",
+                "row 1, col 0 is taken by the axes added at row 1, col 0.",
+                "row",
+                "each cell holds one axes; pick an empty cell.",
             ),
             case(
                 grid(3, 3),

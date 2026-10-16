@@ -55,7 +55,7 @@ impl Default for StemOptions {
 /// axes.stem(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, -1.0], StemOptions::default())?;
 /// let Some(Mark::Stem(stem)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(stem.x(), &AxisData::Numbers(vec![0.0, 1.0]));
-/// assert_eq!(stem.y(), &[2.0, -1.0]);
+/// assert_eq!(stem.y(), &AxisData::Numbers(vec![2.0, -1.0]));
 /// assert_eq!(stem.options(), &StemOptions::default());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
@@ -107,11 +107,11 @@ impl StemMark {
     /// # let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// axes.stem(AxisData::Numbers(vec![1.0]), &[2.0], StemOptions::default())?;
     /// let Some(Mark::Stem(stem)) = axes.marks().first() else { unreachable!() };
-    /// assert_eq!(stem.y(), &[2.0]);
+    /// assert_eq!(stem.y(), &AxisData::Numbers(vec![2.0]));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
-    pub fn y(&self) -> &[f64] {
+    pub fn y(&self) -> &AxisData {
         self.series.y()
     }
 
