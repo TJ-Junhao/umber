@@ -26,6 +26,11 @@ use crate::{CategoryScale, Error, FontLibrary, Result, Rgba, Theme, TickFormat};
 /// neighbour's size along that axis.
 const OVERLAP: f64 = 1.0;
 
+/// How far, in points, a label may exceed its cell and still count as fitting: the cell size
+/// comes from two rounded edges, so a label of exactly the cell's size can measure larger by a
+/// few parts in 1e13.
+const FIT_TOLERANCE: f64 = 1e-6;
+
 /// The hint of a heatmap whose labels do not fit its cells.
 const LABEL_HINT: &str = "enlarge the figure, write fewer decimals with format, or pass \
                           annotate=False.";
@@ -288,7 +293,7 @@ fn check_fit(context: &'static str, placed: &[(Label, &Cell)]) -> Result<()> {
     };
     let too_wide = placed
         .iter()
-        .filter(|(label, cell)| label.width() > size(cell).0)
+        .filter(|(label, cell)| label.width() > size(cell).0 + FIT_TOLERANCE)
         .max_by(|a, b| a.0.width().total_cmp(&b.0.width()));
     if let Some((label, cell)) = too_wide {
         let (width, room) = widths(label.width(), size(cell).0);
@@ -304,7 +309,7 @@ fn check_fit(context: &'static str, placed: &[(Label, &Cell)]) -> Result<()> {
     let height = |label: &Label| f64::from(label.layout.ascent() + label.layout.descent());
     if let Some((label, cell)) = placed
         .iter()
-        .find(|(label, cell)| height(label) > size(cell).1)
+        .find(|(label, cell)| height(label) > size(cell).1 + FIT_TOLERANCE)
     {
         let (tall, room) = widths(height(label), size(cell).1);
         return Err(Error::style(
@@ -798,6 +803,33 @@ mod tests {
             )
             .unwrap();
         assert!(plain.to_scene(FontLibrary::global()).is_ok());
+    }
+
+    #[test]
+    fn a_label_fitting_its_cell_up_to_rounding_is_accepted() {
+        let theme = Theme::pigment();
+        let label = centered_tick_label(FontLibrary::global(), &theme, "12.5", (0.0, 0.0));
+        let width = label.width();
+        let height = f64::from(label.layout.ascent() + label.layout.descent());
+        // The cell edges are rounded, so the size they give can differ from the label's by a
+        // few parts in 1e13 although the two are equal.
+        let cell_of = |width: f64, height: f64| Cell {
+            at: (0, 0),
+            value: 1.0,
+            color: Rgba::BLACK,
+            bounds: [0.0, 0.0, width, height],
+            right: 0.0,
+            down: 0.0,
+            corner: false,
+        };
+        let nudge = 1e-13 * width.max(height);
+        let fitting = cell_of(width - nudge, height - nudge);
+        assert!(check_fit("Figure.to_scene()", &[(label.clone(), &fitting)]).is_ok());
+        // A label wider or taller by a visible amount is still refused.
+        let narrow = cell_of(width - 0.01, height);
+        assert!(check_fit("Figure.to_scene()", &[(label.clone(), &narrow)]).is_err());
+        let short = cell_of(width, height - 0.01);
+        assert!(check_fit("Figure.to_scene()", &[(label, &short)]).is_err());
     }
 
     #[test]
