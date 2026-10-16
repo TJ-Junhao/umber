@@ -361,9 +361,9 @@ impl<'a> AxesMut<'a> {
     ///
     /// # Errors
     ///
-    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis, and when the x
-    /// ticks have labels given with [`AxesMut::xticks_labeled`] and `format` is not plain
-    /// [`TickFormat::AUTO`].
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis, for
+    /// [`TickFormat::iso`] on a linear or log axis, and when the x ticks have labels given with
+    /// [`AxesMut::xticks_labeled`] and `format` is not plain [`TickFormat::AUTO`].
     ///
     /// # Examples
     ///
@@ -396,8 +396,9 @@ impl<'a> AxesMut<'a> {
     ///
     /// # Errors
     ///
-    /// Errors leave the axes unchanged: `Error::Usage` when the y ticks have labels given with
-    /// [`AxesMut::yticks_labeled`] and `format` is not plain [`TickFormat::AUTO`].
+    /// Errors leave the axes unchanged: `Error::Usage` for [`TickFormat::iso`] on a linear or
+    /// log axis, and when the y ticks have labels given with [`AxesMut::yticks_labeled`] and
+    /// `format` is not plain [`TickFormat::AUTO`].
     ///
     /// # Examples
     ///
