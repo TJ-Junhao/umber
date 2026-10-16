@@ -28,7 +28,10 @@ data before entering those methods and adds no locking of its own. On a regular 
 non-rendering calls with the façade's normalized arguments are serialized. Direct native calls
 can invoke Python buffer callbacks while borrowing the figure; those callbacks can release the
 interpreter or re-enter the figure, causing a borrow conflict even on a GIL build.
-Free-threaded builds are not verified: use one figure per thread there.
+
+Free-threaded CPython 3.14t is supported: the module keeps the GIL disabled, and different
+figures build and render in parallel threads. Calls on one ``Figure`` from several threads do
+overlap there, so any of them may raise PyO3's borrow error; the figure's state stays valid.
 """
 
 from typing import ClassVar, final
