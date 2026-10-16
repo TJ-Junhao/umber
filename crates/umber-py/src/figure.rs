@@ -514,13 +514,23 @@ impl Figure {
         color: &Bound<'_, PyAny>,
         marker: i64,
     ) -> PyResult<()> {
-        let (x, y, sizes) = (shared_floats(x)?, shared_floats(y)?, shared_floats(sizes)?);
+        const CONTEXT: &str = "Axes.bubbles()";
         let options = umber_core::BubbleOptions {
             label,
             color: point_color(color)?,
             marker: enum_value::<Marker>(marker)?,
             ..Default::default()
         };
+        // Coordinates in an int64 buffer are times, of a time axis.
+        if is_int64_buffer(x) || is_int64_buffer(y) {
+            let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
+            return self
+                .axes(row, col)?
+                .bubbles_time(x, y, shared_floats(sizes)?, options)
+                .map(drop)
+                .map_err(core_error);
+        }
+        let (x, y, sizes) = (shared_floats(x)?, shared_floats(y)?, shared_floats(sizes)?);
         self.axes(row, col)?
             .bubbles_shared(x, y, sizes, options)
             .map(drop)
@@ -756,12 +766,18 @@ impl Figure {
         base: f64,
         center: Option<f64>,
     ) -> PyResult<()> {
-        let (x, y, values) = (floats(x_edges)?, floats(y_edges)?, floats(values)?);
+        const CONTEXT: &str = "Axes.mesh()";
+        // Edges in an int64 buffer are times, of a time axis.
+        let (x, y) = (
+            series_data(CONTEXT, "x_edges", x_edges)?,
+            series_data(CONTEXT, "y_edges", y_edges)?,
+        );
+        let values = floats(values)?;
         let (cmap, scale) = cell_colors(cmap, scale, base)?;
         self.axes(row, col)?
-            .mesh(
-                &x,
-                &y,
+            .mesh_time(
+                x,
+                y,
                 &values,
                 MeshOptions {
                     cmap,

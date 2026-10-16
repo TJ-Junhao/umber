@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
+use super::axis_data::SharedValues;
 use super::color_by::PointColor;
-use crate::Marker;
+use crate::{Instant, Marker};
 
 /// Options of a bubble mark.
 ///
@@ -38,7 +39,8 @@ impl Default for BubbleOptions {
 
 /// Validated bubble coordinates, size values and options, shared by clones.
 ///
-/// Sizes are finite values from 0 to 1e300. A zero size or NaN coordinate draws nothing.
+/// Sizes are finite values from 0 to 1e300. A zero size, a NaN coordinate or a missing time
+/// draws nothing.
 /// A zero-size point's position still counts in the axis domains like any point. All bubble
 /// marks on an axes share one size scale; the largest size among points with finite x and y
 /// coordinates maps to the theme's maximum radius. Automatic axis limits fit the whole
@@ -61,8 +63,8 @@ impl Default for BubbleOptions {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct BubbleMark {
-    x: Arc<[f64]>,
-    y: Arc<[f64]>,
+    x: SharedValues,
+    y: SharedValues,
     sizes: Arc<[f64]>,
     options: BubbleOptions,
 }
@@ -70,8 +72,8 @@ pub struct BubbleMark {
 impl BubbleMark {
     /// Stores validated arrays without copying them.
     pub(super) fn new(
-        x: Arc<[f64]>,
-        y: Arc<[f64]>,
+        x: SharedValues,
+        y: SharedValues,
         sizes: Arc<[f64]>,
         options: BubbleOptions,
     ) -> Self {
@@ -83,7 +85,7 @@ impl BubbleMark {
         }
     }
 
-    /// The numeric x coordinates, in data order.
+    /// The numeric x coordinates, in data order; none on a time x axis.
     ///
     /// # Examples
     ///
@@ -98,10 +100,38 @@ impl BubbleMark {
     /// ```
     #[must_use]
     pub fn x(&self) -> &[f64] {
+        self.x.numbers()
+    }
+
+    /// The x times, in data order, `None` for a missing time; none unless the x axis is a time
+    /// axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::sync::Arc;
+    /// # use umber_core::{AxisData, BubbleOptions, Figure, Instant, Mark, ScaleKind, Theme};
+    /// # let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// # let mut axes = f.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let x = [Some(Instant::from_micros(0)?), None];
+    /// let y = AxisData::Numbers(vec![1.0, 2.0]);
+    /// axes.bubbles_time(AxisData::Times(x.to_vec()), y, Arc::from([1.0, 2.0]), BubbleOptions::default())?;
+    /// let Some(Mark::Bubbles(mark)) = axes.marks().first() else { unreachable!() };
+    /// assert_eq!(mark.x_times(), &x);
+    /// assert!(mark.x().is_empty());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_times(&self) -> &[Option<Instant>] {
+        self.x.times()
+    }
+
+    /// The x coordinates as stored: numbers or times.
+    pub(crate) fn x_values(&self) -> &SharedValues {
         &self.x
     }
 
-    /// The y coordinates, one per x coordinate.
+    /// The numeric y coordinates, one per x coordinate; none on a time y axis.
     ///
     /// # Examples
     ///
@@ -116,6 +146,33 @@ impl BubbleMark {
     /// ```
     #[must_use]
     pub fn y(&self) -> &[f64] {
+        self.y.numbers()
+    }
+
+    /// The y times, one per x coordinate, `None` for a missing time; none unless the y axis is
+    /// a time axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::sync::Arc;
+    /// # use umber_core::{AxisData, BubbleOptions, Figure, Instant, Mark, ScaleKind, Theme};
+    /// # let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// # let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// let y = [Some(Instant::from_micros(0)?)];
+    /// let x = AxisData::Numbers(vec![1.0]);
+    /// axes.bubbles_time(x, AxisData::Times(y.to_vec()), Arc::from([1.0]), BubbleOptions::default())?;
+    /// let Some(Mark::Bubbles(mark)) = axes.marks().first() else { unreachable!() };
+    /// assert_eq!(mark.y_times(), &y);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn y_times(&self) -> &[Option<Instant>] {
+        self.y.times()
+    }
+
+    /// The y coordinates as stored: numbers or times.
+    pub(crate) fn y_values(&self) -> &SharedValues {
         &self.y
     }
 

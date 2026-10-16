@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use crate::draw::fill::{AREA_ALPHA, HISTOGRAM_TOP_ALPHA, marker_alpha};
 use crate::model::Figure;
 use crate::resolve::{Anchor, AxisLimits, Limits, ResolvedMark, SeriesKey, SeriesKind};
-use crate::{Dash, FillStyle, LegendStyle, Rgba, Theme};
+use crate::{Dash, FillStyle, LegendStyle, Rgba, ScaleKind, Theme, TickFormat};
 
 /// What the fill of a legend swatch shows: a mark's fill as drawn, composited over the plot
 /// background, or the plain series color for marks drawn without a translucent fill. A
@@ -275,12 +275,20 @@ impl<'a> Legend<'a> {
                 }
                 (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
                     row.push(entry);
-                    // Bubbles need a numeric y axis, whose tick format labels their sizes.
-                    if let (false, ResolvedMark::Bubbles { .. }, AxisLimits::Continuous(y)) =
-                        (seen_bubbles, mark, limits.y)
-                    {
-                        row.extend(mark.size_legend(y.ticks.format()));
-                        seen_bubbles = true;
+                    // A numeric y axis labels the sizes with its tick format; a time y axis has
+                    // no number format, so the sizes take the automatic one.
+                    if let (false, ResolvedMark::Bubbles { .. }) = (seen_bubbles, mark) {
+                        match limits.y {
+                            AxisLimits::Continuous(y) => {
+                                row.extend(mark.size_legend(y.ticks.format()));
+                                seen_bubbles = true;
+                            }
+                            AxisLimits::Time(_) => {
+                                row.extend(mark.size_legend(&TickFormat::AUTO));
+                                seen_bubbles = true;
+                            }
+                            AxisLimits::Category => {}
+                        }
                     }
                 }
             }
@@ -322,7 +330,14 @@ impl<'a> Legend<'a> {
                     if seen.insert(key) {
                         row.push(entry);
                         if !seen_bubbles && matches!(mark, ResolvedMark::Bubbles { .. }) {
-                            row.extend(mark.size_legend(axes.y_tick_format()));
+                            // A time y axis has no number format: the sizes take the automatic one.
+                            let auto = TickFormat::AUTO;
+                            let format = if axes.y_scale() == ScaleKind::Time {
+                                &auto
+                            } else {
+                                axes.y_tick_format()
+                            };
+                            row.extend(mark.size_legend(format));
                             seen_bubbles = true;
                         }
                     }

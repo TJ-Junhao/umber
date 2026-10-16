@@ -5,8 +5,8 @@ use crate::layout::Layout;
 use crate::pipeline::{plan_figure, try_plan_panels};
 use crate::resolve::{Resolved, ResolvedMark, resolve_marks};
 use crate::{
-    AxesMut, AxisData, BubbleOptions, Figure, FontLibrary, Grid, GridIndex, Item, LegendStyle,
-    LineOptions, LogBase, Marker, Placement, ScaleKind, ScatterOptions, Share, Theme,
+    AxesMut, AxisData, BubbleOptions, Figure, FontLibrary, Grid, GridIndex, Instant, Item,
+    LegendStyle, LineOptions, LogBase, Marker, Placement, ScaleKind, ScatterOptions, Share, Theme,
 };
 
 const MARKERS: [Marker; 5] = [
@@ -81,13 +81,12 @@ fn overshoot(
             panic!("a mark group")
         };
         let drawn = data
-            .x()
+            .sizes()
             .iter()
-            .zip(data.y())
-            .zip(data.sizes())
-            .filter(|((x, y), size)| {
-                x.is_finite()
-                    && y.is_finite()
+            .enumerate()
+            .filter(|(i, size)| {
+                !data.x_values().is_gap(*i)
+                    && !data.y_values().is_gap(*i)
                     && crate::bubble_scale::radius(**size, *maximum, *radius) > 0.0
             })
             .count();
@@ -425,4 +424,206 @@ fn refitted_limits_are_rounded_and_padded_once() {
     );
     let ticks: Vec<_> = r.y.ticks.iter().map(|tick| tick.label.as_str()).collect();
     assert_eq!(ticks.first().zip(ticks.last()), Some((&"−15", &"15")));
+}
+
+/// The microseconds in a day.
+const DAY: i64 = 86_400_000_000;
+
+/// The time `n` days after 1970-01-01, present.
+fn day(n: i64) -> Option<Instant> {
+    Some(Instant::from_micros(n * DAY).unwrap())
+}
+
+/// Adds bubbles to the axes of `f`, whose coordinates are each numbers or times.
+fn time_bubbles(f: &mut Figure, x: AxisData, y: AxisData, sizes: &[f64], marker: Marker) {
+    f.single_axes_mut()
+        .bubbles_time(
+            x,
+            y,
+            sizes.into(),
+            BubbleOptions {
+                marker,
+                ..BubbleOptions::default()
+            },
+        )
+        .unwrap();
+}
+
+/// The three axes pairs with a time axis.
+const TIME_PAIRS: [(ScaleKind, ScaleKind); 3] = [
+    (ScaleKind::Time, ScaleKind::Linear),
+    (ScaleKind::Linear, ScaleKind::Time),
+    (ScaleKind::Time, ScaleKind::Time),
+];
+
+/// The coordinates of two corner bubbles and a line between them, each a time on a time axis
+/// and a number on a numeric one.
+fn corner_data(x: ScaleKind, y: ScaleKind) -> ([AxisData; 2], [AxisData; 2]) {
+    let along = |kind: ScaleKind, times: [Option<Instant>; 2], numbers: [f64; 2]| {
+        if kind == ScaleKind::Time {
+            AxisData::Times(times.to_vec())
+        } else {
+            AxisData::Numbers(numbers.to_vec())
+        }
+    };
+    (
+        [
+            along(x, [day(0), day(10)], [0.0, 1.0]),
+            along(y, [day(10), day(0)], [1.0, 0.0]),
+        ],
+        [
+            along(x, [day(0), day(10)], [0.0, 1.0]),
+            along(y, [day(0), day(10)], [0.0, 1.0]),
+        ],
+    )
+}
+
+#[test]
+fn automatic_limits_fit_bubbles_on_time_axes() {
+    for marker in MARKERS {
+        for (x, y) in TIME_PAIRS {
+            let mut f = Figure::new(3.0, 2.5, Theme::pigment()).unwrap();
+            f.add_axes(x, y).unwrap();
+            let (points, line) = corner_data(x, y);
+            let [line_x, line_y] = line;
+            f.single_axes_mut()
+                .line_shared(line_x, line_y, LineOptions::default())
+                .unwrap();
+            let [bubble_x, bubble_y] = points;
+            time_bubbles(&mut f, bubble_x, bubble_y, &[1.0, 1.0], marker);
+            assert_bubbles_inside(&f, &format!("{marker:?} on {x:?} and {y:?}"));
+        }
+    }
+}
+
+#[test]
+fn time_axes_widen_beyond_the_times_of_their_bubbles() {
+    let mut f = Figure::new(3.0, 2.5, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Time, ScaleKind::Linear).unwrap();
+    time_bubbles(
+        &mut f,
+        AxisData::Times(vec![day(0), day(10)]),
+        AxisData::Numbers(vec![1.0, 2.0]),
+        &[1.0, 1.0],
+        Marker::Circle,
+    );
+    let (r, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+    let crate::resolve::AxisScale::Time(scale) = &r.x.scale else {
+        panic!("a time axis")
+    };
+    let (low, high) = scale.instants();
+    assert!(
+        low < day(0).unwrap() && high > day(10).unwrap(),
+        "{low:?} {high:?}"
+    );
+    // Each circle's radius is 18 pt: the fitted domain keeps its centre that far from the edges.
+    let seconds = |t: Option<Instant>| scale.seconds(t.unwrap());
+    let position = |t| scale.seconds_scale().normalize(seconds(t)) * layout.plot.width;
+    assert!(position(day(0)) >= 18.0 - 1e-3, "{}", position(day(0)));
+    assert!(
+        layout.plot.width - position(day(10)) >= 18.0 - 1e-3,
+        "{}",
+        position(day(10))
+    );
+}
+
+#[test]
+fn automatic_limits_fit_a_single_time_bubble_with_and_without_explicit_ticks() {
+    for (x, y) in TIME_PAIRS {
+        for explicit_ticks in [false, true] {
+            let mut f = Figure::new(3.0, 2.0, Theme::pigment()).unwrap();
+            let mut a = f.add_axes(x, y).unwrap();
+            if explicit_ticks {
+                if x == ScaleKind::Time {
+                    a.xticks_time(&[Instant::from_micros(0).unwrap()]).unwrap();
+                }
+                if y == ScaleKind::Time {
+                    a.yticks_time(&[Instant::from_micros(0).unwrap()]).unwrap();
+                }
+            }
+            let at = |kind| {
+                if kind == ScaleKind::Time {
+                    AxisData::Times(vec![day(2)])
+                } else {
+                    AxisData::Numbers(vec![1.0])
+                }
+            };
+            time_bubbles(&mut f, at(x), at(y), &[1.0], Marker::Circle);
+            assert_bubbles_inside(
+                &f,
+                &format!("{x:?} {y:?}, explicit ticks: {explicit_ticks}"),
+            );
+        }
+    }
+}
+
+#[test]
+fn automatic_limits_fit_the_bubbles_of_every_shared_time_panel() {
+    let grid = Grid::new(1, 2).unwrap().with_share_x(Share::All);
+    let mut f = Figure::with_grid(6.0, 2.5, Theme::pigment(), grid).unwrap();
+    for col in 0..2 {
+        f.add_axes_at(
+            Placement {
+                row: GridIndex::At(0),
+                col: GridIndex::At(col),
+                ..Placement::default()
+            },
+            ScaleKind::Time,
+            ScaleKind::Linear,
+        )
+        .unwrap()
+        .bubbles_time(
+            AxisData::Times(vec![day(10 * col)]),
+            AxisData::Numbers(vec![col as f64]),
+            [1.0].into(),
+            BubbleOptions::default(),
+        )
+        .unwrap();
+    }
+    assert_bubbles_inside(&f, "shared time");
+    let plans = try_plan_panels(&f, FontLibrary::global()).unwrap();
+    assert_eq!(plans[0].0.x, plans[1].0.x);
+}
+
+#[test]
+fn explicit_time_limits_are_kept_and_clip_the_bubbles() {
+    let mut f = Figure::new(3.0, 2.5, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Time, ScaleKind::Linear)
+        .unwrap()
+        .xlim_time(
+            Instant::from_micros(0).unwrap(),
+            Instant::from_micros(DAY).unwrap(),
+        )
+        .unwrap();
+    time_bubbles(
+        &mut f,
+        AxisData::Times(vec![day(1)]),
+        AxisData::Numbers(vec![1.0]),
+        &[1.0],
+        Marker::Circle,
+    );
+    let (r, _) = plan_figure(&f, (0, 0), FontLibrary::global());
+    let crate::resolve::AxisScale::Time(scale) = &r.x.scale else {
+        panic!("a time axis")
+    };
+    assert_eq!(
+        scale.instants(),
+        (day(0).unwrap(), day(1).unwrap()),
+        "explicit limits stay"
+    );
+    assert!(f.to_scene(FontLibrary::global()).is_ok());
+}
+
+#[test]
+fn missing_times_draw_no_bubble() {
+    let mut f = Figure::new(3.0, 2.5, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Time, ScaleKind::Time).unwrap();
+    time_bubbles(
+        &mut f,
+        AxisData::Times(vec![day(0), None, day(4), day(2)]),
+        AxisData::Times(vec![day(1), day(2), None, day(5)]),
+        &[1.0, 1.0, 1.0, 1.0],
+        Marker::Circle,
+    );
+    assert_bubbles_inside(&f, "gaps");
 }

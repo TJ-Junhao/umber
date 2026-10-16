@@ -47,12 +47,22 @@ both = ub.Figure().add_axes(x=ub.Scale.time(), y=ub.Scale.time())
 assert_type(both, ub.Axes[ub.Time, ub.Time])
 assert_type(ub.Figure().axes_at(x=ub.Scale.time()), ub.Axes[ub.Time, float])
 
-# Negative: bars, histograms, boxes, violins and bubbles need numbers or names, not times.
+# Positive: bubbles take times along either axis, and mesh takes times as edges.
+assert_type(timed.bubbles(times, y, y, label="Orders"), ub.Axes[ub.Time, float])
+assert_type(up.bubbles(y, days, y, color=ub.ColorBy(y)), ub.Axes[float, ub.Time])
+assert_type(both.bubbles(stamps, days, y).line(times, days), ub.Axes[ub.Time, ub.Time])
+assert_type(timed.mesh(times + times[:1], [0.0, 1.0, 2.0], [[1.0, 2.0]]), ub.Axes[ub.Time, float])
+assert_type(up.mesh([0.0, 1.0, 2.0], days, [[1.0], [2.0]]), ub.Axes[float, ub.Time])
+
+# Negative: bars, histograms, boxes and violins need numbers or names, not times.
 timed.bar(["a"], [1.0])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 timed.hist([1.0])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 timed.box(["a"], [[1.0]])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 timed.violin(["a"], [[1.0]])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-timed.bubbles(y, y, y)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+# Negative: bubbles and mesh edges along a time axis are times, not numbers.
+timed.bubbles(y, y, y)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+up.bubbles(y, y, y)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+timed.mesh(y, y, [[1.0]])  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
 # Error bar limits along a time axis are times.
 assert_type(up.y_error_bars(y, days, days), ub.Axes[float, ub.Time])

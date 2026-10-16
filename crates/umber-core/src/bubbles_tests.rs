@@ -5,9 +5,9 @@ use crate::legend::{Legend, Swatch};
 use crate::pipeline::{plan_figure, try_plan_panels};
 use crate::resolve::{Limits, ResolvedMark, resolve_marks};
 use crate::{
-    BubbleOptions, ColorSpec, Error, Figure, FontLibrary, Grid, GridIndex, Item, LegendMode,
-    LegendPosition, LegendStyle, Mark, Marker, Placement, Rgba, ScaleKind, SvgText, Theme,
-    TickFormat,
+    AxisData, BubbleOptions, ColorBy, ColorSpec, Error, Figure, FontLibrary, Grid, GridIndex,
+    Instant, Item, LegendMode, LegendPosition, LegendStyle, Mark, Marker, Paint, Placement,
+    PointColor, Rgba, ScaleKind, SvgText, Theme, TickFormat,
 };
 
 fn options(label: &str) -> BubbleOptions {
@@ -698,4 +698,118 @@ fn bubbles_keep_order_options_and_shared_copies() {
         f.to_svg(SvgText::Outlines).unwrap(),
         copy.to_svg(SvgText::Outlines).unwrap()
     );
+}
+
+/// `n` days after 1970-01-01, as a present time.
+fn day(n: i64) -> Option<Instant> {
+    Some(Instant::from_micros(n * 86_400_000_000).unwrap())
+}
+
+#[test]
+fn time_bubbles_map_colors_and_label_their_size_references_as_numbers() {
+    for (x, y) in [
+        (ScaleKind::Time, ScaleKind::Linear),
+        (ScaleKind::Linear, ScaleKind::Time),
+        (ScaleKind::Time, ScaleKind::Time),
+    ] {
+        let along = |kind: ScaleKind, numbers: [f64; 3]| {
+            if kind == ScaleKind::Time {
+                AxisData::Times(vec![day(0), day(3), day(9)])
+            } else {
+                AxisData::Numbers(numbers.to_vec())
+            }
+        };
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(x, y)
+            .unwrap()
+            .bubbles_time(
+                along(x, [1.0, 2.0, 3.0]),
+                along(y, [3.0, 1.0, 2.0]),
+                [100.0, 400.0, 900.0].into(),
+                BubbleOptions {
+                    label: "Cities".into(),
+                    color: PointColor::By(ColorBy::new(vec![0.1, 0.5, 0.9])),
+                    ..BubbleOptions::default()
+                },
+            )
+            .unwrap();
+        // Each bubble takes its own color.
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
+        crate::test_support::scene::assert_scene_bounded(&scene);
+        let mut fills: Vec<Rgba> = scene
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Group {
+                    clip: Some(_),
+                    items,
+                } => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|item| match item {
+                Item::Fill {
+                    paint: Paint::Solid(color),
+                    ..
+                } => Some(*color),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fills.len(), 3, "{x:?} {y:?}");
+        fills.dedup();
+        assert_eq!(fills.len(), 3, "{x:?} {y:?}");
+        // The legend names the series and shows three size references, labelled as numbers
+        // whatever the axes are.
+        let marks = resolve_marks(f.single_axes().marks(), f.theme());
+        let legend = Legend::new(LegendStyle::Header, &marks, &Limits::of(f.single_axes()));
+        let labels: Vec<_> = legend.row().iter().map(|e| e.label()).collect();
+        assert_eq!(labels, ["Cities", "500", "200", "100"], "{x:?} {y:?}");
+        let marks = [marks];
+        let merged = Legend::merged(&f, marks.iter().map(Vec::as_slice));
+        let labels: Vec<_> = merged.row().iter().map(|e| e.label()).collect();
+        assert_eq!(labels, ["Cities", "500", "200", "100"], "{x:?} {y:?}");
+    }
+}
+
+#[test]
+fn time_bubble_size_references_ignore_the_time_format_of_the_y_axis() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Time)
+        .unwrap()
+        .ytick_format(TickFormat::iso())
+        .unwrap()
+        .bubbles_time(
+            AxisData::Numbers(vec![1.0, 2.0]),
+            AxisData::Times(vec![day(0), day(1)]),
+            [100.0, 400.0].into(),
+            options("Cities"),
+        )
+        .unwrap();
+    let marks = resolve_marks(f.single_axes().marks(), f.theme());
+    let legend = Legend::new(LegendStyle::Header, &marks, &Limits::of(f.single_axes()));
+    let labels: Vec<_> = legend.row().iter().map(|e| e.label()).collect();
+    assert_eq!(labels, ["Cities", "200", "100", "50"]);
+    assert!(f.to_scene(FontLibrary::global()).is_ok());
+}
+
+#[test]
+fn time_bubble_color_errors_change_nothing() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Time, ScaleKind::Linear).unwrap();
+    let before = f.clone();
+    let error = f
+        .single_axes_mut()
+        .bubbles_time(
+            AxisData::Times(vec![day(0), day(1), day(2)]),
+            AxisData::Numbers(vec![1.0, 2.0, 3.0]),
+            [1.0, 2.0, 3.0].into(),
+            BubbleOptions {
+                color: PointColor::By(ColorBy::new(vec![0.5])),
+                ..BubbleOptions::default()
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(error, Error::Data { .. }));
+    assert_eq!(error.parameter(), Some("color"));
+    assert_eq!(f, before);
 }

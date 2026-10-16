@@ -1,12 +1,3 @@
 # Cases whose committed outputs change on purpose in this change.
-
-# Required text widths round up; available panel widths still round down.
-errors/grid-room
-errors/grid
-
-# Required legend label widths and legend heights round up instead of to the nearest point.
-errors/legend_position
-
-# Required x/y tick label widths round up instead of to the nearest point.
-errors/x-label-min-width
-errors/x-label-overflow
+# errors/time: a numeric bubbles call on a time axis now says the axis is a time axis and names bubbles_time(); it no longer claims the mark needs a linear or log axis.
+errors/time

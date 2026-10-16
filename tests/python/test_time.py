@@ -316,11 +316,113 @@ def test_band_and_stacked_area_take_times() -> None:
     ax.y_error_bars(days[:2], [1.0, 2.0], [2.0, 3.0]).stem(days, [1.0] * 5)
     ax.x_error_bars([2.5], [days[1]], [days[3]])
     assert ax.figure.to_svg().startswith("<svg")
-    with pytest.raises(ub.UsageError) as caught:
-        call(ax, "bubbles")(days, [1.0] * 5, [1.0] * 5)
-    assert str(caught.value) == (
-        "Axes.bubbles(): x is a time scale; Axes.bubbles() needs a linear or log x axis."
+
+
+def test_bubbles_take_times_on_either_axis() -> None:
+    days = [dt.date(2026, 1, d) for d in range(1, 6)]
+    sizes = [10.0, 40.0, 0.0, 90.0, 20.0]
+    level = [1.0, 3.0, 2.0, 5.0, 4.0]
+    along_x = time_axes().bubbles(days, level, sizes, label="Orders")
+    assert along_x.figure.to_svg().startswith("<svg")
+    up = ub.Figure(5, 3).add_axes(y=ub.Scale.time()).bubbles(level, days, sizes)
+    both = ub.Figure(5, 3).add_axes(x=ub.Scale.time(), y=ub.Scale.time())
+    both.bubbles(days, days, sizes, color=ub.ColorBy(level))
+    # The same times as numpy datetime64 and as a pandas column draw the same chart.
+    stamps = np.array(days, dtype="datetime64[D]")
+    again = time_axes().bubbles(stamps, level, sizes, label="Orders")
+    assert again.figure.to_svg() == along_x.figure.to_svg()
+    column = pd.Series(pd.to_datetime(days))
+    assert time_axes().bubbles(column, level, sizes, label="Orders").figure.to_svg() == (
+        along_x.figure.to_svg()
     )
+    assert up.figure.to_svg() != along_x.figure.to_svg()
+
+
+def test_bubbles_on_time_axes_skip_missing_times() -> None:
+    days: list[ub.Time] = [dt.date(2026, 1, 1), np.datetime64("NaT", "D"), dt.date(2026, 1, 3)]
+    ax = time_axes().bubbles(days, [1.0, 2.0, 3.0], [1.0, 1.0, 1.0])
+    kept = time_axes().bubbles([days[0], days[2]], [1.0, 3.0], [1.0, 1.0])
+    # The missing time leaves its bubble out of the chart; the others keep their positions.
+    assert ax.figure.to_svg() == kept.figure.to_svg()
+
+
+def test_bubbles_on_time_axes_check_data_against_the_axes() -> None:
+    days = [dt.date(2026, 1, d) for d in range(1, 4)]
+    ax = time_axes()
+    before = ax.figure.to_svg()
+    with pytest.raises(ub.DataError) as caught:
+        call(ax, "bubbles")([1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [1.0, 1.0, 1.0])
+    assert str(caught.value).startswith("Axes.bubbles(): x[0] is 1")
+    assert str(caught.value).endswith("values must be times on a time axis.")
+    with pytest.raises(ub.DataError):
+        call(ax, "bubbles")(days, days, [1.0, 1.0, 1.0])
+    with pytest.raises(ub.DataError):
+        call(ax, "bubbles")(days, [1.0, 2.0], [1.0, 1.0, 1.0])
+    with pytest.raises(ub.DataError):
+        call(ax, "bubbles")([dt.datetime(2026, 1, 1, tzinfo=dt.UTC)] * 3, [1.0] * 3, [1.0] * 3)
+    assert ax.figure.to_svg() == before
+    categories = ub.Figure().add_axes(x=ub.Scale.category())
+    with pytest.raises(ub.UsageError):
+        call(categories, "bubbles")([1.0], [1.0], [1.0])
+    mixed = ub.Figure().add_axes(x=ub.Scale.time(), y=ub.Scale.category())
+    with pytest.raises(ub.UsageError) as usage:
+        call(mixed, "bubbles")(days, [1.0, 2.0, 3.0], [1.0] * 3)
+    assert parts(usage.value) == (
+        "Axes.bubbles(): this is a category axis; bubbles apply to linear, log and time axes only.",
+        "y",
+        "pass y=Scale.linear(), y=Scale.log() or y=Scale.time() to Figure.add_axes().",
+    )
+
+
+def test_mesh_takes_times_on_either_axis() -> None:
+    hours = [dt.datetime(2026, 1, 1, h) for h in (0, 6, 12)]
+    cells = [[1.0, 4.0], [2.0, 3.0]]
+    across = ub.Figure(5, 3).add_axes(x=ub.Scale.time()).mesh(hours, [0, 2, 3], cells)
+    up = ub.Figure(5, 3).add_axes(y=ub.Scale.time()).mesh([0, 2, 3], hours, cells)
+    both = ub.Figure(5, 3).add_axes(x=ub.Scale.time(), y=ub.Scale.time()).mesh(hours, hours, cells)
+    for ax in (across, up, both):
+        assert ax.figure.to_svg().startswith("<svg")
+    stamps = np.array(hours, dtype="datetime64[h]")
+    again = ub.Figure(5, 3).add_axes(x=ub.Scale.time()).mesh(stamps, [0, 2, 3], cells)
+    assert again.figure.to_svg() == across.figure.to_svg()
+
+
+def test_mesh_edges_on_time_axes_are_checked() -> None:
+    days = [dt.date(2026, 1, d) for d in (1, 2, 3)]
+    ax = time_axes()
+    before = ax.figure.to_svg()
+    cases = [
+        (
+            [days[0], np.datetime64("NaT", "D"), days[2]],
+            "Axes.mesh(): x_edges[1] is NaT; edges must be times.",
+        ),
+        (
+            [days[0], days[2], days[1]],
+            "Axes.mesh(): x_edges[2] is 2026-01-02, not after x_edges[1] = 2026-01-03; "
+            "edges must be strictly increasing.",
+        ),
+        (
+            [days[0], days[1], days[1]],
+            "Axes.mesh(): x_edges[2] is 2026-01-02, not after x_edges[1] = 2026-01-02; "
+            "edges must be strictly increasing.",
+        ),
+    ]
+    for edges, message in cases:
+        with pytest.raises(ub.DataError) as caught:
+            call(ax, "mesh")(edges, [0, 1, 2], [[1.0, 2.0], [3.0, 4.0]])
+        assert str(caught.value) == message
+        assert parts(caught.value)[1] == "x_edges"
+    with pytest.raises(ub.DataError) as short:
+        call(ax, "mesh")(days, [0, 1], [[1.0, 2.0, 3.0]])
+    assert str(short.value) == (
+        "Axes.mesh(): x_edges has 3 values; values has 3 columns, so x_edges needs 4."
+    )
+    with pytest.raises(ub.DataError):
+        call(ax, "mesh")([1.0, 2.0, 3.0], [0, 1, 2], [[1.0, 2.0], [3.0, 4.0]])
+    zone = [dt.datetime(2026, 1, 1, tzinfo=dt.UTC)] * 3
+    with pytest.raises(ub.DataError):
+        call(ax, "mesh")(zone, [0, 1, 2], [[1, 2], [3, 4]])
+    assert ax.figure.to_svg() == before
 
 
 def test_scale_time_is_a_value() -> None:

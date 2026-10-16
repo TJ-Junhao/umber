@@ -1,11 +1,19 @@
-//! Opaque, edge-spanning numeric cells. Geometry is clipped before conversion to scene points.
+//! Opaque, edge-spanning cells. Geometry is clipped before conversion to scene points.
 
 use super::MarkContext;
-use super::mapping::{AxisPoint, axis_value, point};
+use super::mapping::{AxisPoint, axis_time, axis_value, point};
 use crate::color_scale::ResolvedColorScale;
-use crate::model::{Hist2dMark, MeshMark};
-use crate::resolve::Resolved;
+use crate::model::{Edges, Hist2dMark, MeshMark};
+use crate::resolve::{Resolved, ResolvedAxis};
 use crate::{FillRule, Item, Paint, Path, Rgba};
+
+/// The edges in axis space: numbers through the axis' scale, times as seconds from its origin.
+fn axis_edges(axis: &ResolvedAxis, edges: &Edges) -> Vec<f64> {
+    match edges {
+        Edges::Numbers(edges) => edges.iter().map(|&v| axis_value(axis, v)).collect(),
+        Edges::Times(edges) => edges.iter().map(|&t| axis_time(axis, t)).collect(),
+    }
+}
 
 /// Draws finite row-major values, leaving NaN cells empty.
 pub(super) fn mesh_items(
@@ -16,13 +24,14 @@ pub(super) fn mesh_items(
     items: &mut Vec<Item>,
 ) {
     let columns = mark.x_edges.len() - 1;
+    let x = axis_edges(&resolved.x, &mark.x_edges);
+    let y = axis_edges(&resolved.y, &mark.y_edges);
     for (i, &value) in mark.colors.values.iter().enumerate() {
         if let Some(fill) = color.color(value) {
             rectangle(
                 context,
-                resolved,
-                [mark.x_edges[i % columns], mark.x_edges[i % columns + 1]],
-                [mark.y_edges[i / columns], mark.y_edges[i / columns + 1]],
+                [x[i % columns], x[i % columns + 1]],
+                [y[i / columns], y[i / columns + 1]],
                 fill,
                 items,
             );
@@ -40,11 +49,12 @@ pub(super) fn hist2d_items(
 ) {
     for (&(col, row), &count) in mark.bins.cells.iter().zip(&mark.bins.counts) {
         if let Some(fill) = color.color(count) {
+            let x = [mark.bins.x_edges[col], mark.bins.x_edges[col + 1]];
+            let y = [mark.bins.y_edges[row], mark.bins.y_edges[row + 1]];
             rectangle(
                 context,
-                resolved,
-                [mark.bins.x_edges[col], mark.bins.x_edges[col + 1]],
-                [mark.bins.y_edges[row], mark.bins.y_edges[row + 1]],
+                x.map(|v| axis_value(&resolved.x, v)),
+                y.map(|v| axis_value(&resolved.y, v)),
                 fill,
                 items,
             );
@@ -52,17 +62,17 @@ pub(super) fn hist2d_items(
     }
 }
 
-/// Clips an axis-aligned cell exactly, keeping every finite projected coordinate bounded.
+/// Clips an axis-aligned cell exactly, keeping every finite projected coordinate bounded. `x`
+/// and `y` are its edges in axis space.
 fn rectangle(
     context: &MarkContext<'_>,
-    resolved: &Resolved,
     x: [f64; 2],
     y: [f64; 2],
     color: Rgba,
     items: &mut Vec<Item>,
 ) {
-    let x = x.map(|v| axis_value(&resolved.x, v).clamp(context.maps.x.lo, context.maps.x.hi));
-    let y = y.map(|v| axis_value(&resolved.y, v).clamp(context.maps.y.lo, context.maps.y.hi));
+    let x = x.map(|v| v.clamp(context.maps.x.lo, context.maps.x.hi));
+    let y = y.map(|v| v.clamp(context.maps.y.lo, context.maps.y.hi));
     if x[0] >= x[1] || y[0] >= y[1] {
         return;
     }
