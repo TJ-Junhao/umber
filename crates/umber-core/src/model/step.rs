@@ -153,7 +153,7 @@ impl Default for StepOptions {
 /// axes.step(AxisData::Numbers(vec![0.0, 1.0, 3.0]), &[1.0, 2.0, 0.0], StepOptions::default())?;
 /// let Some(Mark::Step(step)) = axes.marks().first() else { unreachable!() };
 /// assert_eq!(step.x(), &AxisData::Numbers(vec![0.0, 1.0, 3.0]));
-/// assert_eq!(step.y(), &[1.0, 2.0, 0.0]);
+/// assert_eq!(step.y(), &AxisData::Numbers(vec![1.0, 2.0, 0.0]));
 /// assert_eq!(step.options().position, Step::Post);
 /// # Ok::<(), umber_core::Error>(())
 /// ```
@@ -188,7 +188,7 @@ impl StepMark {
 
     /// The y values, as many as the x values.
     #[must_use]
-    pub fn y(&self) -> &[f64] {
+    pub fn y(&self) -> &AxisData {
         self.series.y()
     }
 
@@ -217,8 +217,6 @@ impl fmt::Debug for StepMark {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::model::{Figure, Mark};
     use crate::{Error, LogBase, ScaleKind, Theme};
@@ -377,7 +375,9 @@ mod tests {
     fn step_keeps_its_input_and_options_and_shares_y() {
         let gap = f64::from_bits(0xfff8_0000_0000_0001);
         let x = vec![-0.0, 0.0, gap, 2.0];
-        let y: Arc<[f64]> = Arc::from([gap, 1.0, -0.0, 4.0]);
+        let expected = [gap, 1.0, -0.0, 4.0];
+        let y = expected.to_vec();
+        let values = y.as_ptr();
         let options = StepOptions {
             position: Step::Pre,
             label: "levels".into(),
@@ -387,7 +387,7 @@ mod tests {
         f.single_axes_mut()
             .step_shared(
                 AxisData::Numbers(x.clone()),
-                Arc::clone(&y),
+                AxisData::Numbers(y),
                 options.clone(),
             )
             .unwrap();
@@ -399,8 +399,8 @@ mod tests {
             panic!("numbers expected")
         };
         assert_eq!(bits(stored), bits(&x));
-        assert_eq!(bits(step.y()), bits(&y));
-        assert!(std::ptr::eq(step.y(), &*y));
+        assert_eq!(bits(step.y().numbers()), bits(&expected));
+        assert!(std::ptr::eq(step.y().numbers().as_ptr(), values));
         assert_eq!(step.options(), &options);
         // Clones read the same arrays.
         let copy = f.clone();

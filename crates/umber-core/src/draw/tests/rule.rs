@@ -413,7 +413,7 @@ fn lower_limit_figure(ylim: Option<(f64, f64)>) -> Figure {
 
 fn baseline_y_of(figure: &Figure) -> (Area, f64) {
     let layout = crate::pipeline::plan_figure(figure, (0, 0), FontLibrary::global()).1;
-    (layout.plot, layout.baseline_y)
+    (layout.plot, layout.baseline_y())
 }
 
 #[test]
@@ -555,7 +555,7 @@ fn a_shared_y_grid_ends_every_panel_at_the_common_baseline() {
     for (col, items) in groups.into_iter().enumerate() {
         let (plot, baseline) = {
             let layout = crate::pipeline::plan_figure(&f, (0, col), FontLibrary::global()).1;
-            (layout.plot, layout.baseline_y)
+            (layout.plot, layout.baseline_y())
         };
         assert!(baseline < plot.bottom() - 1.0, "{col}: {baseline} {plot:?}");
         assert_near(rect(&items[0]).3, baseline);

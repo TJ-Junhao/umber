@@ -23,10 +23,7 @@ use super::{
     Area, BODY_LINE, Frame, Label, Styles, baseline_in_line, legend_too_wide, measure, metrics,
 };
 use crate::legend::{Legend, RowStyle, Swatch};
-use crate::resolve::{
-    Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis,
-    ResolvedContinuousAxis,
-};
+use crate::resolve::{Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis};
 use crate::{Align, FontLibrary, Result, Rgba, SizeSpec, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
@@ -570,9 +567,13 @@ fn x_position(axis: &ResolvedAxis, x: AnchorX<'_>) -> f64 {
     }
 }
 
-/// The normalized y position of an anchor at `y` on `axis`.
-fn y_position(axis: &ResolvedContinuousAxis, y: f64) -> f64 {
-    axis.scale.normalize(y)
+/// The normalized y position of an anchor at `y` on `axis`; NaN on a category axis, which has
+/// no numbers to place it at.
+fn y_position(axis: &ResolvedAxis, y: f64) -> f64 {
+    match &axis.scale {
+        AxisScale::Continuous(scale) => scale.normalize(y),
+        AxisScale::Category(_) => f64::NAN,
+    }
 }
 
 /// A direct label, placed: its label in its line color, and the end dot at its anchor. At
@@ -1509,7 +1510,9 @@ mod tests {
                 panic!("a continuous axis");
             };
             let anchor_x = plot.x_at(NormalizedPos::new(x_scale.normalize(x)));
-            let anchor_y = plot.y_at(NormalizedPos::new(resolved.y.scale.normalize(y)));
+            let anchor_y = plot.y_at(NormalizedPos::new(
+                resolved.y.continuous_scale().normalize(y),
+            ));
             let end = label.dot.unwrap();
             assert_eq!((end.x, end.y, end.diameter), (anchor_x, anchor_y, dot));
             assert!((text_of(label).x - (anchor_x + dot / 2.0 + DIRECT_GAP)).abs() < 1e-9);

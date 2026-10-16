@@ -5,9 +5,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::validation::check_series;
-use crate::{Result, ScaleKind, Transform};
+use crate::{Result, ScaleKind};
 
-/// The x values of a mark: numbers for a continuous axis, names for a category axis.
+/// The values of a mark along one axis: numbers for a continuous axis, names for a category
+/// axis.
 ///
 /// # Examples
 ///
@@ -33,6 +34,22 @@ impl AxisData {
             AxisData::Categories(v) => v.len(),
         }
     }
+
+    /// The numbers; none when these are category names.
+    pub(crate) fn numbers(&self) -> &[f64] {
+        match self {
+            AxisData::Numbers(values) => values,
+            AxisData::Categories(_) => &[],
+        }
+    }
+
+    /// The category names; none when these are numbers.
+    pub(crate) fn categories(&self) -> &[String] {
+        match self {
+            AxisData::Categories(names) => names,
+            AxisData::Numbers(_) => &[],
+        }
+    }
 }
 
 /// One validated series: x and y of equal length, each compatible with its axis. The pair is
@@ -41,27 +58,28 @@ impl AxisData {
 #[derive(Clone, PartialEq)]
 pub(super) struct XySeries {
     x: Arc<AxisData>,
-    y: Arc<[f64]>,
+    y: Arc<AxisData>,
 }
 
 impl XySeries {
     /// Validates `x` and `y` for axes with an x axis of scale kind `x_kind` and a y axis of
-    /// transform `y_transform`, then stores both
-    /// unchanged: every bit, NaN gaps included, in the given order. Both are stored as given,
-    /// without a copy: `x` is moved, and the stored y shares the allocation of `y`. The checks
-    /// run in a fixed order (lengths, then x against its axis, then y against its axis) and the
-    /// first failure is the error, under `context`. An infinite value gets `gap_hint`, which
-    /// says what to pass instead.
+    /// scale kind `y_kind`, then stores both unchanged: every bit, NaN gaps included, in the
+    /// given order. Both are moved into the series, without a copy. The checks run in a fixed
+    /// order (lengths, then x against its axis, then y against its axis) and the first failure
+    /// is the error, under `context`. An infinite value gets `gap_hint`, which says what to pass
+    /// instead.
     pub(super) fn new(
         context: &'static str,
-        x_kind: ScaleKind,
-        y_transform: Transform,
+        (x_kind, y_kind): (ScaleKind, ScaleKind),
         x: AxisData,
-        y: Arc<[f64]>,
+        y: AxisData,
         gap_hint: &'static str,
     ) -> Result<XySeries> {
-        check_series(context, x_kind, y_transform, &x, &y, gap_hint)?;
-        Ok(XySeries { x: Arc::new(x), y })
+        check_series(context, (x_kind, y_kind), (&x, &y), gap_hint)?;
+        Ok(XySeries {
+            x: Arc::new(x),
+            y: Arc::new(y),
+        })
     }
 
     /// The x values.
@@ -70,7 +88,7 @@ impl XySeries {
     }
 
     /// The y values, as many as the x values.
-    pub(super) fn y(&self) -> &[f64] {
+    pub(super) fn y(&self) -> &AxisData {
         &self.y
     }
 }
@@ -94,10 +112,14 @@ mod tests {
     use crate::{Error, LogBase, Theme};
 
     const LIN: ScaleKind = ScaleKind::Linear;
-    const LIN_Y: Transform = Transform::Linear;
+    const LINEAR: (ScaleKind, ScaleKind) = (LIN, LIN);
 
     fn bits(values: &[f64]) -> Vec<u64> {
         values.iter().map(|v| v.to_bits()).collect()
+    }
+
+    fn nums(v: &[f64]) -> AxisData {
+        AxisData::Numbers(v.to_vec())
     }
 
     fn series_of(mark: &Mark) -> &XySeries {
@@ -121,33 +143,31 @@ mod tests {
         ];
         let x = vec![3.0, gaps[0], -0.0, gaps[1], 1.0];
         let y = [gaps[2], 0.0, 2.0, -0.0, gaps[3]];
-        let series = XySeries::new(
-            "t",
-            LIN,
-            LIN_Y,
-            AxisData::Numbers(x.clone()),
-            Arc::from(y),
-            LINE_GAP_HINT,
-        )
-        .unwrap();
-        match series.x() {
-            AxisData::Numbers(stored) => assert_eq!(bits(stored), bits(&x)),
-            other => panic!("unexpected x {other:?}"),
-        }
-        assert_eq!(bits(series.y()), bits(&y));
+        let series = XySeries::new("t", LINEAR, nums(&x), nums(&y), LINE_GAP_HINT).unwrap();
+        assert_eq!(bits(series.x().numbers()), bits(&x));
+        assert_eq!(bits(series.y().numbers()), bits(&y));
 
         let names: Vec<String> = ["b", "a", "b"].iter().map(|s| (*s).to_owned()).collect();
         let cats = AxisData::Categories(names.clone());
         let series = XySeries::new(
             "t",
-            ScaleKind::Category,
-            LIN_Y,
-            cats,
-            Arc::from([1.0, 2.0, 3.0]),
+            (ScaleKind::Category, LIN),
+            cats.clone(),
+            nums(&[1.0, 2.0, 3.0]),
             LINE_GAP_HINT,
         )
         .unwrap();
-        assert_eq!(series.x(), &AxisData::Categories(names));
+        assert_eq!(series.x(), &cats);
+        // Names along y need a category y axis, as names along x need a category x axis.
+        let series = XySeries::new(
+            "t",
+            (LIN, ScaleKind::Category),
+            nums(&[1.0, 2.0, 3.0]),
+            cats.clone(),
+            LINE_GAP_HINT,
+        )
+        .unwrap();
+        assert_eq!(series.y(), &cats);
     }
 
     #[test]
@@ -162,15 +182,13 @@ mod tests {
             }
             other => panic!("expected Data error, got {other:?}"),
         };
-        let nums = |v: &[f64]| AxisData::Numbers(v.to_vec());
         // Lengths before values, x before y, the first bad index within an axis.
         assert!(
             message(XySeries::new(
                 "t",
-                LIN,
-                LIN_Y,
+                LINEAR,
                 nums(&[f64::INFINITY]),
-                Arc::from([]),
+                nums(&[]),
                 LINE_GAP_HINT
             ))
             .starts_with("x has 1 values but y has 0")
@@ -178,10 +196,9 @@ mod tests {
         assert!(
             message(XySeries::new(
                 "t",
-                log,
-                Transform::Log(LogBase::TEN),
+                (log, log),
                 nums(&[1.0, -1.0]),
-                Arc::from([0.0, 1.0]),
+                nums(&[0.0, 1.0]),
                 LINE_GAP_HINT
             ))
             .starts_with("x[1] is -1 on a log axis")
@@ -189,13 +206,34 @@ mod tests {
         assert!(
             message(XySeries::new(
                 "t",
-                LIN,
-                LIN_Y,
+                LINEAR,
                 nums(&[0.0, 1.0]),
-                Arc::from([1e301, f64::INFINITY]),
+                nums(&[1e301, f64::INFINITY]),
                 LINE_GAP_HINT
             ))
             .starts_with("y[0] is 1e301")
+        );
+        // y of the wrong kind for its axis, as for x.
+        let names = AxisData::Categories(vec!["a".into()]);
+        let wrong = XySeries::new("t", LINEAR, nums(&[0.0]), names, LINE_GAP_HINT).unwrap_err();
+        assert_eq!(
+            wrong.to_string(),
+            "t: y holds category names but the y axis is not a category axis; pass numbers."
+        );
+        assert_eq!(
+            wrong.hint(),
+            Some("pass y=Scale.category() to Figure.add_axes().")
+        );
+        let category_y = (LIN, ScaleKind::Category);
+        let wrong =
+            XySeries::new("t", category_y, nums(&[0.0]), nums(&[1.0]), LINE_GAP_HINT).unwrap_err();
+        assert_eq!(
+            wrong.to_string(),
+            "t: y holds numbers but the y axis is a category axis; pass category names."
+        );
+        assert_eq!(
+            wrong.hint(),
+            Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes().")
         );
     }
 
@@ -258,11 +296,8 @@ mod tests {
             panic!("expected one area, got {:?}", axes.marks())
         };
         let series = series_of(mark);
-        match series.x() {
-            AxisData::Numbers(stored) => assert_eq!(bits(stored), bits(&x)),
-            other => panic!("unexpected x {other:?}"),
-        }
-        assert_eq!(bits(series.y()), bits(&y));
+        assert_eq!(bits(series.x().numbers()), bits(&x));
+        assert_eq!(bits(series.y().numbers()), bits(&y));
         assert_eq!(area.options(), &AreaOptions::default());
         // A failed call adds nothing.
         let err = axes
@@ -281,28 +316,29 @@ mod tests {
         let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         let mut axes = figure.add_axes(LIN, LIN).unwrap();
         let x = || AxisData::Numbers(vec![0.0, 1.0]);
-        let y: Arc<[f64]> = Arc::from([2.0, f64::NAN]);
-        axes.line_shared(x(), Arc::clone(&y), LineOptions::default())
+        let values = [vec![2.0, f64::NAN], vec![3.0, 4.0], vec![5.0, 6.0]];
+        let pointers: Vec<*const f64> = values.iter().map(|y| y.as_ptr()).collect();
+        let [line, scatter, area] = values.map(AxisData::Numbers);
+        axes.line_shared(x(), line, LineOptions::default())
             .unwrap()
-            .scatter_shared(x(), Arc::clone(&y), ScatterOptions::default())
+            .scatter_shared(x(), scatter, ScatterOptions::default())
             .unwrap()
-            .area_shared(x(), Arc::clone(&y), AreaOptions::default())
+            .area_shared(x(), area, AreaOptions::default())
             .unwrap();
         // Each mark holds the caller's allocation, not a copy of it.
-        assert_eq!(Arc::strong_count(&y), 4);
-        for mark in axes.marks() {
-            assert!(Arc::ptr_eq(&series_of(mark).y, &y), "{mark:?}");
+        for (mark, pointer) in axes.marks().iter().zip(pointers) {
+            assert_eq!(series_of(mark).y().numbers().as_ptr(), pointer, "{mark:?}");
         }
-        // A failed call keeps no reference to the values and adds no mark.
+        // A failed call adds no mark.
         let err = axes
             .line_shared(
                 AxisData::Numbers(vec![0.0]),
-                Arc::clone(&y),
+                AxisData::Numbers(vec![1.0, 2.0]),
                 LineOptions::default(),
             )
             .unwrap_err();
         assert!(err.to_string().starts_with("Axes.line(): x has 1 values"));
-        assert_eq!((Arc::strong_count(&y), axes.marks().len()), (4, 3));
+        assert_eq!(axes.marks().len(), 3);
 
         let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         let mut axes = figure.add_axes(ScaleKind::Category, LIN).unwrap();

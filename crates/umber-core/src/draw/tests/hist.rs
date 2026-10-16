@@ -67,7 +67,7 @@ fn x_of(resolved: &Resolved, layout: &Layout, v: f64) -> f64 {
 
 /// The plot y of the data value `v` on the resolved y axis.
 fn y_of(resolved: &Resolved, layout: &Layout, v: f64) -> f64 {
-    let scale = &resolved.y.scale;
+    let scale = resolved.y.continuous_scale();
     layout.plot.y_at(NormalizedPos::new(scale.normalize(v)))
 }
 
@@ -105,7 +105,7 @@ fn zero_count_bins_draw_nothing() {
         assert_near(left, x_of(&resolved, &layout, i) + gap / 2.0);
         assert_near(right, x_of(&resolved, &layout, i + 1.0) - gap / 2.0);
         assert_near(top, y_of(&resolved, &layout, count));
-        assert_near(base, layout.baseline_y);
+        assert_near(base, layout.baseline_y());
     }
 }
 
@@ -122,9 +122,9 @@ fn bins_have_square_corners_and_start_on_the_baseline() {
             .all(|v| !matches!(v, PathVerb::CubicTo(..) | PathVerb::QuadTo(..)))
     );
     let (_, layout) = plan(&f);
-    assert_near(layout.plot.bottom() as f32, layout.baseline_y);
+    assert_near(layout.plot.bottom() as f32, layout.baseline_y());
     let (_, hi) = path.bounds().unwrap();
-    assert_near(hi.y, layout.baseline_y);
+    assert_near(hi.y, layout.baseline_y());
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn gradient_runs_top_to_baseline() {
     // color's opacity, to the baseline, transparent.
     let tallest = y_of(&resolved, &layout, 5.0);
     assert_near(gradient.start.y, tallest);
-    assert_near(gradient.end.y, layout.baseline_y);
+    assert_near(gradient.end.y, layout.baseline_y());
     assert_eq!(gradient.start.x, gradient.end.x);
     let alphas: Vec<(f32, u8)> = gradient
         .stops
@@ -244,7 +244,7 @@ fn top_edges_of_short_bins_stop_at_the_baseline() {
     let (short, short_edge) = (drawn[0], edges[0]);
     assert!(f64::from(short.3 - short.2) < 1.6, "{short:?}");
     assert_eq!(short_edge, short);
-    assert_near(short_edge.3, layout.baseline_y);
+    assert_near(short_edge.3, layout.baseline_y());
     // The tall bin keeps the full 1.6 pt edge.
     assert_near(edges[1].3, f64::from(drawn[1].2) + 1.6);
 }
@@ -316,20 +316,23 @@ fn log_y_bins_grow_from_the_baseline() {
     // the lowest tick, so the axis starts a decade lower, at 0.1: the baseline sits there,
     // above the padded plot bottom and below every count.
     assert_eq!(resolved.y.ticks[0].label, "0.1");
-    assert_near(layout.baseline_y as f32, y_of(&resolved, &layout, 0.1));
-    assert!(layout.baseline_y < layout.plot.bottom() - 1.0, "{layout:?}");
+    assert_near(layout.baseline_y() as f32, y_of(&resolved, &layout, 0.1));
+    assert!(
+        layout.baseline_y() < layout.plot.bottom() - 1.0,
+        "{layout:?}"
+    );
     let items = mark_items(&scene);
     let (path, paint) = the_fill(items);
     let drawn = bins(path);
     // The empty bin draws nothing; the bin of count 1 still shows, from the baseline.
     assert_eq!(drawn.len(), 3);
     for (&(_, _, top, base), count) in drawn.iter().zip([1.0, 3.0, 5.0]) {
-        assert_near(base, layout.baseline_y);
+        assert_near(base, layout.baseline_y());
         assert_near(top, y_of(&resolved, &layout, count));
-        assert!(f64::from(top) < layout.baseline_y - 1.0, "{top}");
+        assert!(f64::from(top) < layout.baseline_y() - 1.0, "{top}");
     }
     let gradient = gradient(paint);
-    assert_near(gradient.end.y, layout.baseline_y);
+    assert_near(gradient.end.y, layout.baseline_y());
     assert_near(gradient.start.y, y_of(&resolved, &layout, 5.0));
 }
 

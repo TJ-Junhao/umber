@@ -7,7 +7,7 @@ use super::super::scatter::scatter_item;
 use super::{Pixels, mark_group, near, nums, plot_of, scatter_figure};
 use crate::layout::Area;
 use crate::model::{Figure, ScatterOptions};
-use crate::resolve::NormalizedPos;
+use crate::resolve::{Baseline, NormalizedPos, ValueAxis};
 use crate::scene::Item;
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{FontLibrary, Marker, Rgba, ScaleKind, SizeSpec, Theme};
@@ -138,8 +138,11 @@ fn identity_context(theme: &Theme, plot: Area) -> MarkContext<'_> {
         theme,
         maps: identity_maps(plot),
         plot,
-        baseline: NormalizedPos::LOW,
-        baseline_y: plot.bottom(),
+        baseline: Baseline {
+            axis: ValueAxis::Y,
+            pos: NormalizedPos::LOW,
+        },
+        baseline_at: plot.bottom(),
         widest_line: 0.0,
     }
 }

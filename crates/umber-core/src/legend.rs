@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use crate::draw::fill::{AREA_ALPHA, HISTOGRAM_TOP_ALPHA, marker_alpha};
 use crate::model::Figure;
-use crate::resolve::{Anchor, Limits, ResolvedMark, SeriesKey, SeriesKind};
+use crate::resolve::{Anchor, AxisLimits, Limits, ResolvedMark, SeriesKey, SeriesKind};
 use crate::{Dash, FillStyle, LegendStyle, Rgba, Theme};
 
 /// What the fill of a legend swatch shows: a mark's fill as drawn, composited over the plot
@@ -275,8 +275,11 @@ impl<'a> Legend<'a> {
                 }
                 (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
                     row.push(entry);
-                    if !seen_bubbles && matches!(mark, ResolvedMark::Bubbles { .. }) {
-                        row.extend(mark.size_legend(limits.y.ticks.format()));
+                    // Bubbles need a numeric y axis, whose tick format labels their sizes.
+                    if let (false, ResolvedMark::Bubbles { .. }, AxisLimits::Continuous(y)) =
+                        (seen_bubbles, mark, limits.y)
+                    {
+                        row.extend(mark.size_legend(y.ticks.format()));
                         seen_bubbles = true;
                     }
                 }

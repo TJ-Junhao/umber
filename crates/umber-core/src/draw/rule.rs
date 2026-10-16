@@ -16,12 +16,12 @@ use super::MarkContext;
 use super::chrome::segment;
 use super::fill::AREA_ALPHA;
 use super::line::line_style;
-use super::mapping::{AxisMap, PlotPoint, axis_x, axis_y_value};
+use super::mapping::{AxisMap, PlotPoint, axis_value, axis_values};
 use crate::geometry::Path;
 use crate::model::{AxisData, AxisValue};
-use crate::resolve::{Resolved, ResolvedMark};
+use crate::resolve::{Resolved, ResolvedMark, ValueAxis};
 use crate::scene::{FillRule, Item, LineCap, Paint, Rect};
-use crate::{Dash, Rgba, Transform};
+use crate::{Dash, Rgba};
 
 /// The axis a reference mark has its value on; it runs across the plot along the other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +49,7 @@ impl Along {
             Along::Y => 1.0,
             Along::X if zero_in_domain(resolved) => 1.0,
             Along::X => {
-                ((context.baseline_y - context.plot.y) / context.plot.height).clamp(0.0, 1.0)
+                ((context.baseline_at - context.plot.y) / context.plot.height).clamp(0.0, 1.0)
             }
         }
     }
@@ -74,18 +74,22 @@ impl Along {
 /// Whether the baseline sits at y = 0 inside the domain of a linear y axis, rather than at the
 /// lower limit.
 fn zero_in_domain(resolved: &Resolved) -> bool {
-    let (low, high) = resolved.y.scale.domain();
-    resolved.y.scale.transform() == Transform::Linear && low <= 0.0 && 0.0 <= high
+    resolved.y.holds_zero()
 }
 
 /// The clip of the reference layers: `marks_clip` cut at the baseline when that sits at the y
-/// axis's lower limit below the top of the plot, `None` when nothing lies below it to cut.
+/// axis's lower limit below the top of the plot, `None` when nothing lies below it to cut. A
+/// baseline on the x axis cuts nothing.
 pub(super) fn baseline_clip(
     context: &MarkContext<'_>,
     resolved: &Resolved,
     marks_clip: Rect,
 ) -> Option<Rect> {
-    let height = context.baseline_y - context.plot.y;
+    match context.baseline.axis {
+        ValueAxis::X => return None,
+        ValueAxis::Y => {}
+    }
+    let height = context.baseline_at - context.plot.y;
     if zero_in_domain(resolved) || height >= context.plot.height - 1e-6 {
         return None;
     }
@@ -122,12 +126,12 @@ pub(super) fn span_layer(
     for mark in marks {
         match *mark {
             ResolvedMark::HSpan { mark, color, .. } => {
-                let ends = mark.bounds().iter().map(|&v| axis_y_value(&resolved.y, v));
+                let ends = mark.bounds().iter().map(|&v| axis_value(&resolved.y, v));
                 span_item(context, Along::Y, ends, 1.0, color, &mut layer);
             }
             ResolvedMark::VSpan { mark, color, .. } => {
                 let ends = mark.bounds().iter().map(|&v| {
-                    axis_x(&resolved.x, &AxisData::Numbers(vec![v]))
+                    axis_values(&resolved.x, &AxisData::Numbers(vec![v]))
                         .first()
                         .copied()
                         .unwrap_or(f64::NAN)
@@ -172,7 +176,7 @@ pub(super) fn rule_layer(
             ResolvedMark::HLine {
                 mark, color, width, ..
             } => {
-                let at = axis_y_value(&resolved.y, mark.y());
+                let at = axis_value(&resolved.y, mark.y());
                 let style = rule_style(width, color, mark.options().dash);
                 rule_item(context, Along::Y, at, 1.0, &style, &mut layer);
             }
@@ -214,7 +218,7 @@ fn vline_position(resolved: &Resolved, x: &AxisValue) -> f64 {
         AxisValue::Number(v) => AxisData::Numbers(vec![*v]),
         AxisValue::Category(name) => AxisData::Categories(vec![name.clone()]),
     };
-    axis_x(&resolved.x, &data)
+    axis_values(&resolved.x, &data)
         .first()
         .copied()
         .unwrap_or(f64::NAN)

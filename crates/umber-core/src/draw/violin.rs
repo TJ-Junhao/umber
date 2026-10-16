@@ -5,7 +5,7 @@ use super::bar::{GROUP_GAP, group_slots, in_axis_order};
 use super::clip::{Bounds, clip_segment};
 use super::error_bars::bar_style;
 use super::fill::AREA_ALPHA;
-use super::mapping::{AxisPoint, axis_y_value};
+use super::mapping::{AxisPoint, axis_value};
 use crate::Rgba;
 use crate::geometry::Path;
 use crate::resolve::{AxisScale, Resolved, ResolvedDistribution, ViolinStats};
@@ -107,7 +107,7 @@ fn violin_group(
         ]
     };
     for (value, fraction, stroke) in quantiles {
-        let y = axis_y_value(&resolved.y, value);
+        let y = axis_value(&resolved.y, value);
         let half = half * local_width(&density, y) * fraction;
         if let Some((a, b)) = clip_segment(
             AxisPoint::new(center - half, y),
@@ -130,7 +130,7 @@ fn axis_density(stats: &ViolinStats, resolved: &Resolved) -> Vec<(f64, f64)> {
     stats
         .density
         .iter()
-        .map(|&(y, width)| (axis_y_value(&resolved.y, y), width))
+        .map(|&(y, width)| (axis_value(&resolved.y, y), width))
         .collect()
 }
 

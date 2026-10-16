@@ -34,8 +34,8 @@ pub(super) fn area_items(
 ) {
     let fill_style = context.theme.fill_style();
     let baseline = Baseline {
-        y: context.baseline_y,
-        value: context.maps.y.at(context.baseline),
+        y: context.baseline_at,
+        value: context.maps.y.at(context.baseline.pos),
     };
     let clip = LineClip::of(context, style.width);
     for piece in clamp_polyline(xs, ys, &clip.bounds) {

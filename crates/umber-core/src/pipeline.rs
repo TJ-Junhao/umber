@@ -12,7 +12,9 @@ use crate::layout::{
 };
 use crate::legend::Legend;
 use crate::model::{Axes, Figure, ShareGroups, label_visibility};
-use crate::resolve::{self, Limits, Resolved, ResolvedMark};
+use crate::resolve::{
+    self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
+};
 use crate::scene::Scene;
 use crate::{FontLibrary, Result, Theme, draw};
 
@@ -145,16 +147,21 @@ impl Side {
             .unwrap_or(plots[i])
     }
 
+    /// The axis on this side.
+    fn axis(self) -> ValueAxis {
+        match self {
+            Side::X => ValueAxis::X,
+            Side::Y => ValueAxis::Y,
+        }
+    }
+
     /// Whether this side of an axes with `limits` gets automatic ticks: a linear or log axis
     /// without explicit ticks.
     fn is_automatic(self, limits: &Limits<'_>) -> bool {
-        match self {
-            Side::X => matches!(
-                limits.x,
-                resolve::AxisLimits::Continuous(x) if x.ticks.explicit().is_none()
-            ),
-            Side::Y => limits.y.ticks.explicit().is_none(),
-        }
+        matches!(
+            limits.axis(self.axis()),
+            resolve::AxisLimits::Continuous(axis) if axis.ticks.explicit().is_none()
+        )
     }
 
     /// The ticks of this side of `resolved`.
@@ -241,9 +248,10 @@ impl TickChoice {
     }
 }
 
-/// Resolves each group once, in row-major panel order, then gives its members identical
-/// scales and ticks, with each group's data extent widened to fit its bubbles as `fits` says.
-/// Marks remain per panel for drawing and legend colors.
+/// Resolves each group once, in row-major panel order, in the role its members' marks give it
+/// ([`AxisRole::of_group`]), then gives its members identical scales and ticks, with each
+/// group's data extent widened to fit its bubbles as `fits` says. Each panel's baseline is the
+/// base position of its value axis. Marks remain per panel for drawing and legend colors.
 fn resolve_groups(
     panels: &[Panel<'_>],
     limits: &[Limits<'_>],
@@ -251,32 +259,37 @@ fn resolve_groups(
     rooms: &[[layout::TickRoom<'_>; 2]],
     fits: &BubbleFits,
 ) -> Vec<Resolved> {
-    let mut resolved: Vec<Resolved> = Vec::with_capacity(panels.len());
+    // Each panel's axes with their base positions, x then y; a group's members copy its first.
+    let mut axes: Vec<[(ResolvedAxis, NormalizedPos); 2]> = Vec::with_capacity(panels.len());
     for i in 0..panels.len() {
-        let x = if groups.x[i] == i {
-            let marks = panels
-                .iter()
-                .enumerate()
-                .filter(|(j, _)| groups.x[*j] == i)
-                .flat_map(|(_, panel)| panel.marks.iter());
-            resolve::resolve_x(marks, limits[i].x, &rooms[i][0], fits.x_extent(i))
-        } else {
-            resolved[groups.x[i]].x.clone()
-        };
-        let (y, baseline) = if groups.y[i] == i {
-            let marks = panels
-                .iter()
-                .enumerate()
-                .filter(|(j, _)| groups.y[*j] == i)
-                .flat_map(|(_, panel)| panel.marks.iter());
-            resolve::resolve_y(marks, limits[i].y, &rooms[i][1], fits.y_extent(i))
-        } else {
-            let r = &resolved[groups.y[i]];
-            (r.y.clone(), r.baseline)
-        };
-        resolved.push(Resolved { x, y, baseline });
+        let resolved = Side::BOTH.map(|side| {
+            let keys = side.groups(groups);
+            let first = keys[i];
+            if first != i {
+                return axes[first][side.index()].clone();
+            }
+            let members = || (0..panels.len()).filter(|&j| keys[j] == i);
+            let marks = members().flat_map(|j| panels[j].marks.iter());
+            let role = AxisRole::of_group(
+                side.axis(),
+                members().map(|j| (limits[j].orientation(), panels[j].marks.as_slice())),
+            );
+            let bubbles = match side {
+                Side::X => fits.x_extent(i),
+                Side::Y => fits.y_extent(i),
+            };
+            resolve::resolve_axis(
+                marks,
+                side.axis(),
+                role,
+                limits[i].axis(side.axis()),
+                &rooms[i][side.index()],
+                bubbles,
+            )
+        });
+        axes.push(resolved);
     }
-    resolved
+    axes.into_iter().map(|[x, y]| Resolved::new(x, y)).collect()
 }
 
 /// Resolves and lays out every panel of `figure`, whose records are `panels`.
@@ -1595,7 +1608,7 @@ mod tests {
                 let (new, x_room, y_room) =
                     resolved_at(&f, size, TickSpacing::LabelsApart, lib).remove(0);
                 let x_axis = |r: &Resolved| (r.x.continuous().copied(), r.x.ticks.clone());
-                let y_axis = |r: &Resolved| (Some(r.y.scale), r.y.ticks.clone());
+                let y_axis = |r: &Resolved| (r.y.continuous().copied(), r.y.ticks.clone());
                 for (name, room, new, old) in [
                     ("x", &x_room, x_axis(&new), x_axis(&old)),
                     ("y", &y_room, y_axis(&new), y_axis(&old)),

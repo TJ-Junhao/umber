@@ -256,7 +256,7 @@ fn explicit_limits_are_kept_and_clip_the_bubbles() {
     bubbles(&mut f, &[1.0], &[1.0], &[1.0], Marker::Circle);
     let (r, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
     assert_eq!(r.x.continuous().unwrap().domain(), (0.0, 1.0));
-    assert_eq!(r.y.scale.domain(), (0.0, 1.0));
+    assert_eq!(r.y.continuous_scale().domain(), (0.0, 1.0));
     let marks = resolve_marks(f.single_axes().marks(), f.theme());
     let Item::Group {
         items,
@@ -287,7 +287,7 @@ fn only_the_axis_without_explicit_limits_is_fitted() {
     let (r, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
     assert_eq!(r.x.continuous().unwrap().domain(), (0.0, 1.0));
     assert!(layout.plot.width < 36.8);
-    let position = r.y.scale.normalize(1.0);
+    let position = r.y.continuous_scale().normalize(1.0);
     assert!(position * layout.plot.height >= 18.4);
     assert!((1.0 - position) * layout.plot.height >= 18.4);
     assert!(f.to_scene(FontLibrary::global()).is_ok());
@@ -417,7 +417,7 @@ fn refitted_limits_are_rounded_and_padded_once() {
         .unwrap();
     assert_bubbles_inside(&f, "refitted");
     let (r, _) = plan_figure(&f, (0, 0), FontLibrary::global());
-    let (lo, hi) = r.y.scale.domain();
+    let (lo, hi) = r.y.continuous_scale().domain();
     assert!(
         (lo + 16.5).abs() < 1e-9 && (hi - 16.5).abs() < 1e-9,
         "{:?}",

@@ -36,6 +36,22 @@ impl SharedAxis {
         }
     }
 
+    /// The hint for this axis when it is a category axis but needs to be linear or log.
+    pub const fn numeric_scale_hint(self) -> &'static str {
+        match self {
+            Self::X => "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes().",
+            Self::Y => "pass y=Scale.linear() or y=Scale.log() to Figure.add_axes().",
+        }
+    }
+
+    /// The hint for this axis when it is linear or log but needs to be a category axis.
+    pub const fn category_scale_hint(self) -> &'static str {
+        match self {
+            Self::X => "pass x=Scale.category() to Figure.add_axes().",
+            Self::Y => "pass y=Scale.category() to Figure.add_axes().",
+        }
+    }
+
     /// The sharing mode of this dimension.
     pub fn mode(self, grid: &Grid) -> Share {
         match self {

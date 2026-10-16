@@ -31,7 +31,7 @@ use umber_core::{
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
     RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
-use umber_core::{BoxOptions, Distribution, StemOptions};
+use umber_core::{AxisData, BoxOptions, Distribution, Error, ScaleKind, StemOptions};
 
 use crate::color::{ColorArg, color_spec};
 use crate::enums::enum_value;
@@ -195,7 +195,8 @@ impl Figure {
     /// Adds axes at the row `(row_kind, row)` and the column `(col_kind, col)`, spanning
     /// `row_span × col_span` cells, with the x scale `(x_kind, x_base)` and the y scale
     /// `(y_kind, y_base)`, and returns the `(row, col)` of their top-left cell. The core checks
-    /// the position and the scales, and a refused call adds nothing.
+    /// the position and the scales, and a refused call adds nothing; a category y scale is
+    /// refused after the position, since no mark of the Python layer draws on one.
     fn add_axes(
         &mut self,
         row_kind: i64,
@@ -217,6 +218,16 @@ impl Figure {
         };
         let x = scale_kind(x_kind, x_base)?;
         let y = scale_kind(y_kind, y_base)?;
+        // In the core's order: the position, then the y scale, then the cells taken and shared.
+        self.0.placement_cells(at).map_err(core_error)?;
+        if y == ScaleKind::Category {
+            return Err(core_error(Error::Usage {
+                context: "Figure.add_axes()",
+                message: "y is a category scale; the y axis must be linear or log.".into(),
+                parameter: Some("y"),
+                hint: Some("pass y=Scale.linear() or y=Scale.log()."),
+            }));
+        }
         let axes = self.0.add_axes_at(at, x, y).map_err(core_error)?;
         Ok((axes.cells().row(), axes.cells().col()))
     }
@@ -388,7 +399,7 @@ impl Figure {
         dash: i64,
         width: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, shared_floats(y)?);
+        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
         let options = LineOptions {
             label,
             color: color_spec(color)?,
@@ -414,7 +425,7 @@ impl Figure {
         dash: i64,
         width: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, shared_floats(y)?);
+        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
         let options = AreaOptions {
             label,
             color: color_spec(color)?,
@@ -440,7 +451,7 @@ impl Figure {
         marker: i64,
         size: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, shared_floats(y)?);
+        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
         let options = ScatterOptions {
             label,
             color: color_spec(color)?,
@@ -491,7 +502,7 @@ impl Figure {
         marker: i64,
         size: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, shared_floats(y)?);
+        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
         let options = StemOptions {
             label,
             color: color_spec(color)?,
@@ -706,7 +717,7 @@ impl Figure {
         dash: i64,
         width: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, shared_floats(y)?);
+        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
         let options = StepOptions {
             position: enum_value::<Step>(position)?,
             label,

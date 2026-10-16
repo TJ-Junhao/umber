@@ -9,9 +9,7 @@ use super::mark::Mark;
 use super::share::AxisSettings;
 use super::ticks::{AxisTicks, ExplicitTicks};
 use crate::error::number;
-use crate::{
-    ContinuousScale, Error, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat, Transform,
-};
+use crate::{ContinuousScale, Error, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat};
 
 /// A plotting area with its scales, texts, limits and marks.
 ///
@@ -36,8 +34,7 @@ pub struct Axes {
     /// The cells the axes cover on the figure's grid.
     pub(super) cells: CellRange,
     pub(super) x: ScaleKind,
-    /// The y axis is always linear or log, so it is stored as its transform.
-    pub(super) y: Transform,
+    pub(super) y: ScaleKind,
     pub(super) title: String,
     pub(super) subtitle: String,
     pub(super) xlabel: String,
@@ -54,11 +51,11 @@ pub struct Axes {
 }
 
 impl Axes {
-    /// Empty axes covering `cells`, with an x axis of scale kind `x` and a y axis of transform
+    /// Empty axes covering `cells`, with an x axis of scale kind `x` and a y axis of scale kind
     /// `y`.
     pub(super) fn new(
         x: ScaleKind,
-        y: Transform,
+        y: ScaleKind,
         cells: CellRange,
         x_settings: Arc<AxisSettings>,
         y_settings: Arc<AxisSettings>,
@@ -96,7 +93,7 @@ impl Axes {
         self.x
     }
 
-    /// The kind of the y scale: linear or log, never a category scale.
+    /// The kind of the y scale.
     ///
     /// # Examples
     ///
@@ -104,17 +101,12 @@ impl Axes {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// assert_eq!(axes.y_scale(), ScaleKind::Linear);
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// assert_eq!(axes.y_scale(), ScaleKind::Category);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
     pub fn y_scale(&self) -> ScaleKind {
-        self.y.kind()
-    }
-
-    /// The transform of the y axis.
-    pub(crate) fn y_transform(&self) -> Transform {
         self.y
     }
 
@@ -161,7 +153,7 @@ impl Axes {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn check_scales(&self, x: ScaleKind, y: ScaleKind) -> Result<()> {
-        for (name, given, actual) in [("x", x, self.x), ("y", y, self.y.kind())] {
+        for (name, given, actual) in [("x", x, self.x), ("y", y, self.y)] {
             if given != actual {
                 return Err(Error::usage(
                     "Figure.axes_at()",

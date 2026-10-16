@@ -24,7 +24,7 @@ use crate::draw::marker_reach;
 use crate::layout::PlotSize;
 use crate::model::ShareGroups;
 use crate::resolve::{
-    self, AxisLimits, AxisScale, ContinuousLimits, Limits, Resolved, ResolvedMark,
+    self, AxisLimits, AxisScale, ContinuousLimits, Limits, Resolved, ResolvedMark, ValueAxis,
 };
 use crate::scale::log_offset;
 use crate::{ContinuousScale, Transform};
@@ -67,14 +67,23 @@ impl Axis {
         }
     }
 
-    /// The continuous scale of this axis in `resolved`; `None` for a category x axis.
-    fn scale(self, resolved: &Resolved) -> Option<ContinuousScale> {
+    /// This axis, as resolve names it.
+    fn which(self) -> ValueAxis {
         match self {
-            Axis::X => match resolved.x.scale {
-                AxisScale::Continuous(scale) => Some(scale),
-                AxisScale::Category(_) => None,
-            },
-            Axis::Y => Some(resolved.y.scale),
+            Axis::X => ValueAxis::X,
+            Axis::Y => ValueAxis::Y,
+        }
+    }
+
+    /// The continuous scale of this axis in `resolved`; `None` for a category axis.
+    fn scale(self, resolved: &Resolved) -> Option<ContinuousScale> {
+        let axis = match self {
+            Axis::X => &resolved.x,
+            Axis::Y => &resolved.y,
+        };
+        match axis.scale {
+            AxisScale::Continuous(scale) => Some(scale),
+            AxisScale::Category(_) => None,
         }
     }
 }
@@ -151,10 +160,7 @@ impl BubbleFit {
             return None;
         }
         let marks = members.flat_map(|(_, marks)| marks.iter());
-        let data = match axis {
-            Axis::X => resolve::x_extent(marks),
-            Axis::Y => resolve::y_extent(marks, limits.transform),
-        };
+        let data = resolve::axis_extent(marks, axis.which(), limits.transform);
         let raw = resolve::unrounded_extent(limits, data);
         let seed = ContinuousScale::from_extent(limits.transform, raw, CONTEXT).ok()?;
         Some(BubbleFit {
@@ -362,12 +368,8 @@ impl BubbleFits {
                     if keys[i] != i {
                         return None;
                     }
-                    let limits = match axis {
-                        Axis::X => match &limits[i].x {
-                            AxisLimits::Continuous(limits) => limits,
-                            AxisLimits::Category => return None,
-                        },
-                        Axis::Y => &limits[i].y,
+                    let AxisLimits::Continuous(limits) = limits[i].axis(axis.which()) else {
+                        return None;
                     };
                     if limits.explicit.is_some() {
                         return None;
@@ -375,7 +377,7 @@ impl BubbleFits {
                     let members = (0..marks.len())
                         .filter(|j| keys[*j] == i)
                         .map(|j| (j, marks[j]));
-                    BubbleFit::new(axis, limits, members)
+                    BubbleFit::new(axis, &limits, members)
                 })
             })
             .collect();

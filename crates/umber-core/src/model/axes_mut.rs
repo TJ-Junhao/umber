@@ -19,12 +19,12 @@ use super::stacked_area::StackedAreaMark;
 use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
-    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
-    check_reference_value, check_span, check_step_order, check_vline_x, check_x_error_bars,
-    check_x_limits, check_x_tick_axis, check_y_error_bars,
+    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band, check_limits,
+    check_numeric_y, check_reference_value, check_span, check_step_order, check_tick_axis,
+    check_vline_x, check_x_error_bars, check_y_error_bars,
 };
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
-use crate::{ContinuousScale, Error, LegendPosition, LegendStyle, Result, TickFormat};
+use crate::{Error, LegendPosition, LegendStyle, Result, TickFormat};
 
 /// One axes of a figure, held for changing: the setters of its texts, limits, ticks and legend
 /// style, and its mark methods. It borrows the whole figure, and dereferences to the [`Axes`]
@@ -33,6 +33,9 @@ use crate::{ContinuousScale, Error, LegendPosition, LegendStyle, Result, TickFor
 /// [`Figure::add_axes`], [`Figure::add_axes_at`] and [`Figure::axes_at_mut`] return one.
 /// Every setter checks its input before it stores anything, so a failed call leaves the figure
 /// unchanged. Setters return the handle, so calls chain.
+///
+/// Every mark method needs a linear or log y axis: on a category y axis it returns
+/// `Error::Usage`, naming `y`, before any other check.
 ///
 /// Limits, explicit ticks and tick formats apply to the whole shared group. A member may
 /// replace its own setting, but a different value already set by another member is an
@@ -176,7 +179,12 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
         let mut settings = (*self.x_settings).clone();
-        settings.limits = Some(check_x_limits(self.x, low, high)?);
+        settings.limits = Some(check_limits(
+            "Axes.xlim()",
+            SharedAxis::X,
+            self.x,
+            (low, high),
+        )?);
         self.figure.set_group(
             self.index,
             SharedAxis::X,
@@ -187,7 +195,7 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
-    /// Sets the y limits. Same rules as [`AxesMut::xlim`]; the y axis is never a category axis.
+    /// Sets the y limits. Same rules as [`AxesMut::xlim`].
     ///
     /// # Examples
     ///
@@ -202,7 +210,12 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
         let mut settings = (*self.y_settings).clone();
-        settings.limits = Some(ContinuousScale::new(self.y, low, high, "Axes.ylim()")?);
+        settings.limits = Some(check_limits(
+            "Axes.ylim()",
+            SharedAxis::Y,
+            self.y,
+            (low, high),
+        )?);
         self.figure.set_group(
             self.index,
             SharedAxis::Y,
@@ -246,7 +259,7 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn xticks(&mut self, positions: &[f64]) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.xticks()";
-        let transform = check_x_tick_axis(CONTEXT, self.x, "ticks")?;
+        let transform = check_tick_axis(CONTEXT, SharedAxis::X, self.x, "ticks")?;
         let mut settings = (*self.x_settings).clone();
         settings
             .ticks
@@ -257,12 +270,11 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Replaces the automatic y ticks with ticks at `positions`. Same rules as
-    /// [`AxesMut::xticks`]; the y axis is never a category axis. Bars and histograms keep 0 in a
-    /// linear y domain.
+    /// [`AxesMut::xticks`]. Bars and histograms keep 0 in a linear y domain.
     ///
     /// # Errors
     ///
-    /// Errors leave the axes unchanged: `Error::Style` as for [`AxesMut::xticks`].
+    /// Errors leave the axes unchanged: as for [`AxesMut::xticks`], on the y axis.
     ///
     /// # Examples
     ///
@@ -278,8 +290,11 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn yticks(&mut self, positions: &[f64]) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.yticks()";
+        let transform = check_tick_axis(CONTEXT, SharedAxis::Y, self.y, "ticks")?;
         let mut settings = (*self.y_settings).clone();
-        settings.ticks.set_positions(CONTEXT, self.y, positions)?;
+        settings
+            .ticks
+            .set_positions(CONTEXT, transform, positions)?;
         self.figure
             .set_group(self.index, SharedAxis::Y, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
@@ -315,7 +330,7 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn xticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.xticks_labeled()";
-        let transform = check_x_tick_axis(CONTEXT, self.x, "ticks")?;
+        let transform = check_tick_axis(CONTEXT, SharedAxis::X, self.x, "ticks")?;
         let mut settings = (*self.x_settings).clone();
         settings
             .ticks
@@ -326,13 +341,12 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Replaces the automatic y ticks with ticks at `positions`, each labelled with the label
-    /// at the same index of `labels`, drawn as given. Same rules as [`AxesMut::xticks_labeled`];
-    /// the y axis is never a category axis.
+    /// at the same index of `labels`, drawn as given. Same rules as [`AxesMut::xticks_labeled`].
     ///
     /// # Errors
     ///
-    /// Errors leave the axes unchanged: as for [`AxesMut::xticks_labeled`], against the y tick
-    /// format.
+    /// Errors leave the axes unchanged: as for [`AxesMut::xticks_labeled`], on the y axis and
+    /// against the y tick format.
     ///
     /// # Examples
     ///
@@ -347,10 +361,11 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn yticks_labeled(&mut self, positions: &[f64], labels: Vec<String>) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.yticks_labeled()";
+        let transform = check_tick_axis(CONTEXT, SharedAxis::Y, self.y, "ticks")?;
         let mut settings = (*self.y_settings).clone();
         settings
             .ticks
-            .set_labeled(CONTEXT, self.y, positions, labels)?;
+            .set_labeled(CONTEXT, transform, positions, labels)?;
         self.figure
             .set_group(self.index, SharedAxis::Y, Setting::Ticks, settings, CONTEXT)?;
         Ok(self)
@@ -378,7 +393,7 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn xtick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.xtick_format()";
-        check_x_tick_axis(CONTEXT, self.x, "tick formats")?;
+        check_tick_axis(CONTEXT, SharedAxis::X, self.x, "tick formats")?;
         let mut settings = (*self.x_settings).clone();
         settings.ticks.set_format(CONTEXT, format)?;
         self.figure.set_group(
@@ -391,14 +406,13 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
-    /// Sets the format of the y tick labels. Same rules as [`AxesMut::xtick_format`]; the y axis
-    /// is never a category axis.
+    /// Sets the format of the y tick labels. Same rules as [`AxesMut::xtick_format`].
     ///
     /// # Errors
     ///
-    /// Errors leave the axes unchanged: `Error::Usage` for [`TickFormat::iso`] on a linear or
-    /// log axis, and when the y ticks have labels given with [`AxesMut::yticks_labeled`] and
-    /// `format` is not plain [`TickFormat::AUTO`].
+    /// Errors leave the axes unchanged: `Error::Usage` on a category y axis, for
+    /// [`TickFormat::iso`] on a linear or log axis, and when the y ticks have labels given with
+    /// [`AxesMut::yticks_labeled`] and `format` is not plain [`TickFormat::AUTO`].
     ///
     /// # Examples
     ///
@@ -413,6 +427,7 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn ytick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.ytick_format()";
+        check_tick_axis(CONTEXT, SharedAxis::Y, self.y, "tick formats")?;
         let mut settings = (*self.y_settings).clone();
         settings.ticks.set_format(CONTEXT, format)?;
         self.figure.set_group(
@@ -482,12 +497,13 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
-    /// Adds a line. Errors leave the axes unchanged: `Error::Data` for mismatched lengths, an
-    /// infinite value, a magnitude beyond [`MAX_MAGNITUDE`], a value outside the log range on a
-    /// log axis, or `x` of the wrong kind for the axis. NaN is allowed and breaks the line.
+    /// Adds a line. Errors leave the axes unchanged: `Error::Usage` on a category y axis, then
+    /// `Error::Data` for mismatched lengths, an infinite value, a magnitude beyond
+    /// [`MAX_MAGNITUDE`], a value outside the log range on a log axis, or `x` or `y` of the wrong
+    /// kind for its axis. NaN is allowed and breaks the line.
     ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
-    /// `Arc<[f64]>` without copying them, use [`AxesMut::line_shared`].
+    /// [`AxisData`] without copying them, use [`AxesMut::line_shared`].
     ///
     /// # Examples
     ///
@@ -506,38 +522,41 @@ impl<'a> AxesMut<'a> {
     ///
     /// [`MAX_MAGNITUDE`]: crate::MAX_MAGNITUDE
     pub fn line(&mut self, x: AxisData, y: &[f64], options: LineOptions) -> Result<&mut Self> {
-        self.line_shared(x, Arc::from(y), options)
+        self.line_shared(x, AxisData::Numbers(y.to_vec()), options)
     }
 
-    /// Adds a line as [`AxesMut::line`] does, but stores `y` itself rather than a copy of it: the
-    /// mark, and every clone of the figure, share the allocation of `y`. Use it for values
-    /// that are already in an `Arc<[f64]>`, so they are not copied again. Same rules and errors
-    /// as [`AxesMut::line`]; a failed call stores nothing.
+    /// Adds a line as [`AxesMut::line`] does, but stores `y` itself rather than a copy of it, as
+    /// it stores `x`: the mark, and every clone of the figure, share the allocation of `y`. Use
+    /// it for values that are already in an [`AxisData`], so they are not copied again. Same
+    /// rules and errors as [`AxesMut::line`]; a failed call stores nothing.
     ///
     /// # Examples
     ///
     /// ```
-    /// use std::sync::Arc;
-    ///
     /// use umber_core::figure::{AxisData, LineOptions, Mark};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let y: Arc<[f64]> = Arc::from([1.0, f64::NAN]);
-    /// axes.line_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), LineOptions::default())?;
+    /// let y = vec![1.0, f64::NAN];
+    /// let values = y.as_ptr();
+    /// let x = AxisData::Numbers(vec![0.0, 1.0]);
+    /// axes.line_shared(x, AxisData::Numbers(y), LineOptions::default())?;
     /// let Some(Mark::Line(line)) = axes.marks().first() else { unreachable!() };
-    /// assert!(std::ptr::eq(line.y(), &*y));
+    /// let AxisData::Numbers(stored) = line.y() else { unreachable!() };
+    /// assert!(std::ptr::eq(stored.as_ptr(), values));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn line_shared(
         &mut self,
         x: AxisData,
-        y: Arc<[f64]>,
+        y: AxisData,
         options: LineOptions,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.line()";
         let axes = self.axes_mut();
-        let series = XySeries::new("Axes.line()", axes.x, axes.y, x, y, LINE_GAP_HINT)?;
+        check_numeric_y(CONTEXT, axes.y)?;
+        let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, LINE_GAP_HINT)?;
         axes.marks.push(Mark::line(series, options));
         Ok(self)
     }
@@ -545,7 +564,7 @@ impl<'a> AxesMut<'a> {
     /// Adds a scatter series. Same rules as [`AxesMut::line`]; NaN skips a point.
     ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
-    /// `Arc<[f64]>` without copying them, use [`AxesMut::scatter_shared`].
+    /// [`AxisData`] without copying them, use [`AxesMut::scatter_shared`].
     ///
     /// # Examples
     ///
@@ -565,7 +584,7 @@ impl<'a> AxesMut<'a> {
         y: &[f64],
         options: ScatterOptions,
     ) -> Result<&mut Self> {
-        self.scatter_shared(x, Arc::from(y), options)
+        self.scatter_shared(x, AxisData::Numbers(y.to_vec()), options)
     }
 
     /// Adds a scatter series as [`AxesMut::scatter`] does, but stores `y` itself rather than a
@@ -574,28 +593,30 @@ impl<'a> AxesMut<'a> {
     /// # Examples
     ///
     /// ```
-    /// use std::sync::Arc;
-    ///
     /// use umber_core::figure::{AxisData, Mark, ScatterOptions};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let y: Arc<[f64]> = Arc::from([1.0, 2.0]);
+    /// let y = vec![1.0, 2.0];
+    /// let values = y.as_ptr();
     /// let x = AxisData::Numbers(vec![0.0, 1.0]);
-    /// axes.scatter_shared(x, Arc::clone(&y), ScatterOptions::default())?;
+    /// axes.scatter_shared(x, AxisData::Numbers(y), ScatterOptions::default())?;
     /// let Some(Mark::Scatter(scatter)) = axes.marks().first() else { unreachable!() };
-    /// assert!(std::ptr::eq(scatter.y(), &*y));
+    /// let AxisData::Numbers(stored) = scatter.y() else { unreachable!() };
+    /// assert!(std::ptr::eq(stored.as_ptr(), values));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn scatter_shared(
         &mut self,
         x: AxisData,
-        y: Arc<[f64]>,
+        y: AxisData,
         options: ScatterOptions,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.scatter()";
         let axes = self.axes_mut();
-        let series = XySeries::new("Axes.scatter()", axes.x, axes.y, x, y, SCATTER_GAP_HINT)?;
+        check_numeric_y(CONTEXT, axes.y)?;
+        let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
         axes.marks.push(Mark::scatter(series, options));
         Ok(self)
     }
@@ -671,8 +692,10 @@ impl<'a> AxesMut<'a> {
         sizes: Arc<[f64]>,
         options: super::bubbles::BubbleOptions,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.bubbles()";
         let axes = self.axes_mut();
-        super::validation::check_bubbles("Axes.bubbles()", axes.x, axes.y, (&x, &y, &sizes))?;
+        let y_transform = check_numeric_y(CONTEXT, axes.y)?;
+        super::validation::check_bubbles(CONTEXT, axes.x, y_transform, (&x, &y, &sizes))?;
         axes.marks
             .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
                 x, y, sizes, options,
@@ -687,7 +710,7 @@ impl<'a> AxesMut<'a> {
     ///
     /// The line width is [`Theme::stem_width`](crate::Theme::stem_width); `options.size` sets
     /// only the marker diameter. Labelled stems take a legend row entry, never a direct label.
-    /// The mark copies `y` once; [`AxesMut::stem_shared`] can store an existing `Arc<[f64]>`.
+    /// The mark copies `y` once; [`AxesMut::stem_shared`] can store an existing [`AxisData`].
     ///
     /// # Examples
     ///
@@ -701,7 +724,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn stem(&mut self, x: AxisData, y: &[f64], options: StemOptions) -> Result<&mut Self> {
-        self.stem_shared(x, Arc::from(y), options)
+        self.stem_shared(x, AxisData::Numbers(y.to_vec()), options)
     }
 
     /// Adds stems as [`AxesMut::stem`] does, storing `y` without copying it. Same rules and
@@ -710,25 +733,29 @@ impl<'a> AxesMut<'a> {
     /// # Examples
     ///
     /// ```
-    /// use std::sync::Arc;
     /// use umber_core::{AxisData, Figure, Mark, ScaleKind, StemOptions, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let y: Arc<[f64]> = Arc::from([2.0, -1.0]);
-    /// axes.stem_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), StemOptions::default())?;
+    /// let y = vec![2.0, -1.0];
+    /// let values = y.as_ptr();
+    /// let x = AxisData::Numbers(vec![0.0, 1.0]);
+    /// axes.stem_shared(x, AxisData::Numbers(y), StemOptions::default())?;
     /// let Some(Mark::Stem(stem)) = axes.marks().first() else { unreachable!() };
-    /// assert!(std::ptr::eq(stem.y(), &*y));
+    /// let AxisData::Numbers(stored) = stem.y() else { unreachable!() };
+    /// assert!(std::ptr::eq(stored.as_ptr(), values));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn stem_shared(
         &mut self,
         x: AxisData,
-        y: Arc<[f64]>,
+        y: AxisData,
         options: StemOptions,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.stem()";
         let axes = self.axes_mut();
-        let series = XySeries::new("Axes.stem()", axes.x, axes.y, x, y, SCATTER_GAP_HINT)?;
+        check_numeric_y(CONTEXT, axes.y)?;
+        let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
         axes.marks.push(Mark::Stem(StemMark::new(series, options)));
         Ok(self)
     }
@@ -742,7 +769,7 @@ impl<'a> AxesMut<'a> {
     /// fill.
     ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
-    /// `Arc<[f64]>` without copying them, use [`AxesMut::area_shared`].
+    /// [`AxisData`] without copying them, use [`AxesMut::area_shared`].
     ///
     /// # Examples
     ///
@@ -763,7 +790,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn area(&mut self, x: AxisData, y: &[f64], options: AreaOptions) -> Result<&mut Self> {
-        self.area_shared(x, Arc::from(y), options)
+        self.area_shared(x, AxisData::Numbers(y.to_vec()), options)
     }
 
     /// Adds an area as [`AxesMut::area`] does, but stores `y` itself rather than a copy of it, as
@@ -772,27 +799,30 @@ impl<'a> AxesMut<'a> {
     /// # Examples
     ///
     /// ```
-    /// use std::sync::Arc;
-    ///
     /// use umber_core::figure::{AreaOptions, AxisData, Mark};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let y: Arc<[f64]> = Arc::from([3.0, 4.0]);
-    /// axes.area_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), AreaOptions::default())?;
+    /// let y = vec![3.0, 4.0];
+    /// let values = y.as_ptr();
+    /// let x = AxisData::Numbers(vec![0.0, 1.0]);
+    /// axes.area_shared(x, AxisData::Numbers(y), AreaOptions::default())?;
     /// let Some(Mark::Area(area)) = axes.marks().first() else { unreachable!() };
-    /// assert!(std::ptr::eq(area.y(), &*y));
+    /// let AxisData::Numbers(stored) = area.y() else { unreachable!() };
+    /// assert!(std::ptr::eq(stored.as_ptr(), values));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn area_shared(
         &mut self,
         x: AxisData,
-        y: Arc<[f64]>,
+        y: AxisData,
         options: AreaOptions,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.area()";
         let axes = self.axes_mut();
-        let series = XySeries::new("Axes.area()", axes.x, axes.y, x, y, AREA_GAP_HINT)?;
+        check_numeric_y(CONTEXT, axes.y)?;
+        let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, AREA_GAP_HINT)?;
         axes.marks.push(Mark::area(series, options));
         Ok(self)
     }
@@ -849,8 +879,10 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn stacked_area_shared(&mut self, x: Arc<[f64]>, series: Vec<Series>) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.stacked_area()";
         let axes = self.axes_mut();
-        let mark = StackedAreaMark::new("Axes.stacked_area()", axes.x, axes.y, x, series)?;
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        let mark = StackedAreaMark::new(CONTEXT, axes.x, y, x, series)?;
         axes.marks.push(Mark::StackedArea(mark));
         Ok(self)
     }
@@ -921,8 +953,10 @@ impl<'a> AxesMut<'a> {
         heights: Arc<[f64]>,
         options: BarOptions,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.bar()";
         let axes = self.axes_mut();
-        let mark = BarMark::new("Axes.bar()", axes.x, axes.y, categories, heights, options)?;
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        let mark = BarMark::new(CONTEXT, axes.x, y, categories, heights, options)?;
         axes.marks.push(Mark::Bar(mark));
         Ok(self)
     }
@@ -968,15 +1002,10 @@ impl<'a> AxesMut<'a> {
         categories: Vec<String>,
         series: Vec<Series>,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.grouped_bar()";
         let axes = self.axes_mut();
-        let mark = BarGroupMark::new(
-            "Axes.grouped_bar()",
-            Arrangement::Grouped,
-            axes.x,
-            axes.y,
-            categories,
-            series,
-        )?;
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        let mark = BarGroupMark::new(CONTEXT, Arrangement::Grouped, axes.x, y, categories, series)?;
         axes.marks.push(Mark::GroupedBar(mark));
         Ok(self)
     }
@@ -1006,7 +1035,8 @@ impl<'a> AxesMut<'a> {
         options: BoxOptions,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let mark = BoxMark::new(axes.x, axes.y, categories, groups, options)?;
+        let y = check_numeric_y("Axes.box()", axes.y)?;
+        let mark = BoxMark::new(axes.x, y, categories, groups, options)?;
         axes.marks.push(Mark::Box(mark));
         Ok(self)
     }
@@ -1034,7 +1064,8 @@ impl<'a> AxesMut<'a> {
         distributions: Vec<Distribution>,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let mark = BoxGroupMark::new(axes.x, axes.y, categories, distributions)?;
+        let y = check_numeric_y("Axes.grouped_box()", axes.y)?;
+        let mark = BoxGroupMark::new(axes.x, y, categories, distributions)?;
         axes.marks.push(Mark::GroupedBox(mark));
         Ok(self)
     }
@@ -1065,7 +1096,8 @@ impl<'a> AxesMut<'a> {
         options: ViolinOptions,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let mark = ViolinMark::new(axes.x, axes.y, categories, groups, options)?;
+        let y = check_numeric_y("Axes.violin()", axes.y)?;
+        let mark = ViolinMark::new(axes.x, y, categories, groups, options)?;
         axes.marks.push(Mark::Violin(mark));
         Ok(self)
     }
@@ -1093,7 +1125,8 @@ impl<'a> AxesMut<'a> {
         distributions: Vec<Distribution>,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let mark = ViolinGroupMark::new(axes.x, axes.y, categories, distributions)?;
+        let y = check_numeric_y("Axes.grouped_violin()", axes.y)?;
+        let mark = ViolinGroupMark::new(axes.x, y, categories, distributions)?;
         axes.marks.push(Mark::GroupedViolin(mark));
         Ok(self)
     }
@@ -1134,15 +1167,10 @@ impl<'a> AxesMut<'a> {
         categories: Vec<String>,
         series: Vec<Series>,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.stacked_bar()";
         let axes = self.axes_mut();
-        let mark = BarGroupMark::new(
-            "Axes.stacked_bar()",
-            Arrangement::Stacked,
-            axes.x,
-            axes.y,
-            categories,
-            series,
-        )?;
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        let mark = BarGroupMark::new(CONTEXT, Arrangement::Stacked, axes.x, y, categories, series)?;
         axes.marks.push(Mark::StackedBar(mark));
         Ok(self)
     }
@@ -1211,8 +1239,10 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn hist_shared(&mut self, values: Arc<[f64]>, options: HistOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.hist()";
         let axes = self.axes_mut();
-        let mark = HistMark::new("Axes.hist()", axes.x, values, options)?;
+        check_numeric_y(CONTEXT, axes.y)?;
+        let mark = HistMark::new(CONTEXT, axes.x, values, options)?;
         axes.marks.push(Mark::Hist(mark));
         Ok(self)
     }
@@ -1228,7 +1258,7 @@ impl<'a> AxesMut<'a> {
     /// index.
     ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
-    /// `Arc<[f64]>` without copying them, use [`AxesMut::step_shared`].
+    /// [`AxisData`] without copying them, use [`AxesMut::step_shared`].
     ///
     /// # Examples
     ///
@@ -1248,7 +1278,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn step(&mut self, x: AxisData, y: &[f64], options: StepOptions) -> Result<&mut Self> {
-        self.step_shared(x, Arc::from(y), options)
+        self.step_shared(x, AxisData::Numbers(y.to_vec()), options)
     }
 
     /// Adds a step line as [`AxesMut::step`] does, but stores `y` itself rather than a copy of
@@ -1257,28 +1287,30 @@ impl<'a> AxesMut<'a> {
     /// # Examples
     ///
     /// ```
-    /// use std::sync::Arc;
-    ///
     /// use umber_core::figure::{AxisData, Mark, StepOptions};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let y: Arc<[f64]> = Arc::from([1.0, 2.0]);
-    /// axes.step_shared(AxisData::Numbers(vec![0.0, 1.0]), Arc::clone(&y), StepOptions::default())?;
+    /// let y = vec![1.0, 2.0];
+    /// let values = y.as_ptr();
+    /// let x = AxisData::Numbers(vec![0.0, 1.0]);
+    /// axes.step_shared(x, AxisData::Numbers(y), StepOptions::default())?;
     /// let Some(Mark::Step(step)) = axes.marks().first() else { unreachable!() };
-    /// assert!(std::ptr::eq(step.y(), &*y));
+    /// let AxisData::Numbers(stored) = step.y() else { unreachable!() };
+    /// assert!(std::ptr::eq(stored.as_ptr(), values));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn step_shared(
         &mut self,
         x: AxisData,
-        y: Arc<[f64]>,
+        y: AxisData,
         options: StepOptions,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.step()";
         let axes = self.axes_mut();
-        let series = XySeries::new(CONTEXT, axes.x, axes.y, x, y, LINE_GAP_HINT)?;
+        check_numeric_y(CONTEXT, axes.y)?;
+        let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, LINE_GAP_HINT)?;
         check_step_order(CONTEXT, series.x())?;
         axes.marks.push(Mark::Step(StepMark::new(series, options)));
         Ok(self)
@@ -1307,7 +1339,8 @@ impl<'a> AxesMut<'a> {
     pub fn hline(&mut self, y: f64, options: RuleOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.hline()";
         let axes = self.axes_mut();
-        check_reference_value(CONTEXT, "y", REFERENCE_LINE, y, axes.y)?;
+        let y_transform = check_numeric_y(CONTEXT, axes.y)?;
+        check_reference_value(CONTEXT, "y", REFERENCE_LINE, y, y_transform)?;
         axes.marks.push(Mark::HLine(HLineMark::new(y, options)));
         Ok(self)
     }
@@ -1348,6 +1381,7 @@ impl<'a> AxesMut<'a> {
     pub fn vline(&mut self, x: AxisValue, options: RuleOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.vline()";
         let axes = self.axes_mut();
+        check_numeric_y(CONTEXT, axes.y)?;
         check_vline_x(CONTEXT, axes.x, &x)?;
         axes.marks.push(Mark::VLine(VLineMark::new(x, options)));
         Ok(self)
@@ -1378,7 +1412,8 @@ impl<'a> AxesMut<'a> {
     pub fn hspan(&mut self, low: f64, high: f64, options: SpanOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.hspan()";
         let axes = self.axes_mut();
-        check_span(CONTEXT, (low, high), axes.y)?;
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        check_span(CONTEXT, (low, high), y)?;
         axes.marks
             .push(Mark::HSpan(SpanMark::new(low, high, options)));
         Ok(self)
@@ -1411,6 +1446,7 @@ impl<'a> AxesMut<'a> {
     pub fn vspan(&mut self, low: f64, high: f64, options: SpanOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.vspan()";
         let axes = self.axes_mut();
+        check_numeric_y(CONTEXT, axes.y)?;
         let Some(transform) = axes.x.transform() else {
             return Err(Error::usage(
                 CONTEXT,
@@ -1500,7 +1536,8 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.band()";
         let axes = self.axes_mut();
-        check_band(CONTEXT, axes.x, axes.y, (&x, &low, &high))?;
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        check_band(CONTEXT, axes.x, y, (&x, &low, &high))?;
         axes.marks
             .push(Mark::Band(BandMark::new(x, low, high, options)));
         Ok(self)
@@ -1586,7 +1623,8 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.y_error_bars()";
         let axes = self.axes_mut();
-        check_y_error_bars(CONTEXT, axes.x, axes.y, &x, (&low, &high))?;
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        check_y_error_bars(CONTEXT, axes.x, y, &x, (&low, &high))?;
         axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
             ErrorBarOrientation::Vertical,
             x,
@@ -1676,7 +1714,8 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.x_error_bars()";
         let axes = self.axes_mut();
-        check_x_error_bars(CONTEXT, axes.x, axes.y, &y, (&low, &high))?;
+        let y_transform = check_numeric_y(CONTEXT, axes.y)?;
+        check_x_error_bars(CONTEXT, axes.x, y_transform, &y, (&low, &high))?;
         axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
             ErrorBarOrientation::Horizontal,
             AxisData::Numbers(y),

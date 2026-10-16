@@ -196,8 +196,6 @@ impl Figure {
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// assert!(figure.add_axes(ScaleKind::Linear, ScaleKind::Category).is_err());
-    /// assert_eq!(figure.panels().count(), 0);
     /// figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?.title("Sales");
     /// let err = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap_err();
     /// assert_eq!(
@@ -221,7 +219,6 @@ impl Figure {
     /// - `at.col` is `Auto` on a grid of more than one column, or outside the grid (`col`);
     /// - `at.row_span` is below 1, or the rows spanned run past the last row (`row_span`);
     /// - `at.col_span` is below 1, or the columns spanned run past the last column (`col_span`);
-    /// - `y` is a category scale, because the y axis is always linear or log (`y`);
     /// - a cell is taken by an axes already added (`row`): the message names the first taken
     ///   cell in row-major order and the top-left cell of the axes that holds it;
     /// - a shared group would mix scale kinds or log bases (`x`, then `y`);
@@ -258,24 +255,8 @@ impl Figure {
         x: ScaleKind,
         y: ScaleKind,
     ) -> Result<AxesMut<'_>> {
-        let (rows, cols) = (self.grid.rows(), self.grid.cols());
-        let row = auto_index(ADD_AXES, Dimension::ROW, at.row, rows)?;
-        let row = in_range(ADD_AXES, Dimension::ROW, row, rows)?;
-        let col = auto_index(ADD_AXES, Dimension::COL, at.col, cols)?;
-        let col = in_range(ADD_AXES, Dimension::COL, col, cols)?;
-        let row_span = positive_span(Dimension::ROW, at.row_span)?;
-        let row_span = span_in_grid(Dimension::ROW, row, row_span, rows)?;
-        let col_span = positive_span(Dimension::COL, at.col_span)?;
-        let col_span = span_in_grid(Dimension::COL, col, col_span, cols)?;
-        let Some(y) = y.transform() else {
-            return Err(Error::usage(
-                ADD_AXES,
-                "y is a category scale; the y axis must be linear or log.",
-            )
-            .with_parameter("y")
-            .with_hint("pass y=Scale.linear() or y=Scale.log()."));
-        };
-        let cells = CellRange::new(row, col, row_span, col_span);
+        let cells = self.placement_cells(at)?;
+        let (row, col) = (cells.row(), cells.col());
         let taken = cells.iter().find_map(|cell| {
             self.panels
                 .iter()
@@ -296,7 +277,7 @@ impl Figure {
             .with_parameter("row")
             .with_hint("each cell holds one axes; pick an empty cell."));
         }
-        share::check_add(self, cells, x, y.kind())?;
+        share::check_add(self, cells, x, y)?;
         let x_key = self.x_group_of(row, col);
         let y_key = self.y_group_of(row, col);
         let x_settings = Arc::clone(&self.x_groups.entry(x_key).or_default().settings);
@@ -308,6 +289,46 @@ impl Figure {
         self.panels
             .insert(index, Axes::new(x, y, cells, x_settings, y_settings));
         Ok(AxesMut::new(self, index))
+    }
+
+    /// The cells that an axes added at `at` would cover on this figure's grid, checked as
+    /// [`Figure::add_axes_at`] checks the position, before any other of its checks. It does not
+    /// look at the axes already added: a cell may be taken.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` in `"Figure.add_axes()"`, as the first four rows of the error list of
+    /// [`Figure::add_axes_at`]: the row, the column, the row span, then the column span.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Grid, GridIndex, Placement, Theme};
+    ///
+    /// let figure = Figure::with_grid(9.0, 6.0, Theme::pigment(), Grid::new(2, 3)?)?;
+    /// let at = Placement {
+    ///     row: GridIndex::At(1),
+    ///     col: GridIndex::At(1),
+    ///     col_span: 2,
+    ///     ..Placement::default()
+    /// };
+    /// let cells = figure.placement_cells(at)?;
+    /// assert_eq!((cells.row(), cells.col(), cells.col_span()), (1, 1, 2));
+    /// let past = Placement { col_span: 3, ..at };
+    /// assert_eq!(figure.placement_cells(past).unwrap_err().parameter(), Some("col_span"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn placement_cells(&self, at: Placement) -> Result<CellRange> {
+        let (rows, cols) = (self.grid.rows(), self.grid.cols());
+        let row = auto_index(ADD_AXES, Dimension::ROW, at.row, rows)?;
+        let row = in_range(ADD_AXES, Dimension::ROW, row, rows)?;
+        let col = auto_index(ADD_AXES, Dimension::COL, at.col, cols)?;
+        let col = in_range(ADD_AXES, Dimension::COL, col, cols)?;
+        let row_span = positive_span(Dimension::ROW, at.row_span)?;
+        let row_span = span_in_grid(Dimension::ROW, row, row_span, rows)?;
+        let col_span = positive_span(Dimension::COL, at.col_span)?;
+        let col_span = span_in_grid(Dimension::COL, col, col_span, cols)?;
+        Ok(CellRange::new(row, col, row_span, col_span))
     }
 
     /// The axes whose top-left cell is at `row`, `col`. A spanning axes is found at its
@@ -831,9 +852,9 @@ mod tests {
                 grid(3, 3),
                 at(1, 0, 1, 1),
                 category,
-                "y is a category scale; the y axis must be linear or log.",
-                "y",
-                "pass y=Scale.linear() or y=Scale.log().",
+                "row 1, col 0 is taken by the axes added at row 1, col 0.",
+                "row",
+                "each cell holds one axes; pick an empty cell.",
             ),
             case(
                 grid(3, 3),

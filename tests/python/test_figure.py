@@ -235,6 +235,30 @@ def test_a_category_y_is_reported_before_a_second_axes() -> None:
     assert str(caught.value) == CATEGORY_Y
 
 
+@pytest.mark.parametrize(
+    ("place", "parameter", "message"),
+    [
+        ({"row": -1}, "row", "row is -1; this figure has rows 0 to 0."),
+        ({"col": 3}, "col", "col is 3; this figure has columns 0 to 0."),
+        ({"row_span": 0}, "row_span", "row_span is 0; row_span must be at least 1."),
+        ({"col_span": 2}, "col_span", "col 0 with col_span 2 runs past the last column, 0."),
+    ],
+)
+def test_a_bad_position_is_reported_before_a_category_y(
+    place: dict[str, int], parameter: str, message: str
+) -> None:
+    fig = ub.Figure()
+    before = fig.to_svg()
+    with pytest.raises(ub.UsageError) as caught:
+        cast(Any, fig.add_axes)(y=ub.Scale.category(), **place)
+    assert str(caught.value) == f"Figure.add_axes(): {message}"
+    found = details(caught.value)
+    assert found is not None
+    assert found[0] == parameter
+    assert fig._axes == {}
+    assert fig.to_svg() == before
+
+
 def test_category_y_error_highlights_y(tmp_path: Path) -> None:
     line = "ub.Figure().add_axes(y=ub.Scale.category())"
     err = _raised(tmp_path, line)

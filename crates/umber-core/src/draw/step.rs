@@ -3,7 +3,7 @@
 
 use super::MarkContext;
 use super::line::{downsample_indices, line_items, line_style};
-use super::mapping::{axis_x, axis_y};
+use super::mapping::axis_values;
 use crate::Rgba;
 use crate::model::{Step, StepMark, holds};
 use crate::resolve::Resolved;
@@ -25,8 +25,8 @@ pub(super) fn step_items(
     (color, width): (Rgba, f32),
     items: &mut Vec<Item>,
 ) {
-    let xs = axis_x(&resolved.x, mark.x());
-    let ys = axis_y(&resolved.y, mark.y());
+    let xs = axis_values(&resolved.x, mark.x());
+    let ys = axis_values(&resolved.y, mark.y());
     let (xs, ys) = if resolved.x.is_category() {
         (xs, ys)
     } else {
