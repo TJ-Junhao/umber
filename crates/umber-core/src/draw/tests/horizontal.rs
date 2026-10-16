@@ -536,24 +536,22 @@ fn horizontal_charts_draw_vertical_gridlines_and_baseline() {
     );
 }
 
-/// 100 category names of 60 characters, some in CJK.
+/// 100 category names of 60 characters, in Latin, which the bundled fonts draw.
 fn long_names() -> Vec<String> {
     (0..100)
         .map(|i| {
-            if i % 10 == 3 {
-                format!("{i:03} {}", "類別名稱".repeat(14))
-            } else {
-                format!("{i:03} {}", "category name ".repeat(4))
-                    .chars()
-                    .take(60)
-                    .collect()
-            }
+            format!("{i:03} {}", "category name ".repeat(4))
+                .chars()
+                .take(60)
+                .collect()
         })
         .collect()
 }
 
 #[test]
 fn many_long_y_categories_fit_or_name_the_label() {
+    // The bundled fonts alone, without system fonts, so the widths are the same everywhere.
+    let lib = FontLibrary::with_fallbacks(Vec::new());
     let labels = long_names();
     let heights: Vec<f64> = (0..100).map(|i| f64::from(i % 9) + 1.0).collect();
     let figure = |width: f64| {
@@ -566,7 +564,7 @@ fn many_long_y_categories_fit_or_name_the_label() {
     };
     // A wide figure reserves the label column: the plot starts right of the widest label.
     let wide = figure(16.0);
-    let (_, layout) = crate::pipeline::plan_figure(&wide, (0, 0), FontLibrary::global());
+    let (_, layout) = crate::pipeline::plan_figure(&wide, (0, 0), &lib);
     assert_eq!(layout.y_tick_labels.len(), 100);
     let widest = layout
         .y_tick_labels
@@ -576,9 +574,9 @@ fn many_long_y_categories_fit_or_name_the_label() {
     assert!(layout.plot.x > widest, "{} vs {widest}", layout.plot.x);
     assert!(layout.y_tick_labels.iter().all(|l| l.x >= 0.0));
     assert_eq!(layout.y_tick_labels[0].text, labels[0]);
-    assert_eq!(fills(&wide).len(), 100);
+    assert!(wide.to_scene(&lib).is_ok());
     // A narrow one has no room for the plot, and the error names the widest label.
-    let err = figure(4.0).to_scene(FontLibrary::global()).unwrap_err();
+    let err = figure(3.0).to_scene(&lib).unwrap_err();
     assert!(matches!(err, Error::Style { .. }), "{err:?}");
     let message = err.to_string();
     // The message quotes the label, shortened with an ellipsis when it is long.
@@ -592,7 +590,7 @@ fn many_long_y_categories_fit_or_name_the_label() {
         .find(|l| l.width() == widest)
         .unwrap();
     assert!(
-        widest_label.text.starts_with(quoted),
+        quoted.len() > 20 && widest_label.text.starts_with(quoted),
         "{message} names {quoted:?}, not the widest label {:?}",
         widest_label.text
     );
@@ -600,6 +598,20 @@ fn many_long_y_categories_fit_or_name_the_label() {
         err.hint(),
         Some("shorten the y tick labels or widen the figure.")
     );
+}
+
+#[test]
+fn cjk_y_categories_render() {
+    // Their widths depend on the system fonts that draw them, so only rendering is checked.
+    let names: Vec<String> = (0..40)
+        .map(|i| format!("{i:02} {}", "類別名稱".repeat(6)))
+        .collect();
+    let mut f = Figure::new(16.0, 12.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Category)
+        .unwrap()
+        .bar(names, &[1.0; 40], BarOptions::default())
+        .unwrap();
+    assert_eq!(fills(&f).len(), 40);
 }
 
 /// The items of `items`, the items of groups in their place.

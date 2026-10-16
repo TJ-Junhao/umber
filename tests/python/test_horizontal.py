@@ -211,19 +211,26 @@ def test_a_dot_plot_value_error_highlights_its_argument(tmp_path: Path) -> None:
 
 
 def test_many_long_categories_fit_or_name_the_label() -> None:
+    # Latin names, which the bundled fonts draw, so their widths are the same on every machine.
     names = [f"{i:03} " + ("category name " * 5)[:56] for i in range(100)]
-    names[3] = "003 " + "類別名稱" * 14
     heights = [float(i % 9 + 1) for i in range(100)]
     wide = ub.Figure(16, 30).add_axes(y=ub.Scale.category()).bar(names, heights)
     assert wide.figure.to_png(dpi=72).startswith(PNG_SIGNATURE)
-    narrow = ub.Figure(4, 30).add_axes(y=ub.Scale.category()).bar(names, heights)
+    narrow = ub.Figure(3, 30).add_axes(y=ub.Scale.category()).bar(names, heights)
     with pytest.raises(ub.StyleError) as caught:
         narrow.figure.to_svg()
-    # The message quotes the widest label, here the CJK one, shortened with an ellipsis.
+    # The message quotes the widest label, shortened with an ellipsis.
     message = str(caught.value)
     prefix = 'Figure.to_svg(): y tick label "'
     assert message.startswith(prefix), message
     quoted = message.removeprefix(prefix).split("…")[0]
     assert len(quoted) > 20
-    assert names[3].startswith(quoted), message
+    assert any(name.startswith(quoted) for name in names), message
     assert details(caught.value) == (None, "shorten the y tick labels or widen the figure.")
+
+
+def test_cjk_categories_render() -> None:
+    # Their widths depend on the system fonts that draw them, so only rendering is checked.
+    names = [f"{i:02} " + "類別名稱" * 6 for i in range(40)]
+    ax = ub.Figure(16, 12).add_axes(y=ub.Scale.category()).bar(names, [1.0] * 40)
+    assert ax.figure.to_png(dpi=72).startswith(PNG_SIGNATURE)
