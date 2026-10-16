@@ -77,18 +77,21 @@ jobs:
         with:
           persist-credentials: false
       # Three wheels per platform: the stable ABI for GIL builds from 3.12, a version-specific
-      # wheel for 3.14t, and the free-threaded stable ABI for 3.15t and later. 3.12 is set up
-      # last so that it stays the default interpreter.
+      # wheel for 3.14t, and the free-threaded stable ABI for 3.15t and later. Linux builds use the
+      # manylinux container's interpreters; elsewhere 3.12 is set up last so it stays the default.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         id: python314t
+        if: runner.os != 'Linux'
         with:
           python-version: "3.14t"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         id: python315t
+        if: runner.os != 'Linux'
         with:
           python-version: "3.15t"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         id: python312
+        if: runner.os != 'Linux'
         with:
           python-version: "3.12"
       # Linux wheels build in a manylinux container, where before-script-linux sets the flags.
