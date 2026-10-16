@@ -9,6 +9,9 @@ on:
     paths:
       - "crates/**"
       - "python/**"
+      - "Cargo.toml"
+      - "scripts/release/remap-rustflags.sh"
+      - ".github/workflows/bench.yml"
   workflow_dispatch:
     inputs:
       base:
@@ -53,7 +56,13 @@ jobs:
         run: |
           for name in ${{ steps.base.outputs.trees }}; do
             tree=.; [ "$name" = base ] && tree=../base
-            (cd "$tree" && cargo bench -p umber-core --bench render)
+            # Each revision supplies its own release flags, including frame-pointer policy.
+            (
+              cd "$tree"
+              RUSTFLAGS="$(scripts/release/remap-rustflags.sh)"
+              export RUSTFLAGS
+              cargo bench -p umber-core --bench render
+            )
           done
 
       - name: Build and time the Python package
@@ -63,7 +72,12 @@ jobs:
             tree=.; [ "$name" = base ] && tree=../base
             uv venv "$RUNNER_TEMP/py/$name"
             uv pip install --python "$RUNNER_TEMP/py/$name" "numpy>=2.0" "typing_extensions>=4.12" "maturin>=1.15,<2"
-            (cd "$tree" && VIRTUAL_ENV="$RUNNER_TEMP/py/$name" "$RUNNER_TEMP/py/$name/bin/maturin" develop --release --uv)
+            (
+              cd "$tree"
+              RUSTFLAGS="$(scripts/release/remap-rustflags.sh)"
+              export RUSTFLAGS
+              VIRTUAL_ENV="$RUNNER_TEMP/py/$name" "$RUNNER_TEMP/py/$name/bin/maturin" develop --release --uv
+            )
             # The head's script runs against both builds, so the cases are identical.
             "$RUNNER_TEMP/py/$name/bin/python" scripts/bench/python_e2e.py > "$RUNNER_TEMP/py/$name.json"
             cat "$RUNNER_TEMP/py/$name.json"

@@ -1,3 +1,5 @@
+import importlib.abc
+import importlib.machinery
 import importlib.util
 import inspect
 import linecache
@@ -407,13 +409,13 @@ def test_render_with_color_keeps_combining_marks_inside_the_styled_span() -> Non
 
 
 def test_unreadable_source_gives_no_note() -> None:
-    class FailingLoader:
-        def get_source(self, name: str) -> str:
+    class FailingLoader(importlib.abc.InspectLoader):
+        def get_source(self, fullname: str) -> str:
             raise RuntimeError("the source cannot be read")
 
     namespace: dict[str, object] = {
         "__name__": "unreadable_caller",
-        "__loader__": FailingLoader(),
+        "__spec__": importlib.machinery.ModuleSpec("unreadable_caller", FailingLoader()),
         "Probe": Probe,
     }
     code = compile("def run(p):\n    p.line(1, 2)\n", "unreadable_caller_source.py", "exec")
