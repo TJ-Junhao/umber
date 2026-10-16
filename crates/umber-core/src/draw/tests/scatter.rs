@@ -67,7 +67,9 @@ fn scatter_alpha_multiplies_the_color_alpha() {
             nums(&[0.5]),
             &[0.5],
             ScatterOptions {
-                color: crate::ColorSpec::AUTO.with_alpha(crate::Alpha::new(0.5).unwrap()),
+                color: crate::PointColor::Uniform(
+                    crate::ColorSpec::AUTO.with_alpha(crate::Alpha::new(0.5).unwrap()),
+                ),
                 ..ScatterOptions::default()
             },
         )

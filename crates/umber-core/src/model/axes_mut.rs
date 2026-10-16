@@ -9,6 +9,7 @@ use super::axis_data::{AxisData, XySeries};
 use super::band::{BandMark, BandOptions};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
 use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
+use super::color_by::{check_point_color, check_scatter_label};
 use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
@@ -563,6 +564,14 @@ impl<'a> AxesMut<'a> {
 
     /// Adds a scatter series. Same rules as [`AxesMut::line`]; NaN skips a point.
     ///
+    /// With [`PointColor::By`](crate::PointColor::By), each point takes the color its value
+    /// maps to, and a NaN value skips the point (its position still counts in the axis
+    /// limits). The values are checked by [`ColorBy::check`](crate::ColorBy::check) and must
+    /// number one per point (`Error::Data`); the colormap, scale and center must be those of
+    /// the axes' other color-mapped marks (`Error::Usage`) and suit the color limits of
+    /// [`AxesMut::clim`] (`Error::Style`). A color-mapped scatter has no legend entry: a
+    /// non-empty label is an `Error::Usage`.
+    ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
     /// [`AxisData`] without copying them, use [`AxesMut::scatter_shared`].
     ///
@@ -617,6 +626,8 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         check_numeric_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
+        check_point_color(CONTEXT, axes, &options.color, series.x().len())?;
+        check_scatter_label(CONTEXT, &options.color, &options.label)?;
         axes.marks.push(Mark::scatter(series, options));
         Ok(self)
     }
@@ -648,7 +659,9 @@ impl<'a> AxesMut<'a> {
     ///
     /// A category x axis gives `Error::Usage`. Different lengths, non-finite or negative sizes,
     /// or sizes above 1e300 give `Error::Data`; coordinates follow the scatter rules.
-    /// Errors change nothing.
+    /// A color mapping follows the scatter rules too, except that a color-mapped bubble mark
+    /// keeps its label: its legend entry and size references are drawn in the theme's text
+    /// color. Errors change nothing.
     ///
     /// # Examples
     ///
@@ -696,6 +709,7 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let y_transform = check_numeric_y(CONTEXT, axes.y)?;
         super::validation::check_bubbles(CONTEXT, axes.x, y_transform, (&x, &y, &sizes))?;
+        check_point_color(CONTEXT, axes, &options.color, x.len())?;
         axes.marks
             .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
                 x, y, sizes, options,
@@ -1723,6 +1737,43 @@ impl<'a> AxesMut<'a> {
             high,
             options,
         )));
+        Ok(self)
+    }
+
+    /// Sets the color range of the axes' color-mapped marks: values outside it take the
+    /// colormap's end colors. Without it, the range is the extent of their finite values. On
+    /// a centered color scale, the range is symmetric about the center and reaches the
+    /// farther of the two limits.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. `Error::Style` unless both limits are finite, at most
+    /// 1e300 in magnitude, `low < high`, and the range is at least
+    /// `max(1e-10 * max(|low|, |high|), 1e-290)` wide; on a log color scale unless both are at
+    /// least 1e-300; on a centered color scale unless the range holds the center.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.clim(0.0, 100.0)?;
+    /// assert_eq!(
+    ///     axes.clim(5.0, 2.0).unwrap_err().to_string(),
+    ///     "Axes.clim(): low is 5, high is 2; low must be below high."
+    /// );
+    /// assert_eq!(axes.color_limits(), Some((0.0, 100.0)));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn clim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.clim()";
+        crate::color_scale::check_limits(CONTEXT, (low, high))?;
+        if let Some(spec) = self.marks().iter().find_map(Mark::color_scale) {
+            spec.check_range((low, high), CONTEXT, None)?;
+        }
+        self.axes_mut().color_limits = Some((low, high));
         Ok(self)
     }
 }

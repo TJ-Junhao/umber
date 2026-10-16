@@ -86,6 +86,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/box.rs
   crates/umber-core/tests/support/corpus/bubbles.rs
   crates/umber-core/tests/support/corpus/cmap.rs
+  crates/umber-core/tests/support/corpus/color_by.rs
   crates/umber-core/tests/support/corpus/error_bars.rs
   crates/umber-core/tests/support/corpus/grid.rs
   crates/umber-core/tests/support/corpus/header.rs
