@@ -194,9 +194,9 @@ impl Figure {
 
     /// Adds axes at the row `(row_kind, row)` and the column `(col_kind, col)`, spanning
     /// `row_span × col_span` cells, with the x scale `(x_kind, x_base)` and the y scale
-    /// `(y_kind, y_base)`, and returns the `(row, col)` of their top-left cell. A category y
-    /// scale is refused first, since no mark of the Python layer draws on one; the core then
-    /// checks the position and the scales, and a refused call adds nothing.
+    /// `(y_kind, y_base)`, and returns the `(row, col)` of their top-left cell. The core checks
+    /// the position and the scales, and a refused call adds nothing; a category y scale is
+    /// refused after the position, since no mark of the Python layer draws on one.
     fn add_axes(
         &mut self,
         row_kind: i64,
@@ -218,6 +218,8 @@ impl Figure {
         };
         let x = scale_kind(x_kind, x_base)?;
         let y = scale_kind(y_kind, y_base)?;
+        // In the core's order: the position, then the y scale, then the cells taken and shared.
+        self.0.placement_cells(at).map_err(core_error)?;
         if y == ScaleKind::Category {
             return Err(core_error(Error::Usage {
                 context: "Figure.add_axes()",

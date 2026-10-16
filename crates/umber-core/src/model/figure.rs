@@ -255,16 +255,8 @@ impl Figure {
         x: ScaleKind,
         y: ScaleKind,
     ) -> Result<AxesMut<'_>> {
-        let (rows, cols) = (self.grid.rows(), self.grid.cols());
-        let row = auto_index(ADD_AXES, Dimension::ROW, at.row, rows)?;
-        let row = in_range(ADD_AXES, Dimension::ROW, row, rows)?;
-        let col = auto_index(ADD_AXES, Dimension::COL, at.col, cols)?;
-        let col = in_range(ADD_AXES, Dimension::COL, col, cols)?;
-        let row_span = positive_span(Dimension::ROW, at.row_span)?;
-        let row_span = span_in_grid(Dimension::ROW, row, row_span, rows)?;
-        let col_span = positive_span(Dimension::COL, at.col_span)?;
-        let col_span = span_in_grid(Dimension::COL, col, col_span, cols)?;
-        let cells = CellRange::new(row, col, row_span, col_span);
+        let cells = self.placement_cells(at)?;
+        let (row, col) = (cells.row(), cells.col());
         let taken = cells.iter().find_map(|cell| {
             self.panels
                 .iter()
@@ -297,6 +289,46 @@ impl Figure {
         self.panels
             .insert(index, Axes::new(x, y, cells, x_settings, y_settings));
         Ok(AxesMut::new(self, index))
+    }
+
+    /// The cells that an axes added at `at` would cover on this figure's grid, checked as
+    /// [`Figure::add_axes_at`] checks the position, before any other of its checks. It does not
+    /// look at the axes already added: a cell may be taken.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` in `"Figure.add_axes()"`, as the first four rows of the error list of
+    /// [`Figure::add_axes_at`]: the row, the column, the row span, then the column span.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Grid, GridIndex, Placement, Theme};
+    ///
+    /// let figure = Figure::with_grid(9.0, 6.0, Theme::pigment(), Grid::new(2, 3)?)?;
+    /// let at = Placement {
+    ///     row: GridIndex::At(1),
+    ///     col: GridIndex::At(1),
+    ///     col_span: 2,
+    ///     ..Placement::default()
+    /// };
+    /// let cells = figure.placement_cells(at)?;
+    /// assert_eq!((cells.row(), cells.col(), cells.col_span()), (1, 1, 2));
+    /// let past = Placement { col_span: 3, ..at };
+    /// assert_eq!(figure.placement_cells(past).unwrap_err().parameter(), Some("col_span"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn placement_cells(&self, at: Placement) -> Result<CellRange> {
+        let (rows, cols) = (self.grid.rows(), self.grid.cols());
+        let row = auto_index(ADD_AXES, Dimension::ROW, at.row, rows)?;
+        let row = in_range(ADD_AXES, Dimension::ROW, row, rows)?;
+        let col = auto_index(ADD_AXES, Dimension::COL, at.col, cols)?;
+        let col = in_range(ADD_AXES, Dimension::COL, col, cols)?;
+        let row_span = positive_span(Dimension::ROW, at.row_span)?;
+        let row_span = span_in_grid(Dimension::ROW, row, row_span, rows)?;
+        let col_span = positive_span(Dimension::COL, at.col_span)?;
+        let col_span = span_in_grid(Dimension::COL, col, col_span, cols)?;
+        Ok(CellRange::new(row, col, row_span, col_span))
     }
 
     /// The axes whose top-left cell is at `row`, `col`. A spanning axes is found at its

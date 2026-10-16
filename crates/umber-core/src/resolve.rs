@@ -206,6 +206,49 @@ impl Orientation {
     }
 }
 
+/// The part an axis plays for the marks of its group, which decides how its automatic limits
+/// fit their data (see [`resolve_axis`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AxisRole {
+    /// The axis the marks' values are measured on.
+    Value,
+    /// The axis the marks' positions lie along.
+    Positions,
+}
+
+impl AxisRole {
+    /// The role of the axis `which` in a group whose members are `members`, each the
+    /// orientation of its axes with its resolved marks: the value axis when it is the value
+    /// axis of every member that gives it data, or of every member when none does. A member
+    /// without data along the axis never decides the role for members with data, so neither
+    /// the order of the members nor an empty member changes how the data is fitted.
+    pub fn of_group<'a, 'm: 'a>(
+        which: ValueAxis,
+        members: impl Iterator<Item = (Orientation, &'a [ResolvedMark<'m>])>,
+    ) -> AxisRole {
+        let gives_data = |marks: &[ResolvedMark<'_>]| {
+            marks.iter().any(|mark| {
+                mark.numbers(which).any(f64::is_finite) || mark.categories(which).next().is_some()
+            })
+        };
+        let (with_data, without): (Vec<_>, Vec<_>) =
+            members.partition(|&(_, marks)| gives_data(marks));
+        let deciding = if with_data.is_empty() {
+            without
+        } else {
+            with_data
+        };
+        if deciding
+            .iter()
+            .all(|(orientation, _)| orientation.value_axis() == which)
+        {
+            AxisRole::Value
+        } else {
+            AxisRole::Positions
+        }
+    }
+}
+
 /// Both axes of an [`Axes`], resolved, and the baseline on the value axis.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Resolved {
@@ -787,11 +830,11 @@ pub(crate) fn resolve(
     x_room: &TickRoom<'_>,
     y_room: &TickRoom<'_>,
 ) -> Resolved {
-    let orientation = limits.orientation();
+    let role = |which| AxisRole::of_group(which, std::iter::once((limits.orientation(), marks)));
     let x = resolve_axis(
         marks.iter(),
         ValueAxis::X,
-        orientation,
+        role(ValueAxis::X),
         limits.x,
         x_room,
         None,
@@ -799,7 +842,7 @@ pub(crate) fn resolve(
     let y = resolve_axis(
         marks.iter(),
         ValueAxis::Y,
-        orientation,
+        role(ValueAxis::Y),
         limits.y,
         y_room,
         None,
@@ -808,7 +851,8 @@ pub(crate) fn resolve(
 }
 
 /// Resolves the axis `which` of one group, with members' marks in row-major panel order, then
-/// mark order, for axes of `orientation`, and returns it with its base position: where the
+/// mark order, playing `role` for them ([`AxisRole::of_group`]), and returns it with its base
+/// position: where the
 /// baseline sits along it when it is the value axis (see [`Baseline::pos`]). The iterator is
 /// cloned to inspect the extent and padding without copying any mark data. `bubbles` is the
 /// extent that fits the group's bubbles, if the final layout widened the data extent to it.
@@ -823,7 +867,7 @@ pub(crate) fn resolve(
 pub(crate) fn resolve_axis<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
     which: ValueAxis,
-    orientation: Orientation,
+    role: AxisRole,
     limits: AxisLimits<'_>,
     room: &TickRoom<'_>,
     bubbles: Option<(f64, f64)>,
@@ -842,7 +886,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
     let transform = limits.transform;
     let (data, padding) = axis_data(marks.clone(), which, transform);
     let data = union(data, bubbles);
-    let auto = if orientation.value_axis() == which {
+    let auto = if role == AxisRole::Value {
         AutoLimits::NiceBelowData(padding)
     } else {
         let contributing = || {
@@ -6092,7 +6136,10 @@ mod tests {
                     let (y, base) = resolve_axis(
                         marks.iter(),
                         ValueAxis::Y,
-                        limits.orientation(),
+                        AxisRole::of_group(
+                            ValueAxis::Y,
+                            std::iter::once((limits.orientation(), marks.as_slice())),
+                        ),
                         limits.y,
                         &y_room,
                         bubbles,
@@ -6120,7 +6167,10 @@ mod tests {
                     let (x, _) = resolve_axis(
                         marks.iter(),
                         ValueAxis::X,
-                        limits.orientation(),
+                        AxisRole::of_group(
+                            ValueAxis::X,
+                            std::iter::once((limits.orientation(), marks.as_slice())),
+                        ),
                         limits.x,
                         &x_room,
                         bubbles,

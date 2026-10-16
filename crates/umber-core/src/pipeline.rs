@@ -13,7 +13,7 @@ use crate::layout::{
 use crate::legend::Legend;
 use crate::model::{Axes, Figure, ShareGroups, label_visibility};
 use crate::resolve::{
-    self, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
+    self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
 };
 use crate::scene::Scene;
 use crate::{FontLibrary, Result, Theme, draw};
@@ -248,10 +248,10 @@ impl TickChoice {
     }
 }
 
-/// Resolves each group once, in row-major panel order, for the orientation of its first
-/// member, then gives its members identical scales and ticks, with each group's data extent
-/// widened to fit its bubbles as `fits` says. Each panel's baseline is the base position of
-/// its value axis. Marks remain per panel for drawing and legend colors.
+/// Resolves each group once, in row-major panel order, in the role its members' marks give it
+/// ([`AxisRole::of_group`]), then gives its members identical scales and ticks, with each
+/// group's data extent widened to fit its bubbles as `fits` says. Each panel's baseline is the
+/// base position of its value axis. Marks remain per panel for drawing and legend colors.
 fn resolve_groups(
     panels: &[Panel<'_>],
     limits: &[Limits<'_>],
@@ -268,11 +268,12 @@ fn resolve_groups(
             if first != i {
                 return axes[first][side.index()].clone();
             }
-            let marks = panels
-                .iter()
-                .enumerate()
-                .filter(|(j, _)| keys[*j] == i)
-                .flat_map(|(_, panel)| panel.marks.iter());
+            let members = || (0..panels.len()).filter(|&j| keys[j] == i);
+            let marks = members().flat_map(|j| panels[j].marks.iter());
+            let role = AxisRole::of_group(
+                side.axis(),
+                members().map(|j| (limits[j].orientation(), panels[j].marks.as_slice())),
+            );
             let bubbles = match side {
                 Side::X => fits.x_extent(i),
                 Side::Y => fits.y_extent(i),
@@ -280,7 +281,7 @@ fn resolve_groups(
             resolve::resolve_axis(
                 marks,
                 side.axis(),
-                limits[i].orientation(),
+                role,
                 limits[i].axis(side.axis()),
                 &rooms[i][side.index()],
                 bubbles,
