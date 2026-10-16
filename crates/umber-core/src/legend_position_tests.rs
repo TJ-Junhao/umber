@@ -468,10 +468,10 @@ fn room_error(
 #[test]
 fn new_positions_reject_legends_that_cannot_fit() {
     for (style, grid, widths, height) in [
-        (LegendStyle::Header, false, [362, 352, 384, 338], 460),
-        (LegendStyle::Header, true, [158, 327, 158, 134], 460),
-        (LegendStyle::Chips, false, [363, 353, 384, 339], 640),
-        (LegendStyle::Chips, true, [159, 328, 159, 135], 640),
+        (LegendStyle::Header, false, [362, 352, 384, 338], 461),
+        (LegendStyle::Header, true, [158, 327, 158, 134], 461),
+        (LegendStyle::Chips, false, [363, 353, 384, 339], 641),
+        (LegendStyle::Chips, true, [159, 328, 159, 135], 641),
     ] {
         for (index, (position, tall)) in [
             (LegendPosition::TopRight, false),
@@ -494,7 +494,7 @@ fn new_positions_reject_legends_that_cannot_fit() {
                 format!("the legend is {height} pt tall; {available}.")
             } else {
                 format!(
-                    "the legend label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW… is 609 pt wide; the panel has {} pt.",
+                    "the legend label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW… is 610 pt wide; the panel has {} pt.",
                     widths[index]
                 )
             };

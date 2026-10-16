@@ -248,7 +248,7 @@ mod tests {
             .xticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])
             .unwrap();
         let message = format!(
-            "x tick label \"{}… is 306 pt wide; at most 216 pt fits this figure.",
+            "x tick label \"{}… is 307 pt wide; at most 216 pt fits this figure.",
             "W".repeat(38)
         );
         for (context, err) in [

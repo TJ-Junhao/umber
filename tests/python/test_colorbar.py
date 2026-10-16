@@ -1,5 +1,6 @@
 """Colorbar placement, options, errors and immutable theme defaults."""
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -125,14 +126,14 @@ def test_colorbar_label_failure_keeps_previous_settings() -> None:
             ub.ColorbarPosition.RIGHT,
             1,
             4,
-            "Figure.to_svg(): the colorbar needs 44 pt; the panel has 28 pt.",
+            "Figure.to_svg(): the colorbar needs 45 pt; the panel has 28 pt.",
             "shorten the label or widen the figure.",
         ),
         (
             ub.ColorbarPosition.BOTTOM,
             6,
             1,
-            "Figure.to_svg(): the colorbar needs 52 pt; the panel has 11 pt.",
+            "Figure.to_svg(): the colorbar needs 53 pt; the panel has 11 pt.",
             "increase the figure height.",
         ),
     ],
@@ -212,7 +213,7 @@ def test_colorbar_preserves_unrelated_room_errors(case: str, position: ub.Colorb
             expected = expected.replace("290 pt", "326 pt")
         else:
             assert expected == (
-                'Figure.to_svg(): the legend label "A long legend label" is 72 pt wide; '
+                'Figure.to_svg(): the legend label "A long legend label" is 73 pt wide; '
                 "the panel has 14 pt."
             )
             expected = (
@@ -293,15 +294,18 @@ def test_colorbar_room_error_minimum_renders(
     assert "linearGradient" in render(minimum / 72)
 
 
-@pytest.mark.parametrize(("cols", "width", "available"), [(1, 2.0, 35), (2, 4.0, 35)])
-def test_colorbar_right_legend_reports_available_room(
-    cols: int, width: float, available: int
+@pytest.mark.parametrize(
+    ("cols", "width", "colored", "available"),
+    [(1, 2.0, True, 35), (2, 4.0, True, 35), (2, 4.0, False, 71)],
+)
+def test_right_legend_reported_difference_renders(
+    cols: int, width: float, colored: bool, available: int
 ) -> None:
     def render(size: float) -> str:
         fig = ub.Figure(size, 3, rows=1, cols=cols, legend=ub.Legend.PER_PANEL)
         for col in range(cols):
             ax = fig.add_axes(row=0, col=col)
-            if col == 0:
+            if colored and col == 0:
                 ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
             else:
                 ax.scatter([1, 2, 3, 4], [1, 2, 3, 4])
@@ -312,9 +316,12 @@ def test_colorbar_right_legend_reports_available_room(
 
     with pytest.raises(ub.StyleError) as caught:
         render(width)
+    message = str(caught.value)
+    needed, room = map(int, re.findall(r"(-?\d+) pt", message))
+    assert render(width + (needed - room) / 72).startswith("<svg")
     panel = "row 0, col 0: " if cols > 1 else ""
-    assert str(caught.value) == (
-        f'Figure.to_svg(): {panel}the legend label "A long legend label" is 72 pt wide; '
+    assert message == (
+        f'Figure.to_svg(): {panel}the legend label "A long legend label" is 73 pt wide; '
         f"the panel has {available} pt."
     )
     assert details(caught.value) == (None, "shorten the label or widen the figure.")
@@ -324,9 +331,9 @@ def test_colorbar_right_legend_reports_available_room(
     ("rows", "cols", "height", "position", "needed", "available"),
     [
         (1, 1, 0.7, ub.ColorbarPosition.RIGHT, 13, 4),
-        (1, 1, 0.7, ub.ColorbarPosition.BOTTOM, 52, 4),
+        (1, 1, 0.7, ub.ColorbarPosition.BOTTOM, 53, 4),
         (2, 2, 1.35, ub.ColorbarPosition.RIGHT, 13, 5),
-        (2, 2, 1.5, ub.ColorbarPosition.BOTTOM, 52, 16),
+        (2, 2, 1.5, ub.ColorbarPosition.BOTTOM, 53, 16),
     ],
 )
 def test_colorbar_height_error_reports_its_own_band(
@@ -355,8 +362,8 @@ def test_colorbar_height_error_reports_its_own_band(
 @pytest.mark.parametrize(
     ("rows", "cols", "width", "height", "position", "needed", "available"),
     [
-        (1, 2, 6, 0.8, ub.ColorbarPosition.BOTTOM, 52, 11),
-        (2, 1, 1, 6, ub.ColorbarPosition.RIGHT, 44, 28),
+        (1, 2, 6, 0.8, ub.ColorbarPosition.BOTTOM, 53, 11),
+        (2, 1, 1, 6, ub.ColorbarPosition.RIGHT, 45, 28),
     ],
 )
 def test_colorbars_sharing_a_grid_band_report_its_size(

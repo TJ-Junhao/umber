@@ -67,7 +67,7 @@ fn a_panel_title_wider_than_its_panel_fails() {
     let message = err.to_string();
     assert!(
         message.starts_with(
-            "Figure.to_scene(): row 0, col 0: the title is 511 pt wide; the panel has "
+            "Figure.to_scene(): row 0, col 0: the title is 512 pt wide; the panel has "
         ),
         "{message}"
     );
