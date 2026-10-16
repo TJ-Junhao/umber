@@ -1877,7 +1877,7 @@ impl<'a> AxesMut<'a> {
         values: &[f64],
         options: MeshOptions,
     ) -> Result<&mut Self> {
-        let mark = MeshMark::new(self, x_edges, y_edges, values, options)?;
+        let mark = MeshMark::new(self.figure, self.index, x_edges, y_edges, values, options)?;
         self.axes_mut().marks.push(Mark::Mesh(mark));
         Ok(self)
     }
@@ -1901,7 +1901,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn hist2d(&mut self, x: &[f64], y: &[f64], options: Hist2dOptions) -> Result<&mut Self> {
-        let mark = Hist2dMark::new(self, x, y, options)?;
+        let mark = Hist2dMark::new(self.figure, self.index, x, y, options)?;
         self.axes_mut().marks.push(Mark::Hist2d(mark));
         Ok(self)
     }
@@ -1929,7 +1929,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn hexbin(&mut self, x: &[f64], y: &[f64], options: HexbinOptions) -> Result<&mut Self> {
-        let mark = HexbinMark::new(self, x, y, options)?;
+        let mark = HexbinMark::new(self.figure, self.index, x, y, options)?;
         self.axes_mut().marks.push(Mark::Hexbin(mark));
         Ok(self)
     }
@@ -2562,9 +2562,8 @@ impl<'a> AxesMut<'a> {
         options: HeatmapOptions,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.heatmap()";
-        let axes = self.axes_mut();
-        let mark = HeatmapMark::new(CONTEXT, axes, (x, y), values, options)?;
-        axes.marks.push(Mark::Heatmap(mark));
+        let mark = HeatmapMark::new(CONTEXT, self.figure, self.index, (x, y), values, options)?;
+        self.axes_mut().marks.push(Mark::Heatmap(mark));
         Ok(self)
     }
 }

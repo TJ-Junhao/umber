@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{Axes, CmapChoice, ColorBy, Mark};
+use super::{Axes, CmapChoice, ColorBy, Figure, Mark};
 use crate::bin2d::RectBins;
 use crate::binning::BinCount;
 use crate::color_scale::ColorScaleSpec;
@@ -115,14 +115,15 @@ pub struct MeshMark {
 impl MeshMark {
     /// Validates every edge and cell before storing anything.
     pub(super) fn new(
-        axes: &Axes,
+        figure: &Figure,
+        index: usize,
         x: &[f64],
         y: &[f64],
         values: &[f64],
         options: MeshOptions,
     ) -> Result<Self> {
         let context = "Axes.mesh()";
-        let transforms = numeric_axes(context, axes)?;
+        let transforms = numeric_axes(context, figure.panel(index))?;
         for (name, edges, transform) in
             [("x_edges", x, transforms[0]), ("y_edges", y, transforms[1])]
         {
@@ -206,7 +207,7 @@ impl MeshMark {
             scale: options.scale,
             center: options.center,
         };
-        check_mapping(context, axes, &colors)?;
+        check_mapping(context, figure, index, &colors)?;
         Ok(Self {
             x_edges: x.into(),
             y_edges: y.into(),
@@ -235,9 +236,15 @@ pub struct Hist2dMark {
 
 impl Hist2dMark {
     /// Validates the coordinates and options, then bins paired finite points once.
-    pub(super) fn new(axes: &Axes, x: &[f64], y: &[f64], options: Hist2dOptions) -> Result<Self> {
+    pub(super) fn new(
+        figure: &Figure,
+        index: usize,
+        x: &[f64],
+        y: &[f64],
+        options: Hist2dOptions,
+    ) -> Result<Self> {
         let context = "Axes.hist2d()";
-        let transforms = numeric_axes(context, axes)?;
+        let transforms = numeric_axes(context, figure.panel(index))?;
         let bins = [
             bin_count(context, "bins", options.bins.0)?,
             bin_count(context, "bins", options.bins.1)?,
@@ -248,7 +255,7 @@ impl Hist2dMark {
             scale: options.scale,
             ..ColorBy::new(Vec::new())
         };
-        check_mapping(context, axes, &colors)?;
+        check_mapping(context, figure, index, &colors)?;
         Ok(Self {
             bins: Arc::new(RectBins::new(x, y, bins, transforms)),
             colors: ColorScaleSpec::of(&colors),
@@ -280,9 +287,15 @@ pub struct HexbinMark {
 
 impl HexbinMark {
     /// Validates and stores paired coordinates; layout determines the hexagon row spacing.
-    pub(super) fn new(axes: &Axes, x: &[f64], y: &[f64], options: HexbinOptions) -> Result<Self> {
+    pub(super) fn new(
+        figure: &Figure,
+        index: usize,
+        x: &[f64],
+        y: &[f64],
+        options: HexbinOptions,
+    ) -> Result<Self> {
         let context = "Axes.hexbin()";
-        let transforms = numeric_axes(context, axes)?;
+        let transforms = numeric_axes(context, figure.panel(index))?;
         let gridsize = bin_count(context, "gridsize", options.gridsize)?;
         check_points(context, x, y, transforms)?;
         let colors = ColorBy {
@@ -290,7 +303,7 @@ impl HexbinMark {
             scale: options.scale,
             ..ColorBy::new(Vec::new())
         };
-        check_mapping(context, axes, &colors)?;
+        check_mapping(context, figure, index, &colors)?;
         Ok(Self {
             x: x.into(),
             y: y.into(),
@@ -448,9 +461,15 @@ fn check_points(
     check_numbers(context, "y", y, transforms[1], NumericInput::Coordinates)
 }
 
-/// A mark must use the existing axes-wide colormap, transform, center and color limits.
-fn check_mapping(context: &'static str, axes: &Axes, colors: &ColorBy) -> Result<()> {
+/// A mark must use the axes' and shared group's colormap, transform, center and color limits.
+fn check_mapping(
+    context: &'static str,
+    figure: &Figure,
+    index: usize,
+    colors: &ColorBy,
+) -> Result<()> {
     colors.check().map_err(|error| relocate(error, context))?;
+    let axes = figure.panel(index);
     let new = ColorScaleSpec::of(colors);
     if let Some(existing) = axes.marks.iter().find_map(Mark::color_scale) {
         let parameter = if new.cmap != existing.cmap {
@@ -473,7 +492,7 @@ fn check_mapping(context: &'static str, axes: &Axes, colors: &ColorBy) -> Result
             }),
         )?;
     }
-    Ok(())
+    figure.check_shared_color(index, &new, context, None)
 }
 
 #[cfg(test)]

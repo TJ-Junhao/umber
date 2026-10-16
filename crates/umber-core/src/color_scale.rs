@@ -74,16 +74,18 @@ impl ColorScaleSpec {
     }
 
     /// Checks a shared member's mapping, naming the panel that owns the conflicting mapping.
+    /// Without a containing `parameter`, names the first differing color argument itself.
     pub fn check_shared(
         &self,
         existing: &ColorScaleSpec,
         cells: crate::CellRange,
         context: &'static str,
-        parameter: &'static str,
+        parameter: Option<&'static str>,
     ) -> Result<()> {
         let Some(differs) = self.first_difference(existing) else {
             return Ok(());
         };
+        let parameter = parameter.unwrap_or_else(|| differs.argument());
         Err(Error::usage(
             context,
             format!(

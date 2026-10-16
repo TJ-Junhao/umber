@@ -566,17 +566,18 @@ impl Figure {
             index,
             &crate::color_scale::ColorScaleSpec::of(by),
             context,
-            "color",
+            Some("color"),
         )
     }
 
     /// Checks a new color mapping against the existing mappings in its group.
+    /// `parameter` contains a point mapping; other marks take separate color arguments.
     pub(super) fn check_shared_color(
         &self,
         index: usize,
         spec: &crate::color_scale::ColorScaleSpec,
         context: &'static str,
-        parameter: &'static str,
+        parameter: Option<&'static str>,
     ) -> Result<()> {
         let cell = self.panels[index].cells();
         let crossed = match self.grid.share_color() {
@@ -595,7 +596,7 @@ impl Figure {
                 context,
                 format!("the panel spans {dimension} that share colors in different groups."),
             )
-            .with_parameter(parameter)
+            .with_parameter(parameter.unwrap_or("cmap"))
             .with_hint(hint));
         }
         let key = self.color_group_of(cell.row(), cell.col());

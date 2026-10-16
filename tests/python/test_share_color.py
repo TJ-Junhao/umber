@@ -14,6 +14,36 @@ import umber as ub
 from umber._errors import details
 
 NS = "{http://www.w3.org/2000/svg}"
+CELL_MARKS = ["heatmap", "mesh", "hist2d", "hexbin"]
+
+
+def cell_axes(
+    fig: ub.Figure,
+    mark: str,
+    *,
+    row: int = 0,
+    col: int = 0,
+    row_span: int = 1,
+    col_span: int = 1,
+) -> ub.Axes[str, str] | ub.Axes[float, float]:
+    if mark == "heatmap":
+        return fig.add_axes(
+            x=ub.Scale.category(),
+            y=ub.Scale.category(),
+            row=row,
+            col=col,
+            row_span=row_span,
+            col_span=col_span,
+        )
+    return fig.add_axes(row=row, col=col, row_span=row_span, col_span=col_span)
+
+
+def cell_arguments(mark: str) -> str:
+    if mark == "heatmap":
+        return '["a", "b"], ["r"], [[1, 2]]'
+    if mark == "mesh":
+        return "[0, 1, 2], [0, 1], [[1, 2]]"
+    return "[0, 1, 2], [0, 1, 2]"
 
 
 def colored(fig: ub.Figure, row: int, col: int, values: list[float]) -> ub.Axes[float, float]:
@@ -502,6 +532,210 @@ def test_theme_none_hides_colorbars_in_every_share_mode(mode: ub.Share) -> None:
         assert len(geometry(fig)[0]) == (1 if mode is ub.Share.ALL else 2)
         fig.colorbar()
         assert not geometry(fig)[0]
+
+
+@pytest.mark.parametrize("mark", CELL_MARKS)
+@pytest.mark.parametrize(
+    ("mode", "parameter", "value", "given", "existing"),
+    [
+        (ub.Share.ALL, "cmap", "ub.Cmap.MAGMA", "Cmap.MAGMA", "the theme's colormap"),
+        (ub.Share.ROW, "scale", "ub.Scale.log()", "Scale.log(10)", "Scale.linear()"),
+    ],
+)
+def test_shared_cell_conflict_is_atomic(
+    mark: str,
+    mode: ub.Share,
+    parameter: str,
+    value: str,
+    given: str,
+    existing: str,
+    tmp_path: Path,
+) -> None:
+    fig = ub.Figure(12, 8, rows=2, cols=2, share_color=mode)
+    first = cell_axes(fig, mark, col=1)
+    args = cell_arguments(mark)
+    exec(f"ax.{mark}({args})", {"ax": first})
+    ax = cell_axes(fig, mark)
+    before = fig.to_svg()
+    argument = f"{parameter}={value}"
+    line = f"ax.{mark}({args}, {argument})"
+    path = tmp_path / "shared_cell_call.py"
+    path.write_text(line + "\n")
+    with pytest.raises(ub.UsageError) as caught:
+        exec(compile(line, str(path), "exec"), {"ax": ax, "ub": ub})
+    assert str(caught.value) == (
+        f"Axes.{mark}(): {parameter} uses {given}; row 0, col 1 maps colors with {existing}."
+    )
+    assert details(caught.value) == (
+        parameter,
+        "use the same cmap, scale and center for every color-mapped mark in the shared group.",
+    )
+    marked = f"  {line}\n{' ' * (2 + line.index(argument))}{'^' * len(argument)}"
+    assert getattr(caught.value, "__notes__", [])[0] == marked
+    assert fig.to_svg() == before
+    exec(f"ax.{mark}({args})", {"ax": ax})
+    assert len(geometry(fig)[0]) == 1
+
+
+@pytest.mark.parametrize("mark", CELL_MARKS)
+@pytest.mark.parametrize("mode", [ub.Share.ROW, ub.Share.COL])
+def test_shared_cell_spans_are_atomic(mark: str, mode: ub.Share, tmp_path: Path) -> None:
+    fig = ub.Figure(12, 8, rows=2, cols=2, share_color=mode)
+    ax = cell_axes(
+        fig,
+        mark,
+        row_span=2 if mode is ub.Share.ROW else 1,
+        col_span=2 if mode is ub.Share.COL else 1,
+    )
+    before = fig.to_svg()
+    argument = "cmap=ub.Cmap.MAGMA"
+    line = f"ax.{mark}({cell_arguments(mark)}, {argument})"
+    path = tmp_path / "spanning_cell_call.py"
+    path.write_text(line + "\n")
+    with pytest.raises(ub.UsageError) as caught:
+        exec(compile(line, str(path), "exec"), {"ax": ax, "ub": ub})
+    dimension, group = ("rows", "row") if mode is ub.Share.ROW else ("columns", "column")
+    assert str(caught.value) == (
+        f"Axes.{mark}(): the panel spans {dimension} that share colors in different groups."
+    )
+    assert details(caught.value) == (
+        "cmap",
+        f"share colors by ALL, or place the color-mapped mark on a panel inside one {group}.",
+    )
+    marked = f"  {line}\n{' ' * (2 + line.index(argument))}{'^' * len(argument)}"
+    assert getattr(caught.value, "__notes__", [])[0] == marked
+    assert fig.to_svg() == before
+
+    other = ub.Figure(12, 8, rows=2, cols=2, share_color=mode)
+    inside = cell_axes(
+        other,
+        mark,
+        row_span=2 if mode is ub.Share.COL else 1,
+        col_span=2 if mode is ub.Share.ROW else 1,
+    )
+    exec(line, {"ax": inside, "ub": ub})
+    assert len(geometry(other)[0]) == 1
+
+
+@pytest.mark.parametrize("mark", ["heatmap", "mesh"])
+def test_shared_cell_center_conflict_is_atomic(mark: str) -> None:
+    fig = ub.Figure(cols=2, share_color=ub.Share.ALL)
+    colored(fig, 0, 1, [1, 2])
+    ax = cell_axes(fig, mark)
+    before = fig.to_svg()
+    with pytest.raises(ub.UsageError) as caught:
+        exec(f"ax.{mark}({cell_arguments(mark)}, center=1)", {"ax": ax})
+    assert str(caught.value) == (
+        f"Axes.{mark}(): center uses center 1; row 0, col 1 maps colors with no center."
+    )
+    found = details(caught.value)
+    assert found is not None and found[0] == "center"
+    assert fig.to_svg() == before
+
+
+@pytest.mark.parametrize("first", CELL_MARKS)
+@pytest.mark.parametrize("later", CELL_MARKS)
+def test_shared_cell_kinds_use_one_mapping(first: str, later: str) -> None:
+    fig = ub.Figure(12, 4, cols=2, share_color=ub.Share.ALL)
+    a = cell_axes(fig, first)
+    b = cell_axes(fig, later, col=1)
+    exec(f"ax.{first}({cell_arguments(first)})", {"ax": a})
+    before = fig.to_svg()
+    with pytest.raises(ub.UsageError, match="row 0, col 0 maps colors"):
+        exec(f"ax.{later}({cell_arguments(later)}, cmap=ub.Cmap.MAGMA)", {"ax": b, "ub": ub})
+    assert fig.to_svg() == before
+    exec(f"ax.{later}({cell_arguments(later)})", {"ax": b})
+    assert len(geometry(fig)[0]) == 1
+
+
+@pytest.mark.parametrize("mark", CELL_MARKS)
+@pytest.mark.parametrize("mode", [ub.Share.NONE, ub.Share.ROW, ub.Share.COL])
+def test_separate_cell_groups_allow_different_mappings(mark: str, mode: ub.Share) -> None:
+    fig = ub.Figure(12, 8, rows=2, cols=2, share_color=mode)
+    a = cell_axes(fig, mark)
+    b = cell_axes(fig, mark, row=1, col=1)
+    exec(f"ax.{mark}({cell_arguments(mark)})", {"ax": a})
+    exec(f"ax.{mark}({cell_arguments(mark)}, cmap=ub.Cmap.MAGMA)", {"ax": b, "ub": ub})
+    assert len(geometry(fig)[0]) == 2
+
+
+@pytest.mark.parametrize("centered", [False, True])
+def test_shared_heatmap_clim_validates_all_members_atomically(centered: bool) -> None:
+    fig = ub.Figure(cols=2, share_color=ub.Share.ALL)
+    heatmap = fig.add_axes(x=ub.Scale.category(), y=ub.Scale.category(), col=1)
+    if centered:
+        heatmap.heatmap(["a", "b"], ["r"], [[1, 2]], center=1)
+    else:
+        heatmap.heatmap(["a", "b"], ["r"], [[1, 2]], scale=ub.Scale.log())
+    empty = fig.add_axes(col=0)
+    before = fig.to_svg()
+    with pytest.raises(ub.StyleError) as caught:
+        empty.clim(2 if centered else 0, 10)
+    assert "row 0, col 1:" in str(caught.value)
+    found = details(caught.value)
+    assert found is not None and found[0] == "low" and found[1]
+    assert fig.to_svg() == before
+    empty.clim(1, 10)
+    before = fig.to_svg()
+    with pytest.raises(ub.UsageError, match="shared with row 0, col 0"):
+        heatmap.clim(1, 20)
+    assert fig.to_svg() == before
+    heatmap.clim(1, 10)
+    assert fig.to_svg() == before
+
+
+@pytest.mark.parametrize("new_panel", [False, True])
+@pytest.mark.parametrize("centered", [False, True])
+def test_heatmap_checks_inherited_shared_clim(new_panel: bool, centered: bool) -> None:
+    fig = ub.Figure(cols=2, share_color=ub.Share.ALL)
+    limits = fig.add_axes(col=0)
+    if new_panel:
+        limits.clim(2 if centered else 0, 10)
+    ax = fig.add_axes(x=ub.Scale.category(), y=ub.Scale.category(), col=1)
+    if not new_panel:
+        limits.clim(2 if centered else 0, 10)
+    before = fig.to_svg()
+    with pytest.raises(ub.StyleError) as caught:
+        if centered:
+            ax.heatmap(["a", "b"], ["r"], [[1, 2]], center=1)
+        else:
+            ax.heatmap(["a", "b"], ["r"], [[1, 2]], scale=ub.Scale.log())
+    found = details(caught.value)
+    assert found is not None and found[0] == ("center" if centered else "scale") and found[1]
+    assert fig.to_svg() == before
+    limits.clim(1, 10)
+    if centered:
+        ax.heatmap(["a", "b"], ["r"], [[1, 2]], center=1)
+    else:
+        ax.heatmap(["a", "b"], ["r"], [[1, 2]], scale=ub.Scale.log())
+    assert len(geometry(fig)[0]) == 1
+
+
+@pytest.mark.parametrize(
+    ("mode", "position"),
+    [
+        (ub.Share.ALL, ub.ColorbarPosition.RIGHT),
+        (ub.Share.ALL, ub.ColorbarPosition.BOTTOM),
+        (ub.Share.ROW, ub.ColorbarPosition.RIGHT),
+        (ub.Share.COL, ub.ColorbarPosition.BOTTOM),
+    ],
+)
+def test_shared_plain_width_message_minimum_renders(
+    mode: ub.Share, position: ub.ColorbarPosition
+) -> None:
+    def make(width: float) -> ub.Figure:
+        return grid(mode, width=width).colorbar(position=position)
+
+    with pytest.raises(ub.StyleError) as caught:
+        make(0.25).to_svg()
+    message = str(caught.value)
+    match = re.fullmatch(
+        r"Figure.to_svg\(\): the figure is 18 pt wide; at least (\d+) pt is needed for 2 columns "
+        r"of plots\.",
+        message,
+    )
+    assert match is not None, message
+    assert "linearGradient" in make(int(match[1]) / 72).to_svg()
 
 
 @pytest.mark.parametrize("mode", [ub.Share.ROW, ub.Share.COL, ub.Share.ALL])
