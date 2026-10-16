@@ -238,14 +238,14 @@ pub(crate) enum Norm {
         /// The base the ticks are powers of.
         base: LogBase,
     },
-    /// Linearly from `low` to `high`, which lie as far below `center` as above it.
+    /// Linearly over `center ± radius`, with `center` at 0.5. The position is computed from
+    /// the center and the radius, never from the ends, which can round onto the center when
+    /// the radius is tiny next to it.
     Centered {
-        /// The value at 0.
-        low: f64,
         /// The value at 0.5.
         center: f64,
-        /// The value at 1.
-        high: f64,
+        /// The distance from the center to either end; 0 maps every value to 0.5.
+        radius: f64,
     },
 }
 
@@ -257,12 +257,8 @@ impl Norm {
     fn new(spec: &ColorScaleSpec, (low, high): (f64, f64)) -> Norm {
         match (spec.center, spec.scale) {
             (Some(center), _) => {
-                let d = (center - low).abs().max((high - center).abs());
-                Norm::Centered {
-                    low: center - d,
-                    center,
-                    high: center + d,
-                }
+                let radius = (center - low).abs().max((high - center).abs());
+                Norm::Centered { center, radius }
             }
             (None, Transform::Linear) => Norm::Linear { low, high },
             (None, Transform::Log(base)) => Norm::Log { low, high, base },
@@ -272,9 +268,8 @@ impl Norm {
     /// The range, low end first.
     fn range(&self) -> (f64, f64) {
         match *self {
-            Norm::Linear { low, high }
-            | Norm::Log { low, high, .. }
-            | Norm::Centered { low, high, .. } => (low, high),
+            Norm::Linear { low, high } | Norm::Log { low, high, .. } => (low, high),
+            Norm::Centered { center, radius } => (center - radius, center + radius),
         }
     }
 
@@ -286,10 +281,12 @@ impl Norm {
         }
         let (low, high) = self.range();
         let share = match *self {
+            Norm::Centered { radius: 0.0, .. } => 0.5,
+            Norm::Centered { center, radius } => 0.5 + (v - center) / (2.0 * radius),
             Norm::Log { .. } if v <= 0.0 => return None,
             _ if low == high => 0.5,
             Norm::Log { .. } => log_offset(v, low) / log_offset(high, low),
-            Norm::Linear { .. } | Norm::Centered { .. } => (v - low) / (high - low),
+            Norm::Linear { .. } => (v - low) / (high - low),
         };
         Some(share.clamp(0.0, 1.0))
     }
@@ -302,14 +299,18 @@ impl Norm {
             Norm::Log { base, .. } => Transform::Log(base),
             Norm::Linear { .. } | Norm::Centered { .. } => Transform::Linear,
         };
+        let middle = match *self {
+            Norm::Centered { center, .. } => center,
+            Norm::Linear { .. } | Norm::Log { .. } => low + (high - low) / 2.0,
+        };
         let mut ticks = match ContinuousScale::new(transform, low, high, CONTEXT) {
             Ok(scale) => scale.ticks(TICK_TARGET),
-            Err(_) => labelled(vec![low + (high - low) / 2.0]),
+            Err(_) => labelled(vec![middle]),
         };
-        if let Norm::Centered { center, .. } = *self
+        if let Norm::Centered { center, radius } = *self
             && !ticks
                 .iter()
-                .any(|tick| (tick.value - center).abs() <= 1e-9 * (high - low))
+                .any(|tick| (tick.value - center).abs() <= 2e-9 * radius)
         {
             let mut values: Vec<f64> = ticks.iter().map(|tick| tick.value).collect();
             values.push(center);
@@ -444,9 +445,8 @@ mod tests {
         assert_eq!(
             norm,
             Norm::Centered {
-                low: -8.0,
                 center: 0.0,
-                high: 8.0
+                radius: 8.0
             }
         );
         assert_eq!(norm.unit(0.0), Some(0.5));
@@ -476,6 +476,23 @@ mod tests {
                 .any(|tick| (tick.pos.get() - 0.5).abs() < 1e-12 && tick.label == "0.3"),
             "{:?}",
             off_grid.ticks()
+        );
+    }
+
+    #[test]
+    fn a_tiny_radius_keeps_the_center_in_the_middle() {
+        // The radius is 2^-53, so `center + radius` rounds back to the center.
+        let low = 1.0 - f64::EPSILON / 2.0;
+        let norm = Norm::new(&spec(Transform::Linear, Some(1.0)), (low, 1.0));
+        assert_eq!(1.0 + (1.0 - low), 1.0);
+        assert_eq!(norm.unit(1.0), Some(0.5));
+        assert_eq!(norm.unit(low), Some(0.0));
+        let ticks = norm.ticks();
+        assert!(
+            ticks
+                .iter()
+                .any(|tick| tick.pos.get() == 0.5 && tick.label == "1"),
+            "{ticks:?}"
         );
     }
 

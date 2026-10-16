@@ -509,3 +509,25 @@ fn centers_of_either_zero_sign_agree() {
         .unwrap();
     assert_eq!(f.single_axes().marks().len(), 2);
 }
+
+#[test]
+fn a_center_next_to_the_values_maps_to_the_middle() {
+    let mut f = figure(Theme::pigment());
+    let centered = ColorBy {
+        center: Some(1.0),
+        ..by(&[1.0 - f64::EPSILON / 2.0, 1.0], Cmap::blue_red())
+    };
+    f.single_axes_mut()
+        .scatter(nums(&[1.0, 2.0]), &[1.0, 2.0], mapped(centered))
+        .unwrap();
+    let blue_red = Cmap::blue_red();
+    assert_eq!(blue_red.at(0.5).to_hex(), "#F4F1EC");
+    assert_eq!(
+        marker_fills(&f),
+        [(blue_red.at(0.0), 1), (blue_red.at(0.5), 1)]
+    );
+    let resolved = plan_figure(&f, (0, 0), FontLibrary::global()).0;
+    let scale = resolved.color.expect("a color scale");
+    assert_eq!(scale.norm.unit(1.0), Some(0.5));
+    assert!(scale.ticks.iter().any(|tick| tick.pos.get() == 0.5));
+}
