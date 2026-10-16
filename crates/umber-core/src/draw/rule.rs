@@ -13,8 +13,8 @@
 //! the domain, they cover the whole plot height.
 
 use super::MarkContext;
-use super::area::AREA_ALPHA;
 use super::chrome::segment;
+use super::fill::AREA_ALPHA;
 use super::line::line_style;
 use super::mapping::{AxisMap, PlotPoint, axis_x, axis_y_value};
 use crate::geometry::Path;

@@ -361,9 +361,9 @@ impl<'a> AxesMut<'a> {
     ///
     /// # Errors
     ///
-    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis, and when the x
-    /// ticks have labels given with [`AxesMut::xticks_labeled`] and `format` is not plain
-    /// [`TickFormat::AUTO`].
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis, for
+    /// [`TickFormat::iso`] on a linear or log axis, and when the x ticks have labels given with
+    /// [`AxesMut::xticks_labeled`] and `format` is not plain [`TickFormat::AUTO`].
     ///
     /// # Examples
     ///
@@ -396,8 +396,9 @@ impl<'a> AxesMut<'a> {
     ///
     /// # Errors
     ///
-    /// Errors leave the axes unchanged: `Error::Usage` when the y ticks have labels given with
-    /// [`AxesMut::yticks_labeled`] and `format` is not plain [`TickFormat::AUTO`].
+    /// Errors leave the axes unchanged: `Error::Usage` for [`TickFormat::iso`] on a linear or
+    /// log axis, and when the y ticks have labels given with [`AxesMut::yticks_labeled`] and
+    /// `format` is not plain [`TickFormat::AUTO`].
     ///
     /// # Examples
     ///
@@ -426,6 +427,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the legend style of these axes, overriding the theme's style.
     /// [`LegendStyle::None`] hides the legend. Calling it again replaces the style.
+    /// A swatch shows a mark's fill as drawn: composited over the plot background, which
+    /// leaves it opaque over an opaque background. Gradients show their most opaque end: 0.32
+    /// of the series opacity for areas, 0.95 for histograms. Area and stacked-area swatches
+    /// are filled rectangles under an edge in the line's color, dash and width; scatter, stem
+    /// and bubble swatches show the marker fill at the theme's marker alpha. Lines, steps,
+    /// reference lines and error bars keep the series color, as do direct labels and the
+    /// outlines of box and violin swatches. Panel and merged figure legends use the same rule.
     ///
     /// # Examples
     ///
@@ -603,6 +611,15 @@ impl<'a> AxesMut<'a> {
     /// circle; labels that round to zero are omitted. If all labels round to zero, only the
     /// largest reference circle remains, with an automatic label for its size, without the y
     /// format or its affixes. An all-zero or empty scale has only label entries.
+    /// Automatic limits fit each whole marker and its outline at the final plot size, along
+    /// each axis by the marker shape's own extent, before tick rounding and padding, in log
+    /// space on log axes. Shared axes fit all their panels' bubbles. When the bubbles cannot
+    /// all fit on an automatic axis (a marker, outline included, at least as long as the plot
+    /// along it, limits beyond the supported numeric range, or limits that do not settle in
+    /// the final layout), that axis's limits come from the data positions alone, and the plot
+    /// clips the bubbles that overflow; rendering does not fail. Explicit limits still clip,
+    /// and scatter limits are unchanged. Legend swatches and size circles show the marker fill
+    /// composited over the plot background.
     ///
     /// A merged figure legend also shows only one set, after its first labelled bubble entry,
     /// using that panel's scale and y tick format. Panels do not share a size scale unless

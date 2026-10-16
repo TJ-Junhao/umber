@@ -1,4 +1,5 @@
-//! Tick label formats: how the numbers next to the ticks of a linear or log axis are written.
+//! Tick label formats: how the numbers next to the ticks of a linear or log axis, and the times
+//! next to the ticks of a time axis, are written.
 //!
 //! A [`TickFormat`] is set per axis with
 //! [`AxesMut::xtick_format`](crate::AxesMut::xtick_format) and
@@ -87,6 +88,9 @@ pub enum NumberStyle {
     Percent(Decimals),
     /// Scientific form with up to 12 significant digits, such as `2.5e6` or `1e−5`.
     Scientific,
+    /// ISO 8601 dates and times on a time axis, written down to the unit of the tick step,
+    /// such as `2026-03`, `2026-03-03` or `2026-03-03T06:00`. Linear and log axes refuse it.
+    Iso,
 }
 
 /// The format of the tick labels of a linear or log axis: a [`NumberStyle`] plus text before
@@ -202,6 +206,26 @@ impl TickFormat {
         TickFormat::of(NumberStyle::Scientific)
     }
 
+    /// ISO 8601 labels for a time axis, written down to the unit of the tick step: `2026` for
+    /// yearly ticks, `2026-03` for monthly ones, `2026-03-03` for daily ones and
+    /// `2026-03-03T06:00` for hourly ones. Linear and log axes refuse this format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, NumberStyle, ScaleKind, Theme, TickFormat};
+    ///
+    /// assert_eq!(TickFormat::iso().style(), NumberStyle::Iso);
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert!(axes.xtick_format(TickFormat::iso()).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn iso() -> TickFormat {
+        TickFormat::of(NumberStyle::Iso)
+    }
+
     /// This format with `prefix` written before and `suffix` after every label, replacing any
     /// prefix and suffix it had. A percent label puts its `%` before the suffix.
     ///
@@ -305,7 +329,8 @@ impl TickFormat {
     }
 
     /// `ticks` labelled in this format. [`NumberStyle::Auto`] keeps the labels the ticks carry,
-    /// which are the automatic ones; the other styles write each tick's value, which on a
+    /// which are the automatic ones, and so does [`NumberStyle::Iso`], whose labels a time axis
+    /// writes with its ticks; the other styles write each tick's value, which on a
     /// computed grid is first snapped to zero as `values` says. The prefix and suffix then go
     /// around every label.
     pub(crate) fn relabel(&self, ticks: Vec<Tick>, values: TickValues) -> Vec<Tick> {
@@ -315,7 +340,7 @@ impl TickFormat {
             TickValues::Exact => exact.clone(),
         };
         let numbers = match self.style {
-            NumberStyle::Auto => None,
+            NumberStyle::Auto | NumberStyle::Iso => None,
             NumberStyle::Fixed(decimals) => Some(ticks::format_fixed(&written(), decimals.get())),
             NumberStyle::Percent(decimals) => {
                 let percents: Vec<f64> = written().iter().map(|v| v * 100.0).collect();
@@ -531,5 +556,19 @@ mod tests {
         );
         // No escalation beyond 12 significant digits.
         assert_eq!(labels(&scientific, &[1.0, 1.0 + 1e-13]), ["1e0", "1e0"]);
+    }
+
+    #[test]
+    fn iso_is_its_own_style_and_takes_an_affix() {
+        let iso = TickFormat::iso();
+        assert_eq!(iso.style(), NumberStyle::Iso);
+        assert!(!iso.is_auto());
+        assert_ne!(iso, TickFormat::AUTO);
+        let local = iso.affix("", " local").unwrap();
+        assert_eq!(local.style(), NumberStyle::Iso);
+        assert_eq!(local.suffix(), " local");
+        // Time ticks arrive with their labels written; the format keeps them and adds the
+        // affix.
+        assert_eq!(labels(&local, &[0.0]), ["auto 0 local"]);
     }
 }

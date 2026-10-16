@@ -11,7 +11,7 @@ use super::line::line_style;
 use super::mapping::point;
 use super::marker::{marker_shape, polygon};
 use crate::geometry::Path;
-use crate::layout::{Area, EndDot, Layout, RowEntry};
+use crate::layout::{Area, EndDot, Layout, RowEntry, SwatchBox};
 use crate::legend::Swatch;
 use crate::scene::{FillRule, Item, LineCap, Paint};
 use crate::{Marker, Rgba, Theme};
@@ -90,15 +90,17 @@ fn chip_tint(color: Rgba) -> Rgba {
     color.scale_alpha(CHIP_TINT)
 }
 
-/// The swatch of `entry`, in its series color, inside its swatch box: a line in the series dash
-/// and width, a filled dot, a filled square, or a bar with caps.
+/// The swatch of `entry` inside its box. Fills, dots and bubble references are in the swatch's
+/// fill color, which is the series color for marks without a translucent fill (see
+/// [`SwatchBox::fill`](crate::layout::SwatchBox::fill)); lines, area edges, error bars and the
+/// outlines of boxes and violins are in the series color, dash and width.
 fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
     let b = entry.swatch;
     match b.kind {
         Swatch::Bubble { radius } => Item::Markers {
             shape: marker_shape(Marker::Circle, 2.0 * radius),
             positions: vec![point(b.x + b.width / 2.0, b.center_y)],
-            fill: Some(b.color.scale_alpha(theme.marker_alpha())),
+            fill: Some(b.fill),
             stroke: Some(crate::scene::StrokeStyle {
                 color: theme.background(),
                 width: super::MARKER_OUTLINE,
@@ -108,23 +110,35 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
             }),
         },
         Swatch::Line { dash, width } => {
+            line_swatch(&b, b.center_y, line_style(width, b.color, dash))
+        }
+        Swatch::Area { dash, width } => {
+            // The fill runs from the edge's centre line to the bottom of the box, as an area
+            // fills from its line, and the edge's stroke stays inside the top of the box.
             let style = line_style(width, b.color, dash);
-            // Round caps reach half the stroke width past the ends; keep them inside the box.
-            let inset = match style.cap {
-                LineCap::Butt => 0.0,
-                LineCap::Round | LineCap::Square => {
-                    (f64::from(style.width) / 2.0).min(b.width / 2.0)
-                }
-            };
-            Item::Stroke {
-                path: segment(
-                    point(b.x + inset, b.center_y),
-                    point(b.x + b.width - inset, b.center_y),
-                ),
-                style,
+            let edge = b.center_y - b.height / 2.0 + f64::from(style.width) / 2.0;
+            let (top_left, bottom_right) = (
+                point(b.x, edge),
+                point(b.x + b.width, b.center_y + b.height / 2.0),
+            );
+            Item::Group {
+                clip: None,
+                items: vec![
+                    Item::Fill {
+                        path: polygon(&[
+                            (top_left.x, top_left.y),
+                            (bottom_right.x, top_left.y),
+                            (bottom_right.x, bottom_right.y),
+                            (top_left.x, bottom_right.y),
+                        ]),
+                        paint: Paint::Solid(b.fill),
+                        rule: FillRule::NonZero,
+                    },
+                    line_swatch(&b, edge, style),
+                ],
             }
         }
-        Swatch::Dot { .. } => dot(b.x + b.width / 2.0, b.center_y, b.width, b.color),
+        Swatch::Dot { .. } => dot(b.x + b.width / 2.0, b.center_y, b.width, b.fill),
         Swatch::ErrorBar { vertical, width } => {
             // Each end cap reaches half a stroke beyond its centre line along the bar.
             let inset = f64::from(width) / 2.0;
@@ -167,7 +181,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 items: vec![
                     Item::Fill {
                         path: path.clone(),
-                        paint: Paint::Solid(b.color.scale_alpha(super::area::AREA_ALPHA)),
+                        paint: Paint::Solid(b.fill),
                         rule: FillRule::NonZero,
                     },
                     Item::Stroke {
@@ -204,7 +218,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 items: vec![
                     Item::Fill {
                         path: path.clone(),
-                        paint: Paint::Solid(b.color.scale_alpha(super::area::AREA_ALPHA)),
+                        paint: Paint::Solid(b.fill),
                         rule: FillRule::NonZero,
                     },
                     Item::Stroke {
@@ -226,10 +240,23 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                     (bottom_right.x, bottom_right.y),
                     (top_left.x, bottom_right.y),
                 ]),
-                paint: Paint::Solid(b.color),
+                paint: Paint::Solid(b.fill),
                 rule: FillRule::NonZero,
             }
         }
+    }
+}
+
+/// A horizontal stroke across the box `b` at the height `y`, in `style`. Round and square caps
+/// reach half the stroke width past the ends, so the ends are inset to keep them inside the box.
+fn line_swatch(b: &SwatchBox, y: f64, style: crate::scene::StrokeStyle) -> Item {
+    let inset = match style.cap {
+        LineCap::Butt => 0.0,
+        LineCap::Round | LineCap::Square => (f64::from(style.width) / 2.0).min(b.width / 2.0),
+    };
+    Item::Stroke {
+        path: segment(point(b.x + inset, y), point(b.x + b.width - inset, y)),
+        style,
     }
 }
 
@@ -315,9 +342,10 @@ mod tests {
         let (x0, _, x1, _) = bounds(&items[2]);
         assert!((f64::from(x0) - dashed.x).abs() < 1e-3);
         assert!((f64::from(x1) - (dashed.x + dashed.width)).abs() < 1e-3);
-        // Dot: a filled circle filling its box.
+        // Dot: a filled circle filling its box, in the scatter's marker fill over the background.
         let dot = &entries[2].swatch;
-        assert!(matches!(&items[4], Item::Fill { paint: Paint::Solid(c), .. } if *c == dot.color));
+        assert_ne!(dot.fill, dot.color);
+        assert!(matches!(&items[4], Item::Fill { paint: Paint::Solid(c), .. } if *c == dot.fill));
         let (x0, y0, x1, y1) = bounds(&items[4]);
         assert!((f64::from(x0) - dot.x).abs() < 1e-3);
         assert!((f64::from(x1 - x0) - dot.width).abs() < 1e-3);
@@ -332,7 +360,7 @@ mod tests {
         entry.swatch.height = entry.swatch.width;
         let item = swatch(&theme, &entry);
         assert!(
-            matches!(&item, Item::Fill { paint: Paint::Solid(c), .. } if *c == entry.swatch.color)
+            matches!(&item, Item::Fill { paint: Paint::Solid(c), .. } if *c == entry.swatch.fill)
         );
         let b = entry.swatch;
         let (x0, y0, x1, y1) = bounds(&item);
@@ -688,11 +716,11 @@ mod tests {
                 .filter(|v| matches!(v, crate::geometry::PathVerb::CubicTo(..)))
                 .count();
             assert_eq!(corners, 4);
-            // Then the dot in the series color, inside the pill, and the label.
+            // Then the dot in the swatch fill, inside the pill, and the label.
             let dot = entry.swatch;
             assert!(matches!(dot.kind, Swatch::Dot { .. }));
             assert!(
-                matches!(&triple[1], Item::Fill { paint: Paint::Solid(c), .. } if *c == dot.color)
+                matches!(&triple[1], Item::Fill { paint: Paint::Solid(c), .. } if *c == dot.fill)
             );
             let (dx0, dy0, dx1, dy1) = bounds(&triple[1]);
             assert!(dx0 > x0 && dx1 < x1 && dy0 > y0 && dy1 < y1);

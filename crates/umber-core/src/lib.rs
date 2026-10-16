@@ -67,6 +67,7 @@
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
 //! - per-series line widths and marker sizes: [`SizeSpec`], with its [`Factor`] and [`Points`];
 //! - tick labels: [`TickFormat`], with its [`NumberStyle`] and [`Decimals`];
+//! - times: [`Instant`] and its [`Civil`] date and time;
 //! - scales: [`ScaleKind`] and [`LogBase`];
 //! - output: [`SvgText`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
@@ -91,6 +92,9 @@
 #![forbid(unsafe_code)]
 
 mod binning;
+mod bubble_fit;
+#[cfg(test)]
+mod bubble_fit_tests;
 mod bubble_scale;
 #[cfg(test)]
 mod bubbles_tests;
@@ -107,6 +111,8 @@ mod layout;
 mod legend;
 #[cfg(test)]
 mod legend_position_tests;
+#[cfg(test)]
+mod legend_swatch_tests;
 mod model;
 mod pipeline;
 pub mod render;
@@ -123,6 +129,7 @@ pub mod text;
 pub mod theme;
 pub mod tick_format;
 pub mod ticks;
+mod time;
 
 pub use binning::MAX_BINS;
 pub use color::{Alpha, ColorSpec, Rgba};
@@ -157,6 +164,7 @@ pub use text::{FontLibrary, TextLayout, TextStyle};
 pub use theme::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, Marker, Theme};
 pub use tick_format::{Decimals, NumberStyle, TickFormat};
 pub use ticks::Tick;
+pub use time::{Civil, Instant};
 
 /// The version of this crate, as written in `Cargo.toml`.
 ///

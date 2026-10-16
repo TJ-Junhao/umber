@@ -3,7 +3,7 @@
 //! apart.
 
 use super::validation::{check_tick_labels, check_tick_positions};
-use crate::{Error, Result, Tick, TickFormat, Transform};
+use crate::{Error, NumberStyle, Result, Tick, TickFormat, Transform};
 
 /// Tick positions set explicitly on one axis, in place of the automatic ticks. Read them with
 /// [`Axes::x_ticks`](crate::Axes::x_ticks) and [`Axes::y_ticks`](crate::Axes::y_ticks).
@@ -94,10 +94,18 @@ impl AxisTicks {
         Ok(())
     }
 
-    /// Sets the label format under `context`; `Error::Usage` when the ticks have labels given
-    /// with their positions and `format` is not plain [`TickFormat::AUTO`]. Errors change
-    /// nothing.
+    /// Sets the label format under `context`; `Error::Usage` when `format` is
+    /// [`TickFormat::iso`], which labels times, and when the ticks have labels given with their
+    /// positions and `format` is not plain [`TickFormat::AUTO`]. Errors change nothing.
     pub(super) fn set_format(&mut self, context: &'static str, format: TickFormat) -> Result<()> {
+        if format.style() == NumberStyle::Iso {
+            return Err(Error::usage(
+                context,
+                "this is a linear or log axis; TickFormat.iso() labels time axes only.",
+            )
+            .with_parameter("format")
+            .with_hint("use TickFormat.AUTO or a number format on a numeric axis."));
+        }
         let labeled = matches!(self.explicit, Some(ExplicitTicks::Labeled(_)));
         if labeled && !format.is_auto() {
             return Err(Error::usage(
@@ -395,6 +403,46 @@ mod tests {
         assert_eq!(
             copy.single_axes().y_ticks(),
             Some(&ExplicitTicks::Positions(vec![1.0, 2.0]))
+        );
+    }
+
+    #[test]
+    fn numeric_axes_refuse_iso_labels() {
+        for kind in [ScaleKind::Linear, log()] {
+            let mut f = figure(kind, kind);
+            for (got, context) in [
+                (
+                    fails_unchanged(&mut f, |a| a.xtick_format(TickFormat::iso())),
+                    "Axes.xtick_format()",
+                ),
+                (
+                    fails_unchanged(&mut f, |a| {
+                        a.ytick_format(TickFormat::iso().affix("", " UTC").unwrap())
+                    }),
+                    "Axes.ytick_format()",
+                ),
+            ] {
+                assert_eq!(
+                    got,
+                    (
+                        "usage",
+                        format!(
+                            "{context}: this is a linear or log axis; TickFormat.iso() labels time axes only."
+                        ),
+                        Some("format")
+                    )
+                );
+            }
+        }
+        let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
+        let err = f
+            .single_axes_mut()
+            .xtick_format(TickFormat::iso())
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            err.hint(),
+            Some("use TickFormat.AUTO or a number format on a numeric axis.")
         );
     }
 }

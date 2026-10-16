@@ -251,6 +251,31 @@ impl Rgba {
         }
     }
 
+    /// This color painted over `background` with source-over compositing in straight alpha, as
+    /// a fill of this color is drawn over a background of that one. With `f` and `b` the two
+    /// alphas as fractions, the result's alpha is `f + b (1 - f)` and each channel is
+    /// `(c_f f + c_b b (1 - f))` divided by that alpha, each rounded to the nearest 8-bit value
+    /// (halves up). Over an opaque background the result is opaque; over a fully transparent
+    /// one it is this color unchanged.
+    pub(crate) fn over(self, background: Rgba) -> Rgba {
+        // Alphas in 1/255 units: the result's alpha is `alpha / 255²` exactly.
+        let (front, back) = (u64::from(self.a), u64::from(background.a));
+        let alpha = 255 * front + back * (255 - front);
+        if alpha == 0 {
+            return self;
+        }
+        let channel = |f: u8, b: u8| {
+            let weighted = 255 * u64::from(f) * front + u64::from(b) * back * (255 - front);
+            ((2 * weighted + alpha) / (2 * alpha)) as u8
+        };
+        Rgba {
+            r: channel(self.r, background.r),
+            g: channel(self.g, background.g),
+            b: channel(self.b, background.b),
+            a: ((alpha + 127) / 255) as u8,
+        }
+    }
+
     /// Format as `#RRGGBB` when opaque, otherwise `#RRGGBBAA`, using uppercase digits.
     ///
     /// # Examples

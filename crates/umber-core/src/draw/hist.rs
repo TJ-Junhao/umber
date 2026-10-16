@@ -4,6 +4,7 @@
 use super::MarkContext;
 use super::area::{FadeStop, vertical_fade};
 use super::bar_shape::BarFrame;
+use super::fill::HISTOGRAM_TOP_ALPHA;
 use super::mapping::{axis_x_value, axis_y_value};
 use crate::binning::Histogram;
 use crate::geometry::Path;
@@ -11,8 +12,6 @@ use crate::resolve::{ResolvedAxis, ResolvedContinuousAxis};
 use crate::scene::{FillRule, Item, Paint};
 use crate::{FillStyle, Rgba};
 
-/// The gradient's opacity at the top of the tallest bin, as a share of the color's own.
-const TOP_ALPHA: f32 = 0.95;
 /// The depth of the solid top edge of each bin under a gradient, in points.
 const TOP_EDGE_DEPTH: f64 = 1.6;
 
@@ -91,7 +90,7 @@ pub(super) fn hist_items(
             let v = frame.clip_y(v);
             FadeStop {
                 y: frame.plot_y(v),
-                share: TOP_ALPHA * ramp(v, base, tallest),
+                share: HISTOGRAM_TOP_ALPHA * ramp(v, base, tallest),
             }
         };
         vertical_fade(color, at(tallest), at(base))
