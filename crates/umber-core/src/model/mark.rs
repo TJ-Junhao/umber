@@ -234,6 +234,12 @@ pub enum Mark {
     /// A line from the baseline to each value, with a scatter marker at the value; NaN skips
     /// the point.
     Stem(StemMark),
+    /// Numeric cells filled by value, spanning their edges exactly.
+    Mesh(super::mesh::MeshMark),
+    /// Non-empty equal-width bins of paired numeric coordinates.
+    Hist2d(super::mesh::Hist2dMark),
+    /// Paired numeric coordinates counted in regular pointy-top hexagons.
+    Hexbin(super::mesh::HexbinMark),
 }
 
 impl Mark {
@@ -258,6 +264,9 @@ impl Mark {
     /// not color-mapped.
     pub(super) fn color_scale(&self) -> Option<ColorScaleSpec> {
         let color = match self {
+            Mark::Mesh(mark) => return Some(ColorScaleSpec::of(&mark.colors)),
+            Mark::Hist2d(mark) => return Some(mark.colors.clone()),
+            Mark::Hexbin(mark) => return Some(mark.colors.clone()),
             Mark::Scatter(mark) => &mark.options.color,
             Mark::Bubbles(mark) => &mark.options().color,
             Mark::Violin(_)

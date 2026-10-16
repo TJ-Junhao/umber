@@ -14,6 +14,7 @@ use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
+use super::mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
 use super::rule::{
     AxisValue, HLineMark, RuleOptions, SpanBounds, SpanMark, SpanOptions, VLineMark,
 };
@@ -1847,6 +1848,88 @@ impl<'a> AxesMut<'a> {
             SharedValues::Numbers(high),
             options,
         )));
+        Ok(self)
+    }
+
+    /// Adds row-major numeric cells spanning their strictly increasing edges.
+    /// Automatic limits are the outer edges, without padding. NaN cells are empty.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` for nonnumeric axes or a conflicting color mapping; `Error::Data`
+    /// for invalid edges or values; `Error::Style` for an invalid center or color limits.
+    /// Failed calls change nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, MeshOptions, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?
+    ///     .mesh(&[0.0, 1.0, 3.0], &[0.0, 2.0], &[1.0, 4.0], MeshOptions::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn mesh(
+        &mut self,
+        x_edges: &[f64],
+        y_edges: &[f64],
+        values: &[f64],
+        options: MeshOptions,
+    ) -> Result<&mut Self> {
+        let mark = MeshMark::new(self, x_edges, y_edges, values, options)?;
+        self.axes_mut().marks.push(Mark::Mesh(mark));
+        Ok(self)
+    }
+
+    /// Counts paired finite coordinates in equal-width bins over their data ranges.
+    /// Empty bins are not drawn, including with a log color scale.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` for nonnumeric axes or a conflicting color mapping; `Error::Data`
+    /// for unequal lengths or invalid coordinates; `Error::Style` for bin counts outside
+    /// `1..=MAX_BINS` or incompatible color limits. Failed calls change nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Hist2dOptions, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?
+    ///     .hist2d(&[0.0, 1.0], &[1.0, 2.0], Hist2dOptions::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hist2d(&mut self, x: &[f64], y: &[f64], options: Hist2dOptions) -> Result<&mut Self> {
+        let mark = Hist2dMark::new(self, x, y, options)?;
+        self.axes_mut().marks.push(Mark::Hist2d(mark));
+        Ok(self)
+    }
+
+    /// Counts paired finite coordinates in pointy-top hexagons, regular on screen.
+    /// Automatic limits contain whole cells with the least symmetric extra room needed
+    /// on one axis for the plot aspect. Explicit limits clip.
+    /// With a narrow explicit `xlim` and automatic y limits, hexagons keep their size;
+    /// the y range may grow far beyond the data to keep every hexagon whole and regular.
+    /// Set `ylim()` or choose a larger `gridsize` to control that range.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` for nonnumeric axes or a conflicting color mapping; `Error::Data`
+    /// for unequal lengths or invalid coordinates; `Error::Style` for a gridsize outside
+    /// `1..=MAX_BINS` or incompatible color limits. Failed calls change nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, HexbinOptions, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?
+    ///     .hexbin(&[0.0, 1.0], &[1.0, 2.0], HexbinOptions::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hexbin(&mut self, x: &[f64], y: &[f64], options: HexbinOptions) -> Result<&mut Self> {
+        let mark = HexbinMark::new(self, x, y, options)?;
+        self.axes_mut().marks.push(Mark::Hexbin(mark));
         Ok(self)
     }
 
