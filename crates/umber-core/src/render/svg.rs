@@ -253,49 +253,40 @@ impl Writer {
         };
         let d = path_d(&normalized);
         let mut attrs = String::new();
-        match paint {
-            Paint::LinearGradient { from, to, stops } => {
-                self.fill(
-                    path,
-                    &Paint::Linear(crate::scene::sampled_gradient(*from, *to, stops)),
-                    rule,
-                );
-                return;
+        let gradient = match paint {
+            Paint::Solid(c) => GradientKind::Solid(*c),
+            Paint::Linear(g) => normalize_gradient(g),
+            Paint::Sampled { cmap, from, to } => {
+                normalize_gradient(&crate::LinearGradient::sampled(cmap, *from, *to))
             }
-            Paint::Solid(c) => {
+        };
+        match gradient {
+            GradientKind::Skip => return,
+            GradientKind::Solid(c) => {
                 if c.a == 0 {
                     return;
                 }
-                write_color(&mut attrs, "fill", "fill-opacity", *c);
+                write_color(&mut attrs, "fill", "fill-opacity", c);
             }
-            Paint::Linear(g) => match normalize_gradient(g) {
-                GradientKind::Skip => return,
-                GradientKind::Solid(c) => {
-                    if c.a == 0 {
-                        return;
-                    }
-                    write_color(&mut attrs, "fill", "fill-opacity", c);
+            GradientKind::Linear { start, end, stops } => {
+                let id = self.id();
+                let _ = writeln!(
+                    self.defs,
+                    r#"<linearGradient id="g{id}" gradientUnits="userSpaceOnUse" x1="{}" y1="{}" x2="{}" y2="{}">"#,
+                    num(start.x),
+                    num(start.y),
+                    num(end.x),
+                    num(end.y)
+                );
+                for stop in stops {
+                    let mut line = format!(r#"<stop offset="{}""#, num(stop.offset));
+                    write_color(&mut line, "stop-color", "stop-opacity", stop.color);
+                    line.push_str("/>\n");
+                    self.defs.push_str(&line);
                 }
-                GradientKind::Linear { start, end, stops } => {
-                    let id = self.id();
-                    let _ = writeln!(
-                        self.defs,
-                        r#"<linearGradient id="g{id}" gradientUnits="userSpaceOnUse" x1="{}" y1="{}" x2="{}" y2="{}">"#,
-                        num(start.x),
-                        num(start.y),
-                        num(end.x),
-                        num(end.y)
-                    );
-                    for stop in stops {
-                        let mut line = format!(r#"<stop offset="{}""#, num(stop.offset));
-                        write_color(&mut line, "stop-color", "stop-opacity", stop.color);
-                        line.push_str("/>\n");
-                        self.defs.push_str(&line);
-                    }
-                    self.defs.push_str("</linearGradient>\n");
-                    let _ = write!(attrs, r#" fill="url(#g{id})""#);
-                }
-            },
+                self.defs.push_str("</linearGradient>\n");
+                let _ = write!(attrs, r#" fill="url(#g{id})""#);
+            }
         }
         if rule == FillRule::EvenOdd {
             attrs.push_str(r#" fill-rule="evenodd""#);

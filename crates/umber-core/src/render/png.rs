@@ -213,36 +213,30 @@ fn fill_rule(rule: FillRule) -> sk::FillRule {
 }
 
 /// Builds the paint for a fill; `None` means the fill is skipped.
-fn fill_paint(paint: &Paint) -> Option<sk::Paint<'static>> {
-    match paint {
-        Paint::Solid(c) => (c.a > 0).then(|| solid_paint(*c)),
-        Paint::LinearGradient { from, to, stops } => fill_paint(&Paint::Linear(
-            crate::scene::sampled_gradient(*from, *to, stops),
-        )),
-        Paint::Linear(gradient) => match normalize_gradient(gradient) {
-            GradientKind::Skip => None,
-            GradientKind::Solid(c) => (c.a > 0).then(|| solid_paint(c)),
-            GradientKind::Linear { start, end, stops } => {
-                let shader = sk::LinearGradient::new(
-                    sk::Point::from_xy(start.x, start.y),
-                    sk::Point::from_xy(end.x, end.y),
-                    stops
-                        .iter()
-                        .map(|s| sk::GradientStop::new(s.offset, color(s.color)))
-                        .collect(),
-                    sk::SpreadMode::Pad,
-                    sk::Transform::identity(),
-                );
-                if shader.is_none() {
-                    refused();
-                }
-                shader.map(|shader| sk::Paint {
-                    shader,
-                    anti_alias: true,
-                    ..sk::Paint::default()
-                })
+fn fill_paint(gradient: GradientKind) -> Option<sk::Paint<'static>> {
+    match gradient {
+        GradientKind::Skip => None,
+        GradientKind::Solid(c) => (c.a > 0).then(|| solid_paint(c)),
+        GradientKind::Linear { start, end, stops } => {
+            let shader = sk::LinearGradient::new(
+                sk::Point::from_xy(start.x, start.y),
+                sk::Point::from_xy(end.x, end.y),
+                stops
+                    .iter()
+                    .map(|s| sk::GradientStop::new(s.offset, color(s.color)))
+                    .collect(),
+                sk::SpreadMode::Pad,
+                sk::Transform::identity(),
+            );
+            if shader.is_none() {
+                refused();
             }
-        },
+            shader.map(|shader| sk::Paint {
+                shader,
+                anti_alias: true,
+                ..sk::Paint::default()
+            })
+        }
     }
 }
 
@@ -382,29 +376,38 @@ impl ClipRect {
 fn sampled_fill(
     pixmap: &mut sk::Pixmap,
     path: &sk::Path,
-    gradient: &crate::LinearGradient,
+    cmap: &crate::Cmap,
+    endpoints: (Point, Point),
     rule: sk::FillRule,
     scale: DeviceScale,
     mask: Option<&sk::Mask>,
-) -> bool {
-    let GradientKind::Linear { start, end, stops } = normalize_gradient(gradient) else {
-        return false;
-    };
-    if stops.iter().any(|stop| stop.color.a != 255) {
-        return false;
-    }
-    let maps: Option<Vec<_>> = stops
-        .windows(2)
-        .map(|pair| crate::Cmap::from_colors(&[pair[0].color, pair[1].color]).ok())
-        .collect();
-    let Some(maps) = maps else {
-        return false;
+) {
+    let gradient = normalize_gradient(&crate::LinearGradient::sampled(
+        cmap,
+        endpoints.0,
+        endpoints.1,
+    ));
+    let (start, end) = match gradient {
+        GradientKind::Linear { start, end, .. } => (start, end),
+        other => {
+            if let Some(paint) = fill_paint(other) {
+                pixmap.fill_path(
+                    path,
+                    &paint,
+                    rule,
+                    sk::Transform::from_scale(scale.get(), scale.get()),
+                    mask,
+                );
+            }
+            return;
+        }
     };
     let Some(path) = path
         .clone()
         .transform(sk::Transform::from_scale(scale.get(), scale.get()))
     else {
-        return false;
+        refused();
+        return;
     };
     let bounds = path.bounds();
     let left = bounds.left().floor().max(0.0) as u32;
@@ -412,10 +415,11 @@ fn sampled_fill(
     let right = bounds.right().ceil().min(pixmap.width() as f32).max(0.0) as u32;
     let bottom = bounds.bottom().ceil().min(pixmap.height() as f32).max(0.0) as u32;
     if left >= right || top >= bottom {
-        return true;
+        return;
     }
     let Some(mut texture) = sk::Pixmap::new(right - left, bottom - top) else {
-        return false;
+        refused();
+        return;
     };
     let (dx, dy) = (f64::from(end.x - start.x), f64::from(end.y - start.y));
     let length2 = dx * dx + dy * dy;
@@ -426,17 +430,7 @@ fn sampled_fill(
         let y = (f64::from(top) + (index / width) as f64 + 0.5) / factor;
         let t = (((x - f64::from(start.x)) * dx + (y - f64::from(start.y)) * dy) / length2)
             .clamp(0.0, 1.0);
-        let i = stops
-            .partition_point(|stop| f64::from(stop.offset) <= t)
-            .saturating_sub(1)
-            .min(maps.len() - 1);
-        let low = f64::from(stops[i].offset);
-        let high = f64::from(stops[i + 1].offset);
-        let color = maps[i].at(if high > low {
-            (t - low) / (high - low)
-        } else {
-            1.0
-        });
+        let color = cmap.at(t);
         if let Some(color) = sk::PremultipliedColorU8::from_rgba(color.r, color.g, color.b, color.a)
         {
             *pixel = color;
@@ -454,7 +448,6 @@ fn sampled_fill(
         ..sk::Paint::default()
     };
     pixmap.fill_path(&path, &paint, rule, sk::Transform::identity(), mask);
-    true
 }
 
 struct Canvas {
@@ -558,19 +551,23 @@ impl Canvas {
                 let Some(path) = convert_path(&normalized) else {
                     return;
                 };
-                if let Paint::LinearGradient { from, to, stops } = paint
-                    && sampled_fill(
-                        pixmap,
-                        &path,
-                        &crate::scene::sampled_gradient(*from, *to, stops),
-                        fill_rule(*rule),
-                        *scale,
-                        mask,
-                    )
-                {
-                    return;
-                }
-                if let Some(paint) = fill_paint(paint) {
+                let gradient = match paint {
+                    Paint::Solid(c) => GradientKind::Solid(*c),
+                    Paint::Linear(g) => normalize_gradient(g),
+                    Paint::Sampled { cmap, from, to } => {
+                        sampled_fill(
+                            pixmap,
+                            &path,
+                            cmap,
+                            (*from, *to),
+                            fill_rule(*rule),
+                            *scale,
+                            mask,
+                        );
+                        return;
+                    }
+                };
+                if let Some(paint) = fill_paint(gradient) {
                     pixmap.fill_path(&path, &paint, fill_rule(*rule), root, mask);
                 }
             }
@@ -1214,6 +1211,41 @@ mod tests {
         let value = image.at(10, 10)[0];
         assert!((127..=129).contains(&value), "got {value}");
         assert_eq!(image.at(10, 10)[3], 255);
+    }
+
+    #[test]
+    fn sampled_paint_evaluates_original_cmap_at_pixel_centers() {
+        let cmap = crate::Cmap::from_colors(&[BLACK, WHITE, Rgba::RED]).unwrap();
+        for dpi in [72, 144] {
+            let mut scene = Scene::new(200.0, 20.0, WHITE);
+            scene.push(Item::Group {
+                clip: Some(Rect {
+                    x: 20.0,
+                    y: 0.0,
+                    width: 160.0,
+                    height: 20.0,
+                }),
+                items: vec![Item::Fill {
+                    path: rect_path(0.0, 0.0, 200.0, 20.0),
+                    paint: Paint::Sampled {
+                        cmap: cmap.clone(),
+                        from: Point { x: 0.0, y: 0.0 },
+                        to: Point { x: 200.0, y: 0.0 },
+                    },
+                    rule: FillRule::NonZero,
+                }],
+            });
+            let image = decode(&render_png(&scene, dpi).unwrap());
+            let scale = dpi / 72;
+            assert_eq!(image.at(10 * scale, 10 * scale), [255; 4]);
+            for x in 21 * scale..179 * scale {
+                let color = cmap.at((f64::from(x) + 0.5) / f64::from(scale) / 200.0);
+                assert_eq!(
+                    image.at(x, 10 * scale),
+                    [color.r, color.g, color.b, color.a]
+                );
+            }
+        }
     }
 
     #[test]

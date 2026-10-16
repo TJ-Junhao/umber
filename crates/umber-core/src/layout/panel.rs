@@ -356,8 +356,10 @@ pub(crate) struct PanelBands {
     pub x_title_band: f64,
     /// How far the bottom y tick label reaches below the plot; 0 without y tick labels.
     pub label_drop: f64,
-    /// The x tick labels as normalized positions and half widths, in tick order.
+    /// The x tick and bottom colorbar spans, as normalized positions and half widths.
     pub x_spans: Vec<TickSpan>,
+    /// The widest bottom colorbar tick; zero without one.
+    colorbar_tick_width: f64,
     /// The header, measured, with the legend row wrapped as [`measure_panel`] was asked.
     pub(super) heading: Header,
     /// The y tick labels at their ticks' positions, not yet placed.
@@ -381,13 +383,43 @@ pub(crate) struct PanelBands {
 }
 
 impl PanelBands {
-    /// The widest horizontal colorbar tick, whose span follows the x-axis spans.
+    /// The widest horizontal colorbar tick.
     pub(super) fn colorbar_tick_width(&self) -> f64 {
-        self.x_spans
+        self.colorbar_tick_width
+    }
+
+    /// The label band above both the y ticks and a right colorbar.
+    pub(super) fn top_label_band(&self) -> f64 {
+        self.y_label_band
+            .max(self.colorbar.as_ref().map_or(0.0, |bar| bar.label_band()))
+    }
+
+    /// The rise of either the y ticks or the right colorbar's ticks.
+    pub(super) fn top_label_rise(&self) -> f64 {
+        self.label_rise.max(
+            self.colorbar
+                .as_ref()
+                .map_or(0.0, |bar| bar.tick_overhang().0),
+        )
+    }
+
+    /// The same measured axes without a colorbar, for attributing room errors.
+    pub(super) fn without_colorbar(&self, direct_cap: f64) -> Self {
+        let mut bands = self.clone();
+        bands.colorbar = None;
+        bands.right_colorbar = 0.0;
+        bands.bottom_colorbar = 0.0;
+        bands.colorbar_tick_width = 0.0;
+        bands.direct_reserve = bands.direct_reserve.min(direct_cap);
+        bands.x_spans = bands
+            .x_labels
             .iter()
-            .skip(self.x_labels.len())
-            .map(|span| 2.0 * span.half)
-            .fold(0.0, f64::max)
+            .map(|(pos, label)| TickSpan {
+                pos: pos.get(),
+                half: label.width() / 2.0,
+            })
+            .collect();
+        bands
     }
 
     /// The header: title, subtitle, legend row `row` and the gap below them; 0 when empty.
@@ -397,7 +429,7 @@ impl PanelBands {
 
     /// Everything above the plot: the header, the y label and the rise of the top y tick label.
     pub(super) fn above_with_row(&self, row: &LegendRow) -> f64 {
-        self.header_with_row(row) + self.y_label_band + self.label_rise
+        self.header_with_row(row) + self.top_label_band() + self.top_label_rise()
     }
 
     /// Everything below the plot: the x tick label row and the x label row, or the bottom y
@@ -408,7 +440,11 @@ impl PanelBands {
 
     /// The room below the plot for the axes alone, before a bottom legend.
     pub(super) fn axis_below(&self) -> f64 {
-        (self.x_band + self.x_title_band).max(self.label_drop)
+        (self.x_band + self.x_title_band).max(self.label_drop).max(
+            self.colorbar
+                .as_ref()
+                .map_or(0.0, |bar| bar.tick_overhang().1),
+        )
     }
 
     /// The widest reserve beside the plot: direct labels or the column legend.
@@ -507,18 +543,18 @@ pub(crate) fn measure_panel(
 
     let colorbar =
         super::colorbar::MeasuredColorbar::measure(axes, resolved.color.as_ref(), theme, lib);
-    let (mut right_colorbar, mut bottom_colorbar) = (0.0, 0.0);
-    let (mut y_label_band, mut label_rise, mut label_drop) = (y_label_band, label_rise, label_drop);
+    let (mut right_colorbar, mut bottom_colorbar, mut colorbar_tick_width) = (0.0, 0.0, 0.0);
     if let Some(bar) = &colorbar {
         right_colorbar = bar.right_reserve();
         bottom_colorbar = bar.bottom_reserve();
-        y_label_band = y_label_band.max(bar.label_band());
-        let (rise, drop) = bar.tick_overhang();
-        label_rise = label_rise.max(rise);
-        label_drop = label_drop.max(drop);
+        colorbar_tick_width = bar
+            .x_spans()
+            .map(|span| 2.0 * span.half)
+            .fold(0.0, f64::max);
         x_spans.extend(bar.x_spans());
     }
     PanelBands {
+        colorbar_tick_width,
         right_colorbar,
         bottom_colorbar,
         colorbar,
@@ -574,8 +610,8 @@ pub(crate) fn place_panel(
         frame,
     } = *slot;
     let axis_below = bands.axis_below();
+    let label_rise = bands.top_label_rise();
     let PanelBands {
-        label_rise,
         heading,
         mut y_labels,
         y_label_width,

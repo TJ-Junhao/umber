@@ -254,28 +254,16 @@ impl TickChoice {
 }
 
 /// The axis whose tick-room geometry a colorbar follows.
-fn color_side(axes: &Axes, theme: &Theme) -> Side {
-    match axes
-        .colorbar_options()
-        .position
-        .unwrap_or(theme.colorbar_position())
-    {
-        crate::ColorbarPosition::Bottom => Side::X,
-        crate::ColorbarPosition::Right | crate::ColorbarPosition::None => Side::Y,
+fn color_side(side: layout::ColorbarSide) -> Side {
+    match side {
+        layout::ColorbarSide::Bottom => Side::X,
+        layout::ColorbarSide::Right => Side::Y,
     }
 }
 
 /// Relabels and spaces a visible colorbar without changing its norm or colormap.
-fn choose_color_ticks(
-    panel: &Panel<'_>,
-    resolved: &mut Resolved,
-    room: &layout::TickRoom<'_>,
-    theme: &Theme,
-) {
+fn choose_color_ticks(panel: &Panel<'_>, resolved: &mut Resolved, room: &layout::TickRoom<'_>) {
     let options = panel.axes.colorbar_options();
-    if options.position.unwrap_or(theme.colorbar_position()) == crate::ColorbarPosition::None {
-        return;
-    }
     if let Some(color) = &resolved.color {
         let format = options
             .format
@@ -395,6 +383,10 @@ fn plan(
         context,
         panels: &inputs,
     };
+    let color_sides: Vec<_> = panels
+        .iter()
+        .map(|panel| layout::ColorbarSide::resolve(panel.axes, theme).map(color_side))
+        .collect();
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
     let groups = ShareGroups::new(figure);
     let marks: Vec<&[ResolvedMark<'_>]> =
@@ -438,8 +430,10 @@ fn plan(
         &fits,
     );
     for (i, resolved) in first.iter_mut().enumerate() {
-        let room = color_side(panels[i].axes, theme).room(guesses[i], theme, lib);
-        choose_color_ticks(&panels[i], resolved, &room, theme);
+        if let Some(side) = color_sides[i] {
+            let room = side.room(guesses[i], theme, lib);
+            choose_color_ticks(&panels[i], resolved, &room);
+        }
     }
     let first: Vec<PanelBands> = first
         .iter()
@@ -462,8 +456,10 @@ fn plan(
             .collect();
         let mut resolved = resolve_groups(panels, &limits, &groups, &rooms, fits);
         for (i, r) in resolved.iter_mut().enumerate() {
-            let room = choices[i][2].room(color_side(panels[i].axes, theme), theme, lib);
-            choose_color_ticks(&panels[i], r, &room, theme);
+            if let Some(side) = color_sides[i] {
+                let room = choices[i][2].room(side, theme, lib);
+                choose_color_ticks(&panels[i], r, &room);
+            }
         }
         resolved
     };
@@ -485,8 +481,10 @@ fn plan(
         &fits,
     );
     for (i, r) in resolved.iter_mut().enumerate() {
-        let room = color_side(panels[i].axes, theme).room(plots[i], theme, lib);
-        choose_color_ticks(&panels[i], r, &room, theme);
+        if let Some(side) = color_sides[i] {
+            let room = side.room(plots[i], theme, lib);
+            choose_color_ticks(&panels[i], r, &room);
+        }
     }
     let mut bands: Vec<PanelBands> = resolved
         .iter()
@@ -590,16 +588,9 @@ fn plan(
             let Some(color) = &r.color else {
                 continue;
             };
-            if panels[i]
-                .axes
-                .colorbar_options()
-                .position
-                .unwrap_or(theme.colorbar_position())
-                == crate::ColorbarPosition::None
-            {
+            let Some(side) = color_sides[i] else {
                 continue;
-            }
-            let side = color_side(panels[i].axes, theme);
+            };
             if side.room(plots[i], theme, lib).slack(&color.ticks) >= 0.0 {
                 continue;
             }
@@ -634,10 +625,8 @@ fn plan(
         }
         for &i in &color_again {
             if let Some(color) = &tried_resolved[i].color
-                && next[i][2]
-                    .room(color_side(panels[i].axes, theme), theme, lib)
-                    .slack(&color.ticks)
-                    < 0.0
+                && let Some(side) = color_sides[i]
+                && next[i][2].room(side, theme, lib).slack(&color.ticks) < 0.0
             {
                 next[i][2].state = ChoiceState::Settled;
             }

@@ -2053,15 +2053,16 @@ mod record {
         fn paint(&mut self, paint: &Paint) {
             match paint {
                 Paint::Solid(c) => self.line(&format!(" paint solid {}", rgba(*c))),
-                Paint::LinearGradient { from, to, stops } => {
+                Paint::Sampled { cmap, from, to } => {
+                    let colors = cmap.colors();
                     self.line(&format!(
-                        " paint sampled start={} end={} stops={}",
+                        " paint sampled start={} end={} colors={}",
                         point(*from),
                         point(*to),
-                        stops.len()
+                        colors.len()
                     ));
-                    for (offset, color) in stops {
-                        self.line(&format!("  stop {} {}", f32(*offset), rgba(*color)));
+                    for color in colors {
+                        self.line(&format!("  color {}", rgba(color)));
                     }
                 }
                 Paint::Linear(g) => {

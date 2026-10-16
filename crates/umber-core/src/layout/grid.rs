@@ -240,7 +240,9 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
     };
     let spans: Vec<(f64, f64)> = cells.iter().map(|c| placed.span(*c)).collect();
     let rows = Rows::measure(input, &cells, bands, &spans);
-    let rows = rows.place(input)?;
+    let rows = rows
+        .place(input)
+        .map_err(|error| rows_too_short(input, &cells, bands, &spans, error))?;
     let panels = cells
         .iter()
         .zip(bands)
@@ -719,8 +721,6 @@ struct Rows {
     below: Vec<f64>,
     /// The part of each bottom band occupied by legends, after the aligned x axis labels.
     legends: Vec<f64>,
-    /// The first panel with a visible colorbar, for insufficient-height errors.
-    colorbar: Option<CellRange>,
 }
 
 /// The rows placed.
@@ -772,9 +772,6 @@ impl Rows {
             above,
             below,
             legends,
-            colorbar: cells.iter().zip(bands).find_map(|(cells, band)| {
-                (band.right_colorbar > 0.0 || band.bottom_colorbar > 0.0).then_some(*cells)
-            }),
         }
     }
 
@@ -791,17 +788,6 @@ impl Rows {
         let padding = input.top + PADDING;
         let plot_height = |height: f64| (height - padding - bands - gaps) / rows as f64;
         if plot_height(input.height) < MIN_PLOT {
-            if let Some(cells) = self.colorbar {
-                return Err(in_panel(
-                    cells,
-                    super::colorbar::room_error(
-                        input.context,
-                        bands + MIN_PLOT * rows as f64,
-                        input.height - padding - gaps,
-                        true,
-                    ),
-                ));
-            }
             // The least whole height that the check accepts.
             let needed = padding + bands + gaps + MIN_PLOT * rows as f64;
             let least = input.height.floor() + 1.0;
@@ -832,6 +818,69 @@ impl Rows {
             legends: self.legends,
         })
     }
+}
+
+/// Attributes a height failure to a colorbar only when removing its band leaves room.
+fn rows_too_short(
+    input: &GridInput<'_>,
+    cells: &[CellRange],
+    bands: &[PanelBands],
+    spans: &[(f64, f64)],
+    error: Error,
+) -> Error {
+    let plain: Vec<_> = cells
+        .iter()
+        .zip(bands)
+        .map(|(cell, band)| band.without_colorbar(input.span(*cell).reserve_cap))
+        .collect();
+    let plain_rows = Rows::measure(input, cells, &plain, spans);
+    if let Err(error) = plain_rows.clone().place(input) {
+        return error;
+    }
+    let rows = Rows::measure(input, cells, bands, spans);
+    let reserved = rows.above.iter().sum::<f64>() + rows.below.iter().sum::<f64>();
+    let available = input.height
+        - input.top
+        - PADDING
+        - rows.gap * (rows.above.len() - 1) as f64
+        - MIN_PLOT * rows.above.len() as f64;
+    let deficit = reserved - available;
+    for (i, (cell, band)) in cells.iter().zip(bands).enumerate() {
+        if band.right_colorbar == 0.0 && band.bottom_colorbar == 0.0 {
+            continue;
+        }
+        let first = cell.row();
+        let last = first + cell.row_span() - 1;
+        let legend = input.panels[i].legend;
+        let row = legend.header_within(spans[i].0, spans[i].1);
+        let above = band.above_with_row(&row);
+        let below = band.axis_below();
+        let bottom = legend.bottom_reserve(spans[i].0, spans[i].1) + band.bottom_colorbar;
+        // Only the panels defining an aligned band can be its cause. Equal colorbars share
+        // that band, so removing just one of those panels would not shrink it.
+        let excess = |value: f64, aligned: f64, plain: f64| {
+            if value >= aligned - CONTAINMENT_TOLERANCE {
+                (aligned - plain).max(0.0)
+            } else {
+                0.0
+            }
+        };
+        let freed = excess(above, rows.above[first], plain_rows.above[first])
+            + excess(
+                below,
+                rows.below[last] - rows.legends[last],
+                plain_rows.below[last] - plain_rows.legends[last],
+            )
+            + excess(bottom, rows.legends[last], plain_rows.legends[last]);
+        let needed = above - plain[i].above_with_row(&row) + band.below() - plain[i].below();
+        if needed >= deficit && freed >= deficit {
+            return in_panel(
+                *cell,
+                super::colorbar::room_error(input.context, needed, needed - deficit, true),
+            );
+        }
+    }
+    error
 }
 
 impl PlacedRows {
@@ -882,9 +931,20 @@ fn columns_too_narrow(
     let cols = columns.count();
     let placed = columns.place(&columns.no_growth());
     let deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
-    for ((cell, band), panel) in cells.iter().zip(bands).zip(input.panels) {
+    let plain: Vec<_> = cells
+        .iter()
+        .zip(bands)
+        .map(|(cell, band)| band.without_colorbar(input.span(*cell).reserve_cap))
+        .collect();
+    let plain_columns = Columns::measure(input, cells, &plain);
+    for (cell, band) in cells.iter().zip(bands) {
         let last = cell.col() + cell.col_span() - 1;
-        if band.right_colorbar > 0.0 && band.right() == columns.right[last] {
+        let freed = columns.right[last] - plain_columns.right[last];
+        if band.right_colorbar > 0.0
+            && band.right_colorbar >= deficit
+            && band.right() == columns.right[last]
+            && freed >= deficit
+        {
             return in_panel(
                 *cell,
                 super::colorbar::room_error(
@@ -895,6 +955,16 @@ fn columns_too_narrow(
                 ),
             );
         }
+    }
+    let (bands, columns) = if plain_columns.place(&plain_columns.no_growth()).plot_width < MIN_PLOT
+    {
+        (plain.as_slice(), &plain_columns)
+    } else {
+        (bands, columns)
+    };
+    let deficit = (MIN_PLOT - columns.place(&columns.no_growth()).plot_width) * cols as f64;
+    for ((cell, band), panel) in cells.iter().zip(bands).zip(input.panels) {
+        let last = cell.col() + cell.col_span() - 1;
         if band.right_legend > 0.0 && band.right_legend == columns.right[last] {
             let available = band.right_legend - deficit;
             if let Err(err) = super::placement::check_right_width(
@@ -1190,8 +1260,13 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) -> Result<()> {
     for (panel, layout) in input.panels.iter().zip(layouts) {
         if let Some(colorbar) = &layout.colorbar {
+            let cells = panel.axes.cells();
+            let outer_edges = [
+                cells.col() == 0,
+                cells.col() + cells.col_span() == input.grid.cols(),
+            ];
             colorbar
-                .check(input.context, layout.frame, input.width, panel.lib)
+                .check(input.context, layout.frame, outer_edges, panel.lib)
                 .map_err(|error| {
                     if input.is_single() {
                         error
@@ -2836,7 +2911,6 @@ mod tests {
                 above: (0..rows).map(|_| rng.unit() * 300.0).collect(),
                 below: (0..rows).map(|_| rng.unit() * 100.0).collect(),
                 legends: vec![0.0; rows],
-                colorbar: None,
             };
             let grid = Grid::new(rows as i64, 2).unwrap();
             let input = GridInput {

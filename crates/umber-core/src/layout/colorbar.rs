@@ -1,6 +1,8 @@
 //! Measurement and placement of colorbars beside and below a plot.
 
-use super::{Area, Frame, Label, Styles, Y_LABEL_CENTER, measure, measure_ticks, metrics};
+use super::{
+    AXIS_LABEL_GAP, Area, Frame, Label, Styles, Y_LABEL_CENTER, measure, measure_ticks, metrics,
+};
 use crate::color_scale::ResolvedColorScale;
 use crate::model::Axes;
 use crate::resolve::NormalizedPos;
@@ -11,11 +13,35 @@ const TICK_GAP: f64 = 3.0;
 /// The gap below the horizontal colorbar label, in points.
 const LABEL_GAP: f64 = 4.0;
 
+/// The side occupied by a visible colorbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ColorbarSide {
+    /// Beside the plot.
+    Right,
+    /// Below the plot.
+    Bottom,
+}
+
+impl ColorbarSide {
+    /// Resolves the axes override and theme default; hidden bars have no side.
+    pub(crate) fn resolve(axes: &Axes, theme: &Theme) -> Option<Self> {
+        match axes
+            .colorbar_options()
+            .position
+            .unwrap_or(theme.colorbar_position())
+        {
+            ColorbarPosition::Right => Some(Self::Right),
+            ColorbarPosition::Bottom => Some(Self::Bottom),
+            ColorbarPosition::None => None,
+        }
+    }
+}
+
 /// A colorbar's measured texts and fixed metrics, before its plot area is known.
 #[derive(Debug, Clone)]
 pub(crate) struct MeasuredColorbar {
     /// Where the bar belongs.
-    pub position: ColorbarPosition,
+    pub position: ColorbarSide,
     /// Labels and their positions along the bar.
     ticks: Vec<(NormalizedPos, Label)>,
     /// The label above the bar.
@@ -44,7 +70,7 @@ pub(crate) struct MeasuredColorbar {
 #[derive(Debug, Clone)]
 pub(crate) struct PlacedColorbar {
     /// Where the bar belongs.
-    pub position: ColorbarPosition,
+    pub position: ColorbarSide,
     /// The gradient rectangle.
     pub bar: Area,
     /// The tick labels, placed.
@@ -63,10 +89,7 @@ impl MeasuredColorbar {
     ) -> Option<Self> {
         let color = color?;
         let options = axes.colorbar_options();
-        let position = options.position.unwrap_or(theme.colorbar_position());
-        if position == ColorbarPosition::None {
-            return None;
-        }
+        let position = ColorbarSide::resolve(axes, theme)?;
         let styles = Styles::new(theme);
         let ticks = measure_ticks(lib, &color.ticks, styles.tick);
         let label = (!options.label.is_empty()).then(|| measure(lib, &options.label, styles.body));
@@ -77,7 +100,10 @@ impl MeasuredColorbar {
         let (ascent, descent) = metrics(lib, &styles.tick);
         let (label_ascent, label_descent) = metrics(lib, &styles.body);
         let label_height = if label.is_some() {
-            label_ascent + label_descent + LABEL_GAP
+            match position {
+                ColorbarSide::Right => label_ascent + AXIS_LABEL_GAP,
+                ColorbarSide::Bottom => label_ascent + label_descent + LABEL_GAP,
+            }
         } else {
             0.0
         };
@@ -99,7 +125,7 @@ impl MeasuredColorbar {
 
     /// The horizontal room including its gap; zero for a bottom bar.
     pub(crate) fn right_reserve(&self) -> f64 {
-        if self.position != ColorbarPosition::Right {
+        if self.position != ColorbarSide::Right {
             return 0.0;
         }
         self.gap
@@ -109,7 +135,7 @@ impl MeasuredColorbar {
 
     /// The vertical room including its gap; zero for a right bar.
     pub(crate) fn bottom_reserve(&self) -> f64 {
-        if self.position != ColorbarPosition::Bottom {
+        if self.position != ColorbarSide::Bottom {
             return 0.0;
         }
         self.gap
@@ -123,7 +149,7 @@ impl MeasuredColorbar {
 
     /// Room above the plot for a right bar's label.
     pub(super) fn label_band(&self) -> f64 {
-        if self.position == ColorbarPosition::Right {
+        if self.position == ColorbarSide::Right {
             self.label_height
         } else {
             0.0
@@ -132,7 +158,7 @@ impl MeasuredColorbar {
 
     /// Room above and below the plot for right-bar end ticks.
     pub(super) fn tick_overhang(&self) -> (f64, f64) {
-        if self.position == ColorbarPosition::Right {
+        if self.position == ColorbarSide::Right {
             (
                 (self.ascent - Y_LABEL_CENTER * self.size).max(0.0),
                 Y_LABEL_CENTER * self.size + self.descent,
@@ -146,7 +172,7 @@ impl MeasuredColorbar {
     pub(super) fn x_spans(&self) -> impl Iterator<Item = super::inset::TickSpan> + '_ {
         self.ticks
             .iter()
-            .filter(|_| self.position == ColorbarPosition::Bottom)
+            .filter(|_| self.position == ColorbarSide::Bottom)
             .map(|(pos, label)| super::inset::TickSpan {
                 pos: pos.get(),
                 half: label.width() / 2.0,
@@ -162,43 +188,37 @@ impl MeasuredColorbar {
         rise: f64,
     ) -> PlacedColorbar {
         let bar = match self.position {
-            ColorbarPosition::Right => Area {
+            ColorbarSide::Right => Area {
                 x: plot.right() + right_offset + self.gap,
                 y: plot.y,
                 width: self.thickness,
                 height: plot.height,
             },
-            ColorbarPosition::Bottom => Area {
+            ColorbarSide::Bottom => Area {
                 x: plot.x,
                 y: bottom + self.gap + self.label_height,
                 width: plot.width,
                 height: self.thickness,
             },
-            ColorbarPosition::None => plot,
         };
         for (pos, label) in &mut self.ticks {
             match self.position {
-                ColorbarPosition::Right => {
+                ColorbarSide::Right => {
                     label.x = bar.right() + self.tick_length + TICK_GAP;
                     label.y = bar.y_at(*pos) + Y_LABEL_CENTER * self.size;
                 }
-                ColorbarPosition::Bottom => {
+                ColorbarSide::Bottom => {
                     label.x = bar.x_at(*pos) - label.width() / 2.0;
                     label.y = bar.bottom() + self.tick_length + TICK_GAP + self.ascent;
                 }
-                ColorbarPosition::None => {}
             }
         }
         if let Some(label) = &mut self.label {
             label.x = bar.x;
-            label.y = bar.y
-                - LABEL_GAP
-                - self.label_descent
-                - if self.position == ColorbarPosition::Right {
-                    rise
-                } else {
-                    0.0
-                };
+            label.y = match self.position {
+                ColorbarSide::Right => bar.y - rise - AXIS_LABEL_GAP,
+                ColorbarSide::Bottom => bar.y - LABEL_GAP - self.label_descent,
+            };
         }
         PlacedColorbar {
             position: self.position,
@@ -234,17 +254,17 @@ impl PlacedColorbar {
         &self,
         context: &'static str,
         frame: Frame,
-        canvas_width: f64,
+        outer_edges: [bool; 2],
         lib: &FontLibrary,
     ) -> Result<()> {
         let left = frame.x
-            + if frame.x == 0.0 {
+            + if outer_edges[0] {
                 super::X_LABEL_EDGE_GAP
             } else {
                 0.0
             };
         let right = frame.right()
-            - if frame.right() == canvas_width {
+            - if outer_edges[1] {
                 super::X_LABEL_EDGE_GAP
             } else {
                 0.0
@@ -333,6 +353,25 @@ mod tests {
         assert_eq!(colorbar.bar.x, layout.plot.right() + 10.0);
         assert_eq!(colorbar.label.as_ref().unwrap().x, colorbar.bar.x);
         assert!(colorbar.label.as_ref().unwrap().y < colorbar.bar.y);
+    }
+
+    #[test]
+    fn colorbar_right_label_shares_y_title_baseline() {
+        for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+            let mut f = figure_with(ColorbarPosition::Right, None, 6.0, 4.0, theme);
+            f.single_axes_mut().ylabel("Height");
+            let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+            let label = layout.colorbar.as_ref().unwrap().label.as_ref().unwrap();
+            assert_eq!(label.y, layout.ylabel.as_ref().unwrap().y);
+            f.single_axes_mut()
+                .colorbar(ColorbarOptions {
+                    position: Some(ColorbarPosition::None),
+                    ..ColorbarOptions::default()
+                })
+                .unwrap();
+            let (_, hidden) = plan_figure(&f, (0, 0), FontLibrary::global());
+            assert_eq!(layout.plot.y, hidden.plot.y);
+        }
     }
 
     #[test]
@@ -587,13 +626,117 @@ mod tests {
             .filter(|n| n.has_tag_name("linearGradient"))
             .collect();
         assert_eq!(gradients.len(), 1);
+        let stops = gradients[0]
+            .children()
+            .filter(|n| n.has_tag_name("stop"))
+            .count();
+        assert!(stops >= 64);
+        assert_eq!(stops, 257);
+    }
+
+    #[test]
+    fn colorbar_paint_retains_original_colormap() {
+        for position in [ColorbarPosition::Right, ColorbarPosition::Bottom] {
+            let f = figure(position, None);
+            let (resolved, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+            let color = resolved.color.unwrap();
+            let placed = layout.colorbar.unwrap();
+            let crate::Item::Group { items, .. } =
+                crate::draw::colorbar::draw(f.theme(), &color, &placed)
+            else {
+                panic!("the colorbar is a group");
+            };
+            assert!(matches!(&items[0], crate::Item::Fill {
+                paint: crate::Paint::Sampled { cmap, .. }, ..
+            } if *cmap == color.cmap));
+        }
+    }
+
+    #[test]
+    fn colorbar_canvas_edges_use_grid_topology() {
+        let f = figure(ColorbarPosition::Bottom, None);
+        let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+        let mut bar = layout.colorbar.unwrap();
+        let label = bar.label.as_mut().unwrap();
+        label.x = 1.0;
+        bar.ticks.clear();
+        let frame = super::Frame {
+            x: 0.0,
+            y: 0.0,
+            width: 432.0,
+            height: 288.0,
+        };
         assert!(
-            gradients[0]
-                .children()
-                .filter(|n| n.has_tag_name("stop"))
-                .count()
-                >= 64
+            bar.check(
+                "Figure.to_scene()",
+                frame,
+                [false, false],
+                FontLibrary::global()
+            )
+            .is_ok()
         );
+        assert!(
+            bar.check(
+                "Figure.to_scene()",
+                frame,
+                [true, false],
+                FontLibrary::global()
+            )
+            .is_err()
+        );
+        let label = bar.label.as_mut().unwrap();
+        label.x = frame.right() - label.width() - 1.0;
+        let frame = super::Frame {
+            width: frame.width - 1e-8,
+            ..frame
+        };
+        assert!(
+            bar.check(
+                "Figure.to_scene()",
+                frame,
+                [false, false],
+                FontLibrary::global()
+            )
+            .is_ok()
+        );
+        assert!(
+            bar.check(
+                "Figure.to_scene()",
+                frame,
+                [false, true],
+                FontLibrary::global()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn colorbar_pixels_sample_original_cmap() {
+        let cmap =
+            Cmap::from_colors(&[crate::Rgba::BLACK, crate::Rgba::WHITE, crate::Rgba::RED]).unwrap();
+        let f = figure_with(
+            ColorbarPosition::Bottom,
+            None,
+            6.0,
+            4.0,
+            Theme::pigment().with_cmap(cmap.clone()),
+        );
+        let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+        let bar = layout.colorbar.unwrap().bar;
+        let png = f.to_png(72).unwrap();
+        let image = crate::test_support::image::decode_rgba8(&png).unwrap();
+        let y = (bar.y + bar.height / 2.0).floor() as u32;
+        let start = bar.x as f32;
+        let length = f64::from(bar.right() as f32 - start);
+        for x in bar.x.ceil() as u32 + 2..bar.right().floor() as u32 - 2 {
+            let t = (f64::from(x) + 0.5 - f64::from(start)) / length;
+            let color = cmap.at(t);
+            assert_eq!(
+                image.at(x, y),
+                [color.r, color.g, color.b, color.a],
+                "at {t}"
+            );
+        }
     }
 
     #[test]

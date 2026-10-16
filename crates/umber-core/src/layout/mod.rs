@@ -28,7 +28,7 @@ mod panel;
 pub(crate) mod placement;
 mod program;
 
-pub(crate) use colorbar::PlacedColorbar;
+pub(crate) use colorbar::{ColorbarSide, PlacedColorbar};
 pub(crate) use grid::{GridInput, check_panel_contents, solve_grid};
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
@@ -696,7 +696,7 @@ fn solve_single(
     let LayoutInput {
         legend, context, ..
     } = *input;
-    let mut plot_top = bands.heading.bottom(top) + bands.y_label_band + bands.label_rise;
+    let mut plot_top = bands.heading.bottom(top) + bands.top_label_band() + bands.top_label_rise();
     let cap = panel::end_label_cap(frame.width);
     // The widest y tick label and its gap are added to the padding one at a time, not as the
     // one sum `bands.y_tick_column`, which can round differently.
@@ -719,7 +719,7 @@ fn solve_single(
     // the right padding, x tick labels or not; only then are the x tick labels fitted.
     if matches!(inset::fit_x_labels(&room, &[]), inset::XInset::Overflowing) {
         let direct = legend.direct.reserve(f64::INFINITY);
-        if bands.right_colorbar > 0.0 {
+        if bands.right_colorbar > 0.0 && right - left + bands.right_colorbar >= MIN_PLOT {
             let available = frame.right()
                 - PADDING
                 - left
@@ -733,6 +733,14 @@ fn solve_single(
                 false,
             ));
         }
+        let without = bands.without_colorbar(cap);
+        let bands = &without;
+        let right = frame.right() - PADDING - bands.right();
+        let room = inset::Room {
+            right,
+            right_min: right.min(frame.right() - PADDING - cap),
+            ..room
+        };
         if bands.right_legend > 0.0 {
             let available = frame.right() - PADDING - left - MIN_PLOT;
             placement::check_right_width(context, &legend.column(0.0), available)?;
@@ -785,26 +793,33 @@ fn solve_single(
     let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {
-        if bands.bottom_colorbar > 0.0 {
+        let without = bands.without_colorbar(cap);
+        let plain_top = if legend.position == crate::LegendPosition::TopRight {
+            top + without.above_with_row(&legend.header_within(plot_left, plot_right))
+        } else {
+            without.heading.bottom(top) + without.y_label_band + without.label_rise
+        };
+        let plain_below = PADDING
+            + without.bottom_legend
+            + if without.bottom_legend > 0.0 {
+                without.axis_below()
+            } else {
+                without.x_band + without.x_title_band
+            };
+        let plain_height = frame.bottom() - plain_below - plain_top;
+        let colorbar_band = (plot_top - plain_top) + (below - plain_below);
+        if colorbar_band > 0.0 && plain_height >= MIN_PLOT {
             return Err(colorbar::room_error(
                 context,
-                bands.bottom_colorbar,
-                frame.bottom() - plot_top - MIN_PLOT - axis_below - PADDING - bands.bottom_legend,
-                true,
-            ));
-        }
-        if bands.right_colorbar > 0.0 {
-            return Err(colorbar::room_error(
-                context,
-                bands.y_label_band + bands.label_rise + MIN_PLOT,
-                frame.bottom() - bands.heading.bottom(top) - below,
+                colorbar_band,
+                plain_height - MIN_PLOT,
                 true,
             ));
         }
         return Err(figure_too_short(
             context,
             frame.height,
-            plot_top - frame.y + MIN_PLOT + below,
+            plain_top - frame.y + MIN_PLOT + plain_below,
             bands
                 .heading
                 .height_hint(top > frame.y + PADDING, bands.bottom_legend > 0.0),

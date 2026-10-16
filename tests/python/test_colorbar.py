@@ -152,6 +152,119 @@ def test_colorbar_room_errors_exact(
     assert details(caught.value) == (None, hint)
 
 
+@pytest.mark.parametrize("position", [ub.ColorbarPosition.RIGHT, ub.ColorbarPosition.BOTTOM])
+@pytest.mark.parametrize("case", ["single_height", "grid_height", "single_legend", "grid_legend"])
+def test_colorbar_preserves_unrelated_room_errors(case: str, position: ub.ColorbarPosition) -> None:
+    def render(colored: bool) -> None:
+        grid = case.startswith("grid")
+        if case == "single_height":
+            fig = ub.Figure(6, 0.9).title("A title").subtitle("A subtitle")
+        elif case == "grid_height":
+            fig = ub.Figure(6, 1.6, rows=2, cols=2).title("A title")
+        elif grid:
+            fig = ub.Figure(2, 3, rows=1, cols=2, legend=ub.Legend.PER_PANEL)
+        else:
+            fig = ub.Figure(1.2, 3)
+        count = 4 if case == "grid_height" else 2 if grid else 1
+        for i in range(count):
+            ax = fig.add_axes(row=i // 2, col=i % 2) if grid else fig.add_axes()
+            if "height" in case:
+                ax.title("Panel")
+            if not grid:
+                ax.ylabel("Height")
+            if colored and i == 0:
+                ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+                ax.colorbar(position=position)
+            else:
+                ax.scatter([1, 2, 3, 4], [1, 2, 3, 4])
+            if "legend" in case:
+                ax.line([1, 2], [1, 2], label="A long legend label").legend(
+                    ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
+                )
+        fig.to_svg()
+
+    with pytest.raises(ub.StyleError) as plain:
+        render(False)
+    with pytest.raises(ub.StyleError) as mapped:
+        render(True)
+    assert str(mapped.value) == str(plain.value)
+    assert details(mapped.value) == details(plain.value)
+    if case == "single_height":
+        assert str(mapped.value) == (
+            "Figure.to_svg(): the figure is 64 pt tall; "
+            "at least 135 pt is needed for the plot area."
+        )
+    elif case == "grid_height":
+        assert str(mapped.value) == (
+            "Figure.to_svg(): the figure is 115 pt tall; "
+            "at least 182 pt is needed for 2 rows of plots."
+        )
+
+
+@pytest.mark.parametrize(
+    ("rows", "cols", "height", "position", "needed", "available"),
+    [
+        (1, 1, 0.7, ub.ColorbarPosition.RIGHT, 13, 4),
+        (1, 1, 0.7, ub.ColorbarPosition.BOTTOM, 52, 4),
+        (2, 2, 1.35, ub.ColorbarPosition.RIGHT, 13, 5),
+        (2, 2, 1.5, ub.ColorbarPosition.BOTTOM, 52, 16),
+    ],
+)
+def test_colorbar_height_error_reports_its_own_band(
+    rows: int, cols: int, height: float, position: ub.ColorbarPosition, needed: int, available: int
+) -> None:
+    fig = ub.Figure(6, height, rows=rows, cols=cols)
+    for i in range(rows * cols):
+        ax = fig.add_axes(row=i // cols, col=i % cols)
+        if i in (0, rows * cols - 1):
+            ax.scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8]))
+        else:
+            ax.scatter([1, 2, 3], [1, 2, 3])
+    ax = fig.axes_at(row=rows - 1, col=cols - 1)
+    ax.colorbar("Intensity", position=position)
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    panel = f"row {rows - 1}, col {cols - 1}: " if rows * cols > 1 else ""
+    assert str(caught.value) == (
+        f"Figure.to_svg(): {panel}the colorbar needs {needed} pt; the panel has {available} pt."
+    )
+    assert details(caught.value) == (None, "increase the figure height.")
+    ax.colorbar(position=ub.ColorbarPosition.NONE)
+    fig.to_svg()
+
+
+@pytest.mark.parametrize(
+    ("rows", "cols", "width", "height", "position", "needed", "available"),
+    [
+        (1, 2, 6, 0.8, ub.ColorbarPosition.BOTTOM, 52, 11),
+        (2, 1, 1, 6, ub.ColorbarPosition.RIGHT, 44, 28),
+    ],
+)
+def test_colorbars_sharing_a_grid_band_report_its_size(
+    rows: int,
+    cols: int,
+    width: float,
+    height: float,
+    position: ub.ColorbarPosition,
+    needed: int,
+    available: int,
+) -> None:
+    fig = ub.Figure(width, height, rows=rows, cols=cols)
+    for i in range(rows * cols):
+        fig.add_axes(row=i // cols, col=i % cols).scatter(
+            [1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8])
+        ).colorbar("Intensity", position=position)
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    assert str(caught.value) == (
+        f"Figure.to_svg(): row 0, col 0: the colorbar needs {needed} pt; "
+        f"the panel has {available} pt."
+    )
+    for i in range(rows * cols):
+        fig.axes_at(row=i // cols, col=i % cols).colorbar(position=ub.ColorbarPosition.NONE)
+    fig.to_svg()
+
+
 def test_colorbar_single_value_has_one_tick() -> None:
     ax = ub.Figure().add_axes().scatter([1], [1], color=ub.ColorBy([17]))
     doc = ElementTree.fromstring(ax.figure.to_svg(text=ub.SvgText.EDITABLE))
