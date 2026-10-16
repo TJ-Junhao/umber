@@ -610,7 +610,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def scatter(
-        self: "Axes[float, float] | Axes[str, float] | Axes[float, str]",
+        self,
         x: Values[X],
         y: Values[Y],
         *,
@@ -618,7 +618,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
-    ) -> "Axes[X, Y]":
+    ) -> Self:
         """Add a marker at each point ``(x[i], y[i])``.
 
         A point with a NaN coordinate is left out. On a category y axis the scatter is a dot
@@ -642,7 +642,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, or names and numbers do not match the
                 axes.
             StyleError: If ``label`` is too long.
-            UsageError: If both axes are category axes.
+            UsageError: If both axes are category axes. Type checkers accept such axes,
+                so this is raised when the call runs.
 
         Example:
             >>> import umber as ub
@@ -663,8 +664,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             ys = self._y_values(context, y)
             name = _args.text(context, "label", label)
             self._native.scatter(self._row, self._col, xs, ys, name, spec, shape.value, extent)
-            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
-            return cast("Axes[X, Y]", self)
+            return self
 
     def bubbles(
         self: "Axes[float, float]",
@@ -1237,14 +1237,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def vline(
-        self: "Axes[float, float] | Axes[str, float] | Axes[float, str]",
+        self,
         x: X,
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, Y]":
+    ) -> Self:
         """Add a vertical reference line at ``x`` across the plot.
 
         On a linear or log x axis ``x`` is a number, and without explicit x limits the x axis
@@ -1274,7 +1274,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 axis or a name on a linear or log axis.
             DataError: If ``x`` is not finite, or not positive on a log axis.
             StyleError: If ``label`` is too long.
-            UsageError: If both axes are category axes.
+            UsageError: If both axes are category axes. Type checkers accept such axes,
+                so this is raised when the call runs.
 
         Example:
             >>> import umber as ub
@@ -1297,8 +1298,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 position = _args.checked_text(context, "x", "x", position, DataError)
             name = _args.text(context, "label", label)
             self._native.vline(self._row, self._col, position, name, spec, style.value, extent)
-            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
-            return cast("Axes[X, Y]", self)
+            return self
 
     def hspan(
         self: "Axes[X, float]",

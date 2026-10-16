@@ -80,7 +80,7 @@ assert_type(ax.stacked_area(xs, series).bubbles(xs, values, values), ub.Axes[flo
 assert_type(cats.line(names, values).stem(names, values).hline(1.0), ub.Axes[str, float])
 assert_type(cats.y_error_bars(names, values, values).bar(names, values), ub.Axes[str, float])
 
-# Positive: scatter and vline draw on every axes but two category axes.
+# Positive: scatter and vline keep the type of the axes they draw on.
 assert_type(ax.scatter(xs, values).vline(0.5).line(xs, values), ub.Axes[float, float])
 assert_type(cats.scatter(names, values).vline("North").title("t"), ub.Axes[str, float])
 assert_type(h.scatter(values, names).vline(4.0).bar(names, values), ub.Axes[float, str])
@@ -98,6 +98,16 @@ h.stacked_area(xs, series)  # type: ignore[misc]  # pyright: ignore[reportAttrib
 h.bubbles(xs, values, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 both.line(names, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
-# Negative: two category axes take neither a scatter nor a vertical line.
-both.scatter(names, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-both.vline("North")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+# Positive: scatter and vline take generic receivers along either axis. Two category axes are
+# refused when the call runs, not by the type checkers.
+def draw[T: (float, str)](
+    ax: ub.Axes[T, float], x: ub.Values[T], y: ub.Values[float], position: T
+) -> ub.Axes[T, float]:
+    return ax.scatter(x, y).vline(position)
+
+
+def draw_rows[T: (float, str)](
+    ax: ub.Axes[float, T], x: ub.Values[float], y: ub.Values[T], position: float
+) -> ub.Axes[float, T]:
+    return ax.scatter(x, y).vline(position)
