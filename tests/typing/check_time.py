@@ -67,3 +67,31 @@ timed.vline(1.0)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType
 ub.Figure().add_axes().xlim(days[0], days[1])  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 up.hline(1.0)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 not_a_time: ub.Time = 3.0  # type: ignore[assignment]  # pyright: ignore[reportAssignmentType]
+
+# Negative: a receiver whose axis is a category axis is refused where the method takes numbers
+# or times along that axis, whatever the arguments; here every argument would suit the axis.
+arr = np.zeros(2)
+fmt = ub.TickFormat.AUTO
+cats = ub.Figure().add_axes(x=ub.Scale.category())
+rows = ub.Figure().add_axes(y=ub.Scale.category())
+cats.xlim("a", "b")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.xticks(arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.xticks_labeled(arr, ["a", "b"])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.xtick_format(fmt)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.vspan("a", "b")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.x_error_bars(arr, arr, arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.band(arr, arr, arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.stacked_area(arr, [])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.ylim("a", "b")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.yticks(arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.yticks_labeled(arr, ["a", "b"])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.ytick_format(fmt)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.line(arr, arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.area(arr, arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.step(arr, arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.stem(arr, arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.y_error_bars(arr, arr, arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.hline("a")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.hspan("a", "b")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.band(arr, arr, arr)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+rows.stacked_area(arr, [])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]

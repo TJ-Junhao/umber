@@ -30,7 +30,7 @@ logged.x_error_bars([1.0, 2.0], [1.0, 2.0], [3.0, 4.0], caps=False)
 both: ub.Axes[float, float] = numeric.x_error_bars(t, t, t).y_error_bars(t, t, t)
 
 # Negative: the self type needs a numeric x axis, so a category axis refuses x_error_bars.
-cats.x_error_bars(t, t, t)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.x_error_bars(t, names, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 # Negative: a category axis takes names, a numeric axis takes numbers.
 numeric.y_error_bars(names, t, t)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

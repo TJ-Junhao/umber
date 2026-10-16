@@ -53,6 +53,9 @@ _COARSE: Final = {
 }
 # Units per microsecond, for the NumPy units finer than a microsecond.
 _FINE: Final = {"ns": 10**3, "ps": 10**6, "fs": 10**9, "as": 10**12}
+# Below this product of a unit's microseconds as a reduced fraction, its counts convert in int64
+# arithmetic without overflow; larger ones (huge unit multipliers) convert exactly in Python.
+_FAST_PRODUCT: Final = 2**62
 # Years and months have no fixed length; within this many of 1970 they convert to microseconds
 # without overflow (the int64 range holds about 292,000 years of microseconds).
 _CALENDAR_REACH: Final = {"Y": 290_000, "M": 290_000 * 12}
@@ -253,8 +256,12 @@ def _datetime64_micros(
             numerator, denominator = count * _COARSE[unit], 1
         common = math.gcd(numerator, denominator)
         numerator, denominator = numerator // common, denominator // common
+        if numerator * denominator >= _FAST_PRODUCT:
+            out = _exact_micros(context, name, label, native, missing, (numerator, denominator))
+            out[missing] = MISSING
+            return np.require(out, dtype="=i8", requirements=["A", "C"])
         quotient, remainder = np.divmod(present, denominator)
-        # |remainder * numerator| < denominator * numerator, far inside int64 for NumPy units.
+        # |remainder * numerator| < denominator * numerator < 2**62: no overflow.
         part, rest = np.divmod(remainder * numerator, denominator)
         # The part below the quotient adds less than `numerator`.
         limit = (np.iinfo(np.int64).max - numerator) // numerator
@@ -264,6 +271,37 @@ def _datetime64_micros(
         out = out + up.astype(np.int64)
     out[missing] = MISSING
     return np.require(out, dtype="=i8", requirements=["A", "C"])
+
+
+def _exact_micros(
+    context: str,
+    name: str,
+    label: str | None,
+    array: npt.NDArray[Any],
+    missing: npt.NDArray[np.bool_],
+    ratio: tuple[int, int],
+) -> MicrosArray:
+    """Convert counts of a unit of ``ratio`` microseconds exactly, with Python integers.
+
+    The ratio is too large for the int64 arithmetic of the common units, so each count is scaled
+    exactly, rounded halves to even, and checked to fit an int64 one by one.
+    """
+    numerator, denominator = ratio
+    smallest, largest = MISSING + 1, int(np.iinfo(np.int64).max)
+    out = np.empty(len(array), dtype=np.int64)
+    counts = cast(list[int], array.view(np.int64).tolist())
+    for index, count in enumerate(counts):
+        if missing[index]:
+            out[index] = MISSING
+            continue
+        quotient, remainder = divmod(count * numerator, denominator)
+        if 2 * remainder > denominator or (2 * remainder == denominator and quotient % 2 == 1):
+            quotient += 1
+        if not smallest <= quotient <= largest:
+            at = label or f"{name}[{index}]"
+            raise _beyond_error(context, name, at, array[index : index + 1])
+        out[index] = quotient
+    return out
 
 
 def _calendar_micros(
@@ -304,7 +342,7 @@ def _beyond_error(context: str, name: str, label: str, value: npt.NDArray[Any]) 
     """
     try:
         shown = str(np.datetime_as_string(value, unit="D")[0])
-    except (OverflowError, ValueError):
+    except (OverflowError, ValueError, TypeError):
         unit, count = np.datetime_data(value.dtype)
         shown = f"{int(value.view(np.int64)[0])} times {count} {unit} from 1970"
     message = f"{label} is {shown}; times must lie between 0001-01-01 and 9999-12-31."

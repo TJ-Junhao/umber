@@ -57,7 +57,7 @@ ax.bar(["A", "B"], [3, 5])  # type: ignore[misc]  # pyright: ignore[reportAttrib
 # Negative: a category x axis refuses numeric x values, hist and xlim.
 cats.line([0.1, 0.2], [1, 2])  # type: ignore[list-item]  # pyright: ignore[reportArgumentType]
 cats.hist([1.0])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-cats.xlim(0, 1)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.xlim("A", "B")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 # Positive: a category y axis changes the y type.
 assert_type(ub.Figure().add_axes(y=ub.Scale.category()), ub.Axes[float, str])

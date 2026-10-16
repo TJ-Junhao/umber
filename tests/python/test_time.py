@@ -4,8 +4,10 @@ reference marks on time axes, the marks a time axis refuses, and failed calls.""
 import copy
 import datetime as dt
 import pickle
+import random
 import zoneinfo
 from collections.abc import Callable
+from fractions import Fraction
 from typing import Any, cast
 
 import numpy as np
@@ -410,3 +412,52 @@ def test_byte_order_and_unit_multipliers_convert_exactly() -> None:
         assert message.startswith("Axes.line(): x[1] is "), message
         assert message.endswith("; times must lie between 0001-01-01 and 9999-12-31."), message
         assert parameter == "x"
+
+
+# Microseconds in one of each NumPy unit of a fixed length.
+UNIT_MICROS = {
+    "W": Fraction(7 * 86_400_000_000),
+    "D": Fraction(86_400_000_000),
+    "h": Fraction(3_600_000_000),
+    "m": Fraction(60_000_000),
+    "s": Fraction(1_000_000),
+    "ms": Fraction(1_000),
+    "us": Fraction(1),
+    "ns": Fraction(1, 10**3),
+    "ps": Fraction(1, 10**6),
+    "fs": Fraction(1, 10**9),
+    "as": Fraction(1, 10**12),
+}
+
+
+def test_huge_unit_multipliers_convert_exactly_or_report_the_range() -> None:
+    attos = np.array([999_999_999_999], dtype="datetime64[1000000001as]")
+    np.testing.assert_array_equal(_time.micros("Axes.line()", "x", attos), [1_000_000_001])
+    weeks = np.array([0, NAT], dtype="datetime64[20000000W]")
+    np.testing.assert_array_equal(_time.micros("Axes.line()", "x", weeks), [0, NAT])
+    with pytest.raises(ub.DataError) as caught:
+        _time.micros("Axes.line()", "x", np.array([0, 1], dtype="datetime64[20000000W]"))
+    message, parameter, _ = _parts(caught.value)
+    assert message.startswith("Axes.line(): x[1] is "), message
+    assert parameter == "x"
+
+
+def test_conversion_matches_exact_integer_arithmetic() -> None:
+    generator = random.Random(20261017)
+    largest = int(np.iinfo(np.int64).max)
+    multipliers = [1, 2, 3, 7, 10, 1_000, 10**6, 10**9 + 1, 20_000_000, 2**31 - 1]
+    for _ in range(400):
+        unit = generator.choice(list(UNIT_MICROS))
+        multiplier = generator.choice(multipliers)
+        size = generator.choice([10**3, 10**9, 10**15, largest])
+        counts = [generator.randint(-size, size) for _ in range(4)]
+        counts = [count for count in counts if count != NAT]
+        values = np.array(counts, dtype=np.int64).view(f"datetime64[{multiplier}{unit}]")
+        exact = [round(count * multiplier * UNIT_MICROS[unit]) for count in counts]
+        fits = all(NAT < value <= largest for value in exact)
+        if fits:
+            converted = _time.micros("Axes.line()", "x", values)
+            np.testing.assert_array_equal(converted, exact, err_msg=f"{unit} x{multiplier}")
+        else:
+            with pytest.raises(ub.DataError):
+                _time.micros("Axes.line()", "x", values)

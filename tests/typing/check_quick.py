@@ -28,6 +28,6 @@ as_numeric: ub.Axes[float, float] = ub.bar(["A"], [1])  # type: ignore[assignmen
 as_text: ub.Axes[str, float] = ub.line(t, t)  # type: ignore[assignment]  # pyright: ignore[reportAssignmentType]
 
 # Negative: a bar chart cannot take numeric x limits, a line chart cannot take a category.
-ub.bar(["A"], [1]).xlim(0, 1)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+ub.bar(["A"], [1]).xlim("A", "B")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 ub.line(["A"], [1])  # type: ignore[list-item]  # pyright: ignore[reportArgumentType]
 ub.hist(t, theme="graphite")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

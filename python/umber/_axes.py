@@ -40,13 +40,14 @@ from umber._values import (
 # ``Axes[float, float]``.
 X = TypeVar("X", default=float)
 Y = TypeVar("Y", default=float)
-# The values of an axis that has limits, ticks and spans: numbers on a linear or log axis, times
-# on a time axis. A method whose self type uses it on one axis is refused on a category axis.
-V = TypeVar("V", float, Time, default=float)
-# Axes whose x axis, or whose y axis, is linear, log or time: the self type of the tick format
-# setters, which take no value of the axis.
+# Axes whose x axis, or whose y axis, is linear, log or time: the self types of the methods that
+# take numbers or times along that axis, such as limits, ticks and spans, and refuse a category
+# axis there. A bound on the receiver is checked by both pyright and mypy; the values the method
+# takes follow the axis through ``X`` and ``Y``.
 SX = TypeVar("SX", bound="Axes[float, Any] | Axes[Time, Any]")
 SY = TypeVar("SY", bound="Axes[Any, float] | Axes[Any, Time]")
+# Axes with a linear, log or time x axis beside a linear or log y axis: bands and stacked areas.
+SXF = TypeVar("SXF", bound="Axes[float, float] | Axes[Time, float]")
 
 _CATEGORY: Final = Scale.category()
 _TIME: Final = Scale.time()
@@ -214,7 +215,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.ylabel(self._row, self._col, _args.text("Axes.ylabel()", "text", text))
             return self
 
-    def xlim(self: "Axes[V, Y]", low: V, high: V) -> "Axes[V, Y]":
+    def xlim(self: SX, low: X, high: X) -> SX:
         """Set the x limits, replacing the automatic ones; for linear, log and time x axes.
 
         Args:
@@ -246,7 +247,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.xlim(self._row, self._col, lower, upper)
             return self
 
-    def ylim(self: "Axes[X, V]", low: V, high: V) -> "Axes[X, V]":
+    def ylim(self: SY, low: Y, high: Y) -> SY:
         """Set the y limits, replacing the automatic ones.
 
         Args:
@@ -277,7 +278,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.ylim(self._row, self._col, lower, upper)
             return self
 
-    def xticks(self: "Axes[V, Y]", positions: Values[V]) -> "Axes[V, Y]":
+    def xticks(self: SX, positions: Values[X]) -> SX:
         """Set the x ticks to ``positions``, replacing the automatic ones.
 
         The positions are used in the order given. An empty list leaves the x axis without
@@ -315,7 +316,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.xticks(self._row, self._col, floats(context, "positions", positions))
             return self
 
-    def yticks(self: "Axes[X, V]", positions: Values[V]) -> "Axes[X, V]":
+    def yticks(self: SY, positions: Values[Y]) -> SY:
         """Set the y ticks to ``positions``, replacing the automatic ones.
 
         The positions are used in the order given. An empty list leaves the y axis without
@@ -351,9 +352,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.yticks(self._row, self._col, floats(context, "positions", positions))
             return self
 
-    def xticks_labeled(
-        self: "Axes[V, Y]", positions: Values[V], labels: Values[str]
-    ) -> "Axes[V, Y]":
+    def xticks_labeled(self: SX, positions: Values[X], labels: Values[str]) -> SX:
         """Set the x ticks to ``positions``, each with the label at the same index of ``labels``.
 
         The labels are drawn as given. The ticks follow the rules of ``Axes.xticks()``.
@@ -396,9 +395,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.xticks_labeled(self._row, self._col, places, texts)
             return self
 
-    def yticks_labeled(
-        self: "Axes[X, V]", positions: Values[V], labels: Values[str]
-    ) -> "Axes[X, V]":
+    def yticks_labeled(self: SY, positions: Values[Y], labels: Values[str]) -> SY:
         """Set the y ticks to ``positions``, each with the label at the same index of ``labels``.
 
         The labels are drawn as given. The ticks follow the rules of ``Axes.yticks()``.
@@ -546,15 +543,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def line(
-        self: "Axes[X, V]",
+        self: SY,
         x: Values[X],
-        y: Values[V],
+        y: Values[Y],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, V]":
+    ) -> SY:
         """Add a line through the points ``(x[i], y[i])``, in order.
 
         A NaN in ``x`` or ``y`` leaves a gap in the line.
@@ -598,15 +595,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def area(
-        self: "Axes[X, V]",
+        self: SY,
         x: Values[X],
-        y: Values[V],
+        y: Values[Y],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, V]":
+    ) -> SY:
         """Add a line through the points ``(x[i], y[i])``, in order, and fill the region below it.
 
         The fill reaches down to the baseline of the axes. A NaN in ``x`` or ``y`` leaves a gap in
@@ -798,15 +795,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def stem(
-        self: "Axes[X, V]",
+        self: SY,
         x: Values[X],
-        y: Values[V],
+        y: Values[Y],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
-    ) -> "Axes[X, V]":
+    ) -> SY:
         """Add a line from the baseline to each value, with a marker at its tip.
 
         A linear y domain includes zero. On a log y axis, stems start at the baseline.
@@ -1093,9 +1090,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
-    def stacked_area(
-        self: "Axes[V, float]", x: Values[V], series: Sequence[Series]
-    ) -> "Axes[V, float]":
+    def stacked_area(self: SXF, x: Values[X], series: Sequence[Series]) -> SXF:
         """Add non-negative series stacked in order over shared x values.
 
         Each layer fills between the previous cumulative curve and its own, flat at the
@@ -1188,16 +1183,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def step(
-        self: "Axes[X, V]",
+        self: SY,
         x: Values[X],
-        y: Values[V],
+        y: Values[Y],
         *,
         where: Step = Step.POST,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, V]":
+    ) -> SY:
         """Add a step line through the points ``(x[i], y[i])``, in order.
 
         The line runs horizontally and changes level vertically, at the place ``where`` sets.
@@ -1252,14 +1247,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def hline(
-        self: "Axes[X, V]",
-        y: V,
+        self: SY,
+        y: Y,
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, V]":
+    ) -> SY:
         """Add a horizontal reference line across the whole plot at ``y``.
 
         The line is drawn above the data marks. Without explicit y limits the y axis extends to
@@ -1380,13 +1375,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def hspan(
-        self: "Axes[X, V]",
-        low: V,
-        high: V,
+        self: SY,
+        low: Y,
+        high: Y,
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[X, V]":
+    ) -> SY:
         """Add a horizontal reference span between the y values ``low`` and ``high``.
 
         The span fills the region between the two values across the whole plot, at the opacity
@@ -1434,13 +1429,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def vspan(
-        self: "Axes[V, Y]",
-        low: V,
-        high: V,
+        self: SX,
+        low: X,
+        high: X,
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[V, Y]":
+    ) -> SX:
         """Add a vertical reference span between the x values ``low`` and ``high``.
 
         The span fills the region between the two values across the plot, at the opacity of an
@@ -1491,14 +1486,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def band(
-        self: "Axes[V, float]",
-        x: Values[V],
+        self: SXF,
+        x: Values[X],
         low: Values[float],
         high: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[V, float]":
+    ) -> SXF:
         """Add a band between the curves ``(x[i], low[i])`` and ``(x[i], high[i])``.
 
         The band is a flat fill at the opacity of an area, with no outline, whatever the fill
@@ -1556,16 +1551,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def y_error_bars(
-        self: "Axes[X, V]",
+        self: SY,
         x: Values[X],
-        low: Values[V],
-        high: Values[V],
+        low: Values[Y],
+        high: Values[Y],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         width: Size = Size.AUTO,
         caps: bool = True,
-    ) -> "Axes[X, V]":
+    ) -> SY:
         """Add a vertical error bar at each ``x[i]``, from ``low[i]`` to ``high[i]``.
 
         On a category x axis the bar is drawn at the centre of the category. With ``caps`` each
@@ -1625,16 +1620,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def x_error_bars(
-        self: "Axes[V, Y]",
+        self: SX,
         y: Values[Y],
-        low: Values[V],
-        high: Values[V],
+        low: Values[X],
+        high: Values[X],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         width: Size = Size.AUTO,
         caps: bool = True,
-    ) -> "Axes[V, Y]":
+    ) -> SX:
         """Add a horizontal error bar at each ``y[i]``, from ``low[i]`` to ``high[i]``.
 
         With ``caps`` each end of a bar has a short line across it, as wide as the cap width of

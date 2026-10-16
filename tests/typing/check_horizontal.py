@@ -67,7 +67,7 @@ h.scatter(values, values)  # type: ignore[arg-type]  # pyright: ignore[reportArg
 h.x_error_bars(values, [0.0, 1.0], [1.0, 2.0])  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
 # Negative: a category y axis has no y limits, and histograms bin numbers along x into y.
-h.ylim(0, 1)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.ylim("North", "South")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 h.hist(values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 # Positive: the marks with numeric values on y keep the type of the axes they draw on.
@@ -86,17 +86,17 @@ assert_type(cats.scatter(names, values).vline("North").title("t"), ub.Axes[str, 
 assert_type(h.scatter(values, names).vline(4.0).bar(names, values), ub.Axes[float, str])
 
 # Negative: the marks with numeric values on y refuse a category y axis.
-h.line(xs, values)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-h.area(xs, values)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-h.step(xs, values)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-h.stem(xs, values)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-h.y_error_bars(xs, values, values)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-h.hline(1.0)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-h.hspan(0.0, 1.0)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.line(xs, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.area(xs, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.step(xs, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.stem(xs, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.y_error_bars(xs, names, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.hline("North")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.hspan("North", "South")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 h.band(xs, values, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 h.stacked_area(xs, series)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 h.bubbles(xs, values, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-both.line(names, values)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+both.line(names, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 
 # Positive: scatter and vline take generic receivers along either axis. Two category axes are
