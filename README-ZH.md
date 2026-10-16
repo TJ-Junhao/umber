@@ -1,12 +1,12 @@
 # umber
 
-umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、阶梯图、散点图、面积图、堆叠面积图、柱状图、直方图、箱线图、小提琴图、气泡图、误差棒、区间带、杆状图和参考线，可以单独成图，也可以排成共享坐标轴的多面板网格；排版考究，内置三套主题，输出 PNG 或 SVG。
+umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、阶梯图、散点图、面积图、堆叠面积图、柱状图、直方图、箱线图、小提琴图、气泡图、误差棒、区间带、杆状图、参考线、热力图、网格色块图（mesh）、二维直方图和六边形分箱图（hexbin），支持数值轴、对数轴、类别轴和时间轴，可以单独成图，也可以排成共享坐标轴的多面板网格。它提供 colormap 和 colorbar，排版考究，内置三套主题，输出 PNG 或 SVG。
 
 [English](https://github.com/TJ-Junhao/umber/blob/main/README.md)
 
 ![Graphite 主题下两个站点的每日气温折线图](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
 
-- **大数据量也快。** 渲染在 Rust 中完成：100 万个点的折线渲染成 PNG 约 55 ms，10 万个点的散点图约 50 ms（见[性能](#性能)）。
+- **大数据量也快。** 渲染在 Rust 中完成：100 万个点的折线渲染成 PNG 约 58 ms，10 万个点的散点图约 50 ms（见[性能](#性能)）。
 - **显式。** 每个选项都是有类型的值（`Color`、`Size`、`Dash`、`TickFormat` 等）。没有格式字符串，没有位置式的样式参数，也没有隐式转换。
 - **尽早报错，并指出问题所在。** 非法输入在引发它的那次调用处就报错，附带说明、提示，并在 traceback 中高亮出错的参数。
 - **静态类型。** 类别轴和数值轴是不同的类型：在数值轴上调用 `bar`，pyright 和 mypy 在运行前就会报错。
@@ -18,7 +18,7 @@ umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制
 pip install umber
 ```
 
-需要 Python 3.12 或更新版本，以及 NumPy 2。我们为 Linux（x86_64 和 aarch64）、macOS（Apple silicon 和 Intel）和 Windows（x64）发布预编译 wheel。其他平台上 `pip` 会从源码构建，需要 Rust 1.88 或更新版本。
+需要 Python 3.12 或更新版本，以及 NumPy 2。我们为 Linux（x86_64 和 aarch64）、macOS（Apple silicon 和 Intel）和 Windows（x64）发布预编译 wheel；free-threaded 的 Python 3.14 以及 3.15 及更新版本另有专用 wheel。其他平台上 `pip` 会从源码构建，需要 Rust 1.88 或更新版本。
 
 ## 快速开始
 
@@ -72,12 +72,14 @@ fig.save_svg("temperature.svg")
 | 区间带 | `ax.band(x, low, high)` |
 | 杆状图 | `ax.stem(x, y)` |
 | 参考线和参考区间 | `ax.hline(y)`、`ax.vline(x)`、`ax.hspan(low, high)`、`ax.vspan(low, high)` |
+| 热力图 | `ax.heatmap(x_categories, y_categories, values, annotate=True)` |
+| 网格色块图 | `ax.mesh(x_edges, y_edges, values)` |
+| 二维直方图、六边形分箱图 | `ax.hist2d(x, y, bins=40)`、`ax.hexbin(x, y, gridsize=30)` |
+| 按值着色的散点 | `ax.scatter(x, y, color=ub.ColorBy(values))` |
 
-Bubble 的自动 limits 包含完整 marker 及 outline，log axis 和 shared axes 也遵循这一规则。显式 limits 仍会裁切。若某个自动 axis 上的 bubble 无法全部容纳（包含 outline 的 marker 沿该 axis 不小于 plot 长度、所需 limits 超出支持的数值范围，或 limits 无法收敛），该 axis 的 limits 只由数据位置决定（与 scatter 相同），超出部分由 plot 裁切；rendering 不会抛出异常。Scatter 的 limits 不变。
+柱状图、箱线图和小提琴图需要一条类别轴。在类别 x 轴（`fig.add_axes(x=ub.Scale.category())`）上它们是竖直的；在类别 y 轴（`fig.add_axes(y=ub.Scale.category())`）上它们是水平的，以数值对类别画散点即为点图（dot plot）。热力图要求两条轴都是类别轴。对数轴用 `ub.Scale.log()`，时间轴用 `ub.Scale.time()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
 
-Legend swatch 显示 mark 实际绘制的 fill，即与 plot background 合成后的颜色；per-panel 和 merged legend 采用相同规则。Gradient swatch 取 fill 最不透明的一端（area 为 series opacity 的 0.32，histogram 为 0.95），代表有色端而非透明的 baseline。Area 和 stacked area 的 swatch 是填充矩形，顶边以 line 的颜色、dash 和宽度描边；scatter、stem 和 bubble 的 swatch 显示 marker fill。Line、step、参考线、error bar、direct label 以及 box、violin 的 outline 保留 series color。
-
-柱状图、箱线图和小提琴图需要类别 x 轴：`fig.add_axes(x=ub.Scale.category())`。对数轴用 `ub.Scale.log()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
+自动 limits 包含完整的 bubble marker 及其 outline；显式 limits 会裁切它们。Legend swatch 显示 mark 实际绘制的 fill，即与 plot background 合成后的颜色。
 
 <p>
   <img alt="Pigment 主题下的分组柱状图" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/bars-pigment.png" width="49%">
@@ -108,6 +110,53 @@ variant.axes_at(row=0, col=1).title("Comparison")  # 原图不变
 用 `fig.axes_at(row=..., col=..., x=..., y=...)` 取回已有 axes，也可用于副本。scale kind 和 log base 必须与创建时一致；类别轴需传入 `x=ub.Scale.category()`，返回类型为 `Axes[str, float]`。跨多个 cell 的 panel 只能通过左上角位置取回。仅当某个维度大小为 1 时，才能省略该维度的 row 或 col。旧的 `Figure.axes` 已移除，由这个有精确类型的方法替代。
 
 `fig.cells()` 按 row-major 顺序返回不可变的 `Cell` 位置，包含已占用位置；`fig.cells(n)` 返回前 `n` 个。例如，`for cell, values in zip(fig.cells(), datasets): cell.add_axes().line(x, values)` 为每份数据添加一个 panel。`AUTO` 是有类型的 sentinel，不是 `None`，仅接受它的参数才能使用。
+
+## 颜色与 colorbar
+
+热力图、网格色块图、二维直方图和六边形分箱图按数值为每个格子着色；`color=ub.ColorBy(values)` 对散点图或气泡图的点做同样的事。同一个 axes 上所有按值着色的 mark 共用一个 color scale，plot 旁的 colorbar 说明这一映射。
+
+```python
+import numpy as np
+import umber as ub
+
+rng = np.random.default_rng(41)
+x = rng.normal(size=20_000)
+y = 0.6 * x + rng.normal(scale=0.7, size=x.size)
+
+ax = ub.Figure(theme=ub.Theme.MIDNIGHT).add_axes()
+ax.hexbin(x, y, gridsize=30, scale=ub.Scale.log()).colorbar("Count")
+ax.figure.save_png("density.png")
+```
+
+`cmap=` 选择 colormap：每套主题各有自己的顺序（sequential）和发散（diverging）colormap，另内置 `Cmap.VIRIDIS`、`Cmap.MAGMA`、`Cmap.CIVIDIS` 和 `Cmap.BLUE_RED`。`Cmap.from_colors([...])` 用你给的颜色构建 colormap，颜色之间在感知均匀的 Oklab 空间中混合；`.reversed()` 将其反转。`scale=ub.Scale.log()` 按对数映射数值，`center=0` 使映射变为以该值为中心对称的发散映射。颜色范围从最小到最大的有限值；`ax.clim(low, high)` 可指定范围，范围外的值取两端颜色。
+
+`ax.colorbar(label, position=..., format=...)` 设置 colorbar 的标签，用 `ColorbarPosition.BOTTOM` 移到 plot 下方，或用 `ColorbarPosition.NONE` 隐藏。在 grid 上，`Figure(share_color=ub.Share.ROW)` 让每行的 panel 共用一个颜色范围，并在该行右侧画一个 colorbar；`Share.COL` 在每列下方各画一个，`Share.ALL` 则为整个 grid 画一个。`fig.colorbar(...)` 设置这些共享的 colorbar。
+
+<p>
+  <img alt="Graphite 主题下带数值标注、使用发散 colormap 的相关系数热力图" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/heatmap-graphite.png" width="49%">
+  <img alt="Midnight 主题下按对数 color scale 着色的六边形点计数图" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/hexbin-midnight.png" width="49%">
+</p>
+
+## 时间轴
+
+`ub.Scale.time()` 创建时间轴。它接受 `datetime`、`date` 和 `numpy.datetime64` 值，任意单位的 NumPy `datetime64` 数组，以及不带时区的 pandas 和 polars datetime 列：
+
+```python
+import numpy as np
+import umber as ub
+
+hours = np.datetime64("2026-03-02T00", "h") + np.arange(7 * 24)
+demand = 60 + 20 * np.sin((np.arange(7 * 24) - 6) / 24 * 2 * np.pi)
+
+ax = ub.Figure(8, 4).add_axes(x=ub.Scale.time())
+ax.band(hours, demand - 6, demand + 6, label="Range").line(hours, demand, label="Demand")
+ax.vspan(np.datetime64("2026-03-05T01"), np.datetime64("2026-03-05T05"), label="Maintenance")
+ax.figure.save_png("demand.png")
+```
+
+刻度落在月、日、小时等日历步长上，标签简洁；`xtick_format(ub.TickFormat.iso())` 改用 ISO 8601 格式。时间轴上的 limits、ticks、参考线和参考区间都接受时间值。时间精确到微秒，`NaT` 会留出空隙；带时区的时间会被拒绝，请先转换为不带时区的时间，例如在 pandas 中使用 `.tz_convert(None)`。区间带和堆叠面积图只在 x 轴上接受时间。
+
+![Pigment 主题下一周的逐小时负荷，含波动范围和维护时段](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/time-pigment.png)
 
 ## 标题与 legend
 
@@ -170,7 +219,7 @@ hint: use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.
 
 ## 静态类型
 
-包内附带类型信息（`py.typed`），并在严格模式下通过 pyright 和 mypy 检查。`Figure().add_axes()` 的类型是 `Axes[float, float]`；`add_axes(x=Scale.category())` 是 `Axes[str, float]`。只适用于某一类轴的方法也有相应的类型约束：
+包内附带类型信息（`py.typed`），并在严格模式下通过 pyright 和 mypy 检查。`Figure().add_axes()` 的类型是 `Axes[float, float]`；`add_axes(x=Scale.category())` 是 `Axes[str, float]`，`add_axes(y=Scale.category())` 是 `Axes[float, str]`，两条类别轴是 `Axes[str, str]`，`add_axes(x=Scale.time())` 是 `Axes[Time, float]`。只适用于某一类轴的方法也有相应的类型约束：
 
 ```python
 import umber as ub
@@ -185,13 +234,17 @@ ax.bar(["a", "b"], [1, 2])  # pyright 和 mypy 报错：bar() 需要 Axes[str, f
 
 | 场景 | 耗时 |
 | --- | ---: |
-| 100 万点折线 → PNG | 53 ms |
-| 100 万点折线 → SVG | 21 ms |
-| 10 万点散点图 → PNG | 47 ms |
-| 100 万个值的直方图 → PNG | 20 ms |
-| 4 × 5 网格，每格一条 1 万个点的折线 → PNG | 97 ms |
+| 100 万点折线 → PNG | 58 ms |
+| 时间轴上的 100 万点折线 → PNG | 54 ms |
+| 100 万点折线 → SVG | 19 ms |
+| 10 万点散点图 → PNG | 50 ms |
+| 100 万个值的直方图 → PNG | 21 ms |
+| 100 万个点的二维直方图，100 × 100 个 bin → PNG | 12 ms |
+| 100 万个点的六边形分箱图，grid size 50 → PNG | 69 ms |
+| 1,000 × 1,000 个格子的热力图 → PNG | 1.26 s |
+| 4 × 5 网格，每格一条 1 万个点的折线 → PNG | 103 ms |
 
-对于 x 值有序的数值折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。
+对于 x 值有序的数值或时间折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。
 
 ## Rust
 

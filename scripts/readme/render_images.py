@@ -5,6 +5,7 @@ Run from the repository root after building the package:
     uv run --no-sync python scripts/readme/render_images.py
 """
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -65,6 +66,50 @@ def distribution() -> None:
     fig.save_png(OUT / "histogram-pigment.png", dpi=DPI)
 
 
+def correlations() -> None:
+    """An annotated correlation matrix, diverging around zero, in the Graphite theme."""
+    rng = np.random.default_rng(21)
+    metrics = ["Revenue", "Users", "Orders", "Churn", "Latency", "Margin"]
+    base = rng.normal(size=(2, 400))
+    mix = rng.normal(size=(len(metrics), 2))
+    noise = rng.normal(size=(len(metrics), 400))
+    matrix = np.corrcoef(mix @ base + 0.8 * noise)
+    fig = ub.Figure(6, 4, theme=ub.Theme.GRAPHITE)
+    ax = fig.add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+    ax.title("Metric correlations")
+    ax.heatmap(metrics, metrics, matrix, center=0, annotate=True, format=ub.TickFormat.fixed(2))
+    ax.colorbar("Pearson r")
+    fig.save_png(OUT / "heatmap-graphite.png", dpi=DPI)
+
+
+def density() -> None:
+    """Hexagonal counts of 20,000 correlated points on a log color scale, in the Midnight theme."""
+    rng = np.random.default_rng(41)
+    x = rng.normal(size=20_000)
+    y = 0.6 * x + rng.normal(scale=0.7, size=x.size)
+    fig = ub.Figure(6, 4, theme=ub.Theme.MIDNIGHT)
+    ax = fig.add_axes()
+    ax.title("Point density").subtitle("20,000 points").xlabel("x").ylabel("y")
+    ax.hexbin(x, y, gridsize=30, scale=ub.Scale.log())
+    ax.colorbar("Count")
+    fig.save_png(OUT / "hexbin-midnight.png", dpi=DPI)
+
+
+def demand() -> None:
+    """A week of hourly demand on a time axis, with its range and a marked window."""
+    hours = np.datetime64("2026-03-02T00", "h") + np.arange(7 * 24)
+    load = np.array(
+        [60 + 20 * math.sin((h - 6) / 24 * 2 * math.pi) + 4 * math.sin(h / 5) for h in range(168)]
+    )
+    fig = ub.Figure(8, 4, theme=ub.Theme.PIGMENT)
+    ax = fig.add_axes(x=ub.Scale.time())
+    ax.title("Hourly demand").subtitle("One week in March 2026").ylabel("MW")
+    ax.band(hours, load - 6, load + 6, label="Range")
+    ax.line(hours, load, label="Demand")
+    ax.vspan(np.datetime64("2026-03-05T01"), np.datetime64("2026-03-05T05"), label="Maintenance")
+    fig.save_png(OUT / "time-pigment.png", dpi=DPI)
+
+
 def main() -> None:
     """Render every README image."""
     OUT.mkdir(parents=True, exist_ok=True)
@@ -72,6 +117,9 @@ def main() -> None:
     sales()
     signals()
     distribution()
+    correlations()
+    density()
+    demand()
 
 
 if __name__ == "__main__":
