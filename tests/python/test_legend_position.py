@@ -62,7 +62,7 @@ def test_explicit_position_matches_native(
     ax = fig.add_axes().title("Panel")
     ax.hline(1, label="North")
     assert ax.legend(style, position=position) is ax
-    expected = _umber.Figure(6, 4, native(ub.Theme.PIGMENT), 1, 1, 0, 0, 0)
+    expected = _umber.Figure(6, 4, native(ub.Theme.PIGMENT), 1, 1, 0, 0, 0, 0)
     expected.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
     expected.title(0, 0, "Panel")
     expected.hline(0, 0, 1, "North", (0, 0, 1.0), ub.Dash.SOLID.value, (0, 0.0))

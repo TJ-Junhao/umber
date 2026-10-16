@@ -672,7 +672,9 @@ impl<'a> AxesMut<'a> {
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
         check_point_color(CONTEXT, axes, &options.color, series.x().len())?;
         check_scatter_label(CONTEXT, &options.color, &options.label)?;
-        axes.marks.push(Mark::scatter(series, options));
+        self.figure
+            .check_shared_point_color(self.index, &options.color, CONTEXT)?;
+        self.axes_mut().marks.push(Mark::scatter(series, options));
         Ok(self)
     }
 
@@ -758,7 +760,10 @@ impl<'a> AxesMut<'a> {
         let y_transform = check_numeric_y(CONTEXT, axes.y)?;
         super::validation::check_bubbles(CONTEXT, axes.x, y_transform, (&x, &y, &sizes))?;
         check_point_color(CONTEXT, axes, &options.color, x.len())?;
-        axes.marks
+        self.figure
+            .check_shared_point_color(self.index, &options.color, CONTEXT)?;
+        self.axes_mut()
+            .marks
             .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
                 SharedValues::Numbers(x),
                 SharedValues::Numbers(y),
@@ -813,7 +818,10 @@ impl<'a> AxesMut<'a> {
         let (x, y) =
             super::validation::check_time_bubbles(CONTEXT, (axes.x, axes.y), (x, y), &sizes)?;
         check_point_color(CONTEXT, axes, &options.color, x.len())?;
-        axes.marks
+        self.figure
+            .check_shared_point_color(self.index, &options.color, CONTEXT)?;
+        self.axes_mut()
+            .marks
             .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
                 x, y, sizes, options,
             )));
@@ -1932,7 +1940,7 @@ impl<'a> AxesMut<'a> {
         values: &[f64],
         options: MeshOptions,
     ) -> Result<&mut Self> {
-        let mark = MeshMark::new(self, x_edges, y_edges, values, options)?;
+        let mark = MeshMark::new(self.figure, self.index, x_edges, y_edges, values, options)?;
         self.axes_mut().marks.push(Mark::Mesh(mark));
         Ok(self)
     }
@@ -1972,7 +1980,8 @@ impl<'a> AxesMut<'a> {
         values: &[f64],
         options: MeshOptions,
     ) -> Result<&mut Self> {
-        let mark = MeshMark::new_time(self, &x_edges, &y_edges, values, options)?;
+        let mark =
+            MeshMark::new_time(self.figure, self.index, &x_edges, &y_edges, values, options)?;
         self.axes_mut().marks.push(Mark::Mesh(mark));
         Ok(self)
     }
@@ -1996,7 +2005,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn hist2d(&mut self, x: &[f64], y: &[f64], options: Hist2dOptions) -> Result<&mut Self> {
-        let mark = Hist2dMark::new(self, x, y, options)?;
+        let mark = Hist2dMark::new(self.figure, self.index, x, y, options)?;
         self.axes_mut().marks.push(Mark::Hist2d(mark));
         Ok(self)
     }
@@ -2024,7 +2033,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn hexbin(&mut self, x: &[f64], y: &[f64], options: HexbinOptions) -> Result<&mut Self> {
-        let mark = HexbinMark::new(self, x, y, options)?;
+        let mark = HexbinMark::new(self.figure, self.index, x, y, options)?;
         self.axes_mut().marks.push(Mark::Hexbin(mark));
         Ok(self)
     }
@@ -2059,10 +2068,7 @@ impl<'a> AxesMut<'a> {
     pub fn clim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.clim()";
         crate::color_scale::check_limits(CONTEXT, (low, high))?;
-        if let Some(spec) = self.marks().iter().find_map(Mark::color_scale) {
-            spec.check_range((low, high), CONTEXT, None)?;
-        }
-        self.axes_mut().color_limits = Some((low, high));
+        self.figure.set_color_limits(self.index, (low, high))?;
         Ok(self)
     }
 
@@ -2089,6 +2095,10 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn colorbar(&mut self, options: ColorbarOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.colorbar()";
+        if self.figure.grid().share_color() != crate::Share::None {
+            return Err(Error::usage(CONTEXT, "colors are shared across panels.")
+                .with_hint("set the shared colorbar with Figure.colorbar()."));
+        }
         if !self.marks().iter().any(|mark| mark.color_scale().is_some()) {
             return Err(Error::usage(CONTEXT, "this axes has no color-mapped mark.")
                 .with_hint("add a heatmap, mesh, hist2d, hexbin, or a scatter with color=ColorBy(...) first."));
@@ -2656,9 +2666,8 @@ impl<'a> AxesMut<'a> {
         options: HeatmapOptions,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.heatmap()";
-        let axes = self.axes_mut();
-        let mark = HeatmapMark::new(CONTEXT, axes, (x, y), values, options)?;
-        axes.marks.push(Mark::Heatmap(mark));
+        let mark = HeatmapMark::new(CONTEXT, self.figure, self.index, (x, y), values, options)?;
+        self.axes_mut().marks.push(Mark::Heatmap(mark));
         Ok(self)
     }
 }

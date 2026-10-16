@@ -121,6 +121,18 @@ pub(super) enum Setting {
     Format,
 }
 
+/// Records an explicit setter unless it changes a value set by another member. Inheriting a
+/// value does not record a setter; an error returns the first conflicting cell without mutation.
+fn record_setter(by: &mut Vec<Cell>, cell: Cell, same: bool) -> std::result::Result<(), Cell> {
+    if !same && let Some(other) = by.iter().find(|other| **other != cell) {
+        return Err(*other);
+    }
+    if !by.contains(&cell) {
+        by.push(cell);
+    }
+    Ok(())
+}
+
 /// One group stored by the figure, with a single allocation for its values and the cells of
 /// members that explicitly set each value. Inheriting a value does not count as setting it.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -176,7 +188,7 @@ impl Group {
                 "format",
             ),
         };
-        if !same && let Some(other) = by.iter().find(|other| **other != cell) {
+        if let Err(other) = record_setter(by, cell, same) {
             let verb = if matches!(setting, Setting::Format) {
                 "is"
             } else {
@@ -194,10 +206,38 @@ impl Group {
             .with_parameter(parameter)
             .with_hint("set it once for the group, or share fewer axes."));
         }
-        if !by.contains(&cell) {
-            by.push(cell);
-        }
         self.settings = Arc::new(proposed);
+        Ok(())
+    }
+}
+
+/// A color group's limits and the members that explicitly set them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct ColorGroup {
+    /// Validated color limits, also inherited by panels added later.
+    pub limits: Option<(f64, f64)>,
+    /// Inheritance does not count as explicitly setting limits.
+    by: Vec<Cell>,
+}
+
+impl ColorGroup {
+    /// Records limits only after checking the other setters in the group.
+    pub fn set(&mut self, cell: Cell, limits: (f64, f64)) -> Result<()> {
+        if let Err(other) = record_setter(&mut self.by, cell, self.limits == Some(limits)) {
+            let previous = self.limits.map_or_else(String::new, |(low, high)| {
+                format!("({}, {})", number(low), number(high))
+            });
+            return Err(Error::usage(
+                "Axes.clim()",
+                format!(
+                    "color limits are shared with row {}, col {}, which set {previous}.",
+                    other.row, other.col
+                ),
+            )
+            .with_parameter("low")
+            .with_hint("set it once for the group, or share colors across fewer panels."));
+        }
+        self.limits = Some(limits);
         Ok(())
     }
 }
@@ -233,8 +273,8 @@ pub(super) fn check_add(
             .with_hint("axes that share an axis need the same scale."));
         }
     }
-    for axis in [SharedAxis::X, SharedAxis::Y] {
-        let crossed = match axis.mode(grid) {
+    for (mode, name) in [(grid.share_x(), "x"), (grid.share_y(), "y")] {
+        let crossed = match mode {
             Share::Row if cells.row_span() > 1 => {
                 Some(("rows", "row_span", cells.row(), cells.row_span()))
             }
@@ -249,7 +289,7 @@ pub(super) fn check_add(
                 format!(
                     "the axes spans {dimension} {start} to {}, which share {} in different groups.",
                     start + span - 1,
-                    axis.name(),
+                    name,
                 ),
             )
             .with_parameter(parameter)
@@ -259,17 +299,36 @@ pub(super) fn check_add(
     Ok(())
 }
 
-/// Panel index to group representative, independently for x and y. A representative is the
-/// first panel in row-major order, not insertion order.
+/// Panel index to group representative for each dimension. A representative is the first
+/// participating panel in row-major order, not insertion order.
 #[derive(Debug, Clone)]
 pub(crate) struct ShareGroups {
     /// The representative of each panel's x group.
     pub x: Vec<usize>,
     /// The representative of each panel's y group.
     pub y: Vec<usize>,
+    /// The first color-mapped member of each color group; unmapped panels do not join.
+    pub color: Vec<Option<usize>>,
 }
 
 impl ShareGroups {
+    /// The first color-mapped member of each color group; panels without a mapping do not join.
+    fn colors(figure: &Figure) -> Vec<Option<usize>> {
+        let mut first = BTreeMap::new();
+        figure
+            .panels()
+            .enumerate()
+            .map(|(i, axes)| {
+                if !axes.marks().iter().any(|mark| mark.color_scale().is_some()) {
+                    return None;
+                }
+                let c = axes.cells();
+                let key = figure.color_group_of(c.row(), c.col());
+                Some(*first.entry(key).or_insert(i))
+            })
+            .collect()
+    }
+
     /// Builds the maps for the figure's placed axes.
     pub fn new(figure: &Figure) -> Self {
         let representatives = |axis: SharedAxis| {
@@ -290,7 +349,65 @@ impl ShareGroups {
         Self {
             x: representatives(SharedAxis::X),
             y: representatives(SharedAxis::Y),
+            color: Self::colors(figure),
         }
+    }
+
+    /// The cells spanned by each shared bar, stored only at its group's representative.
+    /// Unmapped panels still extend the occupied row or column past which its bar sits.
+    pub fn colorbar_cells(&self, figure: &Figure) -> Vec<Option<CellRange>> {
+        match figure.grid().share_color() {
+            Share::None => vec![None; self.color.len()],
+            Share::Row => self.color_extents(figure, SharedAxis::Y),
+            Share::Col => self.color_extents(figure, SharedAxis::X),
+            Share::All => self
+                .color
+                .iter()
+                .enumerate()
+                .map(|(i, first)| {
+                    (*first == Some(i))
+                        .then(|| CellRange::new(0, 0, figure.grid().rows(), figure.grid().cols()))
+                })
+                .collect(),
+        }
+    }
+
+    /// Row/column groups include every occupied panel overlapping that row/column, even a
+    /// non-member that spans several groups. The other dimension ends at the last such panel.
+    fn color_extents(&self, figure: &Figure, axis: SharedAxis) -> Vec<Option<CellRange>> {
+        let dimensions = |cells: CellRange| match axis {
+            SharedAxis::X => (
+                cells.col(),
+                cells.col_span(),
+                cells.row() + cells.row_span(),
+            ),
+            SharedAxis::Y => (
+                cells.row(),
+                cells.row_span(),
+                cells.col() + cells.col_span(),
+            ),
+        };
+        figure
+            .panels()
+            .enumerate()
+            .map(|(i, axes)| {
+                if self.color[i] != Some(i) {
+                    return None;
+                }
+                let (start, span, own_end) = dimensions(axes.cells());
+                let end = figure
+                    .panels()
+                    .map(|other| dimensions(other.cells()))
+                    .filter(|(other, size, _)| *other < start + span && start < other + size)
+                    .map(|(_, _, end)| end)
+                    .max()
+                    .unwrap_or(own_end);
+                Some(match axis {
+                    SharedAxis::X => CellRange::new(0, start, end, span),
+                    SharedAxis::Y => CellRange::new(start, 0, span, end),
+                })
+            })
+            .collect()
     }
 }
 

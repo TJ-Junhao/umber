@@ -25,11 +25,33 @@ pub(crate) enum ColorbarSide {
 impl ColorbarSide {
     /// Resolves the axes override and theme default; hidden bars have no side.
     pub(crate) fn resolve(axes: &Axes, theme: &Theme) -> Option<Self> {
-        match axes
-            .colorbar_options()
-            .position
-            .unwrap_or(theme.colorbar_position())
-        {
+        Self::of(
+            axes.colorbar_options()
+                .position
+                .unwrap_or(theme.colorbar_position()),
+        )
+    }
+
+    /// A shared bar's side. The resolved default can hide any mode; visible row and column
+    /// bars keep their required side, while all-panel bars follow the theme/figure choice.
+    pub(crate) fn shared(figure: &crate::Figure) -> Option<Self> {
+        let side = Self::of(
+            figure
+                .colorbar_options()
+                .position
+                .unwrap_or(figure.theme().colorbar_position()),
+        )?;
+        match figure.grid().share_color() {
+            crate::Share::None => None,
+            crate::Share::Row => Some(Self::Right),
+            crate::Share::Col => Some(Self::Bottom),
+            crate::Share::All => Some(side),
+        }
+    }
+
+    /// A visible position as a side.
+    fn of(position: ColorbarPosition) -> Option<Self> {
+        match position {
             ColorbarPosition::Right => Some(Self::Right),
             ColorbarPosition::Bottom => Some(Self::Bottom),
             ColorbarPosition::None => None,
@@ -66,6 +88,17 @@ pub(crate) struct MeasuredColorbar {
     label_descent: f64,
 }
 
+/// A shared group's measured bar and the grid cells it spans.
+#[derive(Debug, Clone)]
+pub(crate) struct SharedColorbar {
+    /// The first color-mapped panel in row-major order, providing the color scale.
+    pub source: usize,
+    /// The row, column or whole grid whose plot edges the bar spans.
+    pub cells: crate::CellRange,
+    /// The measured block.
+    pub measured: MeasuredColorbar,
+}
+
 /// A colorbar placed on the canvas; its ticks retain normalized positions for drawing.
 #[derive(Debug, Clone)]
 pub(crate) struct PlacedColorbar {
@@ -90,6 +123,17 @@ impl MeasuredColorbar {
         let color = color?;
         let options = axes.colorbar_options();
         let position = ColorbarSide::resolve(axes, theme)?;
+        Some(Self::with_options(options, color, position, theme, lib))
+    }
+
+    /// Measures the same block for either panel or figure settings.
+    pub(crate) fn with_options(
+        options: &crate::ColorbarOptions,
+        color: &ResolvedColorScale,
+        position: ColorbarSide,
+        theme: &Theme,
+        lib: &FontLibrary,
+    ) -> Self {
         let styles = Styles::new(theme);
         let ticks = measure_ticks(lib, &color.ticks, styles.tick);
         let label = (!options.label.is_empty()).then(|| measure(lib, &options.label, styles.body));
@@ -107,7 +151,7 @@ impl MeasuredColorbar {
         } else {
             0.0
         };
-        Some(Self {
+        Self {
             position,
             ticks,
             label,
@@ -120,7 +164,16 @@ impl MeasuredColorbar {
             thickness: f64::from(theme.colorbar_thickness()),
             gap: f64::from(theme.colorbar_gap()),
             tick_length: f64::from(theme.colorbar_tick_length()),
-        })
+        }
+    }
+
+    /// Width of a bottom bar's left-aligned label; zero for a right bar.
+    pub(super) fn bottom_label_width(&self) -> f64 {
+        if self.position == ColorbarSide::Bottom {
+            self.label.as_ref().map_or(0.0, Label::width)
+        } else {
+            0.0
+        }
     }
 
     /// The horizontal room including its gap; zero for a bottom bar.

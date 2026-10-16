@@ -1704,3 +1704,120 @@ fn the_padded_ends_of_other_marks_keep_their_whole_microseconds() {
     let (low, high) = time_domain(&f, false);
     assert!(low < before && high > one_second, "{low:?} {high:?}");
 }
+
+/// A mesh of one cell with the colormap `cmap`, between times on a time axis or numbers.
+fn shared_mesh(
+    f: &mut Figure,
+    at: (i64, i64),
+    kinds: (ScaleKind, ScaleKind),
+    cmap: crate::Cmap,
+    span: i64,
+) -> crate::Result<()> {
+    let place = Placement {
+        row: GridIndex::At(at.0),
+        col: GridIndex::At(at.1),
+        row_span: span,
+        ..Placement::default()
+    };
+    let mut ax = f.add_axes_at(place, kinds.0, kinds.1)?;
+    let edges = |kind: ScaleKind| {
+        if kind == TIME {
+            times(&[date(2026, 1, 1), date(2026, 1, 2)])
+        } else {
+            AxisData::Numbers(vec![0.0, 1.0])
+        }
+    };
+    ax.mesh_time(
+        edges(kinds.0),
+        edges(kinds.1),
+        &[1.0],
+        MeshOptions {
+            cmap: crate::CmapChoice::Fixed(cmap),
+            ..MeshOptions::default()
+        },
+    )
+    .map(drop)
+}
+
+#[test]
+fn time_meshes_share_one_color_scale_across_panels() {
+    for (first, second) in [
+        ((TIME, LIN), (LIN, LIN)),
+        ((LIN, LIN), (TIME, LIN)),
+        ((TIME, LIN), (LIN, TIME)),
+    ] {
+        let grid = Grid::new(1, 2).unwrap().with_share_color(Share::All);
+        let mut f = Figure::with_grid(8.0, 3.0, Theme::pigment(), grid).unwrap();
+        shared_mesh(&mut f, (0, 0), first, crate::Cmap::viridis(), 1).unwrap();
+        let marks = |f: &Figure| f.panels().map(|a| a.marks().len()).collect::<Vec<_>>();
+        let err = shared_mesh(&mut f, (0, 1), second, crate::Cmap::magma(), 1).unwrap_err();
+        assert!(matches!(err, Error::Usage { .. }), "{err}");
+        assert_eq!(err.parameter(), Some("cmap"));
+        assert_eq!(marks(&f), [1, 0], "a refused mesh stored a mark");
+        // The same colormap is accepted.
+        let mut g = Figure::with_grid(
+            8.0,
+            3.0,
+            Theme::pigment(),
+            Grid::new(1, 2).unwrap().with_share_color(Share::All),
+        )
+        .unwrap();
+        shared_mesh(&mut g, (0, 0), first, crate::Cmap::viridis(), 1).unwrap();
+        shared_mesh(&mut g, (0, 1), second, crate::Cmap::viridis(), 1).unwrap();
+        assert_eq!(marks(&g), [1, 1]);
+    }
+}
+
+#[test]
+fn a_time_mesh_spanning_rows_that_share_colors_by_row_is_refused() {
+    for kinds in [(TIME, LIN), (LIN, TIME), (TIME, TIME)] {
+        let grid = Grid::new(2, 1).unwrap().with_share_color(Share::Row);
+        let mut f = Figure::with_grid(4.0, 5.0, Theme::pigment(), grid).unwrap();
+        let err = shared_mesh(&mut f, (0, 0), kinds, crate::Cmap::viridis(), 2).unwrap_err();
+        assert!(matches!(err, Error::Usage { .. }), "{err}");
+        assert_eq!(err.parameter(), Some("cmap"));
+        assert!(err.to_string().contains("spans rows"), "{err}");
+        assert_eq!(
+            f.panels().count(),
+            1,
+            "the axes stay; only the mark is refused"
+        );
+        assert!(f.panels().all(|a| a.marks().is_empty()));
+    }
+}
+
+#[test]
+fn a_time_bubble_color_mapping_is_checked_across_a_shared_group() {
+    let grid = Grid::new(1, 2).unwrap().with_share_color(Share::All);
+    let mut f = Figure::with_grid(8.0, 3.0, Theme::pigment(), grid).unwrap();
+    shared_mesh(&mut f, (0, 0), (TIME, LIN), crate::Cmap::viridis(), 1).unwrap();
+    let before = f.clone();
+    let mut ax = f
+        .add_axes_at(
+            Placement {
+                col: GridIndex::At(1),
+                ..Placement::default()
+            },
+            TIME,
+            LIN,
+        )
+        .unwrap();
+    let err = ax
+        .bubbles_time(
+            times(&[date(2026, 1, 1)]),
+            AxisData::Numbers(vec![1.0]),
+            [1.0].into(),
+            BubbleOptions {
+                color: crate::PointColor::By(crate::ColorBy {
+                    cmap: crate::CmapChoice::Fixed(crate::Cmap::magma()),
+                    ..crate::ColorBy::new(vec![0.5])
+                }),
+                ..BubbleOptions::default()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(err.parameter(), Some("color"));
+    assert!(ax.marks().is_empty());
+    assert_eq!(f.panels().map(|a| a.marks().len()).sum::<usize>(), 1);
+    let _ = before;
+}
