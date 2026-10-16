@@ -1295,10 +1295,12 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
-    /// Adds a vertical reference line across the whole plot at `x`: a number on a linear or log
+    /// Adds a vertical reference line across the plot at `x`: a number on a linear or log
     /// x axis, where it extends the automatic x domain, and a category name on a category x
-    /// axis, where it sits at the centre of the category's band. It is drawn above all data
-    /// marks; explicit x limits clip it like any mark.
+    /// axis, where it sits at the centre of the category's band. It runs from the top of the
+    /// plot to the baseline: the bottom of the plot, or, when the baseline sits at the y axis's
+    /// lower limit, that limit before padding. It is drawn above all data marks; explicit x limits
+    /// clip it like any mark.
     ///
     /// A category name does not extend a category axis. Whether the name is one of the axis's
     /// categories, the names of its other marks, is known only when the figure is rendered:
@@ -1366,7 +1368,8 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Adds a vertical reference span: the region between the x values `low` and `high`, across
-    /// the whole plot, filled at the area opacity. It is drawn below all data marks, and both
+    /// the plot from the top to the baseline (see [`AxesMut::vline`]), filled at the area
+    /// opacity. It is drawn below all data marks, and both
     /// values extend the automatic x domain; explicit x limits clip it. A span needs a numeric
     /// x axis: on a category x axis use [`AxesMut::vline`].
     ///

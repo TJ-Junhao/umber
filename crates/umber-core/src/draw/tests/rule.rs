@@ -6,6 +6,7 @@ use super::{mark_group, nums, plot_of, subpaths};
 use crate::geometry::PathVerb;
 use crate::layout::Area;
 use crate::model::{AxisValue, Figure, LineOptions, RuleOptions, SpanOptions};
+use crate::model::{Grid, GridIndex, Placement, Share};
 use crate::scene::{FillRule, Item, LineCap, Paint, Scene};
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{Dash, FontLibrary, LogBase, ScaleKind, Theme};
@@ -363,4 +364,176 @@ fn references_alone_draw_no_data_marks_and_nothing_visible_draws_no_group() {
         .vspan(20.0, 30.0, SpanOptions::default())
         .unwrap();
     assert!(items(&f).is_empty());
+}
+
+/// A line chart over the y values 33 to 68 with every reference mark of the kind: auto y limits,
+/// so the baseline sits at the lower limit before padding, above the plot bottom.
+fn lower_limit_figure(ylim: Option<(f64, f64)>) -> Figure {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.line(
+        nums(&[0.0, 30.0, 60.0]),
+        &[33.0, 50.0, 68.0],
+        LineOptions::default(),
+    )
+    .unwrap()
+    .vline(AxisValue::Number(31.0), RuleOptions::default())
+    .unwrap()
+    .vspan(40.0, 50.0, SpanOptions::default())
+    .unwrap();
+    if let Some((low, high)) = ylim {
+        axes.ylim(low, high).unwrap();
+    }
+    f
+}
+
+fn baseline_y_of(figure: &Figure) -> (Area, f64) {
+    let layout = crate::pipeline::plan_figure(figure, (0, 0), FontLibrary::global()).1;
+    (layout.plot, layout.baseline_y)
+}
+
+#[test]
+fn vertical_references_end_at_a_lower_limit_baseline() {
+    let f = lower_limit_figure(None);
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    let items = items(&f);
+    let (_, top, _, bottom) = rect(&items[0]);
+    assert_near(top, plot.y);
+    assert_near(bottom, baseline);
+    let ((_, y0), (_, y1)) = ends(items.last().unwrap());
+    assert_near(y0, plot.y);
+    assert_near(y1, baseline);
+}
+
+#[test]
+fn vertical_references_keep_the_full_height_when_zero_is_in_the_domain() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            nums(&[0.0, 30.0, 60.0]),
+            &[-10.0, 20.0, 68.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .vline(AxisValue::Number(31.0), RuleOptions::default())
+        .unwrap()
+        .vspan(40.0, 50.0, SpanOptions::default())
+        .unwrap();
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(
+        baseline < plot.bottom() - 1.0,
+        "zero is mid-plot: {baseline}"
+    );
+    let items = items(&f);
+    assert_near(rect(&items[0]).3, plot.bottom());
+    assert_near(ends(items.last().unwrap()).1.1, plot.bottom());
+}
+
+#[test]
+fn vertical_references_fill_an_explicit_ylim_and_end_at_a_log_lower_limit() {
+    // Explicit limits have no padding: the baseline is the plot bottom.
+    let f = lower_limit_figure(Some((20.0, 80.0)));
+    let (plot, baseline) = baseline_y_of(&f);
+    assert_near(baseline, plot.bottom());
+    let drawn = items(&f);
+    assert_near(rect(&drawn[0]).3, plot.bottom());
+    assert_near(ends(drawn.last().unwrap()).1.1, plot.bottom());
+
+    // A log y axis never holds 0, so its baseline is the lower limit before padding.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Log { base: LogBase::TEN })
+        .unwrap()
+        .line(
+            nums(&[0.0, 30.0, 60.0]),
+            &[33.0, 50.0, 680.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .vline(AxisValue::Number(31.0), RuleOptions::default())
+        .unwrap()
+        .vspan(40.0, 50.0, SpanOptions::default())
+        .unwrap();
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    let drawn = items(&f);
+    assert_near(rect(&drawn[0]).3, baseline);
+    assert_near(ends(drawn.last().unwrap()).1.1, baseline);
+}
+
+#[test]
+fn horizontal_references_never_reach_below_a_lower_limit_baseline() {
+    // Their values extend the automatic y domain, so the lower limit lies at or below them.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            nums(&[0.0, 30.0, 60.0]),
+            &[33.0, 50.0, 68.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .hspan(20.0, 40.0, SpanOptions::default())
+        .unwrap()
+        .hline(25.0, RuleOptions::default())
+        .unwrap();
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    let drawn = items(&f);
+    // The span's bottom is the value 20, the lowest value of the chart; the lower limit is a
+    // nice number at or below it.
+    let bottom = rect(&drawn[0]).3;
+    assert!(bottom <= baseline + 1e-3, "{bottom} vs {baseline}");
+    let ((_, y0), (_, y1)) = ends(drawn.last().unwrap());
+    assert!(y0 < baseline && y1 < baseline, "{y0} {y1} vs {baseline}");
+}
+
+#[test]
+fn a_shared_y_grid_ends_every_panel_at_the_common_baseline() {
+    let grid = Grid::new(1, 2).unwrap().with_share_y(Share::All);
+    let mut f = Figure::with_grid(8.0, 4.0, Theme::pigment(), grid).unwrap();
+    // The panels' own data would give them different baselines; shared, both use the one
+    // domain of the pair.
+    for (col, top) in [(0, 68.0), (1, 40.0)] {
+        let at = Placement {
+            row: GridIndex::At(0),
+            col: GridIndex::At(col),
+            ..Placement::default()
+        };
+        f.add_axes_at(at, ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                nums(&[0.0, 30.0, 60.0]),
+                &[33.0, 50.0, top],
+                LineOptions::default(),
+            )
+            .unwrap()
+            .vline(AxisValue::Number(31.0), RuleOptions::default())
+            .unwrap()
+            .vspan(40.0, 50.0, SpanOptions::default())
+            .unwrap();
+    }
+    let scene = scene_of(&f);
+    let groups: Vec<&[Item]> = scene
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Group {
+                clip: Some(_),
+                items,
+            } => Some(items.as_slice()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 2);
+    for (col, items) in groups.into_iter().enumerate() {
+        let (plot, baseline) = {
+            let layout = crate::pipeline::plan_figure(&f, (0, col), FontLibrary::global()).1;
+            (layout.plot, layout.baseline_y)
+        };
+        assert!(baseline < plot.bottom() - 1.0, "{col}: {baseline} {plot:?}");
+        assert_near(rect(&items[0]).3, baseline);
+        assert_near(ends(items.last().unwrap()).1.1, baseline);
+    }
 }

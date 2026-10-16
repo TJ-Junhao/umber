@@ -1192,7 +1192,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
     ) -> Self:
-        """Add a vertical reference line across the whole plot at ``x``.
+        """Add a vertical reference line at ``x``, from the top of the plot to the baseline.
 
         On a linear or log x axis ``x`` is a number, and without explicit x limits the x axis
         extends to include it. On a category x axis ``x`` is a category name, and the line is
@@ -1298,10 +1298,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> "Axes[float, Y]":
         """Add a vertical reference span between the x values ``low`` and ``high``.
 
-        The span fills the region between the two values across the whole plot, at the opacity
-        of an area, and is drawn below the data marks. Without explicit x limits the x axis
-        extends to include both values; with limits, the span is clipped to them. It needs a
-        linear or log x axis: on a category axis use ``vline()``.
+        The span fills the region between the two values from the top of the plot to the baseline,
+        at the opacity of an area, and is drawn below the data marks. Without explicit x limits
+        the x axis extends to include both values; with limits, the span is clipped to them. It
+        needs a linear or log x axis: on a category axis use ``vline()``.
 
         Args:
             low: The lower x value; finite, and positive on a log x axis.
