@@ -834,7 +834,7 @@ fn rows_too_short(
         .map(|(cell, band)| band.without_colorbar(input.span(*cell).reserve_cap))
         .collect();
     let plain_rows = Rows::measure(input, cells, &plain, spans);
-    if let Err(error) = plain_rows.clone().place(input) {
+    if plain_rows.clone().place(input).is_err() {
         return error;
     }
     let rows = Rows::measure(input, cells, bands, spans);
@@ -956,16 +956,9 @@ fn columns_too_narrow(
             );
         }
     }
-    let (bands, columns) = if plain_columns.place(&plain_columns.no_growth()).plot_width < MIN_PLOT
-    {
-        (plain.as_slice(), &plain_columns)
-    } else {
-        (bands, columns)
-    };
-    let deficit = (MIN_PLOT - columns.place(&columns.no_growth()).plot_width) * cols as f64;
     for ((cell, band), panel) in cells.iter().zip(bands).zip(input.panels) {
         let last = cell.col() + cell.col_span() - 1;
-        if band.right_legend > 0.0 && band.right_legend == columns.right[last] {
+        if band.right_legend > 0.0 && band.right() == columns.right[last] {
             let available = band.right_legend - deficit;
             if let Err(err) = super::placement::check_right_width(
                 input.context,
@@ -997,7 +990,7 @@ fn columns_too_narrow(
     grid_too_narrow(
         input.context,
         input.width,
-        needed_width(input, cells, columns),
+        needed_width(input, cells, bands, columns),
         cols,
     )
 }
@@ -1007,30 +1000,38 @@ fn columns_too_narrow(
 /// [`MIN_PLOT`] wide before x tick labels are fitted.
 ///
 /// The plots' width is `(W - 2 × PADDING - ΣL - ΣR(W) - gap × (cols - 1)) / cols`, where
-/// `ΣR(W)`, the room direct labels reserve, depends on the width `W`: each panel's labels
-/// reserve their own width but at most a share of the panel's cells, which are 0 wide up to
+/// `ΣR(W)` includes colorbars and right legends as well as direct labels. Direct labels beside
+/// a colorbar are uncapped; other direct labels reserve at most a share of the panel's cells,
+/// which are 0 wide up to
 /// `2 × PADDING + gap × (cols - 1)`. Between that width and the widths where one panel's cap
 /// reaches another's labels in the same column (where `ΣR` changes slope), the plot width is
 /// linear in `W`, so the narrowest width is found segment by segment from the figure's width,
 /// and then checked both ways: the check accepts the result and refuses one point less.
-fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -> f64 {
+fn needed_width(
+    input: &GridInput<'_>,
+    cells: &[CellRange],
+    bands: &[PanelBands],
+    columns: &Columns,
+) -> f64 {
     let cols = columns.count();
     let gap = columns.gap;
+    // Direct labels beside a colorbar are uncapped; the whole right band stays fixed.
+    let reserve = |panel: &LayoutInput<'_>, band: &PanelBands, cap: f64| {
+        if band.right_colorbar > 0.0 {
+            band.right()
+        } else {
+            panel.legend.direct.reserve(cap).max(band.right_legend)
+        }
+    };
     // The columns of a canvas `width` pt wide: the same y tick label columns, and the direct
     // label reserves capped for that width.
     let at = |width: f64| -> Columns {
         let wider = GridInput { width, ..*input };
         let mut right = vec![0.0_f64; cols];
-        for (cells, panel) in cells.iter().zip(input.panels) {
+        for ((cells, panel), band) in cells.iter().zip(input.panels).zip(bands) {
             let last = cells.col() + cells.col_span() - 1;
             let cap = wider.span(*cells).reserve_cap;
-            right[last] = right[last].max(
-                panel
-                    .legend
-                    .direct
-                    .reserve(cap)
-                    .max(panel.legend.right_reserve()),
-            );
+            right[last] = right[last].max(reserve(panel, band, cap));
         }
         Columns {
             canvas: width,
@@ -1045,17 +1046,10 @@ fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -
     let wants: Vec<(usize, usize, f64)> = cells
         .iter()
         .zip(input.panels)
-        .map(|(cells, panel)| {
+        .zip(bands)
+        .map(|((cells, panel), band)| {
             let last = cells.col() + cells.col_span() - 1;
-            (
-                last,
-                cells.col_span(),
-                panel
-                    .legend
-                    .direct
-                    .reserve(f64::INFINITY)
-                    .max(panel.legend.right_reserve()),
-            )
+            (last, cells.col_span(), reserve(panel, band, f64::INFINITY))
         })
         .collect();
     // The width below which the cells, and so the caps, stop shrinking: they are 0 wide.
@@ -2877,7 +2871,7 @@ mod tests {
                 if columns.place(&columns.no_growth()).plot_width >= MIN_PLOT {
                     return;
                 }
-                let need = needed_width(grid, &cells, &columns);
+                let need = needed_width(grid, &cells, &bands, &columns);
                 let width_at = |width: f64| {
                     let wider = GridInput { width, ..*grid };
                     let fresh: Vec<PanelBands> = grid

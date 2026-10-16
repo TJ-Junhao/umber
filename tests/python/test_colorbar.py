@@ -187,18 +187,137 @@ def test_colorbar_preserves_unrelated_room_errors(case: str, position: ub.Colorb
         render(False)
     with pytest.raises(ub.StyleError) as mapped:
         render(True)
-    assert str(mapped.value) == str(plain.value)
-    assert details(mapped.value) == details(plain.value)
+    expected = str(plain.value)
+    hint = details(plain.value)
     if case == "single_height":
-        assert str(mapped.value) == (
+        assert expected == (
             "Figure.to_svg(): the figure is 64 pt tall; "
             "at least 135 pt is needed for the plot area."
         )
+        if position == ub.ColorbarPosition.BOTTOM:
+            expected = expected.replace("135 pt", "172 pt")
     elif case == "grid_height":
-        assert str(mapped.value) == (
+        assert expected == (
             "Figure.to_svg(): the figure is 115 pt tall; "
             "at least 182 pt is needed for 2 rows of plots."
         )
+        if position == ub.ColorbarPosition.BOTTOM:
+            expected = expected.replace("182 pt", "219 pt")
+    elif position == ub.ColorbarPosition.RIGHT:
+        if case == "grid_legend":
+            assert expected == (
+                "Figure.to_svg(): the figure is 144 pt wide; "
+                "at least 290 pt is needed for 2 columns of plots."
+            )
+            expected = expected.replace("290 pt", "326 pt")
+        else:
+            assert expected == (
+                'Figure.to_svg(): the legend label "A long legend label" is 72 pt wide; '
+                "the panel has 14 pt."
+            )
+            expected = (
+                "Figure.to_svg(): the figure is 86 pt wide; "
+                "at least 181 pt is needed for the plot area."
+            )
+            hint = (None, "widen the figure.")
+    assert str(mapped.value) == expected
+    assert details(mapped.value) == hint
+
+
+@pytest.mark.parametrize(
+    ("case", "side", "minimum", "area"),
+    [
+        ("single_height", 0.9, 190, "the plot area"),
+        ("single_legend", 2.0, 254, "the plot area"),
+        ("single_narrow_legend", 1.2, 181, "the plot area"),
+        ("grid_height", 1.6, 219, "2 rows of plots"),
+        ("grid_width", 1.5, 193, "3 columns of plots"),
+        ("grid_legend", 2.0, 326, "2 columns of plots"),
+    ],
+)
+def test_colorbar_room_error_minimum_renders(
+    case: str, side: float, minimum: int, area: str
+) -> None:
+    def render(size: float) -> str:
+        if case == "single_height":
+            fig = ub.Figure(6, size).title("A title").subtitle("A subtitle")
+            ax = fig.add_axes().title("Panel").xlabel("Distance")
+            ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+            ax.colorbar("Intensity", position=ub.ColorbarPosition.BOTTOM)
+        elif case in ("single_legend", "single_narrow_legend"):
+            fig = ub.Figure(size, 3)
+            ax = fig.add_axes().ylabel("Height")
+            ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+            ax.colorbar("A fairly long colorbar label" if case == "single_legend" else "")
+            ax.line([1, 2], [1, 2], label="A long legend label").legend(
+                ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
+            )
+        elif case == "grid_height":
+            fig = ub.Figure(6, size, rows=2, cols=2).title("A title")
+            for i in range(4):
+                ax = fig.add_axes(row=i // 2, col=i % 2).title("Panel")
+                if i == 0:
+                    ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+                    ax.colorbar(position=ub.ColorbarPosition.BOTTOM)
+                else:
+                    ax.scatter([1, 2], [1, 2])
+        elif case == "grid_legend":
+            fig = ub.Figure(size, 3, rows=1, cols=2, legend=ub.Legend.PER_PANEL)
+            for i in range(2):
+                ax = fig.add_axes(row=0, col=i)
+                if i == 0:
+                    ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+                else:
+                    ax.scatter([1, 2, 3, 4], [1, 2, 3, 4])
+                ax.line([1, 2], [1, 2], label="A long legend label").legend(
+                    ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
+                )
+        else:
+            fig = ub.Figure(size, 4, rows=1, cols=3)
+            for i in range(3):
+                ax = fig.add_axes(row=0, col=i)
+                if i == 1:
+                    ax.scatter([1, 2], [1, 2], color=ub.ColorBy([-200000, 800000]))
+                    ax.colorbar("Intensity")
+                else:
+                    ax.scatter([1, 2], [1, 2])
+        return fig.to_svg()
+
+    with pytest.raises(ub.StyleError) as caught:
+        render(side)
+    direction = "tall" if "height" in case else "wide"
+    assert str(caught.value) == (
+        f"Figure.to_svg(): the figure is {int(side * 72)} pt {direction}; "
+        f"at least {minimum} pt is needed for {area}."
+    )
+    assert "linearGradient" in render(minimum / 72)
+
+
+@pytest.mark.parametrize(("cols", "width", "available"), [(1, 2.0, 35), (2, 4.0, 35)])
+def test_colorbar_right_legend_reports_available_room(
+    cols: int, width: float, available: int
+) -> None:
+    def render(size: float) -> str:
+        fig = ub.Figure(size, 3, rows=1, cols=cols, legend=ub.Legend.PER_PANEL)
+        for col in range(cols):
+            ax = fig.add_axes(row=0, col=col)
+            if col == 0:
+                ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+            else:
+                ax.scatter([1, 2, 3, 4], [1, 2, 3, 4])
+            ax.line([1, 2], [1, 2], label="A long legend label").legend(
+                ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
+            )
+        return fig.to_svg()
+
+    with pytest.raises(ub.StyleError) as caught:
+        render(width)
+    panel = "row 0, col 0: " if cols > 1 else ""
+    assert str(caught.value) == (
+        f'Figure.to_svg(): {panel}the legend label "A long legend label" is 72 pt wide; '
+        f"the panel has {available} pt."
+    )
+    assert details(caught.value) == (None, "shorten the label or widen the figure.")
 
 
 @pytest.mark.parametrize(

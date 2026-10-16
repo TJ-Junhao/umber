@@ -733,17 +733,11 @@ fn solve_single(
                 false,
             ));
         }
-        let without = bands.without_colorbar(cap);
-        let bands = &without;
-        let right = frame.right() - PADDING - bands.right();
-        let room = inset::Room {
-            right,
-            right_min: right.min(frame.right() - PADDING - cap),
-            ..room
-        };
-        if bands.right_legend > 0.0 {
-            let available = frame.right() - PADDING - left - MIN_PLOT;
-            placement::check_right_width(context, &legend.column(0.0), available)?;
+        if bands.right_legend > 0.0 || bands.right_colorbar > 0.0 {
+            if bands.right_legend > 0.0 {
+                let available = right - left - MIN_PLOT + bands.right_legend;
+                placement::check_right_width(context, &legend.column(0.0), available)?;
+            }
             let y_room = right - MIN_PLOT - (frame.x + PADDING) - Y_LABEL_GAP;
             if let Some(label) = widest(&bands.y_labels)
                 && y_room >= 0.0
@@ -754,7 +748,7 @@ fn solve_single(
                 context,
                 Direction::Width,
                 frame.width,
-                2.0 * PADDING + bands.y_tick_column + bands.right_legend + MIN_PLOT,
+                2.0 * PADDING + bands.y_tick_column + bands.right() + MIN_PLOT,
                 FIGURE_WIDTH_HINT,
             ));
         }
@@ -819,7 +813,7 @@ fn solve_single(
         return Err(figure_too_short(
             context,
             frame.height,
-            plain_top - frame.y + MIN_PLOT + plain_below,
+            plot_top - frame.y + MIN_PLOT + below,
             bands
                 .heading
                 .height_hint(top > frame.y + PADDING, bands.bottom_legend > 0.0),
