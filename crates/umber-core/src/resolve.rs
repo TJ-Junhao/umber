@@ -285,6 +285,15 @@ impl Resolved {
     pub fn orientation(&self) -> Orientation {
         Orientation::of(self.x.is_category(), self.y.is_category())
     }
+
+    /// The axis that marks of `orientation` lie along and the axis their values are measured
+    /// on: x and y for vertical marks, y and x for horizontal ones.
+    pub fn along_and_values(&self, orientation: Orientation) -> (&ResolvedAxis, &ResolvedAxis) {
+        match orientation {
+            Orientation::Vertical => (&self.x, &self.y),
+            Orientation::Horizontal => (&self.y, &self.x),
+        }
+    }
 }
 
 /// Whether two normalized positions are the same, for matching ticks to the baseline.
@@ -711,13 +720,19 @@ fn positioned(scale: &ContinuousScale, ticks: Vec<Tick>) -> Vec<AxisTick> {
         .collect()
 }
 
-fn category_ticks(scale: &CategoryScale) -> Vec<AxisTick> {
+/// The ticks of a category axis along `which` of `scale`: one per category, at the centre of
+/// its band, labelled with its name. Categories run left to right along x and top to bottom
+/// along y, so the first category of a y axis sits at its high end.
+fn category_ticks(scale: &CategoryScale, which: ValueAxis) -> Vec<AxisTick> {
     scale
         .categories()
         .iter()
         .enumerate()
         .map(|(i, name)| AxisTick {
-            pos: NormalizedPos::new(scale.center(i)),
+            pos: NormalizedPos::new(match which {
+                ValueAxis::X => scale.center(i),
+                ValueAxis::Y => 1.0 - scale.center(i),
+            }),
             label: name.clone(),
         })
         .collect()
@@ -877,7 +892,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
         AxisLimits::Category => {
             let scale = categories(marks, which);
             let axis = ResolvedAxis {
-                ticks: category_ticks(&scale),
+                ticks: category_ticks(&scale, which),
                 scale: AxisScale::Category(scale),
             };
             return (axis, NormalizedPos::LOW);
@@ -1031,6 +1046,9 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a BarMark,
         /// The bar color.
         color: Rgba,
+        /// Which way the bars run: vertical on a category x axis, horizontal on a category y
+        /// axis, the axes' [`Orientation`].
+        orientation: Orientation,
     },
     /// A grouped bar mark.
     Grouped {
@@ -1040,6 +1058,9 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a BarGroupMark,
         /// Each series of the mark, in order, with its resolved color.
         series: Box<[(SeriesView<'a>, Rgba)]>,
+        /// Which way the bars run: vertical on a category x axis, horizontal on a category y
+        /// axis, the axes' [`Orientation`].
+        orientation: Orientation,
     },
     /// A stacked bar mark.
     Stacked {
@@ -1052,6 +1073,9 @@ pub(crate) enum ResolvedMark<'a> {
         /// The segments of every series in every category of the mark, indexed as the mark's
         /// categories and series.
         stacks: Stacks,
+        /// Which way the stacks run: vertical on a category x axis, horizontal on a category y
+        /// axis, the axes' [`Orientation`].
+        orientation: Orientation,
     },
     /// Non-negative area layers, filled between cumulative curves.
     StackedArea {
@@ -1158,6 +1182,9 @@ pub(crate) enum ResolvedMark<'a> {
         distributions: Vec<ResolvedDistribution<'a>>,
         /// The median stroke width, in points.
         width: f32,
+        /// Which way the boxes run: vertical on a category x axis, horizontal on a category y
+        /// axis, the axes' [`Orientation`].
+        orientation: Orientation,
     },
     /// Plain or grouped violins, with each group's statistics computed once.
     Violin {
@@ -1169,6 +1196,9 @@ pub(crate) enum ResolvedMark<'a> {
         distributions: Vec<ResolvedDistribution<'a, ViolinStats>>,
         /// The median stroke width, in points.
         width: f32,
+        /// Which way the violins run: vertical on a category x axis, horizontal on a category y
+        /// axis, the axes' [`Orientation`].
+        orientation: Orientation,
     },
     /// Error bars.
     ErrorBars {
@@ -1317,6 +1347,27 @@ impl<'a> ResolvedMark<'a> {
                     ));
                 }
             },
+            // Horizontal bars, boxes and violins have their values on x.
+            ResolvedMark::Box {
+                orientation: Orientation::Horizontal,
+                ..
+            }
+            | ResolvedMark::Violin {
+                orientation: Orientation::Horizontal,
+                ..
+            }
+            | ResolvedMark::Bar {
+                orientation: Orientation::Horizontal,
+                ..
+            }
+            | ResolvedMark::Grouped {
+                orientation: Orientation::Horizontal,
+                ..
+            }
+            | ResolvedMark::Stacked {
+                orientation: Orientation::Horizontal,
+                ..
+            } => return self.band_values(),
             ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Bar { .. }
@@ -1369,13 +1420,37 @@ impl<'a> ResolvedMark<'a> {
                 ErrorBarOrientation::Vertical => mark.positions().categories(),
                 ErrorBarOrientation::Horizontal => &[],
             },
-            ResolvedMark::Box { categories, .. } | ResolvedMark::Violin { categories, .. } => {
-                categories
+            ResolvedMark::Box {
+                categories,
+                orientation: Orientation::Vertical,
+                ..
             }
-            ResolvedMark::Bar { mark, .. } => mark.categories(),
-            ResolvedMark::Grouped { mark, .. } | ResolvedMark::Stacked { mark, .. } => {
-                mark.categories()
+            | ResolvedMark::Violin {
+                categories,
+                orientation: Orientation::Vertical,
+                ..
+            } => categories,
+            ResolvedMark::Bar {
+                mark,
+                orientation: Orientation::Vertical,
+                ..
+            } => mark.categories(),
+            ResolvedMark::Grouped {
+                mark,
+                orientation: Orientation::Vertical,
+                ..
             }
+            | ResolvedMark::Stacked {
+                mark,
+                orientation: Orientation::Vertical,
+                ..
+            } => mark.categories(),
+            // Horizontal bars, boxes and violins have their categories on y.
+            ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. }
+            | ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. } => &[],
             // A reference line at a category does not extend the category axis; it is looked up
             // in the categories of the other marks (see `check_references`).
             ResolvedMark::Hist { .. }
@@ -1389,10 +1464,36 @@ impl<'a> ResolvedMark<'a> {
     }
 
     /// The category names the mark contributes to a category y axis, in data order, repeats
-    /// included: the y values of a series that holds names, and the positions of horizontal
-    /// error bars that are names. Every other mark has its categories on x, or none.
+    /// included: the y values of a series that holds names, the positions of horizontal error
+    /// bars that are names, and the categories of horizontal bars, boxes and violins. Every other
+    /// mark has its categories on x, or none.
     fn y_category_names(&self) -> &[String] {
         match self {
+            ResolvedMark::Box {
+                categories,
+                orientation: Orientation::Horizontal,
+                ..
+            }
+            | ResolvedMark::Violin {
+                categories,
+                orientation: Orientation::Horizontal,
+                ..
+            } => categories,
+            ResolvedMark::Bar {
+                mark,
+                orientation: Orientation::Horizontal,
+                ..
+            } => mark.categories(),
+            ResolvedMark::Grouped {
+                mark,
+                orientation: Orientation::Horizontal,
+                ..
+            }
+            | ResolvedMark::Stacked {
+                mark,
+                orientation: Orientation::Horizontal,
+                ..
+            } => mark.categories(),
             ResolvedMark::Line { mark, .. } => mark.y().categories(),
             ResolvedMark::Scatter { mark, .. } => mark.y().categories(),
             ResolvedMark::Stem { mark, .. } => mark.y().categories(),
@@ -1421,12 +1522,9 @@ impl<'a> ResolvedMark<'a> {
     /// The values the mark contributes to a continuous y domain. See [`ResolvedMark`] for the
     /// contract.
     ///
-    /// Lines, scatters, areas and bars yield their y values or heights in data order, and grouped
-    /// bars the values of each series in turn. Stacked bars yield the end of every segment away
-    /// from 0 ([`Stacks::ends`]) and any zero heights, so an all-zero stack still has a domain.
-    /// On a linear axis the bars put 0 into the domain anyway (see
-    /// [`grows_from_baseline`](Self::grows_from_baseline)), and on a log axis, where every height
-    /// is positive, these are the positive segment ends, which a log domain can hold.
+    /// Lines, scatters and areas yield their y values in data order. Vertical bars, boxes and
+    /// violins yield their values as [`band_values`](Self::band_values) says; horizontal ones
+    /// yield nothing here, since their values are x values.
     /// Histograms yield the count of every non-empty bin, in bin order, and so never 0 either: on a
     /// log axis the domain spans the smallest positive count to the largest.
     pub fn y_numbers(&self) -> DomainValues<'_> {
@@ -1453,34 +1551,32 @@ impl<'a> ResolvedMark<'a> {
                 }
                 ErrorBarOrientation::Horizontal => mark.positions().numbers(),
             },
-            ResolvedMark::Violin { distributions, .. } => {
-                return DomainValues::Computed(Box::new(
-                    distributions
-                        .iter()
-                        .flat_map(|d| d.groups.iter().flatten())
-                        .flat_map(|s| s.range),
-                ));
+            ResolvedMark::Violin {
+                orientation: Orientation::Vertical,
+                ..
             }
-            ResolvedMark::Box { distributions, .. } => {
-                return DomainValues::Computed(Box::new(
-                    distributions
-                        .iter()
-                        .flat_map(|d| d.groups.iter().flatten())
-                        .flat_map(|s| {
-                            [s.low_whisker, s.high_whisker]
-                                .into_iter()
-                                .chain(s.outliers.iter().copied())
-                        }),
-                ));
+            | ResolvedMark::Box {
+                orientation: Orientation::Vertical,
+                ..
             }
-            ResolvedMark::Bar { mark, .. } => mark.heights(),
-            ResolvedMark::Grouped { series, .. } => {
-                return DomainValues::Computed(Box::new(
-                    series
-                        .iter()
-                        .flat_map(|(view, _)| view.values().iter().copied()),
-                ));
+            | ResolvedMark::Bar {
+                orientation: Orientation::Vertical,
+                ..
             }
+            | ResolvedMark::Grouped {
+                orientation: Orientation::Vertical,
+                ..
+            }
+            | ResolvedMark::Stacked {
+                orientation: Orientation::Vertical,
+                ..
+            } => return self.band_values(),
+            // Horizontal bars, boxes and violins have their values on x.
+            ResolvedMark::Violin { .. }
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. } => &[],
             ResolvedMark::StackedArea { stacks, .. } => {
                 return DomainValues::Computed(Box::new(
                     stacks
@@ -1488,13 +1584,6 @@ impl<'a> ResolvedMark<'a> {
                         .iter()
                         .flat_map(|curve| curve.iter().copied()),
                 ));
-            }
-            ResolvedMark::Stacked { stacks, series, .. } => {
-                let zeros = series
-                    .iter()
-                    .flat_map(|(view, _)| view.values().iter().copied())
-                    .filter(|&height| height == 0.0);
-                return DomainValues::Computed(Box::new(stacks.ends().chain(zeros)));
             }
             ResolvedMark::Hist { histogram, .. } => {
                 let counts = histogram.as_ref().map_or(&[][..], Histogram::counts);
@@ -1510,17 +1599,19 @@ impl<'a> ResolvedMark<'a> {
     }
 
     /// Whether the mark grows from the baseline along `which`, as bars, histogram bins and the
-    /// fill of an area do: such a mark puts 0 into a linear domain along that axis. Every mark
-    /// that grows from the baseline grows along y ([`grows_from_baseline`](Self::grows_from_baseline)).
+    /// fill of an area do: such a mark puts 0 into a linear domain along that axis. A mark that
+    /// grows from the baseline ([`grows_from_baseline`](Self::grows_from_baseline)) grows along
+    /// y, except for horizontal bars, which grow along x.
     pub fn grows_along(&self, which: ValueAxis) -> bool {
-        match which {
-            ValueAxis::X => false,
-            ValueAxis::Y => self.grows_from_baseline(),
-        }
+        let value_axis = self
+            .band_orientation()
+            .map_or(ValueAxis::Y, Orientation::value_axis);
+        which == value_axis && self.grows_from_baseline()
     }
 
-    /// Whether the mark grows from the baseline along y, as bars, histogram bins and the fill of
-    /// an area do: such a mark puts 0 into a linear y domain.
+    /// Whether the mark grows from the baseline along its value axis, as bars, histogram bins
+    /// and the fill of an area do: such a mark puts 0 into a linear domain along that axis (see
+    /// [`grows_along`](Self::grows_along)).
     pub fn grows_from_baseline(&self) -> bool {
         match self {
             // With no finite y value, a stem does not change the y domain or its padding,
@@ -2012,6 +2103,99 @@ impl<'a> ResolvedMark<'a> {
             }],
         }
     }
+
+    /// The orientation of a mark of the bar, box and violin families, which lie along the
+    /// category axis of their axes and grow along the other: horizontal on a category y axis.
+    /// `None` for every other mark, whose values have an axis of their own.
+    pub fn band_orientation(&self) -> Option<Orientation> {
+        match *self {
+            ResolvedMark::Bar { orientation, .. }
+            | ResolvedMark::Grouped { orientation, .. }
+            | ResolvedMark::Stacked { orientation, .. }
+            | ResolvedMark::Box { orientation, .. }
+            | ResolvedMark::Violin { orientation, .. } => Some(orientation),
+            ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Line { .. }
+            | ResolvedMark::Scatter { .. }
+            | ResolvedMark::Area { .. }
+            | ResolvedMark::StackedArea { .. }
+            | ResolvedMark::Hist { .. }
+            | ResolvedMark::Step { .. }
+            | ResolvedMark::HLine { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::VSpan { .. }
+            | ResolvedMark::Band { .. }
+            | ResolvedMark::Stem { .. }
+            | ResolvedMark::ErrorBars { .. } => None,
+        }
+    }
+
+    /// The values a mark of the bar, box and violin families contributes to the domain of its
+    /// value axis, y or x by its [`band_orientation`](Self::band_orientation); nothing for every
+    /// other mark. See [`ResolvedMark`] for the contract.
+    ///
+    /// Bars yield their heights in data order, and grouped bars the values of each series in
+    /// turn. Stacked bars yield the end of every segment away from 0 ([`Stacks::ends`]) and any
+    /// zero heights, so an all-zero stack still has a domain. On a linear axis the bars put 0
+    /// into the domain anyway (see [`grows_from_baseline`](Self::grows_from_baseline)), and on a
+    /// log axis, where every height is positive, these are the positive segment ends, which a
+    /// log domain can hold. Boxes yield their whiskers and outliers, and violins the range of
+    /// their samples.
+    fn band_values(&self) -> DomainValues<'_> {
+        let values: &[f64] = match self {
+            ResolvedMark::Violin { distributions, .. } => {
+                return DomainValues::Computed(Box::new(
+                    distributions
+                        .iter()
+                        .flat_map(|d| d.groups.iter().flatten())
+                        .flat_map(|s| s.range),
+                ));
+            }
+            ResolvedMark::Box { distributions, .. } => {
+                return DomainValues::Computed(Box::new(
+                    distributions
+                        .iter()
+                        .flat_map(|d| d.groups.iter().flatten())
+                        .flat_map(|s| {
+                            [s.low_whisker, s.high_whisker]
+                                .into_iter()
+                                .chain(s.outliers.iter().copied())
+                        }),
+                ));
+            }
+            ResolvedMark::Bar { mark, .. } => mark.heights(),
+            ResolvedMark::Grouped { series, .. } => {
+                return DomainValues::Computed(Box::new(
+                    series
+                        .iter()
+                        .flat_map(|(view, _)| view.values().iter().copied()),
+                ));
+            }
+            ResolvedMark::Stacked { stacks, series, .. } => {
+                let zeros = series
+                    .iter()
+                    .flat_map(|(view, _)| view.values().iter().copied())
+                    .filter(|&height| height == 0.0);
+                return DomainValues::Computed(Box::new(stacks.ends().chain(zeros)));
+            }
+            ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Line { .. }
+            | ResolvedMark::Scatter { .. }
+            | ResolvedMark::Area { .. }
+            | ResolvedMark::StackedArea { .. }
+            | ResolvedMark::Hist { .. }
+            | ResolvedMark::Step { .. }
+            | ResolvedMark::HLine { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::VSpan { .. }
+            | ResolvedMark::Band { .. }
+            | ResolvedMark::Stem { .. }
+            | ResolvedMark::ErrorBars { .. } => &[],
+        };
+        DomainValues::Data(values.iter().copied())
+    }
 }
 
 /// One series as a legend shows it: its label, its resolved color, how it is drawn, and the
@@ -2405,10 +2589,19 @@ impl SeriesKind {
 /// histograms binned. This is the one place where a mark's [`SizeSpec`](crate::SizeSpec) is resolved.
 ///
 /// Label slots precede unlabelled automatic colors; explicit colors do not consume a slot.
+/// The marks are those of vertical axes, whose y axis is numeric; [`resolve_axes_marks`]
+/// resolves the marks of any axes.
 #[cfg(test)]
 pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<ResolvedMark<'a>> {
     let slots = label_slots(marks.iter());
-    resolve_panel_marks(marks, theme, &slots)
+    resolve_panel_marks(marks, Orientation::Vertical, theme, &slots)
+}
+
+/// Resolves the marks of `axes` as [`resolve_marks`] does, in the orientation of the axes.
+#[cfg(test)]
+pub(crate) fn resolve_axes_marks<'a>(axes: &'a Axes, theme: &Theme) -> Vec<ResolvedMark<'a>> {
+    let slots = label_slots(axes.marks().iter());
+    resolve_panel_marks(axes.marks(), Limits::of(axes).orientation(), theme, &slots)
 }
 
 /// Resolves every panel in row-major order. Labels with automatic colors take slots in first
@@ -2419,7 +2612,10 @@ pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>
     let slots = label_slots(figure.panels().flat_map(|axes| axes.marks()));
     figure
         .panels()
-        .map(|axes| resolve_panel_marks(axes.marks(), figure.theme(), &slots))
+        .map(|axes| {
+            let orientation = Limits::of(axes).orientation();
+            resolve_panel_marks(axes.marks(), orientation, figure.theme(), &slots)
+        })
         .collect()
 }
 
@@ -2462,9 +2658,10 @@ fn label_slots<'a>(marks: impl Iterator<Item = &'a Mark>) -> BTreeMap<&'a str, u
     slots
 }
 
-/// Resolves a panel against the label slots of its figure.
+/// Resolves a panel, whose axes have `orientation`, against the label slots of its figure.
 fn resolve_panel_marks<'a>(
     marks: &'a [Mark],
+    orientation: Orientation,
     theme: &Theme,
     slots: &BTreeMap<&str, usize>,
 ) -> Vec<ResolvedMark<'a>> {
@@ -2542,6 +2739,7 @@ fn resolve_panel_marks<'a>(
                     groups: mark.groups().iter().map(|g| box_stats(g)).collect(),
                 }],
                 width: theme.drawn_line_width(crate::SizeSpec::Auto),
+                orientation,
             },
             Mark::GroupedBox(mark) => ResolvedMark::Box {
                 geometry: None,
@@ -2555,6 +2753,7 @@ fn resolve_panel_marks<'a>(
                     })
                     .collect(),
                 width: theme.drawn_line_width(crate::SizeSpec::Auto),
+                orientation,
             },
             Mark::Violin(mark) => ResolvedMark::Violin {
                 geometry: None,
@@ -2565,6 +2764,7 @@ fn resolve_panel_marks<'a>(
                     groups: mark.groups().iter().map(|g| violin_stats(g)).collect(),
                 }],
                 width: theme.drawn_line_width(crate::SizeSpec::Auto),
+                orientation,
             },
             Mark::GroupedViolin(mark) => ResolvedMark::Violin {
                 geometry: None,
@@ -2578,11 +2778,13 @@ fn resolve_panel_marks<'a>(
                     })
                     .collect(),
                 width: theme.drawn_line_width(crate::SizeSpec::Auto),
+                orientation,
             },
             Mark::Bar(mark) => ResolvedMark::Bar {
                 mark,
                 geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
+                orientation,
             },
             Mark::GroupedBar(mark) => ResolvedMark::Grouped {
                 mark,
@@ -2591,6 +2793,7 @@ fn resolve_panel_marks<'a>(
                     .series()
                     .map(|view| (view, color_of(view.color(), view.label())))
                     .collect(),
+                orientation,
             },
             Mark::StackedBar(mark) => {
                 let series: Box<[_]> = mark
@@ -2603,6 +2806,7 @@ fn resolve_panel_marks<'a>(
                     geometry: None,
                     stacks: Stacks::new(mark.categories().len(), &heights),
                     series,
+                    orientation,
                 }
             }
             Mark::StackedArea(mark) => {
@@ -2721,7 +2925,7 @@ mod tests {
 
     /// Both axes of `axes`, resolved from its marks.
     fn resolve_axes(axes: &Axes, x_target: usize, y_target: usize) -> Resolved {
-        let marks = resolve_marks(axes.marks(), &Theme::pigment());
+        let marks = resolve_axes_marks(axes, &Theme::pigment());
         let (x, y) = TickRoom::unlimited(x_target, y_target, FontLibrary::global());
         resolve(&marks, &Limits::of(axes), &x, &y)
     }
@@ -6088,7 +6292,7 @@ mod tests {
                 marks.iter().flat_map(|mark| mark.categories(ValueAxis::X)),
             );
             return ResolvedAxis {
-                ticks: category_ticks(&scale),
+                ticks: category_ticks(&scale, ValueAxis::X),
                 scale: AxisScale::Category(scale),
             };
         };
@@ -6229,5 +6433,63 @@ mod tests {
             Limits::of(f.single_axes()).orientation(),
             Orientation::Horizontal
         );
+    }
+
+    #[test]
+    fn horizontal_bars_fit_x_from_zero_and_list_their_categories_down_y() {
+        let mut f = figure(LIN, ScaleKind::Category);
+        axes(&mut f)
+            .bar(names(&["b", "a"]), &[3.0, 5.0], BarOptions::default())
+            .unwrap()
+            .stacked_bar(
+                names(&["c", "a"]),
+                vec![auto(&[2.0, 4.0]), auto(&[1.0, 3.0])],
+            )
+            .unwrap();
+        let r = resolve_axes(f.single_axes(), 5, 4);
+        assert_eq!(r.orientation(), Orientation::Horizontal);
+        // The categories of every mark, in order of first appearance, the first at the top.
+        let AxisScale::Category(scale) = &r.y.scale else {
+            panic!("a category y axis")
+        };
+        assert_eq!(scale.categories(), ["b", "a", "c"]);
+        assert_eq!(labels(&r.y.ticks), ["b", "a", "c"]);
+        let positions: Vec<f64> = r.y.ticks.iter().map(|t| t.pos.get()).collect();
+        assert!(positions.windows(2).all(|w| w[0] > w[1]), "{positions:?}");
+        assert!((positions[0] - 5.0 / 6.0).abs() < 1e-12);
+        // The values are on x, which starts at 0, unpadded, where the baseline is.
+        let (lo, hi) = r.x.continuous_scale().domain();
+        assert_eq!(lo, 0.0);
+        assert!(hi >= 7.0, "{hi}");
+        assert_eq!(
+            r.baseline,
+            Baseline {
+                axis: ValueAxis::X,
+                pos: NormalizedPos::LOW
+            }
+        );
+        // Negative values pad the x axis below 0 as well.
+        let mut g = figure(LIN, ScaleKind::Category);
+        axes(&mut g)
+            .bar(names(&["a", "b"]), &[-3.0, 5.0], BarOptions::default())
+            .unwrap();
+        let r = resolve_axes(g.single_axes(), 5, 4);
+        let (lo, hi) = r.x.continuous_scale().domain();
+        assert!(lo < -3.0 && hi > 5.0, "{lo}..{hi}");
+        assert!(r.x.holds_zero());
+        // A dot plot fits its values with nice limits below the data, as a scatter on a
+        // category x axis fits y.
+        let mut h = figure(LIN, ScaleKind::Category);
+        axes(&mut h)
+            .scatter_shared(
+                nums(&[54.5, 83.7]),
+                cats(&["x", "y"]),
+                ScatterOptions::default(),
+            )
+            .unwrap();
+        let r = resolve_axes(h.single_axes(), 5, 4);
+        let (lo, _) = r.x.continuous_scale().domain();
+        assert!(lo > 0.0 && lo < 54.5, "{lo}");
+        assert_eq!(r.baseline.axis, ValueAxis::X);
     }
 }

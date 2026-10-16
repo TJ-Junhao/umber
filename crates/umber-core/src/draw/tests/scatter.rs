@@ -129,6 +129,7 @@ fn identity_maps(plot: Area) -> AxisMaps {
             start: plot.y,
             extent: plot.height,
         },
+        frame: crate::resolve::Orientation::Vertical,
     }
 }
 

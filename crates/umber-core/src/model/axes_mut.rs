@@ -23,6 +23,7 @@ use super::validation::{
     check_numeric_y, check_reference_value, check_span, check_step_order, check_tick_axis,
     check_vline_x, check_x_error_bars, check_y_error_bars,
 };
+use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{Error, LegendPosition, LegendStyle, Result, TickFormat};
 
@@ -34,8 +35,13 @@ use crate::{Error, LegendPosition, LegendStyle, Result, TickFormat};
 /// Every setter checks its input before it stores anything, so a failed call leaves the figure
 /// unchanged. Setters return the handle, so calls chain.
 ///
-/// Every mark method needs a linear or log y axis: on a category y axis it returns
-/// `Error::Usage`, naming `y`, before any other check.
+/// Most mark methods need a linear or log y axis: on a category y axis they return
+/// `Error::Usage`, naming `y`, before any other check. The bar, box and violin families,
+/// [`scatter`](AxesMut::scatter), [`x_error_bars`](AxesMut::x_error_bars),
+/// [`vline`](AxesMut::vline) and [`vspan`](AxesMut::vspan) also draw on a category y axis
+/// beside a linear or log x axis: bars, boxes and violins then lie along y and grow along x,
+/// and a scatter is a dot plot. On two category axes these return `Error::Usage`, naming `x`,
+/// before any other check.
 ///
 /// Limits, explicit ticks and tick formats apply to the whole shared group. A member may
 /// replace its own setting, but a different value already set by another member is an
@@ -561,7 +567,10 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
-    /// Adds a scatter series. Same rules as [`AxesMut::line`]; NaN skips a point.
+    /// Adds a scatter series. Same rules as [`AxesMut::line`]; NaN skips a point. On a category
+    /// y axis beside a linear or log x axis the scatter is a dot plot: `y` holds names, passed
+    /// to [`AxesMut::scatter_shared`], and each point sits at the centre of its category's band;
+    /// two category axes are `Error::Usage`, naming `x`.
     ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
     /// [`AxisData`] without copying them, use [`AxesMut::scatter_shared`].
@@ -615,7 +624,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.scatter()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_not_two_categories(CONTEXT, axes.x, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
         axes.marks.push(Mark::scatter(series, options));
         Ok(self)
@@ -894,10 +903,15 @@ impl<'a> AxesMut<'a> {
     /// they were added; categories join the x axis in order of first appearance across all
     /// marks.
     ///
-    /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order:
-    /// `categories` and `heights` of different lengths; an x axis that is not a category axis;
-    /// a category that appears twice; a height that is infinite, beyond [`MAX_MAGNITUDE`], or
-    /// outside the log range on a log y axis. NaN is allowed and draws no bar.
+    /// On a category y axis beside a linear or log x axis the bars are horizontal: the same
+    /// bars with the axes swapped. The categories run down the y axis, the first at the top,
+    /// and the bars grow along x from the baseline, rightwards for positive heights.
+    ///
+    /// Errors leave the axes unchanged. Two category axes are `Error::Usage`, naming `x`. The
+    /// others are `Error::Data`, checked in this order: `categories` and `heights` of different
+    /// lengths; two numeric axes, whose x axis is not a category axis; a category that appears
+    /// twice; a height that is infinite, beyond [`MAX_MAGNITUDE`], or outside the log range on
+    /// a log value axis. NaN is allowed and draws no bar.
     ///
     /// The mark stores its own copy of `heights`, made once. To store heights already held in
     /// an `Arc<[f64]>` without copying them, use [`AxesMut::bar_shared`].
@@ -915,6 +929,11 @@ impl<'a> AxesMut<'a> {
     /// // A repeated category is an error, and the axes keep their one mark.
     /// assert!(axes.bar(vec!["a".into(), "a".into()], &[1.0, 2.0], BarOptions::default()).is_err());
     /// assert_eq!(axes.marks().len(), 1);
+    ///
+    /// // On a category y axis the bars are horizontal.
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut rows = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// rows.bar(vec!["a".into(), "b".into()], &[3.0, -1.0], BarOptions::default())?;
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     ///
@@ -955,8 +974,8 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.bar()";
         let axes = self.axes_mut();
-        let y = check_numeric_y(CONTEXT, axes.y)?;
-        let mark = BarMark::new(CONTEXT, axes.x, y, categories, heights, options)?;
+        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
+        let mark = BarMark::new(CONTEXT, along, values, categories, heights, options)?;
         axes.marks.push(Mark::Bar(mark));
         Ok(self)
     }
@@ -967,12 +986,13 @@ impl<'a> AxesMut<'a> {
     /// the baseline as in [`AxesMut::bar`]. Automatic colors share one palette slot per label
     /// across the figure; unlabelled series take slots after all labels, per axes.
     /// Categories join the x axis in order of first appearance
-    /// across all marks.
+    /// across all marks. On a category y axis the bars are horizontal, as in [`AxesMut::bar`],
+    /// and the series run down each category in series order, the order of the legend.
     ///
-    /// Errors leave the axes unchanged. They are `Error::Data`, checked in this order: an empty
-    /// `series`; a series whose values are not one per category (the message names the
-    /// series' index); then the categories and each series' values as in [`AxesMut::bar`]. NaN is
-    /// allowed and draws no bar.
+    /// Errors leave the axes unchanged. Two category axes are `Error::Usage`, naming `x`. The
+    /// others are `Error::Data`, checked in this order: an empty `series`; a series whose values
+    /// are not one per category (the message names the series' index); then the categories and
+    /// each series' values as in [`AxesMut::bar`]. NaN is allowed and draws no bar.
     ///
     /// # Examples
     ///
@@ -1004,8 +1024,15 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.grouped_bar()";
         let axes = self.axes_mut();
-        let y = check_numeric_y(CONTEXT, axes.y)?;
-        let mark = BarGroupMark::new(CONTEXT, Arrangement::Grouped, axes.x, y, categories, series)?;
+        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
+        let mark = BarGroupMark::new(
+            CONTEXT,
+            Arrangement::Grouped,
+            along,
+            values,
+            categories,
+            series,
+        )?;
         axes.marks.push(Mark::GroupedBar(mark));
         Ok(self)
     }
@@ -1013,9 +1040,11 @@ impl<'a> AxesMut<'a> {
     /// Adds one box per category: type-7 quartiles, 1.5-IQR Tukey whiskers and outliers.
     /// NaN is ignored; empty groups draw nothing, and constant groups draw only a median line.
     /// Boxes occupy the theme's [`box_width`](crate::Theme::box_width) fraction of each band.
-    /// The automatic y domain includes whiskers and outliers, without forcing zero.
+    /// The automatic y domain includes whiskers and outliers, without forcing zero. On a
+    /// category y axis the boxes are horizontal, the axes swapped as for [`AxesMut::bar`].
     ///
-    /// A numeric x axis is `Error::Usage`. Group counts, repeated categories, infinities,
+    /// Two category axes are `Error::Usage`, naming `x`. A numeric x axis beside a numeric y
+    /// axis is `Error::Usage`. Group counts, repeated categories, infinities,
     /// unsupported magnitudes and non-positive log values are `Error::Data`.
     /// Errors leave the figure unchanged.
     ///
@@ -1035,8 +1064,8 @@ impl<'a> AxesMut<'a> {
         options: BoxOptions,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let y = check_numeric_y("Axes.box()", axes.y)?;
-        let mark = BoxMark::new(axes.x, y, categories, groups, options)?;
+        let (along, values) = check_band_axes("Axes.box()", axes.x, axes.y)?;
+        let mark = BoxMark::new(along, values, categories, groups, options)?;
         axes.marks.push(Mark::Box(mark));
         Ok(self)
     }
@@ -1064,8 +1093,8 @@ impl<'a> AxesMut<'a> {
         distributions: Vec<Distribution>,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let y = check_numeric_y("Axes.grouped_box()", axes.y)?;
-        let mark = BoxGroupMark::new(axes.x, y, categories, distributions)?;
+        let (along, values) = check_band_axes("Axes.grouped_box()", axes.x, axes.y)?;
+        let mark = BoxGroupMark::new(along, values, categories, distributions)?;
         axes.marks.push(Mark::GroupedBox(mark));
         Ok(self)
     }
@@ -1075,8 +1104,11 @@ impl<'a> AxesMut<'a> {
     /// Violins occupy the theme's [`violin_width`](crate::Theme::violin_width) fraction of each band.
     /// Each density has the same maximum width. The median spans its local width; quartile
     /// lines span half their local width. The y domain includes all samples, without forcing zero.
+    /// On a category y axis the violins are horizontal, the axes swapped as for
+    /// [`AxesMut::bar`].
     ///
-    /// A numeric x axis is `Error::Usage`. Group counts, repeated categories, infinities,
+    /// Two category axes are `Error::Usage`, naming `x`. A numeric x axis beside a numeric y
+    /// axis is `Error::Usage`. Group counts, repeated categories, infinities,
     /// unsupported magnitudes and non-positive log values are `Error::Data`.
     /// Errors leave the figure unchanged.
     ///
@@ -1096,8 +1128,8 @@ impl<'a> AxesMut<'a> {
         options: ViolinOptions,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let y = check_numeric_y("Axes.violin()", axes.y)?;
-        let mark = ViolinMark::new(axes.x, y, categories, groups, options)?;
+        let (along, values) = check_band_axes("Axes.violin()", axes.x, axes.y)?;
+        let mark = ViolinMark::new(along, values, categories, groups, options)?;
         axes.marks.push(Mark::Violin(mark));
         Ok(self)
     }
@@ -1125,8 +1157,8 @@ impl<'a> AxesMut<'a> {
         distributions: Vec<Distribution>,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let y = check_numeric_y("Axes.grouped_violin()", axes.y)?;
-        let mark = ViolinGroupMark::new(axes.x, y, categories, distributions)?;
+        let (along, values) = check_band_axes("Axes.grouped_violin()", axes.x, axes.y)?;
+        let mark = ViolinGroupMark::new(along, values, categories, distributions)?;
         axes.marks.push(Mark::GroupedViolin(mark));
         Ok(self)
     }
@@ -1137,7 +1169,8 @@ impl<'a> AxesMut<'a> {
     /// segments on one side are 1 pt apart, and a segment too thin for that gap is not drawn.
     /// Only the outermost segment on each side has its end rounded. On a log y axis the first
     /// segment starts at the baseline, at the lowest y tick (or the explicit lower limit).
-    /// Colors and categories work as in [`AxesMut::grouped_bar`].
+    /// Colors and categories work as in [`AxesMut::grouped_bar`]. On a category y axis the
+    /// stacks are horizontal, as in [`AxesMut::bar`]: positive values stack rightwards.
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
     /// [`AxesMut::grouped_bar`], with one more check at the end: in each category, the positive
@@ -1169,8 +1202,15 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.stacked_bar()";
         let axes = self.axes_mut();
-        let y = check_numeric_y(CONTEXT, axes.y)?;
-        let mark = BarGroupMark::new(CONTEXT, Arrangement::Stacked, axes.x, y, categories, series)?;
+        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
+        let mark = BarGroupMark::new(
+            CONTEXT,
+            Arrangement::Stacked,
+            along,
+            values,
+            categories,
+            series,
+        )?;
         axes.marks.push(Mark::StackedBar(mark));
         Ok(self)
     }
@@ -1350,7 +1390,9 @@ impl<'a> AxesMut<'a> {
     /// axis, where it sits at the centre of the category's band. It runs the full height of the
     /// plot, except when the baseline sits at the y axis's lower limit, that is when 0 is not
     /// inside a linear y domain: then it ends at the baseline, since only padding lies below it.
-    /// It is drawn above all data marks; explicit x limits clip it like any mark.
+    /// On a category y axis beside a linear or log x axis, where the baseline is vertical too,
+    /// it runs the full height. It is drawn above all data marks; explicit x limits clip it like
+    /// any mark. Two category axes are `Error::Usage`, naming `x`.
     ///
     /// A category name does not extend a category axis. Whether the name is one of the axis's
     /// categories, the names of its other marks, is known only when the figure is rendered:
@@ -1381,7 +1423,7 @@ impl<'a> AxesMut<'a> {
     pub fn vline(&mut self, x: AxisValue, options: RuleOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.vline()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_not_two_categories(CONTEXT, axes.x, axes.y)?;
         check_vline_x(CONTEXT, axes.x, &x)?;
         axes.marks.push(Mark::VLine(VLineMark::new(x, options)));
         Ok(self)
@@ -1423,10 +1465,11 @@ impl<'a> AxesMut<'a> {
     /// the full height of the plot, or only down to the baseline when that sits at the y axis's
     /// lower limit (see [`AxesMut::vline`]), filled at the area opacity. It is drawn below all data marks, and both
     /// values extend the automatic x domain; explicit x limits clip it. A span needs a numeric
-    /// x axis: on a category x axis use [`AxesMut::vline`].
+    /// x axis: on a category x axis use [`AxesMut::vline`]. On a category y axis it runs the
+    /// full height, as [`AxesMut::vline`] does.
     ///
-    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis; otherwise as
-    /// [`AxesMut::hspan`], for the x axis.
+    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis, naming `x` when the
+    /// y axis is a category axis too; otherwise as [`AxesMut::hspan`], for the x axis.
     ///
     /// # Examples
     ///
@@ -1446,7 +1489,7 @@ impl<'a> AxesMut<'a> {
     pub fn vspan(&mut self, low: f64, high: f64, options: SpanOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.vspan()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_not_two_categories(CONTEXT, axes.x, axes.y)?;
         let Some(transform) = axes.x.transform() else {
             return Err(Error::usage(
                 CONTEXT,
@@ -1640,13 +1683,16 @@ impl<'a> AxesMut<'a> {
     /// [`Theme::cap_width`] centred on it. Both limits extend the automatic x domain, and the
     /// positions the automatic y domain as the y values of a scatter do. Otherwise as
     /// [`AxesMut::y_error_bars`], with the roles of the axes swapped. They need a linear or log
-    /// x axis.
+    /// x axis. The positions of this method are numbers, for a linear or log y axis; on a
+    /// category y axis they are names, passed to [`AxesMut::x_error_bars_shared`], and each bar
+    /// sits at the centre of its category's band.
     ///
-    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis; otherwise
-    /// `Error::Data`, checked in this order: `y`, `low` and `high` differ in length; a value of
-    /// `y` is infinite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not positive on a log
-    /// axis; the same for `low` and then `high` on the x axis; `low[i]` is above `high[i]`,
-    /// naming the first such index.
+    /// Errors leave the axes unchanged. `Error::Usage` on two category axes, naming `x`, and on
+    /// a category x axis; otherwise `Error::Data`, checked in this order: `y`, `low` and `high`
+    /// differ in length; `y` holds numbers on a category y axis or names on a linear or log one;
+    /// a value of `y` is infinite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not
+    /// positive on a log axis; the same for `low` and then `high` on the x axis; `low[i]` is
+    /// above `high[i]`, naming the first such index.
     ///
     /// The mark stores its own copies of the values, made once. To store limits already held in
     /// `Arc<[f64]>`s without copying them, use [`AxesMut::x_error_bars_shared`].
@@ -1677,48 +1723,60 @@ impl<'a> AxesMut<'a> {
         high: &[f64],
         options: ErrorBarOptions,
     ) -> Result<&mut Self> {
-        self.x_error_bars_shared(y.to_vec(), Arc::from(low), Arc::from(high), options)
+        self.x_error_bars_shared(
+            AxisData::Numbers(y.to_vec()),
+            Arc::from(low),
+            Arc::from(high),
+            options,
+        )
     }
 
     /// Adds horizontal error bars as [`AxesMut::x_error_bars`] does, but stores `low` and `high`
     /// themselves rather than copies of them. The positions `y` are stored as given, without a
-    /// copy. Same rules and errors as [`AxesMut::x_error_bars`].
+    /// copy: numbers on a linear or log y axis, names on a category y axis. Same rules and
+    /// errors as [`AxesMut::x_error_bars`].
     ///
     /// # Examples
     ///
     /// ```
     /// use std::sync::Arc;
     ///
-    /// use umber_core::figure::{ErrorBarOptions, Mark};
+    /// use umber_core::figure::{AxisData, ErrorBarOptions, Mark};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// let high: Arc<[f64]> = Arc::from([3.0, 4.0]);
     /// axes.x_error_bars_shared(
-    ///     vec![0.0, 1.0],
+    ///     AxisData::Numbers(vec![0.0, 1.0]),
     ///     Arc::from([1.0, 2.0]),
     ///     Arc::clone(&high),
     ///     ErrorBarOptions::default(),
     /// )?;
     /// let Some(Mark::ErrorBars(bars)) = axes.marks().first() else { unreachable!() };
     /// assert!(std::ptr::eq(bars.high(), &*high));
+    ///
+    /// // On a category y axis the positions are names.
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut rows = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// let names = AxisData::Categories(vec!["North".into(), "South".into()]);
+    /// rows.x_error_bars_shared(names, Arc::from([1.0, 2.0]), high, ErrorBarOptions::default())?;
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn x_error_bars_shared(
         &mut self,
-        y: Vec<f64>,
+        y: AxisData,
         low: Arc<[f64]>,
         high: Arc<[f64]>,
         options: ErrorBarOptions,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.x_error_bars()";
         let axes = self.axes_mut();
-        let y_transform = check_numeric_y(CONTEXT, axes.y)?;
-        check_x_error_bars(CONTEXT, axes.x, y_transform, &y, (&low, &high))?;
+        check_not_two_categories(CONTEXT, axes.x, axes.y)?;
+        check_x_error_bars(CONTEXT, axes.x, axes.y, &y, (&low, &high))?;
         axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
             ErrorBarOrientation::Horizontal,
-            AxisData::Numbers(y),
+            y,
             low,
             high,
             options,

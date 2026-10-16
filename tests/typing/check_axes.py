@@ -59,8 +59,8 @@ cats.line([0.1, 0.2], [1, 2])  # type: ignore[list-item]  # pyright: ignore[repo
 cats.hist([1.0])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 cats.xlim(0, 1)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
-# Negative: the y axis is always continuous (the parameter is ``Scale[float]``).
-ub.Figure().add_axes(y=ub.Scale.category())  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+# Positive: a category y axis changes the y type.
+assert_type(ub.Figure().add_axes(y=ub.Scale.category()), ub.Axes[float, str])
 
 # Negative: mark methods that need a category axis refuse a numeric one for the series too.
 ax.grouped_bar(["A"], [ub.Series("a", [1])])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]

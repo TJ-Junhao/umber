@@ -58,6 +58,19 @@ pub(crate) fn figure_header(theme: &Theme, header: &crate::layout::FigureHeader)
     (!items.is_empty()).then_some(Item::Group { clip: None, items })
 }
 
+/// Which gridlines the theme's `lines` draws on a plot whose values lie along `value_axis`. The
+/// theme's choice describes a chart with its values on y; a chart with its values on x, one with
+/// a category y axis beside a numeric x axis, mirrors it, so that its lines across the values
+/// run vertically: horizontal lines become vertical ones and vertical lines horizontal ones.
+fn oriented_grid(lines: GridLines, value_axis: ValueAxis) -> GridLines {
+    match (value_axis, lines) {
+        (ValueAxis::Y, lines) => lines,
+        (ValueAxis::X, GridLines::Horizontal) => GridLines::Vertical,
+        (ValueAxis::X, GridLines::Vertical) => GridLines::Horizontal,
+        (ValueAxis::X, lines @ (GridLines::Both | GridLines::None)) => lines,
+    }
+}
+
 /// The axes chrome as one unclipped group: gridlines, tick labels, header and axis labels, in
 /// that order. The baseline is not part of it; see [`baseline`].
 pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
@@ -65,7 +78,8 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
     let mut items = Vec::new();
 
     let grid = grid_style(theme);
-    let lines = theme.grid_lines();
+    // The baseline lies on the value axis.
+    let lines = oriented_grid(theme.grid_lines(), layout.baseline.axis);
     if matches!(lines, GridLines::Horizontal | GridLines::Both) {
         for &y in &layout.y_grid {
             items.push(Item::Stroke {

@@ -95,6 +95,7 @@ mod corpus {
     pub mod grid;
     pub mod header;
     pub mod hist;
+    pub mod horizontal;
     pub mod inputs;
     pub mod legend;
     pub mod legend_position;
@@ -169,6 +170,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::r#box::cases(&lib, &mut sink);
     corpus::violin::cases(&lib, &mut sink);
     corpus::cmap::cases(&mut sink);
+    corpus::horizontal::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -2509,8 +2511,8 @@ fn series_errors(rec: &mut Log) {
         });
     }
 
-    // Axes with a category y axis are created, and their mark methods refuse them, so no series
-    // meets one.
+    // Axes with a category y axis are created. Lines refuse them; the dot plots a scatter draws
+    // there are recorded with the other horizontal marks, in `corpus/horizontal.rs`.
     rec.section("Axes.line and Axes.scatter, category y");
     rec.new_figure("linear/category", linear(), ScaleKind::Category);
 

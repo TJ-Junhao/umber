@@ -1,4 +1,8 @@
 //! Equal-maximum-width violin densities, with local-width quantile lines.
+//!
+//! Violins are drawn in the frame of their orientation (see [`super::mapping`]): the category
+//! axis first, as x, and the value axis second, as y, so horizontal violins are the same code
+//! with the axes swapped.
 
 use super::MarkContext;
 use super::bar::{GROUP_GAP, group_slots, in_axis_order};
@@ -8,24 +12,27 @@ use super::fill::AREA_ALPHA;
 use super::mapping::{AxisPoint, axis_value};
 use crate::Rgba;
 use crate::geometry::Path;
-use crate::resolve::{AxisScale, Resolved, ResolvedDistribution, ViolinStats};
+use crate::resolve::{AxisScale, ResolvedAxis, ResolvedDistribution, ViolinStats};
 use crate::scene::{FillRule, Item, Paint};
 
-/// Draws categories in axis order and distributions in input order, using bar gap rules.
+/// Draws violins lying along the category axis `along` with their values on `values`, in the
+/// frame of `context`: categories in axis order and distributions in input order, using bar gap
+/// rules.
 pub(super) fn violin_items(
     context: &MarkContext<'_>,
-    resolved: &Resolved,
+    (along, values): (&ResolvedAxis, &ResolvedAxis),
     names: &[String],
     distributions: &[ResolvedDistribution<'_, ViolinStats>],
     width: f32,
     items: &mut Vec<Item>,
 ) {
-    let AxisScale::Category(categories) = &resolved.x.scale else {
+    let AxisScale::Category(categories) = &along.scale else {
         return;
     };
     let (start, end) = categories.band(0);
     let total = (end - start) * f64::from(context.theme.violin_width());
-    let (slot, gap) = group_slots(total, distributions.len(), GROUP_GAP / context.plot.width);
+    let gap = context.maps.x.length(GROUP_GAP);
+    let (slot, gap) = group_slots(total, distributions.len(), gap);
     for (index, i) in in_axis_order(categories, names) {
         let (start, end) = categories.band(index);
         let left = (start + end - total) / 2.0;
@@ -36,7 +43,7 @@ pub(super) fn violin_items(
             let center = left + j as f64 * (slot + gap) + slot / 2.0;
             violin_group(
                 context,
-                resolved,
+                values,
                 stats,
                 (center, slot / 2.0),
                 (distribution.color, width),
@@ -46,10 +53,11 @@ pub(super) fn violin_items(
     }
 }
 
-/// Draws one density. Clipping happens before converting extreme data coordinates to f32.
+/// Draws one density, its values on `values`. Clipping happens before converting extreme data
+/// coordinates to f32.
 fn violin_group(
     context: &MarkContext<'_>,
-    resolved: &Resolved,
+    values: &ResolvedAxis,
     stats: &ViolinStats,
     (center, half): (f64, f64),
     (color, width): (Rgba, f32),
@@ -64,7 +72,7 @@ fn violin_group(
         top: y0,
         bottom: y1,
     };
-    let density = axis_density(stats, resolved);
+    let density = axis_density(stats, values);
     if !density.is_empty() {
         let points: Vec<_> = density
             .iter()
@@ -76,8 +84,9 @@ fn violin_group(
                     .map(|&(y, w)| AxisPoint::new(center - half * w, y)),
             )
             .collect();
-        // Category x is always inside its band. Cut only y, beyond the scene clip so that
-        // the polygon's closing edges cannot create visible horizontal outline strokes.
+        // The category axis is always inside its band. Cut only the value axis, beyond the
+        // scene clip, so that the polygon's closing edges cannot create visible outline strokes
+        // across it.
         let points = clip_y(&clip_y(&points, y0, true), y1, false);
         if let Some(&first) = points.first() {
             let mut path = Path::new();
@@ -107,7 +116,7 @@ fn violin_group(
         ]
     };
     for (value, fraction, stroke) in quantiles {
-        let y = axis_value(&resolved.y, value);
+        let y = axis_value(values, value);
         let half = half * local_width(&density, y) * fraction;
         if let Some((a, b)) = clip_segment(
             AxisPoint::new(center - half, y),
@@ -125,12 +134,13 @@ fn violin_group(
     }
 }
 
-/// Maps the density once so the outline and its quantile widths use the same axis space.
-fn axis_density(stats: &ViolinStats, resolved: &Resolved) -> Vec<(f64, f64)> {
+/// Maps the density onto the value axis `values` once, so the outline and its quantile widths
+/// use the same axis space.
+fn axis_density(stats: &ViolinStats, values: &ResolvedAxis) -> Vec<(f64, f64)> {
     stats
         .density
         .iter()
-        .map(|&(y, width)| (axis_value(&resolved.y, y), width))
+        .map(|&(y, width)| (axis_value(values, y), width))
         .collect()
 }
 

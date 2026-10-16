@@ -10,7 +10,10 @@
 //! a reference mark is drawn there: a vertical one ends at the baseline, and the layers are
 //! clipped at it (see [`baseline_clip`]), which also cuts the half-stroke of a horizontal line
 //! on the baseline and the round cap of a vertical one. When the baseline is at y = 0 inside
-//! the domain, they cover the whole plot height.
+//! the domain, they cover the whole plot height. A chart whose values lie along x (a category y
+//! axis beside a numeric x axis) mirrors this: its baseline is vertical, the layers are clipped
+//! left of it when it sits at the x axis's lower limit, and its vertical lines and spans, which
+//! run along the baseline, cover the whole plot height.
 
 use super::MarkContext;
 use super::chrome::segment;
@@ -42,13 +45,16 @@ impl Along {
     }
 
     /// The fraction of the plot area, from its start on the other axis (left, or top), that a
-    /// mark of this kind covers across it: all of it, except for a vertical mark, which stops at
-    /// the baseline when that sits at the y axis's lower limit.
+    /// mark of this kind covers across it: all of it, except for a vertical mark on a chart with
+    /// its values on y, which stops at the baseline when that sits at the y axis's lower limit.
+    /// A mark whose value lies on the value axis runs along the baseline and covers it all. The
+    /// model refuses horizontal marks beside a category y axis, the one chart with its baseline
+    /// on x, so no mark there would stop at the baseline.
     fn reach(self, context: &MarkContext<'_>, resolved: &Resolved) -> f64 {
-        match self {
-            Along::Y => 1.0,
-            Along::X if zero_in_domain(resolved) => 1.0,
-            Along::X => {
+        match (self, context.baseline.axis) {
+            (Along::Y, _) | (Along::X, ValueAxis::X) => 1.0,
+            (Along::X, ValueAxis::Y) if zero_in_domain(context, resolved) => 1.0,
+            (Along::X, ValueAxis::Y) => {
                 ((context.baseline_at - context.plot.y) / context.plot.height).clamp(0.0, 1.0)
             }
         }
@@ -71,32 +77,48 @@ impl Along {
     }
 }
 
-/// Whether the baseline sits at y = 0 inside the domain of a linear y axis, rather than at the
+/// Whether the baseline sits at 0 inside the domain of a linear value axis, rather than at the
 /// lower limit.
-fn zero_in_domain(resolved: &Resolved) -> bool {
-    resolved.y.holds_zero()
+fn zero_in_domain(context: &MarkContext<'_>, resolved: &Resolved) -> bool {
+    match context.baseline.axis {
+        ValueAxis::X => resolved.x.holds_zero(),
+        ValueAxis::Y => resolved.y.holds_zero(),
+    }
 }
 
-/// The clip of the reference layers: `marks_clip` cut at the baseline when that sits at the y
-/// axis's lower limit below the top of the plot, `None` when nothing lies below it to cut. A
-/// baseline on the x axis cuts nothing.
+/// The clip of the reference layers: `marks_clip` cut at the baseline when that sits at the
+/// value axis's lower limit inside the plot (below its top on y, right of its left edge on x),
+/// `None` when nothing lies beyond it to cut.
 pub(super) fn baseline_clip(
     context: &MarkContext<'_>,
     resolved: &Resolved,
     marks_clip: Rect,
 ) -> Option<Rect> {
-    match context.baseline.axis {
-        ValueAxis::X => return None,
-        ValueAxis::Y => {}
-    }
-    let height = context.baseline_at - context.plot.y;
-    if zero_in_domain(resolved) || height >= context.plot.height - 1e-6 {
+    if zero_in_domain(context, resolved) {
         return None;
     }
-    Some(Rect {
-        height: height.max(0.0) as f32,
-        ..marks_clip
-    })
+    let plot = context.plot;
+    match context.baseline.axis {
+        ValueAxis::Y => {
+            let height = context.baseline_at - plot.y;
+            (height < plot.height - 1e-6).then(|| Rect {
+                height: height.max(0.0) as f32,
+                ..marks_clip
+            })
+        }
+        ValueAxis::X => {
+            let left = context.baseline_at - plot.x;
+            (left > 1e-6).then(|| {
+                let right = f64::from(marks_clip.x) + f64::from(marks_clip.width);
+                let x = context.baseline_at.min(right);
+                Rect {
+                    x: x as f32,
+                    width: (right - x) as f32,
+                    ..marks_clip
+                }
+            })
+        }
+    }
 }
 
 /// Adds `layer` to `items`, as one group clipped to `clip` when there is one.

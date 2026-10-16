@@ -16,6 +16,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `bars.py`: a bar chart, a grouped bar chart and a stacked bar chart.
 - `box.py`: plain and grouped box plots, with Tukey whiskers and outliers.
 - `violin.py`: plain and grouped violin plots comparing sample distributions across regions.
+- `horizontal.py`: horizontal grouped bars, horizontal box plots and a dot plot on a category y axis.
 - `histogram.py`: a histogram with a chosen number of bins.
 - `themes.py`: the same chart in the Pigment, Graphite and Midnight themes.
 - `ticks.py`: custom x tick labels and a percent y tick format.
