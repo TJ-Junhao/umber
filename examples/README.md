@@ -6,6 +6,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `subplots.py`: a 2 × 2 grid with a centered figure title and subtitle, x scales shared by column, a comparison panel spanning both rows and a merged legend.
 - `scatter.py`: two point clouds with different markers and sizes.
 - `bubbles.py`: cities with population encoded by marker area and reference circles showing the size scale.
+- `color_by.py`: points colored by a value with `ColorBy`, on a sequential colormap and on a diverging one centered on zero with `clim()`.
 - `area.py`: an area chart with the gradient fill style.
 - `stacked_area.py`: renewable generation in three stacked layers, outlined over flat fills.
 - `step.py`: step lines in the three positions.

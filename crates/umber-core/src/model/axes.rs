@@ -48,6 +48,8 @@ pub struct Axes {
     /// The legend position set for these axes; the theme's applies when unset.
     pub(super) legend_position: Option<LegendPosition>,
     pub(super) marks: Vec<Mark>,
+    /// The explicit color range of the color-mapped marks; their extent applies when unset.
+    pub(super) color_limits: Option<(f64, f64)>,
 }
 
 impl Axes {
@@ -73,6 +75,7 @@ impl Axes {
             legend: None,
             legend_position: None,
             marks: Vec::new(),
+            color_limits: None,
         }
     }
 
@@ -414,6 +417,26 @@ impl Axes {
     #[must_use]
     pub fn marks(&self) -> &[Mark] {
         &self.marks
+    }
+
+    /// The explicit color range set by [`AxesMut::clim`](super::AxesMut::clim); `None` when
+    /// the range of the color-mapped marks is the extent of their finite values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert_eq!(axes.color_limits(), None);
+    /// axes.clim(0.0, 10.0)?;
+    /// assert_eq!(axes.color_limits(), Some((0.0, 10.0)));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn color_limits(&self) -> Option<(f64, f64)> {
+        self.color_limits
     }
 }
 

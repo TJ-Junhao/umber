@@ -15,6 +15,7 @@ import umber
 from umber import _args, _color, _series, _size, _ticks, _umber
 from umber._args import instance, integer, is_text_or_buffer, real, type_name
 from umber._color import Color
+from umber._color_by import ColorBy, native_point_color
 from umber._enums import AUTO, Auto, Dash, LegendPosition, LegendStyle, Marker, Step
 from umber._errors import DataError, new_error
 from umber._report import api_call
@@ -615,7 +616,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         y: Values[Y],
         *,
         label: str = "",
-        color: Color = Color.AUTO,
+        color: Color | ColorBy = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
     ) -> Self:
@@ -629,7 +630,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             y: The y values, one per x value: numbers on a linear or log y axis, names on a
                 category y axis.
             label: The name shown in the legend; an empty string leaves the series out of it.
+                A scatter colored by ``ColorBy`` has no legend entry and takes no label.
             color: The marker color. ``Color.AUTO`` takes the next color of the theme palette.
+                ``ColorBy(values)`` colors each point by its value instead; its ``cmap``,
+                ``scale`` and ``center`` must match the other color-mapped marks of these axes.
             marker: The marker shape.
             size: The marker size. ``Size.AUTO`` is the marker size of the theme.
 
@@ -639,16 +643,20 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
-                value is not positive on a log axis, or names and numbers do not match the
-                axes.
-            StyleError: If ``label`` is too long.
-            UsageError: If both axes are category axes. Type checkers accept such axes,
-                so this is raised when the call runs.
+                value is not positive on a log axis, names and numbers do not match the
+                axes, or a ``ColorBy`` does not have one value per point.
+            StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
+                range set by ``clim()``.
+            UsageError: If both axes are category axes (type checkers accept such axes, so
+                this is raised when the call runs), a ``ColorBy`` comes with a label, or its
+                ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
+                marks of these axes.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.scatter([1, 2, 3], [2.0, 1.0, 3.0], marker=ub.Marker.DIAMOND)
+            >>> ax = ax.scatter([1, 2, 3], [3.0, 2.5, 1.0], color=ub.ColorBy([0.2, 0.5, 0.9]))
             >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
             >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
         """
@@ -657,7 +665,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_axis_type(context, "x", x)
             check_axis_type(context, "y", y)
             _args.require_text(context, "label", label)
-            spec = _color_argument(context, color)
+            spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             extent = _size_argument(context, "size", size)
             xs = self._x_values(context, x)
@@ -673,7 +681,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         sizes: Values[float],
         *,
         label: str = "",
-        color: Color = Color.AUTO,
+        color: Color | ColorBy = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
     ) -> "Axes[float, float]":
         """Add markers whose areas are proportional to non-negative size values.
@@ -707,6 +715,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             sizes: Finite values from 0 to 1e300, one per point; area is proportional to value.
             label: The legend label; empty skips this mark's legend entry.
             color: The marker color. ``Color.AUTO`` takes the next palette color.
+                ``ColorBy(values)`` colors each bubble by its value instead, as for
+                ``scatter()``; the label entry and size references are then drawn in the
+                theme's text color.
             marker: The marker shape; size references are always circles.
 
         Returns:
@@ -714,10 +725,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If lengths differ, coordinates are invalid for their axes, or a size
-                is negative, non-finite, or above 1e300.
-            UsageError: If either axis is a category axis.
-            StyleError: If ``label`` is too long.
+            DataError: If lengths differ, coordinates are invalid for their axes, a size
+                is negative, non-finite, or above 1e300, or a ``ColorBy`` does not have one
+                value per point.
+            UsageError: If either axis is a category axis, or a ``ColorBy`` differs in
+                ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
+            StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
+                range set by ``clim()``.
 
         Example:
             >>> import umber as ub
@@ -730,7 +744,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "y", y)
             check_floats_type(context, "sizes", sizes)
             _args.require_text(context, "label", label)
-            spec = _color_argument(context, color)
+            spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             xs = floats(context, "x", x)
             ys = floats(context, "y", y)
@@ -1727,6 +1741,37 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.grouped_violin(self._row, self._col, category_names, arguments)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
+
+    def clim(self, low: float, high: float) -> Self:
+        """Set the color range of the color-mapped marks of these axes.
+
+        Values outside the range take the colormap's end colors. Without it, the range runs
+        from the smallest to the largest finite mapped value. On a centered color scale, the
+        range is symmetric about the center and reaches the farther of the two limits.
+
+        Args:
+            low: The value at the low end of the colormap.
+            high: The value at the high end of the colormap.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If a limit is not a number.
+            StyleError: If a limit is not finite, ``low`` is not below ``high``, a limit is
+                not positive on a log color scale, or the range does not hold the center.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().clim(0, 100)
+            >>> ax = ax.scatter([1, 2], [3.0, 4.0], color=ub.ColorBy([20.0, 140.0]))
+        """
+        with api_call():
+            context = "Axes.clim()"
+            lo = real(context, "low", low)
+            hi = real(context, "high", high)
+            self._native.clim(self._row, self._col, lo, hi)
+            return self
 
 
 def _color_argument(context: str, value: object) -> tuple[int, int, float]:

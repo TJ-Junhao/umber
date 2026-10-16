@@ -9,8 +9,8 @@
 //! A figure with one axes, a line and a scatter, written as SVG and as PNG:
 //!
 //! ```
-//! use umber_core::{AxisData, ColorSpec, Figure, LineOptions, Rgba, ScaleKind, ScatterOptions};
-//! use umber_core::{SvgText, Theme};
+//! use umber_core::{AxisData, ColorSpec, Figure, LineOptions, PointColor, Rgba, ScaleKind};
+//! use umber_core::{ScatterOptions, SvgText, Theme};
 //!
 //! let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
 //! figure
@@ -27,7 +27,7 @@
 //!         AxisData::Numbers(vec![0.5, 1.5, 2.5]),
 //!         &[2.0, 2.5, 3.5],
 //!         ScatterOptions {
-//!             color: ColorSpec::Fixed(Rgba::hex("#3366b8")?),
+//!             color: PointColor::Uniform(ColorSpec::Fixed(Rgba::hex("#3366b8")?)),
 //!             ..ScatterOptions::default()
 //!         },
 //!     )?;
@@ -64,7 +64,9 @@
 //!   and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
-//! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], and the colormap [`Cmap`];
+//! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
+//!   mapping of points: [`ColorBy`] with its [`CmapChoice`], and the [`PointColor`] of scatter
+//!   and bubble marks;
 //! - per-series line widths and marker sizes: [`SizeSpec`], with its [`Factor`] and [`Points`];
 //! - tick labels: [`TickFormat`], with its [`NumberStyle`] and [`Decimals`];
 //! - times: [`Instant`] and its [`Civil`] date and time;
@@ -100,6 +102,9 @@ mod bubble_scale;
 mod bubbles_tests;
 pub mod cmap;
 pub mod color;
+#[cfg(test)]
+mod color_by_tests;
+mod color_scale;
 mod coverage;
 pub mod downsample;
 mod draw;
@@ -148,6 +153,7 @@ pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLine
 pub use figure::{BandMark, BandOptions};
 pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use figure::{BubbleMark, BubbleOptions};
+pub use figure::{CmapChoice, ColorBy, PointColor};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};

@@ -6,6 +6,7 @@
 //! baseline.
 
 use crate::bubble_fit::BubbleFits;
+use crate::color_scale::ResolvedColorScale;
 use crate::layout::{
     self, FigureHeader, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize,
     TickSpacing,
@@ -27,6 +28,8 @@ struct Panel<'a> {
     marks: Vec<ResolvedMark<'a>>,
     /// The axes' legend, measured.
     legend: MeasuredLegend<'a>,
+    /// The color scale of the axes' color-mapped marks, resolved once.
+    color: Option<ResolvedColorScale>,
 }
 
 /// The records of every panel of `figure`, in the order of [`Figure::panels`]. The legend uses
@@ -47,10 +50,12 @@ fn panels<'a>(figure: &'a Figure, lib: &FontLibrary) -> Vec<Panel<'a>> {
             } else {
                 measure_legend(theme, axes, &marks, lib)
             };
+            let color = ResolvedColorScale::resolve(&marks, axes.color_limits(), theme);
             Panel {
                 axes,
                 marks,
                 legend,
+                color,
             }
         })
         .collect()
@@ -289,7 +294,10 @@ fn resolve_groups(
         });
         axes.push(resolved);
     }
-    axes.into_iter().map(|[x, y]| Resolved::new(x, y)).collect()
+    axes.into_iter()
+        .zip(panels)
+        .map(|([x, y], panel)| Resolved::new(x, y, panel.color.clone()))
+        .collect()
 }
 
 /// Resolves and lays out every panel of `figure`, whose records are `panels`.

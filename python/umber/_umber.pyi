@@ -42,6 +42,7 @@ import numpy.typing
 __all__ = [
     "MAX_BINS",
     "Cmap",
+    "ColorBy",
     "Figure",
     "Theme",
     "__version__",
@@ -138,6 +139,23 @@ class Cmap:
     def from_colors(colors: list[_ColorArg]) -> Cmap: ...
     def reversed(self) -> Cmap: ...
     def colors(self) -> list[int]: ...
+
+@final
+class ColorBy:
+    """Values mapped through a colormap (``None`` for the theme's), checked when built.
+
+    The scale argument is linear or log (kinds 0 and 1); ``center`` is ``None`` for a
+    sequential mapping.
+    """
+
+    def __new__(
+        cls,
+        values: _FloatArray,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
+    ) -> ColorBy: ...
 
 @final
 class Theme:
@@ -270,7 +288,7 @@ class Figure:
         x: _AxisValues,
         y: _AxisValues,
         label: str,
-        color: _ColorArg,
+        color: _ColorArg | ColorBy,
         marker: int,
         size: _SizeArg,
     ) -> None: ...
@@ -282,7 +300,7 @@ class Figure:
         y: _FloatArray,
         sizes: _FloatArray,
         label: str,
-        color: _ColorArg,
+        color: _ColorArg | ColorBy,
         marker: int,
     ) -> None: ...
     def stem(
@@ -427,3 +445,4 @@ class Figure:
     # Figure.save_svg().
     def png_for_file(self, dpi: int) -> bytes: ...
     def svg_for_file(self, text: int) -> str: ...
+    def clim(self, row: int, col: int, low: float, high: float) -> None: ...

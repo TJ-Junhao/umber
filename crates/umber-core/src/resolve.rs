@@ -41,6 +41,7 @@
 use std::collections::BTreeMap;
 
 use crate::binning::Histogram;
+use crate::color_scale::{ColorScaleSpec, MappedColors, ResolvedColorScale};
 use crate::error::quoted;
 use crate::layout::TickRoom;
 use crate::legend::{LegendEntry, Swatch, SwatchFill};
@@ -51,7 +52,7 @@ use crate::model::{
 use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
 use crate::model::{Edge, holds};
 use crate::model::{ErrorBarMark, ErrorBarOrientation};
-use crate::model::{StackedAreaMark, StemMark};
+use crate::model::{PointColor, StackedAreaMark, StemMark};
 use crate::scale::{Finish, Padding, TickJudge, is_single_value, log_offset};
 use crate::stacking::{AreaStacks, Stacks};
 use crate::stats::{BoxStats, box_stats, kde_scott, quantile_type7};
@@ -259,14 +260,18 @@ pub(crate) struct Resolved {
     /// The baseline. Resolve decides it once; layout draws it, line area fills fade to it, and
     /// bars on a log value axis grow from it.
     pub baseline: Baseline,
+    /// The color scale of the color-mapped marks; `None` without one, or when none of their
+    /// values is finite, and then no color-mapped mark is drawn.
+    pub color: Option<ResolvedColorScale>,
 }
 
 impl Resolved {
-    /// Both axes, each with the base position [`resolve_axis`] gave it, and the baseline at the
-    /// base position of the value axis of their orientation.
+    /// Both axes, each with the base position [`resolve_axis`] gave it, the baseline at the
+    /// base position of the value axis of their orientation, and the color scale `color`.
     pub fn new(
         (x, x_base): (ResolvedAxis, NormalizedPos),
         (y, y_base): (ResolvedAxis, NormalizedPos),
+        color: Option<ResolvedColorScale>,
     ) -> Resolved {
         let axis = Orientation::of(x.is_category(), y.is_category()).value_axis();
         let pos = match axis {
@@ -277,6 +282,7 @@ impl Resolved {
             x,
             y,
             baseline: Baseline { axis, pos },
+            color,
         }
     }
 
@@ -837,7 +843,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
 
 /// Resolves both axes from the resolved `marks` and the axes' `limits`, with automatic ticks as
 /// the tick rooms `x_room` and `y_room` ask: about their target number of ticks, with labels
-/// kept apart.
+/// kept apart. There is no color scale: color-mapped marks are resolved through the figure.
 #[cfg(test)]
 pub(crate) fn resolve(
     marks: &[ResolvedMark<'_>],
@@ -862,7 +868,7 @@ pub(crate) fn resolve(
         y_room,
         None,
     );
-    Resolved::new(x, y)
+    Resolved::new(x, y, None)
 }
 
 /// Resolves the axis `which` of one group, with members' marks in row-major panel order, then
@@ -1004,6 +1010,9 @@ pub(crate) enum ResolvedMark<'a> {
         radius: f32,
         /// The diameter of the label's dot swatch.
         size: f32,
+        /// The mapped values of a color-mapped mark, whose `color` is then the theme's text
+        /// color, for its legend entry and size references; `None` for one marker color.
+        mapped: Option<MappedColors<'a>>,
     },
     /// A line mark.
     Line {
@@ -1026,6 +1035,9 @@ pub(crate) enum ResolvedMark<'a> {
         color: Rgba,
         /// The marker diameter as drawn, in points.
         size: f32,
+        /// The mapped values of a color-mapped mark, whose `color` is then the theme's text
+        /// color; `None` for one marker color.
+        mapped: Option<MappedColors<'a>>,
     },
     /// An area mark.
     Area {
@@ -2196,6 +2208,32 @@ impl<'a> ResolvedMark<'a> {
         };
         DomainValues::Data(values.iter().copied())
     }
+
+    /// The spec and values of a color-mapped mark; `None` for a mark drawn in its own colors.
+    pub(crate) fn color_values(&self) -> Option<(&ColorScaleSpec, &[f64])> {
+        match self {
+            ResolvedMark::Scatter { mapped, .. } | ResolvedMark::Bubbles { mapped, .. } => {
+                mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
+            }
+            ResolvedMark::Line { .. }
+            | ResolvedMark::Area { .. }
+            | ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. }
+            | ResolvedMark::StackedArea { .. }
+            | ResolvedMark::Hist { .. }
+            | ResolvedMark::Step { .. }
+            | ResolvedMark::HLine { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::VSpan { .. }
+            | ResolvedMark::Band { .. }
+            | ResolvedMark::Stem { .. }
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. }
+            | ResolvedMark::ErrorBars { .. } => None,
+        }
+    }
 }
 
 /// One series as a legend shows it: its label, its resolved color, how it is drawn, and the
@@ -2623,8 +2661,8 @@ pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>
 fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
     match mark {
         Mark::Line(m) => vec![(&m.options().label, m.options().color)],
-        Mark::Scatter(m) => vec![(&m.options().label, m.options().color)],
-        Mark::Bubbles(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Scatter(m) => uniform(&m.options().label, &m.options().color),
+        Mark::Bubbles(m) => uniform(&m.options().label, &m.options().color),
         Mark::Stem(m) => vec![(&m.options().label, m.options().color)],
         Mark::Area(m) => vec![(&m.options().label, m.options().color)],
         Mark::Bar(m) => vec![(&m.options().label, m.options().color)],
@@ -2643,6 +2681,15 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::HSpan(m) | Mark::VSpan(m) => vec![(&m.options().label, m.options().color)],
         Mark::Band(m) => vec![(&m.options().label, m.options().color)],
         Mark::ErrorBars(m) => vec![(&m.options().label, m.options().color)],
+    }
+}
+
+/// The label and requested color of a mark in one color; none for a color-mapped mark, which
+/// takes no palette color.
+fn uniform<'a>(label: &'a str, color: &PointColor) -> Vec<(&'a str, ColorSpec)> {
+    match *color {
+        PointColor::Uniform(spec) => vec![(label, spec)],
+        PointColor::By(_) => Vec::new(),
     }
 }
 
@@ -2704,20 +2751,34 @@ fn resolve_panel_marks<'a>(
                 color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
             },
-            Mark::Scatter(mark) => ResolvedMark::Scatter {
-                mark,
-                geometry: None,
-                color: color_of(mark.options().color, &mark.options().label),
-                size: theme.drawn_marker_size(mark.options().size),
-            },
-            Mark::Bubbles(mark) => ResolvedMark::Bubbles {
-                mark,
-                geometry: None,
-                color: color_of(mark.options().color, &mark.options().label),
-                maximum: bubble_maximum,
-                radius: theme.bubble_max_radius(),
-                size: theme.drawn_marker_size(crate::SizeSpec::Auto),
-            },
+            Mark::Scatter(mark) => {
+                let (color, mapped) = match &mark.options().color {
+                    PointColor::Uniform(spec) => (color_of(*spec, &mark.options().label), None),
+                    PointColor::By(by) => (theme.text_color(), Some(MappedColors::of(by))),
+                };
+                ResolvedMark::Scatter {
+                    mark,
+                    geometry: None,
+                    color,
+                    size: theme.drawn_marker_size(mark.options().size),
+                    mapped,
+                }
+            }
+            Mark::Bubbles(mark) => {
+                let (color, mapped) = match &mark.options().color {
+                    PointColor::Uniform(spec) => (color_of(*spec, &mark.options().label), None),
+                    PointColor::By(by) => (theme.text_color(), Some(MappedColors::of(by))),
+                };
+                ResolvedMark::Bubbles {
+                    mark,
+                    geometry: None,
+                    color,
+                    maximum: bubble_maximum,
+                    radius: theme.bubble_max_radius(),
+                    size: theme.drawn_marker_size(crate::SizeSpec::Auto),
+                    mapped,
+                }
+            }
             Mark::Stem(mark) => ResolvedMark::Stem {
                 mark,
                 geometry: None,
@@ -3208,7 +3269,7 @@ mod tests {
             // Lines and scatters alternate; both take Auto slots from the same sequence.
             if i % 2 == 0 {
                 let options = ScatterOptions {
-                    color,
+                    color: PointColor::Uniform(color),
                     ..ScatterOptions::default()
                 };
                 a.scatter(nums(&[i as f64]), &[1.0], options).unwrap();

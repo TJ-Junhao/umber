@@ -9,11 +9,17 @@
 //! | 0 | `Color.AUTO` | unused (0) | the opacity |
 //! | 1 | `Color.palette(index)` | the index | the opacity |
 //! | 2 | a fixed color | `0xRRGGBBAA` | ignored: the opacity is part of the payload |
+//!
+//! The color of a scatter or bubble mark is such a tuple, or a native `ColorBy`: values mapped
+//! through a colormap, checked when it is built.
 
 use pyo3::prelude::*;
-use umber_core::{Alpha, ColorSpec, Error, Rgba};
+use umber_core::{Alpha, CmapChoice, ColorSpec, Error, PointColor, Rgba, ScaleKind, Transform};
 
-use crate::errors::{core_error, internal_value};
+use crate::cmap::Cmap;
+use crate::errors::{core_error, internal_type, internal_value};
+use crate::scale::scale_kind;
+use crate::values::shared_floats;
 
 /// The `kind` of a color argument for `Color.AUTO`.
 const AUTO: i64 = 0;
@@ -156,6 +162,58 @@ pub(crate) fn concrete_list(
             .map_err(core_error)
         })
         .collect()
+}
+
+/// A color mapping: one value per point mapped through a colormap. It is checked when it is
+/// built, so a mark method only checks it against the axes.
+#[pyclass(module = "umber._umber", frozen)]
+pub(crate) struct ColorBy(umber_core::ColorBy);
+
+#[pymethods]
+impl ColorBy {
+    /// Maps `values` through `cmap` (`None` for the theme's colormap) on the linear or log scale
+    /// argument `(scale, base)`, centered on `center` when given. A category scale is an
+    /// internal `ValueError`.
+    #[new]
+    fn new(
+        values: &Bound<'_, PyAny>,
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+        center: Option<f64>,
+    ) -> PyResult<ColorBy> {
+        let scale = match scale_kind(scale, base)? {
+            ScaleKind::Linear => Transform::Linear,
+            ScaleKind::Log { base } => Transform::Log(base),
+            _ => {
+                return Err(internal_value(
+                    "a color mapping needs a linear or log scale",
+                ));
+            }
+        };
+        let by = umber_core::ColorBy {
+            values: shared_floats(values)?,
+            cmap: cmap.map_or(CmapChoice::Theme, |cmap| {
+                CmapChoice::Fixed(cmap.core().clone())
+            }),
+            scale,
+            center,
+        };
+        by.check().map_err(core_error)?;
+        Ok(ColorBy(by))
+    }
+}
+
+/// Converts the color of a scatter or bubble mark: a color argument `(kind, payload, alpha)`
+/// or a native `ColorBy`. Anything else is an internal `TypeError`.
+pub(crate) fn point_color(color: &Bound<'_, PyAny>) -> PyResult<PointColor> {
+    if let Ok(by) = color.cast::<ColorBy>() {
+        return Ok(PointColor::By(by.get().0.clone()));
+    }
+    let arg: ColorArg = color
+        .extract()
+        .map_err(|_| internal_type("expected a color argument or a ColorBy"))?;
+    color_spec(arg).map(PointColor::Uniform)
 }
 
 #[cfg(test)]

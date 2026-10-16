@@ -654,7 +654,7 @@ fn bubbles_keep_order_options_and_shared_copies() {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let opts = BubbleOptions {
         label: "Data".into(),
-        color: ColorSpec::Fixed(Rgba::RED),
+        color: crate::PointColor::Uniform(ColorSpec::Fixed(Rgba::RED)),
         marker: Marker::Diamond,
     };
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)

@@ -38,6 +38,7 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<theme::Theme>()?;
     m.add_class::<cmap::Cmap>()?;
     m.add_class::<figure::Figure>()?;
+    m.add_class::<color::ColorBy>()?;
     m.add_function(wrap_pyfunction!(enums::enum_members, m)?)?;
     m.add_function(wrap_pyfunction!(figure::grid_auto_size, m)?)?;
     m.add_function(wrap_pyfunction!(figure::grid_cells, m)?)?;

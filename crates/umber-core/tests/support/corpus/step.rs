@@ -89,7 +89,7 @@ fn figures() -> Vec<(String, Figure)> {
                     AxisData::Numbers(x.clone()),
                     &y,
                     ScatterOptions {
-                        color: first_color(),
+                        color: umber_core::PointColor::Uniform(first_color()),
                         ..ScatterOptions::default()
                     },
                 )

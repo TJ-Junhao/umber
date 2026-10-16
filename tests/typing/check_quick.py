@@ -12,6 +12,8 @@ t = [0.0, 1.0, 2.0]
 # Positive: return types, and chaining through ``figure``.
 assert_type(ub.line(t, t), ub.Axes[float, float])
 assert_type(ub.scatter(t, t, marker=ub.Marker.TRIANGLE), ub.Axes[float, float])
+assert_type(ub.scatter(t, t, color=ub.ColorBy(t)), ub.Axes[float, float])
+assert_type(ub.scatter(t, t, color=ub.ColorBy(t, ub.Cmap.MAGMA, center=1)), ub.Axes[float, float])
 assert_type(ub.bar(["A", "B"], [3, 5]), ub.Axes[str, float])
 assert_type(ub.hist(t, bins=5), ub.Axes[float, float])
 assert_type(ub.line(t, t, theme=ub.Theme.GRAPHITE).title("Signal"), ub.Axes[float, float])

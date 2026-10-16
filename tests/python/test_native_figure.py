@@ -374,6 +374,7 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "grouped_box_plot": lambda f, r, c: f.grouped_box_plot(r, c, ["a"], [("s", [floats(1)], AUTO)]),
     "violin": lambda f, r, c: f.violin(r, c, ["a"], [floats(1)], "", AUTO),
     "grouped_violin": lambda f, r, c: f.grouped_violin(r, c, ["a"], [("s", [floats(1)], AUTO)]),
+    "clim": lambda f, r, c: f.clim(r, c, 0.0, 1.0),
 }
 
 

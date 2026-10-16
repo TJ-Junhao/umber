@@ -33,7 +33,7 @@ use umber_core::{
 };
 use umber_core::{AxisData, BoxOptions, Distribution, StemOptions};
 
-use crate::color::{ColorArg, color_spec};
+use crate::color::{ColorArg, color_spec, point_color};
 use crate::enums::enum_value;
 use crate::errors::{core_error, internal_value};
 use crate::scale::scale_kind;
@@ -436,14 +436,14 @@ impl Figure {
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         label: String,
-        color: ColorArg,
+        color: &Bound<'_, PyAny>,
         marker: i64,
         size: SizeArg,
     ) -> PyResult<()> {
         let (x, y) = (axis_data(x)?, axis_data(y)?);
         let options = ScatterOptions {
             label,
-            color: color_spec(color)?,
+            color: point_color(color)?,
             marker: enum_value::<Marker>(marker)?,
             size: size_spec(size)?,
             ..Default::default()
@@ -463,13 +463,13 @@ impl Figure {
         y: &Bound<'_, PyAny>,
         sizes: &Bound<'_, PyAny>,
         label: String,
-        color: ColorArg,
+        color: &Bound<'_, PyAny>,
         marker: i64,
     ) -> PyResult<()> {
         let (x, y, sizes) = (shared_floats(x)?, shared_floats(y)?, shared_floats(sizes)?);
         let options = umber_core::BubbleOptions {
             label,
-            color: color_spec(color)?,
+            color: point_color(color)?,
             marker: enum_value::<Marker>(marker)?,
             ..Default::default()
         };
@@ -900,5 +900,13 @@ impl Figure {
     /// Renders the figure as an SVG document for `Figure.save_svg()`, which reports its errors.
     fn svg_for_file(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
         Self::svg(slf, text, "Figure.save_svg()")
+    }
+
+    /// Sets the color range of the axes' color-mapped marks.
+    fn clim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
+        self.axes(row, col)?
+            .clim(low, high)
+            .map(drop)
+            .map_err(core_error)
     }
 }
