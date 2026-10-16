@@ -426,6 +426,10 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the legend style of these axes, overriding the theme's style.
     /// [`LegendStyle::None`] hides the legend. Calling it again replaces the style.
+    /// Filled swatches show the fill composited over the plot background, drawn opaque.
+    /// Gradients use their most opaque end: 0.32 of the series opacity for areas, 0.95 for
+    /// histograms. Area swatches keep their line shape. Direct labels and box and violin
+    /// outlines retain the series color. Panel and merged figure legends use the same rule.
     ///
     /// # Examples
     ///
@@ -603,6 +607,13 @@ impl<'a> AxesMut<'a> {
     /// circle; labels that round to zero are omitted. If all labels round to zero, only the
     /// largest reference circle remains, with an automatic label for its size, without the y
     /// format or its affixes. An all-zero or empty scale has only label entries.
+    /// Automatic limits fit the whole circles and their outlines at the final plot size,
+    /// before tick rounding and padding, in log space on log axes. Shared axes fit all their
+    /// panels' bubbles. Explicit limits still clip, and scatter limits are unchanged.
+    /// Rendering returns `Error::Style` if a diameter including its outline is at least the
+    /// plot length on an automatic axis, or fitting needs an unsupported numeric range.
+    /// Enlarge the figure or set explicit limits to allow clipping. Legend swatches and size
+    /// circles show the fill composited over the plot background, drawn opaque.
     ///
     /// A merged figure legend also shows only one set, after its first labelled bubble entry,
     /// using that panel's scale and y tick format. Panels do not share a size scale unless

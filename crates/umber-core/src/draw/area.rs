@@ -13,7 +13,7 @@ use crate::{FillStyle, Rgba};
 /// The opacity of an area fill, as a share of the line's own opacity: all over under
 /// [`FillStyle::Solid`], at the line's extreme under [`FillStyle::Gradient`], from which the
 /// gradient ramps down to 0 at the baseline.
-pub(super) const AREA_ALPHA: f32 = 0.32;
+pub(super) use crate::color::AREA_ALPHA;
 /// Parts of an area less tall than this, in points, are not filled (the part is empty, and a
 /// gradient across it would have no length).
 const MIN_AREA_HEIGHT: f64 = 0.01;

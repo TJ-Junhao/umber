@@ -1,3 +1,189 @@
 # Cases whose committed outputs change on purpose in this change.
-# Preserve cumulative-curve extrema in the half-stroke strips beyond the x limits.
-stacked-area-long-limits
+# Band swatches use the opaque composite of the 0.32-alpha fill.
+band-gaps-graphite
+# Band swatches use the opaque composite of the 0.32-alpha fill.
+band-gaps-midnight
+# Band swatches use the opaque composite of the 0.32-alpha fill.
+band-gaps-pigment
+# Band swatches use the same fill composite in grid legends.
+band-grid
+# Band chip swatches use the plot-background composite, not the chip tint.
+band-legend-chips
+# Band row swatches use the fill composite even under direct legend style.
+band-legend-direct
+# Band header swatches use the fill composite.
+band-legend-header
+# Band swatches use the fill composite; explicit limits remain unchanged.
+band-limits-exact
+# Band swatches use the fill composite; explicit limits remain unchanged.
+band-limits-midnight
+# Band swatches use the fill composite; explicit limits remain unchanged.
+band-limits-pigment
+# Band swatches use the fill composite on log x axes.
+band-log-x
+# Band swatches use the fill composite on log y axes.
+band-log-y
+# Band swatches use the fill composite; the mean line retains its color.
+band-mean-graphite
+# Band swatches use the fill composite; the mean line retains its color.
+band-mean-midnight
+# Band swatches use the fill composite; the mean line retains its color.
+band-mean-pigment
+# Band swatches use the fill composite even when the band is outside the limits.
+band-outside-limits
+# Band swatches use the fill composite; scatter swatches remain unchanged.
+band-with-scatter
+# Box swatch interiors are opaque plot-background composites; outlines retain series color.
+box-graphite
+# Box swatch interiors are opaque composites; explicit limits remain unchanged.
+box-limits-graphite
+# Box swatch interiors are opaque composites; explicit limits remain unchanged.
+box-limits-midnight
+# Box swatch interiors are opaque composites; explicit limits remain unchanged.
+box-limits-pigment
+# Box chip swatches use opaque plot-background composites, not the chip tint.
+box-midnight
+# Box swatch interiors are opaque plot-background composites; outlines retain series color.
+box-pigment
+# Automatic limits fit full bubbles; label and size swatches use opaque fill composites.
+bubbles-best-graphite
+# Automatic limits fit full bubbles; label and size swatches use opaque fill composites.
+bubbles-best-midnight
+# Automatic limits fit full bubbles; label and size swatches use opaque fill composites.
+bubbles-best-pigment
+# Automatic limits fit full bubbles; bottom legend swatches use opaque fill composites.
+bubbles-bottom-graphite
+# Automatic limits fit full bubbles; bottom legend swatches use opaque fill composites.
+bubbles-bottom-midnight
+# Automatic limits fit full bubbles; bottom legend swatches use opaque fill composites.
+bubbles-bottom-pigment
+# Bubble label and size swatches use opaque fill composites; explicit clipping is unchanged.
+bubbles-gaps-limits
+# Automatic limits fit full bubbles; label and size swatches use opaque fill composites.
+bubbles-graphite
+# Automatic limits fit full bubbles; merged legend swatches use opaque fill composites.
+bubbles-merged-graphite
+# Automatic limits fit full bubbles; merged legend swatches use opaque fill composites.
+bubbles-merged-midnight
+# Automatic limits fit full bubbles; merged legend swatches use opaque fill composites.
+bubbles-merged-pigment
+# Automatic limits fit full bubbles; label and size swatches use opaque fill composites.
+bubbles-midnight
+# Automatic limits fit full bubbles; percentage size swatches use opaque fill composites.
+bubbles-percent-graphite
+# Automatic limits fit full bubbles; percentage size swatches use opaque fill composites.
+bubbles-percent-midnight
+# Automatic limits fit full bubbles; percentage size swatches use opaque fill composites.
+bubbles-percent-pigment
+# Automatic limits fit full bubbles; label and size swatches use opaque fill composites.
+bubbles-pigment
+# Automatic limits fit full bubbles; right legend swatches use opaque fill composites.
+bubbles-right-graphite
+# Automatic limits fit full bubbles; right legend swatches use opaque fill composites.
+bubbles-right-midnight
+# Automatic limits fit full bubbles; right legend swatches use opaque fill composites.
+bubbles-right-pigment
+# Automatic limits fit all bubble marks; label and size swatches use opaque fill composites.
+bubbles-shared-scale-graphite
+# Automatic limits fit all bubble marks; label and size swatches use opaque fill composites.
+bubbles-shared-scale-midnight
+# Automatic limits fit all bubble marks; label and size swatches use opaque fill composites.
+bubbles-shared-scale-pigment
+# Automatic limits fit full bubbles; inset legend swatches use opaque fill composites.
+bubbles-top-left-graphite
+# Automatic limits fit full bubbles; inset legend swatches use opaque fill composites.
+bubbles-top-left-midnight
+# Automatic limits fit full bubbles; inset legend swatches use opaque fill composites.
+bubbles-top-left-pigment
+# Automatic limits fit full bubbles; inset legend swatches use opaque fill composites.
+bubbles-top-right-graphite
+# Automatic limits fit full bubbles; inset legend swatches use opaque fill composites.
+bubbles-top-right-midnight
+# Automatic limits fit full bubbles; inset legend swatches use opaque fill composites.
+bubbles-top-right-pigment
+# Area swatches represent the nominal peak fill composite, including clipped gradients.
+fig-area-beyond-y-midnight
+# Area swatches represent the fill composite; log limits remain unchanged.
+fig-area-beyond-y-pigment-log
+# Area chip swatches use the plot-background fill composite, not the chip tint.
+fig-area-chips
+# Gradient area swatches represent the nominal 0.32-opacity colored end.
+fig-area-gradient-pigment
+# Gradient area swatches represent the nominal peak fill composite on log y axes.
+fig-area-log-y-midnight
+# Gradient area swatches represent the nominal 0.32-opacity colored end.
+fig-area-midnight
+# Area swatches represent the fill composite; NaN gaps remain unchanged.
+fig-area-nan-gaps-midnight
+# Area swatches represent the fill composite; NaN gaps remain unchanged.
+fig-area-nan-gaps-pigment
+# Solid area swatches represent the 0.32-opacity fill composite.
+fig-area-pigment
+# Solid area swatches represent the 0.32-opacity fill composite.
+fig-area-solid-midnight
+# Area swatches use the fill composite; scatter swatches remain unchanged.
+fig-area-with-scatter
+# Category-area chip swatches use the opaque fill composite.
+fig-size-category-chips
+# Area header swatches use the fill composite while retaining their width and dash.
+fig-size-header-graphite
+# Area header swatches use the fill composite while retaining their width and dash.
+fig-size-header-midnight
+# Area header swatches use the fill composite while retaining their width and dash.
+fig-size-header-pigment
+# Area chip swatches use the opaque fill composite.
+fig-size-theme-legend-midnight
+# Area header swatches use the opaque fill composite.
+fig-size-theme-legend-pigment
+# Reference-span swatches use the opaque composite of their 0.32-alpha fills.
+rules-alone
+# Reference-span swatches use the fill composite on category axes.
+rules-category-graphite
+# Reference-span swatches use the fill composite on category axes.
+rules-category-pigment
+# Reference-span swatches use the fill composite; explicit limits remain unchanged.
+rules-explicit-limits-graphite
+# Reference-span swatches use the fill composite; explicit limits remain unchanged.
+rules-explicit-limits-midnight
+# Reference-span swatches use the fill composite in grid legends.
+rules-grid
+# Reference-span swatches use the fill composite; drawing order remains unchanged.
+rules-layers
+# Reference-span chip swatches use the plot-background composite, not the chip tint.
+rules-legend-chips
+# Reference-span row swatches use the fill composite under direct legend style.
+rules-legend-direct
+# Reference-span header swatches use the fill composite.
+rules-legend-header
+# Reference-span swatches use the fill composite on log axes.
+rules-log-axes
+# Reference-span swatches use the fill composite; reference-line colors stay unchanged.
+rules-reference-graphite
+# Reference-span swatches use the fill composite; reference-line colors stay unchanged.
+rules-reference-midnight
+# Reference-span swatches use the fill composite; reference-line colors stay unchanged.
+rules-reference-pigment
+# Reference-span swatches use the fill composite; reference-line styles stay unchanged.
+rules-styles
+# Stacked-area swatches use opaque 0.32-alpha fill composites, not outline colors.
+stacked-area-gaps-midnight
+# Stacked-area swatches use opaque 0.32-alpha fill composites, not outline colors.
+stacked-area-gaps-pigment
+# Stacked-area swatches use opaque 0.32-alpha fill composites, not outline colors.
+stacked-area-midnight
+# Stacked-area swatches use opaque 0.32-alpha fill composites, not outline colors.
+stacked-area-pigment
+# Area swatches use the fill composite; step and line swatches remain unchanged.
+step-with-line-and-area
+# Violin swatch interiors are opaque plot-background composites; outlines retain series color.
+violin-graphite
+# Violin swatch interiors are opaque composites; explicit limits remain unchanged.
+violin-limits-graphite
+# Violin swatch interiors are opaque composites; explicit limits remain unchanged.
+violin-limits-midnight
+# Violin swatch interiors are opaque composites; explicit limits remain unchanged.
+violin-limits-pigment
+# Violin chip swatches use opaque plot-background composites, not the chip tint.
+violin-midnight
+# Violin swatch interiors are opaque plot-background composites; outlines retain series color.
+violin-pigment

@@ -73,6 +73,10 @@ This is the chart at the top of this page. Data can be a list, a tuple, a NumPy 
 | Stem | `ax.stem(x, y)` |
 | Reference lines and spans | `ax.hline(y)`, `ax.vline(x)`, `ax.hspan(low, high)`, `ax.vspan(low, high)` |
 
+Automatic bubble limits contain the whole circles and their outlines, including on log and shared axes. Explicit limits still clip. If a circle's diameter including its outline is at least the available plot length on an automatic axis, rendering raises `StyleError`: enlarge the figure or set explicit limits to allow clipping. A fit beyond the supported numeric range also raises `StyleError`. Scatter limits are unchanged.
+
+Legend swatches of filled marks show the fill composited over the plot background, drawn opaque, in both panel and merged legends. Gradient swatches use the most opaque end of the fill (0.32 of the series opacity for areas, 0.95 for histograms), so the swatch represents the colored end rather than the transparent baseline. Direct labels and box and violin outlines keep the series color.
+
 Bar, box and violin charts need a category x axis: `fig.add_axes(x=ub.Scale.category())`. Log axes use `ub.Scale.log()`. Limits, ticks and tick label formats are set with `xlim`, `ylim`, `xticks`, `xticks_labeled`, `ytick_format(ub.TickFormat.percent())` and their counterparts on the other axis.
 
 <p>

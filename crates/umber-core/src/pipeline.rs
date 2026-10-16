@@ -5,6 +5,7 @@
 //! panel of a figure at once; [`scene`] then draws each panel's chrome, marks, legend and
 //! baseline.
 
+use crate::bubble_fit::{Bubble, BubbleFit};
 use crate::layout::{
     self, FigureHeader, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize,
     TickSpacing,
@@ -247,6 +248,7 @@ fn resolve_groups(
     limits: &[Limits<'_>],
     groups: &ShareGroups,
     rooms: &[[layout::TickRoom<'_>; 2]],
+    bubble_extents: &[[Option<(f64, f64)>; 2]],
 ) -> Vec<Resolved> {
     let mut resolved: Vec<Resolved> = Vec::with_capacity(panels.len());
     for i in 0..panels.len() {
@@ -256,7 +258,7 @@ fn resolve_groups(
                 .enumerate()
                 .filter(|(j, _)| groups.x[*j] == i)
                 .flat_map(|(_, panel)| panel.marks.iter());
-            resolve::resolve_x(marks, limits[i].x, &rooms[i][0])
+            resolve::resolve_x(marks, limits[i].x, &rooms[i][0], bubble_extents[i][0])
         } else {
             resolved[groups.x[i]].x.clone()
         };
@@ -266,7 +268,7 @@ fn resolve_groups(
                 .enumerate()
                 .filter(|(j, _)| groups.y[*j] == i)
                 .flat_map(|(_, panel)| panel.marks.iter());
-            resolve::resolve_y(marks, limits[i].y, &rooms[i][1])
+            resolve::resolve_y(marks, limits[i].y, &rooms[i][1], bubble_extents[i][1])
         } else {
             let r = &resolved[groups.y[i]];
             (r.y.clone(), r.baseline)
@@ -274,6 +276,157 @@ fn resolve_groups(
         resolved.push(Resolved { x, y, baseline });
     }
     resolved
+}
+
+/// Bubble constraints for each shared scale; explicit limits never get a fit.
+fn bubble_fits(
+    panels: &[Panel<'_>],
+    limits: &[Limits<'_>],
+    groups: &ShareGroups,
+    context: &'static str,
+) -> Result<Vec<[Option<BubbleFit>; 2]>> {
+    let mut fits = Vec::with_capacity(panels.len());
+    for (i, limits) in limits.iter().enumerate() {
+        let mut pair = [None, None];
+        for side in Side::BOTH {
+            if side.groups(groups)[i] != i {
+                continue;
+            }
+            let limit = match side {
+                Side::X => match limits.x {
+                    resolve::AxisLimits::Continuous(limit) => limit,
+                    resolve::AxisLimits::Category => continue,
+                },
+                Side::Y => limits.y,
+            };
+            if limit.explicit.is_some() {
+                continue;
+            }
+            let members = panels
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| side.groups(groups)[*j] == i);
+            if !members.clone().any(|(_, member)| {
+                member
+                    .marks
+                    .iter()
+                    .any(|mark| matches!(mark, ResolvedMark::Bubbles { .. }))
+            }) {
+                continue;
+            }
+            let mut bubbles = Vec::new();
+            let mut extent = (f64::INFINITY, f64::NEG_INFINITY);
+            let mut add = |v: f64| {
+                if v.is_finite() {
+                    extent = (extent.0.min(v), extent.1.max(v));
+                }
+            };
+            for (panel, member) in members {
+                for mark in &member.marks {
+                    let values = match side {
+                        Side::X => mark.x_numbers(),
+                        Side::Y => mark.y_values(),
+                    };
+                    values.for_each(&mut add);
+                    if side == Side::Y
+                        && limit.transform == crate::Transform::Linear
+                        && mark.grows_from_baseline()
+                    {
+                        add(0.0);
+                    }
+                    if let ResolvedMark::Bubbles {
+                        mark,
+                        maximum,
+                        radius,
+                        ..
+                    } = mark
+                    {
+                        for ((&x, &y), &size) in mark.x().iter().zip(mark.y()).zip(mark.sizes()) {
+                            let r = crate::bubble_scale::radius(size, *maximum, *radius);
+                            if x.is_finite() && y.is_finite() && r > 0.0 {
+                                bubbles.push(Bubble {
+                                    value: match side {
+                                        Side::X => x,
+                                        Side::Y => y,
+                                    },
+                                    radius: f64::from(r) + f64::from(draw::MARKER_OUTLINE) / 2.0,
+                                    panel,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            if bubbles.is_empty() {
+                continue;
+            }
+            if let Some(ticks) = limit.ticks.explicit() {
+                match ticks {
+                    crate::ExplicitTicks::Positions(values) => {
+                        values.iter().copied().for_each(&mut add)
+                    }
+                    crate::ExplicitTicks::Labeled(ticks) => {
+                        ticks.iter().map(|tick| tick.value).for_each(&mut add)
+                    }
+                }
+            }
+            pair[side.index()] = Some(BubbleFit {
+                seed: crate::ContinuousScale::from_extent(limit.transform, Some(extent), context)?,
+                bubbles,
+            });
+        }
+        fits.push(pair);
+    }
+    Ok(fits)
+}
+
+/// Adds the fitted data extent before normal tick rounding and padding. Subsequent passes
+/// repair only circles that no longer fit after the plot size or rounded domain changes.
+fn fit_bubble_extents(
+    fits: &[[Option<BubbleFit>; 2]],
+    plots: &[PlotSize],
+    resolved: &[Resolved],
+    extents: &mut [[Option<(f64, f64)>; 2]],
+    context: &'static str,
+) -> Result<bool> {
+    let mut changed = false;
+    for side in Side::BOTH {
+        let lengths: Vec<_> = plots
+            .iter()
+            .map(|p| match side {
+                Side::X => p.width,
+                Side::Y => p.height,
+            })
+            .collect();
+        for (i, pair) in fits.iter().enumerate() {
+            let Some(fit) = &pair[side.index()] else {
+                continue;
+            };
+            let scale = match side {
+                Side::X => match resolved[i].x.scale {
+                    resolve::AxisScale::Continuous(scale) => scale,
+                    resolve::AxisScale::Category(_) => continue,
+                },
+                Side::Y => resolved[i].y.scale,
+            };
+            let extent = &mut extents[i][side.index()];
+            let seed = if extent.is_none() {
+                fit.seed
+            } else if fit.contains(scale, &lengths) {
+                continue;
+            } else {
+                scale
+            };
+            *extent = Some(fit.fit(seed, &lengths, context).map_err(|error| {
+                error.with_message_prefix(match side {
+                    Side::X => "x axis: ",
+                    Side::Y => "y axis: ",
+                })
+            })?);
+            changed = true;
+        }
+    }
+    Ok(changed)
 }
 
 /// Resolves and lays out every panel of `figure`, whose records are `panels`.
@@ -293,8 +446,11 @@ fn resolve_groups(
 /// fewer the next, and the grid is solved again. A side whose ticks number two, whose new
 /// choice does not fit even on the plot it was made for, or whose new choice the grid cannot
 /// hold (the solve fails, and the previous solve is kept) keeps its ticks. Each side is chosen
-/// again at most twice per number of ticks, and its ticks never grow in number, so the loop
-/// ends.
+/// again at most twice per number of ticks, and its ticks never grow in number while the
+/// domain stays fixed. Bubbles first fit their whole circles to the raw data extent on these
+/// plot sizes, before tick rounding and padding. The fit is checked again after each solve,
+/// including on shared panels with hidden tick labels. At most 32 domain refinements are
+/// allowed; an unsettled or unrepresentable fit returns a style error, never a clipped circle.
 ///
 /// The panels are then placed for the final solve ([`layout::place_panel`]), and on a grid the
 /// texts of every panel are checked to stay in its cells ([`layout::check_panel_contents`]).
@@ -333,6 +489,8 @@ fn plan(
     };
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
     let groups = ShareGroups::new(figure);
+    let fits = bubble_fits(panels, &limits, &groups, context)?;
+    let mut bubble_extents = vec![[None; 2]; panels.len()];
     let show_labels: Vec<_> = panels
         .iter()
         .map(|panel| label_visibility(figure, panel.axes.cells()))
@@ -368,6 +526,7 @@ fn plan(
         &limits,
         &groups,
         &rooms_for(&guesses, TickSpacing::Target),
+        &bubble_extents,
     );
     let first: Vec<PanelBands> = first
         .iter()
@@ -378,7 +537,7 @@ fn plan(
     let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
 
     // The final pass: tick labels kept apart on the plot sizes of the first.
-    let resolve_choices = |choices: &[[TickChoice; 2]]| {
+    let resolve_choices = |choices: &[[TickChoice; 2]], extents: &[[Option<(f64, f64)>; 2]]| {
         let rooms: Vec<_> = choices
             .iter()
             .map(|c| {
@@ -388,7 +547,7 @@ fn plan(
                 ]
             })
             .collect();
-        resolve_groups(panels, &limits, &groups, &rooms)
+        resolve_groups(panels, &limits, &groups, &rooms, extents)
     };
     let mut choices: Vec<[TickChoice; 2]> = (0..panels.len())
         .map(|i| {
@@ -404,6 +563,7 @@ fn plan(
         &limits,
         &groups,
         &rooms_for(&plots, TickSpacing::Deferred),
+        &bubble_extents,
     );
     let mut bands: Vec<PanelBands> = resolved
         .iter()
@@ -426,7 +586,7 @@ fn plan(
             solution
         }
         _ => {
-            resolved = resolve_choices(&choices);
+            resolved = resolve_choices(&choices, &bubble_extents);
             bands = resolved
                 .iter()
                 .enumerate()
@@ -441,7 +601,18 @@ fn plan(
         .iter()
         .map(|r| 2 * (r.x.ticks.len() + r.y.ticks.len()) + 1)
         .sum();
-    for _ in 0..rounds {
+    // Domain fitting and tick rounding can change each other's geometry. Bound retries and
+    // report failure rather than returning a scene with a clipped automatic bubble.
+    const MAX_BUBBLE_FITS: usize = 32;
+    let mut fit_rounds = 0;
+    let unsettled = || {
+        crate::Error::style(
+            context,
+            "automatic bubble limits did not settle on the final plot size.",
+        )
+        .with_hint("make the figure larger, or set explicit limits to allow clipping.")
+    };
+    for _ in 0..rounds + MAX_BUBBLE_FITS {
         // The sides whose labels crowd on the solved plots, chosen again.
         let mut next = choices.clone();
         let mut again: Vec<(usize, Side)> = Vec::new();
@@ -450,6 +621,20 @@ fn plan(
             .iter()
             .map(|slot| slot.plot.size())
             .collect();
+        if fit_bubble_extents(&fits, &plots, &resolved, &mut bubble_extents, context)? {
+            if fit_rounds == MAX_BUBBLE_FITS {
+                return Err(unsettled());
+            }
+            fit_rounds += 1;
+            resolved = resolve_choices(&choices, &bubble_extents);
+            bands = resolved
+                .iter()
+                .enumerate()
+                .map(|(i, r)| measure(i, r))
+                .collect();
+            solution = layout::solve_grid(&grid, &bands)?;
+            continue;
+        }
         for (i, r) in resolved.iter().enumerate() {
             for side in Side::BOTH {
                 if side.groups(&groups)[i] != i {
@@ -474,7 +659,7 @@ fn plan(
         if again.is_empty() {
             break;
         }
-        let tried_resolved = resolve_choices(&next);
+        let tried_resolved = resolve_choices(&next, &bubble_extents);
         let tried_bands: Vec<_> = tried_resolved
             .iter()
             .enumerate()
@@ -505,6 +690,15 @@ fn plan(
                 }
             }
         }
+    }
+
+    let plots: Vec<_> = solution
+        .panels
+        .iter()
+        .map(|slot| slot.plot.size())
+        .collect();
+    if fit_bubble_extents(&fits, &plots, &resolved, &mut bubble_extents, context)? {
+        return Err(unsettled());
     }
 
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = inputs

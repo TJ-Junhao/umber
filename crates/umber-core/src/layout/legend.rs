@@ -69,8 +69,10 @@ fn row_top(row: usize, row_height: f64) -> f64 {
 pub(crate) struct SwatchBox {
     /// The swatch kind.
     pub kind: Swatch,
-    /// The series color, alpha included.
+    /// The series color, alpha included, for outlines and chip tints.
     pub color: Rgba,
+    /// The representative fill over the plot background, or the unfilled series color.
+    pub fill: Rgba,
     /// The left edge.
     pub x: f64,
     /// The vertical center.
@@ -174,6 +176,7 @@ impl MeasuredRow {
                     swatch: SwatchBox {
                         kind,
                         color: entry.color(),
+                        fill: entry.fill_color(theme),
                         x: 0.0,
                         center_y: 0.0,
                         width: w,

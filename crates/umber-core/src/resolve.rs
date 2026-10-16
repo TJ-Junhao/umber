@@ -9,6 +9,9 @@
 //! along its line. A linear y axis that holds bars, a histogram or an area always includes 0, and a
 //! side of its nice domain that ends at 0 is not padded, so bars start on the plot edge. A category
 //! axis lists the marks' categories in order of first appearance.
+//! Bubbles contribute their whole circles and outlines, not only their centers: the final
+//! layout fits each shared automatic scale in axis space before this rounding and padding,
+//! then checks containment on the solved plot. Explicit limits and scatter are unchanged.
 //! The baseline sits at 0 when 0 lies inside a linear y domain, and otherwise at the y axis's
 //! lower limit before padding. Auto y limits keep that lower limit strictly below the data: when
 //! the smallest y value lands on (or within 5 % of the span above) the lowest nice tick, the
@@ -32,7 +35,7 @@ use std::collections::BTreeMap;
 use crate::binning::Histogram;
 use crate::error::quoted;
 use crate::layout::TickRoom;
-use crate::legend::{LegendEntry, Swatch};
+use crate::legend::{LegendEntry, Swatch, SwatchFill};
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
     Mark, ScatterMark, SeriesView, StepMark,
@@ -622,8 +625,8 @@ pub(crate) fn resolve(
     x_room: &TickRoom<'_>,
     y_room: &TickRoom<'_>,
 ) -> Resolved {
-    let x = resolve_x(marks.iter(), limits.x, x_room);
-    let (y, baseline) = resolve_y(marks.iter(), limits.y, y_room);
+    let x = resolve_x(marks.iter(), limits.x, x_room, None);
+    let (y, baseline) = resolve_y(marks.iter(), limits.y, y_room, None);
     Resolved { x, y, baseline }
 }
 
@@ -633,10 +636,16 @@ pub(crate) fn resolve_x<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
     limits: AxisLimits<'_>,
     room: &TickRoom<'_>,
+    bubble_extent: Option<(f64, f64)>,
 ) -> ResolvedAxis {
     match limits {
         AxisLimits::Continuous(x_limits) => {
-            let data = extent(marks.clone().flat_map(|mark| mark.x_numbers()));
+            let data = extent(
+                marks
+                    .clone()
+                    .flat_map(|mark| mark.x_numbers())
+                    .chain(bubble_extent.into_iter().flat_map(|(lo, hi)| [lo, hi])),
+            );
             // Reference lines and spans do not decide the padding: an axis of lines and
             // references keeps the exact extent of the lines, while an axis of references
             // alone is padded.
@@ -674,9 +683,15 @@ pub(crate) fn resolve_y<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
     limits: ContinuousLimits<'_>,
     room: &TickRoom<'_>,
+    bubble_extent: Option<(f64, f64)>,
 ) -> (ResolvedContinuousAxis, NormalizedPos) {
     let transform = limits.transform;
-    let data = extent(marks.clone().flat_map(|mark| mark.y_values()));
+    let data = extent(
+        marks
+            .clone()
+            .flat_map(|mark| mark.y_values())
+            .chain(bubble_extent.into_iter().flat_map(|(lo, hi)| [lo, hi])),
+    );
     // Bars and areas grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
     // edge when it is a limit. On a log axis they grow from the baseline.
     // With no data at all, explicit ticks still use the baseline convention of the mark.
@@ -1328,13 +1343,36 @@ impl<'a> ResolvedMark<'a> {
         self.line_width().is_some() || matches!(self, ResolvedMark::Band { .. })
     }
 
+    /// The fill represented by a legend row, independent of swatch shape and direct labels.
+    pub fn swatch_fill(&self) -> SwatchFill {
+        match self {
+            Self::Area { .. }
+            | Self::StackedArea { .. }
+            | Self::Band { .. }
+            | Self::HSpan { .. }
+            | Self::VSpan { .. }
+            | Self::Box { .. }
+            | Self::Violin { .. } => SwatchFill::Area,
+            Self::Hist { .. } => SwatchFill::Histogram,
+            Self::Bar { .. } | Self::Grouped { .. } | Self::Stacked { .. } => SwatchFill::Solid,
+            Self::Bubbles { .. } => SwatchFill::Marker,
+            Self::Line { .. }
+            | Self::Step { .. }
+            | Self::Scatter { .. }
+            | Self::Stem { .. }
+            | Self::HLine { .. }
+            | Self::VLine { .. }
+            | Self::ErrorBars { .. } => SwatchFill::Unchanged,
+        }
+    }
+
     /// The labelled series' swatches in series order, without resolving direct-label anchors.
     /// Empty labels do not produce entries.
     pub fn legend_swatch(&self) -> Vec<LegendEntry> {
         let one = |label: &str, color, swatch| {
             LegendEntry::new(label, color, swatch).into_iter().collect()
         };
-        match *self {
+        let entries: Vec<LegendEntry> = match *self {
             ResolvedMark::Line {
                 mark, color, width, ..
             } => one(
@@ -1453,7 +1491,11 @@ impl<'a> ResolvedMark<'a> {
                     width,
                 },
             ),
-        }
+        };
+        entries
+            .into_iter()
+            .map(|entry| entry.with_fill(self.swatch_fill()))
+            .collect()
     }
 
     /// Reference circles following a labelled bubble series, using its axes' y tick format.

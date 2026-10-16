@@ -39,6 +39,11 @@ pub struct Rgba {
 
 const HEX_HINT: &str = "use #RRGGBB or #RRGGBBAA.";
 
+/// Area-like fills' opacity, relative to the series color; also the peak of an area gradient.
+pub(crate) const AREA_ALPHA: f32 = 0.32;
+/// The peak opacity of a histogram gradient, relative to the series color.
+pub(crate) const HISTOGRAM_TOP_ALPHA: f32 = 0.95;
+
 impl Rgba {
     /// `#1A1A1A`.
     ///
@@ -249,6 +254,20 @@ impl Rgba {
             a: (f32::from(self.a) * share).round().clamp(0.0, 255.0) as u8,
             ..self
         }
+    }
+
+    /// The opaque sRGB color seen over the background's RGB channels. Uses the same straight
+    /// alpha as solid fills, rounded once to the nearest 8-bit channel.
+    pub(crate) fn over_background(self, background: Rgba) -> Rgba {
+        let alpha = u32::from(self.a);
+        let channel = |front, back| {
+            ((u32::from(front) * alpha + u32::from(back) * (255 - alpha) + 127) / 255) as u8
+        };
+        Rgba::opaque(
+            channel(self.r, background.r),
+            channel(self.g, background.g),
+            channel(self.b, background.b),
+        )
     }
 
     /// Format as `#RRGGBB` when opaque, otherwise `#RRGGBBAA`, using uppercase digits.

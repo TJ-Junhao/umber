@@ -91,6 +91,7 @@
 #![forbid(unsafe_code)]
 
 mod binning;
+mod bubble_fit;
 mod bubble_scale;
 #[cfg(test)]
 mod bubbles_tests;
@@ -101,6 +102,8 @@ mod draw;
 mod error;
 mod exact;
 pub mod figure;
+#[cfg(test)]
+mod fit_and_swatches_tests;
 pub mod fonts;
 pub mod geometry;
 mod layout;

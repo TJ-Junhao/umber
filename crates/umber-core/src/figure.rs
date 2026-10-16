@@ -91,6 +91,12 @@ impl Figure {
     /// figure needs, and the hint suggests making the figure taller or removing whichever of
     /// the title, subtitle and legend it has.
     ///
+    /// Automatic limits also fit whole bubbles and their outlines to the final plot size,
+    /// across every panel sharing the scale. A bubble diameter at least the available plot
+    /// length, a fit outside the supported numeric range, or a fit that cannot settle with
+    /// tick layout is `Error::Style`. Its hint suggests enlarging the figure or setting explicit
+    /// limits to allow clipping; explicit limits and scatter geometry are unchanged.
+    ///
     /// On a grid of more than one cell the same checks run for the grid's columns and rows, in
     /// the same order. A figure too narrow for its columns of plots names the width it needs
     /// (`the figure is … pt wide; at least … pt is needed for 3 columns of plots.`) unless

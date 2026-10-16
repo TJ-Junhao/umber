@@ -90,15 +90,15 @@ fn chip_tint(color: Rgba) -> Rgba {
     color.scale_alpha(CHIP_TINT)
 }
 
-/// The swatch of `entry`, in its series color, inside its swatch box: a line in the series dash
-/// and width, a filled dot, a filled square, or a bar with caps.
+/// The swatch of `entry` inside its box: filled marks use their representative fill color;
+/// other strokes and dots retain the series color, dash and width.
 fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
     let b = entry.swatch;
     match b.kind {
         Swatch::Bubble { radius } => Item::Markers {
             shape: marker_shape(Marker::Circle, 2.0 * radius),
             positions: vec![point(b.x + b.width / 2.0, b.center_y)],
-            fill: Some(b.color.scale_alpha(theme.marker_alpha())),
+            fill: Some(b.fill),
             stroke: Some(crate::scene::StrokeStyle {
                 color: theme.background(),
                 width: super::MARKER_OUTLINE,
@@ -108,7 +108,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
             }),
         },
         Swatch::Line { dash, width } => {
-            let style = line_style(width, b.color, dash);
+            let style = line_style(width, b.fill, dash);
             // Round caps reach half the stroke width past the ends; keep them inside the box.
             let inset = match style.cap {
                 LineCap::Butt => 0.0,
@@ -124,7 +124,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 style,
             }
         }
-        Swatch::Dot { .. } => dot(b.x + b.width / 2.0, b.center_y, b.width, b.color),
+        Swatch::Dot { .. } => dot(b.x + b.width / 2.0, b.center_y, b.width, b.fill),
         Swatch::ErrorBar { vertical, width } => {
             // Each end cap reaches half a stroke beyond its centre line along the bar.
             let inset = f64::from(width) / 2.0;
@@ -167,7 +167,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 items: vec![
                     Item::Fill {
                         path: path.clone(),
-                        paint: Paint::Solid(b.color.scale_alpha(super::area::AREA_ALPHA)),
+                        paint: Paint::Solid(b.fill),
                         rule: FillRule::NonZero,
                     },
                     Item::Stroke {
@@ -204,7 +204,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 items: vec![
                     Item::Fill {
                         path: path.clone(),
-                        paint: Paint::Solid(b.color.scale_alpha(super::area::AREA_ALPHA)),
+                        paint: Paint::Solid(b.fill),
                         rule: FillRule::NonZero,
                     },
                     Item::Stroke {
@@ -226,7 +226,7 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                     (bottom_right.x, bottom_right.y),
                     (top_left.x, bottom_right.y),
                 ]),
-                paint: Paint::Solid(b.color),
+                paint: Paint::Solid(b.fill),
                 rule: FillRule::NonZero,
             }
         }

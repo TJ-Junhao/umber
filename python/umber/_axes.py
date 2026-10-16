@@ -463,6 +463,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         The legend lists marks with a non-empty ``label``; ``LegendStyle.NONE`` hides it.
         Positions apply to single-panel figures and ``Legend.PER_PANEL``. A merged grid
         legend stays under the figure title and subtitle and follows their alignment.
+        Swatches of filled marks show the fill composited over the plot background, drawn
+        opaque. Gradient fills use their most opaque end (0.32 of the series opacity for
+        areas, 0.95 for histograms). Area swatches keep their line shape; direct labels and
+        the outlines of box and violin swatches retain the series color.
 
         Args:
             style: How the legend is laid out.
@@ -665,6 +669,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         finite x and y coordinates has a radius of 18 points. Zero sizes and NaN coordinates
         draw nothing; a zero-size point's position still counts in the axis domains like any
         point. Markers draw in data order, without downsampling, with the theme's marker outline.
+        Automatic limits fit each whole circle and its outline on the final plot, in log space
+        on a log axis, before tick rounding and padding. Shared axes fit bubbles from every
+        panel sharing the scale. Explicit limits still clip; scatter limits are unchanged.
+        Rendering raises ``StyleError`` if a bubble's diameter including its outline is at
+        least the available plot length on an automatic axis, or no supported numeric range
+        can contain it. Enlarge the figure or set explicit limits to allow clipping.
+        Legend swatches and size circles show the fill composited over the plot background,
+        drawn opaque.
         Up to three reference circles at their true radius appear once, after the first labelled
         bubble entry, formatted like the y ticks. Repeated labels keep the larger circle; labels
         that round to zero are omitted. If all labels round to zero, only the largest reference

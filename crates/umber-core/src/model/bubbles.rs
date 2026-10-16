@@ -39,7 +39,10 @@ impl Default for BubbleOptions {
 /// Sizes are finite values from 0 to 1e300. A zero size or NaN coordinate draws nothing.
 /// A zero-size point's position still counts in the axis domains like any point. All bubble
 /// marks on an axes share one size scale; the largest size among points with finite x and y
-/// coordinates maps to the theme's maximum radius.
+/// coordinates maps to the theme's maximum radius. Automatic axis limits fit the whole
+/// circles and their outlines using the final plot size, across all panels sharing that axis;
+/// explicit limits still clip. A diameter at least the automatic axis's plot length is a
+/// render-time `Error::Style`, as is a fit outside the supported numeric range.
 ///
 /// # Examples
 ///

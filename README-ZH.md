@@ -73,6 +73,10 @@ fig.save_svg("temperature.svg")
 | 杆状图 | `ax.stem(x, y)` |
 | 参考线和参考区间 | `ax.hline(y)`、`ax.vline(x)`、`ax.hspan(low, high)`、`ax.vspan(low, high)` |
 
+Bubble 的自动 limits 包含完整圆形及 outline，log axis 和 shared axes 也遵循这一规则。显式 limits 仍会裁切。若包含 outline 的直径不小于自动 axis 的可用 plot 长度，rendering 会抛出 `StyleError`：请增大 figure，或设置显式 limits 以允许裁切。所需范围超出支持的数值范围时也会抛出 `StyleError`。Scatter 的 limits 不变。
+
+Filled mark 的 legend swatch 显示 fill 与 plot background 合成后的颜色，并以不透明颜色绘制；per-panel 和 merged legend 采用相同规则。Gradient swatch 取 fill 最不透明的一端（area 为 series opacity 的 0.32，histogram 为 0.95），代表有色端而非透明的 baseline。Direct label 以及 box、violin 的 outline 保留 series color。
+
 柱状图、箱线图和小提琴图需要类别 x 轴：`fig.add_axes(x=ub.Scale.category())`。对数轴用 `ub.Scale.log()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
 
 <p>

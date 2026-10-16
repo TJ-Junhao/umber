@@ -12,7 +12,7 @@ use crate::scene::{FillRule, Item, Paint};
 use crate::{FillStyle, Rgba};
 
 /// The gradient's opacity at the top of the tallest bin, as a share of the color's own.
-const TOP_ALPHA: f32 = 0.95;
+use crate::color::HISTOGRAM_TOP_ALPHA as TOP_ALPHA;
 /// The depth of the solid top edge of each bin under a gradient, in points.
 const TOP_EDGE_DEPTH: f64 = 1.6;
 

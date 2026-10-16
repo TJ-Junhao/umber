@@ -9,7 +9,41 @@ use std::collections::HashSet;
 
 use crate::model::Figure;
 use crate::resolve::{Anchor, Limits, ResolvedMark, SeriesKey, SeriesKind};
-use crate::{Dash, LegendStyle, Rgba};
+use crate::{Dash, FillStyle, LegendStyle, Rgba, Theme};
+
+/// How a filled swatch represents the mark over the plot background. Gradients use their
+/// peak fill opacity: the identifiable colored end, rather than their transparent baseline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwatchFill {
+    /// An unfilled mark retains its existing stroke or dot color.
+    Unchanged,
+    /// A solid fill in the series color.
+    Solid,
+    /// A fill at area opacity, flat or at the colored end of a gradient.
+    Area,
+    /// A histogram's solid fill or the colored end of its gradient.
+    Histogram,
+    /// A bubble's fill at the theme's marker opacity.
+    Marker,
+}
+
+impl SwatchFill {
+    /// The displayed swatch color. Filled marks are opaque so chips and marks behind an
+    /// inset legend cannot change the representative color.
+    fn color(self, color: Rgba, theme: &Theme) -> Rgba {
+        let alpha = match self {
+            Self::Unchanged => return color,
+            Self::Solid => 1.0,
+            Self::Area => crate::color::AREA_ALPHA,
+            Self::Histogram if theme.fill_style() == FillStyle::Gradient => {
+                crate::color::HISTOGRAM_TOP_ALPHA
+            }
+            Self::Histogram => 1.0,
+            Self::Marker => theme.marker_alpha(),
+        };
+        color.scale_alpha(alpha).over_background(theme.background())
+    }
+}
 
 /// The small figure drawn before a legend label, showing how its series is drawn.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -75,6 +109,7 @@ pub(crate) struct LegendEntry {
     label: String,
     color: Rgba,
     swatch: Swatch,
+    fill: SwatchFill,
 }
 
 impl LegendEntry {
@@ -84,6 +119,12 @@ impl LegendEntry {
             label: label.to_owned(),
             color,
             swatch,
+            fill: match swatch {
+                Swatch::Square => SwatchFill::Solid,
+                Swatch::Box { .. } | Swatch::Violin { .. } => SwatchFill::Area,
+                Swatch::Bubble { .. } => SwatchFill::Marker,
+                _ => SwatchFill::Unchanged,
+            },
         })
     }
 
@@ -100,6 +141,17 @@ impl LegendEntry {
     /// The resolved series color, alpha included.
     pub fn color(&self) -> Rgba {
         self.color
+    }
+
+    /// Sets the mark's fill policy without changing its stroke color or direct labels.
+    pub fn with_fill(mut self, fill: SwatchFill) -> Self {
+        self.fill = fill;
+        self
+    }
+
+    /// The representative color of the fill, composited over the plot background.
+    pub fn fill_color(&self, theme: &Theme) -> Rgba {
+        self.fill.color(self.color, theme)
     }
 
     /// The swatch.
@@ -206,7 +258,7 @@ impl<'a> Legend<'a> {
                     });
                 }
                 (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
-                    row.push(entry);
+                    row.push(entry.with_fill(mark.swatch_fill()));
                     if !seen_bubbles && matches!(mark, ResolvedMark::Bubbles { .. }) {
                         row.extend(mark.size_legend(limits.y.ticks.format()));
                         seen_bubbles = true;
