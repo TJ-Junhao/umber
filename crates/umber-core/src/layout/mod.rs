@@ -606,10 +606,11 @@ const FIGURE_WIDTH_HINT: &str = "widen the figure.";
 /// The hint of the errors for legend labels that do not fit their panel or figure.
 const LEGEND_HINT: &str = "shorten the label or widen the figure.";
 
-/// The text's width and the room it has, in whole points.
+/// Required and available sizes in whole points: round the requirement up and the room down
+/// so their stated difference suffices. Keep them at least one point apart for an error.
 pub(crate) fn widths(width: f64, room: f64) -> (impl std::fmt::Display, impl std::fmt::Display) {
     let room = room.floor();
-    (number(width.round().max(room + 1.0)), number(room))
+    (number(width.ceil().max(room + 1.0)), number(room))
 }
 
 /// A legend label wider than the room left after its swatch and any chip padding.
@@ -961,13 +962,11 @@ fn figure_too_small(
         Direction::Width => "wide",
         Direction::Height => "tall",
     };
-    let shown = side.floor();
+    let (needed, shown) = widths(needed, side);
     Error::style(
         context,
         format!(
-            "the figure is {} pt {along}; at least {} pt is needed for the plot area.",
-            number(shown),
-            number(needed.ceil().max(shown + 1.0)),
+            "the figure is {shown} pt {along}; at least {needed} pt is needed for the plot area."
         ),
     )
     .with_hint(hint)
@@ -977,14 +976,12 @@ fn figure_too_small(
 /// labels up to `y_room` wide would. The widths are in whole points, as in
 /// [`x_labels_overflow`].
 fn y_labels_leave_no_room(context: &'static str, label: &Label, y_room: f64) -> Error {
-    let fits = y_room.floor();
+    let (width, fits) = widths(label.width(), y_room);
     Error::style(
         context,
         format!(
-            "y tick label {} is {} pt wide; at most {} pt leaves room for the plot area.",
+            "y tick label {} is {width} pt wide; at most {fits} pt leaves room for the plot area.",
             quoted(&label.text),
-            number(label.width().round().max(fits + 1.0)),
-            number(fits),
         ),
     )
     .with_hint(Y_LABEL_HINT)
@@ -993,7 +990,7 @@ fn y_labels_leave_no_room(context: &'static str, label: &Label, y_room: f64) -> 
 /// The error for x tick `labels` that cannot fit `room`. It names the widest label (the first
 /// of equally wide ones), which is always wider than the labels that fit, and gives the widths
 /// in whole points: the width up to which labels fit rounded down, and the label's width
-/// rounded, but at least one point more than that, so the two never look equal.
+/// rounded up, and at least one point more than that, so the two never look equal.
 fn x_labels_overflow(
     context: &'static str,
     labels: &[(NormalizedPos, Label)],
@@ -1017,14 +1014,12 @@ fn x_labels_wider_than(
 ) -> Error {
     // Without labels the room's own edges fit: layout checks that first.
     let (text, label_width) = widest(labels).map_or(("", 0.0), |l| (l.text.as_str(), l.width()));
-    let fits = fits.floor();
+    let (width, fits) = widths(label_width, fits);
     Error::style(
         context,
         format!(
-            "x tick label {} is {} pt wide; at most {} pt fits this figure.",
+            "x tick label {} is {width} pt wide; at most {fits} pt fits this figure.",
             quoted(text),
-            number(label_width.round().max(fits + 1.0)),
-            number(fits),
         ),
     )
     .with_hint(X_LABEL_HINT)
@@ -1727,7 +1722,7 @@ mod tests {
         assert_eq!(
             err.to_string(),
             format!(
-                "Figure.to_scene(): x tick label {shown} is 306 pt wide; at most 216 pt fits \
+                "Figure.to_scene(): x tick label {shown} is 307 pt wide; at most 216 pt fits \
                  this figure."
             )
         );
@@ -1743,7 +1738,7 @@ mod tests {
         let err = overflow(&f);
         assert_eq!(
             err.to_string(),
-            "Figure.to_scene(): x tick label \"WWWWWWWWWW\" is 51 pt wide; at most 36 pt fits \
+            "Figure.to_scene(): x tick label \"WWWWWWWWWW\" is 52 pt wide; at most 36 pt fits \
              this figure."
         );
         assert_eq!(err.hint(), Some("shorten the labels or widen the figure."));
@@ -1768,7 +1763,7 @@ mod tests {
         assert!(
             overflow(&f)
                 .to_string()
-                .ends_with("is 219 pt wide; at most 216 pt fits this figure.")
+                .ends_with("is 220 pt wide; at most 216 pt fits this figure.")
         );
     }
 
@@ -1796,7 +1791,7 @@ mod tests {
         assert_eq!(
             err.to_string(),
             format!(
-                "Figure.to_scene(): y tick label \"{}… is 510 pt wide; at most 113 pt leaves \
+                "Figure.to_scene(): y tick label \"{}… is 511 pt wide; at most 113 pt leaves \
                  room for the plot area.",
                 "W".repeat(38)
             )
@@ -2024,7 +2019,7 @@ mod tests {
         let err = overflow(&end_after_wide_y_labels(22));
         assert_eq!(
             err.to_string(),
-            "Figure.to_scene(): x tick label \"END\" is 15 pt wide; at most 13 pt fits this \
+            "Figure.to_scene(): x tick label \"END\" is 16 pt wide; at most 13 pt fits this \
              figure."
         );
         assert_eq!(err.hint(), Some("shorten the labels or widen the figure."));
@@ -2068,7 +2063,7 @@ mod tests {
         assert!(
             overflow(&f)
                 .to_string()
-                .contains(&format!("x tick label \"{}\" is 61 pt", "W".repeat(12)))
+                .contains(&format!("x tick label \"{}\" is 62 pt", "W".repeat(12)))
         );
     }
 
@@ -2239,13 +2234,13 @@ mod tests {
 
     #[test]
     fn legend_width_errors_round_up_past_the_available_room() {
-        for (room, width, shown) in [(20.2, 21, 20), (19.8, 20, 19), (-0.1, 20, -1)] {
+        for (room, width, shown) in [(20.2, 21, 20), (19.8, 21, 19), (-0.1, 21, -1)] {
             let (w, p) = widths(20.4, room);
             assert_eq!(format!("{w} {p}"), format!("{width} {shown}"));
         }
         let lib = FontLibrary::with_fallbacks(Vec::new());
         let label = measure(&lib, "WWWW", Styles::new(&Theme::pigment()).body);
-        let width = label.width().round();
+        let width = label.width().ceil();
         for container in ["figure", "panel"] {
             for (room, shown) in [(width - 0.6, width - 1.0), (-0.1, -1.0)] {
                 let err = legend_too_wide("Figure.to_scene()", &label, room, container);

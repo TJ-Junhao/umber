@@ -47,7 +47,7 @@ use super::{
     MIN_PLOT, PADDING, PlotSize, X_LABEL_EDGE_GAP, initial_plot_size, solve_single, widest, widths,
     x_labels_wider_than, y_labels_leave_no_room,
 };
-use crate::error::{number, quoted};
+use crate::error::quoted;
 use crate::model::{CellRange, Grid};
 use crate::{Error, Result, Theme};
 
@@ -1400,13 +1400,11 @@ fn counted(count: usize, one: &str, many: &str) -> String {
 /// pt. The widths are in whole points, as for a single panel: the figure's rounded down, the
 /// one needed rounded up and at least one point more.
 fn grid_too_narrow(context: &'static str, width: f64, needed: f64, cols: usize) -> Error {
-    let shown = width.floor();
+    let (needed, shown) = widths(needed, width);
     Error::style(
         context,
         format!(
-            "the figure is {} pt wide; at least {} pt is needed for {} of plots.",
-            number(shown),
-            number(needed.ceil().max(shown + 1.0)),
+            "the figure is {shown} pt wide; at least {needed} pt is needed for {} of plots.",
             counted(cols, "column", "columns"),
         ),
     )
@@ -1420,13 +1418,11 @@ fn grid_too_narrow(context: &'static str, width: f64, needed: f64, cols: usize) 
 /// The error for a canvas `height` pt tall whose `rows` rows of plots need at least `needed`
 /// pt, in whole points as [`grid_too_narrow`].
 fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) -> Error {
-    let shown = height.floor();
+    let (needed, shown) = widths(needed, height);
     Error::style(
         context,
         format!(
-            "the figure is {} pt tall; at least {} pt is needed for {} of plots.",
-            number(shown),
-            number(needed.ceil().max(shown + 1.0)),
+            "the figure is {shown} pt tall; at least {needed} pt is needed for {} of plots.",
             counted(rows, "row", "rows"),
         ),
     )
@@ -1449,7 +1445,7 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 /// # Errors
 ///
 /// `Error::Style` in `input.context` for the first text that does not, with the widths in
-/// whole points: the room rounded down, the text's width rounded and at least one point more.
+/// whole points: the room rounded down, the text's width rounded up and at least one point more.
 /// - `row {r}, col {c}: the title is {w} pt wide; the panel has {p} pt.` (likewise
 ///   `the subtitle`, `the x axis label` and `the y axis label`), hint
 ///   `shorten the title or widen the figure.` (naming the text);
@@ -1971,7 +1967,7 @@ mod tests {
             format!(
                 "Figure.to_scene(): row 0, col 2: y tick label \"{label}\" is {} pt wide; at \
                  most {fits} pt leaves room for the plot area.",
-                label_width.round().max(fits + 1.0)
+                label_width.ceil().max(fits + 1.0)
             )
         );
         assert_eq!(
@@ -2014,7 +2010,7 @@ mod tests {
             format!(
                 "Figure.to_scene(): row 0, col 0: x tick label \"{wide}\" is {} pt wide; at most \
                  {fits} pt fits this figure.",
-                w.round().max(fits + 1.0)
+                w.ceil().max(fits + 1.0)
             )
         );
         assert_eq!(err.hint(), Some("shorten the labels or widen the figure."));
@@ -2116,7 +2112,7 @@ mod tests {
                 format!(
                     "Figure.to_scene(): row 0, col 1: {name} is {} pt wide; the panel has \
                      {room} pt.",
-                    width.round().max(room + 1.0)
+                    width.ceil().max(room + 1.0)
                 )
             );
             assert_eq!(err.hint(), Some(hint));
