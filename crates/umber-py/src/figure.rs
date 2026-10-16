@@ -31,7 +31,7 @@ use umber_core::{
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
     RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
-use umber_core::{AxisData, AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
+use umber_core::{AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
 use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };

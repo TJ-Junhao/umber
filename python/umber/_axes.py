@@ -2171,11 +2171,11 @@ def _cell_colors(
     colormap = None if cmap is AUTO else instance(context, "cmap", cmap, Cmap, CMAP_HINT)
     instance(context, "scale", scale, Scale, "use Scale.linear() or Scale.log().")
     transform = cast(Scale[Any], scale)
-    if transform == _CATEGORY:
+    if transform in (_CATEGORY, _TIME):
         raise new_error(
             TypeError,
             context,
-            "scale is Scale.category(); scale must be Scale.linear() or Scale.log().",
+            f"scale is {transform!r}; scale must be Scale.linear() or Scale.log().",
             parameter="scale",
             hint="use Scale.linear() or Scale.log().",
         )
@@ -2186,7 +2186,7 @@ def _cell_colors(
 def _numeric_cells(context: str, axes: Axes[Any, Any]) -> None:
     """Reject nonnumeric axes before converting cell data."""
     for name, scale in zip(("x", "y"), scales(axes), strict=True):
-        if scale == _CATEGORY:
+        if scale in (_CATEGORY, _TIME):
             raise new_error(
                 UsageError,
                 context,

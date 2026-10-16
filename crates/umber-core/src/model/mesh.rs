@@ -921,6 +921,58 @@ mod tests {
     }
 
     #[test]
+    fn numeric_cells_contribute_numbers_not_times() {
+        let mut f = figure(6.0, 4.0);
+        f.single_axes_mut()
+            .mesh(&[0.0, 1.0], &[0.0, 1.0], &[1.0], MeshOptions::default())
+            .unwrap()
+            .hist2d(&[0.0, 1.0], &[0.0, 1.0], Hist2dOptions::default())
+            .unwrap()
+            .hexbin(&[0.0, 1.0], &[0.0, 1.0], HexbinOptions::default())
+            .unwrap();
+        let marks = crate::resolve::resolve_axes_marks(f.panels().next().unwrap(), f.theme());
+        assert_eq!(marks.len(), 3);
+        for mark in &marks {
+            for axis in [crate::resolve::ValueAxis::X, crate::resolve::ValueAxis::Y] {
+                assert!(mark.numbers(axis).next().is_some());
+                assert!(mark.times(axis).next().is_none());
+                assert!(mark.categories(axis).next().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn numeric_cells_reject_time_axes_atomically() {
+        for (x, y, parameter) in [
+            (ScaleKind::Time, ScaleKind::Linear, "x"),
+            (ScaleKind::Linear, ScaleKind::Time, "y"),
+            (ScaleKind::Time, ScaleKind::Time, "x"),
+        ] {
+            let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+            f.add_axes(x, y).unwrap();
+            let before = f.clone();
+            let mut ax = f.single_axes_mut();
+            let errors = [
+                ax.mesh(&[0.0, 1.0], &[0.0, 1.0], &[1.0], MeshOptions::default())
+                    .unwrap_err(),
+                ax.hist2d(&[0.0, 1.0], &[0.0, 1.0], Hist2dOptions::default())
+                    .unwrap_err(),
+                ax.hexbin(&[0.0, 1.0], &[0.0, 1.0], HexbinOptions::default())
+                    .unwrap_err(),
+            ];
+            for error in errors {
+                assert!(matches!(error, crate::Error::Usage { .. }));
+                assert_eq!(error.parameter(), Some(parameter));
+                assert_eq!(
+                    error.hint(),
+                    Some("use Scale.linear() or Scale.log() for both axes.")
+                );
+            }
+            assert_eq!(f, before);
+        }
+    }
+
+    #[test]
     fn mesh_cells_span_edges() {
         let mut f = figure(6.0, 4.0);
         f.single_axes_mut()

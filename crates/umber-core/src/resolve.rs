@@ -1861,7 +1861,10 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::VLine { mark, .. } => DomainTimes::whole(mark.x().times()),
             ResolvedMark::VSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
-            ResolvedMark::Bubbles { .. }
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -1890,7 +1893,10 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::HLine { mark, .. } => DomainTimes::whole(mark.y().times()),
             ResolvedMark::HSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
-            ResolvedMark::Bubbles { .. }
+            ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }

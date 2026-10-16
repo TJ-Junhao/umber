@@ -1,5 +1,6 @@
 """Numeric cells, binned counts, validation and color mapping."""
 
+import datetime as dt
 import math
 import re
 import xml.etree.ElementTree as ET
@@ -222,6 +223,44 @@ def test_category_axes_rejected(method: str) -> None:
         args = ([0, 1], [0, 1], [[1]]) if method == "mesh" else ([0, 1], [0, 1])
         with pytest.raises(ub.UsageError):
             call(getattr(ax, method))(*args)
+
+
+@pytest.mark.parametrize("method", ["mesh", "hist2d", "hexbin"])
+@pytest.mark.parametrize("axis", ["x", "y"])
+@pytest.mark.parametrize("time_values", [False, True])
+def test_time_axes_rejected_before_cell_conversion(
+    method: str, axis: str, time_values: bool
+) -> None:
+    ax = (
+        ub.Figure().add_axes(x=ub.Scale.time())
+        if axis == "x"
+        else ub.Figure().add_axes(y=ub.Scale.time())
+    )
+    before = ax.figure.to_svg()
+    times = [dt.datetime(2026, 1, 1), dt.datetime(2026, 1, 2)]
+    x = times if time_values and axis == "x" else [0, 1]
+    y = times if time_values and axis == "y" else [0, 1]
+    args = (x, y, [[1]]) if method == "mesh" else (x, y)
+    with pytest.raises(ub.UsageError) as caught:
+        call(getattr(ax, method))(*args)
+    assert str(caught.value) == f"Axes.{method}(): {axis} must be a numeric axis."
+    assert details(caught.value) == (axis, "use Scale.linear() or Scale.log() for both axes.")
+    assert ax.figure.to_svg() == before
+
+
+@pytest.mark.parametrize("method", ["mesh", "hist2d", "hexbin"])
+@pytest.mark.parametrize("scale", [ub.Scale.category(), ub.Scale.time()])
+def test_cell_color_scale_must_be_numeric(method: str, scale: ub.Scale[Any]) -> None:
+    ax = axes().scatter([0, 1], [0, 1])
+    before = ax.figure.to_svg()
+    args = ([0, 1], [0, 1], [[1]]) if method == "mesh" else ([0, 1], [0, 1])
+    with pytest.raises(TypeError) as caught:
+        call(getattr(ax, method))(*args, scale=scale)
+    assert str(caught.value) == (
+        f"Axes.{method}(): scale is {scale!r}; scale must be Scale.linear() or Scale.log()."
+    )
+    assert details(caught.value) == ("scale", "use Scale.linear() or Scale.log().")
+    assert ax.figure.to_svg() == before
 
 
 def test_cell_color_conflicts_are_atomic() -> None:
