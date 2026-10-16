@@ -92,6 +92,7 @@ mod corpus {
     pub mod bubbles;
     pub mod cmap;
     pub mod color_by;
+    pub mod colorbar;
     pub mod error_bars;
     pub mod grid;
     pub mod header;
@@ -174,6 +175,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::cmap::cases(&mut sink);
     corpus::color_by::cases(&lib, &mut sink);
     corpus::horizontal::cases(&lib, &mut sink);
+    corpus::colorbar::cases(&lib, &mut sink);
     corpus::time::cases(&lib, &mut sink);
 }
 
@@ -2071,6 +2073,18 @@ mod record {
         fn paint(&mut self, paint: &Paint) {
             match paint {
                 Paint::Solid(c) => self.line(&format!(" paint solid {}", rgba(*c))),
+                Paint::Sampled { cmap, from, to } => {
+                    let colors = cmap.colors();
+                    self.line(&format!(
+                        " paint sampled start={} end={} colors={}",
+                        point(*from),
+                        point(*to),
+                        colors.len()
+                    ));
+                    for color in colors {
+                        self.line(&format!("  color {}", rgba(color)));
+                    }
+                }
                 Paint::Linear(g) => {
                     self.line(&format!(
                         " paint linear start={} end={} stops={}",

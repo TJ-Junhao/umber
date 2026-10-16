@@ -92,7 +92,7 @@ def test_every_native_setter_is_bound() -> None:
     bound = {name for name in vars(ub.Theme) if name.startswith("with_")}
     assert bound == native_names
     expected = {"with_palette", *COLOR_SETTERS, *(f"with_{n}" for n, *_ in NUMERIC_SETTERS)}
-    expected |= {"with_cmap", "with_diverging_cmap"}
+    expected |= {"with_cmap", "with_diverging_cmap", "with_colorbar_position"}
     expected |= {name for name, *_ in ENUM_SETTERS}
     assert bound == expected
 

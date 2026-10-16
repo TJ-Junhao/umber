@@ -19,6 +19,7 @@
 //! measured ([`panel::measure_panel`]), the solve chooses every plot area at once, and each
 //! panel is placed for its plot area ([`panel::place_panel`]).
 
+mod colorbar;
 mod grid;
 mod inset;
 mod legend;
@@ -27,6 +28,7 @@ mod panel;
 pub(crate) mod placement;
 mod program;
 
+pub(crate) use colorbar::{ColorbarSide, PlacedColorbar};
 pub(crate) use grid::{GridInput, check_panel_contents, solve_grid};
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
@@ -181,6 +183,8 @@ pub(crate) struct Layout {
     /// axes; on a grid, the axes' cells with their bands, reaching halfway into the gap next to
     /// a neighbouring cell and to the canvas edge on the grid's outer sides.
     pub frame: Frame,
+    /// The visible colorbar, placed outside the plot.
+    pub colorbar: Option<PlacedColorbar>,
 }
 
 /// The baseline as laid out: the line across the plot area at the baseline's position along
@@ -692,7 +696,7 @@ fn solve_single(
     let LayoutInput {
         legend, context, ..
     } = *input;
-    let mut plot_top = bands.heading.bottom(top) + bands.y_label_band + bands.label_rise;
+    let mut plot_top = bands.heading.bottom(top) + bands.top_label_band() + bands.top_label_rise();
     let cap = panel::end_label_cap(frame.width);
     // The widest y tick label and its gap are added to the padding one at a time, not as the
     // one sum `bands.y_tick_column`, which can round differently.
@@ -715,9 +719,25 @@ fn solve_single(
     // the right padding, x tick labels or not; only then are the x tick labels fitted.
     if matches!(inset::fit_x_labels(&room, &[]), inset::XInset::Overflowing) {
         let direct = legend.direct.reserve(f64::INFINITY);
-        if bands.right_legend > 0.0 {
-            let available = frame.right() - PADDING - left - MIN_PLOT;
-            placement::check_right_width(context, &legend.column(0.0), available)?;
+        if bands.right_colorbar > 0.0 && right - left + bands.right_colorbar >= MIN_PLOT {
+            let available = frame.right()
+                - PADDING
+                - left
+                - MIN_PLOT
+                - bands.direct_reserve
+                - bands.right_legend;
+            return Err(colorbar::room_error(
+                context,
+                bands.right_colorbar,
+                available,
+                false,
+            ));
+        }
+        if bands.right_legend > 0.0 || bands.right_colorbar > 0.0 {
+            if bands.right_legend > 0.0 {
+                let available = right - left - MIN_PLOT + bands.right_legend;
+                placement::check_right_width(context, &legend.column(0.0), available)?;
+            }
             let y_room = right - MIN_PLOT - (frame.x + PADDING) - Y_LABEL_GAP;
             if let Some(label) = widest(&bands.y_labels)
                 && y_room >= 0.0
@@ -728,7 +748,7 @@ fn solve_single(
                 context,
                 Direction::Width,
                 frame.width,
-                2.0 * PADDING + bands.y_tick_column + bands.right_legend + MIN_PLOT,
+                2.0 * PADDING + bands.y_tick_column + bands.right() + MIN_PLOT,
                 FIGURE_WIDTH_HINT,
             ));
         }
@@ -748,6 +768,7 @@ fn solve_single(
                 &bands.x_labels,
                 &room,
                 &bands.x_spans,
+                bands.colorbar_tick_width(),
             ));
         }
     };
@@ -755,16 +776,40 @@ fn solve_single(
     if legend.position == crate::LegendPosition::TopRight {
         plot_top = top + bands.above_with_row(&legend.header_within(plot_left, plot_right));
     }
-    let axis_below = if bands.bottom_legend > 0.0 {
-        bands.axis_below()
-    } else {
-        // Keep the original single-panel extent when no bottom legend needs the label drop.
-        bands.x_band + bands.x_title_band
-    };
-    let below = axis_below + PADDING + bands.bottom_legend;
+    let axis_below =
+        if bands.bottom_legend > 0.0 || bands.bottom_colorbar > 0.0 || bands.right_colorbar > 0.0 {
+            bands.axis_below()
+        } else {
+            // Keep the original single-panel extent when no bottom legend needs the label drop.
+            bands.x_band + bands.x_title_band
+        };
+    let below = axis_below + PADDING + bands.bottom_legend + bands.bottom_colorbar;
     let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {
+        let without = bands.without_colorbar(cap);
+        let plain_top = if legend.position == crate::LegendPosition::TopRight {
+            top + without.above_with_row(&legend.header_within(plot_left, plot_right))
+        } else {
+            without.heading.bottom(top) + without.y_label_band + without.label_rise
+        };
+        let plain_below = PADDING
+            + without.bottom_legend
+            + if without.bottom_legend > 0.0 {
+                without.axis_below()
+            } else {
+                without.x_band + without.x_title_band
+            };
+        let plain_height = frame.bottom() - plain_below - plain_top;
+        let colorbar_band = (plot_top - plain_top) + (below - plain_below);
+        if colorbar_band > 0.0 && plain_height >= MIN_PLOT {
+            return Err(colorbar::room_error(
+                context,
+                colorbar_band,
+                plain_height - MIN_PLOT,
+                true,
+            ));
+        }
         return Err(figure_too_short(
             context,
             frame.height,
@@ -795,6 +840,7 @@ fn solve_single(
             &bands.x_labels,
             &room,
             &bands.x_spans,
+            bands.colorbar_tick_width(),
         ));
     }
     Ok(plot)
@@ -937,8 +983,13 @@ fn x_labels_overflow(
     labels: &[(NormalizedPos, Label)],
     room: &inset::Room,
     spans: &[inset::TickSpan],
+    colorbar_width: f64,
 ) -> Error {
-    x_labels_wider_than(context, labels, inset::widest_label_that_fits(room, spans))
+    let fits = inset::widest_label_that_fits(room, spans);
+    if colorbar_width > fits {
+        return colorbar::room_error(context, colorbar_width, fits, false);
+    }
+    x_labels_wider_than(context, labels, fits)
 }
 
 /// The error for x tick `labels` that cannot fit, when labels up to `fits` pt wide would: as

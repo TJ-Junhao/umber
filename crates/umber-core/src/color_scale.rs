@@ -294,6 +294,11 @@ impl Norm {
     /// The ticks of the range: about five, the center among them on a centered norm, and one
     /// tick at the value when the range is one value.
     fn ticks(&self) -> Vec<AxisTick> {
+        self.ticks_for(TICK_TARGET, &crate::TickFormat::default())
+    }
+
+    /// Ticks for the requested density, labelled before their on-screen fit is checked.
+    fn ticks_for(&self, target: usize, format: &crate::TickFormat) -> Vec<AxisTick> {
         let (low, high) = self.range();
         let transform = match *self {
             Norm::Log { base, .. } => Transform::Log(base),
@@ -304,7 +309,7 @@ impl Norm {
             Norm::Linear { .. } | Norm::Log { .. } => low + (high - low) / 2.0,
         };
         let mut ticks = match ContinuousScale::new(transform, low, high, CONTEXT) {
-            Ok(scale) => scale.ticks(TICK_TARGET),
+            Ok(scale) => scale.ticks(target),
             Err(_) => labelled(vec![middle]),
         };
         if let Norm::Centered { center, radius } = *self
@@ -317,7 +322,8 @@ impl Norm {
             values.sort_by(f64::total_cmp);
             ticks = labelled(values);
         }
-        ticks
+        format
+            .relabel(ticks, crate::ticks::TickValues::Exact)
             .into_iter()
             .filter_map(|tick| {
                 Some(AxisTick {
@@ -398,6 +404,48 @@ impl ResolvedColorScale {
             ticks: norm.ticks(),
             norm,
         })
+    }
+
+    /// Chooses colorbar ticks against the same measured room as axis ticks. Every candidate
+    /// includes the center; reducing density never discards that required tick.
+    pub(crate) fn with_ticks(
+        &self,
+        room: &crate::layout::TickRoom<'_>,
+        format: &crate::TickFormat,
+    ) -> Self {
+        let mut ticks = self.norm.ticks_for(room.target, format);
+        if room.slack(&ticks) < 0.0 {
+            for target in (2..room.target).rev() {
+                let candidate = self.norm.ticks_for(target, format);
+                if candidate.len() <= ticks.len() {
+                    ticks = candidate;
+                }
+                if room.slack(&ticks) >= 0.0 {
+                    break;
+                }
+            }
+        }
+        // An off-grid center can be close to a regular tick at every density. Keep the
+        // center and remove the tick whose removal gives the most room until labels fit.
+        while ticks.len() > 1 && room.slack(&ticks) < 0.0 {
+            let centered = matches!(self.norm, Norm::Centered { .. });
+            let remove = (0..ticks.len())
+                .filter(|&i| !centered || (ticks[i].pos.get() - 0.5).abs() > 1e-12)
+                .max_by(|&a, &b| {
+                    let without = |index| {
+                        let mut candidate = ticks.clone();
+                        candidate.remove(index);
+                        room.slack(&candidate)
+                    };
+                    without(a).total_cmp(&without(b))
+                });
+            let Some(index) = remove else { break };
+            ticks.remove(index);
+        }
+        Self {
+            ticks,
+            ..self.clone()
+        }
     }
 
     /// The color of the value `v`; `None` for a value that maps to no color (NaN).

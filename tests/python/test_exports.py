@@ -19,6 +19,7 @@ EXPECTED = [
     "Cmap",
     "Color",
     "ColorBy",
+    "ColorbarPosition",
     "DataError",
     "Dash",
     "Distribution",
@@ -98,6 +99,7 @@ def test_enums_are_exported_as_enums() -> None:
         "Marker",
         "Step",
         "SvgText",
+        "ColorbarPosition",
     }
 
 

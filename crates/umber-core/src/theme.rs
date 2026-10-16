@@ -283,6 +283,107 @@ pub struct Theme {
     palette: Vec<Rgba>,
     cmap: Cmap,
     diverging_cmap: Cmap,
+    colorbar_position: ColorbarPosition,
+    colorbar_thickness: f32,
+    colorbar_gap: f32,
+    colorbar_tick_length: f32,
+}
+
+/// Where a colorbar sits beside its plot.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{ColorbarPosition, Theme};
+/// assert_eq!(Theme::pigment().colorbar_position(), ColorbarPosition::Right);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorbarPosition {
+    /// To the right, spanning the plot height.
+    Right,
+    /// Below the x axis and any bottom legend, spanning the plot width.
+    Bottom,
+    /// Hidden, without reserving space.
+    None,
+}
+
+impl Theme {
+    /// The default colorbar position: right in every preset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ColorbarPosition, Theme};
+    /// for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+    ///     assert_eq!(theme.colorbar_position(), ColorbarPosition::Right);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn colorbar_position(&self) -> ColorbarPosition {
+        self.colorbar_position
+    }
+
+    /// The colorbar thickness, 10 pt in every preset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    /// for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+    ///     assert_eq!(theme.colorbar_thickness(), 10.0);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn colorbar_thickness(&self) -> f32 {
+        self.colorbar_thickness
+    }
+
+    /// The gap before the colorbar, 10 pt in every preset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    /// for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+    ///     assert_eq!(theme.colorbar_gap(), 10.0);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn colorbar_gap(&self) -> f32 {
+        self.colorbar_gap
+    }
+
+    /// The outward colorbar tick length, 3 pt in every preset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    /// for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+    ///     assert_eq!(theme.colorbar_tick_length(), 3.0);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn colorbar_tick_length(&self) -> f32 {
+        self.colorbar_tick_length
+    }
+
+    /// Returns a copy with the default colorbar position set to `position`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ColorbarPosition, Theme};
+    /// let theme = Theme::pigment().with_colorbar_position(ColorbarPosition::Bottom)?;
+    /// assert_eq!(theme.colorbar_position(), ColorbarPosition::Bottom);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn with_colorbar_position(&self, position: ColorbarPosition) -> Result<Theme> {
+        Ok(Theme {
+            colorbar_position: position,
+            ..self.clone()
+        })
+    }
 }
 
 /// An opaque color from `0xRRGGBB`.
@@ -378,6 +479,10 @@ impl Theme {
             stem_width: 1.5,
             box_width: 0.5,
             violin_width: 0.6,
+            colorbar_position: ColorbarPosition::Right,
+            colorbar_thickness: 10.0,
+            colorbar_gap: 10.0,
+            colorbar_tick_length: 3.0,
             palette: palette_of([
                 0xC4553A, 0x2E6B70, 0xE2A33B, 0x4F6FA3, 0x86A37A, 0x8B5279, 0x6E4C38, 0xA69F94,
             ]),
@@ -427,6 +532,10 @@ impl Theme {
             stem_width: 1.5,
             box_width: 0.5,
             violin_width: 0.6,
+            colorbar_position: ColorbarPosition::Right,
+            colorbar_thickness: 10.0,
+            colorbar_gap: 10.0,
+            colorbar_tick_length: 3.0,
             palette: palette_of([
                 0x233F86, 0xE4572E, 0xF2A900, 0x17A398, 0x9B5DE5, 0x5BA4E6, 0xD9658F, 0xA3A3A3,
             ]),
@@ -476,6 +585,10 @@ impl Theme {
             stem_width: 1.5,
             box_width: 0.5,
             violin_width: 0.6,
+            colorbar_position: ColorbarPosition::Right,
+            colorbar_thickness: 10.0,
+            colorbar_gap: 10.0,
+            colorbar_tick_length: 3.0,
             palette: palette_of([
                 0x75AEF5, 0xDF7F78, 0x96E7A7, 0xE0AE57, 0xC9A3F5, 0x3ACED6, 0xF5A06F, 0x9DA5B1,
             ]),

@@ -240,7 +240,9 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
     };
     let spans: Vec<(f64, f64)> = cells.iter().map(|c| placed.span(*c)).collect();
     let rows = Rows::measure(input, &cells, bands, &spans);
-    let rows = rows.place(input)?;
+    let rows = rows
+        .place(input)
+        .map_err(|error| rows_too_short(input, &cells, bands, &spans, error))?;
     let panels = cells
         .iter()
         .zip(bands)
@@ -757,8 +759,10 @@ impl Rows {
             let last = first + cells.row_span() - 1;
             let row = panel.legend.header_within(left, right);
             above[first] = above[first].max(bands.above_with_row(&row));
-            below[last] = below[last].max(bands.below() - bands.bottom_legend);
-            legends[last] = legends[last].max(panel.legend.bottom_reserve(left, right));
+            below[last] =
+                below[last].max(bands.below() - bands.bottom_legend - bands.bottom_colorbar);
+            legends[last] =
+                legends[last].max(panel.legend.bottom_reserve(left, right) + bands.bottom_colorbar);
         }
         for (below, legend) in below.iter_mut().zip(&legends) {
             *below += legend;
@@ -816,6 +820,69 @@ impl Rows {
     }
 }
 
+/// Attributes a height failure to a colorbar only when removing its band leaves room.
+fn rows_too_short(
+    input: &GridInput<'_>,
+    cells: &[CellRange],
+    bands: &[PanelBands],
+    spans: &[(f64, f64)],
+    error: Error,
+) -> Error {
+    let plain: Vec<_> = cells
+        .iter()
+        .zip(bands)
+        .map(|(cell, band)| band.without_colorbar(input.span(*cell).reserve_cap))
+        .collect();
+    let plain_rows = Rows::measure(input, cells, &plain, spans);
+    if plain_rows.clone().place(input).is_err() {
+        return error;
+    }
+    let rows = Rows::measure(input, cells, bands, spans);
+    let reserved = rows.above.iter().sum::<f64>() + rows.below.iter().sum::<f64>();
+    let available = input.height
+        - input.top
+        - PADDING
+        - rows.gap * (rows.above.len() - 1) as f64
+        - MIN_PLOT * rows.above.len() as f64;
+    let deficit = reserved - available;
+    for (i, (cell, band)) in cells.iter().zip(bands).enumerate() {
+        if band.right_colorbar == 0.0 && band.bottom_colorbar == 0.0 {
+            continue;
+        }
+        let first = cell.row();
+        let last = first + cell.row_span() - 1;
+        let legend = input.panels[i].legend;
+        let row = legend.header_within(spans[i].0, spans[i].1);
+        let above = band.above_with_row(&row);
+        let below = band.axis_below();
+        let bottom = legend.bottom_reserve(spans[i].0, spans[i].1) + band.bottom_colorbar;
+        // Only the panels defining an aligned band can be its cause. Equal colorbars share
+        // that band, so removing just one of those panels would not shrink it.
+        let excess = |value: f64, aligned: f64, plain: f64| {
+            if value >= aligned - CONTAINMENT_TOLERANCE {
+                (aligned - plain).max(0.0)
+            } else {
+                0.0
+            }
+        };
+        let freed = excess(above, rows.above[first], plain_rows.above[first])
+            + excess(
+                below,
+                rows.below[last] - rows.legends[last],
+                plain_rows.below[last] - plain_rows.legends[last],
+            )
+            + excess(bottom, rows.legends[last], plain_rows.legends[last]);
+        let needed = above - plain[i].above_with_row(&row) + band.below() - plain[i].below();
+        if needed >= deficit && freed >= deficit {
+            return in_panel(
+                *cell,
+                super::colorbar::room_error(input.context, needed, needed - deficit, true),
+            );
+        }
+    }
+    error
+}
+
 impl PlacedRows {
     /// The top and bottom edges of the plot of the panel covering `cells`.
     fn span(&self, cells: CellRange) -> (f64, f64) {
@@ -864,9 +931,34 @@ fn columns_too_narrow(
     let cols = columns.count();
     let placed = columns.place(&columns.no_growth());
     let deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
+    let plain: Vec<_> = cells
+        .iter()
+        .zip(bands)
+        .map(|(cell, band)| band.without_colorbar(input.span(*cell).reserve_cap))
+        .collect();
+    let plain_columns = Columns::measure(input, cells, &plain);
+    for (cell, band) in cells.iter().zip(bands) {
+        let last = cell.col() + cell.col_span() - 1;
+        let freed = columns.right[last] - plain_columns.right[last];
+        if band.right_colorbar > 0.0
+            && band.right_colorbar >= deficit
+            && band.right() == columns.right[last]
+            && freed >= deficit
+        {
+            return in_panel(
+                *cell,
+                super::colorbar::room_error(
+                    input.context,
+                    band.right_colorbar,
+                    band.right_colorbar - deficit,
+                    false,
+                ),
+            );
+        }
+    }
     for ((cell, band), panel) in cells.iter().zip(bands).zip(input.panels) {
         let last = cell.col() + cell.col_span() - 1;
-        if band.right_legend > 0.0 && band.right_legend == columns.right[last] {
+        if band.right_legend > 0.0 && band.right() == columns.right[last] {
             let available = band.right_legend - deficit;
             if let Err(err) = super::placement::check_right_width(
                 input.context,
@@ -898,7 +990,7 @@ fn columns_too_narrow(
     grid_too_narrow(
         input.context,
         input.width,
-        needed_width(input, cells, columns),
+        needed_width(input, cells, bands, columns),
         cols,
     )
 }
@@ -908,30 +1000,38 @@ fn columns_too_narrow(
 /// [`MIN_PLOT`] wide before x tick labels are fitted.
 ///
 /// The plots' width is `(W - 2 × PADDING - ΣL - ΣR(W) - gap × (cols - 1)) / cols`, where
-/// `ΣR(W)`, the room direct labels reserve, depends on the width `W`: each panel's labels
-/// reserve their own width but at most a share of the panel's cells, which are 0 wide up to
+/// `ΣR(W)` includes colorbars and right legends as well as direct labels. Direct labels beside
+/// a colorbar are uncapped; other direct labels reserve at most a share of the panel's cells,
+/// which are 0 wide up to
 /// `2 × PADDING + gap × (cols - 1)`. Between that width and the widths where one panel's cap
 /// reaches another's labels in the same column (where `ΣR` changes slope), the plot width is
 /// linear in `W`, so the narrowest width is found segment by segment from the figure's width,
 /// and then checked both ways: the check accepts the result and refuses one point less.
-fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -> f64 {
+fn needed_width(
+    input: &GridInput<'_>,
+    cells: &[CellRange],
+    bands: &[PanelBands],
+    columns: &Columns,
+) -> f64 {
     let cols = columns.count();
     let gap = columns.gap;
+    // Direct labels beside a colorbar are uncapped; the whole right band stays fixed.
+    let reserve = |panel: &LayoutInput<'_>, band: &PanelBands, cap: f64| {
+        if band.right_colorbar > 0.0 {
+            band.right()
+        } else {
+            panel.legend.direct.reserve(cap).max(band.right_legend)
+        }
+    };
     // The columns of a canvas `width` pt wide: the same y tick label columns, and the direct
     // label reserves capped for that width.
     let at = |width: f64| -> Columns {
         let wider = GridInput { width, ..*input };
         let mut right = vec![0.0_f64; cols];
-        for (cells, panel) in cells.iter().zip(input.panels) {
+        for ((cells, panel), band) in cells.iter().zip(input.panels).zip(bands) {
             let last = cells.col() + cells.col_span() - 1;
             let cap = wider.span(*cells).reserve_cap;
-            right[last] = right[last].max(
-                panel
-                    .legend
-                    .direct
-                    .reserve(cap)
-                    .max(panel.legend.right_reserve()),
-            );
+            right[last] = right[last].max(reserve(panel, band, cap));
         }
         Columns {
             canvas: width,
@@ -946,17 +1046,10 @@ fn needed_width(input: &GridInput<'_>, cells: &[CellRange], columns: &Columns) -
     let wants: Vec<(usize, usize, f64)> = cells
         .iter()
         .zip(input.panels)
-        .map(|(cells, panel)| {
+        .zip(bands)
+        .map(|((cells, panel), band)| {
             let last = cells.col() + cells.col_span() - 1;
-            (
-                last,
-                cells.col_span(),
-                panel
-                    .legend
-                    .direct
-                    .reserve(f64::INFINITY)
-                    .max(panel.legend.right_reserve()),
-            )
+            (last, cells.col_span(), reserve(panel, band, f64::INFINITY))
         })
         .collect();
     // The width below which the cells, and so the caps, stop shrinking: they are 0 wide.
@@ -1031,7 +1124,11 @@ fn x_labels_do_not_fit(
         .iter()
         .copied()
         .fold(None, |best: Option<usize>, i| {
-            let width = |i: usize| widest(&bands[i].x_labels).map_or(0.0, Label::width);
+            let width = |i: usize| {
+                widest(&bands[i].x_labels)
+                    .map_or(0.0, Label::width)
+                    .max(bands[i].colorbar_tick_width())
+            };
             match best {
                 Some(kept) if width(kept) >= width(i) => best,
                 _ => Some(i),
@@ -1039,7 +1136,16 @@ fn x_labels_do_not_fit(
         })
         .unwrap_or(0);
     let fits = widest_label_that_fits(columns, cells, bands);
-    let err = x_labels_wider_than(input.context, &bands[named].x_labels, fits);
+    let err = if bands[named].colorbar_tick_width() > fits {
+        super::colorbar::room_error(
+            input.context,
+            bands[named].colorbar_tick_width(),
+            fits,
+            false,
+        )
+    } else {
+        x_labels_wider_than(input.context, &bands[named].x_labels, fits)
+    };
     in_panel(cells[named], err)
 }
 
@@ -1146,6 +1252,24 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 ///
 /// Both legend errors have the hint `shorten the label or widen the figure.`
 pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) -> Result<()> {
+    for (panel, layout) in input.panels.iter().zip(layouts) {
+        if let Some(colorbar) = &layout.colorbar {
+            let cells = panel.axes.cells();
+            let outer_edges = [
+                cells.col() == 0,
+                cells.col() + cells.col_span() == input.grid.cols(),
+            ];
+            colorbar
+                .check(input.context, layout.frame, outer_edges, panel.lib)
+                .map_err(|error| {
+                    if input.is_single() {
+                        error
+                    } else {
+                        in_panel(panel.axes.cells(), error)
+                    }
+                })?;
+        }
+    }
     if input.is_single() {
         for (panel, layout) in input.panels.iter().zip(layouts) {
             super::placement::check(panel, layout, true)?;
@@ -2747,7 +2871,7 @@ mod tests {
                 if columns.place(&columns.no_growth()).plot_width >= MIN_PLOT {
                     return;
                 }
-                let need = needed_width(grid, &cells, &columns);
+                let need = needed_width(grid, &cells, &bands, &columns);
                 let width_at = |width: f64| {
                     let wider = GridInput { width, ..*grid };
                     let fresh: Vec<PanelBands> = grid

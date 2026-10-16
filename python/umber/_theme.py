@@ -9,7 +9,16 @@ from umber import _cmap, _color, _umber
 from umber._args import instance, real
 from umber._cmap import CMAP_HINT, Cmap
 from umber._color import COLOR_HINT, Color
-from umber._enums import Align, Dash, FillStyle, Font, GridLines, LegendPosition, LegendStyle
+from umber._enums import (
+    Align,
+    ColorbarPosition,
+    Dash,
+    FillStyle,
+    Font,
+    GridLines,
+    LegendPosition,
+    LegendStyle,
+)
 from umber._errors import new_error
 from umber._report import api_call
 
@@ -617,6 +626,34 @@ class Theme:
         with api_call():
             checked = instance("Theme.with_diverging_cmap()", "cmap", cmap, Cmap, CMAP_HINT)
             return _wrap(self._native.with_diverging_cmap(_cmap.native(checked)))
+
+    def with_colorbar_position(self, position: ColorbarPosition) -> "Theme":
+        """Return this theme with the default colorbar position changed.
+
+        Args:
+            position: ``RIGHT``, ``BOTTOM`` or ``NONE``. Axes may override this setting.
+
+        Returns:
+            A new theme; this theme is unchanged.
+
+        Raises:
+            TypeError: If position is not a ColorbarPosition.
+
+        Example:
+            >>> import umber as ub
+            >>> theme = ub.Theme.PIGMENT.with_colorbar_position(ub.ColorbarPosition.BOTTOM)
+            >>> theme == ub.Theme.PIGMENT
+            False
+        """
+        with api_call():
+            checked = instance(
+                "Theme.with_colorbar_position()",
+                "position",
+                position,
+                ColorbarPosition,
+                "use ColorbarPosition.RIGHT, ColorbarPosition.BOTTOM or ColorbarPosition.NONE.",
+            )
+            return _wrap(self._native.with_colorbar_position(checked.value))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Theme):
