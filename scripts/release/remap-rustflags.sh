@@ -19,6 +19,8 @@ native() {
 # When several mappings match a path, rustc uses the last one, so the most specific prefixes
 # come last.
 flags=(
+    # Native code does not inherit CPython's frame-pointer flags (PEP 831).
+    "-C force-frame-pointers=yes"
     "--remap-path-prefix=$(native "$HOME")=/home"
     "--remap-path-prefix=$(native "$cargo_home")=/cargo"
     "--remap-path-prefix=$(native "$rustup_home")=/rustup"
