@@ -122,18 +122,49 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: scripts/release/build-dists.sh
 
+  # Free-threaded CPython: the extension is built for 3.14t (not abi3) and the suite runs without
+  # the GIL. polars publishes no free-threaded wheels, so it is not installed and the one test
+  # module that imports it is left out. Every step uses --no-sync, which would install it.
+  python-free-threaded:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14t"
+      - run: uv sync --locked --group dev --no-install-package polars --no-install-package polars-runtime-32
+      - run: uv run --no-sync maturin develop --uv
+      - run: uv run --no-sync python -m mypy.stubtest umber._umber
+      - run: uv run --no-sync pytest -q --ignore=tests/python/test_values.py
+      # As in the python job: the test binary must load this interpreter's shared library.
+      - name: Test the binding crate
+        shell: bash
+        run: |
+          libdir="$(uv run --no-sync python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR") or "")')"
+          base="$(uv run --no-sync python -c 'import sys; print(sys.base_prefix)')"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then base="$(cygpath -u "$base")"; fi
+          export LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export PATH="$base:$PATH"
+          uv run --no-sync cargo test -p umber-py --locked
+
   ci-ok:
     if: always()
-    needs: [rust, licenses, msrv, python, refactor-compare, output-extend]
+    needs: [rust, licenses, msrv, python, python-free-threaded, refactor-compare, output-extend]
     runs-on: ubuntu-latest
     steps:
       - name: Require every needed job to have succeeded
         run: |
-          echo "rust=${{ needs.rust.result }} licenses=${{ needs.licenses.result }} msrv=${{ needs.msrv.result }} python=${{ needs.python.result }} refactor-compare=${{ needs.refactor-compare.result }} output-extend=${{ needs.output-extend.result }}"
+          echo "rust=${{ needs.rust.result }} licenses=${{ needs.licenses.result }} msrv=${{ needs.msrv.result }} python=${{ needs.python.result }} python-free-threaded=${{ needs.python-free-threaded.result }} refactor-compare=${{ needs.refactor-compare.result }} output-extend=${{ needs.output-extend.result }}"
           test "${{ needs.licenses.result }}" = "success"
           test "${{ needs.msrv.result }}" = "success"
           test "${{ needs.rust.result }}" = "success"
           test "${{ needs.python.result }}" = "success"
+          test "${{ needs.python-free-threaded.result }}" = "success"
           # Skipped when the pull request has no `refactor` label.
           test "${{ needs.refactor-compare.result }}" = "success" || test "${{ needs.refactor-compare.result }}" = "skipped"
           # Runs on pull requests only.
