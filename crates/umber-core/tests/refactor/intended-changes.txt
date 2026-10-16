@@ -1,3 +1,13 @@
 # Cases whose committed outputs change on purpose in this change.
-# Preserve cumulative-curve extrema in the half-stroke strips beyond the x limits.
-stacked-area-long-limits
+# Vertical rules and spans end at the baseline when it sits at the y axis lower limit, not at the padded plot bottom.
+rules-alone
+rules-category-added-later
+rules-grid
+rules-legend-chips
+rules-legend-direct
+rules-legend-header
+rules-legend-none
+rules-log-axes
+rules-reference-graphite
+rules-reference-midnight
+rules-reference-pigment

@@ -1192,14 +1192,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
     ) -> Self:
-        """Add a vertical reference line across the whole plot at ``x``.
+        """Add a vertical reference line at ``x`` across the plot.
 
         On a linear or log x axis ``x`` is a number, and without explicit x limits the x axis
         extends to include it. On a category x axis ``x`` is a category name, and the line is
         drawn at the centre of that category. A name does not add a category: it must be the
         name of one of the categories of the other marks of these axes, which is checked when
         the figure is rendered (``DataError`` from ``to_png()``, ``to_svg()`` and the save
-        methods). The line is drawn above the data marks.
+        methods). The line is drawn above the data marks. It runs the full height of the plot,
+        except when the baseline sits at the y axis's lower limit (0 is not inside a linear y
+        domain): then it ends at the baseline, since only padding lies below it.
 
         Args:
             x: The x value of the line: a finite number, positive on a log axis, or a category
@@ -1298,10 +1300,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> "Axes[float, Y]":
         """Add a vertical reference span between the x values ``low`` and ``high``.
 
-        The span fills the region between the two values across the whole plot, at the opacity
-        of an area, and is drawn below the data marks. Without explicit x limits the x axis
-        extends to include both values; with limits, the span is clipped to them. It needs a
-        linear or log x axis: on a category axis use ``vline()``.
+        The span fills the region between the two values across the plot, at the opacity of an
+        area, and is drawn below the data marks. It has the full height of the plot, except when
+        the baseline sits at the y axis's lower limit (0 is not inside a linear y domain): then
+        it ends at the baseline. Without explicit x limits the x axis extends to include both
+        values; with limits, the span is clipped to them. It needs a linear or log x axis: on a
+        category axis use ``vline()``.
 
         Args:
             low: The lower x value; finite, and positive on a log x axis.

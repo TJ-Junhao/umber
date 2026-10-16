@@ -212,14 +212,15 @@ pub enum Mark {
     Step(StepMark),
     /// A horizontal line across the whole plot at a y value. It is drawn above all data marks.
     HLine(HLineMark),
-    /// A vertical line across the whole plot at an x value, or at a category's band centre. It
-    /// is drawn above all data marks.
+    /// A vertical line across the plot at an x value, or at a category's band centre; it ends
+    /// at the baseline when that sits at the y axis's lower limit. It is drawn above all data
+    /// marks.
     VLine(VLineMark),
     /// The region between two y values, across the whole plot, at the area opacity. It is drawn
     /// below all data marks.
     HSpan(SpanMark),
-    /// The region between two x values, across the whole plot, at the area opacity. It is drawn
-    /// below all data marks.
+    /// The region between two x values, across the plot (down to the baseline when that sits at
+    /// the y axis's lower limit), at the area opacity. It is drawn below all data marks.
     VSpan(SpanMark),
     /// The region between a lower and an upper curve, filled flat at the area opacity with no
     /// outline; NaN in x, low or high breaks it.
