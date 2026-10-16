@@ -37,7 +37,6 @@ use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };
 
-use crate::cmap::Cmap;
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::enum_value;
 use crate::errors::{core_error, internal_value};
