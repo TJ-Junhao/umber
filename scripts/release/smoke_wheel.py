@@ -7,6 +7,7 @@ anywhere other than that environment's ``site-packages``.
 
 from __future__ import annotations
 
+import sys
 import sysconfig
 import tempfile
 from pathlib import Path
@@ -31,6 +32,12 @@ def main() -> None:
         svg = path.read_text(encoding="utf-8")
         if "<svg" not in svg:
             raise SystemExit("error: save_svg() did not write an SVG document")
+
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        gil_enabled = sys._is_gil_enabled()
+        if gil_enabled:
+            raise SystemExit("error: importing and rendering with umber enabled the GIL")
+        print(f"sys._is_gil_enabled() = {gil_enabled}")
 
     print(f"umber from {location}: PNG {len(png)} bytes, SVG {len(svg)} characters")
 
