@@ -1,15 +1,16 @@
-//! The tick settings of one linear or log axis: explicit tick positions, with or without their
-//! own labels, and the tick label format, with the rule that keeps given labels and a format
-//! apart.
+//! The tick settings of one linear, log or time axis: explicit tick positions, with or without
+//! their own labels, and the tick label format, with the rule that keeps given labels and a
+//! format apart.
 
-use super::validation::{check_tick_labels, check_tick_positions};
-use crate::{Error, NumberStyle, Result, Tick, TickFormat, Transform};
+use super::validation::{check_tick_labels, check_tick_positions, check_time_tick_positions};
+use crate::{Error, Instant, NumberStyle, Result, ScaleKind, Tick, TickFormat, Transform};
 
 /// Tick positions set explicitly on one axis, in place of the automatic ticks. Read them with
 /// [`Axes::x_ticks`](crate::Axes::x_ticks) and [`Axes::y_ticks`](crate::Axes::y_ticks).
 ///
-/// Positions are finite, strictly increasing, within the supported magnitudes and, on a log
-/// axis, positive. An empty list means an axis without ticks and gridlines.
+/// Positions are strictly increasing; numbers are finite, within the supported magnitudes and,
+/// on a log axis, positive. A time axis holds times instead of numbers. An empty list means an
+/// axis without ticks and gridlines.
 ///
 /// # Examples
 ///
@@ -28,9 +29,13 @@ pub enum ExplicitTicks {
     Positions(Vec<f64>),
     /// Positions with their own labels, drawn as given.
     Labeled(Vec<Tick>),
+    /// Times on a time axis, whose labels the axis's [`TickFormat`] writes.
+    TimePositions(Vec<Instant>),
+    /// Times on a time axis with their own labels, drawn as given.
+    TimeLabeled(Vec<(Instant, String)>),
 }
 
-/// The tick settings of one linear or log axis: the explicit ticks, if set, and the label
+/// The tick settings of one linear, log or time axis: the explicit ticks, if set, and the label
 /// format. Labels given with their positions and a format other than plain
 /// [`TickFormat::AUTO`] cannot both be set: whichever setter comes second fails.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -77,14 +82,7 @@ impl AxisTicks {
     ) -> Result<()> {
         check_tick_positions(context, transform, positions)?;
         check_tick_labels(context, positions.len(), &labels)?;
-        if !self.format.is_auto() {
-            return Err(Error::usage(
-                context,
-                "the axis has a tick format other than TickFormat.AUTO; labels given with their positions are drawn as given and take no format.",
-            )
-            .with_parameter("labels")
-            .with_hint("set the tick format back to TickFormat.AUTO first, or pass only the positions."));
-        }
+        self.check_no_format(context)?;
         let ticks = positions
             .iter()
             .zip(labels)
@@ -94,11 +92,70 @@ impl AxisTicks {
         Ok(())
     }
 
-    /// Sets the label format under `context`; `Error::Usage` when `format` is
-    /// [`TickFormat::iso`], which labels times, and when the ticks have labels given with their
-    /// positions and `format` is not plain [`TickFormat::AUTO`]. Errors change nothing.
-    pub(super) fn set_format(&mut self, context: &'static str, format: TickFormat) -> Result<()> {
-        if format.style() == NumberStyle::Iso {
+    /// Replaces the ticks of a time axis with `positions`, labelled by the format, after
+    /// checking under `context` that they are strictly increasing. Errors change nothing.
+    pub(super) fn set_time_positions(
+        &mut self,
+        context: &'static str,
+        positions: &[Instant],
+    ) -> Result<()> {
+        check_time_tick_positions(context, positions)?;
+        self.explicit = Some(ExplicitTicks::TimePositions(positions.to_vec()));
+        Ok(())
+    }
+
+    /// Replaces the ticks of a time axis with `positions` and their `labels`, after checking
+    /// both under `context`, as [`AxisTicks::set_labeled`] does for numbers. Errors change
+    /// nothing.
+    pub(super) fn set_time_labeled(
+        &mut self,
+        context: &'static str,
+        positions: &[Instant],
+        labels: Vec<String>,
+    ) -> Result<()> {
+        check_time_tick_positions(context, positions)?;
+        check_tick_labels(context, positions.len(), &labels)?;
+        self.check_no_format(context)?;
+        let ticks = positions.iter().copied().zip(labels).collect();
+        self.explicit = Some(ExplicitTicks::TimeLabeled(ticks));
+        Ok(())
+    }
+
+    /// `Error::Usage` under `context` when the format is not plain [`TickFormat::AUTO`], so
+    /// labels given with their positions cannot be set.
+    fn check_no_format(&self, context: &'static str) -> Result<()> {
+        if self.format.is_auto() {
+            return Ok(());
+        }
+        Err(Error::usage(
+            context,
+            "the axis has a tick format other than TickFormat.AUTO; labels given with their positions are drawn as given and take no format.",
+        )
+        .with_parameter("labels")
+        .with_hint("set the tick format back to TickFormat.AUTO first, or pass only the positions."))
+    }
+
+    /// Sets the label format of an axis of scale kind `kind` under `context`. `Error::Usage`
+    /// when `format` does not suit the axis: [`TickFormat::iso`], which labels times, on a
+    /// linear or log axis, and a number format on a time axis; and when the ticks have labels
+    /// given with their positions and `format` is not plain [`TickFormat::AUTO`]. Errors change
+    /// nothing.
+    pub(super) fn set_format(
+        &mut self,
+        context: &'static str,
+        kind: ScaleKind,
+        format: TickFormat,
+    ) -> Result<()> {
+        let iso = format.style() == NumberStyle::Iso;
+        if kind == ScaleKind::Time && !iso && format.style() != NumberStyle::Auto {
+            return Err(Error::usage(
+                context,
+                "this is a time axis; number formats label linear and log axes only.",
+            )
+            .with_parameter("format")
+            .with_hint("use TickFormat.AUTO or TickFormat.iso() on a time axis."));
+        }
+        if kind != ScaleKind::Time && iso {
             return Err(Error::usage(
                 context,
                 "this is a linear or log axis; TickFormat.iso() labels time axes only.",
@@ -106,7 +163,10 @@ impl AxisTicks {
             .with_parameter("format")
             .with_hint("use TickFormat.AUTO or a number format on a numeric axis."));
         }
-        let labeled = matches!(self.explicit, Some(ExplicitTicks::Labeled(_)));
+        let labeled = matches!(
+            self.explicit,
+            Some(ExplicitTicks::Labeled(_) | ExplicitTicks::TimeLabeled(_))
+        );
         if labeled && !format.is_auto() {
             return Err(Error::usage(
                 context,

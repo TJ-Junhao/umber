@@ -160,13 +160,14 @@ impl Side {
         }
     }
 
-    /// Whether this side of an axes with `limits` gets automatic ticks: a linear or log axis
-    /// without explicit ticks.
+    /// Whether this side of an axes with `limits` gets automatic ticks: a linear, log or time
+    /// axis without explicit ticks.
     fn is_automatic(self, limits: &Limits<'_>) -> bool {
-        matches!(
-            limits.axis(self.axis()),
-            resolve::AxisLimits::Continuous(axis) if axis.ticks.explicit().is_none()
-        )
+        match limits.axis(self.axis()) {
+            resolve::AxisLimits::Continuous(axis) => axis.ticks.explicit().is_none(),
+            resolve::AxisLimits::Time(axis) => axis.ticks.explicit().is_none(),
+            resolve::AxisLimits::Category => false,
+        }
     }
 
     /// The ticks of this side of `resolved`.

@@ -286,6 +286,17 @@ fn explicit(t: Option<&ExplicitTicks>) -> String {
                 .collect();
             format!("labeled [{}]", ticks.join(", "))
         }
+        Some(ExplicitTicks::TimePositions(times)) => {
+            let times: Vec<String> = times.iter().map(|t| t.micros().to_string()).collect();
+            format!("time positions [{}]", times.join(","))
+        }
+        Some(ExplicitTicks::TimeLabeled(ticks)) => {
+            let ticks: Vec<String> = ticks
+                .iter()
+                .map(|(t, label)| format!("{} {}", t.micros(), record::text(label)))
+                .collect();
+            format!("time labeled [{}]", ticks.join(", "))
+        }
     }
 }
 

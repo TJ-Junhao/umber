@@ -161,6 +161,122 @@ impl Instant {
     pub fn civil(self) -> Civil {
         civil_of(self.0)
     }
+
+    /// The instant nearest to `us` microseconds since 1970-01-01T00:00 that lies in the
+    /// supported range: `us` itself, or [`Instant::MIN`] or [`Instant::MAX`] beyond them.
+    pub(crate) fn clamped(us: i64) -> Instant {
+        Instant(us.clamp(Instant::MIN.0, Instant::MAX.0))
+    }
+
+    /// This instant as messages write it: the ISO 8601 date, then the clock as far as it is not
+    /// zero, such as `2026-03-03`, `2026-03-03T06:30`, `2026-03-03T06:30:15` or
+    /// `2026-03-03T06:30:15.25`.
+    pub(crate) fn label(self) -> String {
+        let c = self.civil();
+        let date = format!("{:04}-{:02}-{:02}", c.year, c.month, c.day);
+        if (c.hour, c.minute, c.second, c.micro) == (0, 0, 0, 0) {
+            return date;
+        }
+        let minutes = format!("{date}T{:02}:{:02}", c.hour, c.minute);
+        if (c.second, c.micro) == (0, 0) {
+            return minutes;
+        }
+        if c.micro == 0 {
+            return format!("{minutes}:{:02}", c.second);
+        }
+        let fraction = format!("{:06}", c.micro);
+        format!(
+            "{minutes}:{:02}.{}",
+            c.second,
+            fraction.trim_end_matches('0')
+        )
+    }
+}
+
+/// The microseconds that stand for a missing time where times travel as whole microseconds:
+/// the smallest `i64`, which is how NumPy stores `NaT`.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{MISSING_TIME, times_from_micros};
+///
+/// assert_eq!(times_from_micros("doc", "x", &[MISSING_TIME])?, [None]);
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+pub const MISSING_TIME: i64 = i64::MIN;
+
+/// The times `micros`, each in microseconds since 1970-01-01T00:00, with [`MISSING_TIME`] for a
+/// missing time, which becomes `None`, a gap. The values are named `name` in messages, such as
+/// `x`.
+///
+/// # Errors
+///
+/// `Error::Data` under `context`, naming `name`, for the first value outside
+/// [`Instant::MIN`]..=[`Instant::MAX`].
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Instant, MISSING_TIME, times_from_micros};
+///
+/// let times = times_from_micros("Axes.line()", "x", &[0, MISSING_TIME])?;
+/// assert_eq!(times, [Some(Instant::from_micros(0)?), None]);
+/// let late = Instant::MAX.micros() + 1;
+/// let err = times_from_micros("Axes.line()", "x", &[0, late]).unwrap_err();
+/// assert_eq!(
+///     err.to_string(),
+///     "Axes.line(): x[1] is 10000-01-01; times must lie between 0001-01-01 and 9999-12-31."
+/// );
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+pub fn times_from_micros(
+    context: &'static str,
+    name: &'static str,
+    micros: &[i64],
+) -> Result<Vec<Option<Instant>>> {
+    micros
+        .iter()
+        .enumerate()
+        .map(|(i, &us)| {
+            if us == MISSING_TIME {
+                Ok(None)
+            } else if (Instant::MIN.0..=Instant::MAX.0).contains(&us) {
+                Ok(Some(Instant(us)))
+            } else {
+                Err(range_error(context, &format!("{name}[{i}]"), us).with_parameter(name))
+            }
+        })
+        .collect()
+}
+
+/// The time `us`, in microseconds since 1970-01-01T00:00, named `name` in messages, such as
+/// `low`.
+///
+/// # Errors
+///
+/// `Error::Data` under `context`, naming `name`, when `us` lies outside
+/// [`Instant::MIN`]..=[`Instant::MAX`]; [`MISSING_TIME`] does too.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Instant, time_from_micros};
+///
+/// assert_eq!(time_from_micros("Axes.xlim()", "low", 0)?, Instant::from_micros(0)?);
+/// let err = time_from_micros("Axes.xlim()", "low", Instant::MIN.micros() - 1).unwrap_err();
+/// assert_eq!(
+///     err.to_string(),
+///     "Axes.xlim(): low is 0000-12-31; times must lie between 0001-01-01 and 9999-12-31."
+/// );
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+pub fn time_from_micros(context: &'static str, name: &'static str, us: i64) -> Result<Instant> {
+    if (Instant::MIN.0..=Instant::MAX.0).contains(&us) {
+        Ok(Instant(us))
+    } else {
+        Err(range_error(context, name, us).with_parameter(name))
+    }
 }
 
 /// The civil date and time of `us` microseconds since 1970-01-01T00:00, for any `us`: years
@@ -183,7 +299,7 @@ fn civil_of(us: i64) -> Civil {
 
 /// The days from 1970-01-01 to the civil date `year`-`month`-`day` (negative before it), for
 /// `month` in 1..=12 and `day` in 1..=31.
-const fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+pub(crate) const fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     // Years start on March 1 here, so that the leap day ends the year.
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);
@@ -427,7 +543,6 @@ impl TimeStep {
 /// the larger on a tie. Ticks are the step's grid points inside the range, never beyond it.
 /// When no step puts two ticks in the range (`low` equals `high`), the step is one
 /// microsecond, with the single tick at `low`.
-#[cfg_attr(not(test), allow(dead_code, reason = "only tests call it so far"))]
 pub(crate) fn time_ticks(low: Instant, high: Instant) -> (TimeStep, Vec<Instant>) {
     let (low, high) = (low.min(high), low.max(high));
     // The best step outside the wanted counts so far: its distance from 6.5, doubled.
@@ -453,12 +568,54 @@ pub(crate) fn time_ticks(low: Instant, high: Instant) -> (TimeStep, Vec<Instant>
     (step, step.instants(first, count))
 }
 
+/// The steps of the step table coarser than `step`, the nearest first, each with its ticks over
+/// `low..=high` (the ends may come in either order); steps that put fewer than two ticks there
+/// are left out. Where the labels of the automatic step crowd, an axis takes the first of these
+/// whose labels keep apart.
+pub(crate) fn coarser_ticks(
+    step: TimeStep,
+    low: Instant,
+    high: Instant,
+) -> impl Iterator<Item = (TimeStep, Vec<Instant>)> {
+    let (low, high) = (low.min(high), low.max(high));
+    let at = STEPS.iter().position(|&s| s == step).unwrap_or(STEPS.len());
+    STEPS[..at].iter().rev().filter_map(move |&s| {
+        let (first, count) = s.span(low, high);
+        (count >= 2).then(|| (s, s.instants(first, count)))
+    })
+}
+
+/// The step whose labels suit the instants `ticks` when they are not the grid of a step, as
+/// explicit tick positions are: years when every one starts a year, months when every one
+/// starts a month, days when every one is a midnight, then minutes and seconds, and below a
+/// second as many decimals as the finest of them needs.
+pub(crate) fn label_step(ticks: &[Instant]) -> TimeStep {
+    let all = |test: &dyn Fn(Civil) -> bool| ticks.iter().all(|t| test(t.civil()));
+    let midnight = |c: Civil| (c.hour, c.minute, c.second, c.micro) == (0, 0, 0, 0);
+    if all(&|c| midnight(c) && (c.month, c.day) == (1, 1)) {
+        TimeStep::Years(1)
+    } else if all(&|c| midnight(c) && c.day == 1) {
+        TimeStep::Months(1)
+    } else if all(&midnight) {
+        TimeStep::Days(1)
+    } else if all(&|c| (c.second, c.micro) == (0, 0)) {
+        TimeStep::Minutes(1)
+    } else if all(&|c| c.micro == 0) {
+        TimeStep::Seconds(1)
+    } else {
+        let mut every = 100_000;
+        while every > 1 && !all(&|c| c.micro % every == 0) {
+            every /= 10;
+        }
+        TimeStep::Sub(every)
+    }
+}
+
 /// The concise labels of `ticks` on the grid of `step`: each shows the unit that changes, and
 /// the first tick and every tick where the next larger unit changes also show that one. Year
 /// steps write the year (`2026`); month steps the month (`Feb`, `Jan 2026`); day steps the day
 /// (`3`, `Mar 3`); shorter steps the clock (`06:00`, `14:32:15`, `14:32:07.25`), with the date
 /// (`Mar 3 06:00`).
-#[cfg_attr(not(test), allow(dead_code, reason = "only tests call it so far"))]
 pub(crate) fn concise_labels(ticks: &[Instant], step: TimeStep) -> Vec<String> {
     let mut previous: Option<Civil> = None;
     ticks
@@ -498,10 +655,79 @@ pub(crate) fn concise_labels(ticks: &[Instant], step: TimeStep) -> Vec<String> {
         .collect()
 }
 
+/// The labels of explicit ticks `ticks`, in axis order, labelled for `step` (see
+/// [`label_step`]), by the concise rule applied to their own sequence: each label shows the
+/// unit of the step, and also every larger unit that changes from the tick before it, years
+/// included. The first label shows the next larger unit, and the year too when the ticks span
+/// more than one year. So `Jan 2 2025, Jan 2 2026` for two ticks a year apart, and `Jan 2, 9,
+/// Feb 2` within a year.
+pub(crate) fn explicit_labels(ticks: &[Instant], step: TimeStep) -> Vec<String> {
+    /// The calendar units a label can show, the largest first.
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Part {
+        Clock,
+        Day,
+        Month,
+        Year,
+    }
+    let level = match step {
+        TimeStep::Years(_) => Part::Year,
+        TimeStep::Months(_) => Part::Month,
+        TimeStep::Days(_) => Part::Day,
+        _ => Part::Clock,
+    };
+    // The largest unit in which `b` differs from `a`, if any.
+    let changed = |a: Civil, b: Civil| {
+        if a.year != b.year {
+            Some(Part::Year)
+        } else if a.month != b.month {
+            Some(Part::Month)
+        } else if a.day != b.day {
+            Some(Part::Day)
+        } else {
+            None
+        }
+    };
+    let civil: Vec<Civil> = ticks.iter().map(|t| t.civil()).collect();
+    let next_larger = match level {
+        Part::Clock => Part::Day,
+        Part::Day => Part::Month,
+        Part::Month | Part::Year => Part::Year,
+    };
+    let span = match (civil.first(), civil.last()) {
+        (Some(&first), Some(&last)) => changed(first, last),
+        _ => None,
+    };
+    civil
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| {
+            let top = match i.checked_sub(1) {
+                None => span.map_or(next_larger, |s| s.max(next_larger)),
+                Some(j) => changed(civil[j], c).map_or(level, |p| p.max(level)),
+            };
+            let month = MONTHS[usize::from(c.month) - 1];
+            let date = if top == Part::Year {
+                format!("{month} {} {:04}", c.day, c.year)
+            } else {
+                format!("{month} {}", c.day)
+            };
+            match level {
+                Part::Year => format!("{:04}", c.year),
+                Part::Month if top == Part::Year => format!("{month} {:04}", c.year),
+                Part::Month => month.to_owned(),
+                Part::Day if top > Part::Day => date,
+                Part::Day => c.day.to_string(),
+                Part::Clock if top > Part::Clock => format!("{date} {}", clock(c, step)),
+                Part::Clock => clock(c, step),
+            }
+        })
+        .collect()
+}
+
 /// The ISO 8601 label of `t`, written down to the unit of `step`: `2026` for years, `2026-03`
 /// for months, `2026-03-03` for days, `2026-03-03T06:00` for hours and minutes, and the
 /// seconds, with the decimals a sub-second step needs, below that.
-#[cfg_attr(not(test), allow(dead_code, reason = "only tests call it so far"))]
 pub(crate) fn iso_label(t: Instant, step: TimeStep) -> String {
     let c = t.civil();
     let date = format!("{:04}-{:02}-{:02}", c.year, c.month, c.day);

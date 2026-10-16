@@ -36,7 +36,8 @@ MASKED_NAMES_HINT = 'fill them with a name first, e.g. values.filled("n/a").'
 NDIM_HINT = "pass one column, or flatten it with .ravel()."
 BOOL_DTYPE_HINT = "convert with .astype(float) if 0 and 1 are meant."
 BOOL_HINT = "use 1.0 and 0.0 if numbers are meant."
-TIME_HINT = "convert to numbers, e.g. seconds since the first value."
+TIME_HINT = "use numbers, or declare the axis with Scale.time()."
+DURATION_HINT = "convert to numbers, e.g. seconds since the first value."
 COMPLEX_HINT = "pass the real part, values.real, or the magnitude, abs(values)."
 WIDE_FLOAT_HINT = "convert with .astype(np.float64); umber plots in float64 precision."
 STRUCTURED_HINT = "pass one numeric field of the structured array."
@@ -379,43 +380,57 @@ def test_a_bool_among_numbers_is_refused(values: object, index: int, shown: str)
 
 
 @pytest.mark.parametrize(
-    ("values", "dtype"),
+    ("values", "dtype", "hint"),
     [
-        (np.array(["2020-01-01"], dtype="datetime64[ns]"), "datetime64[ns]"),
-        (np.array([1, 2], dtype="timedelta64[s]"), "timedelta64[s]"),
-        (pd.Series(pd.to_datetime(["2020-01-01"])), str(pd.to_datetime(["2020-01-01"]).dtype)),
-        (pd.Series(pd.to_timedelta([1, 2], unit="s")), str(pd.to_timedelta([1], unit="s").dtype)),
+        (np.array(["2020-01-01"], dtype="datetime64[ns]"), "datetime64[ns]", TIME_HINT),
+        (np.array([1, 2], dtype="timedelta64[s]"), "timedelta64[s]", DURATION_HINT),
+        (
+            pd.Series(pd.to_datetime(["2020-01-01"])),
+            str(pd.to_datetime(["2020-01-01"]).dtype),
+            TIME_HINT,
+        ),
+        (
+            pd.Series(pd.to_timedelta([1, 2], unit="s")),
+            str(pd.to_timedelta([1], unit="s").dtype),
+            DURATION_HINT,
+        ),
     ],
 )
-def test_datetime_and_timedelta_data_is_refused(values: object, dtype: str) -> None:
+def test_datetime_and_timedelta_data_is_refused(values: object, dtype: str, hint: str) -> None:
     assert y_error(ub.DataError, values) == (
         f"Axes.line(): y has dtype {dtype}; values must be numbers.",
         "y",
-        TIME_HINT,
+        hint,
     )
 
 
 @pytest.mark.parametrize(
-    ("values", "index", "shown"),
+    ("values", "index", "shown", "hint"),
     [
-        ([1.0, datetime.datetime(2020, 1, 2)], 1, "datetime"),
-        ([np.datetime64("2020-01-01", "D")], 0, "np.datetime64('2020-01-01')"),
-        ([datetime.date(2020, 1, 2)], 0, "date"),
-        ([1.0, datetime.timedelta(seconds=3)], 1, "timedelta"),
-        ([1, np.datetime64("2020-01-01")], 1, "np.datetime64('2020-01-01')"),
-        (np.array([1, np.timedelta64(2, "s")], dtype=object), 1, "np.timedelta64(2,'s')"),
+        ([1.0, datetime.datetime(2020, 1, 2)], 1, "datetime", TIME_HINT),
+        ([np.datetime64("2020-01-01", "D")], 0, "np.datetime64('2020-01-01')", TIME_HINT),
+        ([datetime.date(2020, 1, 2)], 0, "date", TIME_HINT),
+        ([1.0, datetime.timedelta(seconds=3)], 1, "timedelta", DURATION_HINT),
+        ([1, np.datetime64("2020-01-01")], 1, "np.datetime64('2020-01-01')", TIME_HINT),
+        (
+            np.array([1, np.timedelta64(2, "s")], dtype=object),
+            1,
+            "np.timedelta64(2,'s')",
+            DURATION_HINT,
+        ),
         (
             pd.Series(pd.to_datetime(["2020-01-01"]).tz_localize("UTC")),
             0,
             "Timestamp",
+            TIME_HINT,
         ),
     ],
 )
-def test_datetime_elements_are_refused(values: object, index: int, shown: str) -> None:
+def test_datetime_elements_are_refused(values: object, index: int, shown: str, hint: str) -> None:
     assert y_error(ub.DataError, values) == (
         f"Axes.line(): y[{index}] is {shown}; values must be numbers.",
         "y",
-        TIME_HINT,
+        hint,
     )
 
 

@@ -7,6 +7,7 @@ from typing import Final, Generic, Self, TypeVar, cast, final
 from umber import _args, _umber
 from umber._errors import new_error
 from umber._report import api_call
+from umber._types import Time
 
 # An old-style, invariant type variable: a PEP 695 parameter that no method uses would be
 # inferred as bivariant, making ``Scale[str]`` assignable to ``Scale[float]``.
@@ -16,15 +17,17 @@ T = TypeVar("T")
 _LINEAR = 0
 _LOG = 1
 _CATEGORY = 2
+_TIME = 3
 
 
 @final
 class Scale(Generic[T]):  # noqa: UP046
     """An axis scale. The type parameter is the type of the values the axis holds.
 
-    Use ``Scale.linear()`` and ``Scale.log()`` for numeric axes (``Scale[float]``) and
-    ``Scale.category()`` for an axis of names (``Scale[str]``). Scales compare equal when
-    they are the same kind with the same base.
+    Use ``Scale.linear()`` and ``Scale.log()`` for numeric axes (``Scale[float]``),
+    ``Scale.category()`` for an axis of names (``Scale[str]``) and ``Scale.time()`` for an axis
+    of times (``Scale[Time]``). Scales compare equal when they are the same kind with the same
+    base.
 
     Example:
         >>> import umber as ub
@@ -39,14 +42,14 @@ class Scale(Generic[T]):  # noqa: UP046
     _base: float
 
     def __init__(self) -> None:
-        """Refuse construction; use ``Scale.linear()``, ``Scale.log()`` or ``Scale.category()``."""
+        """Refuse construction; use ``Scale.linear()``, ``Scale.log()`` or another constructor."""
         with api_call():
             raise new_error(
                 TypeError,
                 "Scale()",
                 "Scale has no public constructor; use one of its constructors.",
                 parameter=None,
-                hint="use Scale.linear(), Scale.log() or Scale.category().",
+                hint="use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
             )
 
     @staticmethod
@@ -115,6 +118,28 @@ class Scale(Generic[T]):  # noqa: UP046
         with api_call():
             return cast(Scale[str], _new(_CATEGORY, 10.0))
 
+    @staticmethod
+    def time() -> "Scale[Time]":
+        """Return the scale of times, for time series.
+
+        A time axis takes ``datetime``, ``date`` and ``numpy.datetime64`` values, NumPy
+        ``datetime64`` arrays of any unit, and naive pandas and polars datetime columns. A
+        ``date`` is midnight of that day. Times are kept to the microsecond: finer values are
+        rounded to the nearest microsecond, halves to even. Times must not carry a time zone,
+        and must lie between 0001-01-01 and 9999-12-31; ``NaT`` leaves a gap. The ticks fall on
+        calendar steps, such as months or hours, with concise labels.
+
+        Returns:
+            The scale.
+
+        Example:
+            >>> import umber as ub
+            >>> ub.Scale.time()
+            Scale.time()
+        """
+        with api_call():
+            return cast(Scale[Time], _new(_TIME, 10.0))
+
     def _key(self) -> tuple[int, float | None]:
         return self._kind, self._base if self._kind == _LOG else None
 
@@ -131,6 +156,8 @@ class Scale(Generic[T]):  # noqa: UP046
             return "Scale.linear()"
         if self._kind == _CATEGORY:
             return "Scale.category()"
+        if self._kind == _TIME:
+            return "Scale.time()"
         return f"Scale.log({self._base!r})"
 
     def __copy__(self) -> Self:
@@ -159,8 +186,8 @@ def native[V](scale: Scale[V]) -> tuple[int, float]:
         scale: The scale.
 
     Returns:
-        The kind (0 for linear, 1 for log, 2 for category) and the base, which matters for
-        logarithmic scales only.
+        The kind (0 for linear, 1 for log, 2 for category, 3 for time) and the base, which
+        matters for logarithmic scales only.
 
     Example:
         >>> import umber as ub

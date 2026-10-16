@@ -9,6 +9,7 @@
 //! | 1 | `TickFormat.fixed(decimals)` | the decimals |
 //! | 2 | `TickFormat.percent(decimals)` | the decimals |
 //! | 3 | `TickFormat.scientific()` | unused (0) |
+//! | 4 | `TickFormat.iso()` | unused (0) |
 //!
 //! The prefix and the suffix apply to every kind. All bounds are checked by the core.
 
@@ -25,6 +26,8 @@ const FIXED: i64 = 1;
 const PERCENT: i64 = 2;
 /// The `kind` of a tick format argument for `TickFormat.scientific()`.
 const SCIENTIFIC: i64 = 3;
+/// The `kind` of a tick format argument for `TickFormat.iso()`.
+const ISO: i64 = 4;
 
 /// A tick format argument `(kind, decimals, prefix, suffix)`, as the module documentation
 /// describes.
@@ -45,6 +48,7 @@ pub(crate) fn tick_format((kind, decimals, prefix, suffix): TickFormatArg) -> Py
         FIXED => TickFormat::fixed(decimals).map_err(core_error)?,
         PERCENT => TickFormat::percent(decimals).map_err(core_error)?,
         SCIENTIFIC => TickFormat::scientific(),
+        ISO => TickFormat::iso(),
         _ => return Err(internal_value(format!("{kind} is not a tick format kind"))),
     };
     style.affix(&prefix, &suffix).map_err(core_error)
@@ -72,6 +76,10 @@ mod tests {
         assert_eq!(
             tick_format(arg(3, 0, "", "")).unwrap(),
             TickFormat::scientific()
+        );
+        assert_eq!(
+            tick_format(arg(4, 0, "", " UTC")).unwrap(),
+            TickFormat::iso().affix("", " UTC").unwrap()
         );
     }
 }

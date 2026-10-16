@@ -322,7 +322,7 @@ def test_a_category_y_axis_is_accepted() -> None:
 def test_unknown_scale_kinds_are_internal_errors() -> None:
     fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
     assert_internal(
-        lambda: fig.add_axes(*ONLY_CELL, 3, 10.0, LINEAR, 10.0), ValueError, "3 is not a scale kind"
+        lambda: fig.add_axes(*ONLY_CELL, 4, 10.0, LINEAR, 10.0), ValueError, "4 is not a scale kind"
     )
     assert_internal(
         lambda: fig.add_axes(*ONLY_CELL, LINEAR, 10.0, -1, 10.0),
@@ -1094,7 +1094,7 @@ INTERNAL_MARK_ERRORS: list[
         "list of floats",
         lambda f: f.line(0, 0, floats(1), untyped([1.0]), "", AUTO, 0, NO_SIZE),
         TypeError,
-        "expected a one-dimensional float64 buffer, got list",
+        "expected a list of str, got an item of float",
     ),
     (
         "series values",

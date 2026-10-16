@@ -1,7 +1,8 @@
 //! Scales: how values along one axis map to positions in `[0, 1]`.
 //!
 //! A [`ContinuousScale`] maps numbers (linear or logarithmic) and produces ticks; a
-//! [`CategoryScale`] maps named categories to equal bands.
+//! [`CategoryScale`] maps named categories to equal bands. A time axis maps times through a
+//! linear scale of seconds measured from an origin inside its range.
 //!
 //! # Examples
 //!
@@ -19,7 +20,7 @@ use std::collections::HashMap;
 
 use crate::error::number;
 use crate::ticks::{self, AutoTicks, Room, Tick, TickCoverage, TickValues};
-use crate::{Error, Result};
+use crate::{Error, Instant, Result};
 
 /// How values along one axis map to positions.
 ///
@@ -35,7 +36,7 @@ use crate::{Error, Result};
 /// assert_ne!(kind, ScaleKind::Linear);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[non_exhaustive] // room for `Time` later without a breaking change
+#[non_exhaustive] // room for more kinds without a breaking change
 pub enum ScaleKind {
     /// Values map linearly.
     Linear,
@@ -46,15 +47,18 @@ pub enum ScaleKind {
     },
     /// Discrete categories; order = first appearance across marks, resolved at render time.
     Category,
+    /// Times ([`Instant`]s), which map linearly, with calendar ticks and labels.
+    Time,
 }
 
 impl ScaleKind {
-    /// The value transform of a linear or log axis; `None` for a category axis.
+    /// The value transform of a linear or log axis; `None` for a category or a time axis, whose
+    /// values are not numbers.
     pub(crate) fn transform(self) -> Option<Transform> {
         match self {
             ScaleKind::Linear => Some(Transform::Linear),
             ScaleKind::Log { base } => Some(Transform::Log(base)),
-            ScaleKind::Category => None,
+            ScaleKind::Category | ScaleKind::Time => None,
         }
     }
 }
@@ -217,7 +221,7 @@ pub(crate) fn is_single_value(transform: Transform, lo: f64, hi: f64) -> bool {
 
 /// The share of a nice domain's span that auto limits add on each side, so that marks never
 /// sit on the plot edge.
-const AUTO_LIMIT_PADDING: f64 = 0.05;
+pub(crate) const AUTO_LIMIT_PADDING: f64 = 0.05;
 
 /// Which sides of a nice domain [`ContinuousScale::padded`] widens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1426,6 +1430,65 @@ impl CategoryScale {
     pub fn center(&self, index: usize) -> f64 {
         let (start, end) = self.band(index);
         (start + end) / 2.0
+    }
+}
+
+/// The seconds from `from` to `to`; negative when `to` comes first. The difference is taken in
+/// whole microseconds, so two instants close together keep their distance exactly, wherever
+/// they lie in the calendar.
+pub(crate) fn seconds_between(from: Instant, to: Instant) -> f64 {
+    // Both lie between Instant::MIN and Instant::MAX, so the difference fits an i64.
+    (to.micros() - from.micros()) as f64 / 1e6
+}
+
+/// A resolved time axis: a linear [`ContinuousScale`] of seconds measured from `origin`, an
+/// instant inside the axis range. Measuring from an origin near the data keeps the distances
+/// between nearby times exact before they become `f64`, so a span of a microsecond in year
+/// 9999 maps as well as one in 1970.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TimeScale {
+    /// The instant at 0 seconds.
+    origin: Instant,
+    /// The domain, in seconds from the origin.
+    scale: ContinuousScale,
+    /// The earliest and the latest whole microsecond inside the domain, kept exactly.
+    instants: (Instant, Instant),
+}
+
+impl TimeScale {
+    /// The scale whose domain is `scale`, in seconds from `origin`, with `instants` the
+    /// earliest and the latest whole microsecond inside it. `scale` is linear.
+    pub(crate) fn new(
+        origin: Instant,
+        scale: ContinuousScale,
+        instants: (Instant, Instant),
+    ) -> TimeScale {
+        TimeScale {
+            origin,
+            scale,
+            instants,
+        }
+    }
+
+    /// The linear scale of seconds from the origin.
+    pub(crate) fn seconds_scale(&self) -> &ContinuousScale {
+        &self.scale
+    }
+
+    /// The seconds from the origin to `t`: its position in axis space.
+    pub(crate) fn seconds(&self, t: Instant) -> f64 {
+        seconds_between(self.origin, t)
+    }
+
+    /// The position of `t` along the axis: 0 at the low end of the domain, 1 at the high end.
+    pub(crate) fn normalize(&self, t: Instant) -> f64 {
+        self.scale.normalize(self.seconds(t))
+    }
+
+    /// The earliest and the latest whole microsecond inside the domain, as given exactly when
+    /// the scale was made, so that a tick on a limit is never lost to the rounding of seconds.
+    pub(crate) fn instants(&self) -> (Instant, Instant) {
+        self.instants
     }
 }
 

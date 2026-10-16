@@ -1,10 +1,9 @@
 //! Error bar marks: the options given to the error bar methods and the stored error bar mark.
 
 use std::fmt;
-use std::sync::Arc;
 
-use super::axis_data::AxisData;
-use crate::{ColorSpec, SizeSpec};
+use super::axis_data::{AxisData, SharedValues};
+use crate::{ColorSpec, Instant, SizeSpec};
 
 /// The direction of the bars of an error bar mark.
 ///
@@ -70,8 +69,9 @@ impl Default for ErrorBarOptions {
 /// [horizontal](ErrorBarOrientation::Horizontal).
 ///
 /// The positions and limits are stored together and never change; clones share them. The
-/// positions of horizontal bars are numbers. At every index where both limits are finite, low
-/// does not exceed high.
+/// limits are numbers on a linear or log value axis and times on a time one
+/// ([`AxesMut::y_error_bars_time`](super::AxesMut::y_error_bars_time)). At every index where
+/// both limits are given, low does not exceed high.
 ///
 /// # Examples
 ///
@@ -112,19 +112,19 @@ impl Default for ErrorBarOptions {
 pub struct ErrorBarMark {
     orientation: ErrorBarOrientation,
     positions: AxisData,
-    low: Arc<[f64]>,
-    high: Arc<[f64]>,
+    low: SharedValues,
+    high: SharedValues,
     options: ErrorBarOptions,
 }
 
 impl ErrorBarMark {
     /// Bars of `orientation` at validated `positions`, between validated limits of the same
-    /// count.
+    /// count, both numbers or both times.
     pub(super) fn new(
         orientation: ErrorBarOrientation,
         positions: AxisData,
-        low: Arc<[f64]>,
-        high: Arc<[f64]>,
+        low: SharedValues,
+        high: SharedValues,
         options: ErrorBarOptions,
     ) -> ErrorBarMark {
         ErrorBarMark {
@@ -149,16 +149,58 @@ impl ErrorBarMark {
         &self.positions
     }
 
-    /// The lower limit of each bar, as many as the positions.
+    /// The lower limit of each bar, as many as the positions, on a linear or log value axis;
+    /// empty on a time one, whose limits [`ErrorBarMark::low_times`] gives.
     #[must_use]
     pub fn low(&self) -> &[f64] {
-        &self.low
+        self.low.numbers()
     }
 
-    /// The upper limit of each bar, as many as the positions.
+    /// The upper limit of each bar, as many as the positions, on a linear or log value axis;
+    /// empty on a time one, whose limits [`ErrorBarMark::high_times`] gives.
     #[must_use]
     pub fn high(&self) -> &[f64] {
-        &self.high
+        self.high.numbers()
+    }
+
+    /// The lower limit of each bar on a time value axis, `None` for a gap; empty on a linear or
+    /// log one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::figure::{AxisData, ErrorBarOptions, Mark};
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// let (low, high) = ([Some(Instant::from_micros(0)?)], [Some(Instant::from_micros(5)?)]);
+    /// axes.y_error_bars_time(
+    ///     AxisData::Numbers(vec![1.0]),
+    ///     Arc::from(low),
+    ///     Arc::from(high),
+    ///     ErrorBarOptions::default(),
+    /// )?;
+    /// let Some(Mark::ErrorBars(bars)) = axes.marks().first() else { unreachable!() };
+    /// assert_eq!((bars.low_times(), bars.high_times()), (&low[..], &high[..]));
+    /// assert!(bars.low().is_empty());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn low_times(&self) -> &[Option<Instant>] {
+        self.low.times()
+    }
+
+    /// The upper limit of each bar on a time value axis; see [`ErrorBarMark::low_times`].
+    #[must_use]
+    pub fn high_times(&self) -> &[Option<Instant>] {
+        self.high.times()
+    }
+
+    /// The lower and the upper limits as stored: numbers or times.
+    pub(crate) fn limits(&self) -> (&SharedValues, &SharedValues) {
+        (&self.low, &self.high)
     }
 
     /// Label, color, width and caps.
@@ -182,6 +224,8 @@ impl fmt::Debug for ErrorBarMark {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::model::{Figure, Mark};
     use crate::{Error, LogBase, ScaleKind, Theme};

@@ -73,8 +73,8 @@ class Cell:
         """Add axes at this cell of its figure and return them.
 
         Args:
-            x: The x scale, numeric or category.
-            y: The y scale, numeric or category; a category y axis makes horizontal bars.
+            x: The x scale: numeric, category or time.
+            y: The y scale, numeric, category or time; a category y axis makes horizontal bars.
 
         Returns:
             The new axes, occupying this cell only.
@@ -98,14 +98,14 @@ class Cell:
                 "x",
                 x,
                 Scale,
-                "use Scale.linear(), Scale.log() or Scale.category().",
+                "use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
             )
             instance(
                 "Cell.add_axes()",
                 "y",
                 y,
                 Scale,
-                "use Scale.linear(), Scale.log() or Scale.category().",
+                "use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
             )
             return self._figure.add_axes(row=self._row, col=self._col, x=x, y=y)
 

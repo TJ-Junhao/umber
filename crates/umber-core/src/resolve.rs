@@ -32,6 +32,12 @@
 //! Tick positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch
 //! data values again.
 //!
+//! A time axis follows the same rules on times ([`time_axis`]): its domain is the exact time
+//! extent for an axis of lines and padded by 5 % of the span otherwise, explicit limits and
+//! ticks take times, and its ticks are the calendar ticks of the time module inside the domain,
+//! with concise or ISO labels. It is measured in seconds from an origin at the low end of the
+//! data ([`TimeScale`]).
+//!
 //! Marks are resolved here too, once per render: each mark becomes a [`ResolvedMark`], a typed
 //! record that carries the mark's data, its [`ColorSpec`] resolved against the theme's palette
 //! and, for lines, areas and scatters, its [`SizeSpec`](crate::SizeSpec) resolved against the
@@ -47,20 +53,26 @@ use crate::layout::TickRoom;
 use crate::legend::{LegendEntry, Swatch, SwatchFill};
 use crate::model::{
     AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
-    Mark, ScatterMark, SeriesView, StepMark,
+    Mark, ScatterMark, SeriesView, SharedValues, StepMark,
 };
 use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
 use crate::model::{Edge, holds};
 use crate::model::{ErrorBarMark, ErrorBarOrientation};
 use crate::model::{PointColor, StackedAreaMark, StemMark};
-use crate::scale::{Finish, Padding, TickJudge, is_single_value, log_offset};
+use crate::scale::{
+    AUTO_LIMIT_PADDING, Finish, Padding, TickJudge, TimeScale, is_single_value, log_offset,
+    seconds_between,
+};
 use crate::stacking::{AreaStacks, Stacks};
 use crate::stats::{BoxStats, box_stats, kde_scott, quantile_type7};
 use crate::tick_format::TickFormat;
 use crate::ticks::{AutoTicks, TickValues};
+use crate::time::{
+    TimeStep, coarser_ticks, concise_labels, explicit_labels, iso_label, label_step, time_ticks,
+};
 use crate::{
-    CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Marker, Result, Rgba, ScaleKind, Theme,
-    Tick, Transform, ticks,
+    CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Instant, Marker, NumberStyle, Result,
+    Rgba, ScaleKind, Theme, Tick, Transform, ticks,
 };
 
 /// The context of errors that cannot happen here: the model validated every input already.
@@ -73,6 +85,8 @@ pub(crate) enum AxisScale {
     Continuous(ContinuousScale),
     /// A category axis.
     Category(CategoryScale),
+    /// A time axis.
+    Time(TimeScale),
 }
 
 /// A position along an axis as a share of its length: 0 is the low end (left or bottom), 1 the
@@ -127,7 +141,7 @@ impl ResolvedAxis {
     pub fn continuous(&self) -> Option<&ContinuousScale> {
         match &self.scale {
             AxisScale::Continuous(scale) => Some(scale),
-            AxisScale::Category(_) => None,
+            AxisScale::Category(_) | AxisScale::Time(_) => None,
         }
     }
 
@@ -138,16 +152,18 @@ impl ResolvedAxis {
         match &self.scale {
             AxisScale::Continuous(scale) => scale,
             AxisScale::Category(_) => panic!("a category axis has no continuous scale"),
+            AxisScale::Time(_) => panic!("a time axis has no continuous scale"),
         }
     }
 
     /// Whether 0 lies inside the domain of this axis and the axis is linear: the baseline of a
     /// value axis then sits at 0 rather than at its lower limit. Never on a log axis, which
-    /// cannot show 0, or on a category axis, which has no values.
+    /// cannot show 0, on a category axis, which has no values, or on a time axis, which has no
+    /// 0.
     pub fn holds_zero(&self) -> bool {
         match &self.scale {
             AxisScale::Continuous(scale) => holds_zero(scale),
-            AxisScale::Category(_) => false,
+            AxisScale::Category(_) | AxisScale::Time(_) => false,
         }
     }
 }
@@ -229,7 +245,9 @@ impl AxisRole {
     ) -> AxisRole {
         let gives_data = |marks: &[ResolvedMark<'_>]| {
             marks.iter().any(|mark| {
-                mark.numbers(which).any(f64::is_finite) || mark.categories(which).next().is_some()
+                mark.numbers(which).any(f64::is_finite)
+                    || mark.categories(which).next().is_some()
+                    || mark.times(which).next().is_some()
             })
         };
         let (with_data, without): (Vec<_>, Vec<_>) =
@@ -336,6 +354,16 @@ pub(crate) struct ContinuousLimits<'a> {
     pub ticks: &'a AxisTicks,
 }
 
+/// What a time axis fixes before any data is seen: its explicit limits, if set, and its tick
+/// settings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TimeLimits<'a> {
+    /// The explicit limits, the lower first; `None` to fit the data.
+    pub explicit: Option<(Instant, Instant)>,
+    /// The explicit ticks, if set, and the tick label format.
+    pub ticks: &'a AxisTicks,
+}
+
 /// What an axis fixes before any data is seen: whether it lists categories, and for a
 /// continuous axis its transform, its explicit limits and its tick settings.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -344,16 +372,25 @@ pub(crate) enum AxisLimits<'a> {
     Category,
     /// A linear or log axis.
     Continuous(ContinuousLimits<'a>),
+    /// A time axis.
+    Time(TimeLimits<'a>),
 }
 
 impl<'a> AxisLimits<'a> {
-    /// The limits of an axis of scale `kind` with the explicit limits `explicit` and the tick
-    /// settings `ticks`, which a category axis does not use.
+    /// The limits of an axis of scale `kind` with the explicit limits `explicit` of a linear or
+    /// log axis, or `explicit_times` of a time axis, and the tick settings `ticks`, which a
+    /// category axis does not use.
     fn new(
         kind: ScaleKind,
-        explicit: Option<ContinuousScale>,
+        (explicit, explicit_times): (Option<ContinuousScale>, Option<(Instant, Instant)>),
         ticks: &'a AxisTicks,
     ) -> AxisLimits<'a> {
+        if kind == ScaleKind::Time {
+            return AxisLimits::Time(TimeLimits {
+                explicit: explicit_times,
+                ticks,
+            });
+        }
         match kind.transform() {
             Some(transform) => AxisLimits::Continuous(ContinuousLimits {
                 transform,
@@ -383,8 +420,16 @@ impl<'a> Limits<'a> {
     /// The scales, explicit limits and tick settings of `axes`.
     pub fn of(axes: &'a Axes) -> Limits<'a> {
         Limits {
-            x: AxisLimits::new(axes.x_scale(), axes.x_limit_scale(), axes.x_tick_settings()),
-            y: AxisLimits::new(axes.y_scale(), axes.y_limit_scale(), axes.y_tick_settings()),
+            x: AxisLimits::new(
+                axes.x_scale(),
+                (axes.x_limit_scale(), axes.x_time_limits()),
+                axes.x_tick_settings(),
+            ),
+            y: AxisLimits::new(
+                axes.y_scale(),
+                (axes.y_limit_scale(), axes.y_time_limits()),
+                axes.y_tick_settings(),
+            ),
         }
     }
 
@@ -449,11 +494,23 @@ pub(crate) fn unrounded_extent(
     }
 }
 
-/// The positions of the explicit ticks `given`, in the order given.
+/// The positions of the explicit ticks `given` of a linear or log axis, in the order given; none
+/// for the times of a time axis.
 fn tick_positions(given: &ExplicitTicks) -> Vec<f64> {
     match given {
         ExplicitTicks::Positions(values) => values.clone(),
         ExplicitTicks::Labeled(ticks) => ticks.iter().map(|tick| tick.value).collect(),
+        ExplicitTicks::TimePositions(_) | ExplicitTicks::TimeLabeled(_) => Vec::new(),
+    }
+}
+
+/// The times of the explicit ticks `given` of a time axis, in the order given; none for the
+/// numbers of a linear or log axis.
+fn tick_times(given: &ExplicitTicks) -> Vec<Instant> {
+    match given {
+        ExplicitTicks::TimePositions(times) => times.clone(),
+        ExplicitTicks::TimeLabeled(ticks) => ticks.iter().map(|&(time, _)| time).collect(),
+        ExplicitTicks::Positions(_) | ExplicitTicks::Labeled(_) => Vec::new(),
     }
 }
 
@@ -689,6 +746,10 @@ fn explicit_ticks(
                     .collect(),
             )
         }
+        // A linear or log axis never holds times; the model refuses them.
+        ExplicitTicks::TimePositions(_) | ExplicitTicks::TimeLabeled(_) => {
+            ExplicitLabels::Given(Vec::new())
+        }
     }
 }
 
@@ -768,7 +829,7 @@ pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result
         let mut lines = axes.marks().iter().filter_map(|mark| match mark {
             Mark::VLine(line) => match line.x() {
                 AxisValue::Category(name) => Some(name),
-                AxisValue::Number(_) => None,
+                AxisValue::Number(_) | AxisValue::Time(_) => None,
             },
             _ => None,
         });
@@ -903,6 +964,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
             };
             return (axis, NormalizedPos::LOW);
         }
+        AxisLimits::Time(limits) => return time_axis(marks, which, role, limits, room),
     };
     let transform = limits.transform;
     let (data, padding) = axis_data(marks.clone(), which, transform);
@@ -937,6 +999,289 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
         ticks,
     };
     (axis, base)
+}
+
+/// The day an empty time axis spans, in seconds from its origin, 1970-01-01T00:00.
+const EMPTY_TIME_SPAN: f64 = 86_400.0;
+
+/// How far a time axis whose data is a single instant reaches on each side of it, in seconds:
+/// half an hour.
+const SINGLE_TIME_REACH: f64 = 1_800.0;
+
+/// Resolves the time axis `which` of one group from the times its `marks` give along it, as
+/// [`resolve_axis`] resolves a continuous axis, and returns it with its base position, the low
+/// end of the axis: a time axis has no 0 to grow from, and its padding lies below the data.
+///
+/// The domain is the explicit limits when set. Otherwise it fits the data together with the
+/// explicit ticks, if set: the exact extent on a positions axis whose marks, references apart,
+/// are all lines (as [`resolve_axis`] decides), else the extent padded by 5 % of its span on
+/// each side. A single instant reaches half an hour on each side, and an axis without data
+/// spans 1970-01-01. The origin is the low end of the data, or the lower limit, so that the
+/// seconds of nearby times keep their precision.
+///
+/// Automatic ticks are the calendar ticks of [`time_ticks`] inside the domain; when their labels
+/// crowd as `room` judges them, the nearest coarser step whose labels keep apart, or the
+/// coarsest with two ticks, is used. Labels are concise, or ISO 8601 for
+/// [`TickFormat::iso`], and take the format's affix. Explicit ticks are those inside the domain,
+/// labelled for the unit they share ([`label_step`]) by the concise rule on their own sequence
+/// ([`explicit_labels`]), or with their own labels.
+fn time_axis<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    which: ValueAxis,
+    role: AxisRole,
+    limits: TimeLimits<'_>,
+    room: &TickRoom<'_>,
+) -> (ResolvedAxis, NormalizedPos) {
+    let given = limits.ticks.explicit();
+    let scale = match limits.explicit {
+        Some((low, high)) => time_scale(low, 0.0, seconds_between(low, high), (low, high)),
+        None => {
+            let data = time_extent(marks.clone().flat_map(|mark| mark.times(which)));
+            let ticks = given.map(tick_times).unwrap_or_default();
+            let ends = data.into_iter().flat_map(|(low, high)| [low, high]);
+            match time_extent(ends.chain(ticks)) {
+                None => {
+                    let epoch = Instant::clamped(0);
+                    let day = shifted(epoch, EMPTY_TIME_SPAN);
+                    time_scale(epoch, 0.0, EMPTY_TIME_SPAN, (epoch, day))
+                }
+                Some((low, high)) if low == high => {
+                    let reach = (
+                        shifted(low, -SINGLE_TIME_REACH),
+                        shifted(low, SINGLE_TIME_REACH),
+                    );
+                    time_scale(low, -SINGLE_TIME_REACH, SINGLE_TIME_REACH, reach)
+                }
+                Some((low, high)) => {
+                    let span = seconds_between(low, high);
+                    let exact = role == AxisRole::Positions
+                        && exact_time_extent(marks, which, data.is_some());
+                    let pad = if exact {
+                        0.0
+                    } else {
+                        AUTO_LIMIT_PADDING * span
+                    };
+                    let reach = (shifted(low, -pad), shifted(high, pad));
+                    time_scale(low, -pad, span + pad, reach)
+                }
+            }
+        }
+    };
+    let format = limits.ticks.format();
+    let ticks = match given {
+        Some(given) => explicit_time_ticks(given, &scale, format),
+        None => automatic_time_ticks(&scale, format, room),
+    };
+    let axis = ResolvedAxis {
+        scale: AxisScale::Time(scale),
+        ticks,
+    };
+    (axis, NormalizedPos::LOW)
+}
+
+/// The time scale from `low` to `high` seconds measured from `origin`, whose earliest and
+/// latest whole microseconds are `instants`.
+fn time_scale(origin: Instant, low: f64, high: f64, instants: (Instant, Instant)) -> TimeScale {
+    let seconds = ContinuousScale::new(Transform::Linear, low, high, CONTEXT)
+        .unwrap_or_else(|_| ContinuousScale::unit(Transform::Linear));
+    TimeScale::new(origin, seconds, instants)
+}
+
+/// The whole microsecond nearest to `t` moved by `seconds` towards it, so that it stays inside
+/// a domain that reaches `seconds` from `t`, kept inside the supported range.
+fn shifted(t: Instant, seconds: f64) -> Instant {
+    // Truncation moves towards `t`; `as` saturates beyond the range of i64.
+    let micros = (seconds * 1e6) as i64;
+    Instant::clamped(t.micros().saturating_add(micros))
+}
+
+/// The earliest and the latest of `times`; `None` when there is none.
+fn time_extent(times: impl IntoIterator<Item = Instant>) -> Option<(Instant, Instant)> {
+    times.into_iter().fold(None, |acc, t| match acc {
+        None => Some((t, t)),
+        Some((low, high)) => Some((low.min(t), high.max(t))),
+    })
+}
+
+/// Whether a time positions axis keeps the exact extent of the times of `marks` along `which`,
+/// as a continuous positions axis does (see [`resolve_axis`]): when the marks that give it
+/// times, references apart, are all drawn along a line, and they are not references alone.
+/// `has_data` says whether any mark gives a time; without one, explicit ticks alone set the
+/// extent, and it stays exact.
+fn exact_time_extent<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    which: ValueAxis,
+    has_data: bool,
+) -> bool {
+    let contributing = || {
+        marks
+            .clone()
+            .filter(move |mark| mark.times(which).next().is_some())
+    };
+    let only_references = has_data && contributing().all(ResolvedMark::is_reference);
+    !only_references
+        && contributing()
+            .filter(|mark| !mark.is_reference())
+            .all(|mark| mark.has_exact_extent(which))
+}
+
+/// The automatic ticks of the time axis `scale`, labelled as `format` says, chosen as
+/// [`time_axis`] describes.
+fn automatic_time_ticks(
+    scale: &TimeScale,
+    format: &TickFormat,
+    room: &TickRoom<'_>,
+) -> Vec<AxisTick> {
+    let (low, high) = scale.instants();
+    let (step, ticks) = time_ticks(low, high);
+    let mut chosen = time_labelled(scale, &ticks, step, format, concise_labels(&ticks, step));
+    if room.slack(&chosen) >= 0.0 {
+        return chosen;
+    }
+    for (step, ticks) in coarser_ticks(step, low, high) {
+        let concise = concise_labels(&ticks, step);
+        chosen = time_labelled(scale, &ticks, step, format, concise);
+        if room.slack(&chosen) >= 0.0 {
+            break;
+        }
+    }
+    chosen
+}
+
+/// The explicit ticks `given` of the time axis `scale` that lie inside its domain, both ends
+/// included, labelled for the unit they share as `format` says, or with their own labels.
+fn explicit_time_ticks(
+    given: &ExplicitTicks,
+    scale: &TimeScale,
+    format: &TickFormat,
+) -> Vec<AxisTick> {
+    let (low, high) = scale.seconds_scale().domain();
+    let inside = |t: Instant| {
+        let seconds = scale.seconds(t);
+        low <= seconds && seconds <= high
+    };
+    match given {
+        ExplicitTicks::TimePositions(times) => {
+            let times: Vec<Instant> = times.iter().copied().filter(|&t| inside(t)).collect();
+            let step = label_step(&times);
+            let concise = explicit_labels(&times, step);
+            time_labelled(scale, &times, step, format, concise)
+        }
+        ExplicitTicks::TimeLabeled(ticks) => ticks
+            .iter()
+            .filter(|&&(t, _)| inside(t))
+            .map(|(t, label)| AxisTick {
+                pos: time_position(scale, *t),
+                label: label.clone(),
+            })
+            .collect(),
+        // A time axis never holds numbers; the model refuses them.
+        ExplicitTicks::Positions(_) | ExplicitTicks::Labeled(_) => Vec::new(),
+    }
+}
+
+/// The ticks at `times` on the time axis `scale`, labelled for `step`: the `concise` labels,
+/// or ISO 8601 ones for [`TickFormat::iso`], with the affix of `format` around each.
+fn time_labelled(
+    scale: &TimeScale,
+    times: &[Instant],
+    step: TimeStep,
+    format: &TickFormat,
+    concise: Vec<String>,
+) -> Vec<AxisTick> {
+    let labels = match format.style() {
+        NumberStyle::Iso => times.iter().map(|&t| iso_label(t, step)).collect(),
+        // A time axis takes no number style; the model refuses one.
+        NumberStyle::Auto
+        | NumberStyle::Fixed(_)
+        | NumberStyle::Percent(_)
+        | NumberStyle::Scientific => concise,
+    };
+    let ticks = times
+        .iter()
+        .zip(labels)
+        .map(|(&t, label)| Tick {
+            value: scale.seconds(t),
+            label,
+        })
+        .collect();
+    let labelled = format.relabel(ticks, TickValues::Exact);
+    times
+        .iter()
+        .zip(labelled)
+        .map(|(&t, tick)| AxisTick {
+            pos: time_position(scale, t),
+            label: tick.label,
+        })
+        .collect()
+}
+
+/// The position of `t` on the time axis `scale`, for a tick inside its domain: kept in `[0, 1]`
+/// against the rounding of seconds near the ends.
+fn time_position(scale: &TimeScale, t: Instant) -> NormalizedPos {
+    NormalizedPos::new(scale.normalize(t).clamp(0.0, 1.0))
+}
+
+/// The times one mark contributes to a time axis domain, in data order (see
+/// [`ResolvedMark::times`]): the times of a series, skipping its gaps, or the times of a
+/// reference mark. A plain loop over a slice, as [`DomainValues`] is.
+pub(crate) enum DomainTimes<'a> {
+    /// Times with gaps, as series hold them; the gaps are skipped.
+    Gapped(std::iter::Flatten<std::iter::Copied<std::slice::Iter<'a, Option<Instant>>>>),
+    /// Times without gaps, as reference lines and spans hold them.
+    Whole(std::iter::Copied<std::slice::Iter<'a, Instant>>),
+    /// Two series of times with gaps, one after the other, as the limits of error bars are.
+    Pair(PairedTimes<'a>),
+}
+
+/// The times of two series with gaps, one after the other, gaps skipped.
+type PairedTimes<'a> = std::iter::Flatten<
+    std::iter::Copied<
+        std::iter::Chain<
+            std::slice::Iter<'a, Option<Instant>>,
+            std::slice::Iter<'a, Option<Instant>>,
+        >,
+    >,
+>;
+
+impl<'a> DomainTimes<'a> {
+    /// The times of a series, gaps skipped.
+    fn gapped(times: &'a [Option<Instant>]) -> DomainTimes<'a> {
+        DomainTimes::Gapped(times.iter().copied().flatten())
+    }
+
+    /// The times of a reference mark.
+    fn whole(times: &'a [Instant]) -> DomainTimes<'a> {
+        DomainTimes::Whole(times.iter().copied())
+    }
+
+    /// The times of `first`, then of `second`, gaps skipped.
+    fn pair(first: &'a [Option<Instant>], second: &'a [Option<Instant>]) -> DomainTimes<'a> {
+        DomainTimes::Pair(first.iter().chain(second).copied().flatten())
+    }
+}
+
+impl Iterator for DomainTimes<'_> {
+    type Item = Instant;
+
+    fn next(&mut self) -> Option<Instant> {
+        match self {
+            DomainTimes::Gapped(times) => times.next(),
+            DomainTimes::Whole(times) => times.next(),
+            DomainTimes::Pair(times) => times.next(),
+        }
+    }
+
+    fn fold<B, F>(self, init: B, f: F) -> B
+    where
+        F: FnMut(B, Instant) -> B,
+    {
+        match self {
+            DomainTimes::Gapped(times) => times.fold(init, f),
+            DomainTimes::Whole(times) => times.fold(init, f),
+            DomainTimes::Pair(times) => times.fold(init, f),
+        }
+    }
 }
 
 /// The values one mark contributes to an axis domain, in order (see [`ResolvedMark`]).
@@ -1416,6 +1761,79 @@ impl<'a> ResolvedMark<'a> {
         }
         .iter()
         .map(String::as_str)
+    }
+
+    /// The times the mark contributes to a time axis along `which`, in data order, gaps
+    /// skipped; none when its values along that axis are not times. Series yield their x or y
+    /// times, bands and stacked areas their x times, error bars their positions, and reference
+    /// lines and spans the times they sit at.
+    pub fn times(&self, which: ValueAxis) -> DomainTimes<'_> {
+        match which {
+            ValueAxis::X => self.x_times(),
+            ValueAxis::Y => self.y_times(),
+        }
+    }
+
+    /// The times the mark contributes to a time x axis; see [`times`](Self::times).
+    fn x_times(&self) -> DomainTimes<'_> {
+        match self {
+            ResolvedMark::Line { mark, .. } => DomainTimes::gapped(mark.x().times()),
+            ResolvedMark::Scatter { mark, .. } => DomainTimes::gapped(mark.x().times()),
+            ResolvedMark::Stem { mark, .. } => DomainTimes::gapped(mark.x().times()),
+            ResolvedMark::Area { mark, .. } => DomainTimes::gapped(mark.x().times()),
+            ResolvedMark::Step { mark, .. } => DomainTimes::gapped(mark.x().times()),
+            ResolvedMark::Band { mark, .. } => DomainTimes::gapped(mark.x_times()),
+            ResolvedMark::StackedArea { mark, .. } => DomainTimes::gapped(mark.x_times()),
+            ResolvedMark::ErrorBars { mark, .. } => match mark.orientation() {
+                ErrorBarOrientation::Vertical => DomainTimes::gapped(mark.positions().times()),
+                // The limits of horizontal bars are x values.
+                ErrorBarOrientation::Horizontal => {
+                    DomainTimes::pair(mark.low_times(), mark.high_times())
+                }
+            },
+            ResolvedMark::VLine { mark, .. } => DomainTimes::whole(mark.x().times()),
+            ResolvedMark::VSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
+            ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. }
+            | ResolvedMark::Hist { .. }
+            | ResolvedMark::HLine { .. }
+            | ResolvedMark::HSpan { .. }
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. } => DomainTimes::whole(&[]),
+        }
+    }
+
+    /// The times the mark contributes to a time y axis; see [`times`](Self::times).
+    fn y_times(&self) -> DomainTimes<'_> {
+        match self {
+            ResolvedMark::Line { mark, .. } => DomainTimes::gapped(mark.y().times()),
+            ResolvedMark::Scatter { mark, .. } => DomainTimes::gapped(mark.y().times()),
+            ResolvedMark::Stem { mark, .. } => DomainTimes::gapped(mark.y().times()),
+            ResolvedMark::Area { mark, .. } => DomainTimes::gapped(mark.y().times()),
+            ResolvedMark::Step { mark, .. } => DomainTimes::gapped(mark.y().times()),
+            ResolvedMark::ErrorBars { mark, .. } => match mark.orientation() {
+                ErrorBarOrientation::Horizontal => DomainTimes::gapped(mark.positions().times()),
+                // The limits of vertical bars are y values.
+                ErrorBarOrientation::Vertical => {
+                    DomainTimes::pair(mark.low_times(), mark.high_times())
+                }
+            },
+            ResolvedMark::HLine { mark, .. } => DomainTimes::whole(mark.y().times()),
+            ResolvedMark::HSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
+            ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Band { .. }
+            | ResolvedMark::StackedArea { .. }
+            | ResolvedMark::Bar { .. }
+            | ResolvedMark::Grouped { .. }
+            | ResolvedMark::Stacked { .. }
+            | ResolvedMark::Hist { .. }
+            | ResolvedMark::VLine { .. }
+            | ResolvedMark::VSpan { .. }
+            | ResolvedMark::Box { .. }
+            | ResolvedMark::Violin { .. } => DomainTimes::whole(&[]),
+        }
     }
 
     /// The category names the mark contributes to a category x axis, in data order, repeats
@@ -2056,7 +2474,10 @@ impl<'a> ResolvedMark<'a> {
                         dash: Dash::Solid,
                         width: *width,
                     },
-                    anchor: Anchor::of_numbers(mark.x(), curve, limits),
+                    anchor: match mark.x_values() {
+                        SharedValues::Numbers(x) => Anchor::of_numbers(x, curve, limits),
+                        SharedValues::Times(x) => Anchor::of_times(x, curve, limits),
+                    },
                 })
                 .collect(),
             &ResolvedMark::Hist { mark, color, .. } => vec![SeriesKey {
@@ -2311,6 +2732,11 @@ pub(crate) enum AnchorX<'a> {
     /// Midway between the band centres of two category names, where a step line that changes
     /// level between two categories ends.
     Between(&'a str, &'a str),
+    /// A time on a time axis.
+    Time(Instant),
+    /// Midway between two times on a time axis, where a step line that changes level between
+    /// them ends; the middle is taken along the axis, not rounded to a microsecond.
+    TimeBetween(Instant, Instant),
 }
 
 /// How a direct label's anchor ends its line: whether the line ends there, so that an end dot
@@ -2355,6 +2781,7 @@ impl<'a> Anchor<'a> {
         let y = line.y().numbers();
         match line.x() {
             AxisData::Numbers(xs) => Self::of_numbers(xs, y, limits),
+            AxisData::Times(xs) => Self::of_times(xs, y, limits),
             AxisData::Categories(names) => names
                 .iter()
                 .zip(y)
@@ -2378,7 +2805,8 @@ impl<'a> Anchor<'a> {
                 ..
             }) => Some((transform, scale.domain())),
             AxisLimits::Continuous(ContinuousLimits { explicit: None, .. })
-            | AxisLimits::Category => None,
+            | AxisLimits::Category
+            | AxisLimits::Time(_) => None,
         };
         let inside = |x: f64| range.is_none_or(|(_, (lo, hi))| lo <= x && x <= hi);
         let last = xs
@@ -2420,6 +2848,55 @@ impl<'a> Anchor<'a> {
         })
     }
 
+    /// The anchor of a line over the times `xs` of a time x axis, chosen as [`Anchor::of_line`]
+    /// chooses it among numbers, with the line interpolated in seconds where it leaves the plot
+    /// across the upper explicit limit. Times have no anchor along a time y axis: the y values
+    /// of `y` are numbers, and a line with times along y has none, so its label goes to the
+    /// legend row.
+    fn of_times(xs: &[Option<Instant>], y: &[f64], limits: &Limits) -> Option<Anchor<'a>> {
+        let range = match limits.x {
+            AxisLimits::Time(TimeLimits { explicit, .. }) => explicit,
+            AxisLimits::Continuous(_) | AxisLimits::Category => None,
+        };
+        let inside = |t: Instant| range.is_none_or(|(low, high)| low <= t && t <= high);
+        let last = xs
+            .iter()
+            .zip(y)
+            .rposition(|(&x, &y)| x.is_some_and(inside) && y.is_finite())?;
+        let x = xs[last]?;
+        let point = Anchor {
+            x: AnchorX::Time(x),
+            y: y[last],
+            end: EndKind::Point,
+        };
+        let (Some((_, high)), Some(&Some(next_x)), Some(&next_y)) =
+            (range, xs.get(last + 1), y.get(last + 1))
+        else {
+            return Some(point);
+        };
+        let AxisLimits::Continuous(ContinuousLimits {
+            transform: y_transform,
+            ..
+        }) = limits.y
+        else {
+            return Some(point);
+        };
+        if !(x < high && next_x > high && next_y.is_finite()) {
+            return Some(point);
+        }
+        let crossing = crossing_at(
+            (Transform::Linear, y_transform),
+            (0.0, y[last]),
+            (seconds_between(x, next_x), next_y),
+            seconds_between(x, high),
+        );
+        Some(Anchor {
+            x: AnchorX::Time(high),
+            y: crossing,
+            end: EndKind::Edge,
+        })
+    }
+
     /// The anchor of `step`: where the step line as drawn ends. The line is the holds of
     /// [`holds`], each a level held from one x to another, and its last vertex in data order is
     /// the end of the last hold, so a level held out to a neighbour whose y is NaN reaches that
@@ -2443,7 +2920,7 @@ impl<'a> Anchor<'a> {
                         explicit.map(|scale| scale.domain()),
                         matches!(transform, Transform::Log(_)),
                     ),
-                    AxisLimits::Category => (None, false),
+                    AxisLimits::Category | AxisLimits::Time(_) => (None, false),
                 };
                 let origin = range.map_or_else(
                     || xs.iter().copied().find(|v| v.is_finite()).unwrap_or(1.0),
@@ -2483,6 +2960,7 @@ impl<'a> Anchor<'a> {
                     end,
                 })
             }
+            AxisData::Times(times) => Self::of_time_step(step, times, limits),
             AxisData::Categories(names) => {
                 // Band positions in data order; every one is finite.
                 let order: Vec<f64> = (0..names.len()).map(|i| i as f64).collect();
@@ -2498,6 +2976,49 @@ impl<'a> Anchor<'a> {
                 })
             }
         }
+    }
+
+    /// The anchor of `step` over the times `times` of a time x axis, found as
+    /// [`Anchor::of_step`] finds it over numbers, with the holds measured in seconds from the
+    /// lower explicit limit, or from the first time. A midpoint is the point halfway between its
+    /// two neighbours along the axis ([`AnchorX::TimeBetween`]).
+    fn of_time_step(
+        step: &'a StepMark,
+        times: &[Option<Instant>],
+        limits: &Limits,
+    ) -> Option<Anchor<'a>> {
+        let range = match limits.x {
+            AxisLimits::Time(TimeLimits { explicit, .. }) => explicit,
+            AxisLimits::Continuous(_) | AxisLimits::Category => None,
+        };
+        let origin = range.map_or_else(
+            || times.iter().flatten().next().copied(),
+            |(low, _)| Some(low),
+        )?;
+        let mapped: Vec<f64> = times
+            .iter()
+            .map(|t| t.map_or(f64::NAN, |t| seconds_between(origin, t)))
+            .collect();
+        let line = holds(&mapped, step.y().numbers(), step.options().position);
+        let (lo, hi) = range.map_or((f64::NEG_INFINITY, f64::INFINITY), |(low, high)| {
+            (seconds_between(origin, low), seconds_between(origin, high))
+        });
+        let (hold, from, to) = line
+            .iter()
+            .map(|hold| (hold, hold.from.position(&mapped), hold.to.position(&mapped)))
+            .rfind(|&(_, from, to)| to >= lo && from <= hi)?;
+        let y = step.y().numbers()[hold.point];
+        let (x, end) = match range {
+            Some((_, high)) if to > hi && from <= hi => (AnchorX::Time(high), EndKind::Edge),
+            _ => {
+                let x = match hold.to {
+                    Edge::At(k) => AnchorX::Time(times[k]?),
+                    Edge::Mid(i, k) => AnchorX::TimeBetween(times[i]?, times[k]?),
+                };
+                (x, EndKind::Point)
+            }
+        };
+        Some(Anchor { x, y, end })
     }
 }
 
@@ -2879,7 +3400,7 @@ fn resolve_panel_marks<'a>(
                 ResolvedMark::StackedArea {
                     mark,
                     geometry: None,
-                    stacks: AreaStacks::new(mark.x(), &values),
+                    stacks: AreaStacks::new(mark.x_values(), &values),
                     series,
                     width: theme.drawn_line_width(crate::SizeSpec::Auto),
                 }
@@ -4267,6 +4788,8 @@ mod tests {
             AnchorX::Number(x) => (x, anchor.y, anchor.end),
             AnchorX::Category(name) => panic!("expected a number anchor, got {name}"),
             AnchorX::Between(a, b) => panic!("expected a number anchor, got {a} to {b}"),
+            AnchorX::Time(t) => panic!("expected a number anchor, got {t:?}"),
+            AnchorX::TimeBetween(a, b) => panic!("expected a number anchor, got {a:?} to {b:?}"),
         })
     }
 
@@ -4429,7 +4952,10 @@ mod tests {
                     .map(|key| {
                         let anchor = key.anchor.map(|a| match a.x {
                             AnchorX::Number(ax) => (ax, a.y, a.end),
-                            AnchorX::Category(_) | AnchorX::Between(..) => {
+                            AnchorX::Category(_)
+                            | AnchorX::Between(..)
+                            | AnchorX::Time(_)
+                            | AnchorX::TimeBetween(..) => {
                                 panic!("numbers expected")
                             }
                         });
@@ -5051,6 +5577,8 @@ mod tests {
                 AnchorX::Number(x) => (x, a.y, a.end),
                 AnchorX::Category(name) => panic!("category {name}"),
                 AnchorX::Between(a, b) => panic!("between {a} and {b}"),
+                AnchorX::Time(t) => panic!("time {t:?}"),
+                AnchorX::TimeBetween(a, b) => panic!("between {a:?} and {b:?}"),
             })
         };
         let edge = |x, y| Some((x, y, EndKind::Edge));
@@ -5091,6 +5619,8 @@ mod tests {
             AnchorX::Number(x) => AnchorX::Number(x),
             AnchorX::Category(name) => AnchorX::Category(leak(name)),
             AnchorX::Between(a, b) => AnchorX::Between(leak(a), leak(b)),
+            AnchorX::Time(t) => AnchorX::Time(t),
+            AnchorX::TimeBetween(a, b) => AnchorX::TimeBetween(a, b),
         };
         Some(Anchor { x, ..anchor })
     }
