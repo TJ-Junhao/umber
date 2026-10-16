@@ -110,14 +110,16 @@ pub(crate) fn color_spec((kind, payload, alpha): ColorArg) -> PyResult<ColorSpec
     }
 }
 
-/// The concrete color of `spec`, for a theme color. `Color.AUTO` and `Color.palette()` refer to
-/// a theme palette, so a theme cannot use them: they are a `Style` error in `context` about
-/// `parameter`, whose message names the offending argument as `what` (such as `colors[2]`).
+/// The concrete color of `spec`, for the colors of a theme or a colormap (`subject`, such as
+/// `"theme"`). `Color.AUTO` and `Color.palette()` refer to a theme palette, so they cannot be
+/// used there: they are a `Style` error in `context` about `parameter`, whose message names the
+/// offending argument as `what` (such as `colors[2]`).
 pub(crate) fn concrete(
     spec: ColorSpec,
     context: &'static str,
     parameter: &'static str,
     what: &str,
+    subject: &str,
 ) -> umber_core::Result<Rgba> {
     let given = match spec {
         ColorSpec::Fixed(color) => return Ok(color),
@@ -126,10 +128,34 @@ pub(crate) fn concrete(
     };
     Err(Error::Style {
         context,
-        message: format!("{what} is {given}; theme colors must be concrete colors."),
+        message: format!("{what} is {given}; {subject} colors must be concrete colors."),
         parameter: Some(parameter),
         hint: Some("use Color.hex(), Color.rgb() or a named color."),
     })
+}
+
+/// The concrete colors of the color arguments `colors`, passed as the parameter `colors` of
+/// `context`. The first color that is not concrete is a `Style` error that names its index,
+/// such as `colors[2]`; `subject` says whose colors they are, as in [`concrete`].
+pub(crate) fn concrete_list(
+    colors: Vec<ColorArg>,
+    context: &'static str,
+    subject: &str,
+) -> PyResult<Vec<Rgba>> {
+    colors
+        .into_iter()
+        .enumerate()
+        .map(|(index, color)| {
+            concrete(
+                color_spec(color)?,
+                context,
+                "colors",
+                &format!("colors[{index}]"),
+                subject,
+            )
+            .map_err(core_error)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -163,6 +189,7 @@ mod tests {
             "Theme.with_background()",
             "value",
             "value",
+            "theme",
         );
         assert_eq!(red.unwrap(), Rgba::RED);
     }
@@ -174,6 +201,7 @@ mod tests {
             "Theme.with_palette()",
             "colors",
             "colors[2]",
+            "theme",
         );
         let err = auto.unwrap_err();
         assert!(matches!(err, Error::Style { .. }));
@@ -188,7 +216,7 @@ mod tests {
         );
 
         let slot = ColorSpec::palette(3, Alpha::OPAQUE).unwrap();
-        let err = concrete(slot, "Theme.with_grid_color()", "value", "value").unwrap_err();
+        let err = concrete(slot, "Theme.with_grid_color()", "value", "value", "theme").unwrap_err();
         assert_eq!(
             err.to_string(),
             "Theme.with_grid_color(): value is Color.palette(3); theme colors must be concrete \
