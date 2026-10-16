@@ -375,22 +375,21 @@ fn stacked_area_layers_share_colors_and_merge_swatches_but_keep_direct_labels() 
         if f.theme().legend_style() == crate::LegendStyle::Direct {
             assert!(legend.is_empty());
         } else {
-            assert_eq!(legend.row().len(), 2);
-            for (entry, (slot, label)) in legend
+            // Layers and the line merge by label; each entry keeps the swatch of its first
+            // mark, here a layer's area swatch.
+            let area = Swatch::Area {
+                dash: crate::Dash::Solid,
+                width: f.theme().drawn_line_width(crate::SizeSpec::Auto),
+            };
+            let entries: Vec<_> = legend
                 .row()
                 .iter()
-                .zip(["North", "South"].into_iter().enumerate())
-            {
-                assert_eq!(entry.label(), label);
-                assert_eq!(entry.color(), palette[slot]);
-                assert_eq!(
-                    entry.swatch(),
-                    Swatch::Line {
-                        dash: crate::Dash::Solid,
-                        width: f.theme().drawn_line_width(crate::SizeSpec::Auto),
-                    }
-                );
-            }
+                .map(|entry| (entry.label(), entry.color(), entry.swatch()))
+                .collect();
+            assert_eq!(
+                entries,
+                [("North", palette[0], area), ("South", palette[1], area)]
+            );
         }
         f.to_scene(FontLibrary::global()).unwrap();
     }
@@ -449,6 +448,97 @@ fn merged_legend_merges_same_label_and_kind() {
     );
     assert_eq!(legend.row()[0].color(), crate::Rgba::opaque(0, 2, 3));
     assert_eq!(legend.row()[1].swatch(), Swatch::Square);
+}
+
+#[test]
+fn a_line_and_an_area_of_one_label_merge_as_before_area_swatches() {
+    let line = |a: &mut crate::AxesMut<'_>| {
+        a.line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[1.0, 2.0],
+            LineOptions {
+                label: "North".into(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    };
+    let area = |a: &mut crate::AxesMut<'_>| {
+        a.area(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.5, 1.0],
+            crate::AreaOptions {
+                label: "North".into(),
+                ..crate::AreaOptions::default()
+            },
+        )
+        .unwrap();
+    };
+    let width = Theme::pigment().drawn_line_width(crate::SizeSpec::Auto);
+    let line_swatch = Swatch::Line {
+        dash: crate::Dash::Solid,
+        width,
+    };
+    let area_swatch = Swatch::Area {
+        dash: crate::Dash::Solid,
+        width,
+    };
+    // One panel: a panel legend keeps repeated labels, one entry per series, as it always did.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    line(&mut a);
+    area(&mut a);
+    let marks = resolve::resolve_marks(f.single_axes().marks(), f.theme());
+    let legend = Legend::new(
+        crate::LegendStyle::Header,
+        &marks,
+        &Limits::of(f.single_axes()),
+    );
+    let swatches: Vec<_> = legend
+        .row()
+        .iter()
+        .map(|e| (e.label(), e.swatch()))
+        .collect();
+    assert_eq!(swatches, [("North", line_swatch), ("North", area_swatch)]);
+    // A 1 x 2 grid with the line in one panel and the area in the other: the merged legend has
+    // one "North" entry, with the swatch of the first mark in panel order.
+    for (first, swatch) in [(true, line_swatch), (false, area_swatch)] {
+        let mut f = Figure::with_grid(
+            8.0,
+            4.0,
+            Theme::pigment(),
+            Grid::new(1, 2)
+                .unwrap()
+                .with_legend(crate::LegendMode::Merged),
+        )
+        .unwrap();
+        for col in 0..2 {
+            let mut a = f
+                .add_axes_at(
+                    Placement {
+                        col: GridIndex::At(col),
+                        ..Placement::default()
+                    },
+                    ScaleKind::Linear,
+                    ScaleKind::Linear,
+                )
+                .unwrap();
+            if (col == 0) == first {
+                line(&mut a);
+            } else {
+                area(&mut a);
+            }
+        }
+        let marks = resolve::resolve_figure_marks(&f);
+        let merged = Legend::merged(&f, marks.iter().map(Vec::as_slice));
+        let swatches: Vec<_> = merged
+            .row()
+            .iter()
+            .map(|e| (e.label(), e.swatch()))
+            .collect();
+        assert_eq!(swatches, [("North", swatch)], "line first: {first}");
+        f.to_scene(FontLibrary::global()).unwrap();
+    }
 }
 
 #[test]

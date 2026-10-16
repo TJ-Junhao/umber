@@ -1,10 +1,10 @@
 //! Boxes, Tukey whiskers and outliers, clipped in axis space before mapping to scene points.
 
 use super::MarkContext;
-use super::area::AREA_ALPHA;
 use super::bar::{GROUP_GAP, group_slots, in_axis_order};
 use super::clip::{Bounds, clip_segment};
 use super::error_bars::bar_style;
+use super::fill::AREA_ALPHA;
 use super::mapping::{AxisPoint, axis_y_value};
 use super::scatter::scatter_item;
 use crate::geometry::Path;

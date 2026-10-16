@@ -463,6 +463,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         The legend lists marks with a non-empty ``label``; ``LegendStyle.NONE`` hides it.
         Positions apply to single-panel figures and ``Legend.PER_PANEL``. A merged grid
         legend stays under the figure title and subtitle and follows their alignment.
+        A swatch shows a mark's fill as drawn: composited over the plot background, which
+        leaves it opaque over an opaque background. Gradient fills show their most opaque end
+        (0.32 of the series opacity for areas, 0.95 for histograms). Area and stacked-area
+        swatches are filled rectangles under an edge in the line's color, dash and width;
+        scatter, stem and bubble swatches show the marker fill at the theme's marker alpha.
+        Lines, steps, reference lines and error bars keep the series color, as do direct
+        labels and the outlines of box and violin swatches.
 
         Args:
             style: How the legend is laid out.
@@ -665,6 +672,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         finite x and y coordinates has a radius of 18 points. Zero sizes and NaN coordinates
         draw nothing; a zero-size point's position still counts in the axis domains like any
         point. Markers draw in data order, without downsampling, with the theme's marker outline.
+        Automatic limits fit each whole marker and its outline on the final plot, along each
+        axis by the marker shape's own extent, in log space on a log axis, before tick
+        rounding and padding. Shared axes fit bubbles from every panel sharing the scale. When
+        the bubbles cannot all fit on an automatic axis (a marker, outline included, at least
+        as long as the plot along it, limits beyond the supported numeric range, or limits
+        that do not settle), that axis's limits come from the data positions alone and the
+        plot clips the bubbles that overflow; rendering does not raise. Explicit limits still
+        clip; scatter limits are unchanged. Legend swatches and size circles show the marker
+        fill composited over the plot background.
         Up to three reference circles at their true radius appear once, after the first labelled
         bubble entry, formatted like the y ticks. Repeated labels keep the larger circle; labels
         that round to zero are omitted. If all labels round to zero, only the largest reference

@@ -28,7 +28,7 @@ pub(crate) mod placement;
 mod program;
 
 pub(crate) use grid::{GridInput, check_panel_contents, solve_grid};
-pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry};
+pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
 
 use std::cell::RefCell;

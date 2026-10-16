@@ -1,8 +1,8 @@
 //! Violin geometry, domain, clipping, degenerate groups and grouped-bar spacing.
 
 use super::{mark_group, plot_of, subpaths};
-use crate::draw::area::AREA_ALPHA;
 use crate::draw::bar::group_slots;
+use crate::draw::fill::AREA_ALPHA;
 use crate::legend::{Legend, Swatch};
 use crate::model::{Distribution, Figure, ViolinOptions};
 use crate::resolve::{Limits, ResolvedMark, resolve_marks};

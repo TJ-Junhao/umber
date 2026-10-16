@@ -69,8 +69,13 @@ fn row_top(row: usize, row_height: f64) -> f64 {
 pub(crate) struct SwatchBox {
     /// The swatch kind.
     pub kind: Swatch,
-    /// The series color, alpha included.
+    /// The series color, alpha included: the color of lines, edges and outlines, and of the
+    /// chip tint.
     pub color: Rgba,
+    /// The color the swatch is filled with: the mark's fill as drawn over the plot background,
+    /// or the series color for marks without a translucent fill (see
+    /// [`SwatchFill`](crate::legend::SwatchFill)).
+    pub fill: Rgba,
     /// The left edge.
     pub x: f64,
     /// The vertical center.
@@ -174,6 +179,7 @@ impl MeasuredRow {
                     swatch: SwatchBox {
                         kind,
                         color: entry.color(),
+                        fill: entry.fill_color(theme),
                         x: 0.0,
                         center_y: 0.0,
                         width: w,
@@ -630,8 +636,10 @@ fn entry_extent(
 /// series' width (see [`MeasuredRow::measure`]), and stroked at the series' width up to the side
 /// of a square swatch (`0.8 ×` the label size) and up to its own length: a thicker line shows
 /// as a bar of that height, and its round caps fit the box, so its stroke never spills out of
-/// its box onto the label. A chips row draws a dot of `0.6 ×` the label size for series
-/// entries. Bubble references keep their true radius and stroke envelope in either style.
+/// its box onto the label. An area swatch is as long as a line swatch and as tall as a square
+/// swatch, with its edge stroked at the series' width up to half that height. A chips row draws
+/// a dot of `0.6 ×` the label size for series entries. Bubble references keep their true radius
+/// and stroke envelope in either style.
 fn swatch_size(
     theme: &Theme,
     row_style: RowStyle,
@@ -655,6 +663,16 @@ fn swatch_size(
                 width: thickness as f32,
             };
             (capped, length, thickness)
+        }
+        (RowStyle::Plain, Swatch::Area { dash, width }) => {
+            let length = LINE_SWATCH_LENGTH * f64::from(theme.drawn_line_width(SizeSpec::Auto));
+            let side = SQUARE_SWATCH_SIDE * size;
+            let thickness = f64::from(width).min(side / 2.0).min(length);
+            let capped = Swatch::Area {
+                dash,
+                width: thickness as f32,
+            };
+            (capped, length, side)
         }
         (RowStyle::Plain, Swatch::Dot { diameter }) => {
             let d = f64::from(diameter);
@@ -1024,14 +1042,15 @@ mod tests {
             .map(|e| (e.swatch.width, e.swatch.height))
             .collect();
         // Graphite lines are 1.8 pt wide and its markers 5.6 pt across. A line swatch is as tall
-        // as its series' stroke and always 10 times the theme's line width long.
+        // as its series' stroke and always 10 times the theme's line width long; an area swatch
+        // is as long, and as tall as a square swatch, 0.8 times the 8.5 pt label size.
         let thick = f64::from(2.5_f32 * 1.8);
         let theme_width = f64::from(1.8_f32);
         assert_eq!(
             boxes,
             [
                 (10.0 * theme_width, thick),
-                (10.0 * theme_width, 0.5),
+                (10.0 * theme_width, 0.8 * 8.5),
                 (f64::from(2.8_f32), f64::from(2.8_f32)),
                 (12.0, 12.0),
                 (10.0 * theme_width, theme_width),
@@ -1059,8 +1078,13 @@ mod tests {
                 _ => None,
             })
             .collect();
+        // An area swatch groups its fill with its edge, the stroke of its line.
         let legend_strokes: Vec<_> = legend
             .iter()
+            .flat_map(|item| match item {
+                Item::Group { items, .. } => items.iter().collect(),
+                item => vec![item],
+            })
             .filter_map(|item| match item {
                 Item::Stroke { style, .. } => Some((style.width, style.dash.clone())),
                 _ => None,

@@ -91,6 +91,11 @@ impl Figure {
     /// figure needs, and the hint suggests making the figure taller or removing whichever of
     /// the title, subtitle and legend it has.
     ///
+    /// Bubbles never make rendering fail: automatic limits fit whole bubble markers and their
+    /// outlines to the final plot size, across every panel sharing the scale, and when they
+    /// cannot (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)) the axis keeps the limits of
+    /// the data positions and the plot clips the bubbles.
+    ///
     /// On a grid of more than one cell the same checks run for the grid's columns and rows, in
     /// the same order. A figure too narrow for its columns of plots names the width it needs
     /// (`the figure is … pt wide; at least … pt is needed for 3 columns of plots.`) unless
