@@ -4,8 +4,8 @@
 //! one polygon.
 
 use super::MarkContext;
-use super::area::AREA_ALPHA;
 use super::clip::{ClampedPoint, clamp_polyline};
+use super::fill::AREA_ALPHA;
 use super::line::{LineClip, downsample_columns, downsample_range};
 use super::mapping::{PlotPoint, axis_x_value, axis_y};
 use crate::Rgba;

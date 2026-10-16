@@ -659,7 +659,7 @@ fn shared_x_ticks_fit_the_labeled_narrow_panels_above_a_wide_panel() {
             &lib,
             crate::layout::TickSpacing::LabelsApart,
         );
-        crate::resolve::resolve_x(marks.iter(), limits.x, &x)
+        crate::resolve::resolve_x(marks.iter(), limits.x, &x, None)
     };
     let wide = ticks_for(panels[2].1.plot.size());
     let narrow = ticks_for(panels[0].1.plot.size());

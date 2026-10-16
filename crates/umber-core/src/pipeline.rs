@@ -5,6 +5,7 @@
 //! panel of a figure at once; [`scene`] then draws each panel's chrome, marks, legend and
 //! baseline.
 
+use crate::bubble_fit::BubbleFits;
 use crate::layout::{
     self, FigureHeader, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize,
     TickSpacing,
@@ -241,12 +242,14 @@ impl TickChoice {
 }
 
 /// Resolves each group once, in row-major panel order, then gives its members identical
-/// scales and ticks. Marks remain per panel for drawing and legend colors.
+/// scales and ticks, with each group's data extent widened to fit its bubbles as `fits` says.
+/// Marks remain per panel for drawing and legend colors.
 fn resolve_groups(
     panels: &[Panel<'_>],
     limits: &[Limits<'_>],
     groups: &ShareGroups,
     rooms: &[[layout::TickRoom<'_>; 2]],
+    fits: &BubbleFits,
 ) -> Vec<Resolved> {
     let mut resolved: Vec<Resolved> = Vec::with_capacity(panels.len());
     for i in 0..panels.len() {
@@ -256,7 +259,7 @@ fn resolve_groups(
                 .enumerate()
                 .filter(|(j, _)| groups.x[*j] == i)
                 .flat_map(|(_, panel)| panel.marks.iter());
-            resolve::resolve_x(marks, limits[i].x, &rooms[i][0])
+            resolve::resolve_x(marks, limits[i].x, &rooms[i][0], fits.x_extent(i))
         } else {
             resolved[groups.x[i]].x.clone()
         };
@@ -266,7 +269,7 @@ fn resolve_groups(
                 .enumerate()
                 .filter(|(j, _)| groups.y[*j] == i)
                 .flat_map(|(_, panel)| panel.marks.iter());
-            resolve::resolve_y(marks, limits[i].y, &rooms[i][1])
+            resolve::resolve_y(marks, limits[i].y, &rooms[i][1], fits.y_extent(i))
         } else {
             let r = &resolved[groups.y[i]];
             (r.y.clone(), r.baseline)
@@ -293,8 +296,16 @@ fn resolve_groups(
 /// fewer the next, and the grid is solved again. A side whose ticks number two, whose new
 /// choice does not fit even on the plot it was made for, or whose new choice the grid cannot
 /// hold (the solve fails, and the previous solve is kept) keeps its ticks. Each side is chosen
-/// again at most twice per number of ticks, and its ticks never grow in number, so the loop
-/// ends.
+/// again at most twice per number of ticks, and its ticks never grow in number while the
+/// domain stays fixed.
+///
+/// Before each round the bubble fits are asked again on the solved plots ([`BubbleFits`]):
+/// the first time, every automatic axis holding bubbles widens its data extent to fit them on
+/// those plots, before tick rounding and padding, and later whenever a bubble reaches past a
+/// plot edge, shared panels with hidden tick labels included. A changed extent resolves the
+/// axes and solves the grid again, with the same tick choices. A fit the grid cannot hold, or
+/// one still unsettled after the rounds, leaves its axis with the limits of the data positions,
+/// and the plot clips its bubbles; bubbles never make the layout fail.
 ///
 /// The panels are then placed for the final solve ([`layout::place_panel`]), and on a grid the
 /// texts of every panel are checked to stay in its cells ([`layout::check_panel_contents`]).
@@ -333,6 +344,9 @@ fn plan(
     };
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
     let groups = ShareGroups::new(figure);
+    let marks: Vec<&[ResolvedMark<'_>]> =
+        panels.iter().map(|panel| panel.marks.as_slice()).collect();
+    let mut fits = BubbleFits::new(&marks, &limits, &groups);
     let show_labels: Vec<_> = panels
         .iter()
         .map(|panel| label_visibility(figure, panel.axes.cells()))
@@ -368,6 +382,7 @@ fn plan(
         &limits,
         &groups,
         &rooms_for(&guesses, TickSpacing::Target),
+        &fits,
     );
     let first: Vec<PanelBands> = first
         .iter()
@@ -378,7 +393,7 @@ fn plan(
     let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
 
     // The final pass: tick labels kept apart on the plot sizes of the first.
-    let resolve_choices = |choices: &[[TickChoice; 2]]| {
+    let resolve_choices = |choices: &[[TickChoice; 2]], fits: &BubbleFits| {
         let rooms: Vec<_> = choices
             .iter()
             .map(|c| {
@@ -388,7 +403,7 @@ fn plan(
                 ]
             })
             .collect();
-        resolve_groups(panels, &limits, &groups, &rooms)
+        resolve_groups(panels, &limits, &groups, &rooms, fits)
     };
     let mut choices: Vec<[TickChoice; 2]> = (0..panels.len())
         .map(|i| {
@@ -404,6 +419,7 @@ fn plan(
         &limits,
         &groups,
         &rooms_for(&plots, TickSpacing::Deferred),
+        &fits,
     );
     let mut bands: Vec<PanelBands> = resolved
         .iter()
@@ -426,7 +442,7 @@ fn plan(
             solution
         }
         _ => {
-            resolved = resolve_choices(&choices);
+            resolved = resolve_choices(&choices, &fits);
             bands = resolved
                 .iter()
                 .enumerate()
@@ -441,7 +457,31 @@ fn plan(
         .iter()
         .map(|r| 2 * (r.x.ticks.len() + r.y.ticks.len()) + 1)
         .sum();
-    for _ in 0..rounds {
+    // Resolves the axes for the current tick choices and bubble fits and solves the grid
+    // again. When the grid cannot hold the fitted limits, every fit is clipped, and the axes
+    // are resolved and the grid solved with the limits of the data positions.
+    let refit = |fits: &mut BubbleFits, choices: &[[TickChoice; 2]]| {
+        let resolved = resolve_choices(choices, fits);
+        let bands: Vec<PanelBands> = resolved
+            .iter()
+            .enumerate()
+            .map(|(i, r)| measure(i, r))
+            .collect();
+        match layout::solve_grid(&grid, &bands) {
+            Ok(solution) => Ok((resolved, bands, solution)),
+            Err(_) if fits.clip_all() => {
+                let resolved = resolve_choices(choices, fits);
+                let bands: Vec<PanelBands> = resolved
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| measure(i, r))
+                    .collect();
+                layout::solve_grid(&grid, &bands).map(|solution| (resolved, bands, solution))
+            }
+            Err(error) => Err(error),
+        }
+    };
+    for _ in 0..rounds + fits.budget() {
         // The sides whose labels crowd on the solved plots, chosen again.
         let mut next = choices.clone();
         let mut again: Vec<(usize, Side)> = Vec::new();
@@ -450,6 +490,10 @@ fn plan(
             .iter()
             .map(|slot| slot.plot.size())
             .collect();
+        if fits.update(&resolved, &plots) {
+            (resolved, bands, solution) = refit(&mut fits, &choices)?;
+            continue;
+        }
         for (i, r) in resolved.iter().enumerate() {
             for side in Side::BOTH {
                 if side.groups(&groups)[i] != i {
@@ -474,7 +518,7 @@ fn plan(
         if again.is_empty() {
             break;
         }
-        let tried_resolved = resolve_choices(&next);
+        let tried_resolved = resolve_choices(&next, &fits);
         let tried_bands: Vec<_> = tried_resolved
             .iter()
             .enumerate()
@@ -505,6 +549,15 @@ fn plan(
                 }
             }
         }
+    }
+
+    let plots: Vec<_> = solution
+        .panels
+        .iter()
+        .map(|slot| slot.plot.size())
+        .collect();
+    if fits.clip_unsettled(&resolved, &plots) {
+        (resolved, bands, solution) = refit(&mut fits, &choices)?;
     }
 
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = inputs

@@ -1,6 +1,6 @@
 //! Stacked area geometry, shared gaps, flat fills, direct labels and visible downsampling.
 
-use super::super::area::AREA_ALPHA;
+use super::super::fill::AREA_ALPHA;
 use super::super::line::downsample_columns;
 use super::{mark_group, plot_of, subpaths};
 use crate::model::{Figure, Series};
@@ -237,7 +237,7 @@ fn resolved_layers_have_area_keys_and_direct_anchors_at_each_upper_end() {
         assert_eq!(key.color, f.theme().palette()[k]);
         assert!(matches!(
             key.kind,
-            SeriesKind::Line {
+            SeriesKind::Area {
                 dash: Dash::Solid,
                 ..
             }

@@ -92,6 +92,9 @@
 #![forbid(unsafe_code)]
 
 mod binning;
+mod bubble_fit;
+#[cfg(test)]
+mod bubble_fit_tests;
 mod bubble_scale;
 #[cfg(test)]
 mod bubbles_tests;
@@ -108,6 +111,8 @@ mod layout;
 mod legend;
 #[cfg(test)]
 mod legend_position_tests;
+#[cfg(test)]
+mod legend_swatch_tests;
 mod model;
 mod pipeline;
 pub mod render;

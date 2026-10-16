@@ -1,7 +1,7 @@
 //! Band marks: the polygon of each run, NaN gaps, the flat fill in every fill style, clipping
 //! at the limits, a log y axis, and downsampling.
 
-use super::super::area::AREA_ALPHA;
+use super::super::fill::AREA_ALPHA;
 use super::super::line::downsample_columns;
 use super::{mark_group, nums, plot_of, subpaths};
 use crate::geometry::PathVerb;
