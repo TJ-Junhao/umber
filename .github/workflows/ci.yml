@@ -123,8 +123,11 @@ jobs:
         run: scripts/release/build-dists.sh
 
   # Free-threaded CPython: the extension is built for 3.14t (not abi3) and the suite runs without
-  # the GIL. polars publishes no free-threaded wheels, so it is not installed and the one test
-  # module that imports it is left out. Every step uses --no-sync, which would install it.
+  # the GIL. polars publishes abi3 wheels only, which free-threaded CPython cannot use, so on
+  # every platform it would be built from source: it is not installed, and the one test module
+  # that imports it is left out. No step may install it: `uv run` uses --no-sync, and
+  # `maturin develop` uses --skip-install, because installing umber also installs the dev
+  # dependency group.
   python-free-threaded:
     strategy:
       fail-fast: false
@@ -138,7 +141,8 @@ jobs:
         with:
           python-version: "3.14t"
       - run: uv sync --locked --group dev --no-install-package polars --no-install-package polars-runtime-32
-      - run: uv run --no-sync maturin develop --uv
+      # uv sync installed umber as an editable package; this builds its extension in place.
+      - run: uv run --no-sync maturin develop --skip-install
       - run: uv run --no-sync python -m mypy.stubtest umber._umber
       - run: uv run --no-sync pytest -q --ignore=tests/python/test_values.py
       # As in the python job: the test binary must load this interpreter's shared library.
