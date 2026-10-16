@@ -6,9 +6,10 @@ use super::{mark_group, nums, plot_of, subpaths};
 use crate::geometry::PathVerb;
 use crate::layout::Area;
 use crate::model::{AxisValue, Figure, LineOptions, RuleOptions, SpanOptions};
-use crate::scene::{FillRule, Item, LineCap, Paint, Scene};
+use crate::model::{Grid, GridIndex, Placement, Share};
+use crate::scene::{FillRule, Item, LineCap, Paint, Rect, Scene};
 use crate::test_support::scene::assert_scene_bounded;
-use crate::{Dash, FontLibrary, LogBase, ScaleKind, Theme};
+use crate::{Dash, FontLibrary, LogBase, ScaleKind, SizeSpec, Theme};
 
 /// Linear axes limited to `0..=10` on both, holding nothing else.
 fn figure() -> Figure {
@@ -35,7 +36,31 @@ fn items(figure: &Figure) -> Vec<Item> {
     if scene.items.len() == 2 {
         return Vec::new();
     }
-    mark_group(&scene).1.to_vec()
+    flatten(mark_group(&scene).1)
+}
+
+/// `items` with the reference layers' own clipped groups opened up.
+fn flatten(items: &[Item]) -> Vec<Item> {
+    items
+        .iter()
+        .flat_map(|item| match item {
+            Item::Group { items, .. } => flatten(items),
+            other => vec![other.clone()],
+        })
+        .collect()
+}
+
+/// The clips of the groups nested in the marks group of `figure`.
+fn layer_clips(figure: &Figure) -> Vec<Rect> {
+    let scene = scene_of(figure);
+    mark_group(&scene)
+        .1
+        .iter()
+        .filter_map(|item| match item {
+            Item::Group { clip, .. } => *clip,
+            _ => None,
+        })
+        .collect()
 }
 
 /// The plot y of the y value `v` on `0..=10`.
@@ -363,4 +388,238 @@ fn references_alone_draw_no_data_marks_and_nothing_visible_draws_no_group() {
         .vspan(20.0, 30.0, SpanOptions::default())
         .unwrap();
     assert!(items(&f).is_empty());
+}
+
+/// A line chart over the y values 33 to 68 with every reference mark of the kind: auto y limits,
+/// so the baseline sits at the lower limit before padding, above the plot bottom.
+fn lower_limit_figure(ylim: Option<(f64, f64)>) -> Figure {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.line(
+        nums(&[0.0, 30.0, 60.0]),
+        &[33.0, 50.0, 68.0],
+        LineOptions::default(),
+    )
+    .unwrap()
+    .vline(AxisValue::Number(31.0), RuleOptions::default())
+    .unwrap()
+    .vspan(40.0, 50.0, SpanOptions::default())
+    .unwrap();
+    if let Some((low, high)) = ylim {
+        axes.ylim(low, high).unwrap();
+    }
+    f
+}
+
+fn baseline_y_of(figure: &Figure) -> (Area, f64) {
+    let layout = crate::pipeline::plan_figure(figure, (0, 0), FontLibrary::global()).1;
+    (layout.plot, layout.baseline_y)
+}
+
+#[test]
+fn vertical_references_end_at_a_lower_limit_baseline() {
+    let f = lower_limit_figure(None);
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    let items = items(&f);
+    let (_, top, _, bottom) = rect(&items[0]);
+    assert_near(top, plot.y);
+    assert_near(bottom, baseline);
+    let ((_, y0), (_, y1)) = ends(items.last().unwrap());
+    assert_near(y0, plot.y);
+    assert_near(y1, baseline);
+}
+
+#[test]
+fn vertical_references_keep_the_full_height_when_zero_is_in_the_domain() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            nums(&[0.0, 30.0, 60.0]),
+            &[-10.0, 20.0, 68.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .vline(AxisValue::Number(31.0), RuleOptions::default())
+        .unwrap()
+        .vspan(40.0, 50.0, SpanOptions::default())
+        .unwrap();
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(
+        baseline < plot.bottom() - 1.0,
+        "zero is mid-plot: {baseline}"
+    );
+    let items = items(&f);
+    assert_near(rect(&items[0]).3, plot.bottom());
+    assert_near(ends(items.last().unwrap()).1.1, plot.bottom());
+    assert!(layer_clips(&f).is_empty(), "no cut at the baseline");
+}
+
+#[test]
+fn vertical_references_fill_an_explicit_ylim_and_end_at_a_log_lower_limit() {
+    // Explicit limits have no padding: the baseline is the plot bottom.
+    let f = lower_limit_figure(Some((20.0, 80.0)));
+    let (plot, baseline) = baseline_y_of(&f);
+    assert_near(baseline, plot.bottom());
+    let drawn = items(&f);
+    assert_near(rect(&drawn[0]).3, plot.bottom());
+    assert_near(ends(drawn.last().unwrap()).1.1, plot.bottom());
+
+    // A log y axis never holds 0, so its baseline is the lower limit before padding.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Log { base: LogBase::TEN })
+        .unwrap()
+        .line(
+            nums(&[0.0, 30.0, 60.0]),
+            &[33.0, 50.0, 680.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .vline(AxisValue::Number(31.0), RuleOptions::default())
+        .unwrap()
+        .vspan(40.0, 50.0, SpanOptions::default())
+        .unwrap();
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    let drawn = items(&f);
+    assert_near(rect(&drawn[0]).3, baseline);
+    assert_near(ends(drawn.last().unwrap()).1.1, baseline);
+}
+
+#[test]
+fn horizontal_references_never_reach_below_a_lower_limit_baseline() {
+    // Their values extend the automatic y domain, so the lower limit lies at or below them.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            nums(&[0.0, 30.0, 60.0]),
+            &[33.0, 50.0, 68.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .hspan(20.0, 40.0, SpanOptions::default())
+        .unwrap()
+        .hline(25.0, RuleOptions::default())
+        .unwrap();
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    let drawn = items(&f);
+    // The span's bottom is the value 20, the lowest value of the chart; the lower limit is a
+    // nice number at or below it.
+    let bottom = rect(&drawn[0]).3;
+    assert!(bottom <= baseline + 1e-3, "{bottom} vs {baseline}");
+    let ((_, y0), (_, y1)) = ends(drawn.last().unwrap());
+    assert!(y0 < baseline && y1 < baseline, "{y0} {y1} vs {baseline}");
+}
+
+#[test]
+fn a_shared_y_grid_ends_every_panel_at_the_common_baseline() {
+    let grid = Grid::new(1, 2).unwrap().with_share_y(Share::All);
+    let mut f = Figure::with_grid(8.0, 4.0, Theme::pigment(), grid).unwrap();
+    // The panels' own data would give them different baselines; shared, both use the one
+    // domain of the pair.
+    for (col, top) in [(0, 68.0), (1, 40.0)] {
+        let at = Placement {
+            row: GridIndex::At(0),
+            col: GridIndex::At(col),
+            ..Placement::default()
+        };
+        f.add_axes_at(at, ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                nums(&[0.0, 30.0, 60.0]),
+                &[33.0, 50.0, top],
+                LineOptions::default(),
+            )
+            .unwrap()
+            .vline(AxisValue::Number(31.0), RuleOptions::default())
+            .unwrap()
+            .vspan(40.0, 50.0, SpanOptions::default())
+            .unwrap();
+    }
+    let scene = scene_of(&f);
+    let groups: Vec<Vec<Item>> = scene
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Group {
+                clip: Some(_),
+                items,
+            } => Some(flatten(items)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 2);
+    for (col, items) in groups.into_iter().enumerate() {
+        let (plot, baseline) = {
+            let layout = crate::pipeline::plan_figure(&f, (0, col), FontLibrary::global()).1;
+            (layout.plot, layout.baseline_y)
+        };
+        assert!(baseline < plot.bottom() - 1.0, "{col}: {baseline} {plot:?}");
+        assert_near(rect(&items[0]).3, baseline);
+        assert_near(ends(items.last().unwrap()).1.1, baseline);
+    }
+}
+
+/// Data 33 to 68 on y ticks 20 to 80: the baseline is the tick 20, above the plot bottom.
+fn ticked_figure(rule: RuleOptions, vertical: bool) -> Figure {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.line(
+        nums(&[0.0, 30.0, 60.0]),
+        &[33.0, 50.0, 68.0],
+        LineOptions::default(),
+    )
+    .unwrap()
+    .yticks(&[20.0, 40.0, 60.0, 80.0])
+    .unwrap();
+    if vertical {
+        axes.vline(AxisValue::Number(31.0), rule).unwrap();
+    } else {
+        axes.hline(20.0, rule).unwrap();
+    }
+    f
+}
+
+#[test]
+fn a_thick_hline_on_the_baseline_is_cut_at_it() {
+    let width = SizeSpec::pt(6.0).unwrap();
+    let f = ticked_figure(
+        RuleOptions {
+            width,
+            ..RuleOptions::default()
+        },
+        false,
+    );
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    let drawn = items(&f);
+    let ((_, y), _) = ends(drawn.last().unwrap());
+    assert_near(y, baseline);
+    // The lower half of the 6 pt stroke would reach 3 pt below the baseline: the layer's clip
+    // is what stops it.
+    let [clip] = layer_clips(&f).try_into().unwrap();
+    assert_near(f64::from(clip.y + clip.height), baseline);
+    assert_near(f64::from(clip.y), plot.y);
+}
+
+#[test]
+fn a_dotted_vline_cap_is_cut_at_the_baseline() {
+    let f = ticked_figure(
+        RuleOptions {
+            dash: Dash::Dotted,
+            width: SizeSpec::pt(4.2).unwrap(),
+            ..RuleOptions::default()
+        },
+        true,
+    );
+    let (_, baseline) = baseline_y_of(&f);
+    let drawn = items(&f);
+    let ((_, _), (_, end)) = ends(drawn.last().unwrap());
+    assert_near(end, baseline);
+    // The round cap of the last dot reaches 2.1 pt past the path's end; the clip stops it.
+    let [clip] = layer_clips(&f).try_into().unwrap();
+    assert_near(f64::from(clip.y + clip.height), baseline);
 }
