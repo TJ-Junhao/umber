@@ -15,6 +15,9 @@
 //! as that span does not grow. The lengths only shrink and the span only grows, so the extents
 //! only grow and the fits settle.
 //!
+//! A time axis is fitted in seconds from its origin, the earliest time of its data and explicit
+//! ticks (see [`resolve::time_extents`]), as a linear axis is in its own units.
+//!
 //! When the bubbles cannot all fit on an axis (a bubble reaches at least half the plot length,
 //! the fit leaves the supported numeric range, the layout cannot hold the fitted limits, or no
 //! fit settles within [`MAX_REFITS`] attempts), the axis keeps the limits of the data positions
@@ -23,11 +26,13 @@
 use crate::draw::marker_reach;
 use crate::layout::PlotSize;
 use crate::model::ShareGroups;
+use crate::model::SharedValues;
 use crate::resolve::{
-    self, AxisLimits, AxisScale, ContinuousLimits, Limits, Resolved, ResolvedMark, ValueAxis,
+    self, AxisLimits, AxisScale, ContinuousLimits, Limits, Resolved, ResolvedMark, TimeLimits,
+    ValueAxis,
 };
-use crate::scale::log_offset;
-use crate::{ContinuousScale, Transform};
+use crate::scale::{log_offset, seconds_between};
+use crate::{ContinuousScale, Instant, Transform};
 
 /// The most times a fit is made again after its first, before its axis keeps the limits of
 /// the data positions.
@@ -75,7 +80,8 @@ impl Axis {
         }
     }
 
-    /// The continuous scale of this axis in `resolved`; `None` for a category axis.
+    /// The continuous scale of this axis in `resolved`, in seconds from its origin on a time
+    /// axis; `None` for a category axis.
     fn scale(self, resolved: &Resolved) -> Option<ContinuousScale> {
         let axis = match self {
             Axis::X => &resolved.x,
@@ -83,7 +89,8 @@ impl Axis {
         };
         match axis.scale {
             AxisScale::Continuous(scale) => Some(scale),
-            AxisScale::Category(_) | AxisScale::Time(_) => None,
+            AxisScale::Time(scale) => Some(*scale.seconds_scale()),
+            AxisScale::Category(_) => None,
         }
     }
 }
@@ -148,14 +155,7 @@ impl BubbleFit {
         limits: &ContinuousLimits<'_>,
         members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>])> + Clone,
     ) -> Option<BubbleFit> {
-        let bubbles: Vec<Bubble> = members
-            .clone()
-            .flat_map(|(panel, marks)| {
-                marks
-                    .iter()
-                    .flat_map(move |mark| bubbles(mark, axis, panel))
-            })
-            .collect();
+        let bubbles = Self::drawn(axis, None, members.clone());
         if bubbles.is_empty() {
             return None;
         }
@@ -169,6 +169,52 @@ impl BubbleFit {
             bubbles,
             state: State::Unfitted,
         })
+    }
+
+    /// The fit of the time `axis` with `limits`, whose group's members are `members`, as
+    /// [`new`](Self::new) fits a linear axis, in seconds from the earliest time of the data and
+    /// the explicit ticks, the origin of the axis ([`resolve::time_extents`]). A single instant
+    /// has the half-hour reach on each side that resolve gives it.
+    fn time<'a, 'm: 'a>(
+        axis: Axis,
+        limits: &TimeLimits<'_>,
+        members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>])> + Clone,
+    ) -> Option<BubbleFit> {
+        let marks = members.clone().flat_map(|(_, marks)| marks.iter());
+        let (_, extent) = resolve::time_extents(marks, axis.which(), limits.ticks);
+        let (origin, last) = extent?;
+        let bubbles = Self::drawn(axis, Some(origin), members);
+        if bubbles.is_empty() {
+            return None;
+        }
+        let (low, high) = if origin == last {
+            (-resolve::SINGLE_TIME_REACH, resolve::SINGLE_TIME_REACH)
+        } else {
+            (0.0, seconds_between(origin, last))
+        };
+        let seed = ContinuousScale::new(Transform::Linear, low, high, CONTEXT).ok()?;
+        Some(BubbleFit {
+            axis,
+            seed,
+            bubbles,
+            state: State::Unfitted,
+        })
+    }
+
+    /// Every drawn bubble of the group's `members`, as `axis` sees it, with the times of a time
+    /// axis in seconds from `origin`.
+    fn drawn<'a, 'm: 'a>(
+        axis: Axis,
+        origin: Option<Instant>,
+        members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>])>,
+    ) -> Vec<Bubble> {
+        members
+            .flat_map(|(panel, marks)| {
+                marks
+                    .iter()
+                    .flat_map(move |mark| bubbles(mark, axis, panel, origin))
+            })
+            .collect()
     }
 
     /// The extent this fit adds to its axis's data extent; `None` while it adds nothing.
@@ -307,11 +353,13 @@ impl BubbleFit {
 }
 
 /// The drawn bubbles of `mark`, as `axis` of the panel `panel` sees them: none for any other
-/// mark. A bubble is drawn when both its coordinates are finite and its radius is positive.
+/// mark. A bubble is drawn when both its coordinates are finite (or present, for times) and its
+/// radius is positive. The times of a time axis are seconds from `origin`.
 fn bubbles<'a>(
     mark: &'a ResolvedMark<'_>,
     axis: Axis,
     panel: usize,
+    origin: Option<Instant>,
 ) -> impl Iterator<Item = Bubble> + 'a {
     let (data, maximum, radius) = match *mark {
         ResolvedMark::Bubbles {
@@ -324,19 +372,18 @@ fn bubbles<'a>(
     };
     data.into_iter().flat_map(move |data| {
         let shape = data.options().marker;
-        data.x()
+        data.sizes()
             .iter()
-            .zip(data.y())
-            .zip(data.sizes())
-            .filter_map(move |((&x, &y), &size)| {
+            .enumerate()
+            .filter_map(move |(i, &size)| {
                 let r = crate::bubble_scale::radius(size, maximum, radius);
-                if !(x.is_finite() && y.is_finite()) || r <= 0.0 {
+                if !(is_drawn(data.x_values(), i) && is_drawn(data.y_values(), i)) || r <= 0.0 {
                     return None;
                 }
                 let (reach_x, reach_y) = marker_reach(shape, 2.0 * r);
                 let (value, reach) = match axis {
-                    Axis::X => (x, reach_x),
-                    Axis::Y => (y, reach_y),
+                    Axis::X => (coordinate(data.x_values(), i, origin), reach_x),
+                    Axis::Y => (coordinate(data.y_values(), i, origin), reach_y),
                 };
                 Some(Bubble {
                     value,
@@ -345,6 +392,27 @@ fn bubbles<'a>(
                 })
             })
     })
+}
+
+/// Whether the coordinate at `i` places a bubble: a finite number, or a present time.
+fn is_drawn(values: &SharedValues, i: usize) -> bool {
+    match values {
+        SharedValues::Numbers(values) => values.get(i).is_some_and(|v| v.is_finite()),
+        SharedValues::Times(times) => times.get(i).is_some_and(Option::is_some),
+    }
+}
+
+/// The coordinate at `i` in the space of its axis: a number as it is, a time in seconds from
+/// `origin`; NaN for a missing time, or for a time without an origin, which a numeric axis
+/// never has.
+fn coordinate(values: &SharedValues, i: usize, origin: Option<Instant>) -> f64 {
+    match values {
+        SharedValues::Numbers(values) => values.get(i).copied().unwrap_or(f64::NAN),
+        SharedValues::Times(times) => match (times.get(i).copied().flatten(), origin) {
+            (Some(t), Some(origin)) => seconds_between(origin, t),
+            _ => f64::NAN,
+        },
+    }
 }
 
 /// The bubble fits of every automatic axis of a figure: one pair per panel, x then y, filled
@@ -368,16 +436,18 @@ impl BubbleFits {
                     if keys[i] != i {
                         return None;
                     }
-                    let AxisLimits::Continuous(limits) = limits[i].axis(axis.which()) else {
-                        return None;
-                    };
-                    if limits.explicit.is_some() {
-                        return None;
-                    }
                     let members = (0..marks.len())
                         .filter(|j| keys[*j] == i)
                         .map(|j| (j, marks[j]));
-                    BubbleFit::new(axis, &limits, members)
+                    match limits[i].axis(axis.which()) {
+                        AxisLimits::Continuous(limits) if limits.explicit.is_none() => {
+                            BubbleFit::new(axis, &limits, members)
+                        }
+                        AxisLimits::Time(limits) if limits.explicit.is_none() => {
+                            BubbleFit::time(axis, &limits, members)
+                        }
+                        _ => None,
+                    }
                 })
             })
             .collect();

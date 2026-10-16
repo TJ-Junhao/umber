@@ -95,7 +95,7 @@ h.hline("North")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessI
 h.hspan("North", "South")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 h.band(xs, values, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 h.stacked_area(xs, series)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-h.bubbles(xs, values, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.bubbles(xs, values, values)  # type: ignore[misc, arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 both.line(names, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 

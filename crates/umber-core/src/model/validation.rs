@@ -3,6 +3,7 @@
 //! sizes. Every check runs before anything is stored, so a failed call changes nothing.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::axis_data::{AxisData, SharedValues};
 use super::bar::{Arrangement, Series};
@@ -416,6 +417,19 @@ pub(super) fn check_stacked_area(
     Ok(())
 }
 
+/// The `Error::Usage` of the numeric bubble method `context` on a time axis, `axis` being `"x"`
+/// or `"y"`: it takes numbers, and times go through `bubbles_time`.
+pub(super) fn time_bubbles_refusal(context: &'static str, axis: &'static str) -> Error {
+    Error::usage(
+        context,
+        format!(
+            "{axis} is a time scale; {context} takes numbers, so pass times with bubbles_time()."
+        ),
+    )
+    .with_parameter(axis)
+    .with_hint("use bubbles_time() for times.")
+}
+
 /// Checks bubble coordinates and sizes before storage: numeric x, lengths, coordinates, sizes.
 pub(super) fn check_bubbles(
     context: &'static str,
@@ -424,12 +438,7 @@ pub(super) fn check_bubbles(
     (x, y, sizes): (&[f64], &[f64], &[f64]),
 ) -> Result<()> {
     if x_kind == ScaleKind::Time {
-        return Err(Error::usage(
-            context,
-            format!("x is a time scale; {context} needs a linear or log x axis."),
-        )
-        .with_parameter("x")
-        .with_hint("convert the times to numbers first, such as days since the first one."));
+        return Err(time_bubbles_refusal(context, "x"));
     }
     let Some(x_transform) = x_kind.transform() else {
         return Err(Error::usage(
@@ -439,20 +448,29 @@ pub(super) fn check_bubbles(
         .with_parameter("x")
         .with_hint(X_SCALE_HINT));
     };
+    check_bubble_lengths(context, x.len(), y.len(), sizes.len())?;
+    check_numbers(context, ("x", "x"), x, x_transform, SCATTER_GAP_HINT)?;
+    check_numbers(context, ("y", "y"), y, y_transform, SCATTER_GAP_HINT)?;
+    check_bubble_sizes(context, sizes)
+}
+
+/// Checks that the `y` and `sizes` of a bubble mark have as many values as its `x`.
+fn check_bubble_lengths(context: &'static str, x: usize, y: usize, sizes: usize) -> Result<()> {
     for (name, other) in [("y", y), ("sizes", sizes)] {
-        if x.len() != other.len() {
+        if x != other {
             return Err(Error::data(
                 context,
                 format!(
-                    "x has {} values but {name} has {}; x and {name} must have the same length.",
-                    x.len(),
-                    other.len()
+                    "x has {x} values but {name} has {other}; x and {name} must have the same length."
                 ),
             ));
         }
     }
-    check_numbers(context, ("x", "x"), x, x_transform, SCATTER_GAP_HINT)?;
-    check_numbers(context, ("y", "y"), y, y_transform, SCATTER_GAP_HINT)?;
+    Ok(())
+}
+
+/// Checks that every bubble size is finite, at least 0 and at most [`MAX_MAGNITUDE`].
+fn check_bubble_sizes(context: &'static str, sizes: &[f64]) -> Result<()> {
     for (i, &value) in sizes.iter().enumerate() {
         if !value.is_finite() || value < 0.0 {
             return Err(Error::data(
@@ -477,6 +495,52 @@ pub(super) fn check_bubbles(
         }
     }
     Ok(())
+}
+
+/// Checks bubble coordinates and sizes before storage on axes that may be time axes, with an x
+/// axis of scale kind `x_kind` and a y axis of scale kind `y_kind`, and returns the coordinates
+/// as the mark stores them. The checks run in a fixed order and the first failure is the
+/// error, under `context`: neither axis is a category axis (`Error::Usage`, x first); the
+/// lengths; `x`, then `y`, against their axes (see [`check_axis_data`]); the sizes.
+pub(super) fn check_time_bubbles(
+    context: &'static str,
+    (x_kind, y_kind): (ScaleKind, ScaleKind),
+    (x, y): (AxisData, AxisData),
+    sizes: &[f64],
+) -> Result<(SharedValues, SharedValues)> {
+    for (axis, kind) in [(SharedAxis::X, x_kind), (SharedAxis::Y, y_kind)] {
+        if kind == ScaleKind::Category {
+            let hint = match axis {
+                SharedAxis::X => {
+                    "pass x=Scale.linear(), x=Scale.log() or x=Scale.time() to Figure.add_axes()."
+                }
+                SharedAxis::Y => {
+                    "pass y=Scale.linear(), y=Scale.log() or y=Scale.time() to Figure.add_axes()."
+                }
+            };
+            return Err(Error::usage(
+                context,
+                "this is a category axis; bubbles apply to linear, log and time axes only.",
+            )
+            .with_parameter(axis.name())
+            .with_hint(hint));
+        }
+    }
+    check_bubble_lengths(context, x.len(), y.len(), sizes.len())?;
+    check_axis_data(context, SharedAxis::X, x_kind, &x, SCATTER_GAP_HINT)?;
+    check_axis_data(context, SharedAxis::Y, y_kind, &y, SCATTER_GAP_HINT)?;
+    check_bubble_sizes(context, sizes)?;
+    Ok((shared_of(x), shared_of(y)))
+}
+
+/// The shared values of `data`, which holds numbers or times: a category axis, the only
+/// place for names, is refused before.
+fn shared_of(data: AxisData) -> SharedValues {
+    match data {
+        AxisData::Numbers(values) => SharedValues::Numbers(values.into()),
+        AxisData::Times(times) => SharedValues::Times(times.into()),
+        AxisData::Categories(_) => SharedValues::Numbers(Arc::from([])),
+    }
 }
 
 /// Checks that no lower limit exceeds its upper limit; NaN in either limit is not compared.

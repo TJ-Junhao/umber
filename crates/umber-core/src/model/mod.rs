@@ -51,6 +51,7 @@ pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement
 pub use heatmap::{HeatmapMark, HeatmapOptions};
 pub use hist::{HistMark, HistOptions};
 pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
+pub(crate) use mesh::Edges;
 pub use mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
 pub use rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub(crate) use share::{ShareGroups, label_visibility};

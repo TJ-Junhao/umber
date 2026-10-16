@@ -1,7 +1,7 @@
 //! Bubbles in data order, with the scatter fill, outline and culling rules.
 
 use super::MarkContext;
-use super::mapping::axis_value;
+use super::mapping::axis_shared;
 use super::scatter::{PointFill, markers_item};
 use crate::model::BubbleMark;
 use crate::resolve::Resolved;
@@ -18,7 +18,9 @@ pub(super) fn bubble_items(
     (fill, maximum, radius): (PointFill<'_>, f64, f32),
     items: &mut Vec<Item>,
 ) {
-    let points = mark.x().iter().zip(mark.y()).zip(mark.sizes()).enumerate();
+    let xs = axis_shared(&resolved.x, mark.x_values());
+    let ys = axis_shared(&resolved.y, mark.y_values());
+    let points = xs.iter().zip(&ys).zip(mark.sizes()).enumerate();
     for (index, ((&x, &y), &value)) in points {
         if value == 0.0 {
             continue;
@@ -37,7 +39,7 @@ pub(super) fn bubble_items(
             positions,
         }) = markers_item(
             context,
-            (&[axis_value(&resolved.x, x)], &[axis_value(&resolved.y, y)]),
+            (&[x], &[y]),
             color,
             mark.options().marker,
             diameter,

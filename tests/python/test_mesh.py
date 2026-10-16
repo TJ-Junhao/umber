@@ -225,7 +225,7 @@ def test_category_axes_rejected(method: str) -> None:
             call(getattr(ax, method))(*args)
 
 
-@pytest.mark.parametrize("method", ["mesh", "hist2d", "hexbin"])
+@pytest.mark.parametrize("method", ["hist2d", "hexbin"])
 @pytest.mark.parametrize("axis", ["x", "y"])
 @pytest.mark.parametrize("time_values", [False, True])
 def test_time_axes_rejected_before_cell_conversion(
@@ -240,11 +240,28 @@ def test_time_axes_rejected_before_cell_conversion(
     times = [dt.datetime(2026, 1, 1), dt.datetime(2026, 1, 2)]
     x = times if time_values and axis == "x" else [0, 1]
     y = times if time_values and axis == "y" else [0, 1]
-    args = (x, y, [[1]]) if method == "mesh" else (x, y)
     with pytest.raises(ub.UsageError) as caught:
-        call(getattr(ax, method))(*args)
+        call(getattr(ax, method))(x, y)
     assert str(caught.value) == f"Axes.{method}(): {axis} must be a numeric axis."
     assert details(caught.value) == (axis, "use Scale.linear() or Scale.log() for both axes.")
+    assert ax.figure.to_svg() == before
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_mesh_category_axes_name_the_axis(axis: str) -> None:
+    ax = (
+        ub.Figure().add_axes(x=ub.Scale.category())
+        if axis == "x"
+        else ub.Figure().add_axes(y=ub.Scale.category())
+    )
+    before = ax.figure.to_svg()
+    with pytest.raises(ub.UsageError) as caught:
+        call(ax.mesh)([0, 1], [0, 1], [[1]])
+    assert str(caught.value) == f"Axes.mesh(): {axis} must be a numeric or time axis."
+    assert details(caught.value) == (
+        axis,
+        "use Scale.linear(), Scale.log() or Scale.time() for both axes.",
+    )
     assert ax.figure.to_svg() == before
 
 

@@ -971,7 +971,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
             };
             return (axis, NormalizedPos::LOW);
         }
-        AxisLimits::Time(limits) => return time_axis(marks, which, role, limits, room),
+        AxisLimits::Time(limits) => return time_axis(marks, which, role, limits, room, bubbles),
     };
     let transform = limits.transform;
     let (data, padding) = axis_data(marks.clone(), which, transform);
@@ -1043,18 +1043,38 @@ const EMPTY_TIME_SPAN: f64 = 86_400.0;
 
 /// How far a time axis whose data is a single instant reaches on each side of it, in seconds:
 /// half an hour.
-const SINGLE_TIME_REACH: f64 = 1_800.0;
+pub(crate) const SINGLE_TIME_REACH: f64 = 1_800.0;
+
+/// The earliest and the latest of some times.
+pub(crate) type InstantRange = (Instant, Instant);
+
+/// The extents of the times along `which` of a group's `marks`: of the times of the marks alone,
+/// and of those together with the times of the explicit ticks `ticks`, if set. The second is the
+/// raw extent of a time axis without explicit limits, whose low end is the origin of its
+/// seconds ([`time_axis`]).
+pub(crate) fn time_extents<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>>,
+    which: ValueAxis,
+    ticks: &AxisTicks,
+) -> (Option<InstantRange>, Option<InstantRange>) {
+    let data = time_extent(marks.flat_map(|mark| mark.times(which)));
+    let given = ticks.explicit().map(tick_times).unwrap_or_default();
+    let ends = data.into_iter().flat_map(|(low, high)| [low, high]);
+    (data, time_extent(ends.chain(given)))
+}
 
 /// Resolves the time axis `which` of one group from the times its `marks` give along it, as
 /// [`resolve_axis`] resolves a continuous axis, and returns it with its base position, the low
 /// end of the axis: a time axis has no 0 to grow from, and its padding lies below the data.
 ///
 /// The domain is the explicit limits when set. Otherwise it fits the data together with the
-/// explicit ticks, if set: the exact extent on a positions axis whose marks, references apart,
-/// are all lines (as [`resolve_axis`] decides), else the extent padded by 5 % of its span on
-/// each side. A single instant reaches half an hour on each side, and an axis without data
-/// spans 1970-01-01. The origin is the low end of the data, or the lower limit, so that the
-/// seconds of nearby times keep their precision.
+/// explicit ticks, if set, and `bubbles`, the extent in seconds from the origin that fits the
+/// group's bubbles, if the final layout widened the data to it: the exact extent on a
+/// positions axis whose marks, references apart, are all lines (as [`resolve_axis`] decides)
+/// and on an axis that holds cells, else the extent padded by 5 % of its span on each side. A
+/// single instant reaches half an hour on each side, and an axis without data spans
+/// 1970-01-01. The origin is the low end of the data, or the lower limit, so that the seconds
+/// of nearby times keep their precision.
 ///
 /// Automatic ticks are the calendar ticks of [`time_ticks`] inside the domain; when their labels
 /// crowd as `room` judges them, the nearest coarser step whose labels keep apart, or the
@@ -1068,38 +1088,52 @@ fn time_axis<'a, 'm: 'a>(
     role: AxisRole,
     limits: TimeLimits<'_>,
     room: &TickRoom<'_>,
+    bubbles: Option<(f64, f64)>,
 ) -> (ResolvedAxis, NormalizedPos) {
     let given = limits.ticks.explicit();
     let scale = match limits.explicit {
         Some((low, high)) => time_scale(low, 0.0, seconds_between(low, high), (low, high)),
         None => {
-            let data = time_extent(marks.clone().flat_map(|mark| mark.times(which)));
-            let ticks = given.map(tick_times).unwrap_or_default();
-            let ends = data.into_iter().flat_map(|(low, high)| [low, high]);
-            match time_extent(ends.chain(ticks)) {
+            let (data, extent) = time_extents(marks.clone(), which, limits.ticks);
+            match extent {
                 None => {
                     let epoch = Instant::clamped(0);
                     let day = shifted(epoch, EMPTY_TIME_SPAN);
                     time_scale(epoch, 0.0, EMPTY_TIME_SPAN, (epoch, day))
                 }
                 Some((low, high)) if low == high => {
-                    let reach = (
-                        shifted(low, -SINGLE_TIME_REACH),
-                        shifted(low, SINGLE_TIME_REACH),
-                    );
-                    time_scale(low, -SINGLE_TIME_REACH, SINGLE_TIME_REACH, reach)
+                    let (from, to) = union(Some((-SINGLE_TIME_REACH, SINGLE_TIME_REACH)), bubbles)
+                        .unwrap_or((-SINGLE_TIME_REACH, SINGLE_TIME_REACH));
+                    let reach = (shifted(low, from), shifted(low, to));
+                    time_scale(low, from, to, reach)
                 }
                 Some((low, high)) => {
                     let span = seconds_between(low, high);
-                    let exact = role == AxisRole::Positions
-                        && exact_time_extent(marks, which, data.is_some());
+                    let (from, to) = union(Some((0.0, span)), bubbles).unwrap_or((0.0, span));
+                    let cells = marks.clone().any(|mark| {
+                        matches!(mark, ResolvedMark::Mesh { .. })
+                            && mark.times(which).next().is_some()
+                    });
+                    let exact = cells
+                        || (role == AxisRole::Positions
+                            && exact_time_extent(marks, which, data.is_some()));
                     let pad = if exact {
                         0.0
                     } else {
-                        AUTO_LIMIT_PADDING * span
+                        AUTO_LIMIT_PADDING * (to - from)
                     };
-                    let reach = (shifted(low, -pad), shifted(high, pad));
-                    time_scale(low, -pad, span + pad, reach)
+                    // The ends of the data keep their whole microseconds when nothing widens it.
+                    let before = if from == 0.0 {
+                        shifted(low, -pad)
+                    } else {
+                        shifted(low, from - pad)
+                    };
+                    let after = if to == span {
+                        shifted(high, pad)
+                    } else {
+                        shifted(low, to + pad)
+                    };
+                    time_scale(low, from - pad, to + pad, (before, after))
                 }
             }
         }
@@ -1764,7 +1798,7 @@ impl<'a> ResolvedMark<'a> {
     /// ([`Histogram::range`]), and nothing when it has no finite value.
     pub fn x_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
-            ResolvedMark::Mesh { mark, .. } => &mark.x_edges,
+            ResolvedMark::Mesh { mark, .. } => mark.x_edges.numbers(),
             ResolvedMark::Hist2d { mark, .. } => &mark.bins.x_edges,
             ResolvedMark::Hexbin { mark, bins, .. } => match bins {
                 crate::bin2d::HexBins::Uncounted => &mark.extents[0],
@@ -1852,9 +1886,9 @@ impl<'a> ResolvedMark<'a> {
     }
 
     /// The times the mark contributes to a time axis along `which`, in data order, gaps
-    /// skipped; none when its values along that axis are not times. Series yield their x or y
-    /// times, bands and stacked areas their x times, error bars their positions, and reference
-    /// lines and spans the times they sit at.
+    /// skipped; none when its values along that axis are not times. Series and bubbles yield
+    /// their x or y times, bands and stacked areas their x times, error bars their positions,
+    /// mesh cells their edges, and reference lines and spans the times they sit at.
     pub fn times(&self, which: ValueAxis) -> DomainTimes<'_> {
         match which {
             ValueAxis::X => self.x_times(),
@@ -1882,10 +1916,10 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::VLine { mark, .. } => DomainTimes::whole(mark.x().times()),
             ResolvedMark::VSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
-            ResolvedMark::Mesh { .. }
-            | ResolvedMark::Hist2d { .. }
+            ResolvedMark::Mesh { mark, .. } => DomainTimes::whole(mark.x_edges.times()),
+            ResolvedMark::Bubbles { mark, .. } => DomainTimes::gapped(mark.x_times()),
+            ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
-            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -1915,10 +1949,10 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::HLine { mark, .. } => DomainTimes::whole(mark.y().times()),
             ResolvedMark::HSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
-            ResolvedMark::Mesh { .. }
-            | ResolvedMark::Hist2d { .. }
+            ResolvedMark::Mesh { mark, .. } => DomainTimes::whole(mark.y_edges.times()),
+            ResolvedMark::Bubbles { mark, .. } => DomainTimes::gapped(mark.y_times()),
+            ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
-            | ResolvedMark::Bubbles { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }
@@ -2063,7 +2097,7 @@ impl<'a> ResolvedMark<'a> {
     /// log axis the domain spans the smallest positive count to the largest.
     pub fn y_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
-            ResolvedMark::Mesh { mark, .. } => &mark.y_edges,
+            ResolvedMark::Mesh { mark, .. } => mark.y_edges.numbers(),
             ResolvedMark::Hist2d { mark, .. } => &mark.bins.y_edges,
             ResolvedMark::Hexbin { mark, bins, .. } => match bins {
                 crate::bin2d::HexBins::Uncounted => &mark.extents[1],
@@ -3392,11 +3426,9 @@ fn resolve_panel_marks<'a>(
             _ => None,
         })
         .flat_map(|mark| {
-            mark.x()
-                .iter()
-                .zip(mark.y())
-                .zip(mark.sizes())
-                .filter_map(|((&x, &y), &size)| (!x.is_nan() && !y.is_nan()).then_some(size))
+            mark.sizes().iter().enumerate().filter_map(|(i, &size)| {
+                (!mark.x_values().is_gap(i) && !mark.y_values().is_gap(i)).then_some(size)
+            })
         })
         .fold(0.0, f64::max);
     let palette = theme.palette();

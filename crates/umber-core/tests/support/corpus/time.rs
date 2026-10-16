@@ -7,7 +7,7 @@
 //! years and 80 years), the themes rotating Pigment, Graphite and Midnight, which shows the
 //! calendar tick steps and the concise labels; a time x axis with every mark it takes (band,
 //! stacked area, step, scatter, stems, error bars, reference lines and spans), explicit limits
-//! and ISO labels; and a time y axis with explicit ticks.
+//! and ISO labels; a time y axis with explicit ticks; cells between times; and bubbles at times.
 //!
 //! In `errors/time.txt`: the errors of time data and time settings on time and numeric axes,
 //! the marks a time axis refuses, and the state a failed call leaves.
@@ -19,8 +19,8 @@ use umber_core::figure::{
     ScatterOptions, SpanOptions, StemOptions, StepOptions,
 };
 use umber_core::{
-    AxisValue, Dash, Figure, FontLibrary, Instant, ScaleKind, Series, Theme, TickFormat,
-    times_from_micros,
+    AxisValue, BubbleOptions, Dash, Figure, FontLibrary, Instant, MeshOptions, ScaleKind, Series,
+    Theme, TickFormat, times_from_micros,
 };
 
 use super::super::{Log, Output, axes, emit_scene, figure, linear, wobble};
@@ -262,6 +262,42 @@ fn figures() -> Vec<(String, Figure)> {
         .yticks_time(&[date(2026, 1, 1), date(2026, 2, 1), date(2026, 3, 1)])
         .unwrap();
     out.push(("time-y-axis".to_owned(), f));
+
+    // Cells between times, and bubbles at times, each with the colorbar or size references
+    // their data asks for.
+    let mut f = figure(6.0, 4.0, Theme::midnight(), ScaleKind::Time, linear());
+    let days = spread(date(2026, 3, 1), date(2026, 3, 8), 8);
+    let values: Vec<f64> = (0..28)
+        .map(|k| ((k % 7) as f64 * 0.9 + (k / 7) as f64 * 1.7).sin() * 4.0 + 5.0)
+        .collect();
+    axes(&mut f)
+        .title("Cells between days")
+        .ylabel("Hour")
+        .mesh_time(
+            AxisData::Times(days),
+            AxisData::Numbers(vec![0.0, 6.0, 12.0, 18.0, 24.0]),
+            &values,
+            MeshOptions::default(),
+        )
+        .unwrap();
+    out.push(("time-mesh".to_owned(), f));
+
+    let mut f = figure(6.0, 4.0, Theme::graphite(), ScaleKind::Time, linear());
+    let x = spread(date(2026, 2, 1), date(2026, 2, 28), 8);
+    axes(&mut f)
+        .title("Orders by day")
+        .ylabel("Value")
+        .bubbles_time(
+            AxisData::Times(x),
+            AxisData::Numbers(vec![3.2, 4.8, 2.9, 6.4, 5.7, 7.1, 4.2, 8.3]),
+            Arc::from([80.0, 140.0, 220.0, 500.0, 330.0, 870.0, 190.0, 650.0]),
+            BubbleOptions {
+                label: "Orders".into(),
+                ..BubbleOptions::default()
+            },
+        )
+        .unwrap();
+    out.push(("time-bubbles".to_owned(), f));
     out
 }
 

@@ -1,1 +1,3 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# errors/time: a numeric bubbles call on a time axis now says the axis is a time axis and names bubbles_time(); it no longer claims the mark needs a linear or log axis.
+errors/time

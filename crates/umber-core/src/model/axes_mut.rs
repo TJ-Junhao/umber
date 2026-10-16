@@ -73,10 +73,11 @@ pub struct ColorbarOptions {
 /// and a scatter is a dot plot. On two category axes these return `Error::Usage`, naming `x`,
 /// before any other check. [`heatmap`](AxesMut::heatmap) draws on two category axes only.
 ///
-/// A time axis, on x or y, takes the times of lines, steps, areas, scatters, stems, reference
-/// lines and spans, the x of bands and stacked areas and the positions of error bars; the
-/// `_time` methods take times where their counterparts take numbers. Marks that need numbers or
-/// names along a time axis refuse it with `Error::Usage`, first.
+/// A time axis, on x or y, takes the times of lines, steps, areas, scatters, stems, bubbles,
+/// reference lines and spans, the edges of mesh cells, the x of bands and stacked areas and the
+/// positions of error bars; the `_time` methods take times where their counterparts take
+/// numbers. Marks that need numbers or names along a time axis refuse it with `Error::Usage`,
+/// first.
 ///
 /// Limits, explicit ticks and tick formats apply to the whole shared group. A member may
 /// replace its own setting, but a different value already set by another member is an
@@ -675,7 +676,7 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
-    /// Adds markers whose areas are proportional to `sizes`, on a numeric x axis.
+    /// Adds markers whose areas are proportional to `sizes`, on numeric axes.
     ///
     /// All bubble marks on these axes share one size scale. The largest size among points with
     /// finite x and y coordinates maps to [`Theme::bubble_max_radius`](crate::Theme::bubble_max_radius).
@@ -700,7 +701,8 @@ impl<'a> AxesMut<'a> {
     /// using that panel's scale and y tick format. Panels do not share a size scale unless
     /// their size values give them the same maximum.
     ///
-    /// A category x axis gives `Error::Usage`. Different lengths, non-finite or negative sizes,
+    /// A category x axis gives `Error::Usage`, and so does a time axis, which takes
+    /// [`AxesMut::bubbles_time`]. Different lengths, non-finite or negative sizes,
     /// or sizes above 1e300 give `Error::Data`; coordinates follow the scatter rules.
     /// A color mapping follows the scatter rules too, except that a color-mapped bubble mark
     /// keeps its label: its legend entry and size references are drawn in the theme's text
@@ -750,8 +752,66 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.bubbles()";
         let axes = self.axes_mut();
+        if axes.y == ScaleKind::Time {
+            return Err(super::validation::time_bubbles_refusal(CONTEXT, "y"));
+        }
         let y_transform = check_numeric_y(CONTEXT, axes.y)?;
         super::validation::check_bubbles(CONTEXT, axes.x, y_transform, (&x, &y, &sizes))?;
+        check_point_color(CONTEXT, axes, &options.color, x.len())?;
+        axes.marks
+            .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
+                SharedValues::Numbers(x),
+                SharedValues::Numbers(y),
+                sizes,
+                options,
+            )));
+        Ok(self)
+    }
+
+    /// Adds bubbles as [`AxesMut::bubbles_shared`] does, on axes where either coordinate may be
+    /// a time: `x` and `y` each hold numbers on a linear or log axis and times on a time axis,
+    /// and a missing time leaves its bubble out, as a NaN coordinate does. The rules of
+    /// [`AxesMut::bubbles`] apply otherwise, with the whole-marker fit of the automatic limits
+    /// made in seconds on a time axis. Size references are labelled with the automatic number
+    /// format on a time y axis, which has no number format of its own.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` on a category axis, then `Error::Data`
+    /// as [`AxesMut::bubbles`] for the lengths, then for `x` and `y` against their axes (numbers
+    /// on a time axis and times elsewhere included), then for the sizes; then the color
+    /// mapping, as [`AxesMut::bubbles`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::{AxisData, BubbleOptions, Figure, Instant, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = f.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let x = vec![Some(Instant::from_micros(0)?), Some(Instant::from_micros(86_400_000_000)?)];
+    /// axes.bubbles_time(
+    ///     AxisData::Times(x),
+    ///     AxisData::Numbers(vec![3.0, 4.0]),
+    ///     Arc::from([100.0, 400.0]),
+    ///     BubbleOptions::default(),
+    /// )?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// let numbers = AxisData::Numbers(vec![1.0]);
+    /// assert!(axes.bubbles_time(numbers.clone(), numbers, Arc::from([1.0]), BubbleOptions::default()).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn bubbles_time(
+        &mut self,
+        x: AxisData,
+        y: AxisData,
+        sizes: Arc<[f64]>,
+        options: super::bubbles::BubbleOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.bubbles()";
+        let axes = self.axes_mut();
+        let (x, y) =
+            super::validation::check_time_bubbles(CONTEXT, (axes.x, axes.y), (x, y), &sizes)?;
         check_point_color(CONTEXT, axes, &options.color, x.len())?;
         axes.marks
             .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
@@ -1873,6 +1933,46 @@ impl<'a> AxesMut<'a> {
         options: MeshOptions,
     ) -> Result<&mut Self> {
         let mark = MeshMark::new(self, x_edges, y_edges, values, options)?;
+        self.axes_mut().marks.push(Mark::Mesh(mark));
+        Ok(self)
+    }
+
+    /// Adds cells as [`AxesMut::mesh`] does, on axes where either set of edges may be times:
+    /// `x_edges` and `y_edges` each hold numbers on a linear or log axis and times on a time
+    /// axis. The edges are strictly increasing, a missing time is refused, and the automatic
+    /// limits of a time axis are the outer edges exactly, as those of a numeric axis are.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` on a category axis; `Error::Data` for
+    /// edges of the wrong kind for their axis, too few, not strictly increasing or missing, as
+    /// for [`AxesMut::mesh`], and for invalid values; `Error::Style` for an invalid center or
+    /// color limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Figure, Instant, MeshOptions, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = f.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let day = |n: i64| Instant::from_micros(n * 86_400_000_000).map(Some);
+    /// axes.mesh_time(
+    ///     AxisData::Times(vec![day(0)?, day(1)?, day(3)?]),
+    ///     AxisData::Numbers(vec![0.0, 2.0]),
+    ///     &[1.0, 4.0],
+    ///     MeshOptions::default(),
+    /// )?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn mesh_time(
+        &mut self,
+        x_edges: AxisData,
+        y_edges: AxisData,
+        values: &[f64],
+        options: MeshOptions,
+    ) -> Result<&mut Self> {
+        let mark = MeshMark::new_time(self, &x_edges, &y_edges, values, options)?;
         self.axes_mut().marks.push(Mark::Mesh(mark));
         Ok(self)
     }

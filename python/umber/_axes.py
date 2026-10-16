@@ -41,6 +41,7 @@ from umber._values import (
     check_axis_type,
     check_floats_type,
     check_names_type,
+    check_times_type,
     floats,
     matrix,
     names,
@@ -59,6 +60,11 @@ SX = TypeVar("SX", bound="Axes[float, Any] | Axes[Time, Any]")
 SY = TypeVar("SY", bound="Axes[Any, float] | Axes[Any, Time]")
 # Axes with a linear, log or time x axis beside a linear or log y axis: bands and stacked areas.
 SXF = TypeVar("SXF", bound="Axes[float, float] | Axes[Time, float]")
+# Axes whose x and y axes are each linear, log or time: bubbles.
+SXY = TypeVar(
+    "SXY",
+    bound="Axes[float, float] | Axes[Time, float] | Axes[float, Time] | Axes[Time, Time]",
+)
 
 _CATEGORY: Final = Scale.category()
 _TIME: Final = Scale.time()
@@ -724,15 +730,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def bubbles(
-        self: "Axes[float, float]",
-        x: Values[float],
-        y: Values[float],
+        self: SXY,
+        x: Values[X],
+        y: Values[Y],
         sizes: Values[float],
         *,
         label: str = "",
         color: Color | ColorBy = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
-    ) -> "Axes[float, float]":
+    ) -> SXY:
         """Add markers whose areas are proportional to non-negative size values.
 
         Bubble marks on these axes share one size scale. The largest size among points with
@@ -740,8 +746,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         draw nothing; a zero-size point's position still counts in the axis domains like any
         point. Markers draw in data order, without downsampling, with the theme's marker outline.
         Automatic limits fit each whole marker and its outline on the final plot, along each
-        axis by the marker shape's own extent, in log space on a log axis, before tick
-        rounding and padding. Shared axes fit bubbles from every panel sharing the scale. When
+        axis by the marker shape's own extent, in log space on a log axis and in seconds on a
+        time axis, before tick rounding and padding. Shared axes fit bubbles from every panel
+        sharing the scale. When
         the bubbles cannot all fit on an automatic axis (a marker, outline included, at least
         as long as the plot along it, limits beyond the supported numeric range, or limits
         that do not settle), that axis's limits come from the data positions alone and the
@@ -756,11 +763,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         A merged figure legend also shows only one set, after its first labelled bubble entry,
         using that panel's scale and y tick format. Panels do not share a size scale unless
-        their size values give them the same maximum.
+        their size values give them the same maximum. A time y axis has no number format, so
+        the size references take the automatic one.
 
         Args:
-            x: Numeric x coordinates on a linear or log axis.
-            y: The y coordinates, one per x coordinate.
+            x: The x coordinates: numbers on a linear or log x axis, times on a time x axis. A
+                missing time (``NaT``) leaves its bubble out.
+            y: The y coordinates, one per x coordinate: numbers on a linear or log y axis,
+                times on a time y axis.
             sizes: Finite values from 0 to 1e300, one per point; area is proportional to value.
             label: The legend label; empty skips this mark's legend entry.
             color: The marker color. ``Color.AUTO`` takes the next palette color.
@@ -777,8 +787,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If lengths differ, coordinates are invalid for their axes, a size
                 is negative, non-finite, or above 1e300, or a ``ColorBy`` does not have one
                 value per point.
-            UsageError: If either axis is a category or a time axis, or a ``ColorBy`` differs
-                in ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
+            UsageError: If either axis is a category axis (type checkers refuse such axes, so
+                this is raised only for calls they do not check), or a ``ColorBy`` differs in
+                ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
             StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
                 range set by ``clim()``.
 
@@ -786,21 +797,21 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.bubbles([1, 2, 3], [4, 2, 5], [100, 400, 870], label="Cities")
+            >>> import datetime as dt
+            >>> daily = ub.Figure().add_axes(x=ub.Scale.time())
+            >>> days = [dt.date(2026, 1, 1), dt.date(2026, 1, 3)]
+            >>> daily = daily.bubbles(days, [4, 2], [100, 400])
         """
         with api_call():
             context = "Axes.bubbles()"
-            check_floats_type(context, "x", x)
-            check_floats_type(context, "y", y)
+            _check_coordinates_type(context, "x", x, self._x)
+            _check_coordinates_type(context, "y", y, self._y)
             check_floats_type(context, "sizes", sizes)
             _args.require_text(context, "label", label)
             spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
-            if _TIME in (self._x, self._y):
-                # The core refuses a time axis before it reads the data, with its own error.
-                empty = np.empty(0, dtype=np.float64)
-                self._native.bubbles(self._row, self._col, empty, empty, empty, "", spec, 0)
-            xs = floats(context, "x", x)
-            ys = floats(context, "y", y)
+            xs = _limit_values(context, "x", x, self._x)
+            ys = _limit_values(context, "y", y, self._y)
             values = floats(context, "sizes", sizes)
             name = _args.text(context, "label", label)
             self._native.bubbles(self._row, self._col, xs, ys, values, name, spec, shape.value)
@@ -1206,15 +1217,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> Self:
         """Add rectangular cells whose colors map a row-major matrix of values.
 
-        Cells span their edges exactly, without padding their extents. Other marks on the
-        axes keep their usual padding; the domain is the union. NaN values leave cells
-        blank. Both axes must be numeric; the outer edge ranges must meet the axis
-        precision limits, as for ``xlim()`` and ``ylim()``. All color-mapped marks share one
-        color scale.
+        Cells span their edges exactly, without padding their extents. Other marks on a
+        numeric axis keep their usual padding; the domain is the union. On a time axis the
+        domain is the union of the edges and the other marks' times, without padding. NaN
+        values leave cells blank. Neither axis may be a category axis; the outer edge ranges
+        of a numeric axis must meet the axis precision limits, as for ``xlim()`` and
+        ``ylim()``. All color-mapped marks share one color scale.
 
         Args:
-            x_edges: Strictly increasing column edges, one more than the number of columns.
-            y_edges: Strictly increasing row edges, one more than the number of rows.
+            x_edges: Strictly increasing column edges, one more than the number of columns:
+                numbers on a linear or log x axis, times on a time x axis.
+            y_edges: Strictly increasing row edges, one more than the number of rows: numbers
+                on a linear or log y axis, times on a time y axis.
             values: A two-dimensional numeric matrix; rows run along y and columns along x.
             cmap: The colormap, or ``AUTO`` for the theme's colormap.
             scale: A linear or log color scale, independent of the axis scales.
@@ -1225,24 +1239,29 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If the matrix shape or edges are invalid, or a value is invalid.
+            DataError: If the matrix shape or edges are invalid (a missing time among time
+                edges included), or a value is invalid.
             StyleError: If the color center is invalid.
-            UsageError: If an axis is not numeric, or color scales conflict.
+            UsageError: If an axis is a category axis, or color scales conflict.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.mesh([0, 1, 3], [0, 2], [[1.0, 4.0]])
+            >>> import datetime as dt
+            >>> hours = ub.Figure().add_axes(x=ub.Scale.time())
+            >>> times = [dt.datetime(2026, 1, 1, hour) for hour in (0, 6, 12)]
+            >>> hours = hours.mesh(times, [0, 2], [[1.0, 4.0]])
         """
         with api_call():
             context = "Axes.mesh()"
-            check_floats_type(context, "x_edges", x_edges)
-            check_floats_type(context, "y_edges", y_edges)
+            _check_coordinates_type(context, "x_edges", x_edges, self._x)
+            _check_coordinates_type(context, "y_edges", y_edges, self._y)
             check_floats_type(context, "values", values)
             colors = _cell_colors(context, cmap, scale, center)
-            _numeric_cells(context, self)
-            xs = floats(context, "x_edges", x_edges)
-            ys = floats(context, "y_edges", y_edges)
+            _numeric_cells(context, self, time=True)
+            xs = _limit_values(context, "x_edges", x_edges, self._x)
+            ys = _limit_values(context, "y_edges", y_edges, self._y)
             data, rows, columns = _matrix(context, values)
             for name, edges, count, dimension in (
                 ("x_edges", xs, columns, "columns"),
@@ -1302,7 +1321,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "y", y)
             counts = _rect_counts(context, bins)
             colors = _cell_colors(context, cmap, scale, AUTO)
-            _numeric_cells(context, self)
+            _numeric_cells(context, self, time=False)
             xs, ys = floats(context, "x", x), floats(context, "y", y)
             self._native.hist2d(self._row, self._col, xs, ys, counts, *colors[:3])
             return self
@@ -1351,7 +1370,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "y", y)
             count = _cell_count(context, "gridsize", gridsize)
             colors = _cell_colors(context, cmap, scale, AUTO)
-            _numeric_cells(context, self)
+            _numeric_cells(context, self, time=False)
             xs, ys = floats(context, "x", x), floats(context, "y", y)
             self._native.hexbin(self._row, self._col, xs, ys, count, *colors[:3])
             return self
@@ -2289,16 +2308,22 @@ def _cell_colors(
     return None if colormap is None else _cmap.native(colormap), *_scale.native(transform), middle
 
 
-def _numeric_cells(context: str, axes: Axes[Any, Any]) -> None:
-    """Reject nonnumeric axes before converting cell data."""
+def _numeric_cells(context: str, axes: Axes[Any, Any], *, time: bool) -> None:
+    """Reject category axes, and time axes unless ``time`` allows them, before converting cells."""
     for name, scale in zip(("x", "y"), scales(axes), strict=True):
-        if scale in (_CATEGORY, _TIME):
+        if scale == _CATEGORY or (scale == _TIME and not time):
+            allowed = "a numeric or time axis" if time else "a numeric axis"
+            hint = (
+                "use Scale.linear(), Scale.log() or Scale.time() for both axes."
+                if time
+                else "use Scale.linear() or Scale.log() for both axes."
+            )
             raise new_error(
                 UsageError,
                 context,
-                f"{name} must be a numeric axis.",
+                f"{name} must be {allowed}.",
                 parameter=name,
-                hint="use Scale.linear() or Scale.log() for both axes.",
+                hint=hint,
             )
 
 
@@ -2393,10 +2418,18 @@ def _scale_values(
     return converted
 
 
+def _check_coordinates_type(context: str, name: str, values: object, scale: Scale[Any]) -> None:
+    """Check the type of values along an axis of ``scale``: numbers, or times on a time axis."""
+    if scale == _TIME:
+        check_times_type(context, name, values)
+    else:
+        check_floats_type(context, name, values)
+
+
 def _limit_values(
     context: str, name: str, values: object, scale: Scale[Any]
 ) -> FloatArray | MicrosArray:
-    """Convert error bar limits along an axis of ``scale``: numbers, or times on a time axis."""
+    """Convert limits, edges or coordinates along an axis of ``scale``: numbers, or times."""
     if scale == _TIME:
         return _time.micros(context, name, values)
     return floats(context, name, values)

@@ -12,9 +12,9 @@ use crate::time::{concise_labels, iso_label, time_ticks};
 use crate::{
     AreaOptions, AxisData, AxisValue, BandOptions, BarOptions, BoxOptions, BubbleOptions,
     Distribution, Error, ErrorBarOptions, ExplicitTicks, Figure, FontLibrary, Grid, GridIndex,
-    HistOptions, Instant, LegendStyle, LineOptions, Placement, Rgba, RuleOptions, ScaleKind,
-    ScatterOptions, Series, Share, SpanOptions, StemOptions, StepOptions, Theme, TickFormat,
-    ViolinOptions, times_from_micros,
+    HistOptions, Instant, LegendStyle, LineOptions, MeshOptions, Placement, Rgba, RuleOptions,
+    ScaleKind, ScatterOptions, Series, Share, SpanOptions, StemOptions, StepOptions, Theme,
+    TickFormat, ViolinOptions, times_from_micros,
 };
 
 const LIN: ScaleKind = ScaleKind::Linear;
@@ -465,8 +465,14 @@ fn bar_on_time_axis_rejected() {
             .map(drop)
     });
     assert_eq!(
-        parts(&err).1,
-        "Axes.bubbles(): x is a time scale; Axes.bubbles() needs a linear or log x axis."
+        parts(&err),
+        (
+            "usage",
+            "Axes.bubbles(): x is a time scale; Axes.bubbles() takes numbers, so pass times with bubbles_time()."
+                .into(),
+            Some("x"),
+            Some("use bubbles_time() for times.")
+        )
     );
     // On a time y axis the same marks need a numeric y axis.
     let mut f = figure(Theme::pigment(), ScaleKind::Category, TIME);
@@ -1072,4 +1078,401 @@ fn error_bars_take_time_limits_on_a_time_value_axis() {
             Some("pass y=Scale.time() to Figure.add_axes().")
         )
     );
+}
+
+/// The x coordinates of the left edges of the cell fills in the marks group of `f`, in drawing
+/// order, and how many cells there are.
+fn cell_lefts(f: &Figure) -> Vec<f32> {
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
+    assert_scene_bounded(&scene);
+    scene
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Group {
+                clip: Some(_),
+                items,
+            } => Some(items),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|item| match item {
+            Item::Fill { path, .. } => path.bounds().map(|(lo, _)| lo.x),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn mesh_on_a_time_x_axis_spans_its_edges_exactly() {
+    let edges = [date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 5)];
+    let mut f = figure(Theme::pigment(), TIME, LIN);
+    f.single_axes_mut()
+        .mesh_time(
+            times(&edges),
+            AxisData::Numbers(vec![0.0, 2.0, 3.0]),
+            &[1.0, 2.0, 3.0, 4.0],
+            MeshOptions::default(),
+        )
+        .unwrap();
+    let r = resolved(&f);
+    // The domain is the outer edges, neither padded nor rounded.
+    assert_eq!(time_scale(&r.x.scale).instants(), (edges[0], edges[2]));
+    assert_eq!(r.y.continuous_scale().domain(), (0.0, 3.0));
+    let lefts = cell_lefts(&f);
+    assert_eq!(lefts.len(), 4);
+    assert_eq!(lefts[0], lefts[2]);
+    assert_eq!(lefts[1], lefts[3]);
+    // The plot width splits 1:3 at the second edge, as the days do.
+    let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+    let split = f64::from(lefts[1] - lefts[0]) / layout.plot.width;
+    assert!((split - 0.25).abs() < 1e-4, "{split}");
+}
+
+#[test]
+fn mesh_on_a_time_y_axis_and_on_two_time_axes_span_their_edges() {
+    let (a, b, c) = (date(2026, 1, 1), date(2026, 3, 1), date(2026, 6, 1));
+    let mut up = figure(Theme::graphite(), LIN, TIME);
+    up.single_axes_mut()
+        .mesh_time(
+            AxisData::Numbers(vec![-1.0, 4.0]),
+            times(&[a, b, c]),
+            &[1.0, 2.0],
+            MeshOptions::default(),
+        )
+        .unwrap();
+    let r = resolved(&up);
+    assert_eq!(time_scale(&r.y.scale).instants(), (a, c));
+    assert_eq!(r.x.continuous_scale().domain(), (-1.0, 4.0));
+    assert_eq!(cell_lefts(&up).len(), 2);
+
+    let mut both = figure(Theme::midnight(), TIME, TIME);
+    both.single_axes_mut()
+        .mesh_time(
+            times(&[b, c]),
+            times(&[a, b]),
+            &[7.0],
+            MeshOptions::default(),
+        )
+        .unwrap();
+    let r = resolved(&both);
+    assert_eq!(time_scale(&r.x.scale).instants(), (b, c));
+    assert_eq!(time_scale(&r.y.scale).instants(), (a, b));
+    assert_eq!(cell_lefts(&both).len(), 1);
+}
+
+#[test]
+fn mesh_edges_join_the_times_of_other_marks_without_padding() {
+    let edges = [date(2026, 1, 10), date(2026, 1, 20)];
+    let mut f = figure(Theme::pigment(), TIME, LIN);
+    f.single_axes_mut()
+        .mesh_time(
+            times(&edges),
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[1.0],
+            MeshOptions::default(),
+        )
+        .unwrap()
+        .line_shared(
+            times(&[date(2026, 1, 5), date(2026, 1, 15)]),
+            AxisData::Numbers(vec![0.5, 0.5]),
+            LineOptions::default(),
+        )
+        .unwrap();
+    let r = resolved(&f);
+    assert_eq!(
+        time_scale(&r.x.scale).instants(),
+        (date(2026, 1, 5), edges[1])
+    );
+}
+
+#[test]
+fn mesh_time_edges_are_refused_when_they_are_not_strictly_increasing_times() {
+    let (a, b) = (date(2026, 1, 1), date(2026, 1, 2));
+    let cases: [(AxisData, &str); 5] = [
+        (
+            AxisData::Times(vec![Some(a), None]),
+            "Axes.mesh(): x_edges[1] is NaT; edges must be times.",
+        ),
+        (
+            times(&[b, a]),
+            "Axes.mesh(): x_edges[1] is 2026-01-01, not after x_edges[0] = 2026-01-02; edges must be strictly increasing.",
+        ),
+        (
+            times(&[a, b, b]),
+            "Axes.mesh(): x_edges[2] is 2026-01-02, not after x_edges[1] = 2026-01-02; edges must be strictly increasing.",
+        ),
+        (
+            times(&[a]),
+            "Axes.mesh(): x_edges has 1 values; at least two edges are required.",
+        ),
+        (
+            AxisData::Times(vec![None, Some(a)]),
+            "Axes.mesh(): x_edges[0] is NaT; edges must be times.",
+        ),
+    ];
+    for (x, message) in cases {
+        let mut f = figure(Theme::pigment(), TIME, LIN);
+        let err = refused(&mut f, |ax| {
+            let y = AxisData::Numbers(vec![0.0, 1.0]);
+            ax.mesh_time(x.clone(), y, &[1.0, 1.0], MeshOptions::default())
+                .map(drop)
+        });
+        assert_eq!(parts(&err).0, "data");
+        assert_eq!(parts(&err).1, message);
+        assert_eq!(err.parameter(), Some("x_edges"));
+    }
+    // The y edges are checked in the same way, after the x edges.
+    let mut f = figure(Theme::pigment(), LIN, TIME);
+    let err = refused(&mut f, |ax| {
+        let x = AxisData::Numbers(vec![0.0, 1.0]);
+        ax.mesh_time(x, times(&[b, a]), &[1.0], MeshOptions::default())
+            .map(drop)
+    });
+    assert_eq!(
+        parts(&err).1,
+        "Axes.mesh(): y_edges[1] is 2026-01-01, not after y_edges[0] = 2026-01-02; edges must be strictly increasing."
+    );
+    assert_eq!(err.parameter(), Some("y_edges"));
+}
+
+#[test]
+fn mesh_time_edges_must_match_their_axes() {
+    let a = date(2026, 1, 1);
+    let numbers = || AxisData::Numbers(vec![0.0, 1.0]);
+    let mut f = figure(Theme::pigment(), TIME, LIN);
+    let err = refused(&mut f, |ax| {
+        ax.mesh_time(numbers(), numbers(), &[1.0], MeshOptions::default())
+            .map(drop)
+    });
+    assert_eq!(
+        parts(&err).1,
+        "Axes.mesh(): x_edges holds numbers but the x axis is a time axis; pass times."
+    );
+    let err = refused(&mut f, |ax| {
+        ax.mesh_time(
+            times(&[a, plus(a, DAY)]),
+            times(&[a, plus(a, DAY)]),
+            &[1.0],
+            MeshOptions::default(),
+        )
+        .map(drop)
+    });
+    assert_eq!(
+        parts(&err).1,
+        "Axes.mesh(): y_edges holds times but the y axis is not a time axis; pass numbers."
+    );
+    let err = refused(&mut f, |ax| {
+        let names = AxisData::Categories(vec!["a".into(), "b".into()]);
+        ax.mesh_time(
+            times(&[a, plus(a, DAY)]),
+            names,
+            &[1.0],
+            MeshOptions::default(),
+        )
+        .map(drop)
+    });
+    assert_eq!(
+        parts(&err).1,
+        "Axes.mesh(): y_edges holds category names but the y axis takes numbers or times; pass one of them."
+    );
+    // A category axis is refused first, whatever the edges are.
+    for (x, y, name) in [
+        (ScaleKind::Category, TIME, "x"),
+        (TIME, ScaleKind::Category, "y"),
+    ] {
+        let mut f = figure(Theme::pigment(), x, y);
+        let err = refused(&mut f, |ax| {
+            ax.mesh_time(numbers(), numbers(), &[1.0], MeshOptions::default())
+                .map(drop)
+        });
+        assert_eq!(
+            parts(&err),
+            (
+                "usage",
+                format!(
+                    "Axes.mesh(): the {name} axis is a category axis; this mark needs numeric or time axes."
+                ),
+                Some(name),
+                Some("use Scale.linear(), Scale.log() or Scale.time() for both axes.")
+            )
+        );
+    }
+    // The values are checked against the edges.
+    let err = refused(&mut f, |ax| {
+        ax.mesh_time(
+            times(&[a, plus(a, DAY), plus(a, 2 * DAY)]),
+            numbers(),
+            &[1.0],
+            MeshOptions::default(),
+        )
+        .map(drop)
+    });
+    assert_eq!(
+        parts(&err).1,
+        "Axes.mesh(): values has 1 entries; the edges require 1 rows and 2 columns."
+    );
+}
+
+#[test]
+fn numeric_mesh_calls_keep_refusing_time_axes() {
+    let mut f = figure(Theme::pigment(), TIME, LIN);
+    let err = refused(&mut f, |ax| {
+        ax.mesh(&[0.0, 1.0], &[0.0, 1.0], &[1.0], MeshOptions::default())
+            .map(drop)
+    });
+    assert_eq!(
+        parts(&err),
+        (
+            "usage",
+            "Axes.mesh(): the x axis is a time axis; Axes.mesh() takes numbers, so pass times with mesh_time()."
+                .into(),
+            Some("x"),
+            Some("use mesh_time() for times.")
+        )
+    );
+    let mut up = figure(Theme::pigment(), LIN, TIME);
+    let err = refused(&mut up, |ax| {
+        ax.bubbles(&[1.0], &[1.0], &[1.0], BubbleOptions::default())
+            .map(drop)
+    });
+    assert_eq!(
+        parts(&err).1,
+        "Axes.bubbles(): y is a time scale; Axes.bubbles() takes numbers, so pass times with bubbles_time()."
+    );
+}
+
+#[test]
+fn bubbles_take_times_on_either_axis() {
+    let days: Vec<Option<Instant>> = (0..4)
+        .map(|k| Some(plus(date(2026, 1, 1), k * DAY)))
+        .collect();
+    let sizes: std::sync::Arc<[f64]> = [10.0, 40.0, 0.0, 90.0].into();
+    for (x, y, xs, ys) in [
+        (
+            TIME,
+            LIN,
+            AxisData::Times(days.clone()),
+            AxisData::Numbers(vec![1.0, 3.0, 2.0, 5.0]),
+        ),
+        (
+            LIN,
+            TIME,
+            AxisData::Numbers(vec![1.0, 3.0, 2.0, 5.0]),
+            AxisData::Times(days.clone()),
+        ),
+        (
+            TIME,
+            TIME,
+            AxisData::Times(days.clone()),
+            AxisData::Times(days.clone()),
+        ),
+    ] {
+        let mut f = figure(Theme::pigment(), x, y);
+        f.single_axes_mut()
+            .bubbles_time(xs, ys, sizes.clone(), crate::BubbleOptions::default())
+            .unwrap();
+        let r = resolved(&f);
+        // The data positions all lie inside the fitted domain, with room for the circles.
+        for (axis, kind) in [(&r.x, x), (&r.y, y)] {
+            if kind == TIME {
+                let (low, high) = time_scale(&axis.scale).instants();
+                assert!(low < days[0].unwrap() && high > days[3].unwrap());
+            }
+        }
+        // Three circles are drawn; the zero size draws nothing.
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
+        let fills = scene
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Group {
+                    clip: Some(_),
+                    items,
+                } => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .filter(|item| matches!(item, Item::Fill { .. }))
+            .count();
+        assert_eq!(fills, 3);
+    }
+}
+
+#[test]
+fn bubbles_time_checks_axes_then_lengths_then_values_then_sizes() {
+    let a = date(2026, 1, 1);
+    let one = || AxisData::Times(vec![Some(a)]);
+    let sizes = || -> std::sync::Arc<[f64]> { [1.0].into() };
+    let mut f = figure(Theme::pigment(), ScaleKind::Category, TIME);
+    let err = refused(&mut f, |ax| {
+        ax.bubbles_time(one(), one(), sizes(), BubbleOptions::default())
+            .map(drop)
+    });
+    assert_eq!(
+        parts(&err),
+        (
+            "usage",
+            "Axes.bubbles(): this is a category axis; bubbles apply to linear, log and time axes only.".into(),
+            Some("x"),
+            Some("pass x=Scale.linear(), x=Scale.log() or x=Scale.time() to Figure.add_axes().")
+        )
+    );
+    let mut f = figure(Theme::pigment(), TIME, ScaleKind::Category);
+    let err = refused(&mut f, |ax| {
+        ax.bubbles_time(
+            one(),
+            AxisData::Numbers(vec![1.0]),
+            sizes(),
+            BubbleOptions::default(),
+        )
+        .map(drop)
+    });
+    assert_eq!(err.parameter(), Some("y"));
+    let mut f = figure(Theme::pigment(), TIME, LIN);
+    let cases: [(AxisData, AxisData, std::sync::Arc<[f64]>, &str); 6] = [
+        (
+            one(),
+            AxisData::Numbers(vec![1.0, 2.0]),
+            sizes(),
+            "Axes.bubbles(): x has 1 values but y has 2; x and y must have the same length.",
+        ),
+        (
+            one(),
+            AxisData::Numbers(vec![1.0]),
+            [1.0, 2.0].into(),
+            "Axes.bubbles(): x has 1 values but sizes has 2; x and sizes must have the same length.",
+        ),
+        (
+            AxisData::Numbers(vec![1.0]),
+            AxisData::Numbers(vec![1.0]),
+            sizes(),
+            "Axes.bubbles(): x holds numbers but the x axis is a time axis; pass times.",
+        ),
+        (
+            one(),
+            one(),
+            sizes(),
+            "Axes.bubbles(): y holds times but the y axis is not a time axis; pass numbers.",
+        ),
+        (
+            one(),
+            AxisData::Numbers(vec![f64::INFINITY]),
+            sizes(),
+            "Axes.bubbles(): y[0] is inf; values must be finite.",
+        ),
+        (
+            one(),
+            AxisData::Numbers(vec![1.0]),
+            [-1.0].into(),
+            "Axes.bubbles(): sizes[0] is -1; bubble sizes must be finite and at least 0.",
+        ),
+    ];
+    for (x, y, sizes, message) in cases {
+        let err = refused(&mut f, |ax| {
+            ax.bubbles_time(x, y, sizes, BubbleOptions::default())
+                .map(drop)
+        });
+        assert_eq!(parts(&err).1, message);
+    }
 }

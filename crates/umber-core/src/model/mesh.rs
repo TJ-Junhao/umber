@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use super::{Axes, CmapChoice, ColorBy, Mark};
+use super::{Axes, AxisData, CmapChoice, ColorBy, Mark};
 use crate::bin2d::RectBins;
 use crate::binning::BinCount;
 use crate::color_scale::ColorScaleSpec;
 use crate::error::number;
-use crate::{Error, MAX_BINS, Result, Transform};
+use crate::{Error, Instant, MAX_BINS, Result, ScaleKind, Transform};
 
 /// Colormap and normalization of numeric cells.
 ///
@@ -93,6 +93,72 @@ impl Default for HexbinOptions {
     }
 }
 
+/// The edges of the cells along one axis: numbers on a linear or log axis, times on a time axis.
+/// Edges are finite, or present, and strictly increasing; clones share them.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Edges {
+    /// Numbers on a linear or log axis.
+    Numbers(Arc<[f64]>),
+    /// Times on a time axis.
+    Times(Arc<[Instant]>),
+}
+
+impl Edges {
+    /// The number of edges.
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Edges::Numbers(edges) => edges.len(),
+            Edges::Times(edges) => edges.len(),
+        }
+    }
+
+    /// The numbers; none when these are times.
+    pub(crate) fn numbers(&self) -> &[f64] {
+        match self {
+            Edges::Numbers(edges) => edges,
+            Edges::Times(_) => &[],
+        }
+    }
+
+    /// The times; none when these are numbers.
+    pub(crate) fn times(&self) -> &[Instant] {
+        match self {
+            Edges::Times(edges) => edges,
+            Edges::Numbers(_) => &[],
+        }
+    }
+}
+
+/// What a cell axis holds: numbers under a transform, or times.
+#[derive(Debug, Clone, Copy)]
+enum EdgeAxis {
+    /// A linear or log axis.
+    Numeric(Transform),
+    /// A time axis.
+    Time,
+}
+
+/// The edges as given, before they are checked against their axis.
+#[derive(Debug, Clone, Copy)]
+enum GivenEdges<'a> {
+    /// Numbers.
+    Numbers(&'a [f64]),
+    /// Times; `None` is a missing time.
+    Times(&'a [Option<Instant>]),
+    /// Category names, which no axis of cells takes.
+    Categories,
+}
+
+impl<'a> From<&'a AxisData> for GivenEdges<'a> {
+    fn from(data: &'a AxisData) -> Self {
+        match data {
+            AxisData::Numbers(edges) => GivenEdges::Numbers(edges),
+            AxisData::Times(edges) => GivenEdges::Times(edges),
+            AxisData::Categories(_) => GivenEdges::Categories,
+        }
+    }
+}
+
 /// Validated cell edges and row-major values. Clones share their data.
 ///
 /// # Examples
@@ -107,13 +173,13 @@ impl Default for HexbinOptions {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeshMark {
-    pub(crate) x_edges: Arc<[f64]>,
-    pub(crate) y_edges: Arc<[f64]>,
+    pub(crate) x_edges: Edges,
+    pub(crate) y_edges: Edges,
     pub(crate) colors: ColorBy,
 }
 
 impl MeshMark {
-    /// Validates every edge and cell before storing anything.
+    /// Validates numeric edges and cells before storing anything; both axes must be numeric.
     pub(super) fn new(
         axes: &Axes,
         x: &[f64],
@@ -122,62 +188,87 @@ impl MeshMark {
         options: MeshOptions,
     ) -> Result<Self> {
         let context = "Axes.mesh()";
-        let transforms = numeric_axes(context, axes)?;
-        for (name, edges, transform) in
-            [("x_edges", x, transforms[0]), ("y_edges", y, transforms[1])]
-        {
-            if edges.len() < 2 {
-                return Err(Error::data(
+        for (name, kind) in [("x", axes.x_scale()), ("y", axes.y_scale())] {
+            if kind == ScaleKind::Time {
+                return Err(Error::usage(
                     context,
                     format!(
-                        "{name} has {} values; at least two edges are required.",
-                        edges.len()
+                        "the {name} axis is a time axis; {context} takes numbers, so pass times with mesh_time()."
                     ),
                 )
                 .with_parameter(name)
-                .with_hint("pass one more edge than the number of cells."));
-            }
-            check_numbers(context, name, edges, transform, NumericInput::Edges)?;
-            for (i, &v) in edges.iter().enumerate() {
-                if !v.is_finite() || (i > 0 && v <= edges[i - 1]) {
-                    return Err(Error::data(
-                        context,
-                        format!(
-                            "{name}[{i}] is {}; edges must be strictly increasing.",
-                            number(v)
-                        ),
-                    )
-                    .with_parameter(name)
-                    .with_hint("pass finite edges in strictly increasing order."));
-                }
+                .with_hint("use mesh_time() for times."));
             }
         }
-        for (name, edges, transform) in
-            [("x_edges", x, transforms[0]), ("y_edges", y, transforms[1])]
+        let transforms = numeric_axes(context, axes)?;
+        Self::checked(
+            context,
+            axes,
+            [
+                (EdgeAxis::Numeric(transforms[0]), GivenEdges::Numbers(x)),
+                (EdgeAxis::Numeric(transforms[1]), GivenEdges::Numbers(y)),
+            ],
+            values,
+            options,
+        )
+    }
+
+    /// Validates edges that are numbers or times, each as its axis requires, and cells before
+    /// storing anything; neither axis may be a category axis.
+    pub(super) fn new_time(
+        axes: &Axes,
+        x: &AxisData,
+        y: &AxisData,
+        values: &[f64],
+        options: MeshOptions,
+    ) -> Result<Self> {
+        let context = "Axes.mesh()";
+        let mut kinds = [EdgeAxis::Time; 2];
+        for (i, (name, kind)) in [("x", axes.x_scale()), ("y", axes.y_scale())]
+            .into_iter()
+            .enumerate()
         {
-            crate::ContinuousScale::new(transform, edges[0], edges[edges.len() - 1], context)
-                .map_err(|_| {
-                    Error::data(
+            kinds[i] = match (kind, kind.transform()) {
+                (ScaleKind::Time, _) => EdgeAxis::Time,
+                (_, Some(transform)) => EdgeAxis::Numeric(transform),
+                (_, None) => {
+                    return Err(Error::usage(
                         context,
                         format!(
-                            "{name} spans {} to {}; {}.",
-                            number(edges[0]),
-                            number(edges[edges.len() - 1]),
-                            match transform {
-                                Transform::Linear => {
-                                    "the range must be at least 1e-10 of their magnitude \
-                                     (and at least 1e-290)"
-                                }
-                                Transform::Log(_) => {
-                                    "the ratio of the last edge to the first \
-                                     must be at least 1 + 1e-9"
-                                }
-                            },
+                            "the {name} axis is a category axis; this mark needs numeric or time axes."
                         ),
                     )
                     .with_parameter(name)
-                    .with_hint("rescale the coordinates or use a wider range of edges.")
-                })?;
+                    .with_hint(
+                        "use Scale.linear(), Scale.log() or Scale.time() for both axes.",
+                    ));
+                }
+            };
+        }
+        Self::checked(
+            context,
+            axes,
+            [(kinds[0], x.into()), (kinds[1], y.into())],
+            values,
+            options,
+        )
+    }
+
+    /// Validates every edge and cell, each axis's edges as its kind says, before storing anything.
+    fn checked(
+        context: &'static str,
+        axes: &Axes,
+        given: [(EdgeAxis, GivenEdges<'_>); 2],
+        values: &[f64],
+        options: MeshOptions,
+    ) -> Result<Self> {
+        let [(x_kind, x_given), (y_kind, y_given)] = given;
+        let x = check_edges(context, ("x", "x_edges"), x_kind, x_given)?;
+        let y = check_edges(context, ("y", "y_edges"), y_kind, y_given)?;
+        for (name, kind, edges) in [("x_edges", x_kind, &x), ("y_edges", y_kind, &y)] {
+            if let (EdgeAxis::Numeric(transform), Edges::Numbers(edges)) = (kind, edges) {
+                check_edge_range(context, name, transform, edges)?;
+            }
         }
         let count = (x.len() - 1).checked_mul(y.len() - 1);
         if count != Some(values.len()) {
@@ -208,11 +299,143 @@ impl MeshMark {
         };
         check_mapping(context, axes, &colors)?;
         Ok(Self {
-            x_edges: x.into(),
-            y_edges: y.into(),
+            x_edges: x,
+            y_edges: y,
             colors,
         })
     }
+}
+
+/// The edges `given` along the axis `axis` of kind `kind`, whose argument is `name`: of the
+/// kind the axis holds, at least two, finite or present, and strictly increasing.
+fn check_edges(
+    context: &'static str,
+    (axis, name): (&'static str, &'static str),
+    kind: EdgeAxis,
+    given: GivenEdges<'_>,
+) -> Result<Edges> {
+    let mismatch = |holds: &str, expected: &str, hint: &'static str| {
+        Error::data(
+            context,
+            format!("{name} holds {holds} but the {axis} axis {expected}."),
+        )
+        .with_parameter(name)
+        .with_hint(hint)
+    };
+    let too_few = |length: usize| {
+        (length < 2).then(|| {
+            Error::data(
+                context,
+                format!("{name} has {length} values; at least two edges are required."),
+            )
+            .with_parameter(name)
+            .with_hint("pass one more edge than the number of cells.")
+        })
+    };
+    match (kind, given) {
+        (EdgeAxis::Numeric(transform), GivenEdges::Numbers(edges)) => {
+            if let Some(error) = too_few(edges.len()) {
+                return Err(error);
+            }
+            check_numbers(context, name, edges, transform, NumericInput::Edges)?;
+            for (i, &v) in edges.iter().enumerate() {
+                if !v.is_finite() || (i > 0 && v <= edges[i - 1]) {
+                    return Err(Error::data(
+                        context,
+                        format!(
+                            "{name}[{i}] is {}; edges must be strictly increasing.",
+                            number(v)
+                        ),
+                    )
+                    .with_parameter(name)
+                    .with_hint("pass finite edges in strictly increasing order."));
+                }
+            }
+            Ok(Edges::Numbers(edges.into()))
+        }
+        (EdgeAxis::Time, GivenEdges::Times(edges)) => {
+            if let Some(error) = too_few(edges.len()) {
+                return Err(error);
+            }
+            let mut times: Vec<Instant> = Vec::with_capacity(edges.len());
+            for (i, &edge) in edges.iter().enumerate() {
+                let Some(t) = edge else {
+                    return Err(Error::data(
+                        context,
+                        format!("{name}[{i}] is NaT; edges must be times."),
+                    )
+                    .with_parameter(name)
+                    .with_hint("pass a time for every edge."));
+                };
+                if let Some(&previous) = times.last()
+                    && t <= previous
+                {
+                    return Err(Error::data(
+                        context,
+                        format!(
+                            "{name}[{i}] is {}, not after {name}[{}] = {}; edges must be strictly increasing.",
+                            t.label(),
+                            i - 1,
+                            previous.label()
+                        ),
+                    )
+                    .with_parameter(name)
+                    .with_hint("pass edges in strictly increasing order."));
+                }
+                times.push(t);
+            }
+            Ok(Edges::Times(times.into()))
+        }
+        (EdgeAxis::Numeric(_), GivenEdges::Times(_)) => Err(mismatch(
+            "times",
+            "is not a time axis; pass numbers",
+            "pass numbers, or use Scale.time() for times.",
+        )),
+        (EdgeAxis::Time, GivenEdges::Numbers(_)) => Err(mismatch(
+            "numbers",
+            "is a time axis; pass times",
+            "pass times, or use a linear or log axis for numbers.",
+        )),
+        (_, GivenEdges::Categories) => Err(mismatch(
+            "category names",
+            "takes numbers or times; pass one of them",
+            "pass numbers on a linear or log axis and times on a time axis.",
+        )),
+    }
+}
+
+/// Numeric edges must span a range the axis scale can hold.
+fn check_edge_range(
+    context: &'static str,
+    name: &'static str,
+    transform: Transform,
+    edges: &[f64],
+) -> Result<()> {
+    let (first, last) = (edges[0], edges[edges.len() - 1]);
+    crate::ContinuousScale::new(transform, first, last, context)
+        .map(drop)
+        .map_err(|_| {
+            Error::data(
+                context,
+                format!(
+                    "{name} spans {} to {}; {}.",
+                    number(first),
+                    number(last),
+                    match transform {
+                        Transform::Linear => {
+                            "the range must be at least 1e-10 of their magnitude \
+                             (and at least 1e-290)"
+                        }
+                        Transform::Log(_) => {
+                            "the ratio of the last edge to the first \
+                             must be at least 1 + 1e-9"
+                        }
+                    },
+                ),
+            )
+            .with_parameter(name)
+            .with_hint("rescale the coordinates or use a wider range of edges.")
+        })
 }
 
 /// Sparse two-dimensional histogram counts. Empty bins are not stored.
@@ -1136,13 +1359,16 @@ mod tests {
                 ax.hexbin(&[0.0, 1.0], &[0.0, 1.0], HexbinOptions::default())
                     .unwrap_err(),
             ];
-            for error in errors {
+            for (i, error) in errors.into_iter().enumerate() {
                 assert!(matches!(error, crate::Error::Usage { .. }));
                 assert_eq!(error.parameter(), Some(parameter));
-                assert_eq!(
-                    error.hint(),
-                    Some("use Scale.linear() or Scale.log() for both axes.")
-                );
+                // Cells of numbers name the time method; counts have none.
+                let hint = if i == 0 {
+                    "use mesh_time() for times."
+                } else {
+                    "use Scale.linear() or Scale.log() for both axes."
+                };
+                assert_eq!(error.hint(), Some(hint));
             }
             assert_eq!(f, before);
         }
