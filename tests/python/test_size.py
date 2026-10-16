@@ -16,9 +16,9 @@ from umber._errors import details
 from umber._size import native
 
 AUTO = (0, 0, 1.0)
-# A native figure of one cell (rows, cols, share_x, share_y, legend), and the position of its
-# axes: row and column AUTO (grid index kind 0) spanning one cell.
-ONE_CELL = (1, 1, 0, 0, 0)
+# A native figure of one cell (rows, cols, share_x, share_y, legend, share_color), and the
+# axes position: row and column AUTO (grid index kind 0) spanning one cell.
+ONE_CELL = (1, 1, 0, 0, 0, 0)
 ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
 LINEAR = 0

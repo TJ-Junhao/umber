@@ -28,15 +28,15 @@ struct Panel<'a> {
     marks: Vec<ResolvedMark<'a>>,
     /// The axes' legend, measured.
     legend: MeasuredLegend<'a>,
-    /// The color scale of the axes' color-mapped marks, resolved once.
+    /// The color scale shared by the axes' color group.
     color: Option<ResolvedColorScale>,
 }
 
 /// The records of every panel of `figure`, in the order of [`Figure::panels`]. The legend uses
 /// the style set on the axes, else the theme's.
-fn panels<'a>(figure: &'a Figure, lib: &FontLibrary) -> Vec<Panel<'a>> {
+fn panels<'a>(figure: &'a Figure, groups: &ShareGroups, lib: &FontLibrary) -> Vec<Panel<'a>> {
     let theme = figure.theme();
-    figure
+    let mut panels: Vec<_> = figure
         .panels()
         .zip(resolve::resolve_figure_marks(figure))
         .map(|(axes, marks)| {
@@ -50,15 +50,36 @@ fn panels<'a>(figure: &'a Figure, lib: &FontLibrary) -> Vec<Panel<'a>> {
             } else {
                 measure_legend(theme, axes, &marks, lib)
             };
-            let color = ResolvedColorScale::resolve(&marks, axes.color_limits(), theme);
             Panel {
                 axes,
                 marks,
                 legend,
-                color,
+                color: None,
             }
         })
-        .collect()
+        .collect();
+    resolve_colors(&mut panels, groups, theme);
+    panels
+}
+
+/// Resolves each color group's scale from its members' current mapped values.
+fn resolve_colors(panels: &mut [Panel<'_>], groups: &ShareGroups, theme: &Theme) {
+    for i in 0..panels.len() {
+        if groups.color[i] != Some(i) {
+            continue;
+        }
+        let marks = panels
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| groups.color[*j] == Some(i))
+            .flat_map(|(_, panel)| panel.marks.iter());
+        let color = ResolvedColorScale::resolve(marks, panels[i].axes.color_limits(), theme);
+        for (j, panel) in panels.iter_mut().enumerate() {
+            if groups.color[j] == Some(i) {
+                panel.color = color.clone();
+            }
+        }
+    }
 }
 
 /// The legend of `axes` with its resolved `marks`, its row entries and its direct labels,
@@ -99,6 +120,7 @@ fn figure_header(figure: &Figure, panels: &[Panel<'_>], lib: &FontLibrary) -> Fi
 struct FigurePlan {
     header: FigureHeader,
     panels: Vec<(Resolved, Layout)>,
+    colorbars: Vec<(usize, layout::PlacedColorbar)>,
 }
 
 /// One side of a plot area.
@@ -263,8 +285,17 @@ fn color_side(side: layout::ColorbarSide) -> Side {
 }
 
 /// Relabels and spaces a visible colorbar without changing its norm or colormap.
-fn choose_color_ticks(panel: &Panel<'_>, resolved: &mut Resolved, room: &layout::TickRoom<'_>) {
-    let options = panel.axes.colorbar_options();
+fn choose_color_ticks(
+    figure: &Figure,
+    panel: &Panel<'_>,
+    resolved: &mut Resolved,
+    room: &layout::TickRoom<'_>,
+) {
+    let options = if figure.grid().share_color() == crate::Share::None {
+        panel.axes.colorbar_options()
+    } else {
+        figure.colorbar_options()
+    };
     if let Some(color) = &resolved.color {
         let format = options
             .format
@@ -360,6 +391,7 @@ fn resolve_groups(
 fn plan(
     figure: &Figure,
     panels: &[Panel<'_>],
+    groups: &ShareGroups,
     lib: &FontLibrary,
     context: &'static str,
 ) -> Result<FigurePlan> {
@@ -383,35 +415,94 @@ fn plan(
         theme,
         context,
         panels: &inputs,
+        colorbars: &[],
     };
+    let shared = figure.grid().share_color() != crate::Share::None;
+    let color_cells = groups.colorbar_cells(figure);
     let color_sides: Vec<_> = panels
         .iter()
-        .map(|panel| layout::ColorbarSide::resolve(panel.axes, theme).map(color_side))
+        .enumerate()
+        .map(|(i, panel)| {
+            if shared {
+                color_cells[i]
+                    .and_then(|_| layout::ColorbarSide::shared(figure))
+                    .map(color_side)
+            } else {
+                layout::ColorbarSide::resolve(panel.axes, theme).map(color_side)
+            }
+        })
         .collect();
+    let solve = |resolved: &[Resolved], bands: &[PanelBands]| {
+        let colorbars: Vec<_> = color_cells
+            .iter()
+            .enumerate()
+            .filter_map(|(i, cells)| {
+                let cells = (*cells)?;
+                let position = layout::ColorbarSide::shared(figure)?;
+                let color = resolved[i].color.as_ref()?;
+                Some(layout::SharedColorbar {
+                    source: i,
+                    cells,
+                    measured: layout::MeasuredColorbar::with_options(
+                        figure.colorbar_options(),
+                        color,
+                        position,
+                        theme,
+                        lib,
+                    ),
+                })
+            })
+            .collect();
+        layout::solve_grid(
+            &GridInput {
+                colorbars: &colorbars,
+                ..grid
+            },
+            bands,
+        )
+    };
+    let color_plots = |solution: &layout::GridSolution| {
+        let mut plots: Vec<_> = solution
+            .panels
+            .iter()
+            .map(|slot| slot.plot.size())
+            .collect();
+        for (source, bar) in &solution.colorbars {
+            plots[*source] = bar.bar.size();
+        }
+        plots
+    };
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
-    let groups = ShareGroups::new(figure);
     let marks: Vec<&[ResolvedMark<'_>]> =
         panels.iter().map(|panel| panel.marks.as_slice()).collect();
-    let mut fits = BubbleFits::new(&marks, &limits, &groups);
+    let mut fits = BubbleFits::new(&marks, &limits, groups);
     let show_labels: Vec<_> = panels
         .iter()
         .map(|panel| label_visibility(figure, panel.axes.cells()))
         .collect();
+    let has_shared_colorbar = shared
+        && layout::ColorbarSide::shared(figure).is_some()
+        && panels.iter().any(|panel| panel.color.is_some());
     let measure = |i: usize, resolved: &Resolved| {
         let input = &inputs[i];
-        layout::measure_panel(
-            input,
-            resolved,
-            grid.span(input.axes.cells()),
-            show_labels[i],
-        )
+        let mut span = grid.span(input.axes.cells());
+        if has_shared_colorbar {
+            // Keep direct labels inside their panel, before any shared colorbar.
+            span.reserve_cap = f64::INFINITY;
+        }
+        let bands = layout::measure_panel(input, resolved, span, show_labels[i]);
+        if shared {
+            bands.without_colorbar(span.reserve_cap)
+        } else {
+            bands
+        }
     };
 
     let rooms_for = |plots: &[PlotSize], spacing| {
         (0..panels.len())
             .map(|i| {
-                let x = Side::X.group_plot(&groups, i, plots, &show_labels);
-                let y = Side::Y.group_plot(&groups, i, plots, &show_labels);
+                let x = Side::X.group_plot(groups, i, plots, &show_labels);
+                let y = Side::Y.group_plot(groups, i, plots, &show_labels);
                 let (x, _) = layout::tick_rooms(x, theme, lib, spacing);
                 let (_, y) = layout::tick_rooms(y, theme, lib, spacing);
                 [x, y]
@@ -426,23 +517,25 @@ fn plan(
     let mut first = resolve_groups(
         panels,
         &limits,
-        &groups,
+        groups,
         &rooms_for(&guesses, TickSpacing::Target),
         &fits,
     );
     for (i, resolved) in first.iter_mut().enumerate() {
         if let Some(side) = color_sides[i] {
-            let room = side.room(guesses[i], theme, lib);
-            choose_color_ticks(&panels[i], resolved, &room);
+            let size = color_cells[i].map_or(guesses[i], |cells| grid.initial_plot_size(cells));
+            let room = side.room(size, theme, lib);
+            choose_color_ticks(figure, &panels[i], resolved, &room);
         }
     }
-    let first: Vec<PanelBands> = first
+    let first_bands: Vec<PanelBands> = first
         .iter()
         .enumerate()
         .map(|(i, r)| measure(i, r))
         .collect();
-    let first = layout::solve_grid(&grid, &first)?;
+    let first = solve(&first, &first_bands)?;
     let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
+    let bar_plots = color_plots(&first);
 
     // The final pass: tick labels kept apart on the plot sizes of the first.
     let resolve_choices = |choices: &[[TickChoice; 3]], fits: &BubbleFits| {
@@ -455,11 +548,11 @@ fn plan(
                 ]
             })
             .collect();
-        let mut resolved = resolve_groups(panels, &limits, &groups, &rooms, fits);
+        let mut resolved = resolve_groups(panels, &limits, groups, &rooms, fits);
         for (i, r) in resolved.iter_mut().enumerate() {
             if let Some(side) = color_sides[i] {
                 let room = choices[i][2].room(side, theme, lib);
-                choose_color_ticks(&panels[i], r, &room);
+                choose_color_ticks(figure, &panels[i], r, &room);
             }
         }
         resolved
@@ -467,8 +560,8 @@ fn plan(
     let mut choices: Vec<[TickChoice; 3]> = (0..panels.len())
         .map(|i| {
             let [x, y] = Side::BOTH
-                .map(|side| TickChoice::first(side.group_plot(&groups, i, &plots, &show_labels)));
-            [x, y, TickChoice::first(plots[i])]
+                .map(|side| TickChoice::first(side.group_plot(groups, i, &plots, &show_labels)));
+            [x, y, TickChoice::first(bar_plots[i])]
         })
         .collect();
     // First keep the complete previous constrained search. Its fallback may crowd on the
@@ -477,14 +570,14 @@ fn plan(
     let mut resolved = resolve_groups(
         panels,
         &limits,
-        &groups,
+        groups,
         &rooms_for(&plots, TickSpacing::Deferred),
         &fits,
     );
     for (i, r) in resolved.iter_mut().enumerate() {
         if let Some(side) = color_sides[i] {
-            let room = side.room(plots[i], theme, lib);
-            choose_color_ticks(&panels[i], r, &room);
+            let room = side.room(bar_plots[i], theme, lib);
+            choose_color_ticks(figure, &panels[i], r, &room);
         }
     }
     let mut bands: Vec<PanelBands> = resolved
@@ -492,7 +585,7 @@ fn plan(
         .enumerate()
         .map(|(i, resolved)| measure(i, resolved))
         .collect();
-    let mut solution = match layout::solve_grid(&grid, &bands) {
+    let mut solution = match solve(&resolved, &bands) {
         Ok(solution)
             if solution.panels.iter().enumerate().all(|(i, slot)| {
                 Side::BOTH.into_iter().all(|side| {
@@ -514,7 +607,7 @@ fn plan(
                 .enumerate()
                 .map(|(i, resolved)| measure(i, resolved))
                 .collect();
-            layout::solve_grid(&grid, &bands)?
+            solve(&resolved, &bands)?
         }
     };
 
@@ -536,7 +629,7 @@ fn plan(
             .enumerate()
             .map(|(i, r)| measure(i, r))
             .collect();
-        match layout::solve_grid(&grid, &bands) {
+        match solve(&resolved, &bands) {
             Ok(solution) => Ok((resolved, bands, solution)),
             Err(_) if fits.clip_all() => {
                 let resolved = resolve_choices(choices, fits);
@@ -545,7 +638,7 @@ fn plan(
                     .enumerate()
                     .map(|(i, r)| measure(i, r))
                     .collect();
-                layout::solve_grid(&grid, &bands).map(|solution| (resolved, bands, solution))
+                solve(&resolved, &bands).map(|solution| (resolved, bands, solution))
             }
             Err(error) => Err(error),
         }
@@ -565,10 +658,10 @@ fn plan(
         }
         for (i, r) in resolved.iter().enumerate() {
             for side in Side::BOTH {
-                if side.groups(&groups)[i] != i {
+                if side.groups(groups)[i] != i {
                     continue;
                 }
-                let plot = side.group_plot(&groups, i, &plots, &show_labels);
+                let plot = side.group_plot(groups, i, &plots, &show_labels);
                 let ticks = side.ticks(r);
                 if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
                 {
@@ -584,6 +677,7 @@ fn plan(
                 }
             }
         }
+        let bar_plots = color_plots(&solution);
         let mut color_again = Vec::new();
         for (i, r) in resolved.iter().enumerate() {
             let Some(color) = &r.color else {
@@ -592,11 +686,11 @@ fn plan(
             let Some(side) = color_sides[i] else {
                 continue;
             };
-            if side.room(plots[i], theme, lib).slack(&color.ticks) >= 0.0 {
+            if side.room(bar_plots[i], theme, lib).slack(&color.ticks) >= 0.0 {
                 continue;
             }
             let choice = &mut next[i][2];
-            match choice.again(plots[i], color.ticks.len()) {
+            match choice.again(bar_plots[i], color.ticks.len()) {
                 Some(new) => {
                     *choice = new;
                     color_again.push(i);
@@ -632,7 +726,7 @@ fn plan(
                 next[i][2].state = ChoiceState::Settled;
             }
         }
-        match layout::solve_grid(&grid, &tried_bands) {
+        match solve(&tried_resolved, &tried_bands) {
             Ok(tried) => {
                 resolved = tried_resolved;
                 bands = tried_bands;
@@ -692,6 +786,7 @@ fn plan(
     Ok(FigurePlan {
         header,
         panels: resolved.into_iter().zip(layouts).collect(),
+        colorbars: solution.colorbars,
     })
 }
 
@@ -704,10 +799,11 @@ fn plan(
 fn plan_cells(
     figure: &Figure,
     panels: &mut [Panel<'_>],
+    groups: &ShareGroups,
     lib: &FontLibrary,
     context: &'static str,
 ) -> Result<FigurePlan> {
-    let mut planned = plan(figure, panels, lib, context)?;
+    let mut planned = plan(figure, panels, groups, lib, context)?;
     if !panels.iter().any(|panel| {
         panel
             .marks
@@ -716,7 +812,6 @@ fn plan_cells(
     }) {
         return Ok(planned);
     }
-    let groups = ShareGroups::new(figure);
     let axis_scales = |planned: &FigurePlan| {
         planned
             .panels
@@ -806,13 +901,9 @@ fn plan_cells(
             if pass == 0 || recount {
                 counting_aspects[i] = aspects[i];
             }
-            panel.color = ResolvedColorScale::resolve(
-                &panel.marks,
-                panel.axes.color_limits(),
-                figure.theme(),
-            );
         }
-        planned = plan(figure, panels, lib, context)?;
+        resolve_colors(panels, groups, figure.theme());
+        planned = plan(figure, panels, groups, lib, context)?;
         if planned
             .panels
             .iter()
@@ -863,8 +954,9 @@ pub(crate) fn try_plan_figure(
     lib: &FontLibrary,
 ) -> Result<(Resolved, Layout)> {
     let index = panel_index(figure, cell);
-    let mut panels = panels(figure, lib);
-    let mut planned = plan_cells(figure, &mut panels, lib, "Figure.to_scene()")?;
+    let groups = ShareGroups::new(figure);
+    let mut panels = panels(figure, &groups, lib);
+    let mut planned = plan_cells(figure, &mut panels, &groups, lib, "Figure.to_scene()")?;
     Ok(planned.panels.swap_remove(index))
 }
 
@@ -875,8 +967,15 @@ pub(crate) fn try_plan_panels(
     figure: &Figure,
     lib: &FontLibrary,
 ) -> Result<Vec<(Resolved, Layout)>> {
-    plan_cells(figure, &mut panels(figure, lib), lib, "Figure.to_scene()")
-        .map(|planned| planned.panels)
+    let groups = ShareGroups::new(figure);
+    plan_cells(
+        figure,
+        &mut panels(figure, &groups, lib),
+        &groups,
+        lib,
+        "Figure.to_scene()",
+    )
+    .map(|planned| planned.panels)
 }
 
 /// The index, in the order of [`Figure::panels`], of the axes of `figure` whose top-left cell
@@ -901,7 +1000,8 @@ pub(crate) fn with_layout_input<R>(
     f: impl FnOnce(&LayoutInput<'_>, &GridInput<'_>) -> R,
 ) -> R {
     let index = panel_index(figure, cell);
-    let panels = panels(figure, lib);
+    let groups = ShareGroups::new(figure);
+    let panels = panels(figure, &groups, lib);
     let header = figure_header(figure, &panels, lib);
     let inputs: Vec<LayoutInput<'_>> = panels
         .iter()
@@ -921,6 +1021,7 @@ pub(crate) fn with_layout_input<R>(
         theme: figure.theme(),
         context: "Figure.to_scene()",
         panels: &inputs,
+        colorbars: &[],
     };
     f(&inputs[index], &grid)
 }
@@ -952,7 +1053,8 @@ pub(crate) fn scene(
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
-    let mut panels = panels(figure, library);
+    let groups = ShareGroups::new(figure);
+    let mut panels = panels(figure, &groups, library);
     if panels.is_empty() {
         let header = figure_header(figure, &panels, library);
         header.check(figure, context)?;
@@ -961,7 +1063,7 @@ pub(crate) fn scene(
         }
         return Ok(scene);
     }
-    let planned = plan_cells(figure, &mut panels, library, context)?;
+    let planned = plan_cells(figure, &mut panels, &groups, library, context)?;
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         scene.push(draw::chrome(theme, layout));
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
@@ -986,6 +1088,11 @@ pub(crate) fn scene(
             scene.push(draw::baseline(theme, layout));
         }
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
+            scene.push(draw::colorbar::draw(theme, color, bar));
+        }
+    }
+    for (source, bar) in &planned.colorbars {
+        if let Some(color) = &planned.panels[*source].0.color {
             scene.push(draw::colorbar::draw(theme, color, bar));
         }
     }
@@ -1022,6 +1129,7 @@ mod tests {
         let groups = ShareGroups {
             x: vec![0, 0, 0, 3],
             y: vec![0, 0, 0, 3],
+            color: vec![None; 4],
         };
         let plots = [
             PlotSize {
@@ -1208,6 +1316,201 @@ mod tests {
         f
     }
 
+    fn color_grid(share: crate::Share, scale: crate::Transform, center: Option<f64>) -> Figure {
+        let grid = Grid::new(2, 2).unwrap().with_share_color(share);
+        let mut figure = Figure::with_grid(12.0, 8.0, Theme::pigment(), grid).unwrap();
+        for row in (0..2).rev() {
+            for col in (0..2).rev() {
+                let low = 1.0 + (row * 10 + col * 3) as f64;
+                figure
+                    .add_axes_at(
+                        Placement {
+                            row: GridIndex::At(row),
+                            col: GridIndex::At(col),
+                            ..Placement::default()
+                        },
+                        ScaleKind::Linear,
+                        ScaleKind::Linear,
+                    )
+                    .unwrap()
+                    .scatter(
+                        AxisData::Numbers(vec![0.0, 1.0]),
+                        &[0.0, 1.0],
+                        crate::ScatterOptions {
+                            color: crate::PointColor::By(crate::ColorBy {
+                                scale,
+                                center,
+                                ..crate::ColorBy::new(vec![low, low + 2.0])
+                            }),
+                            ..crate::ScatterOptions::default()
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        figure
+    }
+
+    #[test]
+    fn shared_color_norms_use_only_each_groups_union() {
+        use crate::color_scale::Norm;
+        use crate::{LogBase, Share, Transform};
+
+        for share in [Share::None, Share::Row, Share::Col, Share::All] {
+            for (scale, center) in [
+                (Transform::Linear, None),
+                (Transform::Linear, Some(0.0)),
+                (Transform::Log(LogBase::TEN), None),
+            ] {
+                let figure = color_grid(share, scale, center);
+                let panels = panels(&figure, &ShareGroups::new(&figure), FontLibrary::global());
+                for (i, panel) in panels.iter().enumerate() {
+                    let (row, col) = ((i / 2) as f64, (i % 2) as f64);
+                    let (low, high) = match share {
+                        Share::None => (1.0 + row * 10.0 + col * 3.0, 3.0 + row * 10.0 + col * 3.0),
+                        Share::Row => (1.0 + row * 10.0, 6.0 + row * 10.0),
+                        Share::Col => (1.0 + col * 3.0, 13.0 + col * 3.0),
+                        Share::All => (1.0, 16.0),
+                    };
+                    let expected = match (scale, center) {
+                        (_, Some(center)) => Norm::Centered {
+                            center,
+                            radius: high,
+                        },
+                        (Transform::Log(base), _) => Norm::Log { low, high, base },
+                        (Transform::Linear, _) => Norm::Linear { low, high },
+                    };
+                    assert_eq!(panel.color.as_ref().unwrap().norm, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shared_hexbin_colors_use_the_union_after_counting_and_recounting() {
+        use crate::color_scale::Norm;
+        use crate::{HexbinOptions, Paint, Share};
+
+        for fixed_y in [false, true] {
+            let grid = Grid::new(1, 2).unwrap().with_share_color(Share::All);
+            let mut figure = Figure::with_grid(12.0, 4.0, Theme::pigment(), grid).unwrap();
+            for col in 0..2 {
+                let mut x = Vec::new();
+                let mut y = Vec::new();
+                for (value, count) in [(0.0, 1), (1.0, 4), (2.0, 9)] {
+                    let count = count * if col == 0 { 1 } else { 3 };
+                    x.extend(std::iter::repeat_n(value, count));
+                    y.extend(std::iter::repeat_n(value, count));
+                }
+                let mut axes = figure
+                    .add_axes_at(
+                        Placement {
+                            col: GridIndex::At(col),
+                            ..Placement::default()
+                        },
+                        ScaleKind::Linear,
+                        ScaleKind::Linear,
+                    )
+                    .unwrap();
+                if fixed_y && col == 0 {
+                    axes.ylim(-1.0, 3.0).unwrap();
+                }
+                axes.hexbin(&x, &y, HexbinOptions::default()).unwrap();
+            }
+            let lib = FontLibrary::global();
+            let groups = ShareGroups::new(&figure);
+            let mut panels = panels(&figure, &groups, lib);
+            crate::bin2d::COUNT_CALLS.with(|calls| calls.set(0));
+            let planned =
+                plan_cells(&figure, &mut panels, &groups, lib, "Figure.to_scene()").unwrap();
+            let calls = crate::bin2d::COUNT_CALLS.with(|calls| calls.get());
+            if fixed_y {
+                assert!(
+                    calls > 2,
+                    "the fixed y window must cause a recount: {calls}"
+                );
+            } else {
+                assert_eq!(calls, 2);
+            }
+            let counts: Vec<_> = panels
+                .iter()
+                .flat_map(|panel| &panel.marks)
+                .filter_map(ResolvedMark::color_values)
+                .flat_map(|(_, values)| values.iter().copied())
+                .collect();
+            let low = counts.iter().copied().fold(f64::INFINITY, f64::min);
+            let high = counts.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            assert_eq!((low, high), (1.0, 27.0));
+            let expected = Norm::Linear { low, high };
+            for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
+                assert_eq!(panel.color.as_ref().unwrap().norm, expected);
+                assert_eq!(resolved.color.as_ref().unwrap().norm, expected);
+                assert!(layout.colorbar.is_none());
+            }
+            assert_eq!(planned.colorbars.len(), 1);
+            let source = planned.colorbars[0].0;
+            assert_eq!(
+                planned.panels[source].0.color.as_ref().unwrap().norm,
+                expected
+            );
+
+            let scene = figure.to_scene(lib).unwrap();
+            let bars = scene
+                .items
+                .iter()
+                .filter(|item| match item {
+                    Item::Group { clip: None, items } => items.iter().any(|item| {
+                        matches!(
+                            item,
+                            Item::Fill {
+                                paint: Paint::Sampled { .. },
+                                ..
+                            }
+                        )
+                    }),
+                    _ => false,
+                })
+                .count();
+            assert_eq!(bars, 1);
+            figure
+                .axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+                .unwrap()
+                .clim(low, high)
+                .unwrap();
+            assert_eq!(scene, figure.to_scene(lib).unwrap());
+        }
+    }
+
+    #[test]
+    fn shared_colorbars_preserve_plot_alignment() {
+        use crate::{Share, Transform};
+
+        for share in [Share::Row, Share::Col, Share::All] {
+            let figure = color_grid(share, Transform::Linear, None);
+            let lib = FontLibrary::global();
+            let groups = ShareGroups::new(&figure);
+            let panels = panels(&figure, &groups, lib);
+            let planned = plan(&figure, &panels, &groups, lib, "Figure.to_scene()").unwrap();
+            assert_eq!(
+                planned.colorbars.len(),
+                if share == Share::All { 1 } else { 2 }
+            );
+            let plots: Vec<_> = planned
+                .panels
+                .iter()
+                .map(|(_, layout)| layout.plot)
+                .collect();
+            for plot in &plots[1..] {
+                assert!((plot.width - plots[0].width).abs() < 1e-9);
+                assert!((plot.height - plots[0].height).abs() < 1e-9);
+            }
+            assert_eq!(plots[0].x, plots[2].x);
+            assert_eq!(plots[1].x, plots[3].x);
+            assert_eq!(plots[0].y, plots[1].y);
+            assert_eq!(plots[2].y, plots[3].y);
+        }
+    }
+
     #[test]
     fn grid_panels_line_up_with_titles_over_their_plots() {
         // 2 × 2 at 12 × 8 in; (1, 1) is empty.
@@ -1348,7 +1651,7 @@ mod tests {
         spacing: TickSpacing,
         lib: &'a FontLibrary,
     ) -> Vec<(Resolved, layout::TickRoom<'a>, layout::TickRoom<'a>)> {
-        panels(figure, lib)
+        panels(figure, &ShareGroups::new(figure), lib)
             .iter()
             .map(|panel| {
                 let (x, y) = layout::tick_rooms(size, figure.theme(), lib, spacing);
@@ -1428,7 +1731,8 @@ mod tests {
     /// The previous two-pass layout: target-only ticks on guessed sizes, then the constrained
     /// search (including target retries) on the first solve's sizes, with no repair pass.
     fn previous_plan(figure: &Figure, lib: &FontLibrary) -> Result<Vec<(Resolved, Layout)>> {
-        let panels = panels(figure, lib);
+        let groups = ShareGroups::new(figure);
+        let panels = panels(figure, &groups, lib);
         let theme = figure.theme();
         let inputs: Vec<_> = panels
             .iter()
@@ -1448,6 +1752,7 @@ mod tests {
             theme,
             context: "Figure.to_scene()",
             panels: &inputs,
+            colorbars: &[],
         };
         let pass = |sizes: Vec<PlotSize>, spacing| {
             let resolved: Vec<_> = panels

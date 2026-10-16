@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use super::axes::Axes;
 use super::color_by::{CmapChoice, check_center, check_mapped_values};
+use super::figure::Figure;
 use super::mark::Mark;
 use crate::color_scale::ColorScaleSpec;
 use crate::{Error, NumberStyle, Result, ScaleKind, TickFormat, Transform};
@@ -76,7 +76,7 @@ impl Default for HeatmapOptions {
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 ///
-/// A heatmap cannot be built outside [`Axes`]:
+/// A heatmap cannot be built outside [`Axes`](super::Axes):
 ///
 /// ```compile_fail,E0451
 /// use umber_core::{HeatmapMark, HeatmapOptions};
@@ -113,14 +113,18 @@ impl HeatmapMark {
     /// 7. the colormap, scale and center are those of the axes' other color-mapped marks
     ///    (`Error::Usage`, naming the first that differs);
     /// 8. the color limits of the axes are positive on a log scale and hold the center
-    ///    (`Error::Style`).
+    ///    (`Error::Style`);
+    /// 9. the panel stays within one color-sharing group and agrees with its other members
+    ///    (`Error::Usage`).
     pub(super) fn new(
         context: &'static str,
-        axes: &Axes,
+        figure: &Figure,
+        index: usize,
         (x, y): (Vec<String>, Vec<String>),
         values: Arc<[f64]>,
         options: HeatmapOptions,
     ) -> Result<HeatmapMark> {
+        let axes = figure.panel(index);
         check_axis(context, "x", axes.x)?;
         check_axis(context, "y", axes.y)?;
         check_unique(
@@ -173,6 +177,7 @@ impl HeatmapMark {
             .check_range(limits, context, Some("scale"))?;
             spec.check_range(limits, context, Some("center"))?;
         }
+        figure.check_shared_color(index, &spec, context, None)?;
         Ok(mark)
     }
 

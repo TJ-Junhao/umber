@@ -252,7 +252,7 @@ def test_labels_and_shared_figure_palette(style: ub.LegendStyle) -> None:
     ax = axes().legend(style).grouped_violin(["A"], [ub.Distribution("North", [[1, 2]])])
     svg = ax.figure.to_svg(text=ub.SvgText.EDITABLE)
     assert (">North</text>" in svg) == (style != ub.LegendStyle.NONE)
-    fig = _umber.Figure(8.0, 4.0, _umber.Theme.pigment(), 1, 2, 0, 0, 0)
+    fig = _umber.Figure(8.0, 4.0, _umber.Theme.pigment(), 1, 2, 0, 0, 0, 0)
     for col in range(2):
         fig.add_axes(1, 0, 1, col, 1, 1, 2, 10.0, 0, 10.0)
     fig.violin(0, 0, ["A"], [np.array([1.0, 2.0])], "Same", (0, 0, 1.0))
@@ -301,7 +301,7 @@ def test_native_rendering_parity(
     fig = ub.Figure(4, 3, theme=theme)
     ax = fig.add_axes(x=ub.Scale.category())
     groups = [np.array([1.0, 2.0, 3.0, 4.0, 12.0]), np.array([2.0, 2.0])]
-    native = _umber.Figure(4.0, 3.0, native_theme(), 1, 1, 0, 0, 0)
+    native = _umber.Figure(4.0, 3.0, native_theme(), 1, 1, 0, 0, 0, 0)
     native.add_axes(0, 0, 0, 0, 1, 1, 2, 10.0, 0, 10.0)
     if is_grouped:
         ax.grouped_violin(["A", "B"], [ub.Distribution("Samples", groups)])
