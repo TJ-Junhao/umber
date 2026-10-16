@@ -12,8 +12,8 @@ use crate::pipeline::plan_figure;
 use crate::{
     AreaOptions, AxisData, AxisValue, BandOptions, BarOptions, BoxOptions, BubbleOptions,
     ColorSpec, Dash, ErrorBarOptions, Figure, FillStyle, FontLibrary, Grid, GridIndex, HistOptions,
-    Item, LegendMode, LegendStyle, LineOptions, Paint, Placement, Rgba, RuleOptions, ScaleKind,
-    ScatterOptions, Series, SpanOptions, StemOptions, StepOptions, Theme, ViolinOptions,
+    Item, LegendMode, LegendStyle, LineOptions, Paint, Placement, PointColor, Rgba, RuleOptions,
+    ScaleKind, ScatterOptions, Series, SpanOptions, StemOptions, StepOptions, Theme, ViolinOptions,
 };
 
 /// How a mark's swatch is filled, for the table of expected colors.
@@ -184,7 +184,7 @@ fn filled(name: &str, theme: &Theme, color: Rgba) -> (Figure, Fill) {
                 &[1.0],
                 BubbleOptions {
                     label,
-                    color: spec,
+                    color: PointColor::Uniform(spec),
                     ..BubbleOptions::default()
                 },
             )
@@ -210,7 +210,7 @@ fn filled(name: &str, theme: &Theme, color: Rgba) -> (Figure, Fill) {
                 &[1.0, 2.0],
                 ScatterOptions {
                     label,
-                    color: spec,
+                    color: PointColor::Uniform(spec),
                     ..ScatterOptions::default()
                 },
             )

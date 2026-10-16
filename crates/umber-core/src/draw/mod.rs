@@ -134,14 +134,15 @@ pub(crate) fn marks(
                 mark: scatter_mark,
                 color,
                 size,
+                ref mapped,
                 ..
             } => {
                 let xs = axis_values(&resolved.x, scatter_mark.x());
                 let ys = axis_values(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;
-                items.extend(scatter::scatter_item(
-                    &context, &xs, &ys, color, marker, size,
-                ));
+                if let Some(fill) = point_fill(resolved, color, mapped.as_ref()) {
+                    scatter::scatter_items(&context, (&xs, &ys), fill, marker, size, &mut items);
+                }
             }
             ResolvedMark::Bar {
                 mark: bar_mark,
@@ -248,15 +249,18 @@ pub(crate) fn marks(
                 color,
                 maximum,
                 radius,
+                ref mapped,
                 ..
             } => {
-                bubbles::bubble_items(
-                    &context,
-                    resolved,
-                    mark,
-                    (color, maximum, radius),
-                    &mut items,
-                );
+                if let Some(fill) = point_fill(resolved, color, mapped.as_ref()) {
+                    bubbles::bubble_items(
+                        &context,
+                        resolved,
+                        mark,
+                        (fill, maximum, radius),
+                        &mut items,
+                    );
+                }
             }
             ResolvedMark::Stem {
                 mark: stem_mark,
@@ -311,6 +315,25 @@ pub(crate) fn marks(
         clip: Some(clip),
         items,
     })
+}
+
+/// How the points of a scatter or bubble mark in `color` are filled: in that color, or, when
+/// the mark maps its colors from values (`mapped`), in the colors of the axes' color scale.
+/// `None` for a color-mapped mark without a color scale (no finite mapped value), which draws
+/// nothing.
+fn point_fill<'a, 'm: 'a>(
+    resolved: &'a Resolved,
+    color: crate::Rgba,
+    mapped: Option<&'a crate::color_scale::MappedColors<'m>>,
+) -> Option<scatter::PointFill<'a>> {
+    match (mapped, &resolved.color) {
+        (None, _) => Some(scatter::PointFill::Uniform(color)),
+        (Some(mapped), Some(scale)) => Some(scatter::PointFill::Mapped {
+            scale,
+            values: mapped.values,
+        }),
+        (Some(_), None) => None,
+    }
 }
 
 /// The clip rectangle of the marks: the plot area, widened horizontally on each side by half of

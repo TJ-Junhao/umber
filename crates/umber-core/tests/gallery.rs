@@ -200,7 +200,7 @@ fn scatter_figure(theme_name: &str) -> Figure {
             &y,
             ScatterOptions {
                 label: format!("Cluster {}", i + 1),
-                color: ColorSpec::AUTO,
+                color: umber_core::PointColor::AUTO,
                 marker: Marker::Circle,
                 ..ScatterOptions::default()
             },

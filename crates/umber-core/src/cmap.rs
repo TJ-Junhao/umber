@@ -228,6 +228,32 @@ impl Cmap {
     pub fn colors(&self) -> Vec<Rgba> {
         self.stops.iter().copied().map(from_oklab).collect()
     }
+
+    /// This colormap as the Python expression that makes it, for messages: `Cmap.VIRIDIS` or
+    /// `Cmap.VIRIDIS.reversed()` for a built-in, otherwise `Cmap.from_colors([...])` with its
+    /// stops as `Color.hex()` calls.
+    pub(crate) fn name(&self) -> String {
+        let builtins = [
+            ("VIRIDIS", Cmap::viridis()),
+            ("MAGMA", Cmap::magma()),
+            ("CIVIDIS", Cmap::cividis()),
+            ("BLUE_RED", Cmap::blue_red()),
+        ];
+        for (name, builtin) in builtins {
+            if *self == builtin {
+                return format!("Cmap.{name}");
+            }
+            if *self == builtin.reversed() {
+                return format!("Cmap.{name}.reversed()");
+            }
+        }
+        let stops: Vec<String> = self
+            .colors()
+            .into_iter()
+            .map(|color| format!("Color.hex(\"{}\")", color.to_hex()))
+            .collect();
+        format!("Cmap.from_colors([{}])", stops.join(", "))
+    }
 }
 
 /// The linear-light value of an 8-bit sRGB channel.

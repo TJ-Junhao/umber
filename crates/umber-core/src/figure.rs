@@ -34,6 +34,7 @@ pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions,
 pub use crate::model::{BandMark, BandOptions};
 pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use crate::model::{BubbleMark, BubbleOptions};
+pub use crate::model::{CmapChoice, ColorBy, PointColor};
 pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use crate::model::{StemMark, StemOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};

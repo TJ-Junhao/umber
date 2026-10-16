@@ -198,9 +198,12 @@ MARK_ERRORS: list[tuple[Callable[[], object], type, str, str | None, str | None]
     (
         lambda: ub.scatter([0, 1], [1.0], color=cast(ub.Color, "red")),
         TypeError,
-        "Axes.scatter(): color is str; color must be of type Color.",
+        "Axes.scatter(): color is str; color must be of type Color or ColorBy.",
         "color",
-        COLOR_HINT,
+        (
+            'use Color.hex("#3366B8"), Color.rgb(), a named color such as Color.BLUE, '
+            "or ColorBy(values)."
+        ),
     ),
     (
         lambda: ub.bar(["a", "a"], [1.0, 2.0]),

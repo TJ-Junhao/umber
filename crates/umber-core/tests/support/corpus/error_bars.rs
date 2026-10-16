@@ -46,7 +46,7 @@ fn bars(label: &str, index: usize) -> ErrorBarOptions {
 fn means(label: &str) -> ScatterOptions {
     ScatterOptions {
         label: label.into(),
-        color: palette(0),
+        color: umber_core::PointColor::Uniform(palette(0)),
         ..ScatterOptions::default()
     }
 }

@@ -14,6 +14,7 @@ from umber._axes import Axes
 from umber._cell import Cell
 from umber._cmap import Cmap
 from umber._color import Color
+from umber._color_by import ColorBy
 from umber._enums import (
     AUTO,
     Align,
@@ -61,6 +62,7 @@ __all__ = [
     "Series",
     "Cmap",
     "Color",
+    "ColorBy",
     "DataError",
     "Dash",
     "Distribution",
@@ -114,6 +116,7 @@ _report_package_as_module(
     Series,
     Cmap,
     Color,
+    ColorBy,
     Dash,
     Distribution,
     FillStyle,
