@@ -102,7 +102,9 @@ pub(crate) fn marks(
     let mut items = Vec::new();
     // Reference spans lie under the data marks and reference lines over them, whatever the order
     // of the calls; the data marks keep theirs.
-    rule::span_layer(&context, resolved, marks, &mut items);
+    let clip = marks_clip(layout, marks);
+    let layer_clip = rule::baseline_clip(&context, resolved, clip);
+    rule::span_layer(&context, resolved, marks, layer_clip, &mut items);
     for mark in marks {
         match *mark {
             ResolvedMark::Line {
@@ -298,12 +300,12 @@ pub(crate) fn marks(
             | ResolvedMark::VSpan { .. } => {}
         }
     }
-    rule::rule_layer(&context, resolved, marks, &mut items);
+    rule::rule_layer(&context, resolved, marks, layer_clip, &mut items);
     if items.is_empty() {
         return None;
     }
     Some(Item::Group {
-        clip: Some(marks_clip(layout, marks)),
+        clip: Some(clip),
         items,
     })
 }

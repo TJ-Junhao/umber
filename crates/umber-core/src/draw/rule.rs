@@ -6,11 +6,11 @@
 //! clipped in axis space against the one axis it has a value on. Nothing is mapped to plot
 //! points before it is known to be visible.
 //!
-//! A vertical reference mark runs from the top of the plot down to the baseline when the
-//! baseline sits at the y axis's lower limit, since only padding lies below it; when the baseline
-//! is at y = 0 inside the domain it runs to the bottom of the plot. A horizontal one needs no
-//! such cut: with automatic limits its value is part of the y domain, so the lower limit lies at
-//! or below it, and with explicit limits the baseline is the plot bottom.
+//! When the baseline sits at the y axis's lower limit, only padding lies below it, so nothing of
+//! a reference mark is drawn there: a vertical one ends at the baseline, and the layers are
+//! clipped at it (see [`baseline_clip`]), which also cuts the half-stroke of a horizontal line
+//! on the baseline and the round cap of a vertical one. When the baseline is at y = 0 inside
+//! the domain, they cover the whole plot height.
 
 use super::MarkContext;
 use super::area::AREA_ALPHA;
@@ -20,7 +20,7 @@ use super::mapping::{AxisMap, PlotPoint, axis_x, axis_y_value};
 use crate::geometry::Path;
 use crate::model::{AxisData, AxisValue};
 use crate::resolve::{Resolved, ResolvedMark};
-use crate::scene::{FillRule, Item, LineCap, Paint};
+use crate::scene::{FillRule, Item, LineCap, Paint, Rect};
 use crate::{Dash, Rgba, Transform};
 
 /// The axis a reference mark has its value on; it runs across the plot along the other.
@@ -45,13 +45,9 @@ impl Along {
     /// mark of this kind covers across it: all of it, except for a vertical mark, which stops at
     /// the baseline when that sits at the y axis's lower limit.
     fn reach(self, context: &MarkContext<'_>, resolved: &Resolved) -> f64 {
-        let zero_inside = {
-            let (low, high) = resolved.y.scale.domain();
-            resolved.y.scale.transform() == Transform::Linear && low <= 0.0 && 0.0 <= high
-        };
         match self {
             Along::Y => 1.0,
-            Along::X if zero_inside => 1.0,
+            Along::X if zero_in_domain(resolved) => 1.0,
             Along::X => {
                 ((context.baseline_y - context.plot.y) / context.plot.height).clamp(0.0, 1.0)
             }
@@ -75,19 +71,59 @@ impl Along {
     }
 }
 
+/// Whether the baseline sits at y = 0 inside the domain of a linear y axis, rather than at the
+/// lower limit.
+fn zero_in_domain(resolved: &Resolved) -> bool {
+    let (low, high) = resolved.y.scale.domain();
+    resolved.y.scale.transform() == Transform::Linear && low <= 0.0 && 0.0 <= high
+}
+
+/// The clip of the reference layers: `marks_clip` cut at the baseline when that sits at the y
+/// axis's lower limit below the top of the plot, `None` when nothing lies below it to cut.
+pub(super) fn baseline_clip(
+    context: &MarkContext<'_>,
+    resolved: &Resolved,
+    marks_clip: Rect,
+) -> Option<Rect> {
+    let height = context.baseline_y - context.plot.y;
+    if zero_in_domain(resolved) || height >= context.plot.height - 1e-6 {
+        return None;
+    }
+    Some(Rect {
+        height: height.max(0.0) as f32,
+        ..marks_clip
+    })
+}
+
+/// Adds `layer` to `items`, as one group clipped to `clip` when there is one.
+fn push_layer(items: &mut Vec<Item>, clip: Option<Rect>, layer: Vec<Item>) {
+    if layer.is_empty() {
+        return;
+    }
+    match clip {
+        Some(clip) => items.push(Item::Group {
+            clip: Some(clip),
+            items: layer,
+        }),
+        None => items.extend(layer),
+    }
+}
+
 /// The scene items of the spans among `marks`, in call order. They are the lowest layer of the
 /// marks group, under the data marks.
 pub(super) fn span_layer(
     context: &MarkContext<'_>,
     resolved: &Resolved,
     marks: &[ResolvedMark<'_>],
+    clip: Option<Rect>,
     items: &mut Vec<Item>,
 ) {
+    let mut layer = Vec::new();
     for mark in marks {
         match *mark {
             ResolvedMark::HSpan { mark, color, .. } => {
                 let ends = mark.bounds().iter().map(|&v| axis_y_value(&resolved.y, v));
-                span_item(context, Along::Y, ends, 1.0, color, items);
+                span_item(context, Along::Y, ends, 1.0, color, &mut layer);
             }
             ResolvedMark::VSpan { mark, color, .. } => {
                 let ends = mark.bounds().iter().map(|&v| {
@@ -97,7 +133,7 @@ pub(super) fn span_layer(
                         .unwrap_or(f64::NAN)
                 });
                 let reach = Along::X.reach(context, resolved);
-                span_item(context, Along::X, ends, reach, color, items);
+                span_item(context, Along::X, ends, reach, color, &mut layer);
             }
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
@@ -118,6 +154,7 @@ pub(super) fn span_layer(
             | ResolvedMark::Violin { .. } => {}
         }
     }
+    push_layer(items, clip, layer);
 }
 
 /// The scene items of the reference lines among `marks`, in call order. They are the highest
@@ -126,8 +163,10 @@ pub(super) fn rule_layer(
     context: &MarkContext<'_>,
     resolved: &Resolved,
     marks: &[ResolvedMark<'_>],
+    clip: Option<Rect>,
     items: &mut Vec<Item>,
 ) {
+    let mut layer = Vec::new();
     for mark in marks {
         match *mark {
             ResolvedMark::HLine {
@@ -135,7 +174,7 @@ pub(super) fn rule_layer(
             } => {
                 let at = axis_y_value(&resolved.y, mark.y());
                 let style = rule_style(width, color, mark.options().dash);
-                rule_item(context, Along::Y, at, 1.0, &style, items);
+                rule_item(context, Along::Y, at, 1.0, &style, &mut layer);
             }
             ResolvedMark::VLine {
                 mark, color, width, ..
@@ -143,7 +182,7 @@ pub(super) fn rule_layer(
                 let at = vline_position(resolved, mark.x());
                 let style = rule_style(width, color, mark.options().dash);
                 let reach = Along::X.reach(context, resolved);
-                rule_item(context, Along::X, at, reach, &style, items);
+                rule_item(context, Along::X, at, reach, &style, &mut layer);
             }
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
@@ -164,6 +203,7 @@ pub(super) fn rule_layer(
             | ResolvedMark::Violin { .. } => {}
         }
     }
+    push_layer(items, clip, layer);
 }
 
 /// The axis-space position of a vertical line at `x`: its value on a continuous axis, the band

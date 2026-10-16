@@ -7,9 +7,9 @@ use crate::geometry::PathVerb;
 use crate::layout::Area;
 use crate::model::{AxisValue, Figure, LineOptions, RuleOptions, SpanOptions};
 use crate::model::{Grid, GridIndex, Placement, Share};
-use crate::scene::{FillRule, Item, LineCap, Paint, Scene};
+use crate::scene::{FillRule, Item, LineCap, Paint, Rect, Scene};
 use crate::test_support::scene::assert_scene_bounded;
-use crate::{Dash, FontLibrary, LogBase, ScaleKind, Theme};
+use crate::{Dash, FontLibrary, LogBase, ScaleKind, SizeSpec, Theme};
 
 /// Linear axes limited to `0..=10` on both, holding nothing else.
 fn figure() -> Figure {
@@ -36,7 +36,31 @@ fn items(figure: &Figure) -> Vec<Item> {
     if scene.items.len() == 2 {
         return Vec::new();
     }
-    mark_group(&scene).1.to_vec()
+    flatten(mark_group(&scene).1)
+}
+
+/// `items` with the reference layers' own clipped groups opened up.
+fn flatten(items: &[Item]) -> Vec<Item> {
+    items
+        .iter()
+        .flat_map(|item| match item {
+            Item::Group { items, .. } => flatten(items),
+            other => vec![other.clone()],
+        })
+        .collect()
+}
+
+/// The clips of the groups nested in the marks group of `figure`.
+fn layer_clips(figure: &Figure) -> Vec<Rect> {
+    let scene = scene_of(figure);
+    mark_group(&scene)
+        .1
+        .iter()
+        .filter_map(|item| match item {
+            Item::Group { clip, .. } => *clip,
+            _ => None,
+        })
+        .collect()
 }
 
 /// The plot y of the y value `v` on `0..=10`.
@@ -429,6 +453,7 @@ fn vertical_references_keep_the_full_height_when_zero_is_in_the_domain() {
     let items = items(&f);
     assert_near(rect(&items[0]).3, plot.bottom());
     assert_near(ends(items.last().unwrap()).1.1, plot.bottom());
+    assert!(layer_clips(&f).is_empty(), "no cut at the baseline");
 }
 
 #[test]
@@ -515,14 +540,14 @@ fn a_shared_y_grid_ends_every_panel_at_the_common_baseline() {
             .unwrap();
     }
     let scene = scene_of(&f);
-    let groups: Vec<&[Item]> = scene
+    let groups: Vec<Vec<Item>> = scene
         .items
         .iter()
         .filter_map(|item| match item {
             Item::Group {
                 clip: Some(_),
                 items,
-            } => Some(items.as_slice()),
+            } => Some(flatten(items)),
             _ => None,
         })
         .collect();
@@ -536,4 +561,65 @@ fn a_shared_y_grid_ends_every_panel_at_the_common_baseline() {
         assert_near(rect(&items[0]).3, baseline);
         assert_near(ends(items.last().unwrap()).1.1, baseline);
     }
+}
+
+/// Data 33 to 68 on y ticks 20 to 80: the baseline is the tick 20, above the plot bottom.
+fn ticked_figure(rule: RuleOptions, vertical: bool) -> Figure {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.line(
+        nums(&[0.0, 30.0, 60.0]),
+        &[33.0, 50.0, 68.0],
+        LineOptions::default(),
+    )
+    .unwrap()
+    .yticks(&[20.0, 40.0, 60.0, 80.0])
+    .unwrap();
+    if vertical {
+        axes.vline(AxisValue::Number(31.0), rule).unwrap();
+    } else {
+        axes.hline(20.0, rule).unwrap();
+    }
+    f
+}
+
+#[test]
+fn a_thick_hline_on_the_baseline_is_cut_at_it() {
+    let width = SizeSpec::pt(6.0).unwrap();
+    let f = ticked_figure(
+        RuleOptions {
+            width,
+            ..RuleOptions::default()
+        },
+        false,
+    );
+    let (plot, baseline) = baseline_y_of(&f);
+    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    let drawn = items(&f);
+    let ((_, y), _) = ends(drawn.last().unwrap());
+    assert_near(y, baseline);
+    // The lower half of the 6 pt stroke would reach 3 pt below the baseline: the layer's clip
+    // is what stops it.
+    let [clip] = layer_clips(&f).try_into().unwrap();
+    assert_near(f64::from(clip.y + clip.height), baseline);
+    assert_near(f64::from(clip.y), plot.y);
+}
+
+#[test]
+fn a_dotted_vline_cap_is_cut_at_the_baseline() {
+    let f = ticked_figure(
+        RuleOptions {
+            dash: Dash::Dotted,
+            width: SizeSpec::pt(4.2).unwrap(),
+            ..RuleOptions::default()
+        },
+        true,
+    );
+    let (_, baseline) = baseline_y_of(&f);
+    let drawn = items(&f);
+    let ((_, _), (_, end)) = ends(drawn.last().unwrap());
+    assert_near(end, baseline);
+    // The round cap of the last dot reaches 2.1 pt past the path's end; the clip stops it.
+    let [clip] = layer_clips(&f).try_into().unwrap();
+    assert_near(f64::from(clip.y + clip.height), baseline);
 }
