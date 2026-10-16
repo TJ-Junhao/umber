@@ -66,7 +66,7 @@
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
 //!   mapping of points: [`ColorBy`] with its [`CmapChoice`], and the [`PointColor`] of scatter
-//!   and bubble marks;
+//!   and bubble marks; colorbars: [`ColorbarOptions`] and [`ColorbarPosition`];
 //! - per-series line widths and marker sizes: [`SizeSpec`], with its [`Factor`] and [`Points`];
 //! - tick labels: [`TickFormat`], with its [`NumberStyle`] and [`Decimals`];
 //! - times: [`Instant`] and its [`Civil`] date and time;
@@ -159,6 +159,7 @@ pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
+pub use model::ColorbarOptions;
 pub use render::SvgText;
 pub use scale::{
     CategoryScale, ContinuousScale, LogBase, MAX_MAGNITUDE, MIN_LOG_VALUE, ScaleKind, Transform,
@@ -169,6 +170,7 @@ pub use scene::{
 };
 pub use size::{Factor, Points, SizeSpec};
 pub use text::{FontLibrary, TextLayout, TextStyle};
+pub use theme::ColorbarPosition;
 pub use theme::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, Marker, Theme};
 pub use tick_format::{Decimals, NumberStyle, TickFormat};
 pub use ticks::Tick;

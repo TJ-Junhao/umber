@@ -8,8 +8,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
-    Align, Dash, FillStyle, Font, GridLines, LegendMode, LegendPosition, LegendStyle, Marker,
-    Share, Step, SvgText,
+    Align, ColorbarPosition, Dash, FillStyle, Font, GridLines, LegendMode, LegendPosition,
+    LegendStyle, Marker, Share, Step, SvgText,
 };
 
 use crate::errors::internal_value;
@@ -132,6 +132,12 @@ int_enum!("Step", Step {
     "MID" => Step::Mid = 2,
 });
 
+int_enum!("ColorbarPosition", ColorbarPosition {
+    "RIGHT" => ColorbarPosition::Right = 0,
+    "BOTTOM" => ColorbarPosition::Bottom = 1,
+    "NONE" => ColorbarPosition::None = 2,
+});
+
 /// The variant of `E` with integer value `value`; an unknown value is an internal `ValueError`.
 pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
     E::from_value(value)
@@ -140,7 +146,7 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 12] = [
+const TABLES: [(&str, &[(&str, i64)]); 13] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (Font::PY_NAME, Font::MEMBERS),
@@ -153,6 +159,7 @@ const TABLES: [(&str, &[(&str, i64)]); 12] = [
     (LegendPosition::PY_NAME, LegendPosition::MEMBERS),
     (Align::PY_NAME, Align::MEMBERS),
     (Step::PY_NAME, Step::MEMBERS),
+    (ColorbarPosition::PY_NAME, ColorbarPosition::MEMBERS),
 ];
 
 /// The member tables of every bound enum, keyed by the Python enum name.
@@ -201,6 +208,7 @@ mod tests {
         round_trips::<LegendPosition>();
         round_trips::<Align>();
         round_trips::<Step>();
+        round_trips::<ColorbarPosition>();
     }
 
     #[test]
@@ -220,7 +228,8 @@ mod tests {
                 "Legend",
                 "LegendPosition",
                 "Align",
-                "Step"
+                "Step",
+                "ColorbarPosition"
             ]
         );
     }

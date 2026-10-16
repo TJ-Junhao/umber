@@ -35,7 +35,7 @@ pub use violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 mod share_tests;
 
 pub use axes::Axes;
-pub use axes_mut::AxesMut;
+pub use axes_mut::{AxesMut, ColorbarOptions};
 pub use axis_data::AxisData;
 pub use band::{BandMark, BandOptions};
 pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};

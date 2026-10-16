@@ -50,6 +50,8 @@ pub struct Axes {
     pub(super) marks: Vec<Mark>,
     /// The explicit color range of the color-mapped marks; their extent applies when unset.
     pub(super) color_limits: Option<(f64, f64)>,
+    /// The colorbar's label and optional position and tick format overrides.
+    pub(super) colorbar: super::ColorbarOptions,
 }
 
 impl Axes {
@@ -76,6 +78,7 @@ impl Axes {
             legend_position: None,
             marks: Vec::new(),
             color_limits: None,
+            colorbar: super::ColorbarOptions::default(),
         }
     }
 
@@ -437,6 +440,11 @@ impl Axes {
     #[must_use]
     pub fn color_limits(&self) -> Option<(f64, f64)> {
         self.color_limits
+    }
+
+    /// The colorbar settings, including unset overrides.
+    pub(crate) fn colorbar_options(&self) -> &super::ColorbarOptions {
+        &self.colorbar
     }
 }
 

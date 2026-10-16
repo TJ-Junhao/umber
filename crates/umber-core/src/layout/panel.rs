@@ -344,6 +344,12 @@ pub(crate) struct PanelBands {
     pub right_legend: f64,
     /// The bottom legend and its gap to the x axis.
     pub bottom_legend: f64,
+    /// The right colorbar and its gap.
+    pub right_colorbar: f64,
+    /// The bottom colorbar and its gap.
+    pub bottom_colorbar: f64,
+    /// The colorbar texts and metrics, before placement.
+    colorbar: Option<super::colorbar::MeasuredColorbar>,
     /// The x tick label row and its gap; 0 without x tick labels.
     pub x_band: f64,
     /// The x axis label row and its gap; 0 without an x axis label.
@@ -375,6 +381,15 @@ pub(crate) struct PanelBands {
 }
 
 impl PanelBands {
+    /// The widest horizontal colorbar tick, whose span follows the x-axis spans.
+    pub(super) fn colorbar_tick_width(&self) -> f64 {
+        self.x_spans
+            .iter()
+            .skip(self.x_labels.len())
+            .map(|span| 2.0 * span.half)
+            .fold(0.0, f64::max)
+    }
+
     /// The header: title, subtitle, legend row `row` and the gap below them; 0 when empty.
     pub(super) fn header_with_row(&self, row: &LegendRow) -> f64 {
         self.heading.height_with_row(row)
@@ -388,7 +403,7 @@ impl PanelBands {
     /// Everything below the plot: the x tick label row and the x label row, or the bottom y
     /// tick label reaching below the plot when that reaches further.
     pub(super) fn below(&self) -> f64 {
-        self.axis_below() + self.bottom_legend
+        self.axis_below() + self.bottom_legend + self.bottom_colorbar
     }
 
     /// The room below the plot for the axes alone, before a bottom legend.
@@ -398,7 +413,11 @@ impl PanelBands {
 
     /// The widest reserve beside the plot: direct labels or the column legend.
     pub(super) fn right(&self) -> f64 {
-        self.direct_reserve.max(self.right_legend)
+        if self.right_colorbar > 0.0 {
+            self.direct_reserve + self.right_colorbar + self.right_legend
+        } else {
+            self.direct_reserve.max(self.right_legend)
+        }
     }
 }
 
@@ -468,7 +487,7 @@ pub(crate) fn measure_panel(
     } else {
         y_label_width + Y_LABEL_GAP
     };
-    let x_spans = x_labels
+    let mut x_spans: Vec<_> = x_labels
         .iter()
         .map(|(pos, label)| TickSpan {
             pos: pos.get(),
@@ -486,11 +505,31 @@ pub(crate) fn measure_panel(
         0.0
     };
 
+    let colorbar =
+        super::colorbar::MeasuredColorbar::measure(axes, resolved.color.as_ref(), theme, lib);
+    let (mut right_colorbar, mut bottom_colorbar) = (0.0, 0.0);
+    let (mut y_label_band, mut label_rise, mut label_drop) = (y_label_band, label_rise, label_drop);
+    if let Some(bar) = &colorbar {
+        right_colorbar = bar.right_reserve();
+        bottom_colorbar = bar.bottom_reserve();
+        y_label_band = y_label_band.max(bar.label_band());
+        let (rise, drop) = bar.tick_overhang();
+        label_rise = label_rise.max(rise);
+        label_drop = label_drop.max(drop);
+        x_spans.extend(bar.x_spans());
+    }
     PanelBands {
+        right_colorbar,
+        bottom_colorbar,
+        colorbar,
         y_label_band,
         label_rise,
         y_tick_column,
-        direct_reserve: legend.direct.reserve(span.reserve_cap),
+        direct_reserve: legend.direct.reserve(if right_colorbar > 0.0 {
+            f64::INFINITY
+        } else {
+            span.reserve_cap
+        }),
         right_legend: legend.right_reserve(),
         bottom_legend: legend.bottom_reserve(span.row_left, span.row_right),
         x_band,
@@ -564,7 +603,16 @@ pub(crate) fn place_panel(
         crate::LegendPosition::TopLeft | crate::LegendPosition::TopRight => row.placed(header.row),
         crate::LegendPosition::Right => input
             .legend
-            .column(plot.right() + super::placement::RIGHT_GAP)
+            .column(
+                plot.right()
+                    + super::placement::RIGHT_GAP
+                    + bands.right_colorbar
+                    + if bands.right_colorbar > 0.0 {
+                        bands.direct_reserve
+                    } else {
+                        0.0
+                    },
+            )
             .placed(plot.y),
         crate::LegendPosition::Bottom => {
             let axis_bottom = if xlabel.is_some() {
@@ -606,6 +654,19 @@ pub(crate) fn place_panel(
         label.y = plot.y - label_rise - AXIS_LABEL_GAP;
     }
 
+    let axis_bottom = if xlabel.is_some() {
+        (xlabel_baseline + bands.body_descent).max(plot.bottom() + axis_below)
+    } else {
+        plot.bottom() + axis_below
+    };
+    let bottom = if position == crate::LegendPosition::Bottom && !row.is_empty() {
+        axis_bottom + super::placement::BOTTOM_GAP + row.height()
+    } else {
+        axis_bottom
+    };
+    let colorbar = bands
+        .colorbar
+        .map(|bar| bar.place(plot, bands.direct_reserve, bottom, label_rise));
     let direct = input.legend.direct.placed(resolved, plot, frame);
     let baseline = resolved.baseline;
     // The baseline is drawn in place of the gridline it coincides with.
@@ -646,6 +707,7 @@ pub(crate) fn place_panel(
         x_grid,
         baseline: PlacedBaseline::on(&plot, baseline),
         frame,
+        colorbar,
     }
 }
 

@@ -188,6 +188,14 @@ impl Theme {
         Theme(self.0.with_cmap(cmap.core().clone()))
     }
 
+    /// This theme with the colorbar position `position`.
+    fn with_colorbar_position(&self, position: i64) -> PyResult<Theme> {
+        self.with_enum::<umber_core::ColorbarPosition>(
+            position,
+            umber_core::Theme::with_colorbar_position,
+        )
+    }
+
     /// This theme with the default diverging colormap `cmap`.
     fn with_diverging_cmap(&self, cmap: &Cmap) -> Theme {
         Theme(self.0.with_diverging_cmap(cmap.core().clone()))

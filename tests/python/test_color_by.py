@@ -84,9 +84,11 @@ def test_points_take_the_mapped_colors() -> None:
         .scatter([2], [2], color=ub.Color.WHITE)
     )
     faded = axes().scatter([1], [1], color=ub.Color.BLACK).scatter([2], [2], color=ub.Color.WHITE)
+    mapped.colorbar(position=ub.ColorbarPosition.NONE)
     assert mapped.figure.to_svg() != faded.figure.to_svg()
     assert mapped.figure.to_svg() == explicit.figure.to_svg()
     clamped = axes().clim(0, 10).scatter([1, 2], [1, 2], color=ub.ColorBy([-50, 50], GRAYS))
+    clamped.colorbar(position=ub.ColorbarPosition.NONE)
     assert clamped.figure.to_svg() == explicit.figure.to_svg()
 
 

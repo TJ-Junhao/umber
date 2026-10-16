@@ -92,6 +92,7 @@ mod corpus {
     pub mod bubbles;
     pub mod cmap;
     pub mod color_by;
+    pub mod colorbar;
     pub mod error_bars;
     pub mod grid;
     pub mod header;
@@ -171,6 +172,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::violin::cases(&lib, &mut sink);
     corpus::cmap::cases(&mut sink);
     corpus::color_by::cases(&lib, &mut sink);
+    corpus::colorbar::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -2049,6 +2051,17 @@ mod record {
         fn paint(&mut self, paint: &Paint) {
             match paint {
                 Paint::Solid(c) => self.line(&format!(" paint solid {}", rgba(*c))),
+                Paint::LinearGradient { from, to, stops } => {
+                    self.line(&format!(
+                        " paint sampled start={} end={} stops={}",
+                        point(*from),
+                        point(*to),
+                        stops.len()
+                    ));
+                    for (offset, color) in stops {
+                        self.line(&format!("  stop {} {}", f32(*offset), rgba(*color)));
+                    }
+                }
                 Paint::Linear(g) => {
                     self.line(&format!(
                         " paint linear start={} end={} stops={}",

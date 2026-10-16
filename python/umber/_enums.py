@@ -302,3 +302,23 @@ class Step(Enum):
     """Change level halfway between two x values as drawn: at their mean on a linear x axis,
     halfway between the band centres on a category x axis, and at their geometric mean on a log
     x axis (between 1 and 100, at 10)."""
+
+
+@unique
+class ColorbarPosition(Enum):
+    """Where a colorbar sits beside its plot.
+
+    Example:
+        >>> import umber as ub
+        >>> ub.ColorbarPosition.RIGHT.name
+        'RIGHT'
+    """
+
+    RIGHT = 0
+    """Right of the plot, spanning its height."""
+
+    BOTTOM = 1
+    """Below the x axis and any bottom legend, spanning the plot width."""
+
+    NONE = 2
+    """Hidden, without reserving space."""

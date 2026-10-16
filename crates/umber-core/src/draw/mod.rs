@@ -37,6 +37,7 @@ mod box_plot;
 mod bubbles;
 mod chrome;
 mod clip;
+pub(crate) mod colorbar;
 mod error_bars;
 pub(crate) mod fill;
 mod hist;

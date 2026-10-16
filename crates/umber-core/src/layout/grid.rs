@@ -719,6 +719,8 @@ struct Rows {
     below: Vec<f64>,
     /// The part of each bottom band occupied by legends, after the aligned x axis labels.
     legends: Vec<f64>,
+    /// The first panel with a visible colorbar, for insufficient-height errors.
+    colorbar: Option<CellRange>,
 }
 
 /// The rows placed.
@@ -757,8 +759,10 @@ impl Rows {
             let last = first + cells.row_span() - 1;
             let row = panel.legend.header_within(left, right);
             above[first] = above[first].max(bands.above_with_row(&row));
-            below[last] = below[last].max(bands.below() - bands.bottom_legend);
-            legends[last] = legends[last].max(panel.legend.bottom_reserve(left, right));
+            below[last] =
+                below[last].max(bands.below() - bands.bottom_legend - bands.bottom_colorbar);
+            legends[last] =
+                legends[last].max(panel.legend.bottom_reserve(left, right) + bands.bottom_colorbar);
         }
         for (below, legend) in below.iter_mut().zip(&legends) {
             *below += legend;
@@ -768,6 +772,9 @@ impl Rows {
             above,
             below,
             legends,
+            colorbar: cells.iter().zip(bands).find_map(|(cells, band)| {
+                (band.right_colorbar > 0.0 || band.bottom_colorbar > 0.0).then_some(*cells)
+            }),
         }
     }
 
@@ -784,6 +791,17 @@ impl Rows {
         let padding = input.top + PADDING;
         let plot_height = |height: f64| (height - padding - bands - gaps) / rows as f64;
         if plot_height(input.height) < MIN_PLOT {
+            if let Some(cells) = self.colorbar {
+                return Err(in_panel(
+                    cells,
+                    super::colorbar::room_error(
+                        input.context,
+                        bands + MIN_PLOT * rows as f64,
+                        input.height - padding - gaps,
+                        true,
+                    ),
+                ));
+            }
             // The least whole height that the check accepts.
             let needed = padding + bands + gaps + MIN_PLOT * rows as f64;
             let least = input.height.floor() + 1.0;
@@ -866,6 +884,17 @@ fn columns_too_narrow(
     let deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
     for ((cell, band), panel) in cells.iter().zip(bands).zip(input.panels) {
         let last = cell.col() + cell.col_span() - 1;
+        if band.right_colorbar > 0.0 && band.right() == columns.right[last] {
+            return in_panel(
+                *cell,
+                super::colorbar::room_error(
+                    input.context,
+                    band.right_colorbar,
+                    band.right_colorbar - deficit,
+                    false,
+                ),
+            );
+        }
         if band.right_legend > 0.0 && band.right_legend == columns.right[last] {
             let available = band.right_legend - deficit;
             if let Err(err) = super::placement::check_right_width(
@@ -1031,7 +1060,11 @@ fn x_labels_do_not_fit(
         .iter()
         .copied()
         .fold(None, |best: Option<usize>, i| {
-            let width = |i: usize| widest(&bands[i].x_labels).map_or(0.0, Label::width);
+            let width = |i: usize| {
+                widest(&bands[i].x_labels)
+                    .map_or(0.0, Label::width)
+                    .max(bands[i].colorbar_tick_width())
+            };
             match best {
                 Some(kept) if width(kept) >= width(i) => best,
                 _ => Some(i),
@@ -1039,7 +1072,16 @@ fn x_labels_do_not_fit(
         })
         .unwrap_or(0);
     let fits = widest_label_that_fits(columns, cells, bands);
-    let err = x_labels_wider_than(input.context, &bands[named].x_labels, fits);
+    let err = if bands[named].colorbar_tick_width() > fits {
+        super::colorbar::room_error(
+            input.context,
+            bands[named].colorbar_tick_width(),
+            fits,
+            false,
+        )
+    } else {
+        x_labels_wider_than(input.context, &bands[named].x_labels, fits)
+    };
     in_panel(cells[named], err)
 }
 
@@ -1146,6 +1188,19 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 ///
 /// Both legend errors have the hint `shorten the label or widen the figure.`
 pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) -> Result<()> {
+    for (panel, layout) in input.panels.iter().zip(layouts) {
+        if let Some(colorbar) = &layout.colorbar {
+            colorbar
+                .check(input.context, layout.frame, input.width, panel.lib)
+                .map_err(|error| {
+                    if input.is_single() {
+                        error
+                    } else {
+                        in_panel(panel.axes.cells(), error)
+                    }
+                })?;
+        }
+    }
     if input.is_single() {
         for (panel, layout) in input.panels.iter().zip(layouts) {
             super::placement::check(panel, layout, true)?;
@@ -2781,6 +2836,7 @@ mod tests {
                 above: (0..rows).map(|_| rng.unit() * 300.0).collect(),
                 below: (0..rows).map(|_| rng.unit() * 100.0).collect(),
                 legends: vec![0.0; rows],
+                colorbar: None,
             };
             let grid = Grid::new(rows as i64, 2).unwrap();
             let input = GridInput {

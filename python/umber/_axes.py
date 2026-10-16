@@ -16,7 +16,16 @@ from umber import _args, _color, _series, _size, _ticks, _umber
 from umber._args import instance, integer, is_text_or_buffer, real, type_name
 from umber._color import Color
 from umber._color_by import ColorBy, native_point_color
-from umber._enums import AUTO, Auto, Dash, LegendPosition, LegendStyle, Marker, Step
+from umber._enums import (
+    AUTO,
+    Auto,
+    ColorbarPosition,
+    Dash,
+    LegendPosition,
+    LegendStyle,
+    Marker,
+    Step,
+)
 from umber._errors import DataError, new_error
 from umber._report import api_call
 from umber._scale import Scale
@@ -1720,6 +1729,74 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             lo = real(context, "low", low)
             hi = real(context, "high", high)
             self._native.clim(self._row, self._col, lo, hi)
+            return self
+
+    def colorbar(
+        self,
+        label: str = "",
+        *,
+        position: ColorbarPosition | Auto = AUTO,
+        format: TickFormat | Auto = AUTO,
+    ) -> Self:
+        """Set the colorbar label, position and tick format.
+
+        A colorbar is drawn automatically for finite mapped values. ``RIGHT`` places it
+        beside the plot, before a right legend. ``BOTTOM`` places it below the x axis and
+        any bottom legend. The label sits above the bar. Each call replaces all settings.
+
+        Args:
+            label: The horizontal label above the colorbar; empty draws no label.
+            position: ``RIGHT``, ``BOTTOM`` or ``NONE``. ``AUTO`` follows the theme and
+                clears a previous override.
+            format: The tick format. ``AUTO`` follows the y tick format and clears a
+                previous override.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            StyleError: If the label exceeds 1,000 characters or holds a lone surrogate.
+            UsageError: If no color-mapped mark has been added yet.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().scatter([1, 2], [2, 3], color=ub.ColorBy([4, 8]))
+            >>> ax = ax.colorbar("Intensity", position=ub.ColorbarPosition.BOTTOM)
+        """
+        with api_call():
+            context = "Axes.colorbar()"
+            _args.require_text(context, "label", label)
+            placement = (
+                None
+                if position is AUTO
+                else instance(
+                    context,
+                    "position",
+                    position,
+                    ColorbarPosition,
+                    _members_hint(ColorbarPosition) + " Use ub.AUTO for the theme's position.",
+                ).value
+            )
+            checked = (
+                None
+                if format is AUTO
+                else instance(
+                    context,
+                    "format",
+                    format,
+                    TickFormat,
+                    _FORMAT_HINT,
+                )
+            )
+            name = _args.text(context, "label", label)
+            self._native.colorbar(
+                self._row,
+                self._col,
+                name,
+                placement,
+                None if checked is None else _ticks.native(checked),
+            )
             return self
 
 

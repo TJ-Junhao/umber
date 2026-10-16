@@ -254,6 +254,14 @@ impl Writer {
         let d = path_d(&normalized);
         let mut attrs = String::new();
         match paint {
+            Paint::LinearGradient { from, to, stops } => {
+                self.fill(
+                    path,
+                    &Paint::Linear(crate::scene::sampled_gradient(*from, *to, stops)),
+                    rule,
+                );
+                return;
+            }
             Paint::Solid(c) => {
                 if c.a == 0 {
                     return;
