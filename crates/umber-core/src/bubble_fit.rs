@@ -181,16 +181,28 @@ impl BubbleFit {
         members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>])> + Clone,
     ) -> Option<BubbleFit> {
         let marks = members.clone().flat_map(|(_, marks)| marks.iter());
-        let (_, extent) = resolve::time_extents(marks, axis.which(), limits.ticks);
-        let (origin, last) = extent?;
+        let (_, extent) = resolve::time_extents(marks.clone(), axis.which(), limits.ticks);
+        let (origin, _) = extent?;
         let bubbles = Self::drawn(axis, Some(origin), members);
         if bubbles.is_empty() {
             return None;
         }
-        let (low, high) = if origin == last {
-            (-resolve::SINGLE_TIME_REACH, resolve::SINGLE_TIME_REACH)
+        // Mesh cells keep their exact extent whatever the bubbles do, so the fit starts from
+        // the extent of the other marks and the ticks, in seconds from the common origin.
+        let others = marks.filter(|mark| !matches!(mark, ResolvedMark::Mesh { .. }));
+        let (_, other) = resolve::time_extents(others, axis.which(), limits.ticks);
+        let (first, last) = other.unwrap_or((origin, origin));
+        let (low, high) = if first == last {
+            let at = seconds_between(origin, first);
+            (
+                at - resolve::SINGLE_TIME_REACH,
+                at + resolve::SINGLE_TIME_REACH,
+            )
         } else {
-            (0.0, seconds_between(origin, last))
+            (
+                seconds_between(origin, first),
+                seconds_between(origin, last),
+            )
         };
         let seed = ContinuousScale::new(Transform::Linear, low, high, CONTEXT).ok()?;
         Some(BubbleFit {

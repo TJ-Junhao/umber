@@ -1596,3 +1596,111 @@ fn a_mesh_on_a_shared_time_axis_leaves_the_other_panels_padding() {
     assert!(low < jan1 && high > jan31, "{low:?} {high:?}");
     assert_eq!(plans[0].0.x, plans[1].0.x);
 }
+
+/// The domain of the time axis of the single axes of `f`, x or y.
+fn time_domain(f: &Figure, on_x: bool) -> (Instant, Instant) {
+    let r = resolved(f);
+    time_scale(if on_x { &r.x.scale } else { &r.y.scale }).instants()
+}
+
+/// Axes of `f` with the time axis on x when `on_x`, else on y.
+fn kinds(on_x: bool) -> (ScaleKind, ScaleKind) {
+    if on_x { (TIME, LIN) } else { (LIN, TIME) }
+}
+
+/// A mesh between the times `edges` along the time axis of `f`, with one row or column of cells.
+fn time_mesh(f: &mut Figure, on_x: bool, edges: [Instant; 2]) {
+    let numbers = AxisData::Numbers(vec![0.0, 1.0]);
+    let (x, y) = if on_x {
+        (times(&edges), numbers)
+    } else {
+        (numbers, times(&edges))
+    };
+    f.single_axes_mut()
+        .mesh_time(x, y, &[1.0], MeshOptions::default())
+        .unwrap();
+}
+
+#[test]
+fn bubbles_do_not_pad_the_extent_of_a_mesh() {
+    let (jan1, jan10, jan20, jan31) = (
+        date(2026, 1, 1),
+        date(2026, 1, 10),
+        date(2026, 1, 20),
+        date(2026, 1, 31),
+    );
+    for on_x in [true, false] {
+        let (x, y) = kinds(on_x);
+        let mut f = figure(Theme::pigment(), x, y);
+        time_mesh(&mut f, on_x, [jan1, jan31]);
+        let numbers = AxisData::Numbers(vec![0.5, 0.5]);
+        let (bx, by) = if on_x {
+            (times(&[jan10, jan20]), numbers)
+        } else {
+            (numbers, times(&[jan10, jan20]))
+        };
+        f.single_axes_mut()
+            .bubbles_time(bx, by, [1.0, 1.0].into(), BubbleOptions::default())
+            .unwrap();
+        assert_eq!(time_domain(&f, on_x), (jan1, jan31), "on_x {on_x}");
+    }
+}
+
+#[test]
+fn explicit_ticks_enclose_a_mesh_exactly() {
+    let hour = 3_600_000_000;
+    let (start, end) = (date(2026, 1, 1), plus(date(2026, 1, 1), hour));
+    for on_x in [true, false] {
+        let (x, y) = kinds(on_x);
+        let ticks = |f: &mut Figure, at: &[Instant]| {
+            let mut ax = f.single_axes_mut();
+            if on_x {
+                ax.xticks_time(at).unwrap();
+            } else {
+                ax.yticks_time(at).unwrap();
+            }
+        };
+        for (at, expected) in [
+            (vec![start, end], (start, end)),
+            (vec![start], (start, end)),
+            (vec![end], (start, end)),
+            (vec![plus(end, hour)], (start, plus(end, hour))),
+            (vec![plus(start, -hour), end], (plus(start, -hour), end)),
+        ] {
+            let mut f = figure(Theme::pigment(), x, y);
+            time_mesh(&mut f, on_x, [start, end]);
+            ticks(&mut f, &at);
+            assert_eq!(time_domain(&f, on_x), expected, "on_x {on_x}, ticks {at:?}");
+        }
+    }
+}
+
+#[test]
+fn the_padded_ends_of_other_marks_keep_their_whole_microseconds() {
+    let epoch = Instant::from_micros(0).unwrap();
+    let before = Instant::from_micros(-1).unwrap();
+    let one_second = Instant::from_micros(1_000_000).unwrap();
+    // On x a line reads its exact extent: the domain is the union of the cells and the line.
+    let mut f = figure(Theme::pigment(), TIME, LIN);
+    time_mesh(&mut f, true, [before, epoch]);
+    f.single_axes_mut()
+        .line_shared(
+            times(&[epoch, one_second]),
+            AxisData::Numbers(vec![0.0, 1.0]),
+            LineOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(time_domain(&f, true), (before, one_second));
+    // On y padding applies, and the domain still reaches whole microseconds past the data.
+    let mut f = figure(Theme::pigment(), LIN, TIME);
+    time_mesh(&mut f, false, [before, epoch]);
+    f.single_axes_mut()
+        .line_shared(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            times(&[epoch, one_second]),
+            LineOptions::default(),
+        )
+        .unwrap();
+    let (low, high) = time_domain(&f, false);
+    assert!(low < before && high > one_second, "{low:?} {high:?}");
+}

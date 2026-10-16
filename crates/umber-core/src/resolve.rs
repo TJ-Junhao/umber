@@ -1069,9 +1069,10 @@ fn holds_cells(mark: &ResolvedMark<'_>, which: ValueAxis) -> bool {
 }
 
 /// The time scale of an axis that holds mesh cells, whose seconds count from `origin`, the
-/// earliest of all its times: the union of the exact extent of the cells and the domain that
-/// the other marks, the explicit ticks and `bubbles` give it, fitted and padded as
-/// [`time_axis`] fits an axis without cells.
+/// earliest of all its times and explicit ticks: the union of the exact extent of the cells and
+/// the domain that the other marks and `bubbles` give it, fitted and padded as [`time_axis`]
+/// fits an axis without cells. Explicit ticks that no other mark's data accompanies are
+/// enclosed exactly, as the cells are, never padded as data.
 fn time_cells_scale<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>>,
     which: ValueAxis,
@@ -1084,7 +1085,18 @@ fn time_cells_scale<'a, 'm: 'a>(
     let cell_extent = time_extent(cells.iter().flat_map(|mark| mark.times(which)));
     let (other_data, other_extent) = time_extents(others.iter().copied(), which, ticks);
     let seconds = |t: Instant| seconds_between(origin, t);
-    let around = other_extent.map(|(low, high)| {
+    // The instants whose seconds are exact ends of the domain, which then keep their whole
+    // microseconds.
+    let mut ends: Vec<(f64, Instant)> = Vec::new();
+    let mut note = |extent: Option<InstantRange>| {
+        for t in extent.into_iter().flat_map(|(low, high)| [low, high]) {
+            ends.push((seconds(t), t));
+        }
+    };
+    note(cell_extent);
+    note(other_extent);
+    let cell_seconds = cell_extent.map(|(low, high)| (seconds(low), seconds(high)));
+    let around = other_data.and(other_extent).map(|(low, high)| {
         let single = low == high;
         let (from, to) = if single {
             (
@@ -1105,18 +1117,28 @@ fn time_cells_scale<'a, 'm: 'a>(
         };
         (from - pad, to + pad)
     });
-    let cell_seconds = cell_extent.map(|(low, high)| (seconds(low), seconds(high)));
-    let (from, to) = union(cell_seconds, around).unwrap_or((0.0, 0.0));
-    // The cells' own edges keep their whole microseconds.
-    let before = match cell_extent {
-        Some((low, _)) if cell_seconds.is_some_and(|(s, _)| s == from) => low,
-        _ => shifted(origin, from),
+    // Ticks beside data are part of the others' extent above; alone they are enclosed exactly.
+    let tick_seconds = other_data
+        .is_none()
+        .then_some(other_extent)
+        .flatten()
+        .map(|(low, high)| (seconds(low), seconds(high)));
+    let (from, to) = union(union(cell_seconds, around), tick_seconds).unwrap_or((0.0, 0.0));
+    let end = |value: f64, up: bool| {
+        ends.iter()
+            .find(|(s, _)| *s == value)
+            .map_or_else(|| shifted_outward(origin, value, up), |&(_, t)| t)
     };
-    let after = match cell_extent {
-        Some((_, high)) if cell_seconds.is_some_and(|(_, s)| s == to) => high,
-        _ => shifted(origin, to),
-    };
-    time_scale(origin, from, to, (before, after))
+    time_scale(origin, from, to, (end(from, false), end(to, true)))
+}
+
+/// The whole microsecond nearest to `t` moved by `seconds`, rounded away from `t`'s side of the
+/// domain it ends (`up` for a high end, else a low end), so that the instants stay inside it.
+fn shifted_outward(t: Instant, seconds: f64, up: bool) -> Instant {
+    let micros = seconds * 1e6;
+    let micros = if up { micros.ceil() } else { micros.floor() };
+    // `as` saturates beyond the range of i64.
+    Instant::clamped(t.micros().saturating_add(micros as i64))
 }
 
 /// Resolves the time axis `which` of one group from the times its `marks` give along it, as
