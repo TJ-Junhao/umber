@@ -607,7 +607,7 @@ const FIGURE_WIDTH_HINT: &str = "widen the figure.";
 const LEGEND_HINT: &str = "shorten the label or widen the figure.";
 
 /// The text's width and the room it has, in whole points.
-fn widths(width: f64, room: f64) -> (impl std::fmt::Display, impl std::fmt::Display) {
+pub(crate) fn widths(width: f64, room: f64) -> (impl std::fmt::Display, impl std::fmt::Display) {
     let room = room.floor();
     (number(width.round().max(room + 1.0)), number(room))
 }

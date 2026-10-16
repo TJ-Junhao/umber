@@ -86,6 +86,24 @@ def test_shape_error_exact() -> None:
             "values[1][1] is 'x'; values must be numbers.",
         ),
         (np.array([[True, False], [True, True]]), "values has dtype bool; values must be numbers."),
+        # Rows given as arrays are checked one by one, before they are stacked.
+        (
+            [np.array([True, False]), np.array([2.0, 3.0])],
+            "values[0] has dtype bool; values must be numbers.",
+        ),
+        (
+            [np.array([1.0, 2.0]), np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[D]")],
+            "values[1] has dtype datetime64[D]; values must be numbers.",
+        ),
+        (
+            [np.array([1.0, 2.0]), np.array(["3", "x"])],
+            "values[1][0] is '3'; values must be numbers.",
+        ),
+        ([np.array([1.0, 2.0]), [3.0, "x"]], "values[1][1] is 'x'; values must be numbers."),
+        (
+            [np.array([1.0, 2.0]), np.array([3.0, None], dtype=object)],
+            "values[1][1] is None; values must be numbers.",
+        ),
     ],
 )
 def test_values_that_are_not_a_matrix_of_numbers(values: object, message: str) -> None:
@@ -97,6 +115,34 @@ def test_values_that_are_not_a_matrix_of_numbers(values: object, message: str) -
     found = details(caught.value)
     assert found is not None and found[0] == "values"
     assert ax.figure.to_svg() == before
+
+
+def test_rows_of_arrays_convert_one_by_one() -> None:
+    reference = axes().heatmap(["a", "b"], ["r", "s"], [[1.0, 2.0], [3.0, 4.0]])
+    mixed = axes().heatmap(
+        ["a", "b"],
+        ["r", "s"],
+        [np.array([1, 2], dtype=np.int8), np.array([3.0, 4.0], dtype=np.float32)],
+    )
+    objects = axes().heatmap(["a", "b"], ["r", "s"], [np.array([1, 2.0], dtype=object), [3, 4]])
+    assert mixed.figure.to_svg() == reference.figure.to_svg()
+    assert objects.figure.to_svg() == reference.figure.to_svg()
+
+
+def test_labels_that_do_not_fit_their_cells_are_refused() -> None:
+    values = [[12345.6789 if i % 2 == 0 else float("nan") for i in range(30)]]
+    ax = ub.Figure(3, 2).add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+    ax.heatmap(
+        [f"c{i}" for i in range(30)], ["r"], values, annotate=True, format=ub.TickFormat.fixed(4)
+    )
+    with pytest.raises(ub.StyleError) as caught:
+        ax.figure.to_svg()
+    message = str(caught.value)
+    assert message.startswith('Figure.to_svg(): the heatmap label "12345.6789" is '), message
+    assert message.endswith(" pt wide."), message
+    found = details(caught.value)
+    assert found is not None and found[0] is None
+    assert found[1] is not None and "annotate=False" in found[1]
 
 
 def test_core_errors_name_cells_and_categories() -> None:

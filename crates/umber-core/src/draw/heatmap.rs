@@ -13,15 +13,22 @@ use super::chrome::text;
 use super::mapping::{AxisMaps, point};
 use crate::color_scale::ResolvedColorScale;
 use crate::geometry::Path;
-use crate::layout::{Layout, centered_tick_label};
+use std::collections::HashSet;
+
+use crate::error::quoted;
+use crate::layout::{Label, Layout, centered_tick_label, widths};
 use crate::model::HeatmapMark;
 use crate::resolve::{AxisScale, Resolved, ResolvedMark};
 use crate::scene::{FillRule, Item, Paint, Rect};
-use crate::{CategoryScale, FontLibrary, Rgba, Theme, TickFormat};
+use crate::{CategoryScale, Error, FontLibrary, Result, Rgba, Theme, TickFormat};
 
 /// How far, in points, a cell reaches under a neighbour drawn after it; at most half the
 /// neighbour's size along that axis.
 const OVERLAP: f64 = 1.0;
+
+/// The hint of a heatmap whose labels do not fit its cells.
+const LABEL_HINT: &str = "enlarge the figure, write fewer decimals with format, or pass \
+                          annotate=False.";
 
 /// The text color on a cell whose black text contrasts more with it than white text would.
 const DARK_TEXT: Rgba = Rgba {
@@ -42,6 +49,8 @@ const LIGHT_TEXT: Rgba = Rgba {
 /// One drawn cell of a heatmap, in drawing order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Cell {
+    /// The indices of its y and x categories on their axes.
+    at: (usize, usize),
     /// The cell's value, finite.
     value: f64,
     /// The color it maps to.
@@ -102,6 +111,7 @@ fn cells(
             let has_right = at(r, c + 1).is_some();
             let has_below = at(r + 1, c).is_some();
             cells.push(Cell {
+                at: (r, c),
                 value,
                 color,
                 bounds: [
@@ -191,50 +201,119 @@ pub(super) fn heatmap_items(
 /// The values of the annotated heatmaps among `marks`, as one group clipped to the plot area:
 /// each value centered on its cell in the tick font of `theme`, shaped with `lib`, in black or
 /// white by [`text_color_on`]. A heatmap writes its values in its own format, or else in the y
-/// tick format `y_format` (see [`ResolvedColorScale::value_labels`]). `None` when no cell is
-/// annotated.
+/// tick format `y_format` (see [`ResolvedColorScale::value_labels`]). `Ok(None)` when no cell
+/// is annotated.
+///
+/// The labels are drawn above every cell, so a label whose cell a later heatmap covers (a drawn
+/// cell of a later mark on the same pair of categories) is left out, as if each heatmap drew
+/// its labels with its cells.
+///
+/// # Errors
+///
+/// `Error::Style` under `context` when a drawn label does not fit its cell: naming the widest
+/// label when one is wider than the cells, else the label height when it is taller than them.
 pub(crate) fn annotations(
     theme: &Theme,
     lib: &FontLibrary,
     resolved: &Resolved,
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
-    y_format: &TickFormat,
-) -> Option<Item> {
-    let scale = resolved.color.as_ref()?;
+    (y_format, context): (&TickFormat, &'static str),
+) -> Result<Option<Item>> {
+    let Some(scale) = resolved.color.as_ref() else {
+        return Ok(None);
+    };
     let plot = layout.plot;
     let maps = AxisMaps::new(&resolved.x, &resolved.y, plot);
-    let mut items = Vec::new();
-    for mark in marks {
-        let ResolvedMark::Heatmap { mark, .. } = mark else {
-            continue;
-        };
+    let heatmaps: Vec<&HeatmapMark> = marks
+        .iter()
+        .filter_map(|mark| match mark {
+            ResolvedMark::Heatmap { mark, .. } => Some(*mark),
+            _ => None,
+        })
+        .collect();
+    let layers: Vec<Vec<Cell>> = heatmaps
+        .iter()
+        .map(|mark| cells(maps, resolved, mark, scale))
+        .collect();
+    let mut placed = Vec::new();
+    for (i, (mark, cells)) in heatmaps.iter().zip(&layers).enumerate() {
         if !mark.options().annotate {
             continue;
         }
-        let cells = cells(maps, resolved, mark, scale);
-        let values: Vec<f64> = cells.iter().map(|cell| cell.value).collect();
+        let covered: HashSet<(usize, usize)> = layers[i + 1..]
+            .iter()
+            .flatten()
+            .map(|cell| cell.at)
+            .collect();
+        let shown: Vec<&Cell> = cells
+            .iter()
+            .filter(|cell| !covered.contains(&cell.at))
+            .collect();
+        let values: Vec<f64> = shown.iter().map(|cell| cell.value).collect();
         let format = mark.options().format.as_ref().unwrap_or(y_format);
         let labels = scale.value_labels(&values, format);
-        for (cell, label) in cells.iter().zip(labels) {
+        for (cell, label) in shown.into_iter().zip(labels) {
             let [left, top, right, bottom] = cell.bounds;
             let center = ((left + right) / 2.0, (top + bottom) / 2.0);
-            let placed = centered_tick_label(lib, theme, &label, center);
-            items.push(text(&placed, text_color_on(cell.color)));
+            let label = centered_tick_label(lib, theme, &label, center);
+            placed.push((label, cell));
         }
     }
-    if items.is_empty() {
-        return None;
+    check_fit(context, &placed)?;
+    if placed.is_empty() {
+        return Ok(None);
     }
-    Some(Item::Group {
+    Ok(Some(Item::Group {
         clip: Some(Rect {
             x: plot.x as f32,
             y: plot.y as f32,
             width: plot.width as f32,
             height: plot.height as f32,
         }),
-        items,
-    })
+        items: placed
+            .iter()
+            .map(|(label, cell)| text(label, text_color_on(cell.color)))
+            .collect(),
+    }))
+}
+
+/// Checks that every label of `placed`, each with the cell it is centered on, fits inside its
+/// cell's bands: `Error::Style` under `context` naming the widest label when one is wider than
+/// its cell, else the label height when the labels are taller than their cells.
+fn check_fit(context: &'static str, placed: &[(Label, &Cell)]) -> Result<()> {
+    let size = |cell: &Cell| {
+        let [left, top, right, bottom] = cell.bounds;
+        (right - left, bottom - top)
+    };
+    let too_wide = placed
+        .iter()
+        .filter(|(label, cell)| label.width() > size(cell).0)
+        .max_by(|a, b| a.0.width().total_cmp(&b.0.width()));
+    if let Some((label, cell)) = too_wide {
+        let (width, room) = widths(label.width(), size(cell).0);
+        return Err(Error::style(
+            context,
+            format!(
+                "the heatmap label {} is {width} pt wide; its cells are {room} pt wide.",
+                quoted(&label.text)
+            ),
+        )
+        .with_hint(LABEL_HINT));
+    }
+    let height = |label: &Label| f64::from(label.layout.ascent() + label.layout.descent());
+    if let Some((label, cell)) = placed
+        .iter()
+        .find(|(label, cell)| height(label) > size(cell).1)
+    {
+        let (tall, room) = widths(height(label), size(cell).1);
+        return Err(Error::style(
+            context,
+            format!("the heatmap labels are {tall} pt tall; its cells are {room} pt tall."),
+        )
+        .with_hint(LABEL_HINT));
+    }
+    Ok(())
 }
 
 /// Black or white, whichever has the higher WCAG 2 contrast ratio with the opaque `fill`;
@@ -612,6 +691,137 @@ mod tests {
             labels(&[12.0, f64::NAN, 96.4], HeatmapOptions::default()),
             ["12", "96"]
         );
+    }
+
+    /// Every text of `scene`, in drawing order, with its color.
+    fn scene_texts(scene: &Scene) -> Vec<(String, Rgba)> {
+        let mut out = Vec::new();
+        let mut stack: Vec<&Item> = scene.items.iter().rev().collect();
+        while let Some(item) = stack.pop() {
+            match item {
+                Item::Group { items, .. } => stack.extend(items.iter().rev()),
+                Item::Text(text) => out.push((text.text.clone(), text.color)),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// A figure of heatmaps added in order on one cell `a`/`r`, each `(value, annotate)`.
+    fn layers(layers: &[(f64, bool)]) -> Figure {
+        let mut f = Figure::new(5.0, 4.0, Theme::pigment()).unwrap();
+        let mut axes = f
+            .add_axes(ScaleKind::Category, ScaleKind::Category)
+            .unwrap();
+        for &(value, annotate) in layers {
+            let options = HeatmapOptions {
+                annotate,
+                format: annotate.then(|| TickFormat::fixed(3).unwrap()),
+                ..HeatmapOptions::default()
+            };
+            axes.heatmap(&names(&["a"]), &names(&["r"]), &[value], options)
+                .unwrap();
+        }
+        f
+    }
+
+    #[test]
+    fn a_later_heatmap_covers_the_labels_under_it() {
+        // An unannotated heatmap over an annotated one hides its label with its cell.
+        let scene = layers(&[(0.0, true), (1.0, false)])
+            .to_scene(FontLibrary::global())
+            .unwrap();
+        let labels: Vec<_> = scene_texts(&scene)
+            .into_iter()
+            .filter(|(text, _)| text.ends_with(".000"))
+            .collect();
+        assert_eq!(labels, []);
+        // Two annotated layers show the top one's label only, in its contrast color.
+        let f = layers(&[(0.0, true), (1.0, true)]);
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
+        let top = f.theme().cmap().at(1.0);
+        let labels: Vec<_> = scene_texts(&scene)
+            .into_iter()
+            .filter(|(text, _)| text.ends_with(".000"))
+            .collect();
+        assert_eq!(labels, [("1.000".to_owned(), text_color_on(top))]);
+        // A NaN cell on top leaves the label under it visible.
+        let scene = layers(&[(0.0, true), (f64::NAN, false)])
+            .to_scene(FontLibrary::global())
+            .unwrap();
+        assert!(
+            scene_texts(&scene).iter().any(|(text, _)| text == "0.000"),
+            "{:?}",
+            scene_texts(&scene)
+        );
+    }
+
+    #[test]
+    fn labels_wider_than_their_cells_are_refused() {
+        // 30 columns on a figure 3 in wide: cells about 6 pt wide, labels about 30 pt.
+        let x: Vec<String> = (0..30).map(|i| format!("c{i}")).collect();
+        let x: Vec<&str> = x.iter().map(String::as_str).collect();
+        let values: Vec<f64> = (0..30)
+            .map(|i| if i % 2 == 0 { 12345.6789 } else { f64::NAN })
+            .collect();
+        let options = HeatmapOptions {
+            annotate: true,
+            format: Some(TickFormat::fixed(4).unwrap()),
+            ..HeatmapOptions::default()
+        };
+        let mut f = Figure::new(3.0, 2.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Category, ScaleKind::Category)
+            .unwrap()
+            .heatmap(&names(&x), &names(&["r"]), &values, options.clone())
+            .unwrap();
+        let err = f.to_scene(FontLibrary::global()).unwrap_err();
+        assert!(matches!(err, crate::Error::Style { .. }), "{err:?}");
+        let message = err.to_string();
+        assert!(
+            message.starts_with("Figure.to_scene(): the heatmap label \"12345.6789\" is ")
+                && message.contains(" pt wide; its cells are ")
+                && message.ends_with(" pt wide."),
+            "{message}"
+        );
+        assert_eq!(err.parameter(), None);
+        assert_eq!(err.hint(), Some(LABEL_HINT));
+        // Without annotations, or with fewer decimals on a wider figure, it renders.
+        let mut plain = Figure::new(3.0, 2.0, Theme::pigment()).unwrap();
+        plain
+            .add_axes(ScaleKind::Category, ScaleKind::Category)
+            .unwrap()
+            .heatmap(
+                &names(&x),
+                &names(&["r"]),
+                &values,
+                HeatmapOptions::default(),
+            )
+            .unwrap();
+        assert!(plain.to_scene(FontLibrary::global()).is_ok());
+    }
+
+    #[test]
+    fn labels_taller_than_their_cells_are_refused() {
+        let y: Vec<String> = (0..24).map(|i| format!("r{i}")).collect();
+        let y: Vec<&str> = y.iter().map(String::as_str).collect();
+        let f = heatmap(
+            &["a"],
+            &y,
+            &[1.0; 24],
+            HeatmapOptions {
+                annotate: true,
+                ..HeatmapOptions::default()
+            },
+        );
+        let err = f.to_scene(FontLibrary::global()).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.starts_with("Figure.to_scene(): the heatmap labels are ")
+                && message.contains(" pt tall; its cells are ")
+                && message.ends_with(" pt tall."),
+            "{message}"
+        );
+        assert_eq!(err.hint(), Some(LABEL_HINT));
     }
 
     #[test]

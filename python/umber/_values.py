@@ -365,6 +365,11 @@ def _scalar(value: object) -> object:
 
 def _dtype_error(context: str, name: str, array: npt.NDArray[Any]) -> DataError:
     """The error for numeric data whose dtype is neither numeric nor text."""
+    return _dtype_error_at(context, name, name, array)
+
+
+def _dtype_error_at(context: str, name: str, label: str, array: npt.NDArray[Any]) -> DataError:
+    """The error for a part ``label`` of the numeric data ``name``, such as a row, of bad dtype."""
     dtype = array.dtype
     kind = dtype.kind
     if kind == "b":
@@ -381,7 +386,7 @@ def _dtype_error(context: str, name: str, array: npt.NDArray[Any]) -> DataError:
         required, hint = "values must be numbers", _STRUCTURED_HINT
     else:
         required, hint = "values must be numbers", _NUMBER_HINT
-    return _data_error(context, name, f"{name} has dtype {dtype}; {required}.", hint)
+    return _data_error(context, name, f"{label} has dtype {dtype}; {required}.", hint)
 
 
 def _to_float(value: object) -> float:
@@ -661,45 +666,70 @@ def matrix(context: str, name: str, values: object, shape: tuple[int, int]) -> F
         row, column = divmod(found[0], shape[1])
         label = f"{name}[{row}][{column}]"
         raise _value_error(context, name, label, found[1], mixed=False)
+    return _checked_objects(flat)
+
+
+def _checked_objects(array: npt.NDArray[Any]) -> FloatArray:
+    """Convert a one-dimensional array of checked numbers to ``float64``.
+
+    An int too large for a float becomes infinity, which the core library then rejects.
+    """
     try:
-        return flat.astype(np.float64)
+        return array.astype(np.float64)
     except OverflowError:
-        converted = (_to_float(value) for value in _elements(flat))
-        return np.fromiter(converted, dtype=np.float64, count=len(flat))
+        converted = (_to_float(value) for value in _elements(array))
+        return np.fromiter(converted, dtype=np.float64, count=len(array))
 
 
 def _rows_array(context: str, name: str, rows: Sequence[object], width: int) -> npt.NDArray[Any]:
-    """Check a sequence of rows of numbers, then convert it to a two-dimensional array.
+    """Check and convert a sequence of rows of numbers to a two-dimensional ``float64`` array.
 
-    Each row must be a sequence or an array; a row of another length than the first is
-    reported by its index. Elements are checked before NumPy sees them, as for one-dimensional
-    data. An empty sequence is no rows of ``width`` values.
+    Each row must be a sequence or an array, and is checked and converted on its own
+    (``_row_floats``), so every error names its row and column; a row of another length than
+    the first is reported by its index. An empty sequence is no rows of ``width`` values.
     """
     if len(rows) == 0:
         return np.empty((0, width), dtype=np.float64)
-    converted: list[npt.NDArray[Any]] = []
+    converted: list[FloatArray] = []
     for index, row in enumerate(rows):
-        label = f"{name}[{index}]"
-        if not _is_nested(row):
-            message = f"{label} is {short_repr(_scalar(row))}; each row must be a sequence."
-            raise _data_error(context, name, message, _ROWS_HINT)
-        if isinstance(row, np.ndarray):
-            array = cast(npt.NDArray[Any], row)
-        else:
-            items = cast(Sequence[object], row)
-            found = _first_non_number(items)
-            if found is not None:
-                cell = f"{label}[{found[0]}]"
-                raise _value_error(context, name, cell, found[1], mixed=False)
-            array = np.asarray(items)
-        if array.ndim != 1:
-            message = f"{label} has {array.ndim} dimensions; each row must be one-dimensional."
-            raise _data_error(context, name, message, _ROWS_HINT)
+        array = _row_floats(context, name, index, row)
         if converted and len(array) != len(converted[0]):
             message = (
-                f"{label} has {len(array)} values but {name}[0] has {len(converted[0])}; "
-                "every row must have the same length."
+                f"{name}[{index}] has {len(array)} values but {name}[0] has "
+                f"{len(converted[0])}; every row must have the same length."
             )
             raise _data_error(context, name, message, _ROWS_HINT)
         converted.append(array)
     return np.stack(converted)
+
+
+def _row_floats(context: str, name: str, index: int, row: object) -> FloatArray:
+    """Check the row ``index`` of the numeric data ``name`` and convert it to ``float64``.
+
+    A sequence has its elements checked before NumPy sees them; an array has its dtype checked,
+    and an object or text array each of its elements. Errors name the row, as ``values[1]``, or
+    the element, as ``values[1][2]``.
+    """
+    label = f"{name}[{index}]"
+    if not _is_nested(row):
+        message = f"{label} is {short_repr(_scalar(row))}; each row must be a sequence."
+        raise _data_error(context, name, message, _ROWS_HINT)
+    if isinstance(row, np.ndarray):
+        array = cast(npt.NDArray[Any], row)
+    else:
+        items = cast(Sequence[object], row)
+        found = _first_non_number(items)
+        if found is not None:
+            raise _value_error(context, name, f"{label}[{found[0]}]", found[1], mixed=False)
+        array = np.asarray(items)
+    if array.ndim != 1:
+        message = f"{label} has {array.ndim} dimensions; each row must be one-dimensional."
+        raise _data_error(context, name, message, _ROWS_HINT)
+    if _is_float64_or_narrower(array.dtype):
+        return _native(array)
+    if array.dtype.kind not in "OSUT":
+        raise _dtype_error_at(context, name, label, array)
+    found = _first_non_number(_elements(array))
+    if found is not None:
+        raise _value_error(context, name, f"{label}[{found[0]}]", found[1], mixed=False)
+    return _checked_objects(array)
