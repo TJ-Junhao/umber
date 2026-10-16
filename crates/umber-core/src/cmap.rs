@@ -139,7 +139,7 @@ impl Cmap {
             .with_hint("pass between 2 and 16 colors, e.g. [Color.BLUE, Color.RED]."));
         }
         if let Some((index, color)) = colors.iter().enumerate().find(|(_, c)| c.a != 255) {
-            let alpha = (f64::from(color.a) / 255.0 * 100.0).round() / 100.0;
+            let alpha = (f64::from(color.a) / 255.0 * 1000.0).round() / 1000.0;
             return Err(Error::style(
                 "Cmap.from_colors()",
                 format!(

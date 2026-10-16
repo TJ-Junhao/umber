@@ -98,9 +98,14 @@ def test_from_colors_rejects_transparent_colors(tmp_path: Path) -> None:
     with pytest.raises(ub.StyleError) as caught:
         ub.Cmap.from_colors(colors)
     assert str(caught.value) == (
-        "Cmap.from_colors(): colors[2] has alpha 0.5; colormap colors must be opaque."
+        "Cmap.from_colors(): colors[2] has alpha 0.502; colormap colors must be opaque."
     )
     assert details(caught.value) == ("colors", OPAQUE_HINT)
+    with pytest.raises(ub.StyleError) as nearly:
+        ub.Cmap.from_colors([ub.Color.hex("#3366B8FE"), ub.Color.RED])
+    assert str(nearly.value) == (
+        "Cmap.from_colors(): colors[0] has alpha 0.996; colormap colors must be opaque."
+    )
     line = "ub.Cmap.from_colors([ub.Color.RED, ub.Color.BLUE.alpha(0.5)])"
     err = _raised(tmp_path, line)
     assert isinstance(err, ub.StyleError)

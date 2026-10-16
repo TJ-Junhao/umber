@@ -323,14 +323,18 @@ fn from_colors_rejects_transparent_colors() {
     assert!(matches!(err, Error::Style { .. }), "{err:?}");
     assert_eq!(
         err.to_string(),
-        "Cmap.from_colors(): colors[2] has alpha 0.5; colormap colors must be opaque."
+        "Cmap.from_colors(): colors[2] has alpha 0.502; colormap colors must be opaque."
     );
     assert_eq!(err.parameter(), Some("colors"));
     assert_eq!(
         err.hint(),
         Some("use opaque colors; set transparency on the mark instead.")
     );
-    assert!(Cmap::from_colors(&[Rgba::hex("#112233FE").unwrap(), Rgba::RED]).is_err());
+    let err = Cmap::from_colors(&[Rgba::hex("#112233FE").unwrap(), Rgba::RED]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Cmap.from_colors(): colors[0] has alpha 0.996; colormap colors must be opaque."
+    );
     assert!(Cmap::from_colors(&[Rgba::hex("#112233FF").unwrap(), Rgba::RED]).is_ok());
 }
 
