@@ -110,6 +110,7 @@ pub struct Grid {
     cols: usize,
     share_x: Share,
     share_y: Share,
+    share_color: Share,
     legend: LegendMode,
 }
 
@@ -121,6 +122,7 @@ impl Grid {
         cols: 1,
         share_x: Share::None,
         share_y: Share::None,
+        share_color: Share::None,
         legend: LegendMode::Merged,
     };
 
@@ -182,6 +184,37 @@ impl Grid {
             share_y: share,
             ..self
         }
+    }
+
+    /// This grid with color ranges and colorbars shared as `share` says.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Grid, Share};
+    /// assert_eq!(Grid::new(2, 2)?.with_share_color(Share::All).share_color(), Share::All);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn with_share_color(self, share: Share) -> Grid {
+        Grid {
+            share_color: share,
+            ..self
+        }
+    }
+
+    /// How color ranges and colorbars are shared; [`Share::None`] unless set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Grid, Share};
+    /// assert_eq!(Grid::new(2, 2)?.share_color(), Share::None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn share_color(&self) -> Share {
+        self.share_color
     }
 
     /// This grid with the legend shown as `legend` says.

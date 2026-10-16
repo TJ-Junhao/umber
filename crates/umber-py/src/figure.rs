@@ -163,7 +163,7 @@ impl Figure {
     /// and whose legend is shown as `legend` says (a `Legend` value). A missing size is the
     /// Python facade's `AUTO`; explicit sizes are checked before the grid dimensions.
     #[new]
-    #[pyo3(signature = (width, height, theme, rows, cols, share_x, share_y, legend))]
+    #[pyo3(signature = (width, height, theme, rows, cols, share_x, share_y, legend, share_color=0))]
     fn new(
         width: Option<f64>,
         height: Option<f64>,
@@ -173,6 +173,7 @@ impl Figure {
         share_x: i64,
         share_y: i64,
         legend: i64,
+        share_color: i64,
     ) -> PyResult<Figure> {
         // Use the core's size checks before asking it to validate rows and columns. AUTO
         // sides use a valid single-cell size for this check, not a Python-side size rule.
@@ -189,6 +190,7 @@ impl Figure {
         let grid = grid(rows, cols)?
             .with_share_x(share_x)
             .with_share_y(share_y)
+            .with_share_color(enum_value::<Share>(share_color)?)
             .with_legend(legend);
         umber_core::Figure::with_grid(
             width.unwrap_or(auto_width),
@@ -966,6 +968,24 @@ impl Figure {
             .colorbar(options)
             .map(drop)
             .map_err(core_error)
+    }
+
+    /// Replaces the shared colorbars' label and optional overrides.
+    #[pyo3(signature = (label, position, format))]
+    fn figure_colorbar(
+        &mut self,
+        label: String,
+        position: Option<i64>,
+        format: Option<TickFormatArg>,
+    ) -> PyResult<()> {
+        let options = umber_core::ColorbarOptions {
+            label,
+            position: position
+                .map(enum_value::<umber_core::ColorbarPosition>)
+                .transpose()?,
+            format: format.map(tick_format).transpose()?,
+        };
+        self.0.colorbar(options).map(drop).map_err(core_error)
     }
 
     /// Sets the color range of the axes' color-mapped marks.

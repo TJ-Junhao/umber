@@ -85,6 +85,8 @@ pub(crate) struct GridInput<'a> {
     pub context: &'static str,
     /// Every panel, in the order of `Figure::panels`.
     pub panels: &'a [LayoutInput<'a>],
+    /// Shared colorbar blocks; empty when each panel has its own.
+    pub colorbars: &'a [super::SharedColorbar],
 }
 
 /// Where the grid solve put every panel, in the order of [`GridInput::panels`].
@@ -92,6 +94,8 @@ pub(crate) struct GridInput<'a> {
 pub(crate) struct GridSolution {
     /// The slot of each panel.
     pub panels: Vec<PanelSlot>,
+    /// Shared bars paired with the panel providing their group's color scale.
+    pub colorbars: Vec<(usize, super::PlacedColorbar)>,
 }
 
 impl GridInput<'_> {
@@ -161,6 +165,26 @@ impl GridInput<'_> {
     }
 }
 
+/// The shared colorbar reserve after each column, shared by bars ending there.
+fn shared_right(input: &GridInput<'_>) -> Vec<f64> {
+    let mut reserves = vec![0.0_f64; input.grid.cols()];
+    for shared in input.colorbars {
+        let last = shared.cells.col() + shared.cells.col_span() - 1;
+        reserves[last] = reserves[last].max(shared.measured.right_reserve());
+    }
+    reserves
+}
+
+/// The shared colorbar reserve below each row, after axes and legends.
+fn shared_bottom(input: &GridInput<'_>) -> Vec<f64> {
+    let mut reserves = vec![0.0_f64; input.grid.rows()];
+    for shared in input.colorbars {
+        let last = shared.cells.row() + shared.cells.row_span() - 1;
+        reserves[last] = reserves[last].max(shared.measured.bottom_reserve());
+    }
+    reserves
+}
+
 /// Along one side of the canvas, `extent` pt long and split inside the padding into `count`
 /// equal cells `gap` apart: where the `span` cells from cell `first` start, and how long they
 /// are together, the gaps between them included.
@@ -197,7 +221,7 @@ fn in_panel(cells: CellRange, err: Error) -> Error {
 ///
 /// Texts that span a panel are checked against the final layout by [`check_panel_contents`].
 pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<GridSolution> {
-    if input.is_single() {
+    if input.is_single() && input.colorbars.is_empty() {
         let canvas = Frame {
             x: 0.0,
             y: 0.0,
@@ -225,7 +249,10 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                 })
             })
             .collect::<Result<_>>()?;
-        return Ok(GridSolution { panels });
+        return Ok(GridSolution {
+            panels,
+            colorbars: Vec::new(),
+        });
     }
     let cells: Vec<CellRange> = input.panels.iter().map(|p| p.axes.cells()).collect();
     let columns = Columns::measure(input, &cells, bands);
@@ -233,9 +260,13 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
     if open.plot_width < MIN_PLOT {
         return Err(columns_too_narrow(input, &cells, bands, &columns));
     }
-    let bounds = columns.label_bounds(&cells, bands, f64::INFINITY);
+    let mut bounds = columns.label_bounds(&cells, bands, f64::INFINITY);
+    bounds.extend(columns.colorbar_bounds(input));
     let placed = match fit_columns(&columns, &bounds) {
         Ok(placed) => placed,
+        Err(_) if !input.colorbars.is_empty() => {
+            return Err(shared_width_error(input, &cells, bands));
+        }
         Err(stuck) => return Err(x_labels_do_not_fit(input, &cells, bands, &columns, &stuck)),
     };
     let spans: Vec<(f64, f64)> = cells.iter().map(|c| placed.span(*c)).collect();
@@ -275,7 +306,47 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             }
         })
         .collect();
-    Ok(GridSolution { panels })
+    let colorbars = input
+        .colorbars
+        .iter()
+        .map(|shared| {
+            let cells = shared.cells;
+            let last_col = cells.col() + cells.col_span() - 1;
+            let last_row = cells.row() + cells.row_span() - 1;
+            let (left, right) = placed.span(cells);
+            let (top, bottom) = rows.span(cells);
+            let plot = Area {
+                x: left,
+                y: top,
+                width: right - left,
+                height: bottom - top,
+            };
+            let offset = columns.right[last_col] - shared_right(input)[last_col];
+            let bottom = bottom + rows.below[last_row] - shared_bottom(input)[last_row];
+            let bar = shared.measured.clone().place(
+                plot,
+                offset,
+                bottom,
+                shared.measured.tick_overhang().0,
+            );
+            let (x, right) = placed.frame(cells, columns.canvas);
+            let (y, bottom) = rows.frame(cells, input.height);
+            let frame = Frame {
+                x,
+                y,
+                width: right - x,
+                height: bottom - y,
+            };
+            bar.check(
+                input.context,
+                frame,
+                [cells.col() == 0, last_col + 1 == input.grid.cols()],
+                input.panels[shared.source].lib,
+            )?;
+            Ok((shared.source, bar))
+        })
+        .collect::<Result<_>>()?;
+    Ok(GridSolution { panels, colorbars })
 }
 
 /// The column bands of a grid, as measured, before x tick labels grow any of them.
@@ -383,12 +454,67 @@ impl Columns {
             left[first] = left[first].max(bands.y_tick_column);
             right[last] = right[last].max(bands.right());
         }
+        for (right, bar) in right.iter_mut().zip(shared_right(input)) {
+            *right += bar;
+        }
         Columns {
             canvas: input.width,
             gap: input.gap(),
             left,
             right,
         }
+    }
+
+    /// Bottom colorbar tick labels obey the same edge and gap bounds as x tick labels.
+    fn colorbar_bounds(&self, input: &GridInput<'_>) -> Vec<LabelBound> {
+        let mut bounds = Vec::new();
+        for shared in input.colorbars {
+            let first = shared.cells.col();
+            let last = first + shared.cells.col_span() - 1;
+            let left_room = if first == 0 {
+                PADDING - X_LABEL_EDGE_GAP
+            } else {
+                self.gap / 2.0
+            };
+            let right_room = if last + 1 == self.count() {
+                PADDING - X_LABEL_EDGE_GAP
+            } else {
+                self.gap / 2.0
+            };
+            let label_width = shared.measured.bottom_label_width();
+            if label_width > 0.0 {
+                bounds.push(LabelBound {
+                    panel: shared.source,
+                    first,
+                    last,
+                    half: label_width,
+                    share: 1.0,
+                    growth: Self::right_growth(last, self.count()),
+                    base: self.right[last] + right_room,
+                });
+            }
+            for TickSpan { pos, half } in shared.measured.x_spans() {
+                bounds.push(LabelBound {
+                    panel: shared.source,
+                    first,
+                    last,
+                    half,
+                    share: pos,
+                    growth: Self::left_growth(first),
+                    base: self.left[first] + left_room,
+                });
+                bounds.push(LabelBound {
+                    panel: shared.source,
+                    first,
+                    last,
+                    half,
+                    share: 1.0 - pos,
+                    growth: Self::right_growth(last, self.count()),
+                    base: self.right[last] + right_room,
+                });
+            }
+        }
+        bounds
     }
 
     /// The number of columns.
@@ -764,6 +890,16 @@ impl Rows {
             legends[last] =
                 legends[last].max(panel.legend.bottom_reserve(left, right) + bands.bottom_colorbar);
         }
+        for shared in input.colorbars {
+            let first = shared.cells.row();
+            let last = first + shared.cells.row_span() - 1;
+            let bar = &shared.measured;
+            above[first] = above[first].max(bar.label_band() + bar.tick_overhang().0);
+            below[last] = below[last].max(bar.tick_overhang().1);
+        }
+        for (legend, bar) in legends.iter_mut().zip(shared_bottom(input)) {
+            *legend += bar;
+        }
         for (below, legend) in below.iter_mut().zip(&legends) {
             *below += legend;
         }
@@ -828,6 +964,19 @@ fn rows_too_short(
     spans: &[(f64, f64)],
     error: Error,
 ) -> Error {
+    if !input.colorbars.is_empty() {
+        let plain = GridInput {
+            colorbars: &[],
+            ..*input
+        };
+        if Rows::measure(&plain, cells, bands, spans)
+            .place(&plain)
+            .is_ok()
+        {
+            return error.with_message_prefix("the shared colorbar leaves too little height: ");
+        }
+        return error;
+    }
     let plain: Vec<_> = cells
         .iter()
         .zip(bands)
@@ -929,6 +1078,9 @@ fn columns_too_narrow(
     columns: &Columns,
 ) -> Error {
     let cols = columns.count();
+    if !input.colorbars.is_empty() {
+        return shared_width_error(input, cells, bands);
+    }
     let placed = columns.place(&columns.no_growth());
     let deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
     let plain: Vec<_> = cells
@@ -995,6 +1147,44 @@ fn columns_too_narrow(
     )
 }
 
+/// The width needed for shared bars, including tick and label containment, not only their bands.
+fn shared_width_error(input: &GridInput<'_>, cells: &[CellRange], bands: &[PanelBands]) -> Error {
+    let fits = |width: f64, colorbars| {
+        let input = GridInput {
+            width,
+            colorbars,
+            ..*input
+        };
+        let columns = Columns::measure(&input, cells, bands);
+        if columns.place(&columns.no_growth()).plot_width < MIN_PLOT {
+            return false;
+        }
+        let mut bounds = columns.label_bounds(cells, bands, f64::INFINITY);
+        bounds.extend(columns.colorbar_bounds(&input));
+        fit_columns(&columns, &bounds).is_ok()
+    };
+    let mut high = (input.width * 2.0).max(72.0);
+    while !fits(high, input.colorbars) && high < 1.0e9 {
+        high *= 2.0;
+    }
+    let mut low = input.width;
+    for _ in 0..BISECTION_STEPS {
+        let middle = (low + high) / 2.0;
+        if fits(middle, input.colorbars) {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    let needed = high.ceil();
+    let error = grid_too_narrow(input.context, input.width, needed, input.grid.cols());
+    if fits(input.width, &[]) {
+        error.with_message_prefix("the shared colorbar leaves too little width: ")
+    } else {
+        error
+    }
+}
+
 /// The narrowest whole-point canvas width, wider than the figure's, on which the plots of the
 /// panels covering `cells`, with the y tick label columns of `columns`, are at least
 /// [`MIN_PLOT`] wide before x tick labels are fitted.
@@ -1032,6 +1222,9 @@ fn needed_width(
             let last = cells.col() + cells.col_span() - 1;
             let cap = wider.span(*cells).reserve_cap;
             right[last] = right[last].max(reserve(panel, band, cap));
+        }
+        for (right, bar) in right.iter_mut().zip(shared_right(input)) {
+            *right += bar;
         }
         Columns {
             canvas: width,
@@ -1073,6 +1266,7 @@ fn needed_width(
         .sum();
     let last = columns.left.iter().sum::<f64>()
         + widest_reserves
+        + shared_right(input).iter().sum::<f64>()
         + gap * (cols - 1) as f64
         + MIN_PLOT * cols as f64
         + 2.0 * PADDING;
@@ -2915,6 +3109,7 @@ mod tests {
                 theme: &theme,
                 context: "Figure.to_scene()",
                 panels: &[],
+                colorbars: &[],
             };
             let need = named_height(&bands.clone().place(&input).unwrap_err()).unwrap();
             let at = |height: f64| bands.clone().place(&GridInput { height, ..input });

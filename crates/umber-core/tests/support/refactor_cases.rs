@@ -104,6 +104,7 @@ mod corpus {
     pub mod plot_height;
     pub mod rules;
     pub mod share;
+    pub mod share_color;
     pub mod size;
     pub mod stacked_area;
     pub mod stem;
@@ -167,6 +168,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::band::cases(&lib, &mut sink);
     corpus::error_bars::cases(&lib, &mut sink);
     corpus::share::cases(&lib, &mut sink);
+    corpus::share_color::cases(&lib, &mut sink);
     corpus::stacked_area::cases(&lib, &mut sink);
     corpus::stem::cases(&lib, &mut sink);
     corpus::bubbles::cases(&lib, &mut sink);

@@ -202,6 +202,42 @@ impl Group {
     }
 }
 
+/// A color group's limits and the members that explicitly set them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct ColorGroup {
+    /// Validated color limits, also inherited by panels added later.
+    pub limits: Option<(f64, f64)>,
+    /// Inheritance does not count as explicitly setting limits.
+    by: Vec<Cell>,
+}
+
+impl ColorGroup {
+    /// Records limits only after checking the other setters in the group.
+    pub fn set(&mut self, cell: Cell, limits: (f64, f64)) -> Result<()> {
+        if self.limits != Some(limits)
+            && let Some(other) = self.by.iter().find(|other| **other != cell)
+        {
+            let previous = self.limits.map_or_else(String::new, |(low, high)| {
+                format!("({}, {})", number(low), number(high))
+            });
+            return Err(Error::usage(
+                "Axes.clim()",
+                format!(
+                    "color limits are shared with row {}, col {}, which set {previous}.",
+                    other.row, other.col
+                ),
+            )
+            .with_parameter("low")
+            .with_hint("set it once for the group, or share fewer axes."));
+        }
+        if !self.by.contains(&cell) {
+            self.by.push(cell);
+        }
+        self.limits = Some(limits);
+        Ok(())
+    }
+}
+
 /// Checks scale kinds first, x before y, then spans, before a new panel or group is stored.
 pub(super) fn check_add(
     figure: &Figure,
@@ -233,8 +269,12 @@ pub(super) fn check_add(
             .with_hint("axes that share an axis need the same scale."));
         }
     }
-    for axis in [SharedAxis::X, SharedAxis::Y] {
-        let crossed = match axis.mode(grid) {
+    for (mode, name) in [
+        (grid.share_x(), "x"),
+        (grid.share_y(), "y"),
+        (grid.share_color(), "color"),
+    ] {
+        let crossed = match mode {
             Share::Row if cells.row_span() > 1 => {
                 Some(("rows", "row_span", cells.row(), cells.row_span()))
             }
@@ -249,7 +289,7 @@ pub(super) fn check_add(
                 format!(
                     "the axes spans {dimension} {start} to {}, which share {} in different groups.",
                     start + span - 1,
-                    axis.name(),
+                    name,
                 ),
             )
             .with_parameter(parameter)
@@ -270,6 +310,23 @@ pub(crate) struct ShareGroups {
 }
 
 impl ShareGroups {
+    /// The first color-mapped member of each color group; panels without a mapping do not join.
+    pub fn colors(figure: &Figure) -> Vec<Option<usize>> {
+        let mut first = BTreeMap::new();
+        figure
+            .panels()
+            .enumerate()
+            .map(|(i, axes)| {
+                if !axes.marks().iter().any(|mark| mark.color_scale().is_some()) {
+                    return None;
+                }
+                let c = axes.cells();
+                let key = figure.color_group_of(c.row(), c.col());
+                Some(*first.entry(key).or_insert(i))
+            })
+            .collect()
+    }
+
     /// Builds the maps for the figure's placed axes.
     pub fn new(figure: &Figure) -> Self {
         let representatives = |axis: SharedAxis| {
