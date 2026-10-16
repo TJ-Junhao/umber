@@ -12,7 +12,7 @@ from typing_extensions import TypeVar
 # so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
 # ``umber.Figure`` through the package once it has loaded.
 import umber
-from umber import _args, _color, _series, _size, _ticks, _umber
+from umber import _args, _color, _series, _size, _ticks, _time, _umber
 from umber._args import instance, integer, is_text_or_buffer, real, type_name
 from umber._color import Color
 from umber._color_by import ColorBy, native_point_color
@@ -32,7 +32,8 @@ from umber._scale import Scale
 from umber._series import Distribution, Series
 from umber._size import Size
 from umber._ticks import TickFormat
-from umber._types import Values
+from umber._time import MicrosArray
+from umber._types import Time, Values
 from umber._values import (
     FloatArray,
     axis_values,
@@ -48,8 +49,17 @@ from umber._values import (
 # ``Axes[float, float]``.
 X = TypeVar("X", default=float)
 Y = TypeVar("Y", default=float)
+# Axes whose x axis, or whose y axis, is linear, log or time: the self types of the methods that
+# take numbers or times along that axis, such as limits, ticks and spans, and refuse a category
+# axis there. A bound on the receiver is checked by both pyright and mypy; the values the method
+# takes follow the axis through ``X`` and ``Y``.
+SX = TypeVar("SX", bound="Axes[float, Any] | Axes[Time, Any]")
+SY = TypeVar("SY", bound="Axes[Any, float] | Axes[Any, Time]")
+# Axes with a linear, log or time x axis beside a linear or log y axis: bands and stacked areas.
+SXF = TypeVar("SXF", bound="Axes[float, float] | Axes[Time, float]")
 
 _CATEGORY: Final = Scale.category()
+_TIME: Final = Scale.time()
 _COLOR_HINT: Final = 'use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.'
 _COPY_HINT: Final = "copy the figure instead: copy.copy(ax.figure)."
 _PICKLE_HINT: Final = "save the figure with save_png() or save_svg(), or build it again."
@@ -85,10 +95,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     An axes is created by ``Figure.add_axes()`` or ``Cell.add_axes()`` and belongs to that
     figure. Retrieve it with ``Figure.axes_at()`` using the same position and scales.
     The type parameters are the types of the x and y values: ``Axes[float, float]`` for numeric
-    axes, ``Axes[str, float]`` for a category x axis and ``Axes[float, str]`` for a category y
-    axis, on which bars, boxes and violins are horizontal and a scatter is a dot plot. Every
-    method validates its arguments at the call and returns the axes, so calls chain. A failed
-    call changes nothing.
+    axes, ``Axes[str, float]`` for a category x axis, ``Axes[float, str]`` for a category y
+    axis, on which bars, boxes and violins are horizontal and a scatter is a dot plot, and
+    ``Axes[Time, float]`` for a time x axis. Every method validates its arguments at the call
+    and returns the axes, so calls chain. A failed call changes nothing.
 
     Example:
         >>> import umber as ub
@@ -214,11 +224,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.ylabel(self._row, self._col, _args.text("Axes.ylabel()", "text", text))
             return self
 
-    def xlim(self: "Axes[float, Y]", low: float, high: float) -> "Axes[float, Y]":
-        """Set the x limits, replacing the automatic ones; for linear and log x axes.
+    def xlim(self: SX, low: X, high: X) -> SX:
+        """Set the x limits, replacing the automatic ones; for linear, log and time x axes.
 
         Args:
-            low: The lower limit; finite, and positive on a log axis.
+            low: The lower limit; finite, and positive on a log axis; a time on a time axis.
             high: The upper limit; finite and above ``low``.
 
         Returns:
@@ -235,16 +245,22 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().line([0, 5, 10], [1, 4, 2]).xlim(0, 8)
         """
         with api_call():
-            lower = real("Axes.xlim()", "low", low)
-            upper = real("Axes.xlim()", "high", high)
+            context = "Axes.xlim()"
+            if self._x == _TIME:
+                start = _time.instant(context, "low", low)
+                end = _time.instant(context, "high", high)
+                self._native.xlim_time(self._row, self._col, start, end)
+                return self
+            lower = real(context, "low", low)
+            upper = real(context, "high", high)
             self._native.xlim(self._row, self._col, lower, upper)
             return self
 
-    def ylim(self: "Axes[X, float]", low: float, high: float) -> "Axes[X, float]":
+    def ylim(self: SY, low: Y, high: Y) -> SY:
         """Set the y limits, replacing the automatic ones.
 
         Args:
-            low: The lower limit; finite, and positive on a log axis.
+            low: The lower limit; finite, and positive on a log axis; a time on a time axis.
             high: The upper limit; finite and above ``low``.
 
         Returns:
@@ -260,12 +276,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1, 4, 2]).ylim(0, 5)
         """
         with api_call():
-            lower = real("Axes.ylim()", "low", low)
-            upper = real("Axes.ylim()", "high", high)
+            context = "Axes.ylim()"
+            if self._y == _TIME:
+                start = _time.instant(context, "low", low)
+                end = _time.instant(context, "high", high)
+                self._native.ylim_time(self._row, self._col, start, end)
+                return self
+            lower = real(context, "low", low)
+            upper = real(context, "high", high)
             self._native.ylim(self._row, self._col, lower, upper)
             return self
 
-    def xticks(self: "Axes[float, Y]", positions: Values[float]) -> "Axes[float, Y]":
+    def xticks(self: SX, positions: Values[X]) -> SX:
         """Set the x ticks to ``positions``, replacing the automatic ones.
 
         The positions are used in the order given. An empty list leaves the x axis without
@@ -276,14 +298,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Args:
             positions: The tick positions: finite, within the supported magnitudes, positive
-                on a log axis, and strictly increasing.
+                on a log axis, and strictly increasing; times on a time axis, labelled for the
+                unit they share (years, months, days or the clock).
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If ``positions`` is not a sequence or an array.
-            DataError: If ``positions`` cannot be read as numbers.
+            DataError: If ``positions`` cannot be read as numbers, or as times on a time axis.
             StyleError: If a position is not finite, out of range, not positive on a log
                 axis, or not above the one before it.
             UsageError: If the x axis is a category axis.
@@ -294,12 +317,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.xticks([0, 12, 24])
         """
         with api_call():
-            self._native.xticks(
-                self._row, self._col, floats("Axes.xticks()", "positions", positions)
-            )
+            context = "Axes.xticks()"
+            if self._x == _TIME:
+                places = _time.micros(context, "positions", positions)
+                self._native.xticks_time(self._row, self._col, places)
+                return self
+            self._native.xticks(self._row, self._col, floats(context, "positions", positions))
             return self
 
-    def yticks(self: "Axes[X, float]", positions: Values[float]) -> "Axes[X, float]":
+    def yticks(self: SY, positions: Values[Y]) -> SY:
         """Set the y ticks to ``positions``, replacing the automatic ones.
 
         The positions are used in the order given. An empty list leaves the y axis without
@@ -327,14 +353,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.yticks([0, 12, 24])
         """
         with api_call():
-            self._native.yticks(
-                self._row, self._col, floats("Axes.yticks()", "positions", positions)
-            )
+            context = "Axes.yticks()"
+            if self._y == _TIME:
+                places = _time.micros(context, "positions", positions)
+                self._native.yticks_time(self._row, self._col, places)
+                return self
+            self._native.yticks(self._row, self._col, floats(context, "positions", positions))
             return self
 
-    def xticks_labeled(
-        self: "Axes[float, Y]", positions: Values[float], labels: Values[str]
-    ) -> "Axes[float, Y]":
+    def xticks_labeled(self: SX, positions: Values[X], labels: Values[str]) -> SX:
         """Set the x ticks to ``positions``, each with the label at the same index of ``labels``.
 
         The labels are drawn as given. The ticks follow the rules of ``Axes.xticks()``.
@@ -367,14 +394,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             context = "Axes.xticks_labeled()"
             check_floats_type(context, "positions", positions)
             check_names_type(context, "labels", labels)
+            if self._x == _TIME:
+                times = _time.micros(context, "positions", positions)
+                texts = names(context, "labels", labels, check_length=False)
+                self._native.xticks_labeled_time(self._row, self._col, times, texts)
+                return self
             places = floats(context, "positions", positions)
             texts = names(context, "labels", labels, check_length=False)
             self._native.xticks_labeled(self._row, self._col, places, texts)
             return self
 
-    def yticks_labeled(
-        self: "Axes[X, float]", positions: Values[float], labels: Values[str]
-    ) -> "Axes[X, float]":
+    def yticks_labeled(self: SY, positions: Values[Y], labels: Values[str]) -> SY:
         """Set the y ticks to ``positions``, each with the label at the same index of ``labels``.
 
         The labels are drawn as given. The ticks follow the rules of ``Axes.yticks()``.
@@ -406,12 +436,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             context = "Axes.yticks_labeled()"
             check_floats_type(context, "positions", positions)
             check_names_type(context, "labels", labels)
+            if self._y == _TIME:
+                times = _time.micros(context, "positions", positions)
+                texts = names(context, "labels", labels, check_length=False)
+                self._native.yticks_labeled_time(self._row, self._col, times, texts)
+                return self
             places = floats(context, "positions", positions)
             texts = names(context, "labels", labels, check_length=False)
             self._native.yticks_labeled(self._row, self._col, places, texts)
             return self
 
-    def xtick_format(self: "Axes[float, Y]", format: TickFormat) -> "Axes[float, Y]":
+    def xtick_format(self: SX, format: TickFormat) -> SX:
         """Set the format of the x tick labels.
 
         The format applies to the automatic ticks and to positions set with ``Axes.xticks()``.
@@ -427,8 +462,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``format`` is not a ``TickFormat``.
-            UsageError: If the x axis is a category axis, or the x ticks have labels and
-                ``format`` is not ``TickFormat.AUTO``.
+            UsageError: If the x axis is a category axis, the format does not suit the axis
+                (``TickFormat.iso()`` labels time axes only, number formats numeric ones), or
+                the x ticks have labels and ``format`` is not ``TickFormat.AUTO``.
 
         Example:
             >>> import umber as ub
@@ -440,7 +476,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.xtick_format(self._row, self._col, _ticks.native(checked))
             return self
 
-    def ytick_format(self: "Axes[X, float]", format: TickFormat) -> "Axes[X, float]":
+    def ytick_format(self: SY, format: TickFormat) -> SY:
         """Set the format of the y tick labels.
 
         The format applies to the automatic ticks and to positions set with ``Axes.yticks()``.
@@ -456,8 +492,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``format`` is not a ``TickFormat``.
-            UsageError: If the y ticks have labels and ``format`` is not
-                ``TickFormat.AUTO``.
+            UsageError: If the format does not suit the axis (``TickFormat.iso()`` labels
+                time axes only, number formats numeric ones), or the y ticks have labels and
+                ``format`` is not ``TickFormat.AUTO``.
 
         Example:
             >>> import umber as ub
@@ -515,15 +552,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def line(
-        self: "Axes[X, float]",
+        self: SY,
         x: Values[X],
-        y: Values[float],
+        y: Values[Y],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, float]":
+    ) -> SY:
         """Add a line through the points ``(x[i], y[i])``, in order.
 
         A NaN in ``x`` or ``y`` leaves a gap in the line.
@@ -561,21 +598,21 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
             xs = self._x_values(context, x)
-            ys = floats(context, "y", y)
+            ys = self._y_values(context, y)
             name = _args.text(context, "label", label)
             self._native.line(self._row, self._col, xs, ys, name, spec, style.value, extent)
             return self
 
     def area(
-        self: "Axes[X, float]",
+        self: SY,
         x: Values[X],
-        y: Values[float],
+        y: Values[Y],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, float]":
+    ) -> SY:
         """Add a line through the points ``(x[i], y[i])``, in order, and fill the region below it.
 
         The fill reaches down to the baseline of the axes. A NaN in ``x`` or ``y`` leaves a gap in
@@ -614,7 +651,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
             xs = self._x_values(context, x)
-            ys = floats(context, "y", y)
+            ys = self._y_values(context, y)
             name = _args.text(context, "label", label)
             self._native.area(self._row, self._col, xs, ys, name, spec, style.value, extent)
             return self
@@ -737,8 +774,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If lengths differ, coordinates are invalid for their axes, a size
                 is negative, non-finite, or above 1e300, or a ``ColorBy`` does not have one
                 value per point.
-            UsageError: If either axis is a category axis, or a ``ColorBy`` differs in
-                ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
+            UsageError: If either axis is a category or a time axis, or a ``ColorBy`` differs
+                in ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
             StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
                 range set by ``clim()``.
 
@@ -755,6 +792,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "label", label)
             spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
+            if _TIME in (self._x, self._y):
+                # The core refuses a time axis before it reads the data, with its own error.
+                empty = np.empty(0, dtype=np.float64)
+                self._native.bubbles(self._row, self._col, empty, empty, empty, "", spec, 0)
             xs = floats(context, "x", x)
             ys = floats(context, "y", y)
             values = floats(context, "sizes", sizes)
@@ -763,15 +804,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def stem(
-        self: "Axes[X, float]",
+        self: SY,
         x: Values[X],
-        y: Values[float],
+        y: Values[Y],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
-    ) -> "Axes[X, float]":
+    ) -> SY:
         """Add a line from the baseline to each value, with a marker at its tip.
 
         A linear y domain includes zero. On a log y axis, stems start at the baseline.
@@ -812,7 +853,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             extent = _size_argument(context, "size", size)
             xs = self._x_values(context, x)
-            ys = floats(context, "y", y)
+            ys = self._y_values(context, y)
             name = _args.text(context, "label", label)
             self._native.stem(self._row, self._col, xs, ys, name, spec, shape.value, extent)
             return self
@@ -1058,9 +1099,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
-    def stacked_area(
-        self: "Axes[float, float]", x: Values[float], series: Sequence[Series]
-    ) -> "Axes[float, float]":
+    def stacked_area(self: SXF, x: Values[X], series: Sequence[Series]) -> SXF:
         """Add non-negative series stacked in order over shared x values.
 
         Each layer fills between the previous cumulative curve and its own, flat at the
@@ -1071,7 +1110,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         curve's envelope and exact crossings at explicit limits.
 
         Args:
-            x: Numeric x values in non-decreasing order, NaN apart.
+            x: Numeric x values in non-decreasing order, NaN apart; times on a time x axis,
+                ``NaT`` apart.
             series: One or more ``Series``, each as long as x, with non-negative values.
                 Their order is the stacking order. Each series takes its own color and an
                 area's legend swatch. Under ``LegendStyle.DIRECT``, each label goes at the
@@ -1099,6 +1139,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             context = "Axes.stacked_area()"
             check_floats_type(context, "x", x)
             arguments = _series_arguments(context, series)
+            if self._x == _TIME:
+                times = _time.micros(context, "x", x)
+                self._native.stacked_area_time(self._row, self._col, times, arguments)
+                return self
             xs = floats(context, "x", x)
             self._native.stacked_area(self._row, self._col, xs, arguments)
             return self
@@ -1148,16 +1192,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def step(
-        self: "Axes[X, float]",
+        self: SY,
         x: Values[X],
-        y: Values[float],
+        y: Values[Y],
         *,
         where: Step = Step.POST,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, float]":
+    ) -> SY:
         """Add a step line through the points ``(x[i], y[i])``, in order.
 
         The line runs horizontally and changes level vertically, at the place ``where`` sets.
@@ -1204,7 +1248,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
             xs = self._x_values(context, x)
-            ys = floats(context, "y", y)
+            ys = self._y_values(context, y)
             name = _args.text(context, "label", label)
             self._native.step(
                 self._row, self._col, xs, ys, position.value, name, spec, style.value, extent
@@ -1212,21 +1256,22 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def hline(
-        self: "Axes[X, float]",
-        y: float,
+        self: SY,
+        y: Y,
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> "Axes[X, float]":
+    ) -> SY:
         """Add a horizontal reference line across the whole plot at ``y``.
 
         The line is drawn above the data marks. Without explicit y limits the y axis extends to
         include ``y``; with limits, a line outside them is not drawn.
 
         Args:
-            y: The y value of the line; finite, and positive on a log y axis.
+            y: The y value of the line; finite, and positive on a log y axis; a time on a time
+                y axis.
             label: The name shown in the legend; an empty string leaves the line out of it.
                 A reference line always takes an entry in the legend row, also under
                 ``LegendStyle.DIRECT``.
@@ -1250,13 +1295,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.hline()"
-            value = real(context, "y", y)
+            timed = self._y == _TIME
+            value = _time.instant(context, "y", y) if timed else real(context, "y", y)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
             name = _args.text(context, "label", label)
-            self._native.hline(self._row, self._col, value, name, spec, style.value, extent)
+            if isinstance(value, int):
+                self._native.hline_time(
+                    self._row, self._col, value, name, spec, style.value, extent
+                )
+            else:
+                self._native.hline(self._row, self._col, value, name, spec, style.value, extent)
             return self
 
     def vline(
@@ -1280,8 +1331,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         domain): then it ends at the baseline, since only padding lies below it.
 
         Args:
-            x: The x value of the line: a finite number, positive on a log axis, or a category
-                name.
+            x: The x value of the line: a finite number, positive on a log axis, a category
+                name, or a time on a time axis.
             label: The name shown in the legend; an empty string leaves the line out of it.
                 A reference line always takes an entry in the legend row, also under
                 ``LegendStyle.DIRECT``.
@@ -1309,6 +1360,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.vline()"
+            if self._x == _TIME:
+                when = _time.instant(context, "x", x)
+                _args.require_text(context, "label", label)
+                spec = _color_argument(context, color)
+                style = instance(context, "dash", dash, Dash, _DASH_HINT)
+                extent = _size_argument(context, "width", width)
+                name = _args.text(context, "label", label)
+                self._native.vline_time(self._row, self._col, when, name, spec, style.value, extent)
+                return self
             # The kind of x follows the x axis: a name on a category axis, a number otherwise.
             if self._x == _CATEGORY:
                 _args.require_text(context, "x", x)
@@ -1324,13 +1384,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def hspan(
-        self: "Axes[X, float]",
-        low: float,
-        high: float,
+        self: SY,
+        low: Y,
+        high: Y,
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[X, float]":
+    ) -> SY:
         """Add a horizontal reference span between the y values ``low`` and ``high``.
 
         The span fills the region between the two values across the whole plot, at the opacity
@@ -1361,6 +1421,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.hspan()"
+            if self._y == _TIME:
+                start = _time.instant(context, "low", low)
+                end = _time.instant(context, "high", high)
+                _args.require_text(context, "label", label)
+                spec = _color_argument(context, color)
+                name = _args.text(context, "label", label)
+                self._native.hspan_time(self._row, self._col, start, end, name, spec)
+                return self
             lower = real(context, "low", low)
             upper = real(context, "high", high)
             _args.require_text(context, "label", label)
@@ -1370,13 +1438,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def vspan(
-        self: "Axes[float, Y]",
-        low: float,
-        high: float,
+        self: SX,
+        low: X,
+        high: X,
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[float, Y]":
+    ) -> SX:
         """Add a vertical reference span between the x values ``low`` and ``high``.
 
         The span fills the region between the two values across the plot, at the opacity of an
@@ -1410,6 +1478,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             context = "Axes.vspan()"
+            if self._x == _TIME:
+                start = _time.instant(context, "low", low)
+                end = _time.instant(context, "high", high)
+                _args.require_text(context, "label", label)
+                spec = _color_argument(context, color)
+                name = _args.text(context, "label", label)
+                self._native.vspan_time(self._row, self._col, start, end, name, spec)
+                return self
             lower = real(context, "low", low)
             upper = real(context, "high", high)
             _args.require_text(context, "label", label)
@@ -1419,14 +1495,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def band(
-        self: "Axes[float, float]",
-        x: Values[float],
+        self: SXF,
+        x: Values[X],
         low: Values[float],
         high: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[float, float]":
+    ) -> SXF:
         """Add a band between the curves ``(x[i], low[i])`` and ``(x[i], high[i])``.
 
         The band is a flat fill at the opacity of an area, with no outline, whatever the fill
@@ -1436,7 +1512,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         envelope at the resolution of the plot. It needs a linear or log x axis.
 
         Args:
-            x: The x values, numbers in non-decreasing order, NaN apart.
+            x: The x values, numbers in non-decreasing order, NaN apart; times on a time x
+                axis, ``NaT`` apart.
             low: The lower curve, one value per x value.
             high: The upper curve, one value per x value; no value of ``low`` may exceed the
                 value of ``high`` at the same index.
@@ -1468,24 +1545,31 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "high", high)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
-            xs = floats(context, "x", x)
+            xs: FloatArray | MicrosArray = (
+                _time.micros(context, "x", x) if self._x == _TIME else floats(context, "x", x)
+            )
             lows = floats(context, "low", low)
             highs = floats(context, "high", high)
             name = _args.text(context, "label", label)
-            self._native.band(self._row, self._col, xs, lows, highs, name, spec)
+            if xs.dtype == np.int64:
+                times = cast(MicrosArray, xs)
+                self._native.band_time(self._row, self._col, times, lows, highs, name, spec)
+            else:
+                numbers = cast(FloatArray, xs)
+                self._native.band(self._row, self._col, numbers, lows, highs, name, spec)
             return self
 
     def y_error_bars(
-        self: "Axes[X, float]",
+        self: SY,
         x: Values[X],
-        low: Values[float],
-        high: Values[float],
+        low: Values[Y],
+        high: Values[Y],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         width: Size = Size.AUTO,
         caps: bool = True,
-    ) -> "Axes[X, float]":
+    ) -> SY:
         """Add a vertical error bar at each ``x[i]``, from ``low[i]`` to ``high[i]``.
 
         On a category x axis the bar is drawn at the centre of the category. With ``caps`` each
@@ -1498,7 +1582,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Args:
             x: The x values: numbers on a linear or log x axis, names on a category x axis.
-            low: The lower end of each bar, one value per x value.
+            low: The lower end of each bar, one value per x value; times on a time y axis.
             high: The upper end of each bar, one value per x value; no value of ``low`` may
                 exceed the value of ``high`` at the same index.
             label: The name shown in the legend; an empty string leaves the bars out of it.
@@ -1536,8 +1620,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             extent = _size_argument(context, "width", width)
             flag = _args.boolean(context, "caps", caps)
             xs = self._x_values(context, x)
-            lows = floats(context, "low", low)
-            highs = floats(context, "high", high)
+            lows = _limit_values(context, "low", low, self._y)
+            highs = _limit_values(context, "high", high, self._y)
             name = _args.text(context, "label", label)
             self._native.y_error_bars(
                 self._row, self._col, xs, lows, highs, name, spec, extent, flag
@@ -1545,16 +1629,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def x_error_bars(
-        self: "Axes[float, Y]",
+        self: SX,
         y: Values[Y],
-        low: Values[float],
-        high: Values[float],
+        low: Values[X],
+        high: Values[X],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         width: Size = Size.AUTO,
         caps: bool = True,
-    ) -> "Axes[float, Y]":
+    ) -> SX:
         """Add a horizontal error bar at each ``y[i]``, from ``low[i]`` to ``high[i]``.
 
         With ``caps`` each end of a bar has a short line across it, as wide as the cap width of
@@ -1565,8 +1649,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         the centre of its category's band.
 
         Args:
-            y: The y values: numbers on a linear or log y axis, names on a category y axis.
-            low: The left end of each bar, one value per y value.
+            y: The y values: numbers on a linear or log y axis, names on a category y axis,
+                times on a time y axis.
+            low: The left end of each bar, one value per y value; times on a time x axis.
             high: The right end of each bar, one value per y value; no value of ``low`` may
                 exceed the value of ``high`` at the same index.
             label: The name shown in the legend; an empty string leaves the bars out of it.
@@ -1606,20 +1691,30 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             extent = _size_argument(context, "width", width)
             flag = _args.boolean(context, "caps", caps)
             ys = self._y_values(context, y)
-            lows = floats(context, "low", low)
-            highs = floats(context, "high", high)
+            lows = _limit_values(context, "low", low, self._x)
+            highs = _limit_values(context, "high", high, self._x)
             name = _args.text(context, "label", label)
             self._native.x_error_bars(
                 self._row, self._col, ys, lows, highs, name, spec, extent, flag
             )
             return self
 
-    def _x_values(self, context: str, x: object) -> FloatArray | list[str]:
-        """Convert x values; empty data is an empty list of names on a category x axis."""
+    def _x_values(self, context: str, x: object) -> FloatArray | list[str] | MicrosArray:
+        """Convert x values; empty data is an empty list of names on a category x axis.
+
+        On a time x axis the values are times, converted to microseconds.
+        """
+        if self._x == _TIME:
+            return _time.micros(context, "x", x)
         return _scale_values(context, "x", x, self._x)
 
-    def _y_values(self, context: str, y: object) -> FloatArray | list[str]:
-        """Convert y values; empty data is an empty list of names on a category y axis."""
+    def _y_values(self, context: str, y: object) -> FloatArray | list[str] | MicrosArray:
+        """Convert y values; empty data is an empty list of names on a category y axis.
+
+        On a time y axis the values are times, converted to microseconds.
+        """
+        if self._y == _TIME:
+            return _time.micros(context, "y", y)
         return _scale_values(context, "y", y, self._y)
 
     def __copy__(self) -> Never:
@@ -1924,6 +2019,15 @@ def _scale_values(
     if isinstance(converted, np.ndarray) and converted.size == 0 and scale == _CATEGORY:
         return []
     return converted
+
+
+def _limit_values(
+    context: str, name: str, values: object, scale: Scale[Any]
+) -> FloatArray | MicrosArray:
+    """Convert error bar limits along an axis of ``scale``: numbers, or times on a time axis."""
+    if scale == _TIME:
+        return _time.micros(context, name, values)
+    return floats(context, name, values)
 
 
 def attach(

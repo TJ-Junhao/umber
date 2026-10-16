@@ -7,7 +7,7 @@ use super::MarkContext;
 use super::clip::{ClampedPoint, clamp_polyline};
 use super::fill::AREA_ALPHA;
 use super::line::{LineClip, downsample_columns, downsample_range};
-use super::mapping::{PlotPoint, axis_numbers, axis_value};
+use super::mapping::{PlotPoint, axis_numbers, axis_shared};
 use crate::Rgba;
 use crate::downsample::clipped_m4_indices;
 use crate::geometry::Path;
@@ -144,11 +144,7 @@ fn clipped_area(points: &[PlotPoint], plot: Area) -> f64 {
 /// The x, low and high values of `mark` in axis space, with NaN in all three wherever any of
 /// them is NaN, so the three break at the same places.
 fn gapped_points(resolved: &Resolved, mark: &BandMark) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-    let mut xs: Vec<f64> = mark
-        .x()
-        .iter()
-        .map(|&v| axis_value(&resolved.x, v))
-        .collect();
+    let mut xs = axis_shared(&resolved.x, mark.x_values());
     let mut lows = axis_numbers(&resolved.y, mark.low());
     let mut highs = axis_numbers(&resolved.y, mark.high());
     for ((x, low), high) in xs.iter_mut().zip(&mut lows).zip(&mut highs) {

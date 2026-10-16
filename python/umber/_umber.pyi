@@ -8,7 +8,10 @@ Python layer should never make; it carries neither attribute.
 Float data arguments must be one-dimensional, aligned (start and strides multiples of 8 bytes),
 C-contiguous or strided float64 buffers whose format is "d", "@d" or "=d"; an explicit byte order
 such as "<d" is refused. ``np.require(values, dtype="=f8", requirements=["A"]).view(np.float64)``
-produces such a buffer. Name arguments must be a ``list`` of ``str`` without lone surrogates.
+produces such a buffer. Time data arguments are int64 buffers of microseconds since
+1970-01-01T00:00 under the same rules, of format "q" or "l" (eight bytes), with the smallest
+int64 for a missing time; the core checks their range. Name arguments must be a ``list`` of
+``str`` without lone surrogates.
 Text arguments (titles, labels) must not hold lone surrogates either; PyO3 refuses them with a
 ``UnicodeEncodeError`` that carries neither attribute.
 
@@ -86,8 +89,8 @@ def color_with_alpha(rgba: int, a: float) -> int: ...
 def check_alpha(a: float) -> None: ...
 def check_palette_index(index: int) -> None: ...
 
-# A scale argument is (kind, base): kind 0 is linear, 1 is log, 2 is category; the base is
-# used by kind 1 only.
+# A scale argument is (kind, base): kind 0 is linear, 1 is log, 2 is category, 3 is time; the
+# base is used by kind 1 only.
 def check_log_base(base: float) -> None: ...
 
 # A size argument: (kind, value). Kind 0 is Size.AUTO (value unused, 0.0), 1 is Size.times() (value:
@@ -98,16 +101,21 @@ def check_size_times(factor: float) -> None: ...
 def check_size_points(points: float) -> None: ...
 
 # A tick format argument: (kind, decimals, prefix, suffix). Kind 0 is TickFormat.AUTO, 1 is
-# TickFormat.fixed(), 2 is TickFormat.percent() and 3 is TickFormat.scientific(); the decimals are
-# used by kinds 1 and 2 only (0 otherwise). The prefix and the suffix apply to every kind.
+# TickFormat.fixed(), 2 is TickFormat.percent(), 3 is TickFormat.scientific() and 4 is
+# TickFormat.iso(); the decimals are used by kinds 1 and 2 only (0 otherwise). The prefix and the
+# suffix apply to every kind.
 type _TickFormatArg = tuple[int, int, str, str]
 
 def check_tick_format(format: _TickFormatArg) -> None: ...
 
 # Float data: a one-dimensional float64 buffer as described above.
 type _FloatArray = numpy.typing.NDArray[numpy.float64]
+# Time data: a one-dimensional int64 buffer of microseconds as described above.
+type _TimeArray = numpy.typing.NDArray[numpy.int64]
 # x values: float data for a linear or log x axis, a list of names for a category x axis.
 type _AxisValues = _FloatArray | list[str]
+# Series values along either axis: float data, names, or times on a time axis.
+type _SeriesValues = _FloatArray | list[str] | _TimeArray
 # A bar series of grouped and stacked bars: (label, values, color).
 type _SeriesArg = tuple[str, _FloatArray, _ColorArg]
 # A named distribution: (label, one array per category, color).
@@ -264,8 +272,8 @@ class Figure:
         self,
         row: int,
         col: int,
-        x: _AxisValues,
-        y: _FloatArray,
+        x: _SeriesValues,
+        y: _SeriesValues,
         label: str,
         color: _ColorArg,
         dash: int,
@@ -275,8 +283,8 @@ class Figure:
         self,
         row: int,
         col: int,
-        x: _AxisValues,
-        y: _FloatArray,
+        x: _SeriesValues,
+        y: _SeriesValues,
         label: str,
         color: _ColorArg,
         dash: int,
@@ -286,8 +294,8 @@ class Figure:
         self,
         row: int,
         col: int,
-        x: _AxisValues,
-        y: _AxisValues,
+        x: _SeriesValues,
+        y: _SeriesValues,
         label: str,
         color: _ColorArg | ColorBy,
         marker: int,
@@ -308,8 +316,8 @@ class Figure:
         self,
         row: int,
         col: int,
-        x: _AxisValues,
-        y: _FloatArray,
+        x: _SeriesValues,
+        y: _SeriesValues,
         label: str,
         color: _ColorArg,
         marker: int,
@@ -372,8 +380,8 @@ class Figure:
         self,
         row: int,
         col: int,
-        x: _AxisValues,
-        y: _FloatArray,
+        x: _SeriesValues,
+        y: _SeriesValues,
         position: int,
         label: str,
         color: _ColorArg,
@@ -420,9 +428,9 @@ class Figure:
         self,
         row: int,
         col: int,
-        x: _AxisValues,
-        low: _FloatArray,
-        high: _FloatArray,
+        x: _SeriesValues,
+        low: _FloatArray | _TimeArray,
+        high: _FloatArray | _TimeArray,
         label: str,
         color: _ColorArg,
         width: _SizeArg,
@@ -432,9 +440,9 @@ class Figure:
         self,
         row: int,
         col: int,
-        y: _AxisValues,
-        low: _FloatArray,
-        high: _FloatArray,
+        y: _SeriesValues,
+        low: _FloatArray | _TimeArray,
+        high: _FloatArray | _TimeArray,
         label: str,
         color: _ColorArg,
         width: _SizeArg,
@@ -446,6 +454,56 @@ class Figure:
     # Figure.save_svg().
     def png_for_file(self, dpi: int) -> bytes: ...
     def svg_for_file(self, text: int) -> str: ...
+    # Time axes: times travel as int64 microseconds, scalars as int.
+    def xlim_time(self, row: int, col: int, low: int, high: int) -> None: ...
+    def ylim_time(self, row: int, col: int, low: int, high: int) -> None: ...
+    def xticks_time(self, row: int, col: int, positions: _TimeArray) -> None: ...
+    def yticks_time(self, row: int, col: int, positions: _TimeArray) -> None: ...
+    def xticks_labeled_time(
+        self, row: int, col: int, positions: _TimeArray, labels: list[str]
+    ) -> None: ...
+    def yticks_labeled_time(
+        self, row: int, col: int, positions: _TimeArray, labels: list[str]
+    ) -> None: ...
+    def vline_time(
+        self,
+        row: int,
+        col: int,
+        x: int,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def hline_time(
+        self,
+        row: int,
+        col: int,
+        y: int,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def hspan_time(
+        self, row: int, col: int, low: int, high: int, label: str, color: _ColorArg
+    ) -> None: ...
+    def vspan_time(
+        self, row: int, col: int, low: int, high: int, label: str, color: _ColorArg
+    ) -> None: ...
+    def band_time(
+        self,
+        row: int,
+        col: int,
+        x: _TimeArray,
+        low: _FloatArray,
+        high: _FloatArray,
+        label: str,
+        color: _ColorArg,
+    ) -> None: ...
+    def stacked_area_time(
+        self, row: int, col: int, x: _TimeArray, series: list[_SeriesArg]
+    ) -> None: ...
     def clim(self, row: int, col: int, low: float, high: float) -> None: ...
     def colorbar(
         self, row: int, col: int, label: str, position: int | None, format: _TickFormatArg | None

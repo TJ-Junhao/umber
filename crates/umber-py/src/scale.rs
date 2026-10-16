@@ -2,7 +2,7 @@
 //! [`ScaleKind`].
 //!
 //! A scale argument travels as two values, `(kind, base)`: kind 0 is linear, 1 is log with the
-//! given base, and 2 is category. The base is unused for kinds 0 and 2.
+//! given base, 2 is category and 3 is time. The base is unused for kinds 0, 2 and 3.
 
 use pyo3::prelude::*;
 use umber_core::{LogBase, ScaleKind};
@@ -15,6 +15,8 @@ const LINEAR: i64 = 0;
 const LOG: i64 = 1;
 /// The `kind` of a category scale argument.
 const CATEGORY: i64 = 2;
+/// The `kind` of a time scale argument.
+const TIME: i64 = 3;
 
 /// Checks a logarithm base for `Scale.log()`.
 #[pyfunction]
@@ -31,6 +33,7 @@ pub(crate) fn scale_kind(kind: i64, base: f64) -> PyResult<ScaleKind> {
             .map(|base| ScaleKind::Log { base })
             .map_err(core_error),
         CATEGORY => Ok(ScaleKind::Category),
+        TIME => Ok(ScaleKind::Time),
         _ => Err(internal_value(format!("{kind} is not a scale kind"))),
     }
 }

@@ -5,18 +5,22 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::validation::check_series;
-use crate::{Result, ScaleKind};
+use crate::{Instant, Result, ScaleKind};
 
-/// The values of a mark along one axis: numbers for a continuous axis, names for a category
-/// axis.
+/// The values of a mark along one axis: numbers for a linear or log axis, names for a category
+/// axis, times for a time axis.
 ///
 /// # Examples
 ///
 /// ```
 /// use umber_core::figure::AxisData;
+/// use umber_core::Instant;
 ///
 /// let names = AxisData::Categories(vec!["a".into(), "b".into()]);
 /// assert_ne!(names, AxisData::Numbers(vec![0.0, 1.0]));
+/// let times = AxisData::Times(vec![Some(Instant::from_micros(0)?), None]);
+/// assert_ne!(times, names);
+/// # Ok::<(), umber_core::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum AxisData {
@@ -24,6 +28,8 @@ pub enum AxisData {
     Numbers(Vec<f64>),
     /// Category names on a category axis.
     Categories(Vec<String>),
+    /// Times on a time axis. `None` marks a gap, as NaN does among numbers.
+    Times(Vec<Option<Instant>>),
 }
 
 impl AxisData {
@@ -32,22 +38,75 @@ impl AxisData {
         match self {
             AxisData::Numbers(v) => v.len(),
             AxisData::Categories(v) => v.len(),
+            AxisData::Times(v) => v.len(),
         }
     }
 
-    /// The numbers; none when these are category names.
+    /// The numbers; none when these are category names or times.
     pub(crate) fn numbers(&self) -> &[f64] {
         match self {
             AxisData::Numbers(values) => values,
-            AxisData::Categories(_) => &[],
+            AxisData::Categories(_) | AxisData::Times(_) => &[],
         }
     }
 
-    /// The category names; none when these are numbers.
+    /// The category names; none when these are numbers or times.
     pub(crate) fn categories(&self) -> &[String] {
         match self {
             AxisData::Categories(names) => names,
-            AxisData::Numbers(_) => &[],
+            AxisData::Numbers(_) | AxisData::Times(_) => &[],
+        }
+    }
+
+    /// The times, `None` for a gap; none when these are numbers or category names.
+    pub(crate) fn times(&self) -> &[Option<Instant>] {
+        match self {
+            AxisData::Times(times) => times,
+            AxisData::Numbers(_) | AxisData::Categories(_) => &[],
+        }
+    }
+}
+
+/// The x values of a mark that stores them shared, as bands and stacked areas do: numbers on a
+/// linear or log axis, times on a time axis. Clones share the allocation.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum SharedValues {
+    /// Numbers; NaN marks a gap.
+    Numbers(Arc<[f64]>),
+    /// Times; `None` marks a gap.
+    Times(Arc<[Option<Instant>]>),
+}
+
+impl SharedValues {
+    /// The number of values.
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            SharedValues::Numbers(values) => values.len(),
+            SharedValues::Times(times) => times.len(),
+        }
+    }
+
+    /// Whether the value at `i` is a gap: NaN or a missing time.
+    pub(crate) fn is_gap(&self, i: usize) -> bool {
+        match self {
+            SharedValues::Numbers(values) => values.get(i).is_none_or(|v| v.is_nan()),
+            SharedValues::Times(times) => times.get(i).is_none_or(Option::is_none),
+        }
+    }
+
+    /// The numbers; none when these are times.
+    pub(crate) fn numbers(&self) -> &[f64] {
+        match self {
+            SharedValues::Numbers(values) => values,
+            SharedValues::Times(_) => &[],
+        }
+    }
+
+    /// The times, `None` for a gap; none when these are numbers.
+    pub(crate) fn times(&self) -> &[Option<Instant>] {
+        match self {
+            SharedValues::Times(times) => times,
+            SharedValues::Numbers(_) => &[],
         }
     }
 }

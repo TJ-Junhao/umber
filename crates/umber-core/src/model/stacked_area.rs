@@ -2,14 +2,17 @@
 
 use std::sync::Arc;
 
+use super::axis_data::SharedValues;
 use super::bar::{Series, SeriesView};
 use super::validation::check_stacked_area;
-use crate::{Result, ScaleKind, Transform};
+use crate::{Instant, Result, ScaleKind, Transform};
 
 /// Stacked areas over shared x values, with the layers in series order.
 ///
 /// The x values and series are validated together, never change and are shared by clones.
-/// A NaN in x or any series breaks every layer at that index.
+/// The x values are numbers on a linear or log axis and times on a time axis
+/// ([`AxesMut::stacked_area_time`](super::AxesMut::stacked_area_time)). A gap in x (NaN or a
+/// missing time) or a NaN in any series breaks every layer at that index.
 ///
 /// # Examples
 ///
@@ -35,7 +38,7 @@ use crate::{Result, ScaleKind, Transform};
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackedAreaMark {
-    x: Arc<[f64]>,
+    x: SharedValues,
     series: Arc<[Series]>,
 }
 
@@ -45,7 +48,7 @@ impl StackedAreaMark {
         context: &'static str,
         x_kind: ScaleKind,
         y: Transform,
-        x: Arc<[f64]>,
+        x: SharedValues,
         series: Vec<Series>,
     ) -> Result<StackedAreaMark> {
         check_stacked_area(context, x_kind, y, &x, &series)?;
@@ -55,7 +58,8 @@ impl StackedAreaMark {
         })
     }
 
-    /// The x values, in non-decreasing order, NaN apart.
+    /// The x values on a linear or log axis, in non-decreasing order, NaN apart; empty on a
+    /// time axis, whose x values [`StackedAreaMark::x_times`] gives.
     ///
     /// # Examples
     ///
@@ -72,6 +76,34 @@ impl StackedAreaMark {
     /// ```
     #[must_use]
     pub fn x(&self) -> &[f64] {
+        self.x.numbers()
+    }
+
+    /// The x values on a time axis, in non-decreasing order, `None` for a gap; empty on a linear
+    /// or log axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::{Figure, Instant, Mark, ScaleKind, Series, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let x = [Some(Instant::from_micros(0)?), Some(Instant::from_micros(1)?)];
+    /// axes.stacked_area_time(Arc::from(x), vec![Series {
+    ///     values: vec![2.0, 3.0], ..Series::default()
+    /// }])?;
+    /// let Some(Mark::StackedArea(mark)) = axes.marks().first() else { unreachable!() };
+    /// assert_eq!(mark.x_times(), &x);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_times(&self) -> &[Option<Instant>] {
+        self.x.times()
+    }
+
+    /// The x values as stored: numbers or times.
+    pub(crate) fn x_values(&self) -> &SharedValues {
         &self.x
     }
 

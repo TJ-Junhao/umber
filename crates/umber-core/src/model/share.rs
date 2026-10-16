@@ -6,14 +6,37 @@ use std::sync::Arc;
 use super::axes::scale_name;
 use super::{Axes, AxisTicks, Cell, CellRange, Figure, Grid, Share};
 use crate::error::number;
-use crate::{ContinuousScale, Error, Result, ScaleKind};
+use crate::{ContinuousScale, Error, Instant, Result, ScaleKind};
+
+/// The explicit limits of an axis, validated: the scale they define on a linear or log axis,
+/// the lower and the upper time on a time axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ExplicitLimits {
+    /// The limits of a linear or log axis, as the scale they define.
+    Continuous(ContinuousScale),
+    /// The limits of a time axis, the lower below the upper.
+    Time(Instant, Instant),
+}
+
+impl ExplicitLimits {
+    /// The limits as messages write them, such as `(0, 10)` or `(2026-01-01, 2026-02-01)`.
+    fn label(self) -> String {
+        match self {
+            ExplicitLimits::Continuous(scale) => {
+                let (low, high) = scale.domain();
+                format!("({}, {})", number(low), number(high))
+            }
+            ExplicitLimits::Time(low, high) => format!("({}, {})", low.label(), high.label()),
+        }
+    }
+}
 
 /// The values shared by one axis group. Axes borrow them through an immutable shared pointer;
 /// replacing a group's pointer leaves copies of the figure and axes independent.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct AxisSettings {
-    /// The explicit limits, already validated as a scale.
-    pub limits: Option<ContinuousScale>,
+    /// The explicit limits, already validated.
+    pub limits: Option<ExplicitLimits>,
     /// The explicit ticks and their format.
     pub ticks: AxisTicks,
 }
@@ -49,6 +72,14 @@ impl SharedAxis {
         match self {
             Self::X => "pass x=Scale.category() to Figure.add_axes().",
             Self::Y => "pass y=Scale.category() to Figure.add_axes().",
+        }
+    }
+
+    /// The hint for this axis when it is not a time axis but needs to be one.
+    pub const fn time_scale_hint(self) -> &'static str {
+        match self {
+            Self::X => "pass x=Scale.time() to Figure.add_axes().",
+            Self::Y => "pass y=Scale.time() to Figure.add_axes().",
         }
     }
 
@@ -120,10 +151,7 @@ impl Group {
                 let previous = self
                     .settings
                     .limits
-                    .map(|s| {
-                        let (low, high) = s.domain();
-                        format!("({}, {})", number(low), number(high))
-                    })
+                    .map(ExplicitLimits::label)
                     .unwrap_or_default();
                 (
                     self.settings.limits == proposed.limits,

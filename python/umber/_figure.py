@@ -16,7 +16,7 @@ from umber._scale import Scale
 from umber._theme import Theme
 
 _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
-_SCALE_HINT: Final = "use Scale.linear(), Scale.log() or Scale.category()."
+_SCALE_HINT: Final = "use Scale.linear(), Scale.log(), Scale.category() or Scale.time()."
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
 _SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
 _LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
@@ -207,7 +207,8 @@ class Figure:
             row_span: The number of rows occupied, at least 1.
             col_span: The number of columns occupied, at least 1.
             x: The x scale. ``Scale.linear()`` and ``Scale.log()`` make a numeric x axis;
-                ``Scale.category()`` makes an axis of names, as bar charts need.
+                ``Scale.category()`` makes an axis of names, as bar charts need;
+                ``Scale.time()`` makes an axis of times.
             y: The y scale, as for ``x``. A category y axis beside a numeric x axis makes
                 bars, boxes and violins horizontal and a scatter a dot plot.
 

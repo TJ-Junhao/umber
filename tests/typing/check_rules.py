@@ -24,7 +24,7 @@ chained: ub.Axes[float, float] = numeric.hline(1).vline(1).hspan(1, 2).vspan(1, 
 chained_cats: ub.Axes[str, float] = cats.hline(1).vline("a").hspan(1, 2).scatter(names, t)
 
 # Negative: vspan needs a numeric x axis, so it is refused on a category axis.
-cats.vspan(0, 1)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.vspan("a", "b")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 # Negative: x of a vline matches the x axis.
 numeric.vline("Q1")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

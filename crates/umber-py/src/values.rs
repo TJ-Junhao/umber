@@ -1,9 +1,11 @@
-//! Extraction of data arguments: float64 buffers and lists of names.
+//! Extraction of data arguments: float64 buffers, lists of names and int64 buffers of times.
 //!
 //! The Python layer converts every data argument before the native call, to a one-dimensional,
-//! aligned, native-endian float64 array or to a `list` of `str`. These functions only read those
-//! two forms and convert nothing else; any other input is an internal `TypeError`. All checks on
-//! the values themselves (finiteness, lengths, duplicates) belong to the core.
+//! aligned, native-endian float64 array, to a `list` of `str`, or, for times, to such an int64
+//! array of microseconds since 1970-01-01T00:00 with the smallest int64 for a missing time
+//! ([`umber_core::MISSING_TIME`]). These functions only read those forms and convert nothing
+//! else; any other input is an internal `TypeError`. All checks on the values themselves
+//! (finiteness, lengths, duplicates, the range of times) belong to the core.
 
 use std::iter;
 use std::sync::Arc;
@@ -11,9 +13,9 @@ use std::sync::Arc;
 use pyo3::buffer::PyBuffer;
 use pyo3::prelude::*;
 use pyo3::types::{PyFloat, PyList, PyString};
-use umber_core::{AxisData, AxisValue};
+use umber_core::{AxisData, AxisValue, Instant, times_from_micros};
 
-use crate::errors::{internal_state, internal_type};
+use crate::errors::{core_error, internal_state, internal_type};
 
 /// Copies a float64 buffer, such as a NumPy `float64` array, into a vector, in logical order.
 ///
@@ -96,6 +98,68 @@ pub(crate) fn axis_data(obj: &Bound<'_, PyAny>) -> PyResult<AxisData> {
     } else {
         floats(obj).map(AxisData::Numbers)
     }
+}
+
+/// Converts the values of a series along one axis, named `name` in the messages of `context`:
+/// an int64 buffer holds times and becomes [`AxisData::Times`], checked by the core; anything
+/// else converts as [`axis_data`] converts it.
+pub(crate) fn series_data(
+    context: &'static str,
+    name: &'static str,
+    obj: &Bound<'_, PyAny>,
+) -> PyResult<AxisData> {
+    if is_int64_buffer(obj) {
+        times(context, name, obj).map(AxisData::Times)
+    } else {
+        axis_data(obj)
+    }
+}
+
+/// Converts times, named `name` in the messages of `context`: an int64 buffer of
+/// microseconds, read as [`micros`] reads it, with the range checked by the core.
+pub(crate) fn times(
+    context: &'static str,
+    name: &'static str,
+    obj: &Bound<'_, PyAny>,
+) -> PyResult<Vec<Option<Instant>>> {
+    times_from_micros(context, name, &micros(obj)?).map_err(core_error)
+}
+
+/// Copies an int64 buffer of microseconds, such as a NumPy `int64` array, into a vector, in
+/// logical order, with the contract of [`floats`] for an int64 element: one-dimensional,
+/// aligned, and of format `q` or `l` (eight bytes) in native byte order, with or without `@` or
+/// `=`. Anything else is an internal `TypeError`.
+pub(crate) fn micros(obj: &Bound<'_, PyAny>) -> PyResult<Vec<i64>> {
+    let unexpected = || {
+        internal_type(format!(
+            "expected a one-dimensional int64 buffer, got {}",
+            type_name(obj)
+        ))
+    };
+    let buffer = PyBuffer::<i64>::get(obj).map_err(|_| unexpected())?;
+    let aligned_strides = buffer.strides().iter().all(|stride| stride % 8 == 0);
+    if buffer.dimensions() != 1 || !aligned_strides || !is_native_i64(buffer.format().to_bytes()) {
+        return Err(unexpected());
+    }
+    buffer.to_vec(obj.py())
+}
+
+/// Whether `obj` exports a one-dimensional int64 buffer that [`micros`] reads: times, where a
+/// data argument may hold numbers or times.
+pub(crate) fn is_int64_buffer(obj: &Bound<'_, PyAny>) -> bool {
+    PyBuffer::<i64>::get(obj)
+        .is_ok_and(|buffer| buffer.dimensions() == 1 && is_native_i64(buffer.format().to_bytes()))
+}
+
+/// Whether a buffer format string is one eight-byte signed integer in native byte order, with
+/// no explicit byte order: `q`, or `l` where a C `long` has eight bytes, with or without `@` or
+/// `=`.
+fn is_native_i64(format: &[u8]) -> bool {
+    let code = match format {
+        [code] | [b'@' | b'=', code] => *code,
+        _ => return false,
+    };
+    code == b'q' || (code == b'l' && std::mem::size_of::<std::os::raw::c_long>() == 8)
 }
 
 /// Converts the x of a vertical reference line: a `str` becomes [`AxisValue::Category`], a
@@ -318,6 +382,72 @@ mod tests {
             assert_eq!(numbers, AxisData::Numbers(vec![1.5, -2.0, 3.25]));
             let err = axis_data(&eval(py, "['a', '\\udfff']")).unwrap_err();
             internal_type_message(&err, py);
+        });
+    }
+
+    #[test]
+    fn series_data_reads_int64_buffers_as_times() {
+        with_python(|py| {
+            let times = series_data(
+                "Axes.line()",
+                "x",
+                &eval(py, "np.array([0, 1], dtype=np.int64)"),
+            )
+            .unwrap();
+            assert_eq!(
+                times,
+                AxisData::Times(vec![
+                    Some(Instant::from_micros(0).unwrap()),
+                    Some(Instant::from_micros(1).unwrap())
+                ])
+            );
+            let missing = format!("np.array([{}], dtype=np.int64)", umber_core::MISSING_TIME);
+            assert_eq!(
+                series_data("Axes.line()", "x", &eval(py, &missing)).unwrap(),
+                AxisData::Times(vec![None])
+            );
+            // Strided int64 views are read in logical order.
+            let strided = series_data(
+                "Axes.line()",
+                "x",
+                &eval(py, "np.array([5, 6, 7, 8], dtype=np.int64)[::2]"),
+            )
+            .unwrap();
+            assert_eq!(
+                strided,
+                AxisData::Times(vec![
+                    Some(Instant::from_micros(5).unwrap()),
+                    Some(Instant::from_micros(7).unwrap())
+                ])
+            );
+            // Other buffers and lists convert as before.
+            assert_eq!(
+                series_data("Axes.line()", "y", &eval(py, DATA)).unwrap(),
+                AxisData::Numbers(vec![1.5, -2.0, 3.25])
+            );
+            // A time out of range is the core's error.
+            let beyond = "np.array([0, 2**62], dtype=np.int64)";
+            assert!(series_data("Axes.line()", "x", &eval(py, beyond)).is_err());
+        });
+    }
+
+    #[test]
+    fn micros_refuses_other_buffers() {
+        with_python(|py| {
+            for expression in [
+                "np.zeros(2, dtype=np.int32)",
+                "np.zeros((2, 2), dtype=np.int64)",
+                "np.zeros(2, dtype='>i8')",
+                "np.zeros(2)",
+                "[1, 2]",
+            ] {
+                let err = micros(&eval(py, expression)).unwrap_err();
+                let message = internal_type_message(&err, py);
+                assert!(
+                    message.starts_with("internal error: expected a one-dimensional int64"),
+                    "{expression}: {message}"
+                );
+            }
         });
     }
 

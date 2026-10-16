@@ -200,7 +200,7 @@ def test_cell_scale_type_error_highlights_y(tmp_path: Path) -> None:
     assert str(err) == "Cell.add_axes(): y is None; y must be of type Scale."
     assert _notes(err) == [
         _marked(line, "y=None"),
-        "hint: use Scale.linear(), Scale.log() or Scale.category().",
+        "hint: use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
     ]
 
 
@@ -211,7 +211,7 @@ def test_cell_scale_type_error_still_highlights_x(tmp_path: Path) -> None:
     assert str(err) == "Cell.add_axes(): x is None; x must be of type Scale."
     assert _notes(err) == [
         _marked(line, "x=None"),
-        "hint: use Scale.linear(), Scale.log() or Scale.category().",
+        "hint: use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
     ]
 
 
@@ -256,8 +256,8 @@ def test_a_bad_position_is_reported_with_a_category_y(
 @pytest.mark.parametrize(
     ("name", "value", "hint"),
     [
-        ("x", "log", "use Scale.linear(), Scale.log() or Scale.category()."),
-        ("y", None, "use Scale.linear(), Scale.log() or Scale.category()."),
+        ("x", "log", "use Scale.linear(), Scale.log(), Scale.category() or Scale.time()."),
+        ("y", None, "use Scale.linear(), Scale.log(), Scale.category() or Scale.time()."),
     ],
 )
 def test_scales_must_be_scales(name: str, value: object, hint: str) -> None:

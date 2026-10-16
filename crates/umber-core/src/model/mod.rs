@@ -37,6 +37,7 @@ mod share_tests;
 pub use axes::Axes;
 pub use axes_mut::{AxesMut, ColorbarOptions};
 pub use axis_data::AxisData;
+pub(crate) use axis_data::SharedValues;
 pub use band::{BandMark, BandOptions};
 pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};
 pub use box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};

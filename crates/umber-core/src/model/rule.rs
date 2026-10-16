@@ -3,17 +3,19 @@
 use std::fmt;
 use std::slice;
 
-use crate::{ColorSpec, Dash, SizeSpec};
+use crate::{ColorSpec, Dash, Instant, SizeSpec};
 
-/// A position on the x axis: a number on a linear or log axis, a category name on a category
-/// axis.
+/// A position on an axis: a number on a linear or log axis, a category name on a category axis,
+/// a time on a time axis.
 ///
 /// # Examples
 ///
 /// ```
-/// use umber_core::AxisValue;
+/// use umber_core::{AxisValue, Instant};
 ///
 /// assert_ne!(AxisValue::Number(2.0), AxisValue::Category("2".into()));
+/// assert_ne!(AxisValue::Time(Instant::from_micros(2)?), AxisValue::Number(2.0));
+/// # Ok::<(), umber_core::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum AxisValue {
@@ -21,6 +23,26 @@ pub enum AxisValue {
     Number(f64),
     /// A category name.
     Category(String),
+    /// A time on a time axis.
+    Time(Instant),
+}
+
+impl AxisValue {
+    /// The number, as a one-value slice; empty for a category name or a time.
+    pub(crate) fn numbers(&self) -> &[f64] {
+        match self {
+            AxisValue::Number(value) => slice::from_ref(value),
+            AxisValue::Category(_) | AxisValue::Time(_) => &[],
+        }
+    }
+
+    /// The time, as a one-value slice; empty for a number or a category name.
+    pub(crate) fn times(&self) -> &[Instant] {
+        match self {
+            AxisValue::Time(t) => slice::from_ref(t),
+            AxisValue::Number(_) | AxisValue::Category(_) => &[],
+        }
+    }
 }
 
 /// Options of a reference line, horizontal or vertical.
@@ -91,45 +113,46 @@ impl Default for SpanOptions {
     }
 }
 
-/// A horizontal reference line: a validated y and its [`RuleOptions`].
+/// A horizontal reference line: a validated y and its [`RuleOptions`]. The y is a number on a
+/// linear or log y axis and a time on a time y axis.
 ///
 /// # Examples
 ///
 /// ```
 /// use umber_core::figure::{Mark, RuleOptions};
-/// use umber_core::{Figure, ScaleKind, Theme};
+/// use umber_core::{AxisValue, Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
 /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.hline(66.0, RuleOptions::default())?;
 /// let Some(Mark::HLine(rule)) = axes.marks().first() else { unreachable!() };
-/// assert_eq!(rule.y(), 66.0);
+/// assert_eq!(rule.y(), &AxisValue::Number(66.0));
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 ///
 /// A reference line cannot be built outside [`Axes`](super::Axes):
 ///
 /// ```compile_fail,E0451
-/// use umber_core::figure::{HLineMark, Mark, RuleOptions};
+/// use umber_core::figure::{AxisValue, HLineMark, Mark, RuleOptions};
 ///
-/// let mark = Mark::HLine(HLineMark { y: 1.0, options: RuleOptions::default() });
+/// let mark = Mark::HLine(HLineMark { y: AxisValue::Number(1.0), options: RuleOptions::default() });
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct HLineMark {
-    y: f64,
+    y: AxisValue,
     options: RuleOptions,
 }
 
 impl HLineMark {
-    /// A horizontal line at the validated `y`.
-    pub(super) fn new(y: f64, options: RuleOptions) -> HLineMark {
+    /// A horizontal line at the validated `y`, a number or a time.
+    pub(super) fn new(y: AxisValue, options: RuleOptions) -> HLineMark {
         HLineMark { y, options }
     }
 
-    /// The y value the line sits at.
+    /// The y value the line sits at: a number, or a time on a time axis.
     #[must_use]
-    pub fn y(&self) -> f64 {
-        self.y
+    pub fn y(&self) -> &AxisValue {
+        &self.y
     }
 
     /// Label, color, dash and width.
@@ -138,9 +161,10 @@ impl HLineMark {
         &self.options
     }
 
-    /// The y value as a one-value slice, which is what the line contributes to the y domain.
+    /// The number the line sits at, as a one-value slice, which is what the line contributes to
+    /// a linear or log y domain; empty for a time.
     pub(crate) fn y_values(&self) -> &[f64] {
-        slice::from_ref(&self.y)
+        self.y.numbers()
     }
 }
 
@@ -206,12 +230,9 @@ impl VLineMark {
     }
 
     /// The number the line sits at, as a one-value slice, which is what the line contributes to
-    /// a continuous x domain; empty for a category.
+    /// a continuous x domain; empty for a category or a time.
     pub(crate) fn x_numbers(&self) -> &[f64] {
-        match &self.x {
-            AxisValue::Number(x) => slice::from_ref(x),
-            AxisValue::Category(_) => &[],
-        }
+        self.x.numbers()
     }
 }
 
@@ -224,21 +245,31 @@ impl fmt::Debug for VLineMark {
     }
 }
 
+/// The ends of a reference span: two numbers on a linear or log axis, two times on a time axis,
+/// the lower first.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SpanBounds {
+    /// Two numbers.
+    Numbers([f64; 2]),
+    /// Two times.
+    Times([Instant; 2]),
+}
+
 /// A reference span, the region between two values across the whole plot, along y for
 /// [`Mark::HSpan`](super::Mark::HSpan) and along x for [`Mark::VSpan`](super::Mark::VSpan): two
-/// validated values, the lower first, and the [`SpanOptions`].
+/// validated values, the lower first, numbers or times, and the [`SpanOptions`].
 ///
 /// # Examples
 ///
 /// ```
 /// use umber_core::figure::{Mark, SpanOptions};
-/// use umber_core::{Figure, ScaleKind, Theme};
+/// use umber_core::{AxisValue, Figure, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
 /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// axes.hspan(42.0, 58.0, SpanOptions::default())?;
 /// let Some(Mark::HSpan(span)) = axes.marks().first() else { unreachable!() };
-/// assert_eq!((span.low(), span.high()), (42.0, 58.0));
+/// assert_eq!((span.low(), span.high()), (AxisValue::Number(42.0), AxisValue::Number(58.0)));
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 ///
@@ -247,36 +278,36 @@ impl fmt::Debug for VLineMark {
 /// ```compile_fail,E0451
 /// use umber_core::figure::{Mark, SpanMark, SpanOptions};
 ///
-/// let mark = Mark::HSpan(SpanMark {
-///     bounds: [1.0, 2.0],
-///     options: SpanOptions::default(),
-/// });
+/// let mark = Mark::HSpan(SpanMark { options: SpanOptions::default() });
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct SpanMark {
-    bounds: [f64; 2],
+    bounds: SpanBounds,
     options: SpanOptions,
 }
 
 impl SpanMark {
-    /// A span between the validated `low` and `high`, with `low` below `high`.
-    pub(super) fn new(low: f64, high: f64, options: SpanOptions) -> SpanMark {
-        SpanMark {
-            bounds: [low, high],
-            options,
+    /// A span between the validated `bounds`, the lower first.
+    pub(super) fn new(bounds: SpanBounds, options: SpanOptions) -> SpanMark {
+        SpanMark { bounds, options }
+    }
+
+    /// The lower end of the span: a number, or a time on a time axis.
+    #[must_use]
+    pub fn low(&self) -> AxisValue {
+        match self.bounds {
+            SpanBounds::Numbers([low, _]) => AxisValue::Number(low),
+            SpanBounds::Times([low, _]) => AxisValue::Time(low),
         }
     }
 
-    /// The lower end of the span.
+    /// The upper end of the span, above [`SpanMark::low`].
     #[must_use]
-    pub fn low(&self) -> f64 {
-        self.bounds[0]
-    }
-
-    /// The upper end of the span; above [`SpanMark::low`].
-    #[must_use]
-    pub fn high(&self) -> f64 {
-        self.bounds[1]
+    pub fn high(&self) -> AxisValue {
+        match self.bounds {
+            SpanBounds::Numbers([_, high]) => AxisValue::Number(high),
+            SpanBounds::Times([_, high]) => AxisValue::Time(high),
+        }
     }
 
     /// Label and color.
@@ -285,9 +316,22 @@ impl SpanMark {
         &self.options
     }
 
-    /// The two ends, low first, which is what the span contributes to the domain it runs along.
+    /// The two ends as numbers, low first, which is what the span contributes to the linear or
+    /// log domain it runs along; empty for times.
     pub(crate) fn bounds(&self) -> &[f64] {
-        &self.bounds
+        match &self.bounds {
+            SpanBounds::Numbers(bounds) => bounds,
+            SpanBounds::Times(_) => &[],
+        }
+    }
+
+    /// The two ends as times, low first, which is what the span contributes to the time domain
+    /// it runs along; empty for numbers.
+    pub(crate) fn time_bounds(&self) -> &[Instant] {
+        match &self.bounds {
+            SpanBounds::Times(bounds) => bounds,
+            SpanBounds::Numbers(_) => &[],
+        }
     }
 }
 
@@ -377,11 +421,11 @@ mod tests {
         };
         assert_eq!(
             (vspan.low(), vspan.high(), vspan.options()),
-            (40.0, 50.0, &span)
+            (number(40.0), number(50.0), &span)
         );
-        assert_eq!((hline.y(), hline.options()), (66.0, &options));
+        assert_eq!((hline.y(), hline.options()), (&number(66.0), &options));
         assert_eq!(vline.x(), &number(31.0));
-        assert_eq!((hspan.low(), hspan.high()), (42.0, 58.0));
+        assert_eq!((hspan.low(), hspan.high()), (number(42.0), number(58.0)));
     }
 
     #[test]

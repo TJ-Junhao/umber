@@ -40,7 +40,7 @@ from umber._series import Distribution, Series
 from umber._size import Size
 from umber._theme import Theme
 from umber._ticks import TickFormat
-from umber._types import SupportsArray, Values
+from umber._types import SupportsArray, Time, Values
 from umber._umber import MAX_BINS as _MAX_BINS
 from umber._umber import __version__
 
@@ -85,6 +85,7 @@ __all__ = [
     "SvgText",
     "Theme",
     "TickFormat",
+    "Time",
     "UmberError",
     "UsageError",
     "Values",

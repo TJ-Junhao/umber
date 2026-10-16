@@ -109,6 +109,7 @@ mod corpus {
     pub mod stem;
     pub mod step;
     pub mod ticks;
+    pub mod time;
     pub mod violin;
     pub mod x_end_label;
 }
@@ -175,6 +176,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::color_by::cases(&lib, &mut sink);
     corpus::horizontal::cases(&lib, &mut sink);
     corpus::colorbar::cases(&lib, &mut sink);
+    corpus::time::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1559,6 +1561,7 @@ mod record {
             ScaleKind::Linear => "linear".into(),
             ScaleKind::Log { base } => format!("log({})", f64(base.get())),
             ScaleKind::Category => "category".into(),
+            ScaleKind::Time => "time".into(),
             _ => "unknown-scale".into(),
         }
     }
@@ -1652,6 +1655,7 @@ mod record {
                 let names: Vec<String> = v.iter().map(|s| text(s)).collect();
                 format!("categories[{}]", names.join(","))
             }
+            AxisData::Times(v) => format!("times{}", times(v)),
         }
     }
 
@@ -1660,8 +1664,27 @@ mod record {
     fn y_data(d: &AxisData) -> String {
         match d {
             AxisData::Numbers(v) => floats64(v),
-            AxisData::Categories(_) => axis_data(d),
+            AxisData::Categories(_) | AxisData::Times(_) => axis_data(d),
         }
+    }
+
+    /// A position on an axis as the records write it: a number as a one-value float list (the
+    /// format of reference values), a name as text, a time as its microseconds.
+    fn axis_value(v: &umber_core::AxisValue) -> String {
+        match v {
+            umber_core::AxisValue::Number(x) => floats64(&[*x]),
+            umber_core::AxisValue::Category(name) => text(name),
+            umber_core::AxisValue::Time(t) => format!("time({})", t.micros()),
+        }
+    }
+
+    /// Times as the records write them: each as its microseconds, `nat` for a missing one.
+    pub fn times(v: &[Option<umber_core::Instant>]) -> String {
+        let items: Vec<String> = v
+            .iter()
+            .map(|t| t.map_or_else(|| "nat".to_owned(), |t| t.micros().to_string()))
+            .collect();
+        format!("[{}]", items.join(","))
     }
 
     fn mark(m: &Mark) -> String {
@@ -1720,32 +1743,29 @@ mod record {
             ),
             Mark::HLine(rule) => format!(
                 "hline y={} label={} color={} dash={}",
-                floats64(&[rule.y()]),
+                axis_value(rule.y()),
                 text(&rule.options().label),
                 color_spec(rule.options().color),
                 dash(rule.options().dash)
             ),
             Mark::VLine(rule) => format!(
                 "vline x={} label={} color={} dash={}",
-                match rule.x() {
-                    umber_core::AxisValue::Number(x) => floats64(&[*x]),
-                    umber_core::AxisValue::Category(name) => text(name),
-                },
+                axis_value(rule.x()),
                 text(&rule.options().label),
                 color_spec(rule.options().color),
                 dash(rule.options().dash)
             ),
             Mark::HSpan(span) => format!(
                 "hspan low={} high={} label={} color={}",
-                floats64(&[span.low()]),
-                floats64(&[span.high()]),
+                axis_value(&span.low()),
+                axis_value(&span.high()),
                 text(&span.options().label),
                 color_spec(span.options().color)
             ),
             Mark::VSpan(span) => format!(
                 "vspan low={} high={} label={} color={}",
-                floats64(&[span.low()]),
-                floats64(&[span.high()]),
+                axis_value(&span.low()),
+                axis_value(&span.high()),
                 text(&span.options().label),
                 color_spec(span.options().color)
             ),

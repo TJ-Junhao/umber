@@ -8,7 +8,7 @@
 //! is kept only when its end is on the plot.
 
 use super::MarkContext;
-use super::mapping::{AxisPoint, axis_numbers, axis_values};
+use super::mapping::{AxisPoint, axis_shared, axis_values};
 use crate::Rgba;
 use crate::geometry::{Path, Point};
 use crate::model::{ErrorBarMark, ErrorBarOrientation};
@@ -84,8 +84,8 @@ pub(super) fn error_bar_items(
     let maps = context.maps.oriented(orientation);
     let (along, values) = resolved.along_and_values(orientation);
     let positions = axis_values(along, mark.positions());
-    let lows = axis_numbers(values, mark.low());
-    let highs = axis_numbers(values, mark.high());
+    let (low, high) = mark.limits();
+    let (lows, highs) = (axis_shared(values, low), axis_shared(values, high));
     let (position_map, value_map) = (maps.x, maps.y);
     let half_stroke = f64::from(width) / 2.0;
     let reach = cap.map_or(half_stroke, |c| half_stroke.max(f64::from(c) / 2.0));

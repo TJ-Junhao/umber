@@ -1,7 +1,10 @@
-"""Type aliases for the data arguments of every mark: ``SupportsArray`` and ``Values``."""
+"""Type aliases for the data of marks: ``SupportsArray``, ``Values`` and ``Time``."""
 
+import datetime
 from collections.abc import Sequence
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeAlias
+
+import numpy as np
 
 
 class SupportsArray(Protocol):
@@ -48,4 +51,19 @@ Example:
     >>> ax = ub.line([0, 1, 2], pd.Series([0.5, float("nan"), 2.0]))
     >>> ax = ub.line([0, 1, 2], pd.Series([1, None, 3], dtype="Int64"))
     >>> ax = ub.bar(pd.Series(["North", "South"]), [3, 5])
+"""
+
+
+Time: TypeAlias = datetime.datetime | datetime.date | np.datetime64  # noqa: UP040
+"""A time on a time axis: a ``datetime``, a ``date`` (midnight of that day) or a
+``numpy.datetime64``. ``Values[Time]`` also takes NumPy ``datetime64`` arrays of any unit and
+naive pandas and polars datetime columns. Times carry no time zone.
+
+Example:
+    >>> import datetime as dt
+    >>> import umber as ub
+    >>> ax = ub.Figure().add_axes(x=ub.Scale.time())
+    >>> ax = ax.line([dt.date(2026, 1, 1), dt.datetime(2026, 1, 2, 12, 0)], [1.0, 2.0])
+    >>> isinstance(ax, ub.Axes)
+    True
 """

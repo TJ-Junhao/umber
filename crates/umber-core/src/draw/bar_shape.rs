@@ -27,7 +27,7 @@ fn bar_base(y: &ResolvedAxis, map: AxisMap, baseline: NormalizedPos) -> f64 {
             Transform::Linear => 0.0,
             Transform::Log(_) => map.at(baseline),
         },
-        AxisScale::Category(_) => map.at(baseline),
+        AxisScale::Category(_) | AxisScale::Time(_) => map.at(baseline),
     }
 }
 

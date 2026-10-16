@@ -69,7 +69,8 @@
 //!   and bubble marks; colorbars: [`ColorbarOptions`] and [`ColorbarPosition`];
 //! - per-series line widths and marker sizes: [`SizeSpec`], with its [`Factor`] and [`Points`];
 //! - tick labels: [`TickFormat`], with its [`NumberStyle`] and [`Decimals`];
-//! - times: [`Instant`] and its [`Civil`] date and time;
+//! - times: [`Instant`] and its [`Civil`] date and time, and [`times_from_micros`] and
+//!   [`time_from_micros`], which read times given as microseconds, with [`MISSING_TIME`];
 //! - scales: [`ScaleKind`] and [`LogBase`];
 //! - output: [`SvgText`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
@@ -136,6 +137,8 @@ pub mod theme;
 pub mod tick_format;
 pub mod ticks;
 mod time;
+#[cfg(test)]
+mod time_axes_tests;
 
 pub use binning::MAX_BINS;
 pub use cmap::Cmap;
@@ -174,7 +177,7 @@ pub use theme::ColorbarPosition;
 pub use theme::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, Marker, Theme};
 pub use tick_format::{Decimals, NumberStyle, TickFormat};
 pub use ticks::Tick;
-pub use time::{Civil, Instant};
+pub use time::{Civil, Instant, MISSING_TIME, time_from_micros, times_from_micros};
 
 /// The version of this crate, as written in `Cargo.toml`.
 ///
