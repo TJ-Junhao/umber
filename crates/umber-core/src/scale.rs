@@ -59,16 +59,6 @@ impl ScaleKind {
     }
 }
 
-impl Transform {
-    /// The scale kind of an axis with this transform.
-    pub(crate) fn kind(self) -> ScaleKind {
-        match self {
-            Transform::Linear => ScaleKind::Linear,
-            Transform::Log(base) => ScaleKind::Log { base },
-        }
-    }
-}
-
 /// A logarithm base, guaranteed finite and at least 1.000000000001.
 ///
 /// # Examples
@@ -1935,14 +1925,6 @@ mod tests {
             Some(Transform::Log(base))
         );
         assert_eq!(ScaleKind::Category.transform(), None);
-    }
-
-    #[test]
-    fn transform_kind_round_trips_through_scale_kind() {
-        let base = LogBase::new(2.0).unwrap();
-        for transform in [Transform::Linear, Transform::Log(base)] {
-            assert_eq!(transform.kind().transform(), Some(transform));
-        }
     }
 
     #[test]

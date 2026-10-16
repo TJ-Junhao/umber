@@ -5,10 +5,10 @@ use super::MarkContext;
 use super::area::{FadeStop, vertical_fade};
 use super::bar_shape::BarFrame;
 use super::fill::HISTOGRAM_TOP_ALPHA;
-use super::mapping::{axis_x_value, axis_y_value};
+use super::mapping::axis_value;
 use crate::binning::Histogram;
 use crate::geometry::Path;
-use crate::resolve::{ResolvedAxis, ResolvedContinuousAxis};
+use crate::resolve::ResolvedAxis;
 use crate::scene::{FillRule, Item, Paint};
 use crate::{FillStyle, Rgba};
 
@@ -36,12 +36,12 @@ const TOP_EDGE_DEPTH: f64 = 1.6;
 pub(super) fn hist_items(
     context: &MarkContext<'_>,
     x: &ResolvedAxis,
-    y: &ResolvedContinuousAxis,
+    y: &ResolvedAxis,
     histogram: &Histogram,
     color: Rgba,
     items: &mut Vec<Item>,
 ) {
-    let frame = BarFrame::square(context.maps, y, context.baseline);
+    let frame = BarFrame::square(context.maps, y, context.baseline.pos);
     let gradient = context.theme.fill_style() == FillStyle::Gradient;
     // `max` keeps a NaN gap from spreading; the theme only holds finite gaps of at least 0.
     let gap = context
@@ -57,14 +57,14 @@ pub(super) fn hist_items(
             continue;
         }
         let (low, high) = (
-            axis_x_value(x, histogram.edge(i)),
-            axis_x_value(x, histogram.edge(i + 1)),
+            axis_value(x, histogram.edge(i)),
+            axis_value(x, histogram.edge(i + 1)),
         );
         let inset = gap.min((high - low) / 2.0) / 2.0;
         let Some(span) = frame.clip_x((low + inset, high - inset)) else {
             continue;
         };
-        let top = axis_y_value(y, count as f64);
+        let top = axis_value(y, count as f64);
         let Some(outline) = frame.outline(span, base, top, false) else {
             continue;
         };
@@ -85,7 +85,7 @@ pub(super) fn hist_items(
         return;
     }
     let paint = if gradient {
-        let tallest = axis_y_value(y, histogram.max_count() as f64);
+        let tallest = axis_value(y, histogram.max_count() as f64);
         let at = |v: f64| {
             let v = frame.clip_y(v);
             FadeStop {

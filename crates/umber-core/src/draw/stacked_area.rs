@@ -4,7 +4,7 @@
 use super::MarkContext;
 use super::band::band_fill_items;
 use super::line::{downsample_columns, downsample_range, line_items, line_style};
-use super::mapping::{axis_x_value, axis_y};
+use super::mapping::{axis_numbers, axis_value};
 use crate::downsample::clipped_m4_indices;
 use crate::model::{SeriesView, StackedAreaMark};
 use crate::resolve::Resolved;
@@ -27,12 +27,12 @@ pub(super) fn stacked_area_items(
     let mut xs: Vec<_> = mark
         .x()
         .iter()
-        .map(|&v| axis_x_value(&resolved.x, v))
+        .map(|&v| axis_value(&resolved.x, v))
         .collect();
     let curves: Vec<_> = stacks
         .curves()
         .iter()
-        .map(|curve| axis_y(&resolved.y, curve))
+        .map(|curve| axis_numbers(&resolved.y, curve))
         .collect();
     if let Some(first) = curves.first() {
         for (x, y) in xs.iter_mut().zip(first) {
@@ -44,7 +44,7 @@ pub(super) fn stacked_area_items(
     let columns = downsample_columns(context.plot.width);
     let domain = (context.maps.x.lo, context.maps.x.hi);
     let (xs, curves) = kept_points(xs, curves, domain, columns, downsample_range(context));
-    let baseline = context.maps.y.at(context.baseline);
+    let baseline = context.maps.y.at(context.baseline.pos);
     let baseline: Vec<_> = xs
         .iter()
         .map(|x| if x.is_nan() { f64::NAN } else { baseline })

@@ -8,10 +8,10 @@
 //! is kept only when its end is on the plot.
 
 use super::MarkContext;
-use super::mapping::{PlotPoint, axis_x, axis_x_value, axis_y};
+use super::mapping::{PlotPoint, axis_numbers, axis_value, axis_values};
 use crate::Rgba;
 use crate::geometry::{Path, Point};
-use crate::model::{AxisData, ErrorBarMark, ErrorBarOrientation};
+use crate::model::{ErrorBarMark, ErrorBarOrientation};
 use crate::resolve::Resolved;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
 
@@ -77,26 +77,22 @@ pub(super) fn error_bar_items(
     // The position axis the bars are placed along, and the value axis their limits are on.
     let (positions, lows, highs, position_map, value_map) = if vertical {
         (
-            axis_x(&resolved.x, mark.positions()),
-            axis_y(&resolved.y, mark.low()),
-            axis_y(&resolved.y, mark.high()),
+            axis_values(&resolved.x, mark.positions()),
+            axis_numbers(&resolved.y, mark.low()),
+            axis_numbers(&resolved.y, mark.high()),
             context.maps.x,
             context.maps.y,
         )
     } else {
-        let numbers = match mark.positions() {
-            AxisData::Numbers(values) => values.as_slice(),
-            AxisData::Categories(_) => &[],
-        };
         (
-            axis_y(&resolved.y, numbers),
+            axis_values(&resolved.y, mark.positions()),
             mark.low()
                 .iter()
-                .map(|&v| axis_x_value(&resolved.x, v))
+                .map(|&v| axis_value(&resolved.x, v))
                 .collect(),
             mark.high()
                 .iter()
-                .map(|&v| axis_x_value(&resolved.x, v))
+                .map(|&v| axis_value(&resolved.x, v))
                 .collect(),
             context.maps.y,
             context.maps.x,

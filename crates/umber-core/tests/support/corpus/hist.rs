@@ -316,7 +316,8 @@ fn hist_errors() -> String {
         a.hist(&[inf], HistOptions::default()).map(drop)
     });
 
-    // The y axis is never a category axis: the axes refuse it, so no histogram meets one.
+    // Axes with a category y axis are created, and their mark methods refuse them, so no
+    // histogram meets one.
     rec.section("Axes.hist, linear/category");
     rec.new_figure("linear/category", linear(), ScaleKind::Category);
     rec.out

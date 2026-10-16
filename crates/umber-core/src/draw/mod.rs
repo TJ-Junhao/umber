@@ -59,9 +59,9 @@ pub(crate) use chrome::{baseline, chrome, figure_header};
 
 use crate::Theme;
 use crate::layout::{Area, Layout};
-use crate::resolve::{NormalizedPos, Resolved, ResolvedMark};
+use crate::resolve::{Baseline, Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
-use mapping::{AxisMaps, axis_x, axis_y};
+use mapping::{AxisMaps, axis_values};
 
 /// What every mark implementation draws with: the theme, the axis maps and the plot geometry.
 /// The mark's own data and resolved color are passed alongside.
@@ -73,10 +73,12 @@ struct MarkContext<'a> {
     maps: AxisMaps,
     /// The plot area.
     plot: Area,
-    /// Where the baseline sits along the y axis, as resolved; bars on a log y axis start there.
-    baseline: NormalizedPos,
-    /// The plot y of the baseline, as laid out; area fills end there.
-    baseline_y: f64,
+    /// The baseline, as resolved; bars on a log value axis start there. Every mark that reads
+    /// it is drawn on a numeric y axis (the model refuses marks on a category y axis), so its
+    /// baseline lies on y.
+    baseline: Baseline,
+    /// The plot coordinate of the baseline along its axis, as laid out; area fills end there.
+    baseline_at: f64,
     /// The drawn stroke width of the widest line among the marks, areas included, in points; 0
     /// without one (see [`widest_line_width`]). Every line is clipped in axis space at least
     /// this far past the plot, since the marks clip is widened by half of it.
@@ -97,7 +99,7 @@ pub(crate) fn marks(
         maps: AxisMaps::new(&resolved.x, &resolved.y, plot),
         plot,
         baseline: resolved.baseline,
-        baseline_y: layout.baseline_y,
+        baseline_at: layout.baseline.at,
         widest_line: widest_line_width(marks),
     };
     let mut items = Vec::new();
@@ -134,8 +136,8 @@ pub(crate) fn marks(
                 size,
                 ..
             } => {
-                let xs = axis_x(&resolved.x, scatter_mark.x());
-                let ys = axis_y(&resolved.y, scatter_mark.y());
+                let xs = axis_values(&resolved.x, scatter_mark.x());
+                let ys = axis_values(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;
                 items.extend(scatter::scatter_item(
                     &context, &xs, &ys, color, marker, size,

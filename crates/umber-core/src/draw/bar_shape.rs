@@ -6,7 +6,7 @@
 use super::mapping::{AxisMap, AxisMaps, AxisPoint};
 use crate::Transform;
 use crate::geometry::{Path, Point};
-use crate::resolve::{NormalizedPos, ResolvedContinuousAxis};
+use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis};
 
 /// The cubic Bézier handle length for a quarter circle of unit radius.
 const KAPPA: f64 = 0.552_284_749_830_793_4;
@@ -15,11 +15,15 @@ const MIN_BAR_MARGIN: f64 = 2.0;
 
 /// Where bars start on the y axis `y`, in axis space: the value 0 on a linear axis, and on a
 /// log axis, which cannot show 0, the resolved `baseline` (the lowest nice tick for auto
-/// limits, the bottom of the plot for explicit ones).
-fn bar_base(y: &ResolvedContinuousAxis, map: AxisMap, baseline: NormalizedPos) -> f64 {
-    match y.scale.transform() {
-        Transform::Linear => 0.0,
-        Transform::Log(_) => map.at(baseline),
+/// limits, the bottom of the plot for explicit ones). A category axis has no 0 either, so bars
+/// along it would start at the baseline too; the model draws none there.
+fn bar_base(y: &ResolvedAxis, map: AxisMap, baseline: NormalizedPos) -> f64 {
+    match &y.scale {
+        AxisScale::Continuous(scale) => match scale.transform() {
+            Transform::Linear => 0.0,
+            Transform::Log(_) => map.at(baseline),
+        },
+        AxisScale::Category(_) => map.at(baseline),
     }
 }
 
@@ -52,7 +56,7 @@ impl BarFrame {
     /// least 0 and finite), on the y axis `y` whose baseline sits at `baseline`.
     pub(super) fn new(
         maps: AxisMaps,
-        y: &ResolvedContinuousAxis,
+        y: &ResolvedAxis,
         baseline: NormalizedPos,
         radius: f64,
         width: f64,
@@ -72,11 +76,7 @@ impl BarFrame {
 
     /// The frame of bars with square corners on the y axis `y`, clipped with the smallest
     /// margin; see [`BarFrame::new`].
-    pub(super) fn square(
-        maps: AxisMaps,
-        y: &ResolvedContinuousAxis,
-        baseline: NormalizedPos,
-    ) -> BarFrame {
+    pub(super) fn square(maps: AxisMaps, y: &ResolvedAxis, baseline: NormalizedPos) -> BarFrame {
         BarFrame::new(maps, y, baseline, 0.0, 0.0)
     }
 

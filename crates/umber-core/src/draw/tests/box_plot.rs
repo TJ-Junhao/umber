@@ -273,7 +273,7 @@ fn boxes_include_whiskers_and_outliers_without_forcing_zero() {
             )
             .unwrap();
         let (resolved, _) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
-        let (lo, hi) = resolved.y.scale.domain();
+        let (lo, hi) = resolved.y.continuous_scale().domain();
         assert!((lo..=hi).contains(&(10.0 * sign)) && (lo..=hi).contains(&(20.0 * sign)));
         assert!(!(lo..=hi).contains(&0.0), "{lo}..{hi}");
     }
@@ -384,7 +384,8 @@ fn log_boxes_compute_statistics_before_transforming_and_clip_extremes() {
         };
         near(
             f64::from(subpaths(path)[0][0].y),
-            layout.plot.bottom() - resolved.y.scale.normalize(3.0) * layout.plot.height,
+            layout.plot.bottom()
+                - resolved.y.continuous_scale().normalize(3.0) * layout.plot.height,
         );
         let mut extreme = figure(Theme::pigment(), y);
         let samples = if y == ScaleKind::Linear {

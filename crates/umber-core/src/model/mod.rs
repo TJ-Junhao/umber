@@ -272,47 +272,50 @@ mod tests {
         assert!(b.marks().is_empty());
     }
 
-    /// Asserts the error of a category y axis passed to `Figure::add_axes`.
+    /// Asserts the error of the mark method `context` called on a category y axis.
     #[track_caller]
-    fn assert_category_y<T: std::fmt::Debug>(r: Result<T>) {
-        match r {
-            Err(
-                ref err @ Error::Usage {
-                    context,
-                    ref message,
-                    ..
-                },
-            ) => {
-                assert_eq!(context, "Figure.add_axes()");
-                assert_eq!(
-                    message,
-                    "y is a category scale; the y axis must be linear or log."
-                );
+    fn assert_category_y<T: std::fmt::Debug>(r: Result<T>, context: &str) {
+        match &r {
+            Err(err @ Error::Usage { message, .. }) => {
+                let expected = format!("y is a category scale; {context} needs a numeric y axis.");
+                assert_eq!(message, &expected);
+                assert_eq!(err.to_string(), format!("{context}: {expected}"));
                 assert_eq!(err.parameter(), Some("y"));
-                assert_eq!(err.hint(), Some("pass y=Scale.linear() or y=Scale.log()."));
+                assert_eq!(err.hint(), Some("use a linear or log y axis."));
             }
             other => panic!("expected Usage error, got {other:?}"),
         }
     }
 
     #[test]
-    fn category_y_is_rejected_before_any_mark() {
+    fn add_axes_accepts_category_y() {
         for x in [ScaleKind::Linear, log_kind(), ScaleKind::Category] {
             let mut f = figure();
-            assert_category_y(f.add_axes(x, ScaleKind::Category));
-            // The failed call added no axes, so the figure can still take its axes.
-            assert_eq!(f.panels().count(), 0);
-            let a = f.add_axes(x, ScaleKind::Linear).unwrap();
-            assert_eq!(a.y_scale(), ScaleKind::Linear);
+            let mut a = f.add_axes(x, ScaleKind::Category).unwrap();
+            assert_eq!((a.x_scale(), a.y_scale()), (x, ScaleKind::Category));
+            let names = AxisData::Categories(vec!["a".into()]);
+            let x_data = if x == ScaleKind::Category {
+                names.clone()
+            } else {
+                nums(&[1.0])
+            };
+            assert_category_y(
+                a.line(x_data.clone(), &[1.0], LineOptions::default()),
+                "Axes.line()",
+            );
+            // The y check comes first, whatever the values.
+            assert_category_y(
+                a.line_shared(x_data, names, LineOptions::default()),
+                "Axes.line()",
+            );
+            assert!(a.marks().is_empty());
+            // The axes render, without marks.
+            assert!(f.to_scene(crate::FontLibrary::global()).is_ok());
         }
-    }
-
-    #[test]
-    fn a_category_y_is_reported_before_a_taken_cell() {
+        // A category y axis takes a cell like any other axes.
         let mut f = figure();
         f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
-        assert_category_y(f.add_axes(ScaleKind::Linear, ScaleKind::Category));
-        match f.add_axes(ScaleKind::Linear, ScaleKind::Linear) {
+        match f.add_axes(ScaleKind::Linear, ScaleKind::Category) {
             Err(Error::Usage { message, .. }) => assert_eq!(
                 message,
                 "row 0, col 0 is taken by the axes added at row 0, col 0."
@@ -321,6 +324,132 @@ mod tests {
         }
         let scales: Vec<ScaleKind> = f.panels().map(Axes::y_scale).collect();
         assert_eq!(scales, [log_kind()]);
+    }
+
+    #[test]
+    fn every_mark_method_refuses_a_category_y() {
+        use crate::model::{
+            AreaOptions, AxisValue, BandOptions, BarOptions, BoxOptions, BubbleOptions,
+            Distribution, ErrorBarOptions, HistOptions, RuleOptions, Series, SpanOptions,
+            StemOptions, StepOptions, ViolinOptions,
+        };
+        let mut f = figure();
+        let mut a = f
+            .add_axes(ScaleKind::Category, ScaleKind::Category)
+            .unwrap();
+        let names = || vec!["a".to_owned()];
+        let cats = || AxisData::Categories(names());
+        let series = || {
+            vec![Series {
+                values: vec![1.0],
+                ..Series::default()
+            }]
+        };
+        let distribution = || {
+            vec![Distribution {
+                groups: vec![vec![1.0]],
+                ..Distribution::default()
+            }]
+        };
+        let one = || vec![vec![1.0]];
+        assert_category_y(
+            a.line(cats(), &[1.0], LineOptions::default()),
+            "Axes.line()",
+        );
+        assert_category_y(
+            a.scatter(cats(), &[1.0], ScatterOptions::default()),
+            "Axes.scatter()",
+        );
+        assert_category_y(
+            a.bubbles(&[1.0], &[1.0], &[1.0], BubbleOptions::default()),
+            "Axes.bubbles()",
+        );
+        assert_category_y(
+            a.stem(cats(), &[1.0], StemOptions::default()),
+            "Axes.stem()",
+        );
+        assert_category_y(
+            a.area(cats(), &[1.0], AreaOptions::default()),
+            "Axes.area()",
+        );
+        assert_category_y(a.stacked_area(&[1.0], series()), "Axes.stacked_area()");
+        assert_category_y(a.bar(names(), &[1.0], BarOptions::default()), "Axes.bar()");
+        assert_category_y(a.grouped_bar(names(), series()), "Axes.grouped_bar()");
+        assert_category_y(a.stacked_bar(names(), series()), "Axes.stacked_bar()");
+        assert_category_y(
+            a.box_plot(names(), one(), BoxOptions::default()),
+            "Axes.box()",
+        );
+        assert_category_y(
+            a.grouped_box_plot(names(), distribution()),
+            "Axes.grouped_box()",
+        );
+        assert_category_y(
+            a.violin(names(), one(), ViolinOptions::default()),
+            "Axes.violin()",
+        );
+        assert_category_y(
+            a.grouped_violin(names(), distribution()),
+            "Axes.grouped_violin()",
+        );
+        assert_category_y(a.hist(&[1.0], HistOptions::default()), "Axes.hist()");
+        assert_category_y(
+            a.step(cats(), &[1.0], StepOptions::default()),
+            "Axes.step()",
+        );
+        assert_category_y(a.hline(1.0, RuleOptions::default()), "Axes.hline()");
+        assert_category_y(
+            a.vline(AxisValue::Category("a".into()), RuleOptions::default()),
+            "Axes.vline()",
+        );
+        assert_category_y(a.hspan(0.0, 1.0, SpanOptions::default()), "Axes.hspan()");
+        assert_category_y(a.vspan(0.0, 1.0, SpanOptions::default()), "Axes.vspan()");
+        assert_category_y(
+            a.band(&[1.0], &[0.0], &[1.0], BandOptions::default()),
+            "Axes.band()",
+        );
+        assert_category_y(
+            a.y_error_bars(cats(), &[0.0], &[1.0], ErrorBarOptions::default()),
+            "Axes.y_error_bars()",
+        );
+        assert_category_y(
+            a.x_error_bars(&[1.0], &[0.0], &[1.0], ErrorBarOptions::default()),
+            "Axes.x_error_bars()",
+        );
+        assert!(a.marks().is_empty());
+    }
+
+    #[test]
+    fn y_limits_and_ticks_refuse_a_category_y() {
+        let mut f = figure();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Category).unwrap();
+        let hint = Some("pass y=Scale.linear() or y=Scale.log() to Figure.add_axes().");
+        for (result, message) in [
+            (
+                a.ylim(0.0, 1.0).map(drop),
+                "Axes.ylim(): this is a category axis; limits apply to linear and log axes only.",
+            ),
+            (
+                a.yticks(&[0.0]).map(drop),
+                "Axes.yticks(): this is a category axis; ticks apply to linear and log axes only.",
+            ),
+            (
+                a.yticks_labeled(&[0.0], vec!["a".into()]).map(drop),
+                "Axes.yticks_labeled(): this is a category axis; ticks apply to linear and log axes only.",
+            ),
+            (
+                a.ytick_format(crate::TickFormat::AUTO).map(drop),
+                "Axes.ytick_format(): this is a category axis; tick formats apply to linear and log axes only.",
+            ),
+        ] {
+            let err = result.unwrap_err();
+            assert!(matches!(err, Error::Usage { .. }), "{err:?}");
+            assert_eq!(err.to_string(), message);
+            assert_eq!(err.hint(), hint, "{message}");
+        }
+        assert_eq!((a.y_limits(), a.y_ticks()), (None, None));
+        // The x axis of the same axes is linear, so it takes limits.
+        assert!(a.xlim(0.0, 1.0).is_ok());
     }
 
     #[test]
@@ -408,7 +537,7 @@ mod tests {
         y[0] = 99.0;
         match a.marks() {
             [Mark::Line(line)] => {
-                assert_eq!(line.y(), &[1.0, 2.0]);
+                assert_eq!(line.y(), &nums(&[1.0, 2.0]));
                 assert_eq!(line.x(), &x);
             }
             other => panic!("unexpected marks {other:?}"),
@@ -586,8 +715,12 @@ mod tests {
             "categories holds names but the x axis is not a category axis; use a category x axis.",
         );
 
-        // Bars cannot meet a category y axis: the axes refuse it.
-        assert_category_y(figure().add_axes(ScaleKind::Category, ScaleKind::Category));
+        // Bars refuse a category y axis.
+        let mut h = figure();
+        let mut c = h
+            .add_axes(ScaleKind::Category, ScaleKind::Category)
+            .unwrap();
+        assert_category_y(bars(&mut c, &["a"], &[1.0]), BAR);
     }
 
     #[test]

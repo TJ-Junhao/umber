@@ -1,7 +1,5 @@
 //! Stem data, options, shared storage and atomic validation through the public API.
 
-use std::sync::Arc;
-
 use umber_core::{
     AxisData, ColorSpec, Error, Figure, Grid, GridIndex, LogBase, Mark, Marker, Placement,
     ScaleKind, SizeSpec, StemOptions, Theme,
@@ -36,7 +34,9 @@ fn stem_keeps_unsorted_values_options_and_shared_storage() {
     let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let gap = f64::from_bits(0xfff8_0000_0000_0001);
     let x = vec![3.0, -0.0, gap, 1.0];
-    let y: Arc<[f64]> = Arc::from([gap, 1.0, -0.0, 4.0]);
+    let y = [gap, 1.0, -0.0, 4.0];
+    let shared = y.to_vec();
+    let values = shared.as_ptr();
     let options = StemOptions {
         label: "Response".into(),
         marker: Marker::Diamond,
@@ -46,7 +46,7 @@ fn stem_keeps_unsorted_values_options_and_shared_storage() {
     figure
         .add_axes(LIN, LIN)
         .unwrap()
-        .stem_shared(nums(&x), Arc::clone(&y), options.clone())
+        .stem_shared(nums(&x), AxisData::Numbers(shared), options.clone())
         .unwrap();
     let axes = figure.axes_at(GridIndex::At(0), GridIndex::At(0)).unwrap();
     let [Mark::Stem(mark)] = axes.marks() else {
@@ -57,8 +57,11 @@ fn stem_keeps_unsorted_values_options_and_shared_storage() {
     };
     let bits = |v: &[f64]| v.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
     assert_eq!(bits(stored), bits(&x));
-    assert_eq!(bits(mark.y()), bits(&y));
-    assert!(std::ptr::eq(mark.y(), &*y));
+    let AxisData::Numbers(stored_y) = mark.y() else {
+        panic!("numeric y expected")
+    };
+    assert_eq!(bits(stored_y), bits(&y));
+    assert!(std::ptr::eq(stored_y.as_ptr(), values));
     assert_eq!(mark.options(), &options);
     assert!(format!("{mark:?}").starts_with("StemMark"));
     let cloned = figure.clone();

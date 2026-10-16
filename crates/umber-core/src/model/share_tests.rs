@@ -146,7 +146,7 @@ fn shared_error_bar_categories_follow_panel_order_and_allow_references() {
         panic!("category scale")
     };
     assert_eq!(scale.categories(), ["b", "c", "a"]);
-    let (low, high) = panels[0].0.y.scale.domain();
+    let (low, high) = panels[0].0.y.continuous_scale().domain();
     assert!(low <= -10.0 && high >= 40.0);
     assert!(f.to_scene(&lib).is_ok());
 }
@@ -659,7 +659,18 @@ fn shared_x_ticks_fit_the_labeled_narrow_panels_above_a_wide_panel() {
             &lib,
             crate::layout::TickSpacing::LabelsApart,
         );
-        crate::resolve::resolve_x(marks.iter(), limits.x, &x, None)
+        let (axis, _) = crate::resolve::resolve_axis(
+            marks.iter(),
+            crate::resolve::ValueAxis::X,
+            crate::resolve::AxisRole::of_group(
+                crate::resolve::ValueAxis::X,
+                std::iter::once((limits.orientation(), marks.as_slice())),
+            ),
+            limits.x,
+            &x,
+            None,
+        );
+        axis
     };
     let wide = ticks_for(panels[2].1.plot.size());
     let narrow = ticks_for(panels[0].1.plot.size());
@@ -737,9 +748,60 @@ proptest! {
             let x = &all[groups.x[i]].0.x;
             let y = &all[groups.y[i]].0.y;
             prop_assert_eq!(bits(r.x.continuous().unwrap()), bits(x.continuous().unwrap()));
-            prop_assert_eq!(bits(&r.y.scale), bits(&y.scale));
+            prop_assert_eq!(bits(r.y.continuous_scale()), bits(y.continuous_scale()));
             prop_assert_eq!(ticks(&r.x.ticks), ticks(&x.ticks));
             prop_assert_eq!(ticks(&r.y.ticks), ticks(&y.ticks));
         }
     }
+}
+
+/// The x domain of every panel of a 2 × 1 grid sharing x, in panel order, with a line with
+/// explicit x ticks in row `line_row` and an empty axes with a category y axis in the other.
+fn x_domains_beside_an_empty_category_y(line_row: i64) -> Vec<(f64, f64)> {
+    let mut f = figure(2, 1, Share::All, Share::None);
+    f.add_axes_at(at(1 - line_row, 0), ScaleKind::Linear, ScaleKind::Category)
+        .unwrap();
+    f.add_axes_at(at(line_row, 0), ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            AxisData::Numbers(vec![2.0, 5.0, 10.0]),
+            &[3.0, 6.0, 9.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .xticks(&[2.0, 5.0, 10.0])
+        .unwrap();
+    try_plan_panels(&f, &FontLibrary::bundled())
+        .unwrap()
+        .iter()
+        .map(|(resolved, _)| resolved.x.continuous_scale().domain())
+        .collect()
+}
+
+#[test]
+fn an_empty_member_does_not_change_how_a_shared_axis_fits_the_data() {
+    // The line keeps the exact extent of its x values, whichever row the empty axes with a
+    // category y axis, whose value axis is x, takes.
+    for line_row in [0, 1] {
+        assert_eq!(
+            x_domains_beside_an_empty_category_y(line_row),
+            [(2.0, 10.0), (2.0, 10.0)],
+            "line in row {line_row}"
+        );
+    }
+    // Members without data share the role of the others: all of them decide it.
+    use crate::resolve::{AxisRole, Orientation, ValueAxis};
+    let none: &[crate::resolve::ResolvedMark<'_>] = &[];
+    let vertical = (Orientation::Vertical, none);
+    let horizontal = (Orientation::Horizontal, none);
+    for members in [[vertical, horizontal], [horizontal, vertical]] {
+        assert_eq!(
+            AxisRole::of_group(ValueAxis::X, members.into_iter()),
+            AxisRole::Positions
+        );
+    }
+    assert_eq!(
+        AxisRole::of_group(ValueAxis::X, [horizontal, horizontal].into_iter()),
+        AxisRole::Value
+    );
 }

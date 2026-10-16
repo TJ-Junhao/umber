@@ -356,13 +356,13 @@ fn errors_carry_their_parameter_and_hint() {
             None,
         ),
         (
-            "add_axes, category y",
-            figure()
-                .add_axes(linear, cat)
-                .map(|_| ())
-                .expect_err("a category y axis"),
+            "line, category y",
+            on_axes(linear, cat, |a| {
+                a.line(nums(&[0.0]), &[1.0], LineOptions::default())
+                    .map(|_| ())
+            }),
             Some("y"),
-            Some("pass y=Scale.linear() or y=Scale.log()."),
+            Some("use a linear or log y axis."),
         ),
         (
             "second add_axes",

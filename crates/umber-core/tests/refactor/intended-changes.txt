@@ -1,1 +1,8 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Figure.add_axes accepts a category y axis; the mark methods and y setters refuse it instead.
+errors/api
+errors/area
+errors/bars
+errors/grid
+errors/grouped-bars
+errors/hist

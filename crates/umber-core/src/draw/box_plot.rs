@@ -5,7 +5,7 @@ use super::bar::{GROUP_GAP, group_slots, in_axis_order};
 use super::clip::{Bounds, clip_segment};
 use super::error_bars::bar_style;
 use super::fill::AREA_ALPHA;
-use super::mapping::{AxisPoint, axis_y_value};
+use super::mapping::{AxisPoint, axis_value};
 use super::scatter::scatter_item;
 use crate::geometry::Path;
 use crate::resolve::{AxisScale, Resolved, ResolvedDistribution};
@@ -58,7 +58,7 @@ fn box_group(
     (color, width): (Rgba, f32),
     items: &mut Vec<Item>,
 ) {
-    let y = |v| axis_y_value(&resolved.y, v);
+    let y = |v| axis_value(&resolved.y, v);
     let (q1, q3, median) = (y(stats.q1), y(stats.q3), y(stats.median));
     let center = (left + right) / 2.0;
     let half_cap = (right - left) / 4.0;

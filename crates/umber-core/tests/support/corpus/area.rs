@@ -369,7 +369,8 @@ fn area_errors() -> String {
         });
     }
 
-    // The y axis is never a category axis: the axes refuse it, so no area meets one.
+    // Axes with a category y axis are created, and their mark methods refuse them, so no area
+    // meets one.
     rec.section("Axes.area, category y");
     rec.new_figure("linear/category", linear(), ScaleKind::Category);
 

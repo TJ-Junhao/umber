@@ -74,7 +74,7 @@ fn gradient_area_sits_under_its_line() {
     let (line_min, _) = line.bounds().unwrap();
     let (area_min, area_max) = area.bounds().unwrap();
     let (_, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
-    let baseline = layout.baseline_y as f32;
+    let baseline = layout.baseline_y() as f32;
     assert_eq!(area_min.y, line_min.y);
     assert_eq!(area_max.y, baseline);
     // The area's outline is the line, then down to the baseline and back.
@@ -205,14 +205,14 @@ fn areas_include_zero_on_a_linear_y_axis() {
         let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
         let lowest = &resolved.y.ticks[0];
         assert_eq!(lowest.label, "0");
-        assert_eq!(resolved.baseline, lowest.pos);
-        assert_eq!(resolved.y.scale.domain().0, 0.0);
-        assert!((layout.baseline_y - layout.plot.bottom()).abs() < 1e-9);
+        assert_eq!(resolved.baseline.pos, lowest.pos);
+        assert_eq!(resolved.y.continuous_scale().domain().0, 0.0);
+        assert!((layout.baseline_y() - layout.plot.bottom()).abs() < 1e-9);
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         let Some(Item::Fill { path, .. }) = mark_group(&scene).1.first() else {
             panic!("expected an area fill")
         };
-        assert_eq!(path.bounds().unwrap().1.y, layout.baseline_y as f32);
+        assert_eq!(path.bounds().unwrap().1.y, layout.baseline_y() as f32);
     }
     // Negative values too: the axis spans them and 0.
     let f = area_figure(
@@ -222,7 +222,7 @@ fn areas_include_zero_on_a_linear_y_axis() {
         &[-30.0, -10.0],
     );
     let (resolved, _) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
-    assert_eq!(resolved.y.scale.domain().1, 0.0);
+    assert_eq!(resolved.y.continuous_scale().domain().1, 0.0);
 }
 
 #[test]
@@ -235,8 +235,8 @@ fn areas_fill_down_to_the_baseline_on_a_log_y_axis() {
         let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
         let lowest = &resolved.y.ticks[0];
         assert_eq!(lowest.label, "1");
-        assert_eq!(resolved.baseline, lowest.pos);
-        assert!(layout.baseline_y < layout.plot.bottom() - 1.0);
+        assert_eq!(resolved.baseline.pos, lowest.pos);
+        assert!(layout.baseline_y() < layout.plot.bottom() - 1.0);
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         let [
             Item::Fill {
@@ -247,7 +247,7 @@ fn areas_fill_down_to_the_baseline_on_a_log_y_axis() {
         else {
             panic!("expected an area fill under the line");
         };
-        let baseline = layout.baseline_y as f32;
+        let baseline = layout.baseline_y() as f32;
         let (top, bottom) = area.bounds().unwrap();
         assert_eq!(bottom.y, baseline);
         assert!(top.y < baseline);
@@ -255,8 +255,8 @@ fn areas_fill_down_to_the_baseline_on_a_log_y_axis() {
             assert_eq!(gradient.end.y, baseline);
         }
         // The line's lowest point, 10, lies above the baseline.
-        let ten = resolved.y.scale.normalize(10.0);
-        assert!(layout.plot.y_at(NormalizedPos::new(ten)) < layout.baseline_y - 1.0);
+        let ten = resolved.y.continuous_scale().normalize(10.0);
+        assert!(layout.plot.y_at(NormalizedPos::new(ten)) < layout.baseline_y() - 1.0);
     }
 }
 
@@ -441,14 +441,14 @@ fn an_area_whose_line_runs_above_the_plot_fills_it() {
         let (lo, hi) = path.bounds().unwrap();
         let top = plot.y as f32 - margin();
         assert_eq!((lo.x, hi.x), (plot.x as f32, plot.right() as f32));
-        assert_eq!((lo.y, hi.y), (top, layout.baseline_y as f32));
-        assert_eq!(layout.baseline_y, plot.bottom());
+        assert_eq!((lo.y, hi.y), (top, layout.baseline_y() as f32));
+        assert_eq!(layout.baseline_y(), plot.bottom());
         // The gradient stays inside the clip, from its edge to the baseline, and keeps the true
         // ramp from the line at 2 (100): the plot top, halfway up the ramp in axis space,
         // gets 0.16 of the line's opacity, not the 0.32 of the line itself.
         assert_eq!((gradient.start.y, gradient.end.y), (top, hi.y));
         assert_ramp(gradient, plot.y as f32, 0.16);
-        assert_ramp(gradient, layout.baseline_y as f32, 0.0);
+        assert_ramp(gradient, layout.baseline_y() as f32, 0.0);
     }
 }
 
@@ -498,7 +498,7 @@ fn clipped_ramps_keep_the_lines_opacity_at_every_height() {
     let [below] = gradients.as_slice() else {
         panic!("one fill expected, got {gradients:?}")
     };
-    assert!((layout.baseline_y - layout.plot.y).abs() < 1e-9);
+    assert!((layout.baseline_y() - layout.plot.y).abs() < 1e-9);
     assert_ramp(below, layout.plot.bottom() as f32, 0.16);
     assert_ramp(below, layout.plot.y as f32, 0.0);
     // A baseline crossing: from 2 down to -2 on a -1..1 axis, with the baseline in the middle.
@@ -509,7 +509,7 @@ fn clipped_ramps_keep_the_lines_opacity_at_every_height() {
     assert_ramp(above, layout.plot.y as f32, 0.16);
     assert_ramp(below, layout.plot.bottom() as f32, 0.16);
     for g in [above, below] {
-        assert_ramp(g, layout.baseline_y as f32, 0.0);
+        assert_ramp(g, layout.baseline_y() as f32, 0.0);
     }
     // The ramp's own extreme: a line just inside the plot keeps exactly 0.32 there.
     let (gradients, _) = fills(&[0.75, 0.5], (0.0, 1.0));
@@ -561,6 +561,6 @@ fn an_area_entering_from_above_fills_from_its_first_point() {
     // The gradient stays inside the clip and keeps the true ramp from the line's start at 2:
     // the plot top gets 0.16 of the line's opacity.
     assert_eq!(gradient.start.y, top);
-    assert_eq!(gradient.end.y, layout.baseline_y as f32);
+    assert_eq!(gradient.end.y, layout.baseline_y() as f32);
     assert_ramp(gradient, plot.y as f32, 0.16);
 }

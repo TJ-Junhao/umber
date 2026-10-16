@@ -71,7 +71,7 @@ fn zero_size_positions_still_count_in_axis_domains() {
     // Both positions contribute, but only visible circles need radius-aware limits.
     for axes in [zero_axes, visible_axes] {
         assert!(axes.x.continuous().unwrap().domain().1 >= 1000.0);
-        assert!(axes.y.scale.domain().0 <= -1000.0);
+        assert!(axes.y.continuous_scale().domain().0 <= -1000.0);
     }
     let scene = zero.to_scene(FontLibrary::global()).unwrap();
     let Item::Group { items, .. } = &scene.items[1] else {
