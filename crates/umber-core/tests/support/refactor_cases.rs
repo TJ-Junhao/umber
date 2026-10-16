@@ -90,6 +90,7 @@ mod corpus {
     pub mod bars;
     pub mod r#box;
     pub mod bubbles;
+    pub mod cmap;
     pub mod error_bars;
     pub mod grid;
     pub mod header;
@@ -167,6 +168,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::bubbles::cases(&lib, &mut sink);
     corpus::r#box::cases(&lib, &mut sink);
     corpus::violin::cases(&lib, &mut sink);
+    corpus::cmap::cases(&mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

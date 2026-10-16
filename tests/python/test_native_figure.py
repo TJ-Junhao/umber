@@ -139,6 +139,8 @@ SETTERS: list[tuple[str, object, object]] = [
     ("with_baseline_width", 0.0, 2.0),
     ("with_bar_corner_radius", 0.0, 4.0),
     ("with_hist_gap", 0.0, 3.0),
+    ("with_cmap", _umber.Cmap.magma(), _umber.Cmap.cividis()),
+    ("with_diverging_cmap", _umber.Cmap.blue_red(), _umber.Cmap.blue_red().reversed()),
 ]
 
 

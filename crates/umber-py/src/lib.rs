@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+mod cmap;
 mod color;
 mod enums;
 mod errors;
@@ -35,6 +36,7 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", umber_core::VERSION)?;
     m.add("MAX_BINS", umber_core::MAX_BINS)?;
     m.add_class::<theme::Theme>()?;
+    m.add_class::<cmap::Cmap>()?;
     m.add_class::<figure::Figure>()?;
     m.add_function(wrap_pyfunction!(enums::enum_members, m)?)?;
     m.add_function(wrap_pyfunction!(figure::grid_auto_size, m)?)?;

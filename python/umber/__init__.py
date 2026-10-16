@@ -12,6 +12,7 @@ from typing import Final
 
 from umber._axes import Axes
 from umber._cell import Cell
+from umber._cmap import Cmap
 from umber._color import Color
 from umber._enums import (
     AUTO,
@@ -58,6 +59,7 @@ __all__ = [
     "Axes",
     "Cell",
     "Series",
+    "Cmap",
     "Color",
     "DataError",
     "Dash",
@@ -110,6 +112,7 @@ _report_package_as_module(
     Axes,
     Cell,
     Series,
+    Cmap,
     Color,
     Dash,
     Distribution,

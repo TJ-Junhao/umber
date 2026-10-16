@@ -64,7 +64,7 @@
 //!   and [`HistMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
-//! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`];
+//! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], and the colormap [`Cmap`];
 //! - per-series line widths and marker sizes: [`SizeSpec`], with its [`Factor`] and [`Points`];
 //! - tick labels: [`TickFormat`], with its [`NumberStyle`] and [`Decimals`];
 //! - times: [`Instant`] and its [`Civil`] date and time;
@@ -98,6 +98,7 @@ mod bubble_fit_tests;
 mod bubble_scale;
 #[cfg(test)]
 mod bubbles_tests;
+pub mod cmap;
 pub mod color;
 mod coverage;
 pub mod downsample;
@@ -132,6 +133,7 @@ pub mod ticks;
 mod time;
 
 pub use binning::MAX_BINS;
+pub use cmap::Cmap;
 pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
