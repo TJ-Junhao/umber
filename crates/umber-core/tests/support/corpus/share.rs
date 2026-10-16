@@ -144,6 +144,7 @@ fn format(f: &TickFormat) -> String {
         NumberStyle::Fixed(d) => format!("fixed {}", d.get()),
         NumberStyle::Percent(d) => format!("percent {}", d.get()),
         NumberStyle::Scientific => "scientific".to_owned(),
+        NumberStyle::Iso => "iso".to_owned(),
     };
     format!(
         "{style} prefix={} suffix={}",
