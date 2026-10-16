@@ -74,10 +74,17 @@ def test_lists_arrays_and_series_match() -> None:
 
 
 def test_points_take_the_mapped_colors() -> None:
+    # Mapped fills are opaque, as explicit colors are under a theme without marker opacity.
     mapped = axes().scatter([1, 2], [1, 2], color=ub.ColorBy([0, 10], GRAYS))
+    opaque = ub.Theme.PIGMENT.with_marker_alpha(1.0)
     explicit = (
-        axes().scatter([1], [1], color=ub.Color.BLACK).scatter([2], [2], color=ub.Color.WHITE)
+        ub.Figure(6, 4, theme=opaque)
+        .add_axes()
+        .scatter([1], [1], color=ub.Color.BLACK)
+        .scatter([2], [2], color=ub.Color.WHITE)
     )
+    faded = axes().scatter([1], [1], color=ub.Color.BLACK).scatter([2], [2], color=ub.Color.WHITE)
+    assert mapped.figure.to_svg() != faded.figure.to_svg()
     assert mapped.figure.to_svg() == explicit.figure.to_svg()
     clamped = axes().clim(0, 10).scatter([1, 2], [1, 2], color=ub.ColorBy([-50, 50], GRAYS))
     assert clamped.figure.to_svg() == explicit.figure.to_svg()
@@ -272,3 +279,13 @@ def test_color_by_is_immutable_and_not_picklable() -> None:
     with pytest.raises(TypeError) as caught:
         pickle.dumps(by)
     assert str(caught.value) == "ColorBy: a ColorBy cannot be pickled."
+
+
+def test_quick_scatter_takes_a_color_mapping() -> None:
+    by = ub.ColorBy([3.0, 1.0, 2.0], ub.Cmap.CIVIDIS)
+    quick = ub.scatter([1, 2, 3], [1, 2, 3], color=by)
+    step_by_step = ub.Figure().add_axes().scatter([1, 2, 3], [1, 2, 3], color=by)
+    assert quick.figure.to_svg() == step_by_step.figure.to_svg()
+    with pytest.raises(ub.UsageError) as caught:
+        ub.scatter([1], [1], label="a", color=ub.ColorBy([1]))
+    assert str(caught.value).startswith('Axes.scatter(): label is "a"')

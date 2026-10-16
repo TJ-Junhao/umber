@@ -12,6 +12,7 @@ from typing import Final
 from umber._args import instance
 from umber._axes import Axes
 from umber._color import Color
+from umber._color_by import ColorBy
 from umber._enums import Dash, Marker
 from umber._figure import Figure
 from umber._report import api_call
@@ -71,7 +72,7 @@ def scatter(
     y: Values[float],
     *,
     label: str = "",
-    color: Color = Color.AUTO,
+    color: Color | ColorBy = Color.AUTO,
     marker: Marker = Marker.CIRCLE,
     size: Size = Size.AUTO,
     theme: Theme = Theme.PIGMENT,
@@ -85,7 +86,9 @@ def scatter(
         x: The x values.
         y: The y values, one per x value.
         label: The name shown in the legend; an empty string leaves the series out of it.
-        color: The marker color. ``Color.AUTO`` takes the first color of the theme palette.
+            A scatter colored by ``ColorBy`` has no legend entry and takes no label.
+        color: The marker color. ``Color.AUTO`` takes the first color of the theme palette;
+            ``ColorBy(values)`` colors each point by its value instead.
         marker: The marker shape.
         size: The marker size. ``Size.AUTO`` is the marker size of the theme.
         theme: The theme of the new figure.
@@ -95,14 +98,16 @@ def scatter(
 
     Raises:
         TypeError: If an argument has the wrong type.
-        DataError: If the data cannot be plotted: lengths differ, a value is infinite, or
-            ``x`` holds names.
+        DataError: If the data cannot be plotted: lengths differ, a value is infinite,
+            ``x`` holds names, or a ``ColorBy`` does not have one value per point.
         StyleError: If ``label`` is too long.
+        UsageError: If a ``ColorBy`` comes with a label.
 
     Example:
         >>> import umber as ub
         >>> ax = ub.scatter([1, 2, 3], [2.0, 1.0, 3.0], marker=ub.Marker.SQUARE)
         >>> ax.figure.save_png("points.png", dpi=100)
+        >>> ax = ub.scatter([1, 2, 3], [2.0, 1.0, 3.0], color=ub.ColorBy([5.0, 1.0, 3.0]))
     """
     with api_call():
         instance("scatter()", "theme", theme, Theme, _THEME_HINT)

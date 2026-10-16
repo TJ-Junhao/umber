@@ -8,7 +8,7 @@ use super::marker::{extent, marker_shape};
 use crate::color_scale::ResolvedColorScale;
 use crate::geometry::Point;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
-use crate::{Marker, Rgba};
+use crate::{Marker, Rgba, Theme};
 
 /// The scatter outline width, in points.
 pub(crate) const MARKER_OUTLINE: f32 = 0.8;
@@ -42,6 +42,19 @@ pub(super) fn scatter_item(
     shape: Marker,
     size: f32,
 ) -> Option<Item> {
+    let fill = color.scale_alpha(marker_alpha(context.theme));
+    markers_item(context, (xs, ys), fill, shape, size)
+}
+
+/// The scene item of one batch of `shape` markers of diameter `size`, filled with `fill` as
+/// given and outlined as [`scatter_item`] outlines them, with the same culling.
+pub(super) fn markers_item(
+    context: &MarkContext<'_>,
+    (xs, ys): (&[f64], &[f64]),
+    fill: Rgba,
+    shape: Marker,
+    size: f32,
+) -> Option<Item> {
     let MarkContext { theme, maps, .. } = *context;
     let shape_path = marker_shape(shape, size);
     // Cull in axis space by the shape's own extent on each axis, plus the outline (whose miter
@@ -70,7 +83,7 @@ pub(super) fn scatter_item(
     }
     Some(Item::Markers {
         shape: shape_path,
-        fill: Some(color.scale_alpha(marker_alpha(theme))),
+        fill: Some(fill),
         stroke: Some(StrokeStyle {
             color: theme.background(),
             width: MARKER_OUTLINE,
@@ -82,8 +95,9 @@ pub(super) fn scatter_item(
     })
 }
 
-/// The fill colors of the points of a mark: one color, or the color each point's value maps
-/// to on the axes' color scale.
+/// The fill colors of the points of a mark: one color at the theme's marker alpha, or the
+/// opaque color each point's value maps to on the axes' color scale, so a mapped point shows
+/// exactly the colormap's color whatever lies under it.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum PointFill<'a> {
     /// Every point in this color.
@@ -98,11 +112,12 @@ pub(super) enum PointFill<'a> {
 }
 
 impl PointFill<'_> {
-    /// The color of the point at `index`; `None` for a point whose value maps to no color
+    /// The fill of the point at `index` under `theme`: the uniform color at the theme's marker
+    /// alpha, or the mapped color, opaque. `None` for a point whose value maps to no color
     /// (NaN), which is not drawn.
-    pub(super) fn at(self, index: usize) -> Option<Rgba> {
+    pub(super) fn at(self, theme: &Theme, index: usize) -> Option<Rgba> {
         match self {
-            PointFill::Uniform(color) => Some(color),
+            PointFill::Uniform(color) => Some(color.scale_alpha(marker_alpha(theme))),
             PointFill::Mapped { scale, values } => {
                 values.get(index).and_then(|&value| scale.color(value))
             }
@@ -111,7 +126,7 @@ impl PointFill<'_> {
 }
 
 /// The scene items of one scatter whose points are filled by `fill`: as [`scatter_item`]
-/// draws them, one batch per run of consecutive points of one color, in data order, so later
+/// draws them, one batch per run of consecutive points of one fill, in data order, so later
 /// points still cover earlier ones. Points whose value maps to no color are not drawn.
 pub(super) fn scatter_items(
     context: &MarkContext<'_>,
@@ -127,7 +142,7 @@ pub(super) fn scatter_items(
     }
     let mut run: Option<(Rgba, Vec<f64>, Vec<f64>)> = None;
     for (index, (&x, &y)) in xs.iter().zip(ys).enumerate() {
-        let Some(color) = fill.at(index) else {
+        let Some(color) = fill.at(context.theme, index) else {
             continue;
         };
         match &mut run {
@@ -137,13 +152,25 @@ pub(super) fn scatter_items(
             }
             _ => {
                 if let Some((color, run_xs, run_ys)) = run.take() {
-                    items.extend(scatter_item(context, &run_xs, &run_ys, color, shape, size));
+                    items.extend(markers_item(
+                        context,
+                        (&run_xs, &run_ys),
+                        color,
+                        shape,
+                        size,
+                    ));
                 }
                 run = Some((color, vec![x], vec![y]));
             }
         }
     }
     if let Some((color, run_xs, run_ys)) = run {
-        items.extend(scatter_item(context, &run_xs, &run_ys, color, shape, size));
+        items.extend(markers_item(
+            context,
+            (&run_xs, &run_ys),
+            color,
+            shape,
+            size,
+        ));
     }
 }

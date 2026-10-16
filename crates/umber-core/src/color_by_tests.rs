@@ -86,18 +86,20 @@ fn scatter_points_take_mapped_colors() {
             mapped(by(&[0.0, 5.0, 10.0], Cmap::viridis())),
         )
         .unwrap();
-    let theme = f.theme().clone();
     let viridis = Cmap::viridis();
     assert_eq!(
         marker_fills(&f),
         [
-            (faded(viridis.at(0.0), &theme), 1),
-            (faded(viridis.at(0.5), &theme), 1),
-            (faded(viridis.at(1.0), &theme), 1),
+            (viridis.at(0.0), 1),
+            (viridis.at(0.5), 1),
+            (viridis.at(1.0), 1),
         ]
     );
     assert_eq!(viridis.at(0.0).to_hex(), "#440154");
     assert_eq!(viridis.at(1.0).to_hex(), "#FDE725");
+    // Mapped fills are opaque: the theme's marker alpha does not apply to them.
+    assert!(f.theme().marker_alpha() < 1.0);
+    assert!(marker_fills(&f).iter().all(|(fill, _)| fill.a == 255));
 
     // Runs of one color share a batch; data order is kept; NaN values are not drawn.
     let mut f = figure(Theme::pigment());
@@ -111,9 +113,9 @@ fn scatter_points_take_mapped_colors() {
     assert_eq!(
         marker_fills(&f),
         [
-            (faded(viridis.at(0.0), &theme), 2),
-            (faded(viridis.at(1.0), &theme), 1),
-            (faded(viridis.at(0.0), &theme), 1),
+            (viridis.at(0.0), 2),
+            (viridis.at(1.0), 1),
+            (viridis.at(0.0), 1),
         ]
     );
 }
@@ -130,10 +132,7 @@ fn theme_cmap_follows_the_center() {
             )
             .unwrap();
         let ends = [theme.cmap().at(0.0), theme.cmap().at(1.0)];
-        assert_eq!(
-            marker_fills(&f),
-            ends.map(|color| (faded(color, &theme), 1))
-        );
+        assert_eq!(marker_fills(&f), ends.map(|color| (color, 1)));
         let mut f = figure(theme.clone());
         let centered = ColorBy {
             center: Some(0.0),
@@ -145,7 +144,7 @@ fn theme_cmap_follows_the_center() {
         let diverging = theme.diverging_cmap();
         assert_eq!(
             marker_fills(&f),
-            [0.25, 0.5, 1.0].map(|t| (faded(diverging.at(t), &theme), 1))
+            [0.25, 0.5, 1.0].map(|t| (diverging.at(t), 1))
         );
     }
 }
@@ -160,11 +159,7 @@ fn equal_values_map_to_middle() {
             mapped(by(&[7.0, 7.0, 7.0], Cmap::magma())),
         )
         .unwrap();
-    let theme = f.theme().clone();
-    assert_eq!(
-        marker_fills(&f),
-        [(faded(Cmap::magma().at(0.5), &theme), 3)]
-    );
+    assert_eq!(marker_fills(&f), [(Cmap::magma().at(0.5), 3)]);
     let resolved = plan_figure(&f, (0, 0), FontLibrary::global()).0;
     let scale = resolved.color.expect("a color scale");
     let ticks: Vec<_> = scale
@@ -218,11 +213,10 @@ fn clim_clamps_values_outside_it() {
             mapped(by(&[-5.0, 5.0, 50.0], Cmap::cividis())),
         )
         .unwrap();
-    let theme = f.theme().clone();
     let cividis = Cmap::cividis();
     assert_eq!(
         marker_fills(&f),
-        [0.0, 0.5, 1.0].map(|t| (faded(cividis.at(t), &theme), 1))
+        [0.0, 0.5, 1.0].map(|t| (cividis.at(t), 1))
     );
 }
 
@@ -236,10 +230,9 @@ fn log_scale_maps_by_the_logarithm() {
     f.single_axes_mut()
         .scatter(nums(&[1.0, 2.0, 3.0]), &[1.0, 2.0, 3.0], mapped(log))
         .unwrap();
-    let theme = f.theme().clone();
     assert_eq!(
         marker_fills(&f),
-        [0.0, 0.5, 1.0].map(|t| (faded(Cmap::viridis().at(t), &theme), 1))
+        [0.0, 0.5, 1.0].map(|t| (Cmap::viridis().at(t), 1))
     );
 }
 
@@ -434,10 +427,7 @@ fn bubbles_colorby_keeps_size_legend_neutral() {
             )
             .unwrap();
         let viridis = Cmap::viridis();
-        assert_eq!(
-            bubble_fills(&f),
-            [0.0, 0.5, 1.0].map(|t| faded(viridis.at(t), &theme))
-        );
+        assert_eq!(bubble_fills(&f), [0.0, 0.5, 1.0].map(|t| viridis.at(t)));
         let marks = resolve_marks(f.single_axes().marks(), &theme);
         let legend = Legend::new(LegendStyle::Header, &marks, &Limits::of(f.single_axes()));
         let neutral = faded(theme.text_color(), &theme).over(theme.background());
@@ -470,4 +460,52 @@ fn color_mapped_scatter_has_no_legend_entry() {
     let legend = Legend::new(LegendStyle::Header, &marks, &Limits::of(f.single_axes()));
     let labels: Vec<_> = legend.row().iter().map(|e| e.label()).collect();
     assert_eq!(labels, ["Trend"]);
+}
+
+#[test]
+fn narrow_ranges_keep_distinct_colors() {
+    let viridis = Cmap::viridis();
+    // An automatic linear range of 1 at 1e12.
+    let mut f = figure(Theme::pigment());
+    f.single_axes_mut()
+        .scatter(
+            nums(&[1.0, 2.0]),
+            &[1.0, 2.0],
+            mapped(by(&[1e12, 1e12 + 1.0], Cmap::viridis())),
+        )
+        .unwrap();
+    assert_eq!(
+        marker_fills(&f),
+        [(viridis.at(0.0), 1), (viridis.at(1.0), 1)]
+    );
+    // Narrow color limits on a log scale.
+    let mut f = figure(Theme::pigment());
+    let log = ColorBy {
+        scale: Transform::Log(LogBase::TEN),
+        ..by(&[1.0, 1.0 + 5e-10], Cmap::viridis())
+    };
+    f.single_axes_mut()
+        .clim(1.0, 1.0 + 5e-10)
+        .unwrap()
+        .scatter(nums(&[1.0, 2.0]), &[1.0, 2.0], mapped(log))
+        .unwrap();
+    assert_eq!(
+        marker_fills(&f),
+        [(viridis.at(0.0), 1), (viridis.at(1.0), 1)]
+    );
+}
+
+#[test]
+fn centers_of_either_zero_sign_agree() {
+    let mut f = figure(Theme::pigment());
+    let centered = |center: f64, value: f64| ColorBy {
+        center: Some(center),
+        ..ColorBy::new(vec![value])
+    };
+    f.single_axes_mut()
+        .scatter(nums(&[1.0]), &[1.0], mapped(centered(0.0, 1.0)))
+        .unwrap()
+        .scatter(nums(&[2.0]), &[2.0], mapped(centered(-0.0, -1.0)))
+        .unwrap();
+    assert_eq!(f.single_axes().marks().len(), 2);
 }

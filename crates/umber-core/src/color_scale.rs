@@ -10,7 +10,7 @@
 use crate::error::number;
 use crate::model::{CmapChoice, ColorBy};
 use crate::resolve::{AxisTick, NormalizedPos, ResolvedMark};
-use crate::scale::{is_single_value, log_offset, too_narrow};
+use crate::scale::{log_offset, too_narrow};
 use crate::ticks::format_given;
 use crate::{
     Cmap, ContinuousScale, Error, LogBase, MAX_MAGNITUDE, MIN_LOG_VALUE, Result, Rgba, Theme, Tick,
@@ -62,7 +62,7 @@ impl ColorScaleSpec {
             Some((cmap_name(&self.cmap), cmap_name(&existing.cmap)))
         } else if self.scale != existing.scale {
             Some((scale_name(self.scale), scale_name(existing.scale)))
-        } else if self.center.map(f64::to_bits) != existing.center.map(f64::to_bits) {
+        } else if self.center != existing.center {
             Some((center_name(self.center), center_name(existing.center)))
         } else {
             None
@@ -252,34 +252,19 @@ pub(crate) enum Norm {
 impl Norm {
     /// The norm of `spec` over the range `(low, high)` (`low <= high`): symmetric about the
     /// center of a centered spec, with the larger distance from the center to an end on both
-    /// sides. A range that counts as a single value ([`is_single_value`]) becomes one value,
-    /// its midpoint (the center for a centered spec).
+    /// sides. Only a range whose ends are equal is one value; a narrow range keeps its ends, so
+    /// close values still get distinct colors.
     fn new(spec: &ColorScaleSpec, (low, high): (f64, f64)) -> Norm {
-        let middle = low + (high - low) / 2.0;
         match (spec.center, spec.scale) {
             (Some(center), _) => {
                 let d = (center - low).abs().max((high - center).abs());
-                let (low, high) = if too_narrow(center - d, center + d) {
-                    (center, center)
-                } else {
-                    (center - d, center + d)
-                };
-                Norm::Centered { low, center, high }
-            }
-            (None, Transform::Linear) if is_single_value(Transform::Linear, low, high) => {
-                Norm::Linear {
-                    low: middle,
-                    high: middle,
+                Norm::Centered {
+                    low: center - d,
+                    center,
+                    high: center + d,
                 }
             }
             (None, Transform::Linear) => Norm::Linear { low, high },
-            (None, Transform::Log(base)) if is_single_value(Transform::Log(base), low, high) => {
-                Norm::Log {
-                    low: middle,
-                    high: middle,
-                    base,
-                }
-            }
             (None, Transform::Log(base)) => Norm::Log { low, high, base },
         }
     }
