@@ -4,11 +4,17 @@
 //! Marks live in two coordinate spaces. [`AxisPoint`] is axis space, where marks are clipped;
 //! [`PlotPoint`] is plot points, where they are emitted. [`AxisMaps::to_plot`] is the one
 //! conversion from the first to the second.
+//!
+//! Bars, boxes and violins are drawn in the frame of their [`Orientation`]: axis space with the
+//! axis they lie along first and their value axis second ([`AxisMaps::oriented`]). A vertical
+//! mark's frame is the plot's own; a horizontal mark's frame has the axes swapped, and
+//! [`AxisMaps::to_plot`] swaps its points back. So each of these marks has one drawing
+//! implementation, and a horizontal mark is its vertical form with the axes swapped.
 
-use crate::geometry::Point;
+use crate::geometry::{Path, PathVerb, Point};
 use crate::layout::Area;
 use crate::model::AxisData;
-use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis};
+use crate::resolve::{AxisScale, NormalizedPos, Orientation, ResolvedAxis};
 use crate::scale::log_offset;
 use crate::{ContinuousScale, Transform};
 
@@ -56,32 +62,99 @@ pub(super) fn point(x: f64, y: f64) -> Point {
     }
 }
 
-/// The maps of both axes, from axis space to plot points.
+/// The maps of both axes of a frame, from axis space to plot points (see the module
+/// documentation). In the plot's own frame, that of every mark but horizontal bars, boxes and
+/// violins, `x` maps the plot's x axis and `y` its y axis; in the frame of horizontal marks `x`
+/// maps the plot's y axis, which they lie along, and `y` its x axis, which their values are on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct AxisMaps {
-    /// The x axis map.
+    /// The map of the frame's first axis: the x axis, or the y axis of a horizontal frame.
     pub(super) x: AxisMap,
-    /// The y axis map.
+    /// The map of the frame's second axis: the y axis, or the x axis of a horizontal frame.
     pub(super) y: AxisMap,
+    /// The orientation of the frame: [`Orientation::Vertical`] for the plot's own.
+    pub(super) frame: Orientation,
 }
 
 impl AxisMaps {
-    /// The maps of the resolved axes onto `plot`: x from left to right, y from the bottom up.
+    /// The maps of the resolved axes onto `plot`, in the plot's own frame: x from left to
+    /// right; y from the bottom up, or for a category axis from the top down, so that its first
+    /// category is at the top.
     pub(super) fn new(x: &ResolvedAxis, y: &ResolvedAxis, plot: Area) -> AxisMaps {
+        let y = match &y.scale {
+            AxisScale::Continuous(_) => AxisMap::new(y, plot.bottom(), -plot.height),
+            AxisScale::Category(_) => AxisMap::new(y, plot.y, plot.height),
+        };
         AxisMaps {
             x: AxisMap::new(x, plot.x, plot.width),
-            y: AxisMap::new(y, plot.bottom(), -plot.height),
+            y,
+            frame: Orientation::Vertical,
+        }
+    }
+
+    /// These maps, which must be in the plot's own frame, in the frame of marks of
+    /// `orientation`: unchanged for vertical marks, the axes swapped for horizontal ones.
+    pub(super) fn oriented(self, orientation: Orientation) -> AxisMaps {
+        match orientation {
+            Orientation::Vertical => self,
+            Orientation::Horizontal => AxisMaps {
+                x: self.y,
+                y: self.x,
+                frame: Orientation::Horizontal,
+            },
         }
     }
 
     /// The plot point of axis-space point `p`. For `p` within a few points of the axis
     /// domain (all callers pass clipped or culled points) this cannot overflow.
     pub(super) fn to_plot(self, p: AxisPoint) -> PlotPoint {
-        PlotPoint {
-            x: self.x.plot_at(p.x),
-            y: self.y.plot_at(p.y),
+        let (first, second) = (self.x.plot_at(p.x), self.y.plot_at(p.y));
+        match self.frame {
+            Orientation::Vertical => PlotPoint {
+                x: first,
+                y: second,
+            },
+            Orientation::Horizontal => PlotPoint {
+                x: second,
+                y: first,
+            },
         }
     }
+
+    /// The pair `(along x, along y)` of a quantity that has one value along each axis of the
+    /// plot, such as a marker's reach, in the order of the frame's axes.
+    pub(super) fn in_frame(self, (along_x, along_y): (f64, f64)) -> (f64, f64) {
+        match self.frame {
+            Orientation::Vertical => (along_x, along_y),
+            Orientation::Horizontal => (along_y, along_x),
+        }
+    }
+
+    /// The scene path of `path`, drawn in plot points of the frame (the frame's first axis as
+    /// x): `path` itself in the plot's own frame, and with x and y swapped in the frame of
+    /// horizontal marks.
+    pub(super) fn path_to_scene(self, path: Path) -> Path {
+        match self.frame {
+            Orientation::Vertical => path,
+            Orientation::Horizontal => transposed(&path),
+        }
+    }
+}
+
+/// `path` with the x and y of every point swapped.
+fn transposed(path: &Path) -> Path {
+    let swap = |p: Point| Point { x: p.y, y: p.x };
+    let mut out = Path::new();
+    for verb in path.verbs() {
+        match *verb {
+            PathVerb::MoveTo(p) => out.move_to(swap(p)),
+            PathVerb::LineTo(p) => out.line_to(swap(p)),
+            PathVerb::QuadTo(c, p) => out.quad_to(swap(c), swap(p)),
+            PathVerb::CubicTo(c1, c2, p) => out.cubic_to(swap(c1), swap(c2), swap(p)),
+            PathVerb::Close => out.close(),
+        }
+    }
+    out
 }
 
 /// The affine map of one axis from axis space to plot points.
@@ -121,9 +194,11 @@ impl AxisMap {
         self.start + (u - self.lo) / (self.hi - self.lo) * self.extent
     }
 
-    /// The axis-space value at the normalized position `pos` along the axis, from `lo` at the
-    /// low end to `hi` at the high end. Axis space is affine in normalized positions on every
-    /// axis, so this is the value a resolved position such as the baseline stands for.
+    /// The axis-space value at the normalized position `pos` along a continuous axis, from `lo`
+    /// at the low end to `hi` at the high end. Axis space is affine in normalized positions on
+    /// every continuous axis, so this is the value a resolved position such as the baseline
+    /// stands for. (A category y axis runs from the top down, against its normalized positions,
+    /// and holds no baseline.)
     pub(super) fn at(&self, pos: NormalizedPos) -> f64 {
         self.lo + pos.get() * (self.hi - self.lo)
     }
@@ -139,6 +214,12 @@ impl AxisMap {
     /// is the same everywhere on the axis.
     pub(super) fn length(&self, points: f64) -> f64 {
         points / self.extent.abs() * (self.hi - self.lo)
+    }
+
+    /// The plot-point length of `length` axis units along the axis, the inverse of
+    /// [`length`](Self::length).
+    pub(super) fn points(&self, length: f64) -> f64 {
+        length / (self.hi - self.lo) * self.extent.abs()
     }
 }
 

@@ -164,22 +164,32 @@ fn both_axes_map_through_their_scales() {
         ),
         ticks: Vec::new(),
     };
-    // A category y axis maps band centers bottom up, as a category x axis maps them left to
-    // right, and a linear axis maps its values the same way on either side.
+    // A category x axis maps band centers left to right, a category y axis top down, so that
+    // its first category is at the top, and a linear axis maps its values the same way on
+    // either side: left to right, or bottom up.
     let names_ab = AxisData::Categories(names(&["a", "b", "z"]));
     let centers = axis_values(&category, &names_ab);
     assert_eq!(&centers[..2], &[0.25, 0.75]);
     assert!(centers[2].is_nan());
-    for (x, y) in [(&linear, &category), (&category, &linear)] {
-        let maps = AxisMaps::new(x, y, plot);
-        let low = maps.to_plot(AxisPoint::new(maps.x.lo, maps.y.lo));
-        let high = maps.to_plot(AxisPoint::new(maps.x.hi, maps.y.hi));
-        assert_eq!((low.x, low.y), (plot.x, plot.bottom()));
-        assert_eq!((high.x, high.y), (plot.right(), plot.y));
-    }
+    let maps = AxisMaps::new(&category, &linear, plot);
+    let low = maps.to_plot(AxisPoint::new(maps.x.lo, maps.y.lo));
+    let high = maps.to_plot(AxisPoint::new(maps.x.hi, maps.y.hi));
+    assert_eq!((low.x, low.y), (plot.x, plot.bottom()));
+    assert_eq!((high.x, high.y), (plot.right(), plot.y));
     let maps = AxisMaps::new(&linear, &category, plot);
+    let low = maps.to_plot(AxisPoint::new(maps.x.lo, maps.y.lo));
+    let high = maps.to_plot(AxisPoint::new(maps.x.hi, maps.y.hi));
+    assert_eq!((low.x, low.y), (plot.x, plot.y));
+    assert_eq!((high.x, high.y), (plot.right(), plot.bottom()));
     let point = maps.to_plot(AxisPoint::new(axis_value(&linear, 1.0), centers[1]));
-    assert_eq!((point.x, point.y), (60.0, 45.0));
+    assert_eq!((point.x, point.y), (60.0, 95.0));
+    // In the frame of horizontal marks the category axis comes first: a mark drawn there as
+    // on a category x axis lands at the same plot points, its coordinates swapped.
+    let frame = maps.oriented(crate::resolve::Orientation::Horizontal);
+    assert_eq!((frame.x, frame.y), (maps.y, maps.x));
+    let swapped = frame.to_plot(AxisPoint::new(centers[1], axis_value(&linear, 1.0)));
+    assert_eq!((swapped.x, swapped.y), (60.0, 95.0));
+    assert_eq!(maps.oriented(crate::resolve::Orientation::Vertical), maps);
     // Numbers have no place on a category axis.
     assert!(axis_value(&category, 1.0).is_nan());
     assert!(

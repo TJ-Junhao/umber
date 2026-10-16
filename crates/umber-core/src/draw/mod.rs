@@ -27,7 +27,9 @@
 //! Each mark kind has its own module: [`line`](mod@line), [`area`], which fills under a line drawn
 //! as [`line`](mod@line) draws it, [`scatter`] with the [`marker`] shapes, and [`bar`] and [`hist`]
 //! with the [`bar_shape`] outlines they share. They share the axis maps of [`mapping`] and the
-//! clipping of [`clip`], and receive their input as one [`MarkContext`].
+//! clipping of [`clip`], and receive their input as one [`MarkContext`]. Bars, boxes and violins
+//! on a category y axis are horizontal: they are drawn by the same code as on a category x axis,
+//! in a context whose axis maps are in their frame ([`MarkContext::oriented`]).
 
 mod area;
 mod band;
@@ -59,7 +61,7 @@ pub(crate) use chrome::{baseline, chrome, figure_header};
 
 use crate::Theme;
 use crate::layout::{Area, Layout};
-use crate::resolve::{Baseline, Resolved, ResolvedMark};
+use crate::resolve::{Baseline, Orientation, Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
 use mapping::{AxisMaps, axis_values};
 
@@ -73,9 +75,9 @@ struct MarkContext<'a> {
     maps: AxisMaps,
     /// The plot area.
     plot: Area,
-    /// The baseline, as resolved; bars on a log value axis start there. Every mark that reads
-    /// it is drawn on a numeric y axis (the model refuses marks on a category y axis), so its
-    /// baseline lies on y.
+    /// The baseline, as resolved, on the value axis; bars on a log value axis start there. The
+    /// marks that read it grow along y, except horizontal bars, which are drawn in their frame
+    /// ([`MarkContext::oriented`]), whose second axis is the value axis x.
     baseline: Baseline,
     /// The plot coordinate of the baseline along its axis, as laid out; area fills end there.
     baseline_at: f64,
@@ -83,6 +85,17 @@ struct MarkContext<'a> {
     /// without one (see [`widest_line_width`]). Every line is clipped in axis space at least
     /// this far past the plot, since the marks clip is widened by half of it.
     widest_line: f32,
+}
+
+impl MarkContext<'_> {
+    /// This context for marks of `orientation`, its axis maps in their frame
+    /// ([`AxisMaps::oriented`]): unchanged for vertical marks.
+    fn oriented(&self, orientation: Orientation) -> Self {
+        MarkContext {
+            maps: self.maps.oriented(orientation),
+            ..*self
+        }
+    }
 }
 
 /// The `marks` as one group clipped to [`marks_clip`], in the given order, each in its resolved
@@ -147,12 +160,14 @@ pub(crate) fn marks(
             ResolvedMark::Bar {
                 mark: bar_mark,
                 color,
+                orientation,
                 ..
             } => {
+                let (along, values) = resolved.along_and_values(orientation);
                 bar::bar_items(
-                    &context,
-                    &resolved.x,
-                    &resolved.y,
+                    &context.oriented(orientation),
+                    along,
+                    values,
                     bar_mark,
                     color,
                     &mut items,
@@ -161,12 +176,14 @@ pub(crate) fn marks(
             ResolvedMark::Grouped {
                 mark: group_mark,
                 ref series,
+                orientation,
                 ..
             } => {
+                let (along, values) = resolved.along_and_values(orientation);
                 bar::grouped_items(
-                    &context,
-                    &resolved.x,
-                    &resolved.y,
+                    &context.oriented(orientation),
+                    along,
+                    values,
                     group_mark,
                     series,
                     &mut items,
@@ -176,12 +193,14 @@ pub(crate) fn marks(
                 mark: stack_mark,
                 ref series,
                 ref stacks,
+                orientation,
                 ..
             } => {
+                let (along, values) = resolved.along_and_values(orientation);
                 bar::stacked_items(
-                    &context,
-                    &resolved.x,
-                    &resolved.y,
+                    &context.oriented(orientation),
+                    along,
+                    values,
                     stack_mark,
                     series,
                     stacks,
@@ -274,11 +293,12 @@ pub(crate) fn marks(
                 categories,
                 ref distributions,
                 width,
+                orientation,
                 ..
             } => {
                 box_plot::box_items(
-                    &context,
-                    resolved,
+                    &context.oriented(orientation),
+                    resolved.along_and_values(orientation),
                     categories,
                     distributions,
                     width,
@@ -289,11 +309,12 @@ pub(crate) fn marks(
                 categories,
                 ref distributions,
                 width,
+                orientation,
                 ..
             } => {
                 violin::violin_items(
-                    &context,
-                    resolved,
+                    &context.oriented(orientation),
+                    resolved.along_and_values(orientation),
                     categories,
                     distributions,
                     width,

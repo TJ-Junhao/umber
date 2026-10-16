@@ -98,7 +98,11 @@ class Scale(Generic[T]):  # noqa: UP046
 
     @staticmethod
     def category() -> "Scale[str]":
-        """Return the scale of named categories, used for bar charts.
+        """Return the scale of named categories.
+
+        On x it makes vertical bar, box and violin charts. On y, beside a numeric x axis, it
+        makes them horizontal, with the categories running top to bottom, and a scatter a
+        dot plot.
 
         Returns:
             The scale.

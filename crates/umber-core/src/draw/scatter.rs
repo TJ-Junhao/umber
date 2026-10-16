@@ -58,12 +58,15 @@ pub(super) fn markers_item(
     let MarkContext { theme, maps, .. } = *context;
     let shape_path = marker_shape(shape, size);
     // Cull in axis space by the shape's own extent on each axis, plus the outline (whose miter
-    // joins reach at most its width beyond the path for these shapes) and the slack.
+    // joins reach at most its width beyond the path for these shapes) and the slack. The maps
+    // may be in the frame of horizontal marks, as for the outliers of horizontal boxes, whose
+    // first axis is the plot's y axis.
     let (half_w, half_h) = extent(&shape_path);
     let reach = f64::from(MARKER_OUTLINE) + MARKER_SLACK;
+    let (half_first, half_second) = maps.in_frame((half_w, half_h));
     let ((left, right), (top, bottom)) = (
-        maps.x.expanded(half_w + reach),
-        maps.y.expanded(half_h + reach),
+        maps.x.expanded(half_first + reach),
+        maps.y.expanded(half_second + reach),
     );
     let bounds = Bounds {
         left,

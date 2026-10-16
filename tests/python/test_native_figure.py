@@ -312,21 +312,11 @@ def test_a_figure_of_one_cell_has_one_axes() -> None:
     )
 
 
-def test_a_category_y_axis_is_refused() -> None:
-    fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
+def test_a_category_y_axis_is_accepted() -> None:
     for x in (LINEAR, LOG, CATEGORY):
-
-        def call(x: int = x) -> None:
-            fig.add_axes(*ONLY_CELL, x, 10.0, CATEGORY, 10.0)
-
-        assert_reported(
-            call,
-            ub.UsageError,
-            "Figure.add_axes(): y is a category scale; the y axis must be linear or log.",
-            "y",
-            "pass y=Scale.linear() or y=Scale.log().",
-        )
-    fig.add_axes(*ONLY_CELL, CATEGORY, 0.0, LOG, 2.0)  # the failed calls added nothing
+        fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
+        assert fig.add_axes(*ONLY_CELL, x, 10.0, CATEGORY, 10.0) == (0, 0)
+        assert fig.axes_at(*ONLY_CELL[:4], x, 10.0, CATEGORY, 10.0) == (0, 0)
 
 
 def test_unknown_scale_kinds_are_internal_errors() -> None:

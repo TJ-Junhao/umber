@@ -76,8 +76,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     An axes is created by ``Figure.add_axes()`` or ``Cell.add_axes()`` and belongs to that
     figure. Retrieve it with ``Figure.axes_at()`` using the same position and scales.
     The type parameters are the types of the x and y values: ``Axes[float, float]`` for numeric
-    axes, ``Axes[str, float]`` for a category x axis. Every method validates its arguments at the
-    call and returns the axes, so calls chain. A failed call changes nothing.
+    axes, ``Axes[str, float]`` for a category x axis and ``Axes[float, str]`` for a category y
+    axis, on which bars, boxes and violins are horizontal and a scatter is a dot plot. Every
+    method validates its arguments at the call and returns the axes, so calls chain. A failed
+    call changes nothing.
 
     Example:
         >>> import umber as ub
@@ -94,7 +96,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     _row: int
     _col: int
     _x: Scale[X]
-    _y: Scale[float]
+    _y: Scale[Y]
 
     def __init__(self) -> None:
         """Refuse construction; axes are added to a figure with ``Figure.add_axes()``."""
@@ -504,15 +506,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def line(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
-        y: Values[Y],
+        y: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a line through the points ``(x[i], y[i])``, in order.
 
         A NaN in ``x`` or ``y`` leaves a gap in the line.
@@ -534,6 +536,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, or names and numbers do not match the x
                 axis.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -555,15 +558,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def area(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
-        y: Values[Y],
+        y: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a line through the points ``(x[i], y[i])``, in order, and fill the region below it.
 
         The fill reaches down to the baseline of the axes. A NaN in ``x`` or ``y`` leaves a gap in
@@ -586,6 +589,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, or names and numbers do not match the x
                 axis.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -618,11 +622,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> Self:
         """Add a marker at each point ``(x[i], y[i])``.
 
-        A point with a NaN coordinate is left out.
+        A point with a NaN coordinate is left out. On a category y axis the scatter is a dot
+        plot: each point sits at the centre of its category's band.
 
         Args:
             x: The x values: numbers on a linear or log x axis, names on a category x axis.
-            y: The y values, one per x value.
+            y: The y values, one per x value: numbers on a linear or log y axis, names on a
+                category y axis.
             label: The name shown in the legend; an empty string leaves the series out of it.
                 A scatter colored by ``ColorBy`` has no legend entry and takes no label.
             color: The marker color. ``Color.AUTO`` takes the next color of the theme palette.
@@ -637,35 +643,39 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
-                value is not positive on a log axis, names and numbers do not match the x
-                axis, or a ``ColorBy`` does not have one value per point.
+                value is not positive on a log axis, names and numbers do not match the
+                axes, or a ``ColorBy`` does not have one value per point.
             StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
                 range set by ``clim()``.
-            UsageError: If a ``ColorBy`` comes with a label, or its ``cmap``, ``scale`` or
-                ``center`` differs from those of the other color-mapped marks of these axes.
+            UsageError: If both axes are category axes (type checkers accept such axes, so
+                this is raised when the call runs), a ``ColorBy`` comes with a label, or its
+                ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
+                marks of these axes.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.scatter([1, 2, 3], [2.0, 1.0, 3.0], marker=ub.Marker.DIAMOND)
             >>> ax = ax.scatter([1, 2, 3], [3.0, 2.5, 1.0], color=ub.ColorBy([0.2, 0.5, 0.9]))
+            >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
         """
         with api_call():
             context = "Axes.scatter()"
             check_axis_type(context, "x", x)
-            check_floats_type(context, "y", y)
+            check_axis_type(context, "y", y)
             _args.require_text(context, "label", label)
             spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             extent = _size_argument(context, "size", size)
             xs = self._x_values(context, x)
-            ys = floats(context, "y", y)
+            ys = self._y_values(context, y)
             name = _args.text(context, "label", label)
             self._native.scatter(self._row, self._col, xs, ys, name, spec, shape.value, extent)
             return self
 
     def bubbles(
-        self: "Axes[float, Y]",
+        self: "Axes[float, float]",
         x: Values[float],
         y: Values[float],
         sizes: Values[float],
@@ -673,7 +683,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         label: str = "",
         color: Color | ColorBy = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
-    ) -> "Axes[float, Y]":
+    ) -> "Axes[float, float]":
         """Add markers whose areas are proportional to non-negative size values.
 
         Bubble marks on these axes share one size scale. The largest size among points with
@@ -718,7 +728,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If lengths differ, coordinates are invalid for their axes, a size
                 is negative, non-finite, or above 1e300, or a ``ColorBy`` does not have one
                 value per point.
-            UsageError: If the x axis is a category axis, or a ``ColorBy`` differs in
+            UsageError: If either axis is a category axis, or a ``ColorBy`` differs in
                 ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
             StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
                 range set by ``clim()``.
@@ -744,7 +754,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def stem(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
         y: Values[float],
         *,
@@ -752,7 +762,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a line from the baseline to each value, with a marker at its tip.
 
         A linear y domain includes zero. On a log y axis, stems start at the baseline.
@@ -777,6 +787,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If lengths differ, a value is infinite, a magnitude is too large, a
                 value is not positive or is too small on a log axis, or x has the wrong kind.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -798,17 +809,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def bar(
-        self: "Axes[str, float]",
+        self: "Axes[str, float] | Axes[float, str]",
         categories: Values[str],
         heights: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[str, float]":
-        """Add one bar per category, from the baseline to its height; for a category x axis.
+    ) -> "Axes[X, Y]":
+        """Add one bar per category, from the baseline to its height, along the category axis.
 
-        A negative height draws below the baseline. A NaN height leaves its category without
-        a bar.
+        On a category x axis the bars stand on the baseline and a negative height draws below
+        it. On a category y axis the bars are horizontal: the categories run top to bottom in
+        order of first appearance, and the bars grow rightwards from the baseline, leftwards for
+        a negative height. A NaN height leaves its category without a bar.
 
         Args:
             categories: The category names, each at most once.
@@ -822,14 +835,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If the data cannot be plotted: lengths differ, a category repeats, a
-                height is infinite or not positive on a log axis, or the x axis is not a
+                height is infinite or not positive on a log axis, or neither axis is a
                 category axis.
             StyleError: If ``label`` or a category name is too long.
+            UsageError: If both axes are category axes.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
             >>> ax = ax.bar(["North", "South", "East"], [3, 5, 2], label="2025")
+            >>> rows = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> rows = rows.bar(["North", "South", "East"], [3, 5, 2])
         """
         with api_call():
             context = "Axes.bar()"
@@ -841,25 +857,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             values = floats(context, "heights", heights)
             name = _args.text(context, "label", label)
             self._native.bar(self._row, self._col, category_names, values, name, spec)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def box(
-        self: "Axes[str, float]",
+        self: "Axes[str, float] | Axes[float, str]",
         categories: Values[str],
         groups: Sequence[Values[float]],
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[str, float]":
+    ) -> "Axes[X, Y]":
         """Add a box plot for each category, ignoring NaN samples.
 
         Quartiles use linear interpolation (Hyndman-Fan type 7, NumPy's default). The fences
         lie 1.5 times the interquartile range beyond the quartiles; samples outside them are
         outliers. Whiskers reach the most extreme samples inside the fences, clamped to the
         quartiles so they never extend into the box. Empty groups draw nothing; when the
-        quartiles coincide, only the median and any outliers are drawn. The y domain
+        quartiles coincide, only the median and any outliers are drawn. The value axis domain
         includes whiskers and outliers. Boxes occupy half of each category band and use
-        the theme's area opacity.
+        the theme's area opacity. On a category y axis the boxes are horizontal, the vertical
+        form with the axes swapped.
 
         Args:
             categories: The category names, each appearing once.
@@ -874,14 +892,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If group counts differ, categories repeat, or samples are not
                 numeric, are infinite, exceed the supported range or are not positive on
-                a log y axis.
+                a log axis.
             StyleError: If a label or category name is too long.
-            UsageError: If x is not a category axis.
+            UsageError: If neither axis or both axes are category axes.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
             >>> ax = ax.box(["North", "South"], [[1, 2, 4, 9], [2, 3, 5]], label="Samples")
+            >>> rows = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> rows = rows.box(["North", "South"], [[1, 2, 4, 9], [2, 3, 5]])
         """
         with api_call():
             context = "Axes.box()"
@@ -893,18 +913,20 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             values = _series.group_values(context, groups)
             name = _args.text(context, "label", label)
             self._native.box_plot(self._row, self._col, category_names, values, name, spec)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def grouped_box(
-        self: "Axes[str, float]",
+        self: "Axes[str, float] | Axes[float, str]",
         categories: Values[str],
         distributions: Sequence[Distribution],
-    ) -> "Axes[str, float]":
+    ) -> "Axes[X, Y]":
         """Add distributions side by side within each category band.
 
         Statistics and NaN handling are as in ``box()``. The group occupies half the band;
         boxes are 2 pt apart, or touch if that gap would leave them narrower than the gap.
-        Each distribution has its own color and legend entry, in input order.
+        Each distribution has its own color and legend entry, in input order: left to right,
+        or top to bottom on a category y axis.
 
         Args:
             categories: The category names, each appearing once.
@@ -917,9 +939,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If categories or distributions have the wrong type.
             DataError: If distributions are empty, group counts differ, categories repeat,
                 or a sample is infinite, exceeds the supported range or is not positive
-                on a log y axis.
+                on a log axis.
             StyleError: If a category name is too long.
-            UsageError: If x is not a category axis.
+            UsageError: If neither axis or both axes are category axes.
 
         Example:
             >>> import umber as ub
@@ -935,12 +957,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             arguments = _distribution_arguments(context, distributions)
             category_names = names(context, "categories", categories)
             self._native.grouped_box_plot(self._row, self._col, category_names, arguments)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def grouped_bar(
-        self: "Axes[str, float]", categories: Values[str], series: Sequence[Series]
-    ) -> "Axes[str, float]":
+        self: "Axes[str, float] | Axes[float, str]",
+        categories: Values[str],
+        series: Sequence[Series],
+    ) -> "Axes[X, Y]":
         """Add grouped bars: in each category, one bar per series, side by side.
+
+        The bars grow as in ``bar()``. Within a category they follow the order of the series,
+        which is the order of the legend: left to right, or top to bottom on a category y axis.
 
         Args:
             categories: The category names, each at most once.
@@ -955,8 +983,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 the wrong type.
             DataError: If the data cannot be plotted: ``series`` is empty, a series has a
                 different length, a category repeats, a height is infinite or not positive on
-                a log axis, or the x axis is not a category axis.
+                a log axis, or neither axis is a category axis.
             StyleError: If a category name is too long.
+            UsageError: If both axes are category axes.
 
         Example:
             >>> import umber as ub
@@ -972,14 +1001,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
             self._native.grouped_bar(self._row, self._col, category_names, arguments)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def stacked_bar(
-        self: "Axes[str, float]", categories: Values[str], series: Sequence[Series]
-    ) -> "Axes[str, float]":
+        self: "Axes[str, float] | Axes[float, str]",
+        categories: Values[str],
+        series: Sequence[Series],
+    ) -> "Axes[X, Y]":
         """Add stacked bars: in each category, the series stacked on one another.
 
-        Positive and negative values stack separately, above and below the baseline.
+        Positive and negative values stack separately, above and below the baseline, or on a
+        category y axis right and left of it.
 
         Args:
             categories: The category names, each at most once.
@@ -994,9 +1027,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 the wrong type.
             DataError: If the data cannot be plotted: ``series`` is empty, a series has a
                 different length, a category repeats, a height is infinite or not positive on
-                a log axis, a stack exceeds the supported magnitude, or the x axis is not a
+                a log axis, a stack exceeds the supported magnitude, or neither axis is a
                 category axis.
             StyleError: If a category name is too long.
+            UsageError: If both axes are category axes.
 
         Example:
             >>> import umber as ub
@@ -1012,11 +1046,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
             self._native.stacked_bar(self._row, self._col, category_names, arguments)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def stacked_area(
-        self: "Axes[float, Y]", x: Values[float], series: Sequence[Series]
-    ) -> "Axes[float, Y]":
+        self: "Axes[float, float]", x: Values[float], series: Sequence[Series]
+    ) -> "Axes[float, float]":
         """Add non-negative series stacked in order over shared x values.
 
         Each layer fills between the previous cumulative curve and its own, flat at the
@@ -1041,7 +1076,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If series is empty, lengths differ, x is not sorted, a value is
                 negative or infinite, a value violates its scale's bounds, or a cumulative
                 total exceeds the supported magnitude. Log values must be positive.
-            UsageError: If the x axis is a category axis.
+            UsageError: If either axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1104,16 +1139,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def step(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
-        y: Values[Y],
+        y: Values[float],
         *,
         where: Step = Step.POST,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a step line through the points ``(x[i], y[i])``, in order.
 
         The line runs horizontally and changes level vertically, at the place ``where`` sets.
@@ -1143,6 +1178,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, names and numbers do not match the x
                 axis, or x is not in non-decreasing order.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1167,14 +1203,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def hline(
-        self,
+        self: "Axes[X, float]",
         y: float,
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a horizontal reference line across the whole plot at ``y``.
 
         The line is drawn above the data marks. Without explicit y limits the y axis extends to
@@ -1196,6 +1232,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If ``y`` is not finite, or not positive on a log axis.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1251,6 +1288,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 axis or a name on a linear or log axis.
             DataError: If ``x`` is not finite, or not positive on a log axis.
             StyleError: If ``label`` is too long.
+            UsageError: If both axes are category axes. Type checkers accept such axes,
+                so this is raised when the call runs.
 
         Example:
             >>> import umber as ub
@@ -1276,13 +1315,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def hspan(
-        self,
+        self: "Axes[X, float]",
         low: float,
         high: float,
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a horizontal reference span between the y values ``low`` and ``high``.
 
         The span fills the region between the two values across the whole plot, at the opacity
@@ -1304,6 +1343,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
             StyleError: If ``low`` is not below ``high``, or ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1370,14 +1410,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def band(
-        self: "Axes[float, Y]",
+        self: "Axes[float, float]",
         x: Values[float],
         low: Values[float],
         high: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[float, Y]":
+    ) -> "Axes[float, float]":
         """Add a band between the curves ``(x[i], low[i])`` and ``(x[i], high[i])``.
 
         The band is a flat fill at the opacity of an area, with no outline, whatever the fill
@@ -1405,7 +1445,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, ``x`` is not in non-decreasing order, or a
                 value of ``low`` is above the value of ``high`` at the same index.
             StyleError: If ``label`` is too long.
-            UsageError: If the x axis is a category axis.
+            UsageError: If either axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1427,7 +1467,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def y_error_bars(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
         low: Values[float],
         high: Values[float],
@@ -1436,7 +1476,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         width: Size = Size.AUTO,
         caps: bool = True,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a vertical error bar at each ``x[i]``, from ``low[i]`` to ``high[i]``.
 
         On a category x axis the bar is drawn at the centre of the category. With ``caps`` each
@@ -1470,6 +1510,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, names and numbers do not match the x axis,
                 or a value of ``low`` is above the value of ``high`` at the same index.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1496,7 +1537,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
     def x_error_bars(
         self: "Axes[float, Y]",
-        y: Values[float],
+        y: Values[Y],
         low: Values[float],
         high: Values[float],
         *,
@@ -1511,10 +1552,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         the theme. Without explicit limits ``low`` and ``high`` extend the x axis and ``y`` the
         y axis, as the values of a scatter do. With limits, a bar partly outside the plot keeps
         the part inside, and loses the cap that is outside. A NaN in ``y``, ``low`` or ``high``
-        skips that bar. It needs a linear or log x axis.
+        skips that bar. It needs a linear or log x axis. On a category y axis each bar sits at
+        the centre of its category's band.
 
         Args:
-            y: The y values, numbers.
+            y: The y values: numbers on a linear or log y axis, names on a category y axis.
             low: The left end of each bar, one value per y value.
             high: The right end of each bar, one value per y value; no value of ``low`` may
                 exceed the value of ``high`` at the same index.
@@ -1533,8 +1575,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
-                value is not positive on a log axis, or a value of ``low`` is above the value
-                of ``high`` at the same index.
+                value is not positive on a log axis, names and numbers do not match the y
+                axis, or a value of ``low`` is above the value of ``high`` at the same index.
             StyleError: If ``label`` is too long.
             UsageError: If the x axis is a category axis.
 
@@ -1542,17 +1584,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.x_error_bars([1.0, 2.0], [0.5, 1.2], [1.5, 2.0], caps=False)
+            >>> rows = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> rows = rows.x_error_bars(["North", "South"], [0.5, 1.2], [1.5, 2.0])
         """
         with api_call():
             context = "Axes.x_error_bars()"
-            check_floats_type(context, "y", y)
+            check_axis_type(context, "y", y)
             check_floats_type(context, "low", low)
             check_floats_type(context, "high", high)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             extent = _size_argument(context, "width", width)
             flag = _args.boolean(context, "caps", caps)
-            ys = floats(context, "y", y)
+            ys = self._y_values(context, y)
             lows = floats(context, "low", low)
             highs = floats(context, "high", high)
             name = _args.text(context, "label", label)
@@ -1563,10 +1607,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
     def _x_values(self, context: str, x: object) -> FloatArray | list[str]:
         """Convert x values; empty data is an empty list of names on a category x axis."""
-        values = axis_values(context, "x", x)
-        if isinstance(values, np.ndarray) and values.size == 0 and self._x == _CATEGORY:
-            return []
-        return values
+        return _scale_values(context, "x", x, self._x)
+
+    def _y_values(self, context: str, y: object) -> FloatArray | list[str]:
+        """Convert y values; empty data is an empty list of names on a category y axis."""
+        return _scale_values(context, "y", y, self._y)
 
     def __copy__(self) -> Never:
         with api_call():
@@ -1599,13 +1644,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             )
 
     def violin(
-        self: "Axes[str, float]",
+        self: "Axes[str, float] | Axes[float, str]",
         categories: Values[str],
         groups: Sequence[Values[float]],
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[str, float]":
+    ) -> "Axes[X, Y]":
         """Add a violin density for each category, ignoring NaN samples.
 
         Gaussian kernels use Scott bandwidth: the sample standard deviation (ddof 1) times
@@ -1613,7 +1658,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         to max, with no tails outside the data. Every violin has the same maximum width,
         0.6 of its category band, and the theme's area opacity. Type-7 quartiles are drawn
         at half their local width; the median spans the full local width. Empty groups
-        draw nothing; fewer than two distinct finite values draw a median line only.
+        draw nothing; fewer than two distinct finite values draw a median line only. On a
+        category y axis the violins are horizontal, the vertical form with the axes swapped.
 
         Args:
             categories: The category names, each appearing once.
@@ -1628,14 +1674,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If group counts differ, categories repeat, or samples are not
                 numeric, are infinite, exceed the supported range or are not positive on
-                a log y axis.
+                a log axis.
             StyleError: If a label or category name is too long.
-            UsageError: If x is not a category axis.
+            UsageError: If neither axis or both axes are category axes.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
             >>> ax = ax.violin(["North", "South"], [[1, 2, 4, 9], [2, 3, 5]], label="Samples")
+            >>> rows = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> rows = rows.violin(["North", "South"], [[1, 2, 4, 9], [2, 3, 5]])
         """
         with api_call():
             context = "Axes.violin()"
@@ -1647,18 +1695,20 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             values = _series.group_values(context, groups)
             name = _args.text(context, "label", label)
             self._native.violin(self._row, self._col, category_names, values, name, spec)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def grouped_violin(
-        self: "Axes[str, float]",
+        self: "Axes[str, float] | Axes[float, str]",
         categories: Values[str],
         distributions: Sequence[Distribution],
-    ) -> "Axes[str, float]":
+    ) -> "Axes[X, Y]":
         """Add distributions side by side within each category band.
 
         Statistics and NaN handling are as in ``violin()``. The group occupies 0.6 of the band;
         violins are 2 pt apart, or touch if that gap would leave them narrower than the gap.
-        Each distribution has its own color and legend entry, in input order.
+        Each distribution has its own color and legend entry, in input order: left to right,
+        or top to bottom on a category y axis.
 
         Args:
             categories: The category names, each appearing once.
@@ -1671,9 +1721,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If categories or distributions have the wrong type.
             DataError: If distributions are empty, group counts differ, categories repeat,
                 or a sample is infinite, exceeds the supported range or is not positive
-                on a log y axis.
+                on a log axis.
             StyleError: If a category name is too long.
-            UsageError: If x is not a category axis.
+            UsageError: If neither axis or both axes are category axes.
 
         Example:
             >>> import umber as ub
@@ -1689,7 +1739,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             arguments = _distribution_arguments(context, distributions)
             category_names = names(context, "categories", categories)
             self._native.grouped_violin(self._row, self._col, category_names, arguments)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def clim(self, low: float, high: float) -> Self:
         """Set the color range of the color-mapped marks of these axes.
@@ -1784,14 +1835,28 @@ def _distribution_arguments(
 _SCALES: Final = attrgetter("_x", "_y")
 
 
+def _scale_values(
+    context: str, name: str, values: object, scale: Scale[Any]
+) -> FloatArray | list[str]:
+    """Convert the values ``name`` of an axis of ``scale``, as ``axis_values()`` does.
+
+    Empty data converts to an empty array of numbers, which a category axis would refuse; on
+    a category axis it is an empty list of names instead.
+    """
+    converted = axis_values(context, name, values)
+    if isinstance(converted, np.ndarray) and converted.size == 0 and scale == _CATEGORY:
+        return []
+    return converted
+
+
 def attach(
     figure: "umber.Figure",
     native: _umber.Figure,
     x: Scale[X],
-    y: Scale[float],
+    y: Scale[Y],
     row: int,
     col: int,
-) -> Axes[X, float]:
+) -> Axes[X, Y]:
     """Return new axes of ``figure`` with the scales ``x`` and ``y``.
 
     The native figure must already hold axes with these scales whose top-left cell is at
@@ -1802,7 +1867,7 @@ def attach(
         figure: The figure the axes belong to.
         native: The native figure ``figure`` owns.
         x: The x scale.
-        y: The y scale; linear or log.
+        y: The y scale.
         row: The row of the axes' top-left cell.
         col: The column of the axes' top-left cell.
 
@@ -1816,7 +1881,7 @@ def attach(
         >>> ax.figure is fig
         True
     """
-    axes = cast(Axes[X, float], object.__new__(Axes))
+    axes = cast(Axes[X, Y], object.__new__(Axes))
     object.__setattr__(axes, "_figure", figure)
     object.__setattr__(axes, "_native", native)
     object.__setattr__(axes, "_row", row)
@@ -1847,7 +1912,7 @@ def cell(axes: Axes[Any, Any]) -> tuple[int, int]:
     return cast(tuple[int, int], _CELL(axes))
 
 
-def scales(axes: Axes[Any, Any]) -> tuple[Scale[Any], Scale[float]]:
+def scales(axes: Axes[Any, Any]) -> tuple[Scale[Any], Scale[Any]]:
     """Return the x and y scales of ``axes``.
 
     Args:
@@ -1862,4 +1927,4 @@ def scales(axes: Axes[Any, Any]) -> tuple[Scale[Any], Scale[float]]:
         >>> scales(ub.Figure().add_axes(x=ub.Scale.category()))
         (Scale.category(), Scale.linear())
     """
-    return cast(tuple[Scale[Any], Scale[float]], _SCALES(axes))
+    return cast(tuple[Scale[Any], Scale[Any]], _SCALES(axes))

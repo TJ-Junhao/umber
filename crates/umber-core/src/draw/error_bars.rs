@@ -8,11 +8,11 @@
 //! is kept only when its end is on the plot.
 
 use super::MarkContext;
-use super::mapping::{PlotPoint, axis_numbers, axis_value, axis_values};
+use super::mapping::{AxisPoint, axis_numbers, axis_values};
 use crate::Rgba;
 use crate::geometry::{Path, Point};
 use crate::model::{ErrorBarMark, ErrorBarOrientation};
-use crate::resolve::Resolved;
+use crate::resolve::{Orientation, Resolved};
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
 
 /// The stroke of error bars and their caps: solid, `width` pt wide, with flat ends, so a bar
@@ -72,44 +72,28 @@ pub(super) fn error_bar_items(
     (color, width): (Rgba, f32),
     items: &mut Vec<Item>,
 ) {
-    let vertical = mark.orientation() == ErrorBarOrientation::Vertical;
-    let cap = mark.options().caps.then(|| context.theme.cap_width());
-    // The position axis the bars are placed along, and the value axis their limits are on.
-    let (positions, lows, highs, position_map, value_map) = if vertical {
-        (
-            axis_values(&resolved.x, mark.positions()),
-            axis_numbers(&resolved.y, mark.low()),
-            axis_numbers(&resolved.y, mark.high()),
-            context.maps.x,
-            context.maps.y,
-        )
-    } else {
-        (
-            axis_values(&resolved.y, mark.positions()),
-            mark.low()
-                .iter()
-                .map(|&v| axis_value(&resolved.x, v))
-                .collect(),
-            mark.high()
-                .iter()
-                .map(|&v| axis_value(&resolved.x, v))
-                .collect(),
-            context.maps.y,
-            context.maps.x,
-        )
+    // Vertical bars stand along x with their limits on y, horizontal ones the other way round;
+    // both are drawn in the frame of their orientation (see `super::mapping`), whose first axis
+    // is the one the bars are placed along and whose second is the one their limits are on.
+    let orientation = match mark.orientation() {
+        ErrorBarOrientation::Vertical => Orientation::Vertical,
+        ErrorBarOrientation::Horizontal => Orientation::Horizontal,
     };
+    let vertical = orientation == Orientation::Vertical;
+    let cap = mark.options().caps.then(|| context.theme.cap_width());
+    let maps = context.maps.oriented(orientation);
+    let (along, values) = resolved.along_and_values(orientation);
+    let positions = axis_values(along, mark.positions());
+    let lows = axis_numbers(values, mark.low());
+    let highs = axis_numbers(values, mark.high());
+    let (position_map, value_map) = (maps.x, maps.y);
     let half_stroke = f64::from(width) / 2.0;
     let reach = cap.map_or(half_stroke, |c| half_stroke.max(f64::from(c) / 2.0));
     let (near, far) = position_map.expanded(reach);
     let (ends_low, ends_high) = value_map.expanded(half_stroke);
     let (domain_low, domain_high) = (value_map.lo, value_map.hi);
     let plot_point = |position: f64, value: f64| -> Point {
-        let (x, y) = if vertical {
-            (position_map.plot_at(position), value_map.plot_at(value))
-        } else {
-            (value_map.plot_at(value), position_map.plot_at(position))
-        };
-        PlotPoint { x, y }.to_scene()
+        maps.to_plot(AxisPoint::new(position, value)).to_scene()
     };
     let mut path = Path::new();
     for ((&position, &low), &high) in positions.iter().zip(&lows).zip(&highs) {
