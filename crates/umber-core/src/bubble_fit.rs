@@ -83,7 +83,7 @@ impl Axis {
         };
         match axis.scale {
             AxisScale::Continuous(scale) => Some(scale),
-            AxisScale::Category(_) => None,
+            AxisScale::Category(_) | AxisScale::Time(_) => None,
         }
     }
 }

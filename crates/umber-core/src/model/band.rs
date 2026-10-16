@@ -3,7 +3,8 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::ColorSpec;
+use super::axis_data::SharedX;
+use crate::{ColorSpec, Instant};
 
 /// Options of a band mark.
 ///
@@ -41,8 +42,9 @@ impl Default for BandOptions {
 /// [`BandOptions`].
 ///
 /// The x, low and high values are stored together and never change; clones share them. The x
-/// values are in non-decreasing order, and at every index where both are finite, low does not
-/// exceed high.
+/// values are numbers on a linear or log axis and times on a time axis
+/// ([`AxesMut::band_time`](super::AxesMut::band_time)), in non-decreasing order, and at every
+/// index where both are finite, low does not exceed high.
 ///
 /// # Examples
 ///
@@ -74,7 +76,7 @@ impl Default for BandOptions {
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct BandMark {
-    x: Arc<[f64]>,
+    x: SharedX,
     low: Arc<[f64]>,
     high: Arc<[f64]>,
     options: BandOptions,
@@ -83,7 +85,7 @@ pub struct BandMark {
 impl BandMark {
     /// A band over validated values of equal length.
     pub(super) fn new(
-        x: Arc<[f64]>,
+        x: SharedX,
         low: Arc<[f64]>,
         high: Arc<[f64]>,
         options: BandOptions,
@@ -96,9 +98,38 @@ impl BandMark {
         }
     }
 
-    /// The x values.
+    /// The x values on a linear or log axis; empty on a time axis, whose x values
+    /// [`BandMark::x_times`] gives.
     #[must_use]
     pub fn x(&self) -> &[f64] {
+        self.x.numbers()
+    }
+
+    /// The x values on a time axis, `None` for a gap; empty on a linear or log axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::figure::{BandOptions, Mark};
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let x = [Some(Instant::from_micros(0)?), None];
+    /// axes.band_time(Arc::from(x), Arc::from([1.0, 2.0]), Arc::from([3.0, 4.0]), BandOptions::default())?;
+    /// let Some(Mark::Band(band)) = axes.marks().first() else { unreachable!() };
+    /// assert_eq!(band.x_times(), &x);
+    /// assert!(band.x().is_empty());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_times(&self) -> &[Option<Instant>] {
+        self.x.times()
+    }
+
+    /// The x values as stored: numbers or times.
+    pub(crate) fn x_values(&self) -> &SharedX {
         &self.x
     }
 
@@ -124,7 +155,7 @@ impl BandMark {
 impl fmt::Debug for BandMark {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BandMark")
-            .field("x", &self.x())
+            .field("x", &self.x)
             .field("low", &self.low())
             .field("high", &self.high())
             .field("options", &self.options)

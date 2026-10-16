@@ -34,8 +34,8 @@ assert_type(ub.TickFormat.scientific().affix("~", "!"), ub.TickFormat)
 fmt: ub.TickFormat = ub.TickFormat.fixed(decimals=2)
 
 # Negative: a category x axis has no x ticks and no x tick format.
-cats.xticks([1.0])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-cats.xticks_labeled([1.0], ["a"])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.xticks([1.0])  # type: ignore[list-item]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.xticks_labeled([1.0], ["a"])  # type: ignore[list-item]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 cats.xtick_format(ub.TickFormat.AUTO)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 # Negative: a format is a TickFormat, not a string or a tuple.

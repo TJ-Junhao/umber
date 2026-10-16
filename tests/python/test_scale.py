@@ -65,7 +65,10 @@ def test_scale_is_immutable_and_has_no_public_constructor() -> None:
     assert str(caught.value) == (
         "Scale(): Scale has no public constructor; use one of its constructors."
     )
-    assert details(caught.value) == (None, "use Scale.linear(), Scale.log() or Scale.category().")
+    assert details(caught.value) == (
+        None,
+        "use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
+    )
 
 
 @pytest.mark.parametrize(
@@ -150,7 +153,9 @@ def test_log_accepts_numpy_numbers() -> None:
 def test_direct_construction_is_reported_with_a_hint_and_no_package_frame() -> None:
     with pytest.raises(TypeError) as caught:
         ub.Scale()
-    assert _notes(caught.value) == ["hint: use Scale.linear(), Scale.log() or Scale.category()."]
+    assert _notes(caught.value) == [
+        "hint: use Scale.linear(), Scale.log(), Scale.category() or Scale.time()."
+    ]
     frames = [entry.name for entry in traceback.extract_tb(caught.value.__traceback__)]
     assert frames == ["test_direct_construction_is_reported_with_a_hint_and_no_package_frame"]
 

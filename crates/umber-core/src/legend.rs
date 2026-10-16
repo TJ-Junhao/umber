@@ -732,6 +732,7 @@ mod tests {
         let kind = match x {
             AxisData::Numbers(_) => ScaleKind::Linear,
             AxisData::Categories(_) => ScaleKind::Category,
+            AxisData::Times(_) => ScaleKind::Time,
         };
         let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
         let mut axes = f.add_axes(kind, ScaleKind::Linear).unwrap();

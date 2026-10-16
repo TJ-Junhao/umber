@@ -6,10 +6,12 @@ use std::sync::Arc;
 
 use super::grid::CellRange;
 use super::mark::Mark;
-use super::share::AxisSettings;
+use super::share::{AxisSettings, ExplicitLimits};
 use super::ticks::{AxisTicks, ExplicitTicks};
 use crate::error::number;
-use crate::{ContinuousScale, Error, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat};
+use crate::{
+    ContinuousScale, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat,
+};
 
 /// A plotting area with its scales, texts, limits and marks.
 ///
@@ -240,7 +242,8 @@ impl Axes {
         &self.ylabel
     }
 
-    /// The explicit x limits, if set.
+    /// The explicit x limits of a linear or log x axis, if set; `None` on a time axis, whose
+    /// limits [`Axes::x_time_limits`] gives.
     ///
     /// # Examples
     ///
@@ -254,7 +257,7 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn x_limits(&self) -> Option<(f64, f64)> {
-        self.x_settings.limits.map(|scale| scale.domain())
+        self.x_limit_scale().map(|scale| scale.domain())
     }
 
     /// The explicit y limits, if set.
@@ -272,17 +275,56 @@ impl Axes {
     /// ```
     #[must_use]
     pub fn y_limits(&self) -> Option<(f64, f64)> {
-        self.y_settings.limits.map(|scale| scale.domain())
+        self.y_limit_scale().map(|scale| scale.domain())
     }
 
-    /// The x scale that the explicit x limits define, if set.
+    /// The explicit x limits of a time x axis, the lower first, if set; `None` on a linear or
+    /// log axis, whose limits [`Axes::x_limits`] gives.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let (low, high) = (Instant::from_micros(0)?, Instant::from_micros(86_400_000_000)?);
+    /// axes.xlim_time(low, high)?;
+    /// assert_eq!(axes.x_time_limits(), Some((low, high)));
+    /// assert_eq!(axes.x_limits(), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_time_limits(&self) -> Option<(Instant, Instant)> {
+        time_limits(self.x_settings.limits)
+    }
+
+    /// The explicit y limits of a time y axis, the lower first, if set. Same rules as
+    /// [`Axes::x_time_limits`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// assert_eq!(axes.y_time_limits(), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn y_time_limits(&self) -> Option<(Instant, Instant)> {
+        time_limits(self.y_settings.limits)
+    }
+
+    /// The x scale that the explicit limits of a linear or log x axis define, if set.
     pub(crate) fn x_limit_scale(&self) -> Option<ContinuousScale> {
-        self.x_settings.limits
+        continuous_limits(self.x_settings.limits)
     }
 
-    /// The y scale that the explicit y limits define, if set.
+    /// The y scale that the explicit limits of a linear or log y axis define, if set.
     pub(crate) fn y_limit_scale(&self) -> Option<ContinuousScale> {
-        self.y_settings.limits
+        continuous_limits(self.y_settings.limits)
     }
 
     /// The explicit x ticks; `None` when the x axis uses the automatic ticks.
@@ -417,12 +459,29 @@ impl Axes {
     }
 }
 
-/// `kind` as the Python `Scale` call that makes it: `Scale.linear()`, `Scale.log(2)` or
-/// `Scale.category()`.
+/// `kind` as the Python `Scale` call that makes it: `Scale.linear()`, `Scale.log(2)`,
+/// `Scale.category()` or `Scale.time()`.
 pub(super) fn scale_name(kind: ScaleKind) -> String {
     match kind {
         ScaleKind::Linear => "Scale.linear()".to_owned(),
         ScaleKind::Log { base } => format!("Scale.log({})", number(base.get())),
         ScaleKind::Category => "Scale.category()".to_owned(),
+        ScaleKind::Time => "Scale.time()".to_owned(),
+    }
+}
+
+/// The scale of `limits` when they are the limits of a linear or log axis.
+fn continuous_limits(limits: Option<ExplicitLimits>) -> Option<ContinuousScale> {
+    match limits {
+        Some(ExplicitLimits::Continuous(scale)) => Some(scale),
+        Some(ExplicitLimits::Time(..)) | None => None,
+    }
+}
+
+/// The two times of `limits` when they are the limits of a time axis.
+fn time_limits(limits: Option<ExplicitLimits>) -> Option<(Instant, Instant)> {
+    match limits {
+        Some(ExplicitLimits::Time(low, high)) => Some((low, high)),
+        Some(ExplicitLimits::Continuous(_)) | None => None,
     }
 }

@@ -31,7 +31,9 @@ use umber_core::{
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
     RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
-use umber_core::{AxisData, BoxOptions, Distribution, Error, ScaleKind, StemOptions};
+use umber_core::{
+    AxisValue, BoxOptions, Distribution, Error, ScaleKind, StemOptions, time_from_micros,
+};
 
 use crate::color::{ColorArg, color_spec};
 use crate::enums::enum_value;
@@ -40,7 +42,7 @@ use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
 use crate::ticks::{TickFormatArg, tick_format};
-use crate::values::{axis_data, axis_value, floats, names, shared_floats};
+use crate::values::{axis_value, floats, micros, names, series_data, shared_floats, times};
 
 /// The series of a grouped or stacked bar chart: `(label, values, color)` for each series.
 type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
@@ -125,6 +127,19 @@ impl Figure {
             .map_err(|err| core_error(err.with_context(context)))
     }
 
+    /// The tick positions `obj` of a time axis, an int64 buffer of microseconds, named
+    /// `positions` in the messages of `context`. A missing time cannot be a tick, so the core
+    /// refuses it as a time out of range.
+    fn tick_times(
+        context: &'static str,
+        obj: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<umber_core::Instant>> {
+        micros(obj)?
+            .into_iter()
+            .map(|us| time_from_micros(context, "positions", us).map_err(core_error))
+            .collect()
+    }
+
     /// The core series of a grouped or stacked bar chart.
     fn series(series: SeriesArgs<'_>) -> PyResult<Vec<Series>> {
         series
@@ -196,7 +211,8 @@ impl Figure {
     /// `row_span × col_span` cells, with the x scale `(x_kind, x_base)` and the y scale
     /// `(y_kind, y_base)`, and returns the `(row, col)` of their top-left cell. The core checks
     /// the position and the scales, and a refused call adds nothing; a category y scale is
-    /// refused after the position, since no mark of the Python layer draws on one.
+    /// refused after the position, since no mark of the Python layer draws on one. A time scale
+    /// is allowed on either axis.
     fn add_axes(
         &mut self,
         row_kind: i64,
@@ -399,7 +415,8 @@ impl Figure {
         dash: i64,
         width: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
+        const CONTEXT: &str = "Axes.line()";
+        let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
         let options = LineOptions {
             label,
             color: color_spec(color)?,
@@ -425,7 +442,8 @@ impl Figure {
         dash: i64,
         width: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
+        const CONTEXT: &str = "Axes.area()";
+        let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
         let options = AreaOptions {
             label,
             color: color_spec(color)?,
@@ -451,7 +469,8 @@ impl Figure {
         marker: i64,
         size: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
+        const CONTEXT: &str = "Axes.scatter()";
+        let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
         let options = ScatterOptions {
             label,
             color: color_spec(color)?,
@@ -502,7 +521,8 @@ impl Figure {
         marker: i64,
         size: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
+        const CONTEXT: &str = "Axes.stem()";
+        let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
         let options = StemOptions {
             label,
             color: color_spec(color)?,
@@ -717,7 +737,8 @@ impl Figure {
         dash: i64,
         width: SizeArg,
     ) -> PyResult<()> {
-        let (x, y) = (axis_data(x)?, AxisData::Numbers(floats(y)?));
+        const CONTEXT: &str = "Axes.step()";
+        let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
         let options = StepOptions {
             position: enum_value::<Step>(position)?,
             label,
@@ -853,7 +874,8 @@ impl Figure {
         width: SizeArg,
         caps: bool,
     ) -> PyResult<()> {
-        let (x, low, high) = (axis_data(x)?, shared_floats(low)?, shared_floats(high)?);
+        let x = series_data("Axes.y_error_bars()", "x", x)?;
+        let (low, high) = (shared_floats(low)?, shared_floats(high)?);
         let options = ErrorBarOptions {
             label,
             color: color_spec(color)?,
@@ -879,7 +901,8 @@ impl Figure {
         width: SizeArg,
         caps: bool,
     ) -> PyResult<()> {
-        let (y, low, high) = (floats(y)?, shared_floats(low)?, shared_floats(high)?);
+        let y = series_data("Axes.x_error_bars()", "y", y)?;
+        let (low, high) = (shared_floats(low)?, shared_floats(high)?);
         let options = ErrorBarOptions {
             label,
             color: color_spec(color)?,
@@ -910,5 +933,211 @@ impl Figure {
     /// Renders the figure as an SVG document for `Figure.save_svg()`, which reports its errors.
     fn svg_for_file(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
         Self::svg(slf, text, "Figure.save_svg()")
+    }
+
+    /// Sets the limits of a time x axis to the times `low` and `high`, in microseconds.
+    fn xlim_time(&mut self, row: i64, col: i64, low: i64, high: i64) -> PyResult<()> {
+        const CONTEXT: &str = "Axes.xlim()";
+        let low = time_from_micros(CONTEXT, "low", low).map_err(core_error)?;
+        let high = time_from_micros(CONTEXT, "high", high).map_err(core_error)?;
+        self.axes(row, col)?
+            .xlim_time(low, high)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Sets the limits of a time y axis to the times `low` and `high`, in microseconds.
+    fn ylim_time(&mut self, row: i64, col: i64, low: i64, high: i64) -> PyResult<()> {
+        const CONTEXT: &str = "Axes.ylim()";
+        let low = time_from_micros(CONTEXT, "low", low).map_err(core_error)?;
+        let high = time_from_micros(CONTEXT, "high", high).map_err(core_error)?;
+        self.axes(row, col)?
+            .ylim_time(low, high)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Replaces the ticks of a time x axis with ticks at the times `positions`.
+    fn xticks_time(&mut self, row: i64, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+        let positions = Self::tick_times("Axes.xticks()", positions)?;
+        self.axes(row, col)?
+            .xticks_time(&positions)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Replaces the ticks of a time y axis with ticks at the times `positions`.
+    fn yticks_time(&mut self, row: i64, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+        let positions = Self::tick_times("Axes.yticks()", positions)?;
+        self.axes(row, col)?
+            .yticks_time(&positions)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Replaces the ticks of a time x axis with ticks at the times `positions`, each with the
+    /// label at its index.
+    fn xticks_labeled_time(
+        &mut self,
+        row: i64,
+        col: i64,
+        positions: &Bound<'_, PyAny>,
+        labels: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let positions = Self::tick_times("Axes.xticks_labeled()", positions)?;
+        let labels = names(labels)?;
+        self.axes(row, col)?
+            .xticks_labeled_time(&positions, labels)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Replaces the ticks of a time y axis with ticks at the times `positions`, each with the
+    /// label at its index.
+    fn yticks_labeled_time(
+        &mut self,
+        row: i64,
+        col: i64,
+        positions: &Bound<'_, PyAny>,
+        labels: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let positions = Self::tick_times("Axes.yticks_labeled()", positions)?;
+        let labels = names(labels)?;
+        self.axes(row, col)?
+            .yticks_labeled_time(&positions, labels)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a vertical reference line at the time `x`, in microseconds.
+    fn vline_time(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: i64,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let x = time_from_micros("Axes.vline()", "x", x).map_err(core_error)?;
+        let options = RuleOptions {
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+        };
+        self.axes(row, col)?
+            .vline(AxisValue::Time(x), options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a horizontal reference line at the time `y`, in microseconds.
+    fn hline_time(
+        &mut self,
+        row: i64,
+        col: i64,
+        y: i64,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let y = time_from_micros("Axes.hline()", "y", y).map_err(core_error)?;
+        let options = RuleOptions {
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+        };
+        self.axes(row, col)?
+            .hline_time(y, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a horizontal reference span between the times `low` and `high`, in microseconds.
+    fn hspan_time(
+        &mut self,
+        row: i64,
+        col: i64,
+        low: i64,
+        high: i64,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        const CONTEXT: &str = "Axes.hspan()";
+        let low = time_from_micros(CONTEXT, "low", low).map_err(core_error)?;
+        let high = time_from_micros(CONTEXT, "high", high).map_err(core_error)?;
+        let options = SpanOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        self.axes(row, col)?
+            .hspan_time(low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a vertical reference span between the times `low` and `high`, in microseconds.
+    fn vspan_time(
+        &mut self,
+        row: i64,
+        col: i64,
+        low: i64,
+        high: i64,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        const CONTEXT: &str = "Axes.vspan()";
+        let low = time_from_micros(CONTEXT, "low", low).map_err(core_error)?;
+        let high = time_from_micros(CONTEXT, "high", high).map_err(core_error)?;
+        let options = SpanOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        self.axes(row, col)?
+            .vspan_time(low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a band between the curves `low` and `high` over the times `x`.
+    fn band_time(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        low: &Bound<'_, PyAny>,
+        high: &Bound<'_, PyAny>,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let x = times("Axes.band()", "x", x)?;
+        let (low, high) = (shared_floats(low)?, shared_floats(high)?);
+        let options = BandOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        self.axes(row, col)?
+            .band_time(x.into(), low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds non-negative area series stacked over the times `x`.
+    fn stacked_area_time(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        series: SeriesArgs<'_>,
+    ) -> PyResult<()> {
+        let (x, series) = (times("Axes.stacked_area()", "x", x)?, Self::series(series)?);
+        self.axes(row, col)?
+            .stacked_area_time(x.into(), series)
+            .map(drop)
+            .map_err(core_error)
     }
 }

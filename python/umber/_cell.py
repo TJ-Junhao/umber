@@ -4,7 +4,7 @@ from typing import Self, final
 
 import umber
 from umber._args import instance
-from umber._axes import Axes, X
+from umber._axes import Axes, V, X
 from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
@@ -68,13 +68,13 @@ class Cell:
         self,
         *,
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[float] = Scale.linear(),  # noqa: B008
-    ) -> Axes[X, float]:
+        y: Scale[V] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+    ) -> Axes[X, V]:
         """Add axes at this cell of its figure and return them.
 
         Args:
-            x: The x scale, numeric or category.
-            y: The numeric y scale, linear or log.
+            x: The x scale: numeric, category or time.
+            y: The y scale: linear, log or time.
 
         Returns:
             The new axes, occupying this cell only.
@@ -98,9 +98,11 @@ class Cell:
                 "x",
                 x,
                 Scale,
-                "use Scale.linear(), Scale.log() or Scale.category().",
+                "use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
             )
-            instance("Cell.add_axes()", "y", y, Scale, "use Scale.linear() or Scale.log().")
+            instance(
+                "Cell.add_axes()", "y", y, Scale, "use Scale.linear(), Scale.log() or Scale.time()."
+            )
             return self._figure.add_axes(row=self._row, col=self._col, x=x, y=y)
 
     def __repr__(self) -> str:

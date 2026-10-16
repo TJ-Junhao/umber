@@ -43,7 +43,8 @@ _MASKED_NAMES_HINT: Final = 'fill them with a name first, e.g. values.filled("n/
 _NDIM_HINT: Final = "pass one column, or flatten it with .ravel()."
 _BOOL_DTYPE_HINT: Final = "convert with .astype(float) if 0 and 1 are meant."
 _BOOL_HINT: Final = "use 1.0 and 0.0 if numbers are meant."
-_TIME_HINT: Final = "convert to numbers, e.g. seconds since the first value."
+_TIME_HINT: Final = "use numbers, or declare the axis with Scale.time()."
+_DURATION_HINT: Final = "convert to numbers, e.g. seconds since the first value."
 _COMPLEX_HINT: Final = "pass the real part, values.real, or the magnitude, abs(values)."
 _WIDE_FLOAT_HINT: Final = "convert with .astype(np.float64); umber plots in float64 precision."
 _STRUCTURED_HINT: Final = "pass one numeric field of the structured array."
@@ -59,7 +60,8 @@ _MISSING_NAME_HINT: Final = 'give every category a name, e.g. "n/a" for missing 
 _MIXED_HINT: Final = "pass only names or only numbers."
 
 _BOOLS: Final = (bool, np.bool_)
-_TIMES: Final = (datetime.date, datetime.time, datetime.timedelta, np.datetime64, np.timedelta64)
+_TIMES: Final = (datetime.date, np.datetime64)
+_DURATIONS: Final = (datetime.time, datetime.timedelta, np.timedelta64)
 
 
 def _data(context: str, name: str, values: object, *, str_hint: str, masked_hint: str) -> _Data:
@@ -178,6 +180,70 @@ def check_axis_type(context: str, name: str, values: object) -> None:
     )
 
 
+def check_times_type(context: str, name: str, values: object) -> None:
+    """Check the type of a times argument without converting it.
+
+    A masked array passes; the conversion refuses it.
+
+    Args:
+        context: The API call, such as ``"Axes.line()"``.
+        name: The parameter name.
+        values: The value passed.
+
+    Raises:
+        TypeError: The value is text, a single value, or a container without an order.
+
+    Example:
+        >>> import datetime as dt
+        >>> from umber._values import check_times_type
+        >>> check_times_type("Axes.line()", "x", [dt.date(2026, 1, 1)])
+    """
+    _check_container(
+        context,
+        name,
+        values,
+        str_hint=_SINGLE_HINT,
+        masked_hint=_MASKED_HINT,
+        refuse_masked=False,
+    )
+
+
+def check_one_dimensional(context: str, name: str, array: npt.NDArray[Any]) -> None:
+    """Refuse an array of more or fewer than one dimension with ``DataError``.
+
+    Args:
+        context: The API call, such as ``"Axes.line()"``.
+        name: The parameter name.
+        array: The converted data.
+
+    Raises:
+        DataError: The array is not one-dimensional.
+
+    Example:
+        >>> import numpy as np
+        >>> from umber._values import check_one_dimensional
+        >>> check_one_dimensional("Axes.line()", "x", np.zeros(2))
+    """
+    _check_one_dimensional(context, name, array)
+
+
+def is_missing(value: object) -> bool:
+    """Whether a value marks a missing entry: ``None``, NaN, or pandas ``NA`` or ``NaT``.
+
+    Args:
+        value: Any object.
+
+    Returns:
+        Whether it marks a missing entry.
+
+    Example:
+        >>> from umber._values import is_missing
+        >>> is_missing(float("nan")), is_missing(1.0)
+        (True, False)
+    """
+    return _is_missing(value)
+
+
 def _container_error(context: str, name: str, values: object, hint: str) -> TypeError:
     message = f"{name} is {type_name(values)}; {name} must be a sequence or an array."
     return new_error(TypeError, context, message, parameter=name, hint=hint)
@@ -264,6 +330,8 @@ def _element_error(context: str, name: str, index: int, value: object, *, mixed:
         message, hint = f"{label} is {shown}; values must be numbers.", _TEXT_HINT
     elif isinstance(value, _TIMES):
         message, hint = f"{label} is {shown}; values must be numbers.", _TIME_HINT
+    elif isinstance(value, _DURATIONS):
+        message, hint = f"{label} is {shown}; values must be numbers.", _DURATION_HINT
     elif isinstance(value, complex | np.complexfloating):
         message, hint = f"{label} is {shown}; values must be real numbers.", _COMPLEX_HINT
     elif isinstance(value, np.floating):
@@ -297,8 +365,10 @@ def _dtype_error(context: str, name: str, array: npt.NDArray[Any]) -> DataError:
     kind = dtype.kind
     if kind == "b":
         required, hint = "values must be numbers", _BOOL_DTYPE_HINT
-    elif kind in "Mm":
+    elif kind == "M":
         required, hint = "values must be numbers", _TIME_HINT
+    elif kind == "m":
+        required, hint = "values must be numbers", _DURATION_HINT
     elif kind == "c":
         required, hint = "values must be real numbers", _COMPLEX_HINT
     elif kind == "f":

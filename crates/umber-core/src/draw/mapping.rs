@@ -7,14 +7,14 @@
 
 use crate::geometry::Point;
 use crate::layout::Area;
-use crate::model::AxisData;
+use crate::model::{AxisData, AxisValue, SharedX};
 use crate::resolve::{AxisScale, NormalizedPos, ResolvedAxis};
 use crate::scale::log_offset;
-use crate::{ContinuousScale, Transform};
+use crate::{ContinuousScale, Instant, Transform};
 
 /// A point in axis space: the raw value on a linear axis, `ln(value / lower limit)` on a log
-/// axis, the band center on a category axis. Validated data is finite here, and NaN marks a
-/// gap.
+/// axis, the band center on a category axis, the seconds from the axis's origin on a time axis.
+/// Validated data is finite here, and NaN marks a gap.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct AxisPoint {
     /// The x axis value.
@@ -101,11 +101,12 @@ pub(super) struct AxisMap {
 impl AxisMap {
     /// The map of `axis` onto the plot coordinates from `start`, at its low end, to
     /// `start + extent`, at its high end. A category axis spans `0..1`, the band centers'
-    /// range.
+    /// range, and a time axis its domain in seconds from its origin.
     fn new(axis: &ResolvedAxis, start: f64, extent: f64) -> AxisMap {
         let (lo, hi) = match &axis.scale {
             AxisScale::Continuous(scale) => continuous_domain(scale),
             AxisScale::Category(_) => (0.0, 1.0),
+            AxisScale::Time(scale) => scale.seconds_scale().domain(),
         };
         AxisMap {
             lo,
@@ -153,8 +154,9 @@ fn continuous_domain(scale: &ContinuousScale) -> (f64, f64) {
     }
 }
 
-/// The axis-space values of `data` on `axis`. Category names map to their band center; NaN,
-/// and names the scale does not know (impossible after resolve), map to NaN.
+/// The axis-space values of `data` on `axis`. Category names map to their band center and
+/// times to their seconds from the axis's origin; NaN, missing times, and names the scale does
+/// not know (impossible after resolve), map to NaN.
 pub(super) fn axis_values(axis: &ResolvedAxis, data: &AxisData) -> Vec<f64> {
     match (&axis.scale, data) {
         (AxisScale::Continuous(scale), AxisData::Numbers(values)) => {
@@ -164,6 +166,7 @@ pub(super) fn axis_values(axis: &ResolvedAxis, data: &AxisData) -> Vec<f64> {
             .iter()
             .map(|name| scale.index_of(name).map_or(f64::NAN, |i| scale.center(i)))
             .collect(),
+        (AxisScale::Time(_), AxisData::Times(times)) => axis_times(axis, times),
         // The model rejects data of the wrong kind for the axis.
         (_, data) => vec![f64::NAN; data.len()],
     }
@@ -173,16 +176,58 @@ pub(super) fn axis_values(axis: &ResolvedAxis, data: &AxisData) -> Vec<f64> {
 pub(super) fn axis_numbers(axis: &ResolvedAxis, values: &[f64]) -> Vec<f64> {
     match &axis.scale {
         AxisScale::Continuous(scale) => continuous_values(scale, values),
-        AxisScale::Category(_) => vec![f64::NAN; values.len()],
+        AxisScale::Category(_) | AxisScale::Time(_) => vec![f64::NAN; values.len()],
     }
 }
 
 /// The axis-space value of the number `v` on `axis`, as [`axis_values`] maps numbers; NaN on a
-/// category axis, which has no numbers.
+/// category or a time axis, which have no numbers.
 pub(super) fn axis_value(axis: &ResolvedAxis, v: f64) -> f64 {
     match &axis.scale {
         AxisScale::Continuous(scale) => continuous_value(scale, v),
-        AxisScale::Category(_) => f64::NAN,
+        AxisScale::Category(_) | AxisScale::Time(_) => f64::NAN,
+    }
+}
+
+/// The axis-space value of the time `t` on `axis`: its seconds from the origin of a time axis;
+/// NaN on any other axis, which has no times.
+pub(super) fn axis_time(axis: &ResolvedAxis, t: Instant) -> f64 {
+    match &axis.scale {
+        AxisScale::Time(scale) => scale.seconds(t),
+        AxisScale::Continuous(_) | AxisScale::Category(_) => f64::NAN,
+    }
+}
+
+/// The axis-space values of the times `times` on `axis`, each as [`axis_time`] maps it; a
+/// missing time maps to NaN, a gap.
+pub(super) fn axis_times(axis: &ResolvedAxis, times: &[Option<Instant>]) -> Vec<f64> {
+    times
+        .iter()
+        .map(|t| t.map_or(f64::NAN, |t| axis_time(axis, t)))
+        .collect()
+}
+
+/// The axis-space values of the shared x values `x` of a band or a stacked area on `axis`.
+pub(super) fn axis_shared(axis: &ResolvedAxis, x: &SharedX) -> Vec<f64> {
+    match x {
+        SharedX::Numbers(values) => values.iter().map(|&v| axis_value(axis, v)).collect(),
+        SharedX::Times(times) => axis_times(axis, times),
+    }
+}
+
+/// The axis-space position of the value `v` on `axis`: a number as [`axis_value`] maps it, a
+/// time as [`axis_time`] does, and a category name at its band centre; NaN for a name the axis
+/// does not have.
+pub(super) fn axis_position(axis: &ResolvedAxis, v: &AxisValue) -> f64 {
+    match v {
+        AxisValue::Number(v) => axis_value(axis, *v),
+        AxisValue::Time(t) => axis_time(axis, *t),
+        AxisValue::Category(name) => match &axis.scale {
+            AxisScale::Category(scale) => {
+                scale.index_of(name).map_or(f64::NAN, |i| scale.center(i))
+            }
+            AxisScale::Continuous(_) | AxisScale::Time(_) => f64::NAN,
+        },
     }
 }
 

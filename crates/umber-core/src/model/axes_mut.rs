@@ -5,7 +5,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::axes::Axes;
-use super::axis_data::{AxisData, XySeries};
+use super::axis_data::{AxisData, SharedX, XySeries};
 use super::band::{BandMark, BandOptions};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
 use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
@@ -13,18 +13,21 @@ use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
 use super::hist::{HistMark, HistOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
-use super::rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
-use super::share::{Setting, SharedAxis};
+use super::rule::{
+    AxisValue, HLineMark, RuleOptions, SpanBounds, SpanMark, SpanOptions, VLineMark,
+};
+use super::share::{ExplicitLimits, Setting, SharedAxis};
 use super::stacked_area::StackedAreaMark;
 use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
-    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band, check_limits,
-    check_numeric_y, check_reference_value, check_span, check_step_order, check_tick_axis,
-    check_vline_x, check_x_error_bars, check_y_error_bars,
+    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band, check_format_axis,
+    check_limits, check_no_time_x, check_numeric_y, check_reference_value, check_series_y,
+    check_span, check_step_order, check_tick_axis, check_time_limits, check_time_span,
+    check_time_tick_axis, check_vline_x, check_x_error_bars, check_y_error_bars,
 };
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
-use crate::{Error, LegendPosition, LegendStyle, Result, TickFormat};
+use crate::{Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat};
 
 /// One axes of a figure, held for changing: the setters of its texts, limits, ticks and legend
 /// style, and its mark methods. It borrows the whole figure, and dereferences to the [`Axes`]
@@ -34,8 +37,12 @@ use crate::{Error, LegendPosition, LegendStyle, Result, TickFormat};
 /// Every setter checks its input before it stores anything, so a failed call leaves the figure
 /// unchanged. Setters return the handle, so calls chain.
 ///
-/// Every mark method needs a linear or log y axis: on a category y axis it returns
-/// `Error::Usage`, naming `y`, before any other check.
+/// Every mark method needs a linear, log or time y axis: on a category y axis it returns
+/// `Error::Usage`, naming `y`, before any other check. A time axis, on x or y, takes the times
+/// of lines, steps, areas, scatters, stems, reference lines and spans, the x of bands and
+/// stacked areas and the positions of error bars; the `_time` methods take times where their
+/// counterparts take numbers. Marks that need numbers or names along a time axis refuse it with
+/// `Error::Usage`, first.
 ///
 /// Limits, explicit ticks and tick formats apply to the whole shared group. A member may
 /// replace its own setting, but a different value already set by another member is an
@@ -179,12 +186,12 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
         let mut settings = (*self.x_settings).clone();
-        settings.limits = Some(check_limits(
+        settings.limits = Some(ExplicitLimits::Continuous(check_limits(
             "Axes.xlim()",
             SharedAxis::X,
             self.x,
             (low, high),
-        )?);
+        )?));
         self.figure.set_group(
             self.index,
             SharedAxis::X,
@@ -210,12 +217,12 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
         let mut settings = (*self.y_settings).clone();
-        settings.limits = Some(check_limits(
+        settings.limits = Some(ExplicitLimits::Continuous(check_limits(
             "Axes.ylim()",
             SharedAxis::Y,
             self.y,
             (low, high),
-        )?);
+        )?));
         self.figure.set_group(
             self.index,
             SharedAxis::Y,
@@ -393,9 +400,9 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn xtick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.xtick_format()";
-        check_tick_axis(CONTEXT, SharedAxis::X, self.x, "tick formats")?;
+        check_format_axis(CONTEXT, SharedAxis::X, self.x)?;
         let mut settings = (*self.x_settings).clone();
-        settings.ticks.set_format(CONTEXT, format)?;
+        settings.ticks.set_format(CONTEXT, self.x, format)?;
         self.figure.set_group(
             self.index,
             SharedAxis::X,
@@ -427,9 +434,9 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn ytick_format(&mut self, format: TickFormat) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.ytick_format()";
-        check_tick_axis(CONTEXT, SharedAxis::Y, self.y, "tick formats")?;
+        check_format_axis(CONTEXT, SharedAxis::Y, self.y)?;
         let mut settings = (*self.y_settings).clone();
-        settings.ticks.set_format(CONTEXT, format)?;
+        settings.ticks.set_format(CONTEXT, self.y, format)?;
         self.figure.set_group(
             self.index,
             SharedAxis::Y,
@@ -555,7 +562,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.line()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, LINE_GAP_HINT)?;
         axes.marks.push(Mark::line(series, options));
         Ok(self)
@@ -615,7 +622,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.scatter()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
         axes.marks.push(Mark::scatter(series, options));
         Ok(self)
@@ -754,7 +761,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.stem()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
         axes.marks.push(Mark::Stem(StemMark::new(series, options)));
         Ok(self)
@@ -821,7 +828,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.area()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, AREA_GAP_HINT)?;
         axes.marks.push(Mark::area(series, options));
         Ok(self)
@@ -882,7 +889,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.stacked_area()";
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
-        let mark = StackedAreaMark::new(CONTEXT, axes.x, y, x, series)?;
+        let mark = StackedAreaMark::new(CONTEXT, axes.x, y, SharedX::Numbers(x), series)?;
         axes.marks.push(Mark::StackedArea(mark));
         Ok(self)
     }
@@ -956,6 +963,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.bar()";
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
+        check_no_time_x(CONTEXT, axes.x, "a category x axis")?;
         let mark = BarMark::new(CONTEXT, axes.x, y, categories, heights, options)?;
         axes.marks.push(Mark::Bar(mark));
         Ok(self)
@@ -1005,6 +1013,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.grouped_bar()";
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
+        check_no_time_x(CONTEXT, axes.x, "a category x axis")?;
         let mark = BarGroupMark::new(CONTEXT, Arrangement::Grouped, axes.x, y, categories, series)?;
         axes.marks.push(Mark::GroupedBar(mark));
         Ok(self)
@@ -1036,6 +1045,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let y = check_numeric_y("Axes.box()", axes.y)?;
+        check_no_time_x("Axes.box()", axes.x, "a category x axis")?;
         let mark = BoxMark::new(axes.x, y, categories, groups, options)?;
         axes.marks.push(Mark::Box(mark));
         Ok(self)
@@ -1065,6 +1075,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let y = check_numeric_y("Axes.grouped_box()", axes.y)?;
+        check_no_time_x("Axes.grouped_box()", axes.x, "a category x axis")?;
         let mark = BoxGroupMark::new(axes.x, y, categories, distributions)?;
         axes.marks.push(Mark::GroupedBox(mark));
         Ok(self)
@@ -1097,6 +1108,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let y = check_numeric_y("Axes.violin()", axes.y)?;
+        check_no_time_x("Axes.violin()", axes.x, "a category x axis")?;
         let mark = ViolinMark::new(axes.x, y, categories, groups, options)?;
         axes.marks.push(Mark::Violin(mark));
         Ok(self)
@@ -1126,6 +1138,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let y = check_numeric_y("Axes.grouped_violin()", axes.y)?;
+        check_no_time_x("Axes.grouped_violin()", axes.x, "a category x axis")?;
         let mark = ViolinGroupMark::new(axes.x, y, categories, distributions)?;
         axes.marks.push(Mark::GroupedViolin(mark));
         Ok(self)
@@ -1170,6 +1183,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.stacked_bar()";
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
+        check_no_time_x(CONTEXT, axes.x, "a category x axis")?;
         let mark = BarGroupMark::new(CONTEXT, Arrangement::Stacked, axes.x, y, categories, series)?;
         axes.marks.push(Mark::StackedBar(mark));
         Ok(self)
@@ -1242,6 +1256,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.hist()";
         let axes = self.axes_mut();
         check_numeric_y(CONTEXT, axes.y)?;
+        check_no_time_x(CONTEXT, axes.x, "a linear x axis")?;
         let mark = HistMark::new(CONTEXT, axes.x, values, options)?;
         axes.marks.push(Mark::Hist(mark));
         Ok(self)
@@ -1309,7 +1324,7 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.step()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, LINE_GAP_HINT)?;
         check_step_order(CONTEXT, series.x())?;
         axes.marks.push(Mark::Step(StepMark::new(series, options)));
@@ -1341,7 +1356,8 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let y_transform = check_numeric_y(CONTEXT, axes.y)?;
         check_reference_value(CONTEXT, "y", REFERENCE_LINE, y, y_transform)?;
-        axes.marks.push(Mark::HLine(HLineMark::new(y, options)));
+        axes.marks
+            .push(Mark::HLine(HLineMark::new(AxisValue::Number(y), options)));
         Ok(self)
     }
 
@@ -1381,7 +1397,7 @@ impl<'a> AxesMut<'a> {
     pub fn vline(&mut self, x: AxisValue, options: RuleOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.vline()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_series_y(CONTEXT, axes.y)?;
         check_vline_x(CONTEXT, axes.x, &x)?;
         axes.marks.push(Mark::VLine(VLineMark::new(x, options)));
         Ok(self)
@@ -1414,8 +1430,10 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
         check_span(CONTEXT, (low, high), y)?;
-        axes.marks
-            .push(Mark::HSpan(SpanMark::new(low, high, options)));
+        axes.marks.push(Mark::HSpan(SpanMark::new(
+            SpanBounds::Numbers([low, high]),
+            options,
+        )));
         Ok(self)
     }
 
@@ -1446,7 +1464,15 @@ impl<'a> AxesMut<'a> {
     pub fn vspan(&mut self, low: f64, high: f64, options: SpanOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.vspan()";
         let axes = self.axes_mut();
-        check_numeric_y(CONTEXT, axes.y)?;
+        check_series_y(CONTEXT, axes.y)?;
+        if axes.x == ScaleKind::Time {
+            return Err(Error::usage(
+                CONTEXT,
+                format!("x is a time scale; {CONTEXT} needs a numeric x axis."),
+            )
+            .with_parameter("x")
+            .with_hint("use a linear or log x axis."));
+        }
         let Some(transform) = axes.x.transform() else {
             return Err(Error::usage(
                 CONTEXT,
@@ -1455,8 +1481,10 @@ impl<'a> AxesMut<'a> {
             .with_hint("vspan needs a numeric x axis; use vline on a category."));
         };
         check_span(CONTEXT, (low, high), transform)?;
-        axes.marks
-            .push(Mark::VSpan(SpanMark::new(low, high, options)));
+        axes.marks.push(Mark::VSpan(SpanMark::new(
+            SpanBounds::Numbers([low, high]),
+            options,
+        )));
         Ok(self)
     }
 
@@ -1537,6 +1565,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.band()";
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
+        let x = SharedX::Numbers(x);
         check_band(CONTEXT, axes.x, y, (&x, &low, &high))?;
         axes.marks
             .push(Mark::Band(BandMark::new(x, low, high, options)));
@@ -1677,26 +1706,32 @@ impl<'a> AxesMut<'a> {
         high: &[f64],
         options: ErrorBarOptions,
     ) -> Result<&mut Self> {
-        self.x_error_bars_shared(y.to_vec(), Arc::from(low), Arc::from(high), options)
+        self.x_error_bars_shared(
+            AxisData::Numbers(y.to_vec()),
+            Arc::from(low),
+            Arc::from(high),
+            options,
+        )
     }
 
     /// Adds horizontal error bars as [`AxesMut::x_error_bars`] does, but stores `low` and `high`
     /// themselves rather than copies of them. The positions `y` are stored as given, without a
-    /// copy. Same rules and errors as [`AxesMut::x_error_bars`].
+    /// copy: numbers on a linear or log y axis, times on a time y axis. Same rules and errors as
+    /// [`AxesMut::x_error_bars`], with `y` checked as the y values of a scatter are.
     ///
     /// # Examples
     ///
     /// ```
     /// use std::sync::Arc;
     ///
-    /// use umber_core::figure::{ErrorBarOptions, Mark};
+    /// use umber_core::figure::{AxisData, ErrorBarOptions, Mark};
     /// use umber_core::{Figure, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// let high: Arc<[f64]> = Arc::from([3.0, 4.0]);
     /// axes.x_error_bars_shared(
-    ///     vec![0.0, 1.0],
+    ///     AxisData::Numbers(vec![0.0, 1.0]),
     ///     Arc::from([1.0, 2.0]),
     ///     Arc::clone(&high),
     ///     ErrorBarOptions::default(),
@@ -1707,22 +1742,428 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn x_error_bars_shared(
         &mut self,
-        y: Vec<f64>,
+        y: AxisData,
         low: Arc<[f64]>,
         high: Arc<[f64]>,
         options: ErrorBarOptions,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.x_error_bars()";
         let axes = self.axes_mut();
-        let y_transform = check_numeric_y(CONTEXT, axes.y)?;
-        check_x_error_bars(CONTEXT, axes.x, y_transform, &y, (&low, &high))?;
+        check_series_y(CONTEXT, axes.y)?;
+        check_x_error_bars(CONTEXT, (axes.x, axes.y), &y, (&low, &high))?;
         axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
             ErrorBarOrientation::Horizontal,
-            AxisData::Numbers(y),
+            y,
             low,
             high,
             options,
         )));
         Ok(self)
     }
+
+    /// Sets the limits of a time x axis to the times `low` and `high`, replacing the automatic
+    /// ones, as [`AxesMut::xlim`] sets those of a linear or log axis. The limits are never
+    /// padded; marks outside them are clipped.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` unless the x axis is a time axis, then
+    /// `Error::Style` unless `low` is below `high`, then the rules of shared limits (see
+    /// [`AxesMut`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let (low, high) = (Instant::from_micros(0)?, Instant::from_micros(3_600_000_000)?);
+    /// axes.xlim_time(low, high)?;
+    /// assert_eq!(axes.x_time_limits(), Some((low, high)));
+    /// assert!(axes.xlim_time(high, low).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xlim_time(&mut self, low: Instant, high: Instant) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.xlim()";
+        let (low, high) = check_time_limits(CONTEXT, SharedAxis::X, self.x, (low, high))?;
+        let mut settings = (*self.x_settings).clone();
+        settings.limits = Some(ExplicitLimits::Time(low, high));
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::Limits,
+            settings,
+            CONTEXT,
+        )?;
+        Ok(self)
+    }
+
+    /// Sets the limits of a time y axis. Same rules as [`AxesMut::xlim_time`].
+    ///
+    /// # Errors
+    ///
+    /// As [`AxesMut::xlim_time`], on the y axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// let (low, high) = (Instant::from_micros(0)?, Instant::from_micros(1)?);
+    /// assert!(axes.ylim_time(low, high).is_ok());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ylim_time(&mut self, low: Instant, high: Instant) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.ylim()";
+        let (low, high) = check_time_limits(CONTEXT, SharedAxis::Y, self.y, (low, high))?;
+        let mut settings = (*self.y_settings).clone();
+        settings.limits = Some(ExplicitLimits::Time(low, high));
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::Limits,
+            settings,
+            CONTEXT,
+        )?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic ticks of a time x axis with ticks at the times `positions`, as
+    /// [`AxesMut::xticks`] does on a linear or log axis. The labels name the unit the positions
+    /// share: years when every position starts a year, months when every one starts a month,
+    /// days when every one is a midnight, the clock otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` unless the x axis is a time axis, then
+    /// `Error::Style` naming the first position that is not above the one before it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ExplicitTicks, Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let day = Instant::from_micros(86_400_000_000)?;
+    /// axes.xticks_time(&[day])?;
+    /// assert_eq!(axes.x_ticks(), Some(&ExplicitTicks::TimePositions(vec![day])));
+    /// assert!(axes.xticks_time(&[day, day]).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xticks_time(&mut self, positions: &[Instant]) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.xticks()";
+        check_time_tick_axis(CONTEXT, SharedAxis::X, self.x)?;
+        let mut settings = (*self.x_settings).clone();
+        settings.ticks.set_time_positions(CONTEXT, positions)?;
+        self.figure
+            .set_group(self.index, SharedAxis::X, Setting::Ticks, settings, CONTEXT)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic ticks of a time y axis with ticks at the times `positions`. Same
+    /// rules as [`AxesMut::xticks_time`].
+    ///
+    /// # Errors
+    ///
+    /// As [`AxesMut::xticks_time`], on the y axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// assert!(axes.yticks_time(&[Instant::from_micros(0)?]).is_ok());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn yticks_time(&mut self, positions: &[Instant]) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.yticks()";
+        check_time_tick_axis(CONTEXT, SharedAxis::Y, self.y)?;
+        let mut settings = (*self.y_settings).clone();
+        settings.ticks.set_time_positions(CONTEXT, positions)?;
+        self.figure
+            .set_group(self.index, SharedAxis::Y, Setting::Ticks, settings, CONTEXT)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic ticks of a time x axis with ticks at the times `positions`, each
+    /// labelled with the label at the same index of `labels`, as [`AxesMut::xticks_labeled`]
+    /// does on a linear or log axis.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged. They are checked in this order: `Error::Usage` unless the
+    /// x axis is a time axis; the positions as for [`AxesMut::xticks_time`]; the labels and the
+    /// tick format as for [`AxesMut::xticks_labeled`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let launch = Instant::from_micros(0)?;
+    /// axes.xticks_labeled_time(&[launch], vec!["launch".into()])?;
+    /// assert!(axes.xticks_labeled_time(&[launch], vec![]).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xticks_labeled_time(
+        &mut self,
+        positions: &[Instant],
+        labels: Vec<String>,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.xticks_labeled()";
+        check_time_tick_axis(CONTEXT, SharedAxis::X, self.x)?;
+        let mut settings = (*self.x_settings).clone();
+        settings
+            .ticks
+            .set_time_labeled(CONTEXT, positions, labels)?;
+        self.figure
+            .set_group(self.index, SharedAxis::X, Setting::Ticks, settings, CONTEXT)?;
+        Ok(self)
+    }
+
+    /// Replaces the automatic ticks of a time y axis with ticks at the times `positions`, each
+    /// with its label. Same rules as [`AxesMut::xticks_labeled_time`].
+    ///
+    /// # Errors
+    ///
+    /// As [`AxesMut::xticks_labeled_time`], on the y axis and against the y tick format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// assert!(axes.yticks_labeled_time(&[Instant::from_micros(0)?], vec!["start".into()]).is_ok());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn yticks_labeled_time(
+        &mut self,
+        positions: &[Instant],
+        labels: Vec<String>,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.yticks_labeled()";
+        check_time_tick_axis(CONTEXT, SharedAxis::Y, self.y)?;
+        let mut settings = (*self.y_settings).clone();
+        settings
+            .ticks
+            .set_time_labeled(CONTEXT, positions, labels)?;
+        self.figure
+            .set_group(self.index, SharedAxis::Y, Setting::Ticks, settings, CONTEXT)?;
+        Ok(self)
+    }
+
+    /// Adds a horizontal reference line across the whole plot at the time `y`, on a time y axis,
+    /// as [`AxesMut::hline`] adds one at a number. The time extends the automatic y domain.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Data` unless the y axis is a time axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::RuleOptions;
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// axes.hline_time(Instant::from_micros(0)?, RuleOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hline_time(&mut self, y: Instant, options: RuleOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.hline()";
+        let axes = self.axes_mut();
+        if axes.y != ScaleKind::Time {
+            return Err(Error::data(
+                CONTEXT,
+                "y holds a time but the y axis is not a time axis; pass a number.",
+            )
+            .with_parameter("y")
+            .with_hint(SharedAxis::Y.time_scale_hint()));
+        }
+        axes.marks
+            .push(Mark::HLine(HLineMark::new(AxisValue::Time(y), options)));
+        Ok(self)
+    }
+
+    /// Adds a horizontal reference span between the times `low` and `high`, on a time y axis, as
+    /// [`AxesMut::hspan`] adds one between numbers. Both times extend the automatic y domain.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` unless the y axis is a time axis, then
+    /// `Error::Style`, naming `high`, unless `low` is below `high`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::SpanOptions;
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// let (low, high) = (Instant::from_micros(0)?, Instant::from_micros(10)?);
+    /// axes.hspan_time(low, high, SpanOptions::default())?;
+    /// assert!(axes.hspan_time(high, low, SpanOptions::default()).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hspan_time(
+        &mut self,
+        low: Instant,
+        high: Instant,
+        options: SpanOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.hspan()";
+        let axes = self.axes_mut();
+        check_time_axis_for_span(CONTEXT, SharedAxis::Y, axes.y)?;
+        check_time_span(CONTEXT, (low, high))?;
+        axes.marks.push(Mark::HSpan(SpanMark::new(
+            SpanBounds::Times([low, high]),
+            options,
+        )));
+        Ok(self)
+    }
+
+    /// Adds a vertical reference span between the times `low` and `high`, on a time x axis, as
+    /// [`AxesMut::vspan`] adds one between numbers. Both times extend the automatic x domain.
+    ///
+    /// # Errors
+    ///
+    /// As [`AxesMut::hspan_time`], on the x axis; and `Error::Usage` on a category y axis, as
+    /// for every mark method.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::SpanOptions;
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let (low, high) = (Instant::from_micros(0)?, Instant::from_micros(10)?);
+    /// axes.vspan_time(low, high, SpanOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn vspan_time(
+        &mut self,
+        low: Instant,
+        high: Instant,
+        options: SpanOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.vspan()";
+        let axes = self.axes_mut();
+        check_series_y(CONTEXT, axes.y)?;
+        check_time_axis_for_span(CONTEXT, SharedAxis::X, axes.x)?;
+        check_time_span(CONTEXT, (low, high))?;
+        axes.marks.push(Mark::VSpan(SpanMark::new(
+            SpanBounds::Times([low, high]),
+            options,
+        )));
+        Ok(self)
+    }
+
+    /// Adds a band over the times `x`, on a time x axis, as [`AxesMut::band_shared`] adds one
+    /// over numbers, storing the three arrays themselves. A missing time breaks the band there.
+    ///
+    /// # Errors
+    ///
+    /// As [`AxesMut::band`], with `x` checked against the x axis as times: `Error::Data` unless
+    /// it is a time axis, and for the first time below the one before it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::figure::BandOptions;
+    /// use umber_core::{Figure, Instant, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let x = [Some(Instant::from_micros(0)?), Some(Instant::from_micros(1)?)];
+    /// axes.band_time(Arc::from(x), Arc::from([1.0, 2.0]), Arc::from([3.0, 4.0]), BandOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn band_time(
+        &mut self,
+        x: Arc<[Option<Instant>]>,
+        low: Arc<[f64]>,
+        high: Arc<[f64]>,
+        options: BandOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.band()";
+        let axes = self.axes_mut();
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        let x = SharedX::Times(x);
+        check_band(CONTEXT, axes.x, y, (&x, &low, &high))?;
+        axes.marks
+            .push(Mark::Band(BandMark::new(x, low, high, options)));
+        Ok(self)
+    }
+
+    /// Adds stacked areas over the times `x`, on a time x axis, as
+    /// [`AxesMut::stacked_area_shared`] adds them over numbers. A missing time breaks every layer
+    /// there.
+    ///
+    /// # Errors
+    ///
+    /// As [`AxesMut::stacked_area`], with `x` checked against the x axis as times.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use umber_core::{Figure, Instant, ScaleKind, Series, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let x = [Some(Instant::from_micros(0)?), None];
+    /// axes.stacked_area_time(Arc::from(x), vec![Series { values: vec![1.0, 2.0], ..Series::default() }])?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn stacked_area_time(
+        &mut self,
+        x: Arc<[Option<Instant>]>,
+        series: Vec<Series>,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.stacked_area()";
+        let axes = self.axes_mut();
+        let y = check_numeric_y(CONTEXT, axes.y)?;
+        let mark = StackedAreaMark::new(CONTEXT, axes.x, y, SharedX::Times(x), series)?;
+        axes.marks.push(Mark::StackedArea(mark));
+        Ok(self)
+    }
+}
+
+/// Checks that `axis`, of scale kind `kind`, is a time axis for the span method `context`,
+/// whose ends are times: `Error::Usage` otherwise.
+fn check_time_axis_for_span(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+) -> Result<()> {
+    if kind == ScaleKind::Time {
+        return Ok(());
+    }
+    Err(Error::usage(
+        context,
+        format!(
+            "the {} axis is not a time axis; spans between times need one.",
+            axis.name()
+        ),
+    )
+    .with_hint(axis.time_scale_hint()))
 }

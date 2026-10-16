@@ -500,7 +500,7 @@ mod tests {
         let mut f = figure(LIN, LIN);
         f.single_axes_mut()
             .x_error_bars_shared(
-                vec![1.0, gap],
+                AxisData::Numbers(vec![1.0, gap]),
                 Arc::from([0.0, 1.0]),
                 Arc::from([2.0, 3.0]),
                 ErrorBarOptions::default(),
@@ -531,7 +531,7 @@ mod tests {
         assert!(
             f.single_axes_mut()
                 .x_error_bars_shared(
-                    vec![0.0, 1.0],
+                    AxisData::Numbers(vec![0.0, 1.0]),
                     Arc::clone(&low),
                     Arc::clone(&high),
                     ErrorBarOptions::default()

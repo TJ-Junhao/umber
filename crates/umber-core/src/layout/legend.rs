@@ -562,17 +562,22 @@ fn x_position(axis: &ResolvedAxis, x: AnchorX<'_>) -> f64 {
                 _ => f64::NAN,
             }
         }
+        (AxisScale::Time(scale), AnchorX::Time(t)) => scale.normalize(t),
         (AxisScale::Continuous(_), AnchorX::Category(_) | AnchorX::Between(..))
-        | (AxisScale::Category(_), AnchorX::Number(_)) => f64::NAN,
+        | (AxisScale::Category(_), AnchorX::Number(_))
+        | (AxisScale::Continuous(_) | AxisScale::Category(_), AnchorX::Time(_))
+        | (AxisScale::Time(_), AnchorX::Number(_) | AnchorX::Category(_) | AnchorX::Between(..)) => {
+            f64::NAN
+        }
     }
 }
 
-/// The normalized y position of an anchor at `y` on `axis`; NaN on a category axis, which has
-/// no numbers to place it at.
+/// The normalized y position of an anchor at `y` on `axis`; NaN on a category or a time axis,
+/// which have no numbers to place it at.
 fn y_position(axis: &ResolvedAxis, y: f64) -> f64 {
     match &axis.scale {
         AxisScale::Continuous(scale) => scale.normalize(y),
-        AxisScale::Category(_) => f64::NAN,
+        AxisScale::Category(_) | AxisScale::Time(_) => f64::NAN,
     }
 }
 

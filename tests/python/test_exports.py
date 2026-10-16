@@ -38,6 +38,7 @@ EXPECTED = [
     "SvgText",
     "Theme",
     "TickFormat",
+    "Time",
     "UmberError",
     "UsageError",
     "Values",

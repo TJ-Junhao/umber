@@ -1,4 +1,4 @@
-"""``TickFormat``: how the numbers in tick labels are written."""
+"""``TickFormat``: how the numbers and times in tick labels are written."""
 
 from collections.abc import Callable
 from operator import attrgetter
@@ -13,15 +13,18 @@ _AUTO = 0
 _FIXED = 1
 _PERCENT = 2
 _SCIENTIFIC = 3
+_ISO = 4
 
 
 @final
 class TickFormat:
-    """An immutable format for the tick labels of a linear or log axis.
+    """An immutable format for the tick labels of a linear, log or time axis.
 
-    ``TickFormat.AUTO`` chooses the decimals from the tick step. ``TickFormat.fixed()``,
-    ``TickFormat.percent()`` and ``TickFormat.scientific()`` write every label the same way,
-    and ``affix()`` adds text before and after each label. Negative numbers use the minus sign
+    ``TickFormat.AUTO`` chooses the decimals from the tick step, and on a time axis writes
+    concise labels. ``TickFormat.fixed()``, ``TickFormat.percent()`` and
+    ``TickFormat.scientific()`` write every label of a numeric axis the same way,
+    ``TickFormat.iso()`` writes the times of a time axis in ISO 8601, and ``affix()`` adds text
+    before and after each label. Negative numbers use the minus sign
     U+2212 and zero is never signed. Only ``AUTO`` adds decimals when two ticks would share a
     label; with another format, that is your choice. Formats compare equal when they write
     labels the same way.
@@ -123,6 +126,26 @@ class TickFormat:
         """
         return _new(_SCIENTIFIC, 0, "", "")
 
+    @staticmethod
+    def iso() -> "TickFormat":
+        """Return the ISO 8601 format for the labels of a time axis.
+
+        Labels are written down to the unit of the tick step: ``2026`` for yearly ticks,
+        ``2026-03`` for monthly ones, ``2026-03-03`` for daily ones and ``2026-03-03T06:00``
+        for hourly ones. Linear and log axes refuse this format.
+
+        Returns:
+            The format.
+
+        Example:
+            >>> import datetime as dt
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.time())
+            >>> ax = ax.line([dt.date(2026, 1, 1), dt.date(2026, 6, 1)], [1, 2])
+            >>> ax = ax.xtick_format(ub.TickFormat.iso())
+        """
+        return _new(_ISO, 0, "", "")
+
     def affix(self, prefix: str = "", suffix: str = "") -> "TickFormat":
         """Return this format with text before and after every label.
 
@@ -170,6 +193,8 @@ class TickFormat:
             text = "TickFormat.AUTO"
         elif self._kind == _SCIENTIFIC:
             text = "TickFormat.scientific()"
+        elif self._kind == _ISO:
+            text = "TickFormat.iso()"
         else:
             name = "fixed" if self._kind == _FIXED else "percent"
             text = f"TickFormat.{name}({self._decimals})"
@@ -209,7 +234,8 @@ def native(format: TickFormat) -> tuple[int, int, str, str]:
 
     Returns:
         The kind (0 for ``TickFormat.AUTO``, 1 for ``fixed()``, 2 for ``percent()``, 3 for
-        ``scientific()``), the decimals (0 for the kinds without), the prefix and the suffix.
+        ``scientific()``, 4 for ``iso()``), the decimals (0 for the kinds without), the prefix
+        and the suffix.
 
     Example:
         >>> import umber as ub

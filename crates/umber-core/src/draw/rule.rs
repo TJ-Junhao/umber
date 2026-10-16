@@ -16,9 +16,8 @@ use super::MarkContext;
 use super::chrome::segment;
 use super::fill::AREA_ALPHA;
 use super::line::line_style;
-use super::mapping::{AxisMap, PlotPoint, axis_value, axis_values};
+use super::mapping::{AxisMap, PlotPoint, axis_position, axis_time, axis_value};
 use crate::geometry::Path;
-use crate::model::{AxisData, AxisValue};
 use crate::resolve::{Resolved, ResolvedMark, ValueAxis};
 use crate::scene::{FillRule, Item, LineCap, Paint, Rect};
 use crate::{Dash, Rgba};
@@ -127,17 +126,27 @@ pub(super) fn span_layer(
         match *mark {
             ResolvedMark::HSpan { mark, color, .. } => {
                 let ends = mark.bounds().iter().map(|&v| axis_value(&resolved.y, v));
-                span_item(context, Along::Y, ends, 1.0, color, &mut layer);
+                let times = mark
+                    .time_bounds()
+                    .iter()
+                    .map(|&t| axis_time(&resolved.y, t));
+                span_item(context, Along::Y, ends.chain(times), 1.0, color, &mut layer);
             }
             ResolvedMark::VSpan { mark, color, .. } => {
-                let ends = mark.bounds().iter().map(|&v| {
-                    axis_values(&resolved.x, &AxisData::Numbers(vec![v]))
-                        .first()
-                        .copied()
-                        .unwrap_or(f64::NAN)
-                });
+                let ends = mark.bounds().iter().map(|&v| axis_value(&resolved.x, v));
+                let times = mark
+                    .time_bounds()
+                    .iter()
+                    .map(|&t| axis_time(&resolved.x, t));
                 let reach = Along::X.reach(context, resolved);
-                span_item(context, Along::X, ends, reach, color, &mut layer);
+                span_item(
+                    context,
+                    Along::X,
+                    ends.chain(times),
+                    reach,
+                    color,
+                    &mut layer,
+                );
             }
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
@@ -176,14 +185,14 @@ pub(super) fn rule_layer(
             ResolvedMark::HLine {
                 mark, color, width, ..
             } => {
-                let at = axis_value(&resolved.y, mark.y());
+                let at = axis_position(&resolved.y, mark.y());
                 let style = rule_style(width, color, mark.options().dash);
                 rule_item(context, Along::Y, at, 1.0, &style, &mut layer);
             }
             ResolvedMark::VLine {
                 mark, color, width, ..
             } => {
-                let at = vline_position(resolved, mark.x());
+                let at = axis_position(&resolved.x, mark.x());
                 let style = rule_style(width, color, mark.options().dash);
                 let reach = Along::X.reach(context, resolved);
                 rule_item(context, Along::X, at, reach, &style, &mut layer);
@@ -208,20 +217,6 @@ pub(super) fn rule_layer(
         }
     }
     push_layer(items, clip, layer);
-}
-
-/// The axis-space position of a vertical line at `x`: its value on a continuous axis, the band
-/// centre of its category on a category axis. NaN for a name the axis does not have, which
-/// rendering refuses before it gets here (see `resolve::check_references`).
-fn vline_position(resolved: &Resolved, x: &AxisValue) -> f64 {
-    let data = match x {
-        AxisValue::Number(v) => AxisData::Numbers(vec![*v]),
-        AxisValue::Category(name) => AxisData::Categories(vec![name.clone()]),
-    };
-    axis_values(&resolved.x, &data)
-        .first()
-        .copied()
-        .unwrap_or(f64::NAN)
 }
 
 /// The stroke of a reference line of `color` and `dash`, `width` pt wide. A line runs exactly

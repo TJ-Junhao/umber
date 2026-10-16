@@ -691,7 +691,7 @@ def test_native_check_accepts_valid_formats() -> None:
         _umber.check_tick_format(arg)
 
 
-@pytest.mark.parametrize("kind", [-1, 4, 99])
+@pytest.mark.parametrize("kind", [-1, 5, 99])
 def test_an_unknown_native_format_kind_is_an_internal_error(kind: int) -> None:
     with pytest.raises(ValueError, match="internal error: .* is not a tick format kind"):
         _umber.check_tick_format((kind, 0, "", ""))

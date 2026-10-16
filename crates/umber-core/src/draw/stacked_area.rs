@@ -4,7 +4,7 @@
 use super::MarkContext;
 use super::band::band_fill_items;
 use super::line::{downsample_columns, downsample_range, line_items, line_style};
-use super::mapping::{axis_numbers, axis_value};
+use super::mapping::{axis_numbers, axis_shared};
 use crate::downsample::clipped_m4_indices;
 use crate::model::{SeriesView, StackedAreaMark};
 use crate::resolve::Resolved;
@@ -24,11 +24,7 @@ pub(super) fn stacked_area_items(
     width: f32,
     items: &mut Vec<Item>,
 ) {
-    let mut xs: Vec<_> = mark
-        .x()
-        .iter()
-        .map(|&v| axis_value(&resolved.x, v))
-        .collect();
+    let mut xs = axis_shared(&resolved.x, mark.x_values());
     let curves: Vec<_> = stacks
         .curves()
         .iter()

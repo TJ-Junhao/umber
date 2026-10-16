@@ -57,10 +57,10 @@ ax.bar(["A", "B"], [3, 5])  # type: ignore[misc]  # pyright: ignore[reportAttrib
 # Negative: a category x axis refuses numeric x values, hist and xlim.
 cats.line([0.1, 0.2], [1, 2])  # type: ignore[list-item]  # pyright: ignore[reportArgumentType]
 cats.hist([1.0])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-cats.xlim(0, 1)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.xlim(0, 1)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 # Negative: the y axis is always continuous (the parameter is ``Scale[float]``).
-ub.Figure().add_axes(y=ub.Scale.category())  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+ub.Figure().add_axes(y=ub.Scale.category())  # type: ignore[type-var]  # pyright: ignore[reportArgumentType]
 
 # Negative: mark methods that need a category axis refuse a numeric one for the series too.
 ax.grouped_bar(["A"], [ub.Series("a", [1])])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]

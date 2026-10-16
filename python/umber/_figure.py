@@ -7,7 +7,7 @@ from typing import Any, Final, Never, Self, final
 
 from umber import _args, _axes, _cell, _scale, _theme, _umber
 from umber._args import instance, integer, real
-from umber._axes import Axes, X
+from umber._axes import Axes, V, X
 from umber._cell import Cell
 from umber._enums import AUTO, Auto, Legend, Share, SvgText
 from umber._errors import new_error
@@ -16,8 +16,8 @@ from umber._scale import Scale
 from umber._theme import Theme
 
 _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
-_X_SCALE_HINT: Final = "use Scale.linear(), Scale.log() or Scale.category()."
-_Y_SCALE_HINT: Final = "use Scale.linear() or Scale.log()."
+_X_SCALE_HINT: Final = "use Scale.linear(), Scale.log(), Scale.category() or Scale.time()."
+_Y_SCALE_HINT: Final = "use Scale.linear(), Scale.log() or Scale.time()."
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
 _SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
 _LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
@@ -197,8 +197,8 @@ class Figure:
         col_span: int = 1,
         # mypy rejects ``Scale[float]`` as the default of ``Scale[X]``; pyright accepts it.
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[float] = Scale.linear(),  # noqa: B008
-    ) -> Axes[X, float]:
+        y: Scale[V] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+    ) -> Axes[X, V]:
         """Add axes at a grid position and return them.
 
         Args:
@@ -207,9 +207,9 @@ class Figure:
             row_span: The number of rows occupied, at least 1.
             col_span: The number of columns occupied, at least 1.
             x: The x scale. ``Scale.linear()`` and ``Scale.log()`` make a numeric x axis;
-                ``Scale.category()`` makes an axis of names, as bar charts need.
-            y: The y scale: ``Scale.linear()`` or ``Scale.log()``. The y axis is always
-                numeric.
+                ``Scale.category()`` makes an axis of names, as bar charts need;
+                ``Scale.time()`` makes an axis of times.
+            y: The y scale: ``Scale.linear()``, ``Scale.log()`` or ``Scale.time()``.
 
         Returns:
             The new axes.
@@ -249,8 +249,8 @@ class Figure:
         row: int | Auto = AUTO,
         col: int | Auto = AUTO,
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[float] = Scale.linear(),  # noqa: B008
-    ) -> Axes[X, float]:
+        y: Scale[V] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+    ) -> Axes[X, V]:
         """Return existing axes with the given position and scales, including those of a copy.
 
         Args:

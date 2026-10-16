@@ -22,7 +22,7 @@ chained: ub.Axes[float, float] = numeric.band(t, t, t).band(t, t, t).line(t, t)
 logged_y: ub.Axes[float, float] = logged.band(t, t, t)
 
 # Negative: the self type needs a numeric x axis, so a category axis refuses a band.
-cats.band(t, t, t)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+cats.band(t, t, t)  # type: ignore[arg-type]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 # Negative: all three arrays are numbers.
 numeric.band(names, t, t)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

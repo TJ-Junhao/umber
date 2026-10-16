@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::axis_data::AxisData;
+use super::axis_data::{AxisData, SharedX};
 use super::bar::{Arrangement, Series};
 use super::box_plot::Distribution;
 use super::share::SharedAxis;
@@ -12,7 +12,7 @@ use crate::binning::{BinCount, MAX_BINS};
 use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
 use crate::stacking::Totals;
-use crate::{ContinuousScale, Error, Result, ScaleKind, Transform};
+use crate::{ContinuousScale, Error, Instant, Result, ScaleKind, Transform};
 
 /// The hint for an x axis of the wrong kind for limits or numeric data.
 const X_SCALE_HINT: &str = SharedAxis::X.numeric_scale_hint();
@@ -117,8 +117,8 @@ pub(super) fn check_series(
 }
 
 /// Checks the values `data` of a series along `axis` against that axis, of scale kind `kind`:
-/// names need a category axis, numbers a linear or log axis and are checked by
-/// [`check_numbers`].
+/// names need a category axis, times a time axis, and numbers a linear or log axis, where they
+/// are checked by [`check_numbers`]. Times are valid by construction; `None` marks a gap.
 fn check_axis_data(
     context: &'static str,
     axis: SharedAxis,
@@ -127,25 +127,91 @@ fn check_axis_data(
     gap_hint: &'static str,
 ) -> Result<()> {
     let name = axis.name();
-    match (data, kind.transform()) {
-        (AxisData::Categories(_), None) => Ok(()),
-        (AxisData::Numbers(values), Some(transform)) => {
-            check_numbers(context, (name, name), values, transform, gap_hint)
+    match (data, kind) {
+        (AxisData::Categories(_), ScaleKind::Category) | (AxisData::Times(_), ScaleKind::Time) => {
+            Ok(())
         }
-        (AxisData::Numbers(_), None) => Err(Error::data(
+        (AxisData::Numbers(values), ScaleKind::Linear) => {
+            check_numbers(context, (name, name), values, Transform::Linear, gap_hint)
+        }
+        (AxisData::Numbers(values), ScaleKind::Log { base }) => {
+            check_numbers(context, (name, name), values, Transform::Log(base), gap_hint)
+        }
+        (AxisData::Numbers(_), ScaleKind::Category) => Err(Error::data(
             context,
             format!(
                 "{name} holds numbers but the {name} axis is a category axis; pass category names."
             ),
         )
         .with_hint(axis.numeric_scale_hint())),
-        (AxisData::Categories(_), Some(_)) => Err(Error::data(
+        (AxisData::Categories(_), ScaleKind::Linear | ScaleKind::Log { .. }) => Err(Error::data(
             context,
             format!(
                 "{name} holds category names but the {name} axis is not a category axis; pass numbers."
             ),
         )
         .with_hint(axis.category_scale_hint())),
+        (AxisData::Numbers(_), ScaleKind::Time) => Err(numbers_on_a_time_axis(context, axis)),
+        (AxisData::Categories(_), ScaleKind::Time) => Err(Error::data(
+            context,
+            format!("{name} holds category names but the {name} axis is a time axis; pass times."),
+        )
+        .with_hint(axis.category_scale_hint())),
+        (AxisData::Times(_), _) => Err(times_off_a_time_axis(context, axis, kind)),
+    }
+}
+
+/// The `Error::Data` under `context` for numbers along `axis`, a time axis.
+fn numbers_on_a_time_axis(context: &'static str, axis: SharedAxis) -> Error {
+    let name = axis.name();
+    Error::data(
+        context,
+        format!("{name} holds numbers but the {name} axis is a time axis; pass times."),
+    )
+    .with_hint(axis.numeric_scale_hint())
+}
+
+/// The `Error::Data` under `context` for times along `axis`, of scale kind `kind`, which is
+/// not a time axis.
+fn times_off_a_time_axis(context: &'static str, axis: SharedAxis, kind: ScaleKind) -> Error {
+    let name = axis.name();
+    let instead = if kind == ScaleKind::Category {
+        "category names"
+    } else {
+        "numbers"
+    };
+    Error::data(
+        context,
+        format!("{name} holds times but the {name} axis is not a time axis; pass {instead}."),
+    )
+    .with_hint(axis.time_scale_hint())
+}
+
+/// Checks the shared x values `x` of a band or a stacked area against the x axis, of scale kind
+/// `x_kind`: numbers need a linear or log axis and are checked by [`check_numbers`], times a
+/// time axis. The callers refuse a category x axis before.
+fn check_shared_x(
+    context: &'static str,
+    x_kind: ScaleKind,
+    x: &SharedX,
+    gap_hint: &'static str,
+) -> Result<()> {
+    match x {
+        SharedX::Numbers(values) => {
+            if x_kind == ScaleKind::Time {
+                return Err(numbers_on_a_time_axis(context, SharedAxis::X));
+            }
+            let transform = x_kind.transform().ok_or_else(|| {
+                Error::data(
+                    context,
+                    "x holds numbers but the x axis is a category axis; pass category names.",
+                )
+                .with_hint(X_SCALE_HINT)
+            })?;
+            check_numbers(context, ("x", "x"), values, transform, gap_hint)
+        }
+        SharedX::Times(_) if x_kind == ScaleKind::Time => Ok(()),
+        SharedX::Times(_) => Err(times_off_a_time_axis(context, SharedAxis::X, x_kind)),
     }
 }
 
@@ -156,7 +222,44 @@ fn check_axis_data(
 pub(super) fn check_step_order(context: &'static str, x: &AxisData) -> Result<()> {
     match x {
         AxisData::Numbers(values) => check_sorted(context, "step", values),
+        AxisData::Times(times) => check_sorted_times(context, "step", times),
         AxisData::Categories(_) => Ok(()),
+    }
+}
+
+/// Checks that the times `x` are in non-decreasing order for the mark `mark`, skipping missing
+/// times as [`check_sorted`] skips NaN; the error is `Error::Data` under `context`.
+fn check_sorted_times(context: &'static str, mark: &str, x: &[Option<Instant>]) -> Result<()> {
+    let mut previous: Option<(usize, Instant)> = None;
+    for (i, &t) in x.iter().enumerate() {
+        let Some(t) = t else {
+            continue;
+        };
+        if let Some((j, u)) = previous
+            && t < u
+        {
+            return Err(Error::data(
+                context,
+                format!(
+                    "x[{i}] is {}, below x[{j}] = {}; {mark} needs x in non-decreasing order.",
+                    t.label(),
+                    u.label()
+                ),
+            )
+            .with_parameter("x")
+            .with_hint("sort the points by x first."));
+        }
+        previous = Some((i, t));
+    }
+    Ok(())
+}
+
+/// Checks that the shared x values `x` are in non-decreasing order for the mark `mark`, as
+/// [`check_sorted`] and [`check_sorted_times`] do.
+fn check_shared_sorted(context: &'static str, mark: &str, x: &SharedX) -> Result<()> {
+    match x {
+        SharedX::Numbers(values) => check_sorted(context, mark, values),
+        SharedX::Times(times) => check_sorted_times(context, mark, times),
     }
 }
 
@@ -194,24 +297,25 @@ fn check_sorted(context: &'static str, mark: &str, x: &[f64]) -> Result<()> {
 ///
 /// 1. the x axis is not a category axis (`Error::Usage`);
 /// 2. `x`, `low` and `high` have the same length;
-/// 3. `x` against the x axis, then `low` and `high` against the y axis (see [`check_numbers`]);
-/// 4. `x` is in non-decreasing order, NaN apart (see [`check_step_order`]);
+/// 3. `x` against the x axis (numbers on a linear or log axis, times on a time axis), then
+///    `low` and `high` against the y axis (see [`check_numbers`]);
+/// 4. `x` is in non-decreasing order, gaps apart (see [`check_step_order`]);
 /// 5. no `low[i]` exceeds `high[i]`; an index where either is NaN is not compared.
 pub(super) fn check_band(
     context: &'static str,
     x_kind: ScaleKind,
     y_transform: Transform,
-    (x, low, high): (&[f64], &[f64], &[f64]),
+    (x, low, high): (&SharedX, &[f64], &[f64]),
 ) -> Result<()> {
     const GAP_HINT: &str = "use NaN to leave a gap in the band.";
-    let Some(x_transform) = x_kind.transform() else {
+    if x_kind == ScaleKind::Category {
         return Err(Error::usage(
             context,
             "this is a category axis; bands along x apply to linear and log axes only.",
         )
         .with_parameter("x")
         .with_hint(X_SCALE_HINT));
-    };
+    }
     for (name, other) in [("low", low), ("high", high)] {
         if x.len() != other.len() {
             return Err(Error::data(
@@ -224,10 +328,10 @@ pub(super) fn check_band(
             ));
         }
     }
-    check_numbers(context, ("x", "x"), x, x_transform, GAP_HINT)?;
+    check_shared_x(context, x_kind, x, GAP_HINT)?;
     check_numbers(context, ("low", "low"), low, y_transform, GAP_HINT)?;
     check_numbers(context, ("high", "high"), high, y_transform, GAP_HINT)?;
-    check_sorted(context, "band", x)?;
+    check_shared_sorted(context, "band", x)?;
     check_interval_order(context, (low, high))
 }
 
@@ -238,17 +342,17 @@ pub(super) fn check_stacked_area(
     context: &'static str,
     x_kind: ScaleKind,
     y_transform: Transform,
-    x: &[f64],
+    x: &SharedX,
     series: &[Series],
 ) -> Result<()> {
-    let Some(x_transform) = x_kind.transform() else {
+    if x_kind == ScaleKind::Category {
         return Err(Error::usage(
             context,
             "this is a category axis; stacked areas apply to linear and log axes only.",
         )
         .with_parameter("x")
         .with_hint(X_SCALE_HINT));
-    };
+    }
     if series.is_empty() {
         return Err(
             Error::data(context, "series is empty; pass at least one Series.")
@@ -268,7 +372,7 @@ pub(super) fn check_stacked_area(
             .with_parameter("series"));
         }
     }
-    check_numbers(context, ("x", "x"), x, x_transform, AREA_GAP_HINT)?;
+    check_shared_x(context, x_kind, x, AREA_GAP_HINT)?;
     for (k, s) in series.iter().enumerate() {
         let name = format!("series[{k}].values");
         let negative = s.values.iter().position(|&v| v.is_finite() && v < 0.0);
@@ -293,9 +397,9 @@ pub(super) fn check_stacked_area(
             .with_hint("use stacked_bar for values with mixed signs."));
         }
     }
-    check_sorted(context, "stacked_area", x)?;
-    for (i, &x) in x.iter().enumerate() {
-        if x.is_nan() || series.iter().any(|s| s.values[i].is_nan()) {
+    check_shared_sorted(context, "stacked_area", x)?;
+    for i in 0..x.len() {
+        if x.is_gap(i) || series.iter().any(|s| s.values[i].is_nan()) {
             continue;
         }
         let mut totals = Totals::default();
@@ -319,6 +423,14 @@ pub(super) fn check_bubbles(
     y_transform: Transform,
     (x, y, sizes): (&[f64], &[f64], &[f64]),
 ) -> Result<()> {
+    if x_kind == ScaleKind::Time {
+        return Err(Error::usage(
+            context,
+            format!("x is a time scale; {context} needs a linear or log x axis."),
+        )
+        .with_parameter("x")
+        .with_hint("convert the times to numbers first, such as days since the first one."));
+    }
     let Some(x_transform) = x_kind.transform() else {
         return Err(Error::usage(
             context,
@@ -452,21 +564,29 @@ pub(super) fn check_y_error_bars(
 }
 
 /// Validates the y, `low` and `high` values of horizontal error bars for axes with an x axis of
-/// scale kind `x_kind` and a y axis of transform `y_transform`, before they are stored, so a
+/// scale kind `x_kind` and a y axis of scale kind `y_kind`, before they are stored, so a
 /// failed call changes nothing. The checks run in a fixed order and the first failure is the
 /// error, under `context`:
 ///
-/// 1. the x axis is not a category axis (`Error::Usage`);
+/// 1. the x axis is not a category axis, nor a time axis (`Error::Usage`);
 /// 2. `y`, `low` and `high` have the same length;
-/// 3. `y` against the y axis, then `low` and `high` against the x axis (see [`check_numbers`]);
+/// 3. `y` against the y axis (see [`check_axis_data`]), then `low` and `high` against the x
+///    axis (see [`check_numbers`]);
 /// 4. no `low[i]` exceeds `high[i]`; an index where either is NaN is not compared.
 pub(super) fn check_x_error_bars(
     context: &'static str,
-    x_kind: ScaleKind,
-    y_transform: Transform,
-    y: &[f64],
+    (x_kind, y_kind): (ScaleKind, ScaleKind),
+    y: &AxisData,
     limits: (&[f64], &[f64]),
 ) -> Result<()> {
+    if x_kind == ScaleKind::Time {
+        return Err(Error::usage(
+            context,
+            format!("x is a time scale; {context} needs a numeric x axis."),
+        )
+        .with_parameter("x")
+        .with_hint("use a linear or log x axis."));
+    }
     let Some(x_transform) = x_kind.transform() else {
         return Err(Error::usage(
             context,
@@ -475,7 +595,7 @@ pub(super) fn check_x_error_bars(
         .with_hint("x_error_bars needs a numeric x axis; use y_error_bars on a category."));
     };
     check_interval_lengths(context, "y", y.len(), limits)?;
-    check_numbers(context, ("y", "y"), y, y_transform, ERROR_BAR_GAP_HINT)?;
+    check_axis_data(context, SharedAxis::Y, y_kind, y, ERROR_BAR_GAP_HINT)?;
     check_intervals(context, x_transform, limits)
 }
 
@@ -568,33 +688,85 @@ pub(super) fn check_span(
     Ok(())
 }
 
+/// Checks the ends of a span of times, `low` and `high`, before it is stored: `low` must be
+/// below `high`, as [`check_span`] requires of numbers.
+pub(super) fn check_time_span(
+    context: &'static str,
+    (low, high): (Instant, Instant),
+) -> Result<()> {
+    if low >= high {
+        return Err(Error::style(
+            context,
+            format!(
+                "low is {}, high is {}; low must be below high.",
+                low.label(),
+                high.label()
+            ),
+        )
+        .with_parameter("high")
+        .with_hint("swap the two values."));
+    }
+    Ok(())
+}
+
 /// Checks the x of a vertical reference line against the x axis of scale kind `kind`, before the
 /// line is stored: a number needs a linear or log axis and is checked as
-/// [`check_reference_value`] checks a value, a category name needs a category axis. Whether the
-/// name is one of the axis's categories is not known until the figure is rendered.
+/// [`check_reference_value`] checks a value, a category name needs a category axis, and a time
+/// a time axis. Whether the name is one of the axis's categories is not known until the figure
+/// is rendered.
 pub(super) fn check_vline_x(
     context: &'static str,
     kind: ScaleKind,
     x: &super::rule::AxisValue,
 ) -> Result<()> {
     use super::rule::AxisValue;
-    match (x, kind.transform()) {
-        (AxisValue::Number(x), Some(transform)) => {
-            check_reference_value(context, "x", REFERENCE_LINE, *x, transform)
+    match (x, kind) {
+        (AxisValue::Number(x), ScaleKind::Linear) => {
+            check_reference_value(context, "x", REFERENCE_LINE, *x, Transform::Linear)
         }
-        (AxisValue::Category(_), None) => Ok(()),
-        (AxisValue::Number(_), None) => Err(Error::data(
+        (AxisValue::Number(x), ScaleKind::Log { base }) => {
+            check_reference_value(context, "x", REFERENCE_LINE, *x, Transform::Log(base))
+        }
+        (AxisValue::Category(_), ScaleKind::Category) | (AxisValue::Time(_), ScaleKind::Time) => {
+            Ok(())
+        }
+        (AxisValue::Number(_), ScaleKind::Category) => Err(Error::data(
             context,
             "x holds a number but the x axis is a category axis; pass a category name.",
         )
         .with_parameter("x")
         .with_hint(X_SCALE_HINT)),
-        (AxisValue::Category(_), Some(_)) => Err(Error::data(
+        (AxisValue::Category(_), ScaleKind::Linear | ScaleKind::Log { .. }) => Err(Error::data(
             context,
             "x holds a category name but the x axis is not a category axis; pass a number.",
         )
         .with_parameter("x")
         .with_hint("pass x=Scale.category() to Figure.add_axes().")),
+        (AxisValue::Number(_), ScaleKind::Time) => Err(Error::data(
+            context,
+            "x holds a number but the x axis is a time axis; pass a time.",
+        )
+        .with_parameter("x")
+        .with_hint(X_SCALE_HINT)),
+        (AxisValue::Category(_), ScaleKind::Time) => Err(Error::data(
+            context,
+            "x holds a category name but the x axis is a time axis; pass a time.",
+        )
+        .with_parameter("x")
+        .with_hint("pass x=Scale.category() to Figure.add_axes().")),
+        (AxisValue::Time(_), _) => {
+            let instead = if kind == ScaleKind::Category {
+                "a category name"
+            } else {
+                "a number"
+            };
+            Err(Error::data(
+                context,
+                format!("x holds a time but the x axis is not a time axis; pass {instead}."),
+            )
+            .with_parameter("x")
+            .with_hint(SharedAxis::X.time_scale_hint()))
+        }
     }
 }
 
@@ -862,6 +1034,7 @@ pub(super) fn check_hist(
             )
             .with_hint("pass x=Scale.linear() to Figure.add_axes()."));
         }
+        ScaleKind::Time => check_no_time_x(context, x_kind, "a linear x axis")?,
     }
     check_numbers(
         context,
@@ -942,6 +1115,12 @@ pub(super) fn check_limits(
     kind: ScaleKind,
     (low, high): (f64, f64),
 ) -> Result<ContinuousScale> {
+    if kind == ScaleKind::Time {
+        return Err(Error::usage(
+            context,
+            "this is a time axis; its limits must be times.",
+        ));
+    }
     let Some(transform) = kind.transform() else {
         return Err(Error::usage(
             context,
@@ -950,6 +1129,44 @@ pub(super) fn check_limits(
         .with_hint(axis.numeric_scale_hint()));
     };
     ContinuousScale::new(transform, low, high, context)
+}
+
+/// Checks the explicit limits of a time axis, `low` and `high`, for the setter `context` of
+/// `axis`, of scale kind `kind`: `Error::Usage` unless it is a time axis, then `Error::Style`
+/// unless `low` is below `high`.
+pub(super) fn check_time_limits(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+    (low, high): (Instant, Instant),
+) -> Result<(Instant, Instant)> {
+    match kind {
+        ScaleKind::Time => {}
+        ScaleKind::Category => {
+            return Err(Error::usage(
+                context,
+                "this is a category axis; limits apply to linear, log and time axes only.",
+            )
+            .with_hint(axis.time_scale_hint()));
+        }
+        ScaleKind::Linear | ScaleKind::Log { .. } => {
+            return Err(Error::usage(
+                context,
+                "this is a linear or log axis; its limits must be numbers.",
+            ));
+        }
+    }
+    if low >= high {
+        return Err(Error::style(
+            context,
+            format!(
+                "the limits are {} and {}; the lower limit must be below the upper limit.",
+                low.label(),
+                high.label()
+            ),
+        ));
+    }
+    Ok((low, high))
 }
 
 /// The longest text, in characters, of a tick label or of a tick format's prefix or suffix.
@@ -1002,6 +1219,12 @@ pub(super) fn check_tick_axis(
     kind: ScaleKind,
     what: &str,
 ) -> Result<Transform> {
+    if kind == ScaleKind::Time {
+        return Err(Error::usage(
+            context,
+            "this is a time axis; its tick positions must be times.",
+        ));
+    }
     kind.transform().ok_or_else(|| {
         Error::usage(
             context,
@@ -1011,17 +1234,81 @@ pub(super) fn check_tick_axis(
     })
 }
 
-/// The transform of the y axis, of scale kind `kind`, for the mark method `context`, which
-/// draws on a numeric y axis only: `Error::Usage` naming `y` on a category axis.
-pub(super) fn check_numeric_y(context: &'static str, kind: ScaleKind) -> Result<Transform> {
-    kind.transform().ok_or_else(|| {
-        Error::usage(
+/// Checks that `axis`, of scale kind `kind`, takes the tick format the setter `context` sets:
+/// `Error::Usage` on a category axis, whose ticks are its categories, as
+/// [`check_tick_axis`] reports it. Linear, log and time axes take a format.
+pub(super) fn check_format_axis(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+) -> Result<()> {
+    if kind == ScaleKind::Category {
+        return check_tick_axis(context, axis, kind, "tick formats").map(drop);
+    }
+    Ok(())
+}
+
+/// Checks that `axis`, of scale kind `kind`, takes the time tick positions the setter `context`
+/// sets: `Error::Usage` unless it is a time axis.
+pub(super) fn check_time_tick_axis(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+) -> Result<()> {
+    match kind {
+        ScaleKind::Time => Ok(()),
+        ScaleKind::Category => Err(Error::usage(
             context,
-            format!("y is a category scale; {context} needs a numeric y axis."),
+            "this is a category axis; ticks apply to linear, log and time axes only.",
         )
-        .with_parameter("y")
-        .with_hint("use a linear or log y axis.")
-    })
+        .with_hint(axis.time_scale_hint())),
+        ScaleKind::Linear | ScaleKind::Log { .. } => Err(Error::usage(
+            context,
+            "this is a linear or log axis; its tick positions must be numbers.",
+        )),
+    }
+}
+
+/// The transform of the y axis, of scale kind `kind`, for the mark method `context`, which
+/// draws on a numeric y axis only: `Error::Usage` naming `y` on a category or a time axis.
+pub(super) fn check_numeric_y(context: &'static str, kind: ScaleKind) -> Result<Transform> {
+    let scale = match kind {
+        ScaleKind::Linear => return Ok(Transform::Linear),
+        ScaleKind::Log { base } => return Ok(Transform::Log(base)),
+        ScaleKind::Category => "category",
+        ScaleKind::Time => "time",
+    };
+    Err(Error::usage(
+        context,
+        format!("y is a {scale} scale; {context} needs a numeric y axis."),
+    )
+    .with_parameter("y")
+    .with_hint("use a linear or log y axis."))
+}
+
+/// Checks the y axis, of scale kind `kind`, for the series mark method `context`, whose y values
+/// are numbers or times: `Error::Usage` naming `y` on a category axis, as
+/// [`check_numeric_y`] reports it.
+pub(super) fn check_series_y(context: &'static str, kind: ScaleKind) -> Result<()> {
+    if kind == ScaleKind::Category {
+        return check_numeric_y(context, kind).map(drop);
+    }
+    Ok(())
+}
+
+/// Refuses the mark method `context`, which needs `needs` along x, such as `"a category x
+/// axis"`, on a time x axis, of scale kind `kind`: `Error::Usage` naming `x`. Other kinds pass,
+/// for the method's own checks.
+pub(super) fn check_no_time_x(context: &'static str, kind: ScaleKind, needs: &str) -> Result<()> {
+    if kind != ScaleKind::Time {
+        return Ok(());
+    }
+    Err(Error::usage(
+        context,
+        format!("x is a time scale; {context} needs {needs}."),
+    )
+    .with_parameter("x")
+    .with_hint("use a category axis with formatted labels."))
 }
 
 /// Checks explicit tick `positions` for an axis of `transform`, index by index, and reports the
@@ -1087,6 +1374,31 @@ pub(super) fn check_tick_positions(
             .with_hint(
                 "sort the positions and remove repeats; they are used in the order given.",
             ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks explicit time tick `positions` index by index and reports the first one that is not
+/// above the one before it as `Error::Style` under `context`, as [`check_tick_positions`] does
+/// for numbers. The positions are used in the order given, never sorted.
+pub(super) fn check_time_tick_positions(
+    context: &'static str,
+    positions: &[Instant],
+) -> Result<()> {
+    for (i, pair) in positions.windows(2).enumerate() {
+        if pair[1] <= pair[0] {
+            return Err(Error::style(
+                context,
+                format!(
+                    "positions[{}] is {} but positions[{i}] is {}; tick positions must be strictly increasing.",
+                    i + 1,
+                    pair[1].label(),
+                    pair[0].label()
+                ),
+            )
+            .with_parameter("positions")
+            .with_hint("sort the positions and remove repeats; they are used in the order given."));
         }
     }
     Ok(())
