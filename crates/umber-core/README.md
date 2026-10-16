@@ -1,6 +1,6 @@
 # umber-core
 
-`umber-core` is the rendering core of [umber](https://github.com/TJ-Junhao/umber), a plotting library for Python. It draws line, step, scatter, area, stacked area, bar, histogram, box, violin, bubble, error bar, band, stem and reference-line charts, including grouped and stacked bars, grouped boxes and violins, and reference spans. Figures can have a single axes or a grid of panels with shared axes, spanning panels, figure titles and merged or per-panel legends. It renders to PNG and SVG, has no Python dependency and can be used directly from Rust.
+`umber-core` is the rendering core of [umber](https://github.com/TJ-Junhao/umber), a plotting library for Python. It draws line, step, scatter, area, stacked area, bar, histogram, box, violin, bubble, error bar, band, stem, reference-line, heatmap, mesh, 2-D histogram and hexbin charts, including grouped and stacked bars, grouped boxes and violins, reference spans, horizontal bars, boxes and violins, and color-mapped points. Axes are linear, log, category or time axes, and color-mapped marks come with colormaps and colorbars. Figures can have a single axes or a grid of panels with shared axes, spanning panels, figure titles and merged or per-panel legends. It renders to PNG and SVG, has no Python dependency and can be used directly from Rust.
 
 ```rust
 use umber_core::{AxisData, Figure, LineOptions, ScaleKind, Theme};

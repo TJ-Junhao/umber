@@ -1,12 +1,12 @@
 # umber
 
-umber is a plotting library for Python with a rendering core written in Rust. It draws line, step, scatter, area, stacked area, bar, histogram, box, violin, bubble, error bar, band, stem and reference-line charts, alone or on a grid of panels with shared axes, with careful typography, three built-in themes, and PNG or SVG output.
+umber is a plotting library for Python with a rendering core written in Rust. It draws line, step, scatter, area, stacked area, bar, histogram, box, violin, bubble, error bar, band, stem, reference-line, heatmap, mesh, 2-D histogram and hexbin charts on numeric, log, category and time axes, alone or on a grid of panels with shared axes. It has colormaps and colorbars, careful typography, three built-in themes, and PNG or SVG output.
 
 [简体中文](https://github.com/TJ-Junhao/umber/blob/main/README-ZH.md)
 
 ![A line chart of daily temperature at two stations, in the Graphite theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
 
-- **Fast on large data.** Rendering runs in Rust: a 1,000,000-point line renders to PNG in about 55 ms, and a 100,000-point scatter in about 50 ms (see [Performance](#performance)).
+- **Fast on large data.** Rendering runs in Rust: a 1,000,000-point line renders to PNG in about 58 ms, and a 100,000-point scatter in about 50 ms (see [Performance](#performance)).
 - **Explicit.** Every option is a typed value (`Color`, `Size`, `Dash`, `TickFormat`, …). There are no format strings, no positional style arguments and no silent conversions.
 - **Fails fast, pointing at the problem.** Invalid input raises at the call that caused it, with a message, a hint and the offending argument highlighted in the traceback.
 - **Statically typed.** Category and numeric axes are distinct types: calling `bar` on a numeric axes is reported by pyright and mypy before the code runs.
@@ -18,7 +18,7 @@ umber is a plotting library for Python with a rendering core written in Rust. It
 pip install umber
 ```
 
-umber requires Python 3.12 or newer and NumPy 2. Prebuilt wheels are published for Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows (x64). On other platforms `pip` builds from source, which needs Rust 1.88 or newer.
+umber requires Python 3.12 or newer and NumPy 2. Prebuilt wheels are published for Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows (x64); free-threaded Python 3.14 and 3.15 or newer have wheels of their own. On other platforms `pip` builds from source, which needs Rust 1.88 or newer.
 
 ## Quick start
 
@@ -72,12 +72,14 @@ This is the chart at the top of this page. Data can be a list, a tuple, a NumPy 
 | Band | `ax.band(x, low, high)` |
 | Stem | `ax.stem(x, y)` |
 | Reference lines and spans | `ax.hline(y)`, `ax.vline(x)`, `ax.hspan(low, high)`, `ax.vspan(low, high)` |
+| Heatmap | `ax.heatmap(x_categories, y_categories, values, annotate=True)` |
+| Mesh | `ax.mesh(x_edges, y_edges, values)` |
+| 2-D histogram, hexbin | `ax.hist2d(x, y, bins=40)`, `ax.hexbin(x, y, gridsize=30)` |
+| Color-mapped points | `ax.scatter(x, y, color=ub.ColorBy(values))` |
 
-Automatic bubble limits contain the whole markers and their outlines, including on log and shared axes. Explicit limits still clip. When the bubbles cannot all fit on an automatic axis (a marker, outline included, at least as long as the plot along it, limits beyond the supported numeric range, or limits that do not settle), that axis's limits come from the data positions alone, as for scatter, and the plot clips the bubbles that overflow; rendering does not raise. Scatter limits are unchanged.
+Bar, box and violin charts need a category axis. On a category x axis, `fig.add_axes(x=ub.Scale.category())`, they are vertical; on a category y axis, `fig.add_axes(y=ub.Scale.category())`, they are horizontal, and a scatter of values against categories is a dot plot. A heatmap needs category axes on both sides. Log axes use `ub.Scale.log()` and time axes `ub.Scale.time()`. Limits, ticks and tick label formats are set with `xlim`, `ylim`, `xticks`, `xticks_labeled`, `ytick_format(ub.TickFormat.percent())` and their counterparts on the other axis.
 
-Legend swatches show each mark's fill as drawn, composited over the plot background, in both panel and merged legends. Gradient swatches use the most opaque end of the fill (0.32 of the series opacity for areas, 0.95 for histograms), so the swatch represents the colored end rather than the transparent baseline. Area and stacked-area swatches are filled rectangles under an edge in the line's color, dash and width, and scatter, stem and bubble swatches show the marker fill. Lines, steps, reference lines, error bars, direct labels and box and violin outlines keep the series color.
-
-Bar, box and violin charts need a category x axis: `fig.add_axes(x=ub.Scale.category())`. Log axes use `ub.Scale.log()`. Limits, ticks and tick label formats are set with `xlim`, `ylim`, `xticks`, `xticks_labeled`, `ytick_format(ub.TickFormat.percent())` and their counterparts on the other axis.
+Automatic limits contain whole bubble markers, outlines included; explicit limits clip them. Legend swatches show each mark's fill as drawn over the plot background.
 
 <p>
   <img alt="A grouped bar chart in the Pigment theme" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/bars-pigment.png" width="49%">
@@ -108,6 +110,53 @@ variant.axes_at(row=0, col=1).title("Comparison")  # the original is unchanged
 Use `fig.axes_at(row=..., col=..., x=..., y=...)` to retrieve axes, including those in a copy. The scale kinds and log bases must match creation; for category axes, pass `x=ub.Scale.category()` to get `Axes[str, float]`. A spanning panel is found only at its top-left cell. A row or column can be omitted only when that dimension has size 1. `Figure.axes` has been removed in favor of this typed method.
 
 `fig.cells()` yields immutable `Cell` positions in row-major order, occupied or not; `fig.cells(n)` yields the first `n`. For example, `for cell, values in zip(fig.cells(), datasets): cell.add_axes().line(x, values)` adds one panel per dataset. `AUTO` is a typed sentinel, not `None`, and only parameters that declare it accept it.
+
+## Colors and colorbars
+
+Heatmaps, meshes, 2-D histograms and hexbins color each cell by its value, and `color=ub.ColorBy(values)` does the same for the points of a scatter or bubble chart. The color-mapped marks of one axes share a single color scale, and a colorbar beside the plot explains it.
+
+```python
+import numpy as np
+import umber as ub
+
+rng = np.random.default_rng(41)
+x = rng.normal(size=20_000)
+y = 0.6 * x + rng.normal(scale=0.7, size=x.size)
+
+ax = ub.Figure(theme=ub.Theme.MIDNIGHT).add_axes()
+ax.hexbin(x, y, gridsize=30, scale=ub.Scale.log()).colorbar("Count")
+ax.figure.save_png("density.png")
+```
+
+`cmap=` chooses the colormap: each theme has its own sequential and diverging colormaps, and `Cmap.VIRIDIS`, `Cmap.MAGMA`, `Cmap.CIVIDIS` and `Cmap.BLUE_RED` are built in. `Cmap.from_colors([...])` builds one from your colors, mixed in the perceptual Oklab space, and `.reversed()` turns one around. `scale=ub.Scale.log()` maps values on a log scale, and `center=0` makes the mapping diverging and symmetric about that value. The color range runs from the smallest to the largest finite value; `ax.clim(low, high)` sets it, and values outside it take the end colors.
+
+`ax.colorbar(label, position=..., format=...)` labels the colorbar, moves it below the plot with `ColorbarPosition.BOTTOM` or hides it with `ColorbarPosition.NONE`. On a grid, `Figure(share_color=ub.Share.ROW)` gives the panels of each row one color range and one colorbar at the right of the row; `Share.COL` puts one below each column, and `Share.ALL` one beside the whole grid. `fig.colorbar(...)` sets those shared colorbars.
+
+<p>
+  <img alt="An annotated correlation heatmap with a diverging colormap in the Graphite theme" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/heatmap-graphite.png" width="49%">
+  <img alt="Hexagonal point counts on a log color scale in the Midnight theme" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/hexbin-midnight.png" width="49%">
+</p>
+
+## Time axes
+
+`ub.Scale.time()` makes a time axis. It takes `datetime`, `date` and `numpy.datetime64` values, NumPy `datetime64` arrays of any unit, and naive pandas and polars datetime columns:
+
+```python
+import numpy as np
+import umber as ub
+
+hours = np.datetime64("2026-03-02T00", "h") + np.arange(7 * 24)
+demand = 60 + 20 * np.sin((np.arange(7 * 24) - 6) / 24 * 2 * np.pi)
+
+ax = ub.Figure(8, 4).add_axes(x=ub.Scale.time())
+ax.band(hours, demand - 6, demand + 6, label="Range").line(hours, demand, label="Demand")
+ax.vspan(np.datetime64("2026-03-05T01"), np.datetime64("2026-03-05T05"), label="Maintenance")
+ax.figure.save_png("demand.png")
+```
+
+Ticks fall on calendar steps, such as months, days or hours, with concise labels; `xtick_format(ub.TickFormat.iso())` writes them in ISO 8601 instead. Limits, ticks, reference lines and spans on a time axis take times. Times are kept to the microsecond, `NaT` leaves a gap, and a time zone is refused: convert to naive times first, for example with `.tz_convert(None)` in pandas. Bands and stacked areas take times on the x axis only.
+
+![A week of hourly demand with its range and a maintenance window, in the Pigment theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/time-pigment.png)
 
 ## Titles and legends
 
@@ -170,7 +219,7 @@ In a terminal that supports it, the hint and the highlight are shown in color; s
 
 ## Static typing
 
-The package ships type information (`py.typed`) and is checked with pyright and mypy in strict mode. `Figure().add_axes()` is `Axes[float, float]`; `add_axes(x=Scale.category())` is `Axes[str, float]`. Methods that only make sense on one kind of axis are typed accordingly:
+The package ships type information (`py.typed`) and is checked with pyright and mypy in strict mode. `Figure().add_axes()` is `Axes[float, float]`; `add_axes(x=Scale.category())` is `Axes[str, float]`, `add_axes(y=Scale.category())` is `Axes[float, str]`, two category axes are `Axes[str, str]` and `add_axes(x=Scale.time())` is `Axes[Time, float]`. Methods that only make sense on one kind of axis are typed accordingly:
 
 ```python
 import umber as ub
@@ -185,13 +234,17 @@ Medians from the [criterion](https://github.com/criterion-rs/criterion.rs) suite
 
 | Case | Time |
 | --- | ---: |
-| 1,000,000-point line → PNG | 53 ms |
-| 1,000,000-point line → SVG | 21 ms |
-| 100,000-point scatter → PNG | 47 ms |
-| Histogram of 1,000,000 values → PNG | 20 ms |
-| 4 × 5 grid, one 10,000-point line per panel → PNG | 97 ms |
+| 1,000,000-point line → PNG | 58 ms |
+| 1,000,000-point line on a time axis → PNG | 54 ms |
+| 1,000,000-point line → SVG | 19 ms |
+| 100,000-point scatter → PNG | 50 ms |
+| Histogram of 1,000,000 values → PNG | 21 ms |
+| 2-D histogram of 1,000,000 points, 100 × 100 bins → PNG | 12 ms |
+| Hexbin of 1,000,000 points, grid size 50 → PNG | 69 ms |
+| Heatmap of 1,000 × 1,000 cells → PNG | 1.26 s |
+| 4 × 5 grid, one 10,000-point line per panel → PNG | 103 ms |
 
-Lines with sorted numeric x values are downsampled when they have more than four points per pixel column of the plot (counted at a nominal 300 dpi), keeping the first, last, minimum and maximum point in each column, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads.
+Lines with sorted numeric or time x values are downsampled when they have more than four points per pixel column of the plot (counted at a nominal 300 dpi), keeping the first, last, minimum and maximum point in each column, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads.
 
 ## Rust
 
