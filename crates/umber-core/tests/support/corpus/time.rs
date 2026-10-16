@@ -205,6 +205,13 @@ fn figures() -> Vec<(String, Figure)> {
             ErrorBarOptions::default(),
         )
         .unwrap()
+        .x_error_bars_time(
+            AxisData::Numbers(vec![1.5]),
+            Arc::from([Some(date(2026, 1, 16))]),
+            Arc::from([Some(date(2026, 1, 25))]),
+            ErrorBarOptions::default(),
+        )
+        .unwrap()
         .vspan_time(date(2026, 1, 10), date(2026, 1, 14), SpanOptions::default())
         .unwrap()
         .vline(
@@ -238,6 +245,13 @@ fn figures() -> Vec<(String, Figure)> {
             AxisData::Times(y[..4].to_vec()),
             Arc::from([0.5, 1.5, 2.5, 3.5]),
             Arc::from([1.5, 2.5, 3.5, 4.5]),
+            ErrorBarOptions::default(),
+        )
+        .unwrap()
+        .y_error_bars_time(
+            AxisData::Numbers(vec![9.0, 10.0]),
+            Arc::from([Some(date(2026, 1, 20)), Some(date(2026, 2, 1))]),
+            Arc::from([Some(date(2026, 2, 5)), Some(date(2026, 3, 10))]),
             ErrorBarOptions::default(),
         )
         .unwrap()
@@ -341,6 +355,33 @@ fn time_errors() -> String {
     rec.on_axes(&mut f, "x_error_bars", |a| {
         a.x_error_bars(&[1.0], &[0.0], &[2.0], ErrorBarOptions::default())
             .map(drop)
+    });
+    rec.on_axes(&mut f, "x_error_bars_time ok", |a| {
+        a.x_error_bars_time(
+            AxisData::Numbers(vec![1.0]),
+            Arc::from([Some(jan)]),
+            Arc::from([Some(feb)]),
+            ErrorBarOptions::default(),
+        )
+        .map(drop)
+    });
+    rec.on_axes(&mut f, "x_error_bars_time reversed", |a| {
+        a.x_error_bars_time(
+            AxisData::Numbers(vec![1.0]),
+            Arc::from([Some(feb)]),
+            Arc::from([Some(jan)]),
+            ErrorBarOptions::default(),
+        )
+        .map(drop)
+    });
+    rec.on_axes(&mut f, "y_error_bars_time on a linear y", |a| {
+        a.y_error_bars_time(
+            times(&[jan]),
+            Arc::from([Some(jan)]),
+            Arc::from([Some(feb)]),
+            ErrorBarOptions::default(),
+        )
+        .map(drop)
     });
 
     rec.section("Axes on a linear/time pair");

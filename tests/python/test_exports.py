@@ -18,6 +18,7 @@ EXPECTED = [
     "Series",
     "Cmap",
     "Color",
+    "ColorBy",
     "DataError",
     "Dash",
     "Distribution",

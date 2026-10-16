@@ -236,7 +236,9 @@ fn figures() -> Vec<(&'static str, Figure)> {
                 &y,
                 ScatterOptions {
                     label: "Faded points".into(),
-                    color: ColorSpec::Auto(umber_core::Alpha::new(0.5).unwrap()),
+                    color: umber_core::PointColor::Uniform(ColorSpec::Auto(
+                        umber_core::Alpha::new(0.5).unwrap(),
+                    )),
                     ..ScatterOptions::default()
                 },
             )
@@ -424,7 +426,9 @@ fn chips_figures() -> Vec<(&'static str, Figure)> {
                 &y,
                 ScatterOptions {
                     label: "Faded points".into(),
-                    color: ColorSpec::Auto(umber_core::Alpha::new(0.5).unwrap()),
+                    color: umber_core::PointColor::Uniform(ColorSpec::Auto(
+                        umber_core::Alpha::new(0.5).unwrap(),
+                    )),
                     ..ScatterOptions::default()
                 },
             )

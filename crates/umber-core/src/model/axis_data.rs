@@ -70,43 +70,43 @@ impl AxisData {
 /// The x values of a mark that stores them shared, as bands and stacked areas do: numbers on a
 /// linear or log axis, times on a time axis. Clones share the allocation.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum SharedX {
+pub(crate) enum SharedValues {
     /// Numbers; NaN marks a gap.
     Numbers(Arc<[f64]>),
     /// Times; `None` marks a gap.
     Times(Arc<[Option<Instant>]>),
 }
 
-impl SharedX {
+impl SharedValues {
     /// The number of values.
     pub(crate) fn len(&self) -> usize {
         match self {
-            SharedX::Numbers(values) => values.len(),
-            SharedX::Times(times) => times.len(),
+            SharedValues::Numbers(values) => values.len(),
+            SharedValues::Times(times) => times.len(),
         }
     }
 
     /// Whether the value at `i` is a gap: NaN or a missing time.
     pub(crate) fn is_gap(&self, i: usize) -> bool {
         match self {
-            SharedX::Numbers(values) => values.get(i).is_none_or(|v| v.is_nan()),
-            SharedX::Times(times) => times.get(i).is_none_or(Option::is_none),
+            SharedValues::Numbers(values) => values.get(i).is_none_or(|v| v.is_nan()),
+            SharedValues::Times(times) => times.get(i).is_none_or(Option::is_none),
         }
     }
 
     /// The numbers; none when these are times.
     pub(crate) fn numbers(&self) -> &[f64] {
         match self {
-            SharedX::Numbers(values) => values,
-            SharedX::Times(_) => &[],
+            SharedValues::Numbers(values) => values,
+            SharedValues::Times(_) => &[],
         }
     }
 
     /// The times, `None` for a gap; none when these are numbers.
     pub(crate) fn times(&self) -> &[Option<Instant>] {
         match self {
-            SharedX::Times(times) => times,
-            SharedX::Numbers(_) => &[],
+            SharedValues::Times(times) => times,
+            SharedValues::Numbers(_) => &[],
         }
     }
 }

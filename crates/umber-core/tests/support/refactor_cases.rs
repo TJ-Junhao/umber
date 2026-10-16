@@ -91,10 +91,12 @@ mod corpus {
     pub mod r#box;
     pub mod bubbles;
     pub mod cmap;
+    pub mod color_by;
     pub mod error_bars;
     pub mod grid;
     pub mod header;
     pub mod hist;
+    pub mod horizontal;
     pub mod inputs;
     pub mod legend;
     pub mod legend_position;
@@ -170,6 +172,8 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::r#box::cases(&lib, &mut sink);
     corpus::violin::cases(&lib, &mut sink);
     corpus::cmap::cases(&mut sink);
+    corpus::color_by::cases(&lib, &mut sink);
+    corpus::horizontal::cases(&lib, &mut sink);
     corpus::time::cases(&lib, &mut sink);
 }
 
@@ -451,11 +455,11 @@ fn scene_cases(lib: &FontLibrary) -> Vec<(String, Scene)> {
                 &y,
                 ScatterOptions {
                     label: record::marker(marker).into(),
-                    color: if k == 4 {
+                    color: umber_core::PointColor::Uniform(if k == 4 {
                         ColorSpec::Fixed(rgb(220, 80, 20))
                     } else {
                         ColorSpec::Auto(Alpha::new(0.7).unwrap())
-                    },
+                    }),
                     marker,
                     ..ScatterOptions::default()
                 },
@@ -1696,7 +1700,7 @@ mod record {
                 axis_data(scatter.x()),
                 y_data(scatter.y()),
                 text(&scatter.options().label),
-                color_spec(scatter.options().color),
+                point_color(&scatter.options().color),
                 marker(scatter.options().marker)
             ),
             Mark::Area(area) => format!(
@@ -1804,7 +1808,7 @@ mod record {
                 floats64(mark.y()),
                 floats64(mark.sizes()),
                 text(&mark.options().label),
-                color_spec(mark.options().color),
+                point_color(&mark.options().color),
                 marker(mark.options().marker)
             ),
             Mark::Stem(stem) => format!(
@@ -2115,6 +2119,30 @@ mod record {
             f32(s.width),
             floats32(&s.dash)
         )
+    }
+
+    /// One color as its color spec is recorded; a color mapping by its values, colormap stops,
+    /// scale and center.
+    pub fn point_color(c: &umber_core::PointColor) -> String {
+        match c {
+            umber_core::PointColor::Uniform(spec) => color_spec(*spec),
+            umber_core::PointColor::By(by) => format!(
+                "by(values={} cmap={} scale={} center={})",
+                floats64(&by.values),
+                match &by.cmap {
+                    umber_core::CmapChoice::Theme => "theme".to_owned(),
+                    umber_core::CmapChoice::Fixed(cmap) => {
+                        let stops: Vec<String> = cmap.colors().into_iter().map(rgba).collect();
+                        format!("[{}]", stops.join(","))
+                    }
+                },
+                match by.scale {
+                    Transform::Linear => "linear".to_owned(),
+                    Transform::Log(base) => format!("log({})", f64(base.get())),
+                },
+                by.center.map_or_else(|| "none".to_owned(), f64)
+            ),
+        }
     }
 }
 
@@ -2499,7 +2527,9 @@ fn series_errors(rec: &mut Log) {
             &[1.0],
             ScatterOptions {
                 label: "fixed".into(),
-                color: ColorSpec::Fixed(rgb(1, 2, 3)).with_alpha(Alpha::new(0.5).unwrap()),
+                color: umber_core::PointColor::Uniform(
+                    ColorSpec::Fixed(rgb(1, 2, 3)).with_alpha(Alpha::new(0.5).unwrap()),
+                ),
                 marker: Marker::Diamond,
                 ..ScatterOptions::default()
             },
@@ -2529,8 +2559,8 @@ fn series_errors(rec: &mut Log) {
         });
     }
 
-    // Axes with a category y axis are created, and their mark methods refuse them, so no series
-    // meets one.
+    // Axes with a category y axis are created. Lines refuse them; the dot plots a scatter draws
+    // there are recorded with the other horizontal marks, in `corpus/horizontal.rs`.
     rec.section("Axes.line and Axes.scatter, category y");
     rec.new_figure("linear/category", linear(), ScaleKind::Category);
 

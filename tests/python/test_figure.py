@@ -18,8 +18,6 @@ from umber._errors import details
 SIZE_RULE = "it must be finite, above 0 and at most 200 inches."
 THEME_HINT = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
 SVG_TEXT_HINT = "use SvgText.OUTLINES or SvgText.EDITABLE."
-CATEGORY_Y = "Figure.add_axes(): y is a category scale; the y axis must be linear or log."
-CATEGORY_Y_HINT = "pass y=Scale.linear() or y=Scale.log()."
 SECOND_AXES = "Figure.add_axes(): row 0, col 0 is taken by the axes added at row 0, col 0."
 SECOND_AXES_HINT = "each cell holds one axes; pick an empty cell."
 
@@ -195,13 +193,15 @@ def test_occupied_cell_partial_does_not_get_a_misleading_highlight(tmp_path: Pat
     assert _notes(err) == [f"hint: {SECOND_AXES_HINT}"]
 
 
-def test_cell_category_y_error_still_highlights_y(tmp_path: Path) -> None:
-    line = "cell.add_axes(y=ub.Scale.category())"
+def test_cell_scale_type_error_highlights_y(tmp_path: Path) -> None:
+    line = "cell.add_axes(y=None)"
     err = _raised(tmp_path, line, "cell = next(ub.Figure().cells())")
-    assert isinstance(err, ub.UsageError)
-    assert str(err) == CATEGORY_Y
-    assert details(err) == ("y", CATEGORY_Y_HINT)
-    assert _notes(err) == [_marked(line, "y=ub.Scale.category()"), f"hint: {CATEGORY_Y_HINT}"]
+    assert isinstance(err, TypeError)
+    assert str(err) == "Cell.add_axes(): y is None; y must be of type Scale."
+    assert _notes(err) == [
+        _marked(line, "y=None"),
+        "hint: use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
+    ]
 
 
 def test_cell_scale_type_error_still_highlights_x(tmp_path: Path) -> None:
@@ -215,24 +215,18 @@ def test_cell_scale_type_error_still_highlights_x(tmp_path: Path) -> None:
     ]
 
 
-def test_a_category_y_axis_is_refused() -> None:
-    fig = ub.Figure()
-    before = fig.to_svg()
-    with pytest.raises(ub.UsageError) as caught:
-        fig.add_axes(x=ub.Scale.category(), y=cast(ub.Scale[float], ub.Scale.category()))
-    assert str(caught.value) == CATEGORY_Y
-    assert details(caught.value) == ("y", CATEGORY_Y_HINT)
-    assert fig._axes == {}
-    assert fig.to_svg() == before
-    fig.add_axes()  # the failed call added nothing
-
-
-def test_a_category_y_is_reported_before_a_second_axes() -> None:
-    fig = ub.Figure()
-    fig.add_axes()
-    with pytest.raises(ub.UsageError) as caught:
-        fig.add_axes(y=cast(ub.Scale[float], ub.Scale.category()))
-    assert str(caught.value) == CATEGORY_Y
+def test_a_category_y_axis_is_accepted() -> None:
+    fig = ub.Figure(cols=3)
+    horizontal = fig.add_axes(col=0, y=ub.Scale.category())
+    both = fig.add_axes(col=1, x=ub.Scale.category(), y=ub.Scale.category())
+    log = fig.add_axes(col=2, x=ub.Scale.log(), y=ub.Scale.category())
+    assert fig.axes_at(col=0, y=ub.Scale.category()) is horizontal
+    assert fig.axes_at(col=1, x=ub.Scale.category(), y=ub.Scale.category()) is both
+    assert fig.axes_at(col=2, x=ub.Scale.log(), y=ub.Scale.category()) is log
+    # The scales are part of the witness: the same cell with a linear y is not found.
+    with pytest.raises(ub.UsageError):
+        fig.axes_at(col=0)
+    assert fig.to_png().startswith(b"\x89PNG")
 
 
 @pytest.mark.parametrize(
@@ -244,7 +238,7 @@ def test_a_category_y_is_reported_before_a_second_axes() -> None:
         ({"col_span": 2}, "col_span", "col 0 with col_span 2 runs past the last column, 0."),
     ],
 )
-def test_a_bad_position_is_reported_before_a_category_y(
+def test_a_bad_position_is_reported_with_a_category_y(
     place: dict[str, int], parameter: str, message: str
 ) -> None:
     fig = ub.Figure()
@@ -259,18 +253,11 @@ def test_a_bad_position_is_reported_before_a_category_y(
     assert fig.to_svg() == before
 
 
-def test_category_y_error_highlights_y(tmp_path: Path) -> None:
-    line = "ub.Figure().add_axes(y=ub.Scale.category())"
-    err = _raised(tmp_path, line)
-    assert isinstance(err, ub.UsageError)
-    assert _notes(err) == [_marked(line, "y=ub.Scale.category()"), f"hint: {CATEGORY_Y_HINT}"]
-
-
 @pytest.mark.parametrize(
     ("name", "value", "hint"),
     [
         ("x", "log", "use Scale.linear(), Scale.log(), Scale.category() or Scale.time()."),
-        ("y", None, "use Scale.linear(), Scale.log() or Scale.time()."),
+        ("y", None, "use Scale.linear(), Scale.log(), Scale.category() or Scale.time()."),
     ],
 )
 def test_scales_must_be_scales(name: str, value: object, hint: str) -> None:

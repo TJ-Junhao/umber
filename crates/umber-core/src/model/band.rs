@@ -3,7 +3,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::axis_data::SharedX;
+use super::axis_data::SharedValues;
 use crate::{ColorSpec, Instant};
 
 /// Options of a band mark.
@@ -76,7 +76,7 @@ impl Default for BandOptions {
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct BandMark {
-    x: SharedX,
+    x: SharedValues,
     low: Arc<[f64]>,
     high: Arc<[f64]>,
     options: BandOptions,
@@ -85,7 +85,7 @@ pub struct BandMark {
 impl BandMark {
     /// A band over validated values of equal length.
     pub(super) fn new(
-        x: SharedX,
+        x: SharedValues,
         low: Arc<[f64]>,
         high: Arc<[f64]>,
         options: BandOptions,
@@ -129,7 +129,7 @@ impl BandMark {
     }
 
     /// The x values as stored: numbers or times.
-    pub(crate) fn x_values(&self) -> &SharedX {
+    pub(crate) fn x_values(&self) -> &SharedValues {
         &self.x
     }
 

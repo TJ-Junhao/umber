@@ -246,6 +246,10 @@ class FillStyle(Enum):
 class GridLines(Enum):
     """Which grid lines are drawn.
 
+    The choice describes a chart whose values lie along y. A chart whose values lie along x,
+    one with a category y axis beside a numeric x axis, mirrors it: there ``HORIZONTAL`` draws
+    the lines at the x ticks and ``VERTICAL`` those at the y ticks.
+
     Example:
         >>> import umber as ub
         >>> ub.GridLines.BOTH.name

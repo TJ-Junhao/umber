@@ -1,4 +1,8 @@
 //! Boxes, Tukey whiskers and outliers, clipped in axis space before mapping to scene points.
+//!
+//! Boxes are drawn in the frame of their orientation (see [`super::mapping`]): the category
+//! axis first, as x, and the value axis second, as y, so horizontal boxes are the same code with
+//! the axes swapped.
 
 use super::MarkContext;
 use super::bar::{GROUP_GAP, group_slots, in_axis_order};
@@ -8,27 +12,29 @@ use super::fill::AREA_ALPHA;
 use super::mapping::{AxisPoint, axis_value};
 use super::scatter::scatter_item;
 use crate::geometry::Path;
-use crate::resolve::{AxisScale, Resolved, ResolvedDistribution};
+use crate::resolve::{AxisScale, ResolvedAxis, ResolvedDistribution};
 use crate::scene::{FillRule, Item, Paint};
 use crate::stats::BoxStats;
 use crate::{Marker, Rgba, SizeSpec};
 
-/// Draws distributions in axis-category order, then distribution order within a category.
+/// Draws distributions lying along the category axis `along` with their values on `values`, in
+/// the frame of `context`: in axis-category order, then distribution order within a category.
 /// Group widths use the theme's box fraction; slot widths and gap fallback are shared with bars.
 pub(super) fn box_items(
     context: &MarkContext<'_>,
-    resolved: &Resolved,
+    (along, values): (&ResolvedAxis, &ResolvedAxis),
     names: &[String],
     distributions: &[ResolvedDistribution<'_>],
     width: f32,
     items: &mut Vec<Item>,
 ) {
-    let AxisScale::Category(categories) = &resolved.x.scale else {
+    let AxisScale::Category(categories) = &along.scale else {
         return;
     };
     let (start, end) = categories.band(0);
     let total = (end - start) * f64::from(context.theme.box_width());
-    let (slot, gap) = group_slots(total, distributions.len(), GROUP_GAP / context.plot.width);
+    let gap = context.maps.x.length(GROUP_GAP);
+    let (slot, gap) = group_slots(total, distributions.len(), gap);
     for (index, i) in in_axis_order(categories, names) {
         let (start, end) = categories.band(index);
         let left = (start + end - total) / 2.0;
@@ -39,7 +45,7 @@ pub(super) fn box_items(
             let x0 = left + j as f64 * (slot + gap);
             box_group(
                 context,
-                resolved,
+                values,
                 stats,
                 (x0, x0 + slot),
                 (distribution.color, width),
@@ -49,16 +55,17 @@ pub(super) fn box_items(
     }
 }
 
-/// Draws one summary. A constant group has only its median; empty groups never reach here.
+/// Draws one summary, its values on `values`. A constant group has only its median; empty
+/// groups never reach here.
 fn box_group(
     context: &MarkContext<'_>,
-    resolved: &Resolved,
+    values: &ResolvedAxis,
     stats: &BoxStats,
     (left, right): (f64, f64),
     (color, width): (Rgba, f32),
     items: &mut Vec<Item>,
 ) {
-    let y = |v| axis_value(&resolved.y, v);
+    let y = |v| axis_value(values, v);
     let (q1, q3, median) = (y(stats.q1), y(stats.q3), y(stats.median));
     let center = (left + right) / 2.0;
     let half_cap = (right - left) / 4.0;

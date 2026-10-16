@@ -31,18 +31,18 @@ use umber_core::{
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
     RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
-use umber_core::{
-    AxisValue, BoxOptions, Distribution, Error, ScaleKind, StemOptions, time_from_micros,
-};
+use umber_core::{AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
 
-use crate::color::{ColorArg, color_spec};
+use crate::color::{ColorArg, color_spec, point_color};
 use crate::enums::enum_value;
 use crate::errors::{core_error, internal_value};
 use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
 use crate::ticks::{TickFormatArg, tick_format};
-use crate::values::{axis_value, floats, micros, names, series_data, shared_floats, times};
+use crate::values::{
+    axis_value, floats, is_int64_buffer, micros, names, series_data, shared_floats, times,
+};
 
 /// The series of a grouped or stacked bar chart: `(label, values, color)` for each series.
 type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
@@ -210,9 +210,8 @@ impl Figure {
     /// Adds axes at the row `(row_kind, row)` and the column `(col_kind, col)`, spanning
     /// `row_span × col_span` cells, with the x scale `(x_kind, x_base)` and the y scale
     /// `(y_kind, y_base)`, and returns the `(row, col)` of their top-left cell. The core checks
-    /// the position and the scales, and a refused call adds nothing; a category y scale is
-    /// refused after the position, since no mark of the Python layer draws on one. A time scale
-    /// is allowed on either axis.
+    /// the position and the scales, and a refused call adds nothing. A time scale is allowed
+    /// on either axis.
     fn add_axes(
         &mut self,
         row_kind: i64,
@@ -234,16 +233,6 @@ impl Figure {
         };
         let x = scale_kind(x_kind, x_base)?;
         let y = scale_kind(y_kind, y_base)?;
-        // In the core's order: the position, then the y scale, then the cells taken and shared.
-        self.0.placement_cells(at).map_err(core_error)?;
-        if y == ScaleKind::Category {
-            return Err(core_error(Error::Usage {
-                context: "Figure.add_axes()",
-                message: "y is a category scale; the y axis must be linear or log.".into(),
-                parameter: Some("y"),
-                hint: Some("pass y=Scale.linear() or y=Scale.log()."),
-            }));
-        }
         let axes = self.0.add_axes_at(at, x, y).map_err(core_error)?;
         Ok((axes.cells().row(), axes.cells().col()))
     }
@@ -457,7 +446,7 @@ impl Figure {
             .map_err(core_error)
     }
 
-    /// Adds a scatter series.
+    /// Adds a scatter series; `x` and `y` each hold numbers, or names on a category axis.
     fn scatter(
         &mut self,
         row: i64,
@@ -465,7 +454,7 @@ impl Figure {
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         label: String,
-        color: ColorArg,
+        color: &Bound<'_, PyAny>,
         marker: i64,
         size: SizeArg,
     ) -> PyResult<()> {
@@ -473,7 +462,7 @@ impl Figure {
         let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
         let options = ScatterOptions {
             label,
-            color: color_spec(color)?,
+            color: point_color(color)?,
             marker: enum_value::<Marker>(marker)?,
             size: size_spec(size)?,
             ..Default::default()
@@ -493,13 +482,13 @@ impl Figure {
         y: &Bound<'_, PyAny>,
         sizes: &Bound<'_, PyAny>,
         label: String,
-        color: ColorArg,
+        color: &Bound<'_, PyAny>,
         marker: i64,
     ) -> PyResult<()> {
         let (x, y, sizes) = (shared_floats(x)?, shared_floats(y)?, shared_floats(sizes)?);
         let options = umber_core::BubbleOptions {
             label,
-            color: color_spec(color)?,
+            color: point_color(color)?,
             marker: enum_value::<Marker>(marker)?,
             ..Default::default()
         };
@@ -874,21 +863,32 @@ impl Figure {
         width: SizeArg,
         caps: bool,
     ) -> PyResult<()> {
-        let x = series_data("Axes.y_error_bars()", "x", x)?;
-        let (low, high) = (shared_floats(low)?, shared_floats(high)?);
+        const CONTEXT: &str = "Axes.y_error_bars()";
+        let x = series_data(CONTEXT, "x", x)?;
         let options = ErrorBarOptions {
             label,
             color: color_spec(color)?,
             width: size_spec(width)?,
             caps,
         };
+        // Limits in an int64 buffer are times, of a time y axis.
+        if is_int64_buffer(low) {
+            let (low, high) = (times(CONTEXT, "low", low)?, times(CONTEXT, "high", high)?);
+            return self
+                .axes(row, col)?
+                .y_error_bars_time(x, low.into(), high.into(), options)
+                .map(drop)
+                .map_err(core_error);
+        }
+        let (low, high) = (shared_floats(low)?, shared_floats(high)?);
         self.axes(row, col)?
             .y_error_bars_shared(x, low, high, options)
             .map(drop)
             .map_err(core_error)
     }
 
-    /// Adds horizontal error bars at `y` between the limits `low` and `high`.
+    /// Adds horizontal error bars at `y`, numbers or names on a category y axis, between the
+    /// limits `low` and `high`.
     fn x_error_bars(
         &mut self,
         row: i64,
@@ -901,14 +901,24 @@ impl Figure {
         width: SizeArg,
         caps: bool,
     ) -> PyResult<()> {
-        let y = series_data("Axes.x_error_bars()", "y", y)?;
-        let (low, high) = (shared_floats(low)?, shared_floats(high)?);
+        const CONTEXT: &str = "Axes.x_error_bars()";
+        let y = series_data(CONTEXT, "y", y)?;
         let options = ErrorBarOptions {
             label,
             color: color_spec(color)?,
             width: size_spec(width)?,
             caps,
         };
+        // Limits in an int64 buffer are times, of a time x axis.
+        if is_int64_buffer(low) {
+            let (low, high) = (times(CONTEXT, "low", low)?, times(CONTEXT, "high", high)?);
+            return self
+                .axes(row, col)?
+                .x_error_bars_time(y, low.into(), high.into(), options)
+                .map(drop)
+                .map_err(core_error);
+        }
+        let (low, high) = (shared_floats(low)?, shared_floats(high)?);
         self.axes(row, col)?
             .x_error_bars_shared(y, low, high, options)
             .map(drop)
@@ -933,6 +943,14 @@ impl Figure {
     /// Renders the figure as an SVG document for `Figure.save_svg()`, which reports its errors.
     fn svg_for_file(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
         Self::svg(slf, text, "Figure.save_svg()")
+    }
+
+    /// Sets the color range of the axes' color-mapped marks.
+    fn clim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
+        self.axes(row, col)?
+            .clim(low, high)
+            .map(drop)
+            .map_err(core_error)
     }
 
     /// Sets the limits of a time x axis to the times `low` and `high`, in microseconds.

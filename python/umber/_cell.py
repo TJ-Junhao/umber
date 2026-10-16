@@ -4,7 +4,7 @@ from typing import Self, final
 
 import umber
 from umber._args import instance
-from umber._axes import Axes, V, X
+from umber._axes import Axes, X, Y
 from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
@@ -68,21 +68,21 @@ class Cell:
         self,
         *,
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[V] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-    ) -> Axes[X, V]:
+        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+    ) -> Axes[X, Y]:
         """Add axes at this cell of its figure and return them.
 
         Args:
             x: The x scale: numeric, category or time.
-            y: The y scale: linear, log or time.
+            y: The y scale, numeric, category or time; a category y axis makes horizontal bars.
 
         Returns:
             The new axes, occupying this cell only.
 
         Raises:
             TypeError: If either scale has the wrong type.
-            UsageError: If the cell is occupied, ``y`` is a category scale, or the scales
-                conflict with a shared group. These errors retain ``Figure.add_axes()``.
+            UsageError: If the cell is occupied, or the scales conflict with a shared group.
+                These errors retain ``Figure.add_axes()``.
 
         Example:
             >>> import umber as ub
@@ -101,7 +101,11 @@ class Cell:
                 "use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
             )
             instance(
-                "Cell.add_axes()", "y", y, Scale, "use Scale.linear(), Scale.log() or Scale.time()."
+                "Cell.add_axes()",
+                "y",
+                y,
+                Scale,
+                "use Scale.linear(), Scale.log(), Scale.category() or Scale.time().",
             )
             return self._figure.add_axes(row=self._row, col=self._col, x=x, y=y)
 

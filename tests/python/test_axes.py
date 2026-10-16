@@ -371,6 +371,10 @@ def test_style_arguments_reach_the_figure() -> None:
     assert dots != crosses
 
 
+POINT_COLOR_HINT = (
+    'use Color.hex("#3366B8"), Color.rgb(), a named color such as Color.BLUE, or ColorBy(values).'
+)
+
 # (method, keyword, a wrong value, the expected type in the message, hint)
 STYLE_TYPE_ERRORS: list[tuple[str, str, object, str, str]] = [
     ("line", "label", 3, "a str", TEXT_HINT),
@@ -378,7 +382,7 @@ STYLE_TYPE_ERRORS: list[tuple[str, str, object, str, str]] = [
     ("line", "dash", "--", "of type Dash", DASH_HINT),
     ("line", "dash", ub.Marker.CIRCLE, "of type Dash", DASH_HINT),
     ("scatter", "label", None, "a str", TEXT_HINT),
-    ("scatter", "color", (1, 0, 0), "of type Color", COLOR_HINT),
+    ("scatter", "color", (1, 0, 0), "of type Color or ColorBy", POINT_COLOR_HINT),
     ("scatter", "marker", "o", "of type Marker", MARKER_HINT),
 ]
 

@@ -6,6 +6,7 @@ use super::axis_data::{AxisData, XySeries};
 use super::band::BandMark;
 use super::bar::{BarGroupMark, BarMark};
 use super::box_plot::{BoxGroupMark, BoxMark};
+use super::color_by::PointColor;
 use super::error_bars::ErrorBarMark;
 use super::hist::HistMark;
 use super::rule::{HLineMark, SpanMark, VLineMark};
@@ -13,6 +14,7 @@ use super::stacked_area::StackedAreaMark;
 use super::stem::StemMark;
 use super::step::StepMark;
 use super::violin::{ViolinGroupMark, ViolinMark};
+use crate::color_scale::ColorScaleSpec;
 use crate::{ColorSpec, Dash, Marker, SizeSpec};
 
 /// Options of a line mark.
@@ -76,10 +78,10 @@ pub type AreaOptions = LineOptions;
 ///
 /// ```
 /// use umber_core::figure::ScatterOptions;
-/// use umber_core::{ColorSpec, Marker, SizeSpec};
+/// use umber_core::{Marker, PointColor, SizeSpec};
 ///
 /// let options = ScatterOptions::default();
-/// assert_eq!((options.color, options.marker), (ColorSpec::AUTO, Marker::Circle));
+/// assert_eq!((&options.color, options.marker), (&PointColor::AUTO, Marker::Circle));
 /// assert_eq!(options.size, SizeSpec::Auto);
 /// assert!(options.label.is_empty());
 ///
@@ -91,8 +93,9 @@ pub type AreaOptions = LineOptions;
 pub struct ScatterOptions {
     /// The legend label; empty for none.
     pub label: String,
-    /// The marker color.
-    pub color: ColorSpec,
+    /// The marker color: one color, or a color per point mapped from values. A color-mapped
+    /// scatter has no legend entry, so its label must be empty.
+    pub color: PointColor,
     /// The marker shape.
     pub marker: Marker,
     /// The marker diameter; [`SizeSpec::Auto`] for the theme's marker size.
@@ -103,7 +106,7 @@ impl Default for ScatterOptions {
     fn default() -> Self {
         ScatterOptions {
             label: String::new(),
-            color: ColorSpec::AUTO,
+            color: PointColor::AUTO,
             marker: Marker::Circle,
             size: SizeSpec::Auto,
         }
@@ -249,6 +252,38 @@ impl Mark {
         Mark::Area(AreaMark {
             line: LineMark { series, options },
         })
+    }
+
+    /// The colormap, scale and center the mark maps its colors with; `None` for a mark that is
+    /// not color-mapped.
+    pub(super) fn color_scale(&self) -> Option<ColorScaleSpec> {
+        let color = match self {
+            Mark::Scatter(mark) => &mark.options.color,
+            Mark::Bubbles(mark) => &mark.options().color,
+            Mark::Violin(_)
+            | Mark::GroupedViolin(_)
+            | Mark::Box(_)
+            | Mark::GroupedBox(_)
+            | Mark::Line(_)
+            | Mark::Area(_)
+            | Mark::Bar(_)
+            | Mark::GroupedBar(_)
+            | Mark::StackedBar(_)
+            | Mark::StackedArea(_)
+            | Mark::Hist(_)
+            | Mark::Step(_)
+            | Mark::HLine(_)
+            | Mark::VLine(_)
+            | Mark::HSpan(_)
+            | Mark::VSpan(_)
+            | Mark::Band(_)
+            | Mark::ErrorBars(_)
+            | Mark::Stem(_) => return None,
+        };
+        match color {
+            PointColor::Uniform(_) => None,
+            PointColor::By(by) => Some(ColorScaleSpec::of(by)),
+        }
     }
 }
 

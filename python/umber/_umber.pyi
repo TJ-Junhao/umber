@@ -31,7 +31,10 @@ data before entering those methods and adds no locking of its own. On a regular 
 non-rendering calls with the façade's normalized arguments are serialized. Direct native calls
 can invoke Python buffer callbacks while borrowing the figure; those callbacks can release the
 interpreter or re-enter the figure, causing a borrow conflict even on a GIL build.
-Free-threaded builds are not verified: use one figure per thread there.
+
+Free-threaded CPython 3.14t is supported: the module keeps the GIL disabled, and different
+figures build and render in parallel threads. Calls on one ``Figure`` from several threads do
+overlap there, so any of them may raise PyO3's borrow error; the figure's state stays valid.
 """
 
 from typing import ClassVar, final
@@ -42,6 +45,7 @@ import numpy.typing
 __all__ = [
     "MAX_BINS",
     "Cmap",
+    "ColorBy",
     "Figure",
     "Theme",
     "__version__",
@@ -143,6 +147,23 @@ class Cmap:
     def from_colors(colors: list[_ColorArg]) -> Cmap: ...
     def reversed(self) -> Cmap: ...
     def colors(self) -> list[int]: ...
+
+@final
+class ColorBy:
+    """Values mapped through a colormap (``None`` for the theme's), checked when built.
+
+    The scale argument is linear or log (kinds 0 and 1); ``center`` is ``None`` for a
+    sequential mapping.
+    """
+
+    def __new__(
+        cls,
+        values: _FloatArray,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
+    ) -> ColorBy: ...
 
 @final
 class Theme:
@@ -275,7 +296,7 @@ class Figure:
         x: _SeriesValues,
         y: _SeriesValues,
         label: str,
-        color: _ColorArg,
+        color: _ColorArg | ColorBy,
         marker: int,
         size: _SizeArg,
     ) -> None: ...
@@ -287,7 +308,7 @@ class Figure:
         y: _FloatArray,
         sizes: _FloatArray,
         label: str,
-        color: _ColorArg,
+        color: _ColorArg | ColorBy,
         marker: int,
     ) -> None: ...
     def stem(
@@ -407,8 +428,8 @@ class Figure:
         row: int,
         col: int,
         x: _SeriesValues,
-        low: _FloatArray,
-        high: _FloatArray,
+        low: _FloatArray | _TimeArray,
+        high: _FloatArray | _TimeArray,
         label: str,
         color: _ColorArg,
         width: _SizeArg,
@@ -419,8 +440,8 @@ class Figure:
         row: int,
         col: int,
         y: _SeriesValues,
-        low: _FloatArray,
-        high: _FloatArray,
+        low: _FloatArray | _TimeArray,
+        high: _FloatArray | _TimeArray,
         label: str,
         color: _ColorArg,
         width: _SizeArg,
@@ -482,3 +503,4 @@ class Figure:
     def stacked_area_time(
         self, row: int, col: int, x: _TimeArray, series: list[_SeriesArg]
     ) -> None: ...
+    def clim(self, row: int, col: int, low: float, high: float) -> None: ...

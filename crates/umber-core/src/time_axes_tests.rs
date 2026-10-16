@@ -986,3 +986,90 @@ fn the_ticks_of_exact_limits_reach_both_limits() {
     assert_eq!(ticks.last(), Some(&high));
     assert_eq!(r.x.ticks.last().map(|t| t.pos.get()), Some(1.0));
 }
+
+#[test]
+fn error_bars_take_time_limits_on_a_time_value_axis() {
+    let (a, b, c) = (date(2026, 1, 1), date(2026, 1, 3), date(2026, 1, 9));
+    // Vertical bars between times on a time y axis extend its domain to their limits.
+    let mut f = figure(Theme::pigment(), LIN, TIME);
+    f.single_axes_mut()
+        .y_error_bars_time(
+            AxisData::Numbers(vec![1.0, 2.0, 3.0]),
+            Arc::from([Some(a), None, Some(b)]),
+            Arc::from([Some(b), Some(c), Some(c)]),
+            ErrorBarOptions::default(),
+        )
+        .unwrap();
+    let r = resolved(&f);
+    let scale = time_scale(&r.y.scale);
+    let share = 0.05 / 1.1;
+    assert!((scale.normalize(a) - share).abs() < 1e-12);
+    assert!((scale.normalize(c) - (1.0 - share)).abs() < 1e-12);
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
+    let bars = strokes_of(&scene, f.theme().palette()[0]);
+    // The bar with a missing limit is skipped: two stems with their caps.
+    assert_eq!(bars.len(), 1);
+    assert_eq!(move_tos(&bars[0]), 2 * 3);
+    // Horizontal bars between times on a time x axis.
+    let mut f = figure(Theme::pigment(), TIME, LIN);
+    f.single_axes_mut()
+        .x_error_bars_time(
+            AxisData::Numbers(vec![1.0]),
+            Arc::from([Some(a)]),
+            Arc::from([Some(c)]),
+            ErrorBarOptions::default(),
+        )
+        .unwrap();
+    let r = resolved(&f);
+    assert!(time_scale(&r.x.scale).normalize(c) < 1.0);
+    // Limits in the wrong order, of the wrong count, or on a numeric value axis are refused.
+    let err = refused(&mut f, |ax| {
+        ax.x_error_bars_time(
+            AxisData::Numbers(vec![1.0]),
+            Arc::from([Some(c)]),
+            Arc::from([Some(b)]),
+            ErrorBarOptions::default(),
+        )
+        .map(drop)
+    });
+    assert_eq!(
+        parts(&err),
+        (
+            "data",
+            "Axes.x_error_bars(): low[0] is 2026-01-09, above high[0] = 2026-01-03; low must not exceed high.".into(),
+            Some("low"),
+            Some("check that low and high are not swapped.")
+        )
+    );
+    let err = refused(&mut f, |ax| {
+        ax.x_error_bars_time(
+            AxisData::Numbers(vec![1.0, 2.0]),
+            Arc::from([Some(a)]),
+            Arc::from([Some(b)]),
+            ErrorBarOptions::default(),
+        )
+        .map(drop)
+    });
+    assert_eq!(
+        parts(&err).1,
+        "Axes.x_error_bars(): y has 2 values but low has 1; y, low and high must have the same length."
+    );
+    let err = refused(&mut f, |ax| {
+        ax.y_error_bars_time(
+            AxisData::Times(vec![Some(a)]),
+            Arc::from([Some(a)]),
+            Arc::from([Some(b)]),
+            ErrorBarOptions::default(),
+        )
+        .map(drop)
+    });
+    assert_eq!(
+        parts(&err),
+        (
+            "usage",
+            "Axes.y_error_bars(): the y axis is not a time axis; error bars between times need one.".into(),
+            None,
+            Some("pass y=Scale.time() to Figure.add_axes().")
+        )
+    );
+}

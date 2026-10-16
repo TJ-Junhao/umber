@@ -3,7 +3,9 @@
 import umber as ub
 
 
-def generic_stem[X, Y](axes: ub.Axes[X, Y], x: ub.Values[X], y: ub.Values[Y]) -> ub.Axes[X, Y]:
+def generic_stem[X](
+    axes: ub.Axes[X, float], x: ub.Values[X], y: ub.Values[float]
+) -> ub.Axes[X, float]:
     return axes.stem(x, y)
 
 

@@ -2,24 +2,26 @@
 
 use std::sync::Arc;
 
-use crate::{ColorSpec, Marker};
+use super::color_by::PointColor;
+use crate::Marker;
 
 /// Options of a bubble mark.
 ///
 /// # Examples
 ///
 /// ```
-/// use umber_core::{BubbleOptions, ColorSpec, Marker};
+/// use umber_core::{BubbleOptions, Marker, PointColor};
 /// let options = BubbleOptions::default();
-/// assert_eq!((options.color, options.marker), (ColorSpec::AUTO, Marker::Circle));
+/// assert_eq!((&options.color, options.marker), (&PointColor::AUTO, Marker::Circle));
 /// assert!(options.label.is_empty());
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct BubbleOptions {
     /// The legend label; the first labelled bubble entry is followed by the size references.
     pub label: String,
-    /// The marker color.
-    pub color: ColorSpec,
+    /// The marker color: one color, or a color per point mapped from values. The legend entry
+    /// and size references of a color-mapped mark are drawn in the theme's text color.
+    pub color: PointColor,
     /// The marker shape.
     pub marker: Marker,
 }
@@ -28,7 +30,7 @@ impl Default for BubbleOptions {
     fn default() -> Self {
         Self {
             label: String::new(),
-            color: ColorSpec::AUTO,
+            color: PointColor::AUTO,
             marker: Marker::Circle,
         }
     }

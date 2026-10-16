@@ -53,8 +53,12 @@ timed.hist([1.0])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccess
 timed.box(["a"], [[1.0]])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 timed.violin(["a"], [[1.0]])  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 timed.bubbles(y, y, y)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-up.y_error_bars(y, y, y)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-timed.x_error_bars(y, y, y)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+# Error bar limits along a time axis are times.
+assert_type(up.y_error_bars(y, days, days), ub.Axes[float, ub.Time])
+assert_type(timed.x_error_bars(y, times, times), ub.Axes[ub.Time, float])
+up.y_error_bars(y, y, y)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+timed.x_error_bars(y, y, y)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
 # Negative: values of the wrong kind for the axis.
 timed.line(["a"], [1.0])  # type: ignore[list-item]  # pyright: ignore[reportArgumentType]

@@ -15,6 +15,7 @@ mod band;
 mod bar;
 mod box_plot;
 mod bubbles;
+mod color_by;
 mod error_bars;
 mod figure;
 mod grid;
@@ -36,11 +37,12 @@ mod share_tests;
 pub use axes::Axes;
 pub use axes_mut::AxesMut;
 pub use axis_data::AxisData;
-pub(crate) use axis_data::SharedX;
+pub(crate) use axis_data::SharedValues;
 pub use band::{BandMark, BandOptions};
 pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};
 pub use box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use bubbles::{BubbleMark, BubbleOptions};
+pub use color_by::{CmapChoice, ColorBy, PointColor};
 pub use error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use figure::Figure;
 pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement, Share};
@@ -58,6 +60,8 @@ pub(crate) use validation::check_text;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::{Error, LogBase, Result, ScaleKind, Theme};
 
@@ -327,8 +331,24 @@ mod tests {
         assert_eq!(scales, [log_kind()]);
     }
 
+    /// Asserts the error of the mark method `context`, which draws beside a category y axis on
+    /// a numeric x axis only, called on two category axes.
+    #[track_caller]
+    fn assert_category_x<T: std::fmt::Debug>(r: Result<T>, context: &str) {
+        match &r {
+            Err(err @ Error::Usage { message, .. }) => {
+                let expected = format!("x is a category scale; {context} needs a numeric x axis.");
+                assert_eq!(message, &expected);
+                assert_eq!(err.to_string(), format!("{context}: {expected}"));
+                assert_eq!(err.parameter(), Some("x"));
+                assert_eq!(err.hint(), Some("use a linear or log x axis."));
+            }
+            other => panic!("expected Usage error, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn every_mark_method_refuses_a_category_y() {
+    fn every_mark_method_refuses_two_category_axes() {
         use crate::model::{
             AreaOptions, AxisValue, BandOptions, BarOptions, BoxOptions, BubbleOptions,
             Distribution, ErrorBarOptions, HistOptions, RuleOptions, Series, SpanOptions,
@@ -353,13 +373,10 @@ mod tests {
             }]
         };
         let one = || vec![vec![1.0]];
+        // The marks that need a numeric y axis name y.
         assert_category_y(
             a.line(cats(), &[1.0], LineOptions::default()),
             "Axes.line()",
-        );
-        assert_category_y(
-            a.scatter(cats(), &[1.0], ScatterOptions::default()),
-            "Axes.scatter()",
         );
         assert_category_y(
             a.bubbles(&[1.0], &[1.0], &[1.0], BubbleOptions::default()),
@@ -374,37 +391,13 @@ mod tests {
             "Axes.area()",
         );
         assert_category_y(a.stacked_area(&[1.0], series()), "Axes.stacked_area()");
-        assert_category_y(a.bar(names(), &[1.0], BarOptions::default()), "Axes.bar()");
-        assert_category_y(a.grouped_bar(names(), series()), "Axes.grouped_bar()");
-        assert_category_y(a.stacked_bar(names(), series()), "Axes.stacked_bar()");
-        assert_category_y(
-            a.box_plot(names(), one(), BoxOptions::default()),
-            "Axes.box()",
-        );
-        assert_category_y(
-            a.grouped_box_plot(names(), distribution()),
-            "Axes.grouped_box()",
-        );
-        assert_category_y(
-            a.violin(names(), one(), ViolinOptions::default()),
-            "Axes.violin()",
-        );
-        assert_category_y(
-            a.grouped_violin(names(), distribution()),
-            "Axes.grouped_violin()",
-        );
         assert_category_y(a.hist(&[1.0], HistOptions::default()), "Axes.hist()");
         assert_category_y(
             a.step(cats(), &[1.0], StepOptions::default()),
             "Axes.step()",
         );
         assert_category_y(a.hline(1.0, RuleOptions::default()), "Axes.hline()");
-        assert_category_y(
-            a.vline(AxisValue::Category("a".into()), RuleOptions::default()),
-            "Axes.vline()",
-        );
         assert_category_y(a.hspan(0.0, 1.0, SpanOptions::default()), "Axes.hspan()");
-        assert_category_y(a.vspan(0.0, 1.0, SpanOptions::default()), "Axes.vspan()");
         assert_category_y(
             a.band(&[1.0], &[0.0], &[1.0], BandOptions::default()),
             "Axes.band()",
@@ -413,11 +406,133 @@ mod tests {
             a.y_error_bars(cats(), &[0.0], &[1.0], ErrorBarOptions::default()),
             "Axes.y_error_bars()",
         );
-        assert_category_y(
-            a.x_error_bars(&[1.0], &[0.0], &[1.0], ErrorBarOptions::default()),
+        // The marks that also draw beside a category y axis need a numeric x axis there, and
+        // name x.
+        assert_category_x(
+            a.scatter_shared(cats(), cats(), ScatterOptions::default()),
+            "Axes.scatter()",
+        );
+        assert_category_x(a.bar(names(), &[1.0], BarOptions::default()), "Axes.bar()");
+        assert_category_x(a.grouped_bar(names(), series()), "Axes.grouped_bar()");
+        assert_category_x(a.stacked_bar(names(), series()), "Axes.stacked_bar()");
+        assert_category_x(
+            a.box_plot(names(), one(), BoxOptions::default()),
+            "Axes.box()",
+        );
+        assert_category_x(
+            a.grouped_box_plot(names(), distribution()),
+            "Axes.grouped_box()",
+        );
+        assert_category_x(
+            a.violin(names(), one(), ViolinOptions::default()),
+            "Axes.violin()",
+        );
+        assert_category_x(
+            a.grouped_violin(names(), distribution()),
+            "Axes.grouped_violin()",
+        );
+        assert_category_x(
+            a.vline(AxisValue::Category("a".into()), RuleOptions::default()),
+            "Axes.vline()",
+        );
+        assert_category_x(a.vspan(0.0, 1.0, SpanOptions::default()), "Axes.vspan()");
+        assert_category_x(
+            a.x_error_bars_shared(
+                cats(),
+                Arc::from([0.0]),
+                Arc::from([1.0]),
+                ErrorBarOptions::default(),
+            ),
             "Axes.x_error_bars()",
         );
         assert!(a.marks().is_empty());
+    }
+
+    #[test]
+    fn a_category_y_beside_a_numeric_x_takes_the_horizontal_marks() {
+        use crate::model::{
+            AreaOptions, AxisValue, BarOptions, BoxOptions, Distribution, ErrorBarOptions,
+            HistOptions, RuleOptions, Series, SpanOptions, ViolinOptions,
+        };
+        let mut f = figure();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Category).unwrap();
+        let names = || vec!["a".to_owned(), "b".to_owned()];
+        let cats = || AxisData::Categories(names());
+        let series = || {
+            vec![Series {
+                values: vec![1.0, -2.0],
+                ..Series::default()
+            }]
+        };
+        let distribution = || {
+            vec![Distribution {
+                groups: vec![vec![1.0], vec![2.0, 3.0]],
+                ..Distribution::default()
+            }]
+        };
+        let two = || vec![vec![1.0], vec![2.0, 3.0]];
+        a.bar(names(), &[1.0, 2.0], BarOptions::default())
+            .unwrap()
+            .grouped_bar(names(), series())
+            .unwrap()
+            .stacked_bar(names(), series())
+            .unwrap()
+            .box_plot(names(), two(), BoxOptions::default())
+            .unwrap()
+            .grouped_box_plot(names(), distribution())
+            .unwrap()
+            .violin(names(), two(), ViolinOptions::default())
+            .unwrap()
+            .grouped_violin(names(), distribution())
+            .unwrap()
+            .scatter_shared(nums(&[1.0, 2.0]), cats(), ScatterOptions::default())
+            .unwrap()
+            .x_error_bars_shared(
+                cats(),
+                Arc::from([0.0, 1.0]),
+                Arc::from([1.0, 2.0]),
+                ErrorBarOptions::default(),
+            )
+            .unwrap()
+            .vline(AxisValue::Number(1.0), RuleOptions::default())
+            .unwrap()
+            .vspan(0.0, 1.0, SpanOptions::default())
+            .unwrap();
+        assert_eq!(a.marks().len(), 11);
+        // The values of a horizontal mark are checked on the x axis, and numbers among the
+        // positions on the category y axis are refused, as on a category x axis.
+        assert_data(
+            a.bar(names(), &[1.0, f64::INFINITY], BarOptions::default()),
+            "Axes.bar()",
+            "heights[1] is inf; values must be finite.",
+        );
+        assert_data(
+            a.scatter(nums(&[1.0]), &[1.0], ScatterOptions::default()),
+            "Axes.scatter()",
+            "category axis",
+        );
+        // The other marks keep refusing a category y axis.
+        assert_category_y(
+            a.line(nums(&[1.0]), &[1.0], LineOptions::default()),
+            "Axes.line()",
+        );
+        assert_category_y(
+            a.area(nums(&[1.0]), &[1.0], AreaOptions::default()),
+            "Axes.area()",
+        );
+        assert_category_y(a.hist(&[1.0], HistOptions::default()), "Axes.hist()");
+        assert_category_y(a.hline(1.0, RuleOptions::default()), "Axes.hline()");
+        assert_eq!(a.marks().len(), 11);
+
+        // On a log x axis the values of horizontal bars must be positive.
+        let mut g = figure();
+        let mut b = g.add_axes(log_kind(), ScaleKind::Category).unwrap();
+        assert_data(
+            b.bar(names(), &[1.0, -1.0], BarOptions::default()),
+            "Axes.bar()",
+            "heights[1] is -1 on a log axis; values must be positive.",
+        );
+        assert!(b.marks().is_empty());
     }
 
     #[test]
@@ -716,12 +831,12 @@ mod tests {
             "categories holds names but the x axis is not a category axis; use a category x axis.",
         );
 
-        // Bars refuse a category y axis.
+        // Bars refuse two category axes, naming x: on a category y axis they need a numeric x.
         let mut h = figure();
         let mut c = h
             .add_axes(ScaleKind::Category, ScaleKind::Category)
             .unwrap();
-        assert_category_y(bars(&mut c, &["a"], &[1.0]), BAR);
+        assert_category_x(bars(&mut c, &["a"], &[1.0]), BAR);
     }
 
     #[test]

@@ -11,6 +11,7 @@ mod clip;
 mod downsample;
 mod error_bars;
 mod hist;
+mod horizontal;
 mod line;
 mod mapping;
 mod marker;

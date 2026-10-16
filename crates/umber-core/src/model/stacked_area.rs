@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::axis_data::SharedX;
+use super::axis_data::SharedValues;
 use super::bar::{Series, SeriesView};
 use super::validation::check_stacked_area;
 use crate::{Instant, Result, ScaleKind, Transform};
@@ -38,7 +38,7 @@ use crate::{Instant, Result, ScaleKind, Transform};
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackedAreaMark {
-    x: SharedX,
+    x: SharedValues,
     series: Arc<[Series]>,
 }
 
@@ -48,7 +48,7 @@ impl StackedAreaMark {
         context: &'static str,
         x_kind: ScaleKind,
         y: Transform,
-        x: SharedX,
+        x: SharedValues,
         series: Vec<Series>,
     ) -> Result<StackedAreaMark> {
         check_stacked_area(context, x_kind, y, &x, &series)?;
@@ -103,7 +103,7 @@ impl StackedAreaMark {
     }
 
     /// The x values as stored: numbers or times.
-    pub(crate) fn x_values(&self) -> &SharedX {
+    pub(crate) fn x_values(&self) -> &SharedValues {
         &self.x
     }
 

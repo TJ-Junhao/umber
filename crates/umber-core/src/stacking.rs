@@ -1,7 +1,7 @@
 //! Stacking: the cumulative segments of stacked series per category, with positive and
 //! negative values stacked separately away from zero.
 
-use crate::model::SharedX;
+use crate::model::SharedValues;
 
 /// One series' share of a stack: the span from `bottom` to `top`.
 ///
@@ -141,7 +141,7 @@ pub(crate) struct AreaStacks {
 impl AreaStacks {
     /// Stacks validated non-negative series over x, using the same sums as validation. A gap
     /// in x or a NaN in any series leaves every curve without a value at that index.
-    pub(crate) fn new(x: &SharedX, series: &[&[f64]]) -> AreaStacks {
+    pub(crate) fn new(x: &SharedValues, series: &[&[f64]]) -> AreaStacks {
         let mut curves: Vec<_> = series
             .iter()
             .map(|_| vec![f64::NAN; x.len()].into_boxed_slice())

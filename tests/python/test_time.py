@@ -278,10 +278,20 @@ def test_time_y_axis() -> None:
     ax.x_error_bars([dt.date(2026, 1, 4)], [0.5], [1.5])
     assert fig.axes_at(y=ub.Scale.time()) is ax
     assert fig.to_svg().startswith("<svg")
-    with pytest.raises(ub.UsageError) as caught:
+    ax.y_error_bars(
+        [1.0, 2.0], [dt.date(2026, 1, 2), np.datetime64("NaT", "s")], [dt.date(2026, 1, 4)] * 2
+    )
+    assert fig.to_svg().startswith("<svg")
+    with pytest.raises(ub.DataError) as caught:
         _call(ax, "y_error_bars")([1.0], [1.0], [2.0])
     assert str(caught.value) == (
-        "Axes.y_error_bars(): y is a time scale; Axes.y_error_bars() needs a numeric y axis."
+        "Axes.y_error_bars(): low[0] is 1.0; values must be times on a time axis."
+    )
+    with pytest.raises(ub.DataError) as caught:
+        ax.y_error_bars([1.0], [dt.date(2026, 1, 5)], [dt.date(2026, 1, 4)])
+    assert str(caught.value) == (
+        "Axes.y_error_bars(): low[0] is 2026-01-05, above high[0] = 2026-01-04; low must not "
+        "exceed high."
     )
 
 
@@ -341,6 +351,7 @@ def test_band_and_stacked_area_take_times() -> None:
     ax.band(days, [1.0, 1.5, 1.0, 2.0, 1.5], [3.0, 3.5, 3.0, 4.0, 3.5], label="Range")
     ax.stacked_area(days, [ub.Series("A", [1.0, 2.0, 1.0, 2.0, 1.0])])
     ax.y_error_bars(days[:2], [1.0, 2.0], [2.0, 3.0]).stem(days, [1.0] * 5)
+    ax.x_error_bars([2.5], [days[1]], [days[3]])
     assert ax.figure.to_svg().startswith("<svg")
     with pytest.raises(ub.UsageError) as caught:
         _call(ax, "bubbles")(days, [1.0] * 5, [1.0] * 5)

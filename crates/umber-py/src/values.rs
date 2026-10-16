@@ -144,8 +144,9 @@ pub(crate) fn micros(obj: &Bound<'_, PyAny>) -> PyResult<Vec<i64>> {
     buffer.to_vec(obj.py())
 }
 
-/// Whether `obj` exports a one-dimensional int64 buffer that [`micros`] reads.
-fn is_int64_buffer(obj: &Bound<'_, PyAny>) -> bool {
+/// Whether `obj` exports a one-dimensional int64 buffer that [`micros`] reads: times, where a
+/// data argument may hold numbers or times.
+pub(crate) fn is_int64_buffer(obj: &Bound<'_, PyAny>) -> bool {
     PyBuffer::<i64>::get(obj)
         .is_ok_and(|buffer| buffer.dimensions() == 1 && is_native_i64(buffer.format().to_bytes()))
 }

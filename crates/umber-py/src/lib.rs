@@ -22,13 +22,23 @@ mod values;
 use pyo3::prelude::*;
 
 /// Native extension module behind the `umber` Python package. Private: use `umber` instead.
-#[pymodule]
+///
+/// The module runs without the GIL on free-threaded Python (`gil_used = false`):
+///
+/// - `Figure` is the only mutable class. PyO3 checks its borrows at run time, so a call that
+///   changes a figure while another thread uses it raises `RuntimeError` instead of racing.
+///   Rendering copies the figure under a short borrow and renders the copy.
+/// - `Theme` is frozen, and the functions keep no state between calls.
+/// - The core keeps no mutable global state other than its font library, whose caches sit
+///   behind locks and atomics.
+#[pymodule(gil_used = false)]
 fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", umber_core::VERSION)?;
     m.add("MAX_BINS", umber_core::MAX_BINS)?;
     m.add_class::<theme::Theme>()?;
     m.add_class::<cmap::Cmap>()?;
     m.add_class::<figure::Figure>()?;
+    m.add_class::<color::ColorBy>()?;
     m.add_function(wrap_pyfunction!(enums::enum_members, m)?)?;
     m.add_function(wrap_pyfunction!(figure::grid_auto_size, m)?)?;
     m.add_function(wrap_pyfunction!(figure::grid_cells, m)?)?;
