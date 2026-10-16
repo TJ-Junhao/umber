@@ -62,6 +62,8 @@
 //!   [`BarMark`], [`BarGroupMark`], [`SeriesView`], [`BoxMark`], [`BoxGroupMark`],
 //!   [`ViolinMark`], [`ViolinGroupMark`], [`DistributionView`], [`BandMark`], [`ErrorBarMark`]
 //!   and [`HistMark`] that [`Axes::marks`] returns;
+//! - numeric cells: [`MeshOptions`], [`Hist2dOptions`] and [`HexbinOptions`], with the
+//!   read-only [`MeshMark`], [`Hist2dMark`] and [`HexbinMark`] payloads of [`Mark`];
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
@@ -94,6 +96,8 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+#[path = "stats/bin2d.rs"]
+mod bin2d;
 mod binning;
 mod bubble_fit;
 #[cfg(test)]
@@ -158,6 +162,7 @@ pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionVi
 pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{CmapChoice, ColorBy, PointColor};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use figure::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
 pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{Font, Weight};

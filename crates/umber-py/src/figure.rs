@@ -23,15 +23,18 @@
     reason = "native methods take a cell, the data and every option as plain values"
 )]
 
+use crate::cmap::Cmap;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use umber_core::ViolinOptions;
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
     RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
 use umber_core::{AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
+use umber_core::{
+    CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
+};
 
 use crate::color::{ColorArg, color_spec, point_color};
 use crate::enums::enum_value;
@@ -63,6 +66,29 @@ fn grid_index(kind: i64, index: i64) -> PyResult<GridIndex> {
         AT_INDEX => Ok(GridIndex::At(index)),
         _ => Err(internal_value(format!("{kind} is not a grid index kind"))),
     }
+}
+
+/// Converts the shared numeric color scale argument of cell marks.
+fn cell_colors(
+    cmap: Option<PyRef<'_, Cmap>>,
+    kind: i64,
+    base: f64,
+) -> PyResult<(CmapChoice, Transform)> {
+    let transform = match scale_kind(kind, base)? {
+        ScaleKind::Linear => Transform::Linear,
+        ScaleKind::Log { base } => Transform::Log(base),
+        _ => {
+            return Err(internal_value(
+                "a color mapping needs a linear or log scale",
+            ));
+        }
+    };
+    Ok((
+        cmap.map_or(CmapChoice::Theme, |cmap| {
+            CmapChoice::Fixed(cmap.core().clone())
+        }),
+        transform,
+    ))
 }
 
 /// The grid of `rows × cols` cells.
@@ -709,6 +735,98 @@ impl Figure {
         };
         self.axes(row, col)?
             .hist_shared(values, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds rectangular cells with flattened row-major color values.
+    #[pyo3(signature = (row, col, x_edges, y_edges, values, cmap, scale, base, center))]
+    fn mesh(
+        &mut self,
+        row: i64,
+        col: i64,
+        x_edges: &Bound<'_, PyAny>,
+        y_edges: &Bound<'_, PyAny>,
+        values: &Bound<'_, PyAny>,
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+        center: Option<f64>,
+    ) -> PyResult<()> {
+        let (x, y, values) = (floats(x_edges)?, floats(y_edges)?, floats(values)?);
+        let (cmap, scale) = cell_colors(cmap, scale, base)?;
+        self.axes(row, col)?
+            .mesh(
+                &x,
+                &y,
+                &values,
+                MeshOptions {
+                    cmap,
+                    scale,
+                    center,
+                    ..Default::default()
+                },
+            )
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Counts paired coordinates in rectangular bins.
+    #[pyo3(signature = (row, col, x, y, bins, cmap, scale, base))]
+    fn hist2d(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        bins: (usize, usize),
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+    ) -> PyResult<()> {
+        let (x, y) = (floats(x)?, floats(y)?);
+        let (cmap, scale) = cell_colors(cmap, scale, base)?;
+        self.axes(row, col)?
+            .hist2d(
+                &x,
+                &y,
+                Hist2dOptions {
+                    bins,
+                    cmap,
+                    scale,
+                    ..Default::default()
+                },
+            )
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Counts paired coordinates in regular pointy-top hexagons.
+    #[pyo3(signature = (row, col, x, y, gridsize, cmap, scale, base))]
+    fn hexbin(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        gridsize: usize,
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+    ) -> PyResult<()> {
+        let (x, y) = (floats(x)?, floats(y)?);
+        let (cmap, scale) = cell_colors(cmap, scale, base)?;
+        self.axes(row, col)?
+            .hexbin(
+                &x,
+                &y,
+                HexbinOptions {
+                    gridsize,
+                    cmap,
+                    scale,
+                    ..Default::default()
+                },
+            )
             .map(drop)
             .map_err(core_error)
     }

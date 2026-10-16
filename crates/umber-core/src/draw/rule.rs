@@ -180,6 +180,9 @@ pub(super) fn span_layer(
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::Hist { .. }
+            | ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
@@ -229,6 +232,9 @@ pub(super) fn rule_layer(
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::Hist { .. }
+            | ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
