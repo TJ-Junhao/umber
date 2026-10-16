@@ -505,15 +505,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def line(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
-        y: Values[Y],
+        y: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a line through the points ``(x[i], y[i])``, in order.
 
         A NaN in ``x`` or ``y`` leaves a gap in the line.
@@ -535,6 +535,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, or names and numbers do not match the x
                 axis.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -556,15 +557,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def area(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
-        y: Values[Y],
+        y: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a line through the points ``(x[i], y[i])``, in order, and fill the region below it.
 
         The fill reaches down to the baseline of the axes. A NaN in ``x`` or ``y`` leaves a gap in
@@ -587,6 +588,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, or names and numbers do not match the x
                 axis.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -608,7 +610,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def scatter(
-        self,
+        self: "Axes[float, float] | Axes[str, float] | Axes[float, str]",
         x: Values[X],
         y: Values[Y],
         *,
@@ -616,7 +618,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, Y]":
         """Add a marker at each point ``(x[i], y[i])``.
 
         A point with a NaN coordinate is left out. On a category y axis the scatter is a dot
@@ -661,10 +663,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             ys = self._y_values(context, y)
             name = _args.text(context, "label", label)
             self._native.scatter(self._row, self._col, xs, ys, name, spec, shape.value, extent)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def bubbles(
-        self: "Axes[float, Y]",
+        self: "Axes[float, float]",
         x: Values[float],
         y: Values[float],
         sizes: Values[float],
@@ -672,7 +675,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         label: str = "",
         color: Color = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
-    ) -> "Axes[float, Y]":
+    ) -> "Axes[float, float]":
         """Add markers whose areas are proportional to non-negative size values.
 
         Bubble marks on these axes share one size scale. The largest size among points with
@@ -713,7 +716,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If lengths differ, coordinates are invalid for their axes, or a size
                 is negative, non-finite, or above 1e300.
-            UsageError: If the x axis is a category axis.
+            UsageError: If either axis is a category axis.
             StyleError: If ``label`` is too long.
 
         Example:
@@ -737,7 +740,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def stem(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
         y: Values[float],
         *,
@@ -745,7 +748,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a line from the baseline to each value, with a marker at its tip.
 
         A linear y domain includes zero. On a log y axis, stems start at the baseline.
@@ -770,6 +773,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If lengths differ, a value is infinite, a magnitude is too large, a
                 value is not positive or is too small on a log axis, or x has the wrong kind.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1032,8 +1036,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return cast("Axes[X, Y]", self)
 
     def stacked_area(
-        self: "Axes[float, Y]", x: Values[float], series: Sequence[Series]
-    ) -> "Axes[float, Y]":
+        self: "Axes[float, float]", x: Values[float], series: Sequence[Series]
+    ) -> "Axes[float, float]":
         """Add non-negative series stacked in order over shared x values.
 
         Each layer fills between the previous cumulative curve and its own, flat at the
@@ -1058,7 +1062,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If series is empty, lengths differ, x is not sorted, a value is
                 negative or infinite, a value violates its scale's bounds, or a cumulative
                 total exceeds the supported magnitude. Log values must be positive.
-            UsageError: If the x axis is a category axis.
+            UsageError: If either axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1121,16 +1125,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def step(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
-        y: Values[Y],
+        y: Values[float],
         *,
         where: Step = Step.POST,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a step line through the points ``(x[i], y[i])``, in order.
 
         The line runs horizontally and changes level vertically, at the place ``where`` sets.
@@ -1160,6 +1164,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, names and numbers do not match the x
                 axis, or x is not in non-decreasing order.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1184,14 +1189,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def hline(
-        self,
+        self: "Axes[X, float]",
         y: float,
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a horizontal reference line across the whole plot at ``y``.
 
         The line is drawn above the data marks. Without explicit y limits the y axis extends to
@@ -1213,6 +1218,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If ``y`` is not finite, or not positive on a log axis.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1231,14 +1237,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def vline(
-        self,
+        self: "Axes[float, float] | Axes[str, float] | Axes[float, str]",
         x: X,
         *,
         label: str = "",
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, Y]":
         """Add a vertical reference line at ``x`` across the plot.
 
         On a linear or log x axis ``x`` is a number, and without explicit x limits the x axis
@@ -1268,6 +1274,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 axis or a name on a linear or log axis.
             DataError: If ``x`` is not finite, or not positive on a log axis.
             StyleError: If ``label`` is too long.
+            UsageError: If both axes are category axes.
 
         Example:
             >>> import umber as ub
@@ -1290,16 +1297,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 position = _args.checked_text(context, "x", "x", position, DataError)
             name = _args.text(context, "label", label)
             self._native.vline(self._row, self._col, position, name, spec, style.value, extent)
-            return self
+            # The self type only restricts the call: these are the Axes[X, Y] it was made on.
+            return cast("Axes[X, Y]", self)
 
     def hspan(
-        self,
+        self: "Axes[X, float]",
         low: float,
         high: float,
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a horizontal reference span between the y values ``low`` and ``high``.
 
         The span fills the region between the two values across the whole plot, at the opacity
@@ -1321,6 +1329,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
             StyleError: If ``low`` is not below ``high``, or ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1387,14 +1396,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def band(
-        self: "Axes[float, Y]",
+        self: "Axes[float, float]",
         x: Values[float],
         low: Values[float],
         high: Values[float],
         *,
         label: str = "",
         color: Color = Color.AUTO,
-    ) -> "Axes[float, Y]":
+    ) -> "Axes[float, float]":
         """Add a band between the curves ``(x[i], low[i])`` and ``(x[i], high[i])``.
 
         The band is a flat fill at the opacity of an area, with no outline, whatever the fill
@@ -1422,7 +1431,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, ``x`` is not in non-decreasing order, or a
                 value of ``low`` is above the value of ``high`` at the same index.
             StyleError: If ``label`` is too long.
-            UsageError: If the x axis is a category axis.
+            UsageError: If either axis is a category axis.
 
         Example:
             >>> import umber as ub
@@ -1444,7 +1453,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def y_error_bars(
-        self,
+        self: "Axes[X, float]",
         x: Values[X],
         low: Values[float],
         high: Values[float],
@@ -1453,7 +1462,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         width: Size = Size.AUTO,
         caps: bool = True,
-    ) -> Self:
+    ) -> "Axes[X, float]":
         """Add a vertical error bar at each ``x[i]``, from ``low[i]`` to ``high[i]``.
 
         On a category x axis the bar is drawn at the centre of the category. With ``caps`` each
@@ -1487,6 +1496,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 value is not positive on a log axis, names and numbers do not match the x axis,
                 or a value of ``low`` is above the value of ``high`` at the same index.
             StyleError: If ``label`` is too long.
+            UsageError: If the y axis is a category axis.
 
         Example:
             >>> import umber as ub

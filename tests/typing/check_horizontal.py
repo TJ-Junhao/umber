@@ -69,3 +69,35 @@ h.x_error_bars(values, [0.0, 1.0], [1.0, 2.0])  # type: ignore[arg-type]  # pyri
 # Negative: a category y axis has no y limits, and histograms bin numbers along x into y.
 h.ylim(0, 1)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 h.hist(values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+# Positive: the marks with numeric values on y keep the type of the axes they draw on.
+xs = [0.0, 1.0]
+ax = ub.Figure().add_axes()
+assert_type(ax.line(xs, values).area(xs, values).step(xs, values), ub.Axes[float, float])
+assert_type(ax.stem(xs, values).y_error_bars(xs, values, values), ub.Axes[float, float])
+assert_type(ax.hline(1.0).hspan(0.0, 1.0).band(xs, values, values), ub.Axes[float, float])
+assert_type(ax.stacked_area(xs, series).bubbles(xs, values, values), ub.Axes[float, float])
+assert_type(cats.line(names, values).stem(names, values).hline(1.0), ub.Axes[str, float])
+assert_type(cats.y_error_bars(names, values, values).bar(names, values), ub.Axes[str, float])
+
+# Positive: scatter and vline draw on every axes but two category axes.
+assert_type(ax.scatter(xs, values).vline(0.5).line(xs, values), ub.Axes[float, float])
+assert_type(cats.scatter(names, values).vline("North").title("t"), ub.Axes[str, float])
+assert_type(h.scatter(values, names).vline(4.0).bar(names, values), ub.Axes[float, str])
+
+# Negative: the marks with numeric values on y refuse a category y axis.
+h.line(xs, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.area(xs, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.step(xs, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.stem(xs, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.y_error_bars(xs, values, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.hline(1.0)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.hspan(0.0, 1.0)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.band(xs, values, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.stacked_area(xs, series)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+h.bubbles(xs, values, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+both.line(names, values)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+# Negative: two category axes take neither a scatter nor a vertical line.
+both.scatter(names, names)  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+both.vline("North")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
