@@ -7,41 +7,47 @@
 
 use std::collections::HashSet;
 
+use crate::draw::fill::{AREA_ALPHA, HISTOGRAM_TOP_ALPHA, marker_alpha};
 use crate::model::Figure;
 use crate::resolve::{Anchor, Limits, ResolvedMark, SeriesKey, SeriesKind};
 use crate::{Dash, FillStyle, LegendStyle, Rgba, Theme};
 
-/// How a filled swatch represents the mark over the plot background. Gradients use their
-/// peak fill opacity: the identifiable colored end, rather than their transparent baseline.
+/// What the fill of a legend swatch shows: a mark's fill as drawn, composited over the plot
+/// background, or the plain series color for marks drawn without a translucent fill. A
+/// gradient is shown by its most opaque end, the colored one, rather than its transparent
+/// baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SwatchFill {
-    /// An unfilled mark retains its existing stroke or dot color.
-    Unchanged,
-    /// A solid fill in the series color.
+    /// The series color as it is: lines, steps, reference lines and error bars.
+    Series,
+    /// A solid fill in the series color: bars.
     Solid,
-    /// A fill at area opacity, flat or at the colored end of a gradient.
+    /// A fill at the area opacity, flat or at the colored end of a gradient: areas, stacked
+    /// areas, bands, spans, boxes and violins.
     Area,
-    /// A histogram's solid fill or the colored end of its gradient.
+    /// A histogram's solid fill, or the colored end of its gradient.
     Histogram,
-    /// A bubble's fill at the theme's marker opacity.
+    /// A marker fill at the theme's marker opacity: scatters, stems and bubbles.
     Marker,
 }
 
 impl SwatchFill {
-    /// The displayed swatch color. Filled marks are opaque so chips and marks behind an
-    /// inset legend cannot change the representative color.
+    /// The color the swatch of a series in `color` is filled with under `theme`: the series
+    /// color for [`Series`](Self::Series), otherwise the fill as the mark draws it, composited
+    /// over the theme's background ([`Rgba::over`]), so a swatch over chips, marks or other
+    /// legend boxes still shows the color the fill shows on the plot.
     fn color(self, color: Rgba, theme: &Theme) -> Rgba {
-        let alpha = match self {
-            Self::Unchanged => return color,
+        let share = match self {
+            Self::Series => return color,
             Self::Solid => 1.0,
-            Self::Area => crate::color::AREA_ALPHA,
-            Self::Histogram if theme.fill_style() == FillStyle::Gradient => {
-                crate::color::HISTOGRAM_TOP_ALPHA
-            }
-            Self::Histogram => 1.0,
-            Self::Marker => theme.marker_alpha(),
+            Self::Area => AREA_ALPHA,
+            Self::Histogram => match theme.fill_style() {
+                FillStyle::Gradient => HISTOGRAM_TOP_ALPHA,
+                FillStyle::Solid => 1.0,
+            },
+            Self::Marker => marker_alpha(theme),
         };
-        color.scale_alpha(alpha).over_background(theme.background())
+        color.scale_alpha(share).over(theme.background())
     }
 }
 
@@ -52,6 +58,13 @@ pub(crate) enum Swatch {
     Bubble {
         /// The radius of the circle path, in points.
         radius: f32,
+    },
+    /// A filled rectangle under a top edge in the series dash and width, for areas.
+    Area {
+        /// The dash style of the edge.
+        dash: Dash,
+        /// The stroke width the edge is drawn at, in points.
+        width: f32,
     },
     /// A short line in the series dash and width.
     Line {
@@ -87,13 +100,25 @@ pub(crate) enum Swatch {
 }
 
 impl Swatch {
-    /// The swatch of a series drawn as `kind`: a line in its dash and width, a dot of its
-    /// marker diameter, a square, or a bar with caps.
+    /// The kind a merged figure legend tells entries of one label apart by: the swatch's own,
+    /// except that an area's counts as a line's, as an area is labelled as the line that bounds
+    /// it. So a line and an area of one label merge into one entry, as they did when both had
+    /// line swatches.
+    fn merge_kind(&self) -> std::mem::Discriminant<Swatch> {
+        match *self {
+            Swatch::Area { dash, width } => std::mem::discriminant(&Swatch::Line { dash, width }),
+            ref swatch => std::mem::discriminant(swatch),
+        }
+    }
+
+    /// The swatch of a series drawn as `kind`: a line in its dash and width, a filled rectangle
+    /// under such a line, a dot of its marker diameter, a square, or a bar with caps.
     fn of(kind: SeriesKind) -> Swatch {
         match kind {
             SeriesKind::Line { dash, width } | SeriesKind::Rule { dash, width } => {
                 Swatch::Line { dash, width }
             }
+            SeriesKind::Area { dash, width } => Swatch::Area { dash, width },
             SeriesKind::Points { size, .. } => Swatch::Dot { diameter: size },
             SeriesKind::Bar | SeriesKind::Span => Swatch::Square,
             SeriesKind::Box { width } => Swatch::Box { width },
@@ -103,7 +128,7 @@ impl Swatch {
     }
 }
 
-/// One legend entry: a non-empty label with its series color and swatch.
+/// One legend entry: a non-empty label with its series color, swatch and swatch fill.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LegendEntry {
     label: String,
@@ -113,24 +138,21 @@ pub(crate) struct LegendEntry {
 }
 
 impl LegendEntry {
-    /// An entry for a non-empty label; `None` for an unlabelled series.
-    pub fn new(label: &str, color: Rgba, swatch: Swatch) -> Option<LegendEntry> {
+    /// An entry for a non-empty label, with the `fill` its mark gives its swatch
+    /// ([`ResolvedMark::swatch_fill`]); `None` for an unlabelled series.
+    pub fn new(label: &str, color: Rgba, swatch: Swatch, fill: SwatchFill) -> Option<LegendEntry> {
         (!label.is_empty()).then(|| LegendEntry {
             label: label.to_owned(),
             color,
             swatch,
-            fill: match swatch {
-                Swatch::Square => SwatchFill::Solid,
-                Swatch::Box { .. } | Swatch::Violin { .. } => SwatchFill::Area,
-                Swatch::Bubble { .. } => SwatchFill::Marker,
-                _ => SwatchFill::Unchanged,
-            },
+            fill,
         })
     }
 
-    /// The entry of `key`; `None` when the series is unlabelled.
-    fn of(key: &SeriesKey<'_>) -> Option<LegendEntry> {
-        Self::new(key.label, key.color, Swatch::of(key.kind))
+    /// The entry of `key`, a series of a mark whose swatches are filled as `fill` says; `None`
+    /// when the series is unlabelled.
+    fn of(key: &SeriesKey<'_>, fill: SwatchFill) -> Option<LegendEntry> {
+        Self::new(key.label, key.color, Swatch::of(key.kind), fill)
     }
 
     /// The label; never empty.
@@ -143,13 +165,7 @@ impl LegendEntry {
         self.color
     }
 
-    /// Sets the mark's fill policy without changing its stroke color or direct labels.
-    pub fn with_fill(mut self, fill: SwatchFill) -> Self {
-        self.fill = fill;
-        self
-    }
-
-    /// The representative color of the fill, composited over the plot background.
+    /// The color the swatch is filled with under `theme` (see [`SwatchFill::color`]).
     pub fn fill_color(&self, theme: &Theme) -> Rgba {
         self.fill.color(self.color, theme)
     }
@@ -245,7 +261,7 @@ impl<'a> Legend<'a> {
             LegendStyle::Chips => RowStyle::Chips,
         };
         for (mark, key) in keys {
-            let Some(entry) = LegendEntry::of(&key) else {
+            let Some(entry) = LegendEntry::of(&key, mark.swatch_fill()) else {
                 continue;
             };
             match (style, key.anchor) {
@@ -258,7 +274,7 @@ impl<'a> Legend<'a> {
                     });
                 }
                 (LegendStyle::Header | LegendStyle::Chips | LegendStyle::Direct, _) => {
-                    row.push(entry.with_fill(mark.swatch_fill()));
+                    row.push(entry);
                     if !seen_bubbles && matches!(mark, ResolvedMark::Bubbles { .. }) {
                         row.extend(mark.size_legend(limits.y.ticks.format()));
                         seen_bubbles = true;
@@ -274,7 +290,8 @@ impl<'a> Legend<'a> {
     }
 
     /// The figure's row entries in panel and series order, with one entry per label and swatch
-    /// kind. The first swatch wins, including its color and stroke or marker size. Direct
+    /// kind, an area's swatch counting as a line's ([`Swatch::merge_kind`]). The first swatch
+    /// wins, including its kind, color and stroke or marker size. Direct
     /// line-like series remain in their panels; hidden legends contribute no entries.
     /// Bubble size references follow only the first retained bubble entry and use its panel's
     /// scale; merging legends does not share size scales between panels.
@@ -298,7 +315,7 @@ impl<'a> Legend<'a> {
                 .filter(|mark| style != LegendStyle::Direct || mark.line_width().is_none())
             {
                 for entry in mark.legend_swatch() {
-                    let key = (entry.label.clone(), std::mem::discriminant(&entry.swatch));
+                    let key = (entry.label.clone(), entry.swatch.merge_kind());
                     if seen.insert(key) {
                         row.push(entry);
                         if !seen_bubbles && matches!(mark, ResolvedMark::Bubbles { .. }) {
@@ -490,7 +507,7 @@ mod tests {
                     dash: Dash::Dashed,
                     width: 2.5 * 1.8,
                 },
-                Swatch::Line {
+                Swatch::Area {
                     dash: Dash::Solid,
                     width: 0.5,
                 },
@@ -517,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn areas_show_their_line_swatch_and_label_directly() {
+    fn areas_show_an_area_swatch_and_label_directly() {
         use crate::model::AreaOptions;
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
@@ -535,7 +552,8 @@ mod tests {
             .scatter(nums(&[0.5]), &[1.5], scatter("Samples"))
             .unwrap();
         let palette = f.theme().palette();
-        // Header and chips: the area's entry is the line swatch in its dash and color.
+        // Header and chips: the area's entry is an area swatch under its line's dash, in its
+        // color.
         for style in [LegendStyle::Header, LegendStyle::Chips] {
             let legend = legend_of(&f, style);
             let entries: Vec<(&str, Rgba, Swatch)> = legend
@@ -546,7 +564,14 @@ mod tests {
             assert_eq!(
                 entries,
                 [
-                    ("Load", palette[0], pigment_line(Dash::Dashed)),
+                    (
+                        "Load",
+                        palette[0],
+                        Swatch::Area {
+                            dash: Dash::Dashed,
+                            width: 2.0,
+                        }
+                    ),
                     ("Samples", palette[1], PIGMENT_DOT),
                 ]
             );

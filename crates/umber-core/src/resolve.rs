@@ -9,9 +9,11 @@
 //! along its line. A linear y axis that holds bars, a histogram or an area always includes 0, and a
 //! side of its nice domain that ends at 0 is not padded, so bars start on the plot edge. A category
 //! axis lists the marks' categories in order of first appearance.
-//! Bubbles contribute their whole circles and outlines, not only their centers: the final
-//! layout fits each shared automatic scale in axis space before this rounding and padding,
-//! then checks containment on the solved plot. Explicit limits and scatter are unchanged.
+//! Bubbles also contribute their whole markers and outlines, not only their centers: the final
+//! layout widens the data extent of each shared automatic axis to fit them on the solved plot
+//! (see [`crate::bubble_fit`]), and this rounding and padding then apply once, to the widened
+//! extent. When they cannot all fit, the extent stays that of the data positions, and the plot
+//! clips the bubbles. Explicit limits and scatter are unchanged.
 //! The baseline sits at 0 when 0 lies inside a linear y domain, and otherwise at the y axis's
 //! lower limit before padding. Auto y limits keep that lower limit strictly below the data: when
 //! the smallest y value lands on (or within 5 % of the span above) the lowest nice tick, the
@@ -244,6 +246,67 @@ impl<'a> Limits<'a> {
     }
 }
 
+/// The extent of the x values of an x group's `marks`, before rounding and padding.
+pub(crate) fn x_extent<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>>,
+) -> Option<(f64, f64)> {
+    extent(marks.flat_map(|mark| mark.x_numbers()))
+}
+
+/// The extent of the y values of a y group's `marks`, before rounding and padding.
+pub(crate) fn y_extent<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    transform: Transform,
+) -> Option<(f64, f64)> {
+    y_data(marks, transform).0
+}
+
+/// The y extent of a y group's `marks` and how its nice domain is padded. Bars and areas grow
+/// from 0 on a linear axis, so the extent includes 0 and the padding keeps it on the plot edge
+/// when it is a limit; on a log axis they grow from the baseline. With no data at all, explicit
+/// ticks still use the baseline convention of the mark.
+fn y_data<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    transform: Transform,
+) -> (Option<(f64, f64)>, Padding) {
+    let data = extent(marks.clone().flat_map(|mark| mark.y_values()));
+    let bars = marks.clone().any(|mark| {
+        mark.grows_from_baseline() && (data.is_none() || mark.y_values().any(f64::is_finite))
+    });
+    if bars && transform == Transform::Linear {
+        let with_zero = data.map(|(lo, hi)| (lo.min(0.0), hi.max(0.0)));
+        (with_zero, Padding::KeepZero)
+    } else {
+        (data, Padding::BothSides)
+    }
+}
+
+/// The extent that a continuous axis without explicit limits encloses before rounding and
+/// padding: the `data` extent, and with explicit ticks their positions too, as [`continuous`]
+/// encloses them.
+pub(crate) fn unrounded_extent(
+    limits: &ContinuousLimits<'_>,
+    data: Option<(f64, f64)>,
+) -> Option<(f64, f64)> {
+    match limits.ticks.explicit() {
+        Some(given) => union(data, extent(tick_positions(given))),
+        None => data,
+    }
+}
+
+/// The positions of the explicit ticks `given`, in the order given.
+fn tick_positions(given: &ExplicitTicks) -> Vec<f64> {
+    match given {
+        ExplicitTicks::Positions(values) => values.clone(),
+        ExplicitTicks::Labeled(ticks) => ticks.iter().map(|tick| tick.value).collect(),
+    }
+}
+
+/// The smallest extent holding both `a` and `b`; either alone when the other is `None`.
+fn union(a: Option<(f64, f64)>, b: Option<(f64, f64)>) -> Option<(f64, f64)> {
+    extent(a.into_iter().chain(b).flat_map(|(lo, hi)| [lo, hi]))
+}
+
 /// The smallest and largest finite value, ignoring NaN; `None` when there is none.
 fn extent(values: impl IntoIterator<Item = f64>) -> Option<(f64, f64)> {
     values
@@ -403,12 +466,7 @@ fn enclosing(
     given: &ExplicitTicks,
     auto: AutoLimits,
 ) -> (ContinuousScale, ContinuousScale) {
-    let positions: Vec<f64> = match given {
-        ExplicitTicks::Positions(values) => values.clone(),
-        ExplicitTicks::Labeled(ticks) => ticks.iter().map(|tick| tick.value).collect(),
-    };
-    let ends = data.into_iter().flat_map(|(lo, hi)| [lo, hi]);
-    let Some((lo, hi)) = extent(ends.chain(positions)) else {
+    let Some((lo, hi)) = union(data, extent(tick_positions(given))) else {
         let unit = ContinuousScale::unit(transform);
         return (unit, unit);
     };
@@ -632,20 +690,17 @@ pub(crate) fn resolve(
 
 /// Resolves one x group, with members' marks in row-major panel order, then mark order.
 /// The iterator is cloned to inspect the extent and padding without copying any mark data.
+/// `bubbles` is the extent that fits the group's bubbles, if the final layout widened the data
+/// extent to it.
 pub(crate) fn resolve_x<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
     limits: AxisLimits<'_>,
     room: &TickRoom<'_>,
-    bubble_extent: Option<(f64, f64)>,
+    bubbles: Option<(f64, f64)>,
 ) -> ResolvedAxis {
     match limits {
         AxisLimits::Continuous(x_limits) => {
-            let data = extent(
-                marks
-                    .clone()
-                    .flat_map(|mark| mark.x_numbers())
-                    .chain(bubble_extent.into_iter().flat_map(|(lo, hi)| [lo, hi])),
-            );
+            let data = union(x_extent(marks.clone()), bubbles);
             // Reference lines and spans do not decide the padding: an axis of lines and
             // references keeps the exact extent of the lines, while an axis of references
             // alone is padded.
@@ -678,32 +733,17 @@ pub(crate) fn resolve_x<'a, 'm: 'a>(
     }
 }
 
-/// Resolves one y group and the baseline shared by its members.
+/// Resolves one y group and the baseline shared by its members. `bubbles` is the extent that
+/// fits the group's bubbles, if the final layout widened the data extent to it.
 pub(crate) fn resolve_y<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
     limits: ContinuousLimits<'_>,
     room: &TickRoom<'_>,
-    bubble_extent: Option<(f64, f64)>,
+    bubbles: Option<(f64, f64)>,
 ) -> (ResolvedContinuousAxis, NormalizedPos) {
     let transform = limits.transform;
-    let data = extent(
-        marks
-            .clone()
-            .flat_map(|mark| mark.y_values())
-            .chain(bubble_extent.into_iter().flat_map(|(lo, hi)| [lo, hi])),
-    );
-    // Bars and areas grow from 0 on a linear axis, so the axis shows 0 and keeps it on the plot
-    // edge when it is a limit. On a log axis they grow from the baseline.
-    // With no data at all, explicit ticks still use the baseline convention of the mark.
-    let bars = marks.clone().any(|mark| {
-        mark.grows_from_baseline() && (data.is_none() || mark.y_values().any(f64::is_finite))
-    });
-    let (data, padding) = if bars && transform == Transform::Linear {
-        let with_zero = data.map(|(lo, hi)| (lo.min(0.0), hi.max(0.0)));
-        (with_zero, Padding::KeepZero)
-    } else {
-        (data, Padding::BothSides)
-    };
+    let (data, padding) = y_data(marks, transform);
+    let data = union(data, bubbles);
     let auto = AutoLimits::NiceBelowData(padding);
     let ContinuousAxis {
         axis: y,
@@ -1343,7 +1383,9 @@ impl<'a> ResolvedMark<'a> {
         self.line_width().is_some() || matches!(self, ResolvedMark::Band { .. })
     }
 
-    /// The fill represented by a legend row, independent of swatch shape and direct labels.
+    /// How the legend swatches of this mark are filled: the one place that decides it, for
+    /// panel legends, merged figure legends and bubble size references alike. Direct labels
+    /// keep the series color whatever the fill.
     pub fn swatch_fill(&self) -> SwatchFill {
         match self {
             Self::Area { .. }
@@ -1355,24 +1397,25 @@ impl<'a> ResolvedMark<'a> {
             | Self::Violin { .. } => SwatchFill::Area,
             Self::Hist { .. } => SwatchFill::Histogram,
             Self::Bar { .. } | Self::Grouped { .. } | Self::Stacked { .. } => SwatchFill::Solid,
-            Self::Bubbles { .. } => SwatchFill::Marker,
+            Self::Bubbles { .. } | Self::Scatter { .. } | Self::Stem { .. } => SwatchFill::Marker,
             Self::Line { .. }
             | Self::Step { .. }
-            | Self::Scatter { .. }
-            | Self::Stem { .. }
             | Self::HLine { .. }
             | Self::VLine { .. }
-            | Self::ErrorBars { .. } => SwatchFill::Unchanged,
+            | Self::ErrorBars { .. } => SwatchFill::Series,
         }
     }
 
     /// The labelled series' swatches in series order, without resolving direct-label anchors.
     /// Empty labels do not produce entries.
     pub fn legend_swatch(&self) -> Vec<LegendEntry> {
+        let fill = self.swatch_fill();
         let one = |label: &str, color, swatch| {
-            LegendEntry::new(label, color, swatch).into_iter().collect()
+            LegendEntry::new(label, color, swatch, fill)
+                .into_iter()
+                .collect()
         };
-        let entries: Vec<LegendEntry> = match *self {
+        match *self {
             ResolvedMark::Line {
                 mark, color, width, ..
             } => one(
@@ -1388,7 +1431,7 @@ impl<'a> ResolvedMark<'a> {
             } => one(
                 &mark.options().label,
                 color,
-                Swatch::Line {
+                Swatch::Area {
                     dash: mark.options().dash,
                     width,
                 },
@@ -1441,7 +1484,7 @@ impl<'a> ResolvedMark<'a> {
                 ..
             } => distributions
                 .iter()
-                .filter_map(|d| LegendEntry::new(d.label, d.color, Swatch::Box { width }))
+                .filter_map(|d| LegendEntry::new(d.label, d.color, Swatch::Box { width }, fill))
                 .collect(),
             ResolvedMark::Violin {
                 ref distributions,
@@ -1449,13 +1492,13 @@ impl<'a> ResolvedMark<'a> {
                 ..
             } => distributions
                 .iter()
-                .filter_map(|d| LegendEntry::new(d.label, d.color, Swatch::Violin { width }))
+                .filter_map(|d| LegendEntry::new(d.label, d.color, Swatch::Violin { width }, fill))
                 .collect(),
             ResolvedMark::Grouped { ref series, .. } | ResolvedMark::Stacked { ref series, .. } => {
                 series
                     .iter()
                     .filter_map(|(view, color)| {
-                        LegendEntry::new(view.label(), *color, Swatch::Square)
+                        LegendEntry::new(view.label(), *color, Swatch::Square, fill)
                     })
                     .collect()
             }
@@ -1467,10 +1510,11 @@ impl<'a> ResolvedMark<'a> {
                     LegendEntry::new(
                         view.label(),
                         *color,
-                        Swatch::Line {
+                        Swatch::Area {
                             dash: Dash::Solid,
                             width,
                         },
+                        fill,
                     )
                 })
                 .collect(),
@@ -1491,11 +1535,7 @@ impl<'a> ResolvedMark<'a> {
                     width,
                 },
             ),
-        };
-        entries
-            .into_iter()
-            .map(|entry| entry.with_fill(self.swatch_fill()))
-            .collect()
+        }
     }
 
     /// Reference circles following a labelled bubble series, using its axes' y tick format.
@@ -1554,6 +1594,7 @@ impl<'a> ResolvedMark<'a> {
                     Swatch::Bubble {
                         radius: crate::bubble_scale::radius(tick.value, *maximum, *radius),
                     },
+                    self.swatch_fill(),
                 )
             })
             .collect()
@@ -1590,12 +1631,19 @@ impl<'a> ResolvedMark<'a> {
             } => {
                 vec![SeriesKey::of_line(mark, color, width, limits)]
             }
-            // An area is labelled as the line that bounds it: the line's swatch, and a direct
-            // label at the line's anchor.
+            // An area is labelled as the line that bounds it: a filled swatch under the line's
+            // dash and width, and a direct label at the line's anchor.
             &ResolvedMark::Area {
                 mark, color, width, ..
             } => {
-                vec![SeriesKey::of_line(mark.line(), color, width, limits)]
+                let line = SeriesKey::of_line(mark.line(), color, width, limits);
+                vec![SeriesKey {
+                    kind: SeriesKind::Area {
+                        dash: mark.options().dash,
+                        width,
+                    },
+                    ..line
+                }]
             }
             &ResolvedMark::Scatter {
                 mark, color, size, ..
@@ -1664,7 +1712,7 @@ impl<'a> ResolvedMark<'a> {
                 .map(|(&(view, color), curve)| SeriesKey {
                     label: view.label(),
                     color,
-                    kind: SeriesKind::Line {
+                    kind: SeriesKind::Area {
                         dash: Dash::Solid,
                         width: *width,
                     },
@@ -2055,6 +2103,14 @@ pub(crate) enum SeriesKind {
         /// The stroke width as drawn, in points.
         width: f32,
     },
+    /// A filled area under a line with its dash style and drawn width: an area or a layer of
+    /// a stacked area.
+    Area {
+        /// The dash style of the line.
+        dash: Dash,
+        /// The stroke width of the line as drawn, in points.
+        width: f32,
+    },
     /// Individual markers of one shape and drawn size.
     Points {
         /// The marker shape.
@@ -2101,7 +2157,7 @@ impl SeriesKind {
     /// in the legend row under every style, as do points and bars.
     pub fn takes_direct_label(self) -> bool {
         match self {
-            SeriesKind::Line { .. } => true,
+            SeriesKind::Line { .. } | SeriesKind::Area { .. } => true,
             SeriesKind::Points { .. }
             | SeriesKind::Bar
             | SeriesKind::Rule { .. }
@@ -3838,10 +3894,10 @@ mod tests {
     type OwnedKey = (String, Rgba, SeriesKind, Option<(f64, f64, EndKind)>);
 
     #[test]
-    fn area_keys_are_their_line_keys() {
+    fn area_keys_are_their_line_keys_with_an_area_swatch() {
         use crate::Dash;
-        // An area is keyed exactly as the line that bounds it: the line swatch in its dash and
-        // width, its color, and the line's anchor, at the edge where an x limit cuts it.
+        // An area is keyed as the line that bounds it: its color and the line's anchor, at the
+        // edge where an x limit cuts it, with an area swatch under the line's dash and width.
         let x = || nums(&[0.0, 1.0, 2.0]);
         let options = LineOptions {
             label: "Load".to_owned(),
@@ -3879,7 +3935,17 @@ mod tests {
                 (keys, palette[0])
             };
             let (area, color) = keys_of(true);
-            assert_eq!(area, keys_of(false).0);
+            let line: Vec<OwnedKey> = keys_of(false)
+                .0
+                .into_iter()
+                .map(|(label, color, kind, anchor)| {
+                    let SeriesKind::Line { dash, width } = kind else {
+                        panic!("a line key");
+                    };
+                    (label, color, SeriesKind::Area { dash, width }, anchor)
+                })
+                .collect();
+            assert_eq!(area, line);
             let end = if xlim.is_some() {
                 (1.5, 6.5, EndKind::Edge)
             } else {
@@ -3890,7 +3956,7 @@ mod tests {
                 [(
                     "Load".to_owned(),
                     color,
-                    SeriesKind::Line {
+                    SeriesKind::Area {
                         dash: Dash::Dotted,
                         width: 3.0,
                     },

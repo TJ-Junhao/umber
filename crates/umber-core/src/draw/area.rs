@@ -4,16 +4,13 @@
 
 use super::MarkContext;
 use super::clip::{clamp_polyline, crossing};
+use super::fill::AREA_ALPHA;
 use super::line::{LineClip, plot_subpaths, stroke};
 use super::mapping::PlotPoint;
 use crate::geometry::Path;
 use crate::scene::{FillRule, GradientStop, Item, LinearGradient, Paint, StrokeStyle};
 use crate::{FillStyle, Rgba};
 
-/// The opacity of an area fill, as a share of the line's own opacity: all over under
-/// [`FillStyle::Solid`], at the line's extreme under [`FillStyle::Gradient`], from which the
-/// gradient ramps down to 0 at the baseline.
-pub(super) use crate::color::AREA_ALPHA;
 /// Parts of an area less tall than this, in points, are not filled (the part is empty, and a
 /// gradient across it would have no length).
 const MIN_AREA_HEIGHT: f64 = 0.01;

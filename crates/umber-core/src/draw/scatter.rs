@@ -2,6 +2,7 @@
 
 use super::MarkContext;
 use super::clip::Bounds;
+use super::fill::marker_alpha;
 use super::mapping::AxisPoint;
 use super::marker::{extent, marker_shape};
 use crate::geometry::Point;
@@ -13,6 +14,20 @@ pub(crate) const MARKER_OUTLINE: f32 = 0.8;
 /// Scatter points whose marker (shape extent plus outline) lies further than this many points
 /// outside the plot area are dropped.
 const MARKER_SLACK: f64 = 1.0;
+
+/// How far a marker of `shape` and nominal `diameter` reaches from its centre along x and along
+/// y, outline included, in points: the shape's extent on each axis plus half the outline for a
+/// circle, or the whole outline for a polygon, whose miter joins reach at most that far past a
+/// vertex for these shapes (a triangle's 60° apex reaches exactly that far).
+pub(crate) fn marker_reach(shape: Marker, diameter: f32) -> (f64, f64) {
+    let (half_w, half_h) = extent(&marker_shape(shape, diameter));
+    let outline = f64::from(MARKER_OUTLINE);
+    let join = match shape {
+        Marker::Circle => outline / 2.0,
+        Marker::Square | Marker::Triangle | Marker::Diamond | Marker::Cross => outline,
+    };
+    (half_w + join, half_h + join)
+}
 
 /// The scene item of one scatter: one batch of `shape` markers of diameter `size` (the mark's
 /// drawn size, see [`ResolvedMark::Scatter`](crate::resolve::ResolvedMark::Scatter)), filled
@@ -52,15 +67,9 @@ pub(super) fn scatter_item(
     if positions.is_empty() {
         return None;
     }
-    let alpha = theme.marker_alpha();
-    let alpha = if alpha.is_finite() {
-        alpha.clamp(0.0, 1.0)
-    } else {
-        1.0
-    };
     Some(Item::Markers {
         shape: shape_path,
-        fill: Some(color.scale_alpha(alpha)),
+        fill: Some(color.scale_alpha(marker_alpha(theme))),
         stroke: Some(StrokeStyle {
             color: theme.background(),
             width: MARKER_OUTLINE,

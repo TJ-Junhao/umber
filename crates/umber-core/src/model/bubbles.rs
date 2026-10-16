@@ -40,9 +40,11 @@ impl Default for BubbleOptions {
 /// A zero-size point's position still counts in the axis domains like any point. All bubble
 /// marks on an axes share one size scale; the largest size among points with finite x and y
 /// coordinates maps to the theme's maximum radius. Automatic axis limits fit the whole
-/// circles and their outlines using the final plot size, across all panels sharing that axis;
-/// explicit limits still clip. A diameter at least the automatic axis's plot length is a
-/// render-time `Error::Style`, as is a fit outside the supported numeric range.
+/// markers and their outlines using the final plot size, across all panels sharing that axis;
+/// explicit limits still clip. When the bubbles cannot all fit on an automatic axis (a marker
+/// at least as long as the plot along it, limits beyond the supported numeric range, or limits
+/// that do not settle), that axis's limits come from the data positions alone and the plot
+/// clips the bubbles.
 ///
 /// # Examples
 ///

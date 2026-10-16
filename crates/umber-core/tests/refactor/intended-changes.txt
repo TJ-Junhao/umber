@@ -31,7 +31,7 @@ band-mean-midnight
 band-mean-pigment
 # Band swatches use the fill composite even when the band is outside the limits.
 band-outside-limits
-# Band swatches use the fill composite; scatter swatches remain unchanged.
+# Band swatches use the fill composite; scatter swatches show the marker fill composite.
 band-with-scatter
 # Box swatch interiors are opaque plot-background composites; outlines retain series color.
 box-graphite
@@ -83,11 +83,11 @@ bubbles-right-graphite
 bubbles-right-midnight
 # Automatic limits fit full bubbles; right legend swatches use opaque fill composites.
 bubbles-right-pigment
-# Automatic limits fit all bubble marks; label and size swatches use opaque fill composites.
+# Automatic limits fit every bubble by its marker shape's extent, diamonds included; label and size swatches use fill composites.
 bubbles-shared-scale-graphite
-# Automatic limits fit all bubble marks; label and size swatches use opaque fill composites.
+# Automatic limits fit every bubble by its marker shape's extent, diamonds included; label and size swatches use fill composites.
 bubbles-shared-scale-midnight
-# Automatic limits fit all bubble marks; label and size swatches use opaque fill composites.
+# Automatic limits fit every bubble by its marker shape's extent, diamonds included; label and size swatches use fill composites.
 bubbles-shared-scale-pigment
 # Automatic limits fit full bubbles; inset legend swatches use opaque fill composites.
 bubbles-top-left-graphite
@@ -101,13 +101,33 @@ bubbles-top-right-graphite
 bubbles-top-right-midnight
 # Automatic limits fit full bubbles; inset legend swatches use opaque fill composites.
 bubbles-top-right-pigment
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-category-graphite
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-category-midnight
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-category-pigment
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-graphite
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-log-y
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-midnight
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-numeric-graphite
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-numeric-midnight
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-numeric-pigment
+# The scatter swatch shows the marker fill composite; error-bar swatches keep the series color.
+error-bars-pigment
 # Area swatches represent the nominal peak fill composite, including clipped gradients.
 fig-area-beyond-y-midnight
-# Area swatches represent the fill composite; log limits remain unchanged.
+# Area swatches are rectangles of the fill composite under the line's edge; log limits remain unchanged.
 fig-area-beyond-y-pigment-log
 # Area chip swatches use the plot-background fill composite, not the chip tint.
 fig-area-chips
-# Gradient area swatches represent the nominal 0.32-opacity colored end.
+# Gradient area swatches are rectangles of the 0.32-opacity colored end under the line's edge.
 fig-area-gradient-pigment
 # Gradient area swatches represent the nominal peak fill composite on log y axes.
 fig-area-log-y-midnight
@@ -115,26 +135,74 @@ fig-area-log-y-midnight
 fig-area-midnight
 # Area swatches represent the fill composite; NaN gaps remain unchanged.
 fig-area-nan-gaps-midnight
-# Area swatches represent the fill composite; NaN gaps remain unchanged.
+# Area swatches are rectangles of the fill composite under the line's edge; NaN gaps remain unchanged.
 fig-area-nan-gaps-pigment
-# Solid area swatches represent the 0.32-opacity fill composite.
+# Solid area swatches are rectangles of the 0.32-opacity fill composite under the line's edge.
 fig-area-pigment
 # Solid area swatches represent the 0.32-opacity fill composite.
 fig-area-solid-midnight
-# Area swatches use the fill composite; scatter swatches remain unchanged.
+# Area swatches are rectangles of the fill composite under the line's edge; scatter swatches show the marker fill composite.
 fig-area-with-scatter
-# Category-area chip swatches use the opaque fill composite.
+# The scatter's row swatch shows the marker fill composite; the direct line label is unchanged.
+fig-direct-line-and-scatter
+# Scatter chip swatches show the marker fill composite.
+fig-legend-chips-graphite
+# Scatter chip swatches show the marker fill composite.
+fig-legend-chips-midnight
+# Scatter chip swatches show the marker fill composite.
+fig-legend-chips-pigment
+# Scatter header swatches show the marker fill composite.
+fig-legend-graphite-header
+# Scatter header swatches show the marker fill composite.
+fig-legend-midnight-header
+# The scatter swatch shows the marker fill composite; the line swatches of every dash are unchanged.
+fig-legend-swatch-kinds
+# Scatter swatches show the marker fill composite for every marker shape.
+fig-scatter-markers
+# Category-area and scatter chip swatches use their opaque fill composites.
 fig-size-category-chips
-# Area header swatches use the fill composite while retaining their width and dash.
+# Area header swatches are fill-composite rectangles under an edge of the line's width and dash; scatter swatches show the marker fill composite.
 fig-size-header-graphite
-# Area header swatches use the fill composite while retaining their width and dash.
+# Area header swatches are fill-composite rectangles under an edge of the line's width and dash; scatter swatches show the marker fill composite.
 fig-size-header-midnight
-# Area header swatches use the fill composite while retaining their width and dash.
+# Area header swatches are fill-composite rectangles under an edge of the line's width and dash; scatter swatches show the marker fill composite.
 fig-size-header-pigment
-# Area chip swatches use the opaque fill composite.
+# Scatter swatches of every size show the marker fill composite.
+fig-size-points-graphite
+# Scatter swatches of every size show the marker fill composite.
+fig-size-points-midnight
+# Scatter swatches of every size show the marker fill composite.
+fig-size-points-pigment
+# Scatter swatches show the marker fill composite; direct area labels are unchanged.
+fig-size-theme-legend-graphite
+# Area and scatter chip swatches use their opaque fill composites.
 fig-size-theme-legend-midnight
-# Area header swatches use the opaque fill composite.
+# Area swatches are rectangles of the fill composite under the line's edge; scatter swatches show the marker fill composite.
 fig-size-theme-legend-pigment
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-bottom-left-graphite
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-bottom-left-midnight
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-bottom-left-pigment
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-bottom-right-graphite
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-bottom-right-midnight
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-bottom-right-pigment
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-top-left-graphite
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-top-left-midnight
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-top-left-pigment
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-top-right-graphite
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-top-right-midnight
+# Scatter swatches show the marker fill composite; the best position is unchanged.
+legend-position-best-data-top-right-pigment
 # Reference-span swatches use the opaque composite of their 0.32-alpha fills.
 rules-alone
 # Reference-span swatches use the fill composite on category axes.
@@ -147,7 +215,7 @@ rules-explicit-limits-graphite
 rules-explicit-limits-midnight
 # Reference-span swatches use the fill composite in grid legends.
 rules-grid
-# Reference-span swatches use the fill composite; drawing order remains unchanged.
+# Reference-span and scatter swatches use their fill composites; drawing order remains unchanged.
 rules-layers
 # Reference-span chip swatches use the plot-background composite, not the chip tint.
 rules-legend-chips
@@ -167,12 +235,62 @@ rules-reference-pigment
 rules-styles
 # Stacked-area swatches use opaque 0.32-alpha fill composites, not outline colors.
 stacked-area-gaps-midnight
-# Stacked-area swatches use opaque 0.32-alpha fill composites, not outline colors.
+# Stacked-area swatches are rectangles of the 0.32-alpha fill composite under a solid edge in the series color.
 stacked-area-gaps-pigment
 # Stacked-area swatches use opaque 0.32-alpha fill composites, not outline colors.
 stacked-area-midnight
-# Stacked-area swatches use opaque 0.32-alpha fill composites, not outline colors.
+# Stacked-area swatches are rectangles of the 0.32-alpha fill composite under a solid edge in the series color.
 stacked-area-pigment
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-category-graphite
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-category-midnight
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-category-pigment
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-gaps-graphite
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-gaps-midnight
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-gaps-pigment
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-graphite
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-grid-graphite
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-grid-midnight
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-grid-pigment
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-legend-chips
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-legend-direct
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-legend-header
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-limits-graphite
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-limits-midnight
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-limits-pigment
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-log-x
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-log-y-graphite
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-log-y-midnight
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-log-y-pigment
+# Stem swatches show the marker fill composite for every marker shape; stems keep the series color.
+stem-markers-graphite
+# Stem swatches show the marker fill composite for every marker shape; stems keep the series color.
+stem-markers-midnight
+# Stem swatches show the marker fill composite for every marker shape; stems keep the series color.
+stem-markers-pigment
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-midnight
+# Stem swatches show the marker fill composite; stems keep the series color.
+stem-pigment
 # Area swatches use the fill composite; step and line swatches remain unchanged.
 step-with-line-and-area
 # Violin swatch interiors are opaque plot-background composites; outlines retain series color.

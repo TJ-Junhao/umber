@@ -39,11 +39,6 @@ pub struct Rgba {
 
 const HEX_HINT: &str = "use #RRGGBB or #RRGGBBAA.";
 
-/// Area-like fills' opacity, relative to the series color; also the peak of an area gradient.
-pub(crate) const AREA_ALPHA: f32 = 0.32;
-/// The peak opacity of a histogram gradient, relative to the series color.
-pub(crate) const HISTOGRAM_TOP_ALPHA: f32 = 0.95;
-
 impl Rgba {
     /// `#1A1A1A`.
     ///
@@ -256,18 +251,29 @@ impl Rgba {
         }
     }
 
-    /// The opaque sRGB color seen over the background's RGB channels. Uses the same straight
-    /// alpha as solid fills, rounded once to the nearest 8-bit channel.
-    pub(crate) fn over_background(self, background: Rgba) -> Rgba {
-        let alpha = u32::from(self.a);
-        let channel = |front, back| {
-            ((u32::from(front) * alpha + u32::from(back) * (255 - alpha) + 127) / 255) as u8
+    /// This color painted over `background` with source-over compositing in straight alpha, as
+    /// a fill of this color is drawn over a background of that one. With `f` and `b` the two
+    /// alphas as fractions, the result's alpha is `f + b (1 - f)` and each channel is
+    /// `(c_f f + c_b b (1 - f))` divided by that alpha, each rounded to the nearest 8-bit value
+    /// (halves up). Over an opaque background the result is opaque; over a fully transparent
+    /// one it is this color unchanged.
+    pub(crate) fn over(self, background: Rgba) -> Rgba {
+        // Alphas in 1/255 units: the result's alpha is `alpha / 255²` exactly.
+        let (front, back) = (u64::from(self.a), u64::from(background.a));
+        let alpha = 255 * front + back * (255 - front);
+        if alpha == 0 {
+            return self;
+        }
+        let channel = |f: u8, b: u8| {
+            let weighted = 255 * u64::from(f) * front + u64::from(b) * back * (255 - front);
+            ((2 * weighted + alpha) / (2 * alpha)) as u8
         };
-        Rgba::opaque(
-            channel(self.r, background.r),
-            channel(self.g, background.g),
-            channel(self.b, background.b),
-        )
+        Rgba {
+            r: channel(self.r, background.r),
+            g: channel(self.g, background.g),
+            b: channel(self.b, background.b),
+            a: ((alpha + 127) / 255) as u8,
+        }
     }
 
     /// Format as `#RRGGBB` when opaque, otherwise `#RRGGBBAA`, using uppercase digits.

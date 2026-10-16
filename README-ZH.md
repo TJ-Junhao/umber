@@ -73,9 +73,9 @@ fig.save_svg("temperature.svg")
 | 杆状图 | `ax.stem(x, y)` |
 | 参考线和参考区间 | `ax.hline(y)`、`ax.vline(x)`、`ax.hspan(low, high)`、`ax.vspan(low, high)` |
 
-Bubble 的自动 limits 包含完整圆形及 outline，log axis 和 shared axes 也遵循这一规则。显式 limits 仍会裁切。若包含 outline 的直径不小于自动 axis 的可用 plot 长度，rendering 会抛出 `StyleError`：请增大 figure，或设置显式 limits 以允许裁切。所需范围超出支持的数值范围时也会抛出 `StyleError`。Scatter 的 limits 不变。
+Bubble 的自动 limits 包含完整 marker 及 outline，log axis 和 shared axes 也遵循这一规则。显式 limits 仍会裁切。若某个自动 axis 上的 bubble 无法全部容纳（包含 outline 的 marker 沿该 axis 不小于 plot 长度、所需 limits 超出支持的数值范围，或 limits 无法收敛），该 axis 的 limits 只由数据位置决定（与 scatter 相同），超出部分由 plot 裁切；rendering 不会抛出异常。Scatter 的 limits 不变。
 
-Filled mark 的 legend swatch 显示 fill 与 plot background 合成后的颜色，并以不透明颜色绘制；per-panel 和 merged legend 采用相同规则。Gradient swatch 取 fill 最不透明的一端（area 为 series opacity 的 0.32，histogram 为 0.95），代表有色端而非透明的 baseline。Direct label 以及 box、violin 的 outline 保留 series color。
+Legend swatch 显示 mark 实际绘制的 fill，即与 plot background 合成后的颜色；per-panel 和 merged legend 采用相同规则。Gradient swatch 取 fill 最不透明的一端（area 为 series opacity 的 0.32，histogram 为 0.95），代表有色端而非透明的 baseline。Area 和 stacked area 的 swatch 是填充矩形，顶边以 line 的颜色、dash 和宽度描边；scatter、stem 和 bubble 的 swatch 显示 marker fill。Line、step、参考线、error bar、direct label 以及 box、violin 的 outline 保留 series color。
 
 柱状图、箱线图和小提琴图需要类别 x 轴：`fig.add_axes(x=ub.Scale.category())`。对数轴用 `ub.Scale.log()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
 
