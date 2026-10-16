@@ -55,13 +55,13 @@
 //!   [`ScatterOptions`], [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
 //!   position, [`StemOptions`], [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of
 //!   a vertical line, [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
-//!   [`BoxOptions`], [`ViolinOptions`] and [`Distribution`], [`BarOptions`], [`Series`] and
-//!   [`HistOptions`] with its bin limit [`MAX_BINS`], and the
+//!   [`BoxOptions`], [`ViolinOptions`] and [`Distribution`], [`BarOptions`], [`Series`],
+//!   [`HistOptions`] with its bin limit [`MAX_BINS`] and [`HeatmapOptions`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`BubbleMark`], [`AreaMark`],
 //!   [`StackedAreaMark`], [`StepMark`], [`StemMark`], [`HLineMark`], [`VLineMark`], [`SpanMark`],
 //!   [`BarMark`], [`BarGroupMark`], [`SeriesView`], [`BoxMark`], [`BoxGroupMark`],
-//!   [`ViolinMark`], [`ViolinGroupMark`], [`DistributionView`], [`BandMark`], [`ErrorBarMark`]
-//!   and [`HistMark`] that [`Axes::marks`] returns;
+//!   [`ViolinMark`], [`ViolinGroupMark`], [`DistributionView`], [`BandMark`], [`ErrorBarMark`],
+//!   [`HistMark`] and [`HeatmapMark`] that [`Axes::marks`] returns;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
@@ -158,6 +158,7 @@ pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionVi
 pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{CmapChoice, ColorBy, PointColor};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use figure::{HeatmapMark, HeatmapOptions};
 pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{Font, Weight};

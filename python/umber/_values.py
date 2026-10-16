@@ -315,8 +315,12 @@ def _first_non_number(items: Iterable[object]) -> tuple[int, object] | None:
 
 def _element_error(context: str, name: str, index: int, value: object, *, mixed: bool) -> DataError:
     """The error for an element of numeric data that is not an int or a float."""
+    return _value_error(context, name, f"{name}[{index}]", value, mixed=mixed)
+
+
+def _value_error(context: str, name: str, label: str, value: object, *, mixed: bool) -> DataError:
+    """The error for the element ``label`` of the numeric data ``name``: not an int or a float."""
     value = _scalar(value)
-    label = f"{name}[{index}]"
     shown = short_repr(value)
     if _is_masked(value):
         message, hint = f"{label} is masked; masked values cannot be plotted.", _MASKED_HINT
@@ -600,3 +604,102 @@ def axis_values(context: str, name: str, values: object) -> FloatArray | list[st
     if _starts_with_name(data):
         return _names(context, name, data, mixed=True)
     return _floats(context, name, data, mixed=True)
+
+
+_ROWS_HINT: Final = "pass one row per y category."
+
+
+def matrix(context: str, name: str, values: object, shape: tuple[int, int]) -> FloatArray:
+    """Convert two-dimensional numeric data, such as heatmap values, to a flat ``float64`` array.
+
+    A two-dimensional NumPy array or an object with ``__array__``, such as a pandas
+    DataFrame, or a sequence of rows, each a sequence or an array of numbers, is accepted. The
+    data must have ``shape``: ``shape[0]`` rows of ``shape[1]`` values. An empty sequence has
+    no rows. The values are returned row by row.
+
+    Args:
+        context: The API call, such as ``"Axes.heatmap()"``.
+        name: The parameter name.
+        values: The data passed.
+        shape: The required number of rows and of values in each row.
+
+    Returns:
+        A one-dimensional ``float64`` array of the values, row by row.
+
+    Raises:
+        TypeError: The data is text, a single value, or a container without an order.
+        DataError: The data is a masked array, is not two-dimensional, has another shape, has
+            a dtype that is not a number, or holds an element that is not an int or a float,
+            named by its row and column.
+
+    Example:
+        >>> from umber._values import matrix
+        >>> matrix("Axes.heatmap()", "values", [[1, 2, 3], [4, 5, 6]], (2, 3))
+        array([1., 2., 3., 4., 5., 6.])
+    """
+    _check_container(context, name, values, str_hint=_ROWS_HINT, masked_hint=_MASKED_HINT)
+    if hasattr(values, "__array__"):
+        array = np.asarray(values)
+    else:
+        array = _rows_array(context, name, cast(Sequence[object], values), shape[1])
+    if array.ndim != 2:
+        dimensions = "dimension" if array.ndim == 1 else "dimensions"
+        message = f"{name} has {array.ndim} {dimensions}; values must be two-dimensional."
+        raise _data_error(context, name, message, _ROWS_HINT)
+    if array.shape != shape:
+        given = f"({array.shape[0]}, {array.shape[1]})"
+        required = f"(len(y_categories), len(x_categories)) = ({shape[0]}, {shape[1]})"
+        message = f"{name} has shape {given}; it must be {required}."
+        raise _data_error(context, name, message, _ROWS_HINT)
+    flat = array.reshape(-1)
+    if _is_float64_or_narrower(array.dtype):
+        return _native(flat)
+    if array.dtype.kind not in "OSUT":
+        raise _dtype_error(context, name, array)
+    found = _first_non_number(_elements(flat))
+    if found is not None:
+        row, column = divmod(found[0], shape[1])
+        label = f"{name}[{row}][{column}]"
+        raise _value_error(context, name, label, found[1], mixed=False)
+    try:
+        return flat.astype(np.float64)
+    except OverflowError:
+        converted = (_to_float(value) for value in _elements(flat))
+        return np.fromiter(converted, dtype=np.float64, count=len(flat))
+
+
+def _rows_array(context: str, name: str, rows: Sequence[object], width: int) -> npt.NDArray[Any]:
+    """Check a sequence of rows of numbers, then convert it to a two-dimensional array.
+
+    Each row must be a sequence or an array; a row of another length than the first is
+    reported by its index. Elements are checked before NumPy sees them, as for one-dimensional
+    data. An empty sequence is no rows of ``width`` values.
+    """
+    if len(rows) == 0:
+        return np.empty((0, width), dtype=np.float64)
+    converted: list[npt.NDArray[Any]] = []
+    for index, row in enumerate(rows):
+        label = f"{name}[{index}]"
+        if not _is_nested(row):
+            message = f"{label} is {short_repr(_scalar(row))}; each row must be a sequence."
+            raise _data_error(context, name, message, _ROWS_HINT)
+        if isinstance(row, np.ndarray):
+            array = cast(npt.NDArray[Any], row)
+        else:
+            items = cast(Sequence[object], row)
+            found = _first_non_number(items)
+            if found is not None:
+                cell = f"{label}[{found[0]}]"
+                raise _value_error(context, name, cell, found[1], mixed=False)
+            array = np.asarray(items)
+        if array.ndim != 1:
+            message = f"{label} has {array.ndim} dimensions; each row must be one-dimensional."
+            raise _data_error(context, name, message, _ROWS_HINT)
+        if converted and len(array) != len(converted[0]):
+            message = (
+                f"{label} has {len(array)} values but {name}[0] has {len(converted[0])}; "
+                "every row must have the same length."
+            )
+            raise _data_error(context, name, message, _ROWS_HINT)
+        converted.append(array)
+    return np.stack(converted)

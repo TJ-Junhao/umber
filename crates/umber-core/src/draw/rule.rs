@@ -186,7 +186,8 @@ pub(super) fn span_layer(
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Box { .. }
-            | ResolvedMark::Violin { .. } => {}
+            | ResolvedMark::Violin { .. }
+            | ResolvedMark::Heatmap { .. } => {}
         }
     }
     push_layer(items, clip, layer);
@@ -235,7 +236,8 @@ pub(super) fn rule_layer(
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Box { .. }
-            | ResolvedMark::Violin { .. } => {}
+            | ResolvedMark::Violin { .. }
+            | ResolvedMark::Heatmap { .. } => {}
         }
     }
     push_layer(items, clip, layer);

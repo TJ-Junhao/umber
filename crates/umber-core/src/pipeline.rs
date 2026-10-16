@@ -783,8 +783,10 @@ pub(crate) fn with_layout_input<R>(
 /// - the axes chrome without the baseline, as one unclipped group;
 /// - the visible marks, in insertion order, as one group clipped to the plot area (widened
 ///   horizontally for line ends, see `draw::marks_clip`);
+/// - the values written on annotated heatmap cells, when there are any, as one group clipped
+///   to the plot area;
 /// - the legend, when it has row entries or direct labels, as one unclipped group;
-/// - the baseline, as an unclipped group of its own.
+/// - the baseline, as an unclipped group of its own, unless both axes are category axes.
 ///
 /// Every axes is laid out by one solve of the grid ([`plan`]); a figure of one axes has the
 /// canvas as its frame. The figure header follows the panels as its own unclipped group when
@@ -818,10 +820,18 @@ pub(crate) fn scene(
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
             scene.push(marks);
         }
+        let y_format = panel.axes.y_tick_format();
+        if let Some(notes) =
+            draw::heatmap_annotations(theme, library, resolved, layout, &panel.marks, y_format)
+        {
+            scene.push(notes);
+        }
         if let Some(legend) = draw::legend::legend(theme, layout) {
             scene.push(legend);
         }
-        scene.push(draw::baseline(theme, layout));
+        if resolved.draws_baseline() {
+            scene.push(draw::baseline(theme, layout));
+        }
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
             scene.push(draw::colorbar::draw(theme, color, bar));
         }

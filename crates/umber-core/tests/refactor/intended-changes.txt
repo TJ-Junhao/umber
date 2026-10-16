@@ -1,13 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# The colorbar is drawn.
-color-by-bubbles-graphite
-color-by-bubbles-midnight
-color-by-bubbles-pigment
-color-by-centered-graphite
-color-by-centered-midnight
-color-by-centered-pigment
-color-by-equal
-color-by-log
-color-by-scatter-graphite
-color-by-scatter-midnight
-color-by-scatter-pigment
+# Cases whose committed outputs change on purpose in this change; none.

@@ -14,8 +14,9 @@ from typing_extensions import TypeVar
 import umber
 from umber import _args, _color, _series, _size, _ticks, _time, _umber
 from umber._args import instance, integer, is_text_or_buffer, real, type_name
+from umber._cmap import Cmap
 from umber._color import Color
-from umber._color_by import ColorBy, native_point_color
+from umber._color_by import ColorBy, native_color_scale, native_point_color
 from umber._enums import (
     AUTO,
     Auto,
@@ -41,6 +42,7 @@ from umber._values import (
     check_floats_type,
     check_names_type,
     floats,
+    matrix,
     names,
 )
 
@@ -96,7 +98,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     figure. Retrieve it with ``Figure.axes_at()`` using the same position and scales.
     The type parameters are the types of the x and y values: ``Axes[float, float]`` for numeric
     axes, ``Axes[str, float]`` for a category x axis, ``Axes[float, str]`` for a category y
-    axis, on which bars, boxes and violins are horizontal and a scatter is a dot plot, and
+    axis, on which bars, boxes and violins are horizontal and a scatter is a dot plot,
+    ``Axes[str, str]`` for two category axes, which take a ``heatmap()``, and
     ``Axes[Time, float]`` for a time x axis. Every method validates its arguments at the call
     and returns the axes, so calls chain. A failed call changes nothing.
 
@@ -1942,6 +1945,107 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 name,
                 placement,
                 None if checked is None else _ticks.native(checked),
+            )
+            return self
+
+    def heatmap(
+        self: "Axes[str, str]",
+        x_categories: Values[str],
+        y_categories: Values[str],
+        values: object,
+        *,
+        cmap: Cmap | Auto = AUTO,
+        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        center: float | Auto = AUTO,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+    ) -> "Axes[str, str]":
+        """Add a heatmap: one cell per pair of an x and a y category, colored by its value.
+
+        The x categories run left to right and the y categories top to bottom, and the cells
+        fill their category bands exactly, with no gridlines over them. A NaN value leaves its
+        cell empty. The colors come from the color scale of these axes, which every
+        color-mapped mark shares; ``clim()`` sets its range, and the colorbar explains it.
+
+        Args:
+            x_categories: The column names, left to right, each at most once.
+            y_categories: The row names, top to bottom, each at most once.
+            values: The values as a two-dimensional array or a list of rows, shaped
+                ``(len(y_categories), len(x_categories))``: one row per y category.
+            cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center``
+                is given and its sequential colormap otherwise.
+            scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
+            center: The value at the middle of a diverging colormap, as for ``ColorBy``;
+                ``AUTO`` for a sequential mapping.
+            annotate: Whether each cell shows its value at its center, in the tick font, in
+                black or white, whichever contrasts more with the cell.
+            format: The format of the values shown by ``annotate``. ``AUTO`` follows the y
+                tick format, which writes each value with the decimals of the colorbar's tick
+                step, or with up to 12 significant digits on a log scale.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, or ``scale`` is not linear or log.
+            DataError: If ``values`` is not shaped ``(len(y_categories), len(x_categories))``,
+                a category repeats, or a value is infinite, beyond 1e300 in magnitude, or not
+                positive on a log scale.
+            StyleError: If a category name is too long, ``center`` is not finite or comes
+                with a log scale, ``format`` is ``TickFormat.iso()``, or the color range set by
+                ``clim()`` does not suit ``scale`` or ``center``.
+            UsageError: If either axis is not a category axis (type checkers refuse such
+                axes), ``format`` is given without ``annotate``, or ``cmap``, ``scale`` or
+                ``center`` differs from those of the other color-mapped marks of these axes.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+            >>> days, periods = ["Mon", "Tue", "Wed"], ["Day", "Night"]
+            >>> ax = ax.heatmap(days, periods, [[12, 18, 15], [4, 7, 6]], annotate=True)
+        """
+        with api_call():
+            context = "Axes.heatmap()"
+            check_names_type(context, "x_categories", x_categories)
+            check_names_type(context, "y_categories", y_categories)
+            native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
+            shows = _args.boolean(context, "annotate", annotate)
+            checked = (
+                None
+                if format is AUTO
+                else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
+            )
+            if (self._x, self._y) != (_CATEGORY, _CATEGORY):
+                # The core refuses the axes before it reads the data, with its own error.
+                empty = np.empty(0, dtype=np.float64)
+                self._native.heatmap(
+                    self._row,
+                    self._col,
+                    [],
+                    [],
+                    empty,
+                    native_cmap,
+                    kind,
+                    base,
+                    middle,
+                    shows,
+                    checked,
+                )
+            x_names = names(context, "x_categories", x_categories)
+            y_names = names(context, "y_categories", y_categories)
+            cells = matrix(context, "values", values, (len(y_names), len(x_names)))
+            self._native.heatmap(
+                self._row,
+                self._col,
+                x_names,
+                y_names,
+                cells,
+                native_cmap,
+                kind,
+                base,
+                middle,
+                shows,
+                checked,
             )
             return self
 

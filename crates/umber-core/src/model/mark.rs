@@ -8,6 +8,7 @@ use super::bar::{BarGroupMark, BarMark};
 use super::box_plot::{BoxGroupMark, BoxMark};
 use super::color_by::PointColor;
 use super::error_bars::ErrorBarMark;
+use super::heatmap::HeatmapMark;
 use super::hist::HistMark;
 use super::rule::{HLineMark, SpanMark, VLineMark};
 use super::stacked_area::StackedAreaMark;
@@ -125,11 +126,13 @@ impl Default for ScatterOptions {
 /// [`AxesMut::hspan`](super::AxesMut::hspan), [`AxesMut::vspan`](super::AxesMut::vspan),
 /// [`AxesMut::band`](super::AxesMut::band), [`AxesMut::y_error_bars`](super::AxesMut::y_error_bars)
 /// [`AxesMut::x_error_bars`](super::AxesMut::x_error_bars),
-/// [`AxesMut::box_plot`](super::AxesMut::box_plot) and
-/// [`AxesMut::grouped_box_plot`](super::AxesMut::grouped_box_plot),
+/// [`AxesMut::box_plot`](super::AxesMut::box_plot),
+/// [`AxesMut::grouped_box_plot`](super::AxesMut::grouped_box_plot) and
+/// [`AxesMut::heatmap`](super::AxesMut::heatmap),
 /// which validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
 /// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`], [`HLineMark`], [`VLineMark`],
-/// [`SpanMark`], [`BandMark`], [`StackedAreaMark`], [`ErrorBarMark`], [`BoxMark`], [`BoxGroupMark`])
+/// [`SpanMark`], [`BandMark`], [`StackedAreaMark`], [`ErrorBarMark`], [`BoxMark`], [`BoxGroupMark`],
+/// [`HeatmapMark`])
 /// that keeps the validated values
 /// together and exposes them read-only; it has no
 /// public constructor. Read a mark by matching on its variant.
@@ -234,6 +237,9 @@ pub enum Mark {
     /// A line from the baseline to each value, with a scatter marker at the value; NaN skips
     /// the point.
     Stem(StemMark),
+    /// One cell per pair of an x and a y category, filled with the color its value maps to;
+    /// NaN leaves the cell empty.
+    Heatmap(HeatmapMark),
 }
 
 impl Mark {
@@ -279,6 +285,7 @@ impl Mark {
             | Mark::Band(_)
             | Mark::ErrorBars(_)
             | Mark::Stem(_) => return None,
+            Mark::Heatmap(mark) => return Some(mark.color_scale()),
         };
         match color {
             PointColor::Uniform(_) => None,

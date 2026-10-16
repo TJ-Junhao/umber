@@ -36,6 +36,7 @@ pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, Distribu
 pub use crate::model::{BubbleMark, BubbleOptions};
 pub use crate::model::{CmapChoice, ColorBy, PointColor};
 pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use crate::model::{HeatmapMark, HeatmapOptions};
 pub use crate::model::{StemMark, StemOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
 
@@ -50,9 +51,11 @@ impl Figure {
     /// tick labels, header and axis labels) as one unclipped group, followed by the visible
     /// marks, in insertion order, as one group clipped to the plot area (widened horizontally
     /// by half of the widest line stroke when the axes hold lines or areas, as far as the room
-    /// beside the plot allows, so line ends stay whole), the legend as one unclipped group when
-    /// it shows anything, and last the baseline as an unclipped group of its own, so marks
-    /// never cover it. A non-empty figure header follows as one unclipped group: the figure
+    /// beside the plot allows, so line ends stay whole), the values written on annotated
+    /// heatmap cells as one group clipped to the plot area when there are any, the legend as
+    /// one unclipped group when it shows anything, and last the baseline as an unclipped group
+    /// of its own, so marks never cover it; two category axes have no value axis and draw no
+    /// baseline. A non-empty figure header follows as one unclipped group: the figure
     /// title, subtitle and merged legend. Without axes it holds the background and any figure
     /// title or subtitle. The same figure always gives the same scene.
     ///

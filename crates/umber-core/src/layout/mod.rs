@@ -340,6 +340,22 @@ fn measure_ticks(
         .collect()
 }
 
+/// `text` shaped in the tick label style of `theme` and centered on the point `(x, y)`:
+/// horizontally on `x`, and vertically as a y tick label is centered on its tick. For labels
+/// drawn inside the plot area, such as the values written on heatmap cells.
+pub(crate) fn centered_tick_label(
+    lib: &FontLibrary,
+    theme: &Theme,
+    text: &str,
+    (x, y): (f64, f64),
+) -> Label {
+    let style = Styles::new(theme).tick;
+    let mut label = measure(lib, text, style);
+    label.x = x - label.width() / 2.0;
+    label.y = y + Y_LABEL_CENTER * f64::from(style.size);
+    label
+}
+
 /// The baseline of text with `ascent` and `descent` in a line box of `height` whose top is
 /// `top`: the leading is split evenly above and below.
 fn baseline_in_line(top: f64, height: f64, ascent: f64, descent: f64) -> f64 {

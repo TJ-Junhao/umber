@@ -25,6 +25,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use umber_core::HeatmapOptions;
 use umber_core::ViolinOptions;
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
@@ -33,7 +34,8 @@ use umber_core::{
 };
 use umber_core::{AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
 
-use crate::color::{ColorArg, color_spec, point_color};
+use crate::cmap::Cmap;
+use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::enum_value;
 use crate::errors::{core_error, internal_value};
 use crate::scale::scale_kind;
@@ -964,6 +966,39 @@ impl Figure {
         };
         self.axes(row, col)?
             .colorbar(options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a heatmap: `values` holds `len(y_categories) * len(x_categories)` numbers, row by
+    /// row, one row per y category; the colormap (`None` for the theme's), the linear or log
+    /// scale argument `(scale, base)`, the center and the format (`None` for the y tick format)
+    /// are converted as those of a `ColorBy` and of `colorbar`.
+    #[pyo3(signature = (row, col, x_categories, y_categories, values, cmap, scale, base, center, annotate, format))]
+    fn heatmap(
+        &mut self,
+        row: i64,
+        col: i64,
+        x_categories: &Bound<'_, PyAny>,
+        y_categories: &Bound<'_, PyAny>,
+        values: &Bound<'_, PyAny>,
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+        center: Option<f64>,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+    ) -> PyResult<()> {
+        let options = HeatmapOptions {
+            cmap: cmap_choice(cmap),
+            scale: color_transform(scale, base)?,
+            center,
+            annotate,
+            format: format.map(tick_format).transpose()?,
+        };
+        let (x, y) = (names(x_categories)?, names(y_categories)?);
+        self.axes(row, col)?
+            .heatmap_shared(x, y, shared_floats(values)?, options)
             .map(drop)
             .map_err(core_error)
     }
