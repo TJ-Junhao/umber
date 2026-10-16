@@ -103,59 +103,96 @@ impl ColorBy {
     /// );
     /// ```
     pub fn check(&self) -> Result<()> {
-        let log = matches!(self.scale, Transform::Log(_));
-        for (i, &v) in self.values.iter().enumerate() {
-            if v.is_nan() {
-                continue;
-            }
-            let fault = |message: String| Error::data(CONTEXT, message).with_parameter("values");
-            if v.is_infinite() {
-                return Err(fault(format!(
-                    "values[{i}] is {v}; values must be finite.",
-                    v = number(v)
-                ))
-                .with_hint("use NaN to leave a point undrawn."));
-            }
-            if v.abs() > MAX_MAGNITUDE {
-                return Err(fault(format!(
-                    "values[{i}] is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
-                    v = number(v)
-                )));
-            }
-            if log && v <= 0.0 {
-                return Err(fault(format!(
-                    "values[{i}] is {v}; values on a log scale must be positive.",
-                    v = number(v)
-                ))
-                .with_hint("use a linear scale, or NaN for values that are not positive."));
-            }
-            if log && v < MIN_LOG_VALUE {
-                return Err(fault(format!(
-                    "values[{i}] is {v}; values on a log scale must be at least \
-                     {MIN_LOG_VALUE:e}.",
-                    v = number(v)
-                ))
-                .with_hint("use a linear scale, or rescale the values."));
-            }
-        }
-        if let Some(center) = self.center {
-            let fault = |message: String| Error::style(CONTEXT, message).with_parameter("center");
-            if !center.is_finite() || center.abs() > MAX_MAGNITUDE {
-                return Err(fault(format!(
-                    "center is {}; it must be finite and at most {MAX_MAGNITUDE:e} in magnitude.",
-                    number(center)
-                )));
-            }
-            if log {
-                return Err(fault(format!(
-                    "center is {} with a log scale; a centered color scale is linear.",
-                    number(center)
-                ))
-                .with_hint("remove center, or use Scale.linear()."));
-            }
-        }
-        Ok(())
+        check_mapped_values(
+            CONTEXT,
+            &self.values,
+            self.scale,
+            |i| format!("values[{i}]"),
+            "use NaN to leave a point undrawn.",
+        )?;
+        check_center(CONTEXT, self.center, self.scale)
     }
+}
+
+/// Checks the color-mapped `values` of the call `context` against the color `scale`:
+/// `Error::Data` about the parameter `values` for the first value that is infinite (with
+/// `infinite_hint`, which says what to pass instead), beyond 1e300 in magnitude, or (on a log
+/// scale) not positive or below 1e-300. NaN passes. `name(i)` is how messages name the value at
+/// index `i`, such as `values[2]`.
+pub(super) fn check_mapped_values(
+    context: &'static str,
+    values: &[f64],
+    scale: Transform,
+    name: impl Fn(usize) -> String,
+    infinite_hint: &'static str,
+) -> Result<()> {
+    let log = matches!(scale, Transform::Log(_));
+    for (i, &v) in values.iter().enumerate() {
+        if v.is_nan() {
+            continue;
+        }
+        let fault = |message: String| Error::data(context, message).with_parameter("values");
+        if v.is_infinite() {
+            return Err(fault(format!(
+                "{} is {v}; values must be finite.",
+                name(i),
+                v = number(v)
+            ))
+            .with_hint(infinite_hint));
+        }
+        if v.abs() > MAX_MAGNITUDE {
+            return Err(fault(format!(
+                "{} is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
+                name(i),
+                v = number(v)
+            )));
+        }
+        if log && v <= 0.0 {
+            return Err(fault(format!(
+                "{} is {v}; values on a log scale must be positive.",
+                name(i),
+                v = number(v)
+            ))
+            .with_hint("use a linear scale, or NaN for values that are not positive."));
+        }
+        if log && v < MIN_LOG_VALUE {
+            return Err(fault(format!(
+                "{} is {v}; values on a log scale must be at least {MIN_LOG_VALUE:e}.",
+                name(i),
+                v = number(v)
+            ))
+            .with_hint("use a linear scale, or rescale the values."));
+        }
+    }
+    Ok(())
+}
+
+/// Checks the `center` of a color mapping on the color `scale`, for the call `context`:
+/// `Error::Style` about the parameter `center` for a center that is not finite or beyond 1e300
+/// in magnitude, or any center with a log scale. No center passes.
+pub(super) fn check_center(
+    context: &'static str,
+    center: Option<f64>,
+    scale: Transform,
+) -> Result<()> {
+    let Some(center) = center else {
+        return Ok(());
+    };
+    let fault = |message: String| Error::style(context, message).with_parameter("center");
+    if !center.is_finite() || center.abs() > MAX_MAGNITUDE {
+        return Err(fault(format!(
+            "center is {}; it must be finite and at most {MAX_MAGNITUDE:e} in magnitude.",
+            number(center)
+        )));
+    }
+    if matches!(scale, Transform::Log(_)) {
+        return Err(fault(format!(
+            "center is {} with a log scale; a centered color scale is linear.",
+            number(center)
+        ))
+        .with_hint("remove center, or use Scale.linear()."));
+    }
+    Ok(())
 }
 
 /// The color of a scatter or bubble mark: one color for every point, or a color per point

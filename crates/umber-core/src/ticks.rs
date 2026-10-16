@@ -719,6 +719,28 @@ pub(crate) fn format_values(values: &[f64]) -> Vec<String> {
     values.iter().map(|&v| label(v, None)).collect()
 }
 
+/// Labels for finite `values` that are not ticks, such as the values written on the cells of a
+/// heatmap, one label each. With a `step`, each value has the decimals that labels of ticks
+/// `step` apart have (the grid policy); without one, up to 12 significant digits (the value
+/// policy). The whole set is written in scientific form when a non-zero value lies outside
+/// `1e-4 <= |v| < 1e6`. Unlike tick labels, two values may share a label: the precision is
+/// never raised to tell them apart.
+pub(crate) fn format_annotations(values: &[f64], step: Option<f64>) -> Vec<String> {
+    let use_scientific = values
+        .iter()
+        .any(|&v| v != 0.0 && !(1e-4..1e6).contains(&v.abs()));
+    let places = step.map(|step| decimals(step.abs(), 1e-6));
+    values
+        .iter()
+        .map(|&v| match (use_scientific, places) {
+            (true, _) if v == 0.0 => "0".to_owned(),
+            (true, _) => scientific(v, Some(*SCIENTIFIC_DIGITS.start())),
+            (false, Some(places)) => fixed(v, Some(places)),
+            (false, None) => fixed(round_significant(v, *SCIENTIFIC_DIGITS.start()), None),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -17,7 +17,7 @@ use crate::resolve::{
     self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
 };
 use crate::scene::Scene;
-use crate::{FontLibrary, Result, Theme, draw};
+use crate::{Error, FontLibrary, Result, Theme, draw};
 
 /// One panel's records that layout and drawing share: its axes, its marks resolved against the
 /// theme, and its legend, measured. They are made once, before layout.
@@ -930,8 +930,10 @@ pub(crate) fn with_layout_input<R>(
 /// - the axes chrome without the baseline, as one unclipped group;
 /// - the visible marks, in insertion order, as one group clipped to the plot area (widened
 ///   horizontally for line ends, see `draw::marks_clip`);
+/// - the values written on annotated heatmap cells, when there are any, as one group clipped
+///   to the plot area;
 /// - the legend, when it has row entries or direct labels, as one unclipped group;
-/// - the baseline, as an unclipped group of its own.
+/// - the baseline, as an unclipped group of its own, unless both axes are category axes.
 ///
 /// Every axes is laid out by one solve of the grid ([`plan`]); a figure of one axes has the
 /// canvas as its frame. The figure header follows the panels as its own unclipped group when
@@ -965,10 +967,24 @@ pub(crate) fn scene(
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
             scene.push(marks);
         }
+        let notes = draw::heatmap_annotations(
+            theme,
+            library,
+            resolved,
+            layout,
+            &panel.marks,
+            (panel.axes.y_tick_format(), context),
+        )
+        .map_err(|err| in_cell(figure, panel.axes, err))?;
+        if let Some(notes) = notes {
+            scene.push(notes);
+        }
         if let Some(legend) = draw::legend::legend(theme, layout) {
             scene.push(legend);
         }
-        scene.push(draw::baseline(theme, layout));
+        if resolved.draws_baseline() {
+            scene.push(draw::baseline(theme, layout));
+        }
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
             scene.push(draw::colorbar::draw(theme, color, bar));
         }
@@ -977,6 +993,17 @@ pub(crate) fn scene(
         scene.push(header);
     }
     Ok(scene)
+}
+
+/// `err`, an error of the axes `axes` of `figure`, naming the axes' top-left cell first on a
+/// grid of more than one cell, as layout errors do.
+fn in_cell(figure: &Figure, axes: &Axes, err: Error) -> Error {
+    let grid = figure.grid();
+    if grid.rows() * grid.cols() == 1 {
+        return err;
+    }
+    let cells = axes.cells();
+    err.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
 }
 
 #[cfg(test)]

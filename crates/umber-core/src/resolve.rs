@@ -58,7 +58,7 @@ use crate::model::{
 use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
 use crate::model::{Edge, holds};
 use crate::model::{ErrorBarMark, ErrorBarOrientation};
-use crate::model::{PointColor, StackedAreaMark, StemMark};
+use crate::model::{HeatmapMark, PointColor, StackedAreaMark, StemMark};
 use crate::scale::{
     AUTO_LIMIT_PADDING, Finish, Padding, TickJudge, TimeScale, is_single_value, log_offset,
     seconds_between,
@@ -316,6 +316,12 @@ impl Resolved {
             Orientation::Vertical => (&self.x, &self.y),
             Orientation::Horizontal => (&self.y, &self.x),
         }
+    }
+
+    /// Whether the baseline is drawn: on every axes with a value axis, so not on two category
+    /// axes, whose heatmap cells fill the plot up to its edges.
+    pub fn draws_baseline(&self) -> bool {
+        !(self.x.is_category() && self.y.is_category())
     }
 }
 
@@ -883,6 +889,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Line(mark) => mark.x().categories(),
         Mark::Scatter(mark) => mark.x().categories(),
         Mark::Stem(mark) => mark.x().categories(),
+        Mark::Heatmap(mark) => mark.x_categories(),
         Mark::Area(mark) => mark.x().categories(),
         Mark::Step(mark) => mark.x().categories(),
         Mark::Bar(mark) => mark.categories(),
@@ -1623,6 +1630,15 @@ pub(crate) enum ResolvedMark<'a> {
         /// The stroke width of the bars and their caps as drawn, in points.
         width: f32,
     },
+    /// A heatmap: its cells take the colors of the axes' color scale.
+    Heatmap {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The mark.
+        mark: &'a HeatmapMark,
+        /// The spec the cells map their values with, and the values, row by row.
+        mapped: MappedColors<'a>,
+    },
 }
 
 /// One distribution resolved once per render, before layout iterates over its domains.
@@ -1701,6 +1717,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::ErrorBars { geometry, .. }
             | ResolvedMark::Bubbles { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
+            | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
             | ResolvedMark::Violin { geometry, .. } => geometry,
         };
@@ -1733,6 +1750,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::ErrorBars { geometry, .. }
             | ResolvedMark::Bubbles { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
+            | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
             | ResolvedMark::Violin { geometry, .. } => geometry,
         };
@@ -1757,6 +1775,8 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mark, .. } => mark.x().numbers(),
             ResolvedMark::Bubbles { mark, .. } => mark.x(),
             ResolvedMark::Stem { mark, .. } => mark.x().numbers(),
+            // A heatmap's cells lie at categories, which have no numbers.
+            ResolvedMark::Heatmap { .. } => &[],
             ResolvedMark::Area { mark, .. } => mark.x().numbers(),
             ResolvedMark::Step { mark, .. } => mark.x().numbers(),
             ResolvedMark::VLine { mark, .. } => mark.x_numbers(),
@@ -1848,6 +1868,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { mark, .. } => DomainTimes::gapped(mark.x().times()),
             ResolvedMark::Scatter { mark, .. } => DomainTimes::gapped(mark.x().times()),
             ResolvedMark::Stem { mark, .. } => DomainTimes::gapped(mark.x().times()),
+            ResolvedMark::Heatmap { .. } => DomainTimes::whole(&[]),
             ResolvedMark::Area { mark, .. } => DomainTimes::gapped(mark.x().times()),
             ResolvedMark::Step { mark, .. } => DomainTimes::gapped(mark.x().times()),
             ResolvedMark::Band { mark, .. } => DomainTimes::gapped(mark.x_times()),
@@ -1882,6 +1903,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { mark, .. } => DomainTimes::gapped(mark.y().times()),
             ResolvedMark::Scatter { mark, .. } => DomainTimes::gapped(mark.y().times()),
             ResolvedMark::Stem { mark, .. } => DomainTimes::gapped(mark.y().times()),
+            ResolvedMark::Heatmap { .. } => DomainTimes::whole(&[]),
             ResolvedMark::Area { mark, .. } => DomainTimes::gapped(mark.y().times()),
             ResolvedMark::Step { mark, .. } => DomainTimes::gapped(mark.y().times()),
             ResolvedMark::ErrorBars { mark, .. } => match mark.orientation() {
@@ -1921,6 +1943,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. } => &[],
             ResolvedMark::Stem { mark, .. } => mark.x().categories(),
+            ResolvedMark::Heatmap { mark, .. } => mark.x_categories(),
             ResolvedMark::Area { mark, .. } => mark.x().categories(),
             ResolvedMark::Step { mark, .. } => mark.x().categories(),
             ResolvedMark::ErrorBars { mark, .. } => match mark.orientation() {
@@ -2004,6 +2027,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { mark, .. } => mark.y().categories(),
             ResolvedMark::Scatter { mark, .. } => mark.y().categories(),
             ResolvedMark::Stem { mark, .. } => mark.y().categories(),
+            ResolvedMark::Heatmap { mark, .. } => mark.y_categories(),
             ResolvedMark::Area { mark, .. } => mark.y().categories(),
             ResolvedMark::Step { mark, .. } => mark.y().categories(),
             ResolvedMark::ErrorBars { mark, .. } => match mark.orientation() {
@@ -2050,6 +2074,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mark, .. } => mark.y().numbers(),
             ResolvedMark::Bubbles { mark, .. } => mark.y(),
             ResolvedMark::Stem { mark, .. } => mark.y().numbers(),
+            ResolvedMark::Heatmap { .. } => &[],
             ResolvedMark::Area { mark, .. } => mark.y().numbers(),
             ResolvedMark::Step { mark, .. } => mark.y().numbers(),
             ResolvedMark::HLine { mark, .. } => mark.y_values(),
@@ -2138,6 +2163,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. } => false,
             ResolvedMark::Stem { mark, .. } => mark.y().numbers().iter().any(|v| v.is_finite()),
+            ResolvedMark::Heatmap { .. } => false,
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Step { .. }
@@ -2169,6 +2195,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. } => None,
             ResolvedMark::Stem { .. } => None,
+            ResolvedMark::Heatmap { .. } => None,
             ResolvedMark::Line { width, .. }
             | ResolvedMark::Area { width, .. }
             | ResolvedMark::Step { width, .. }
@@ -2199,6 +2226,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. } => false,
             ResolvedMark::Stem { .. } => false,
+            ResolvedMark::Heatmap { .. } => false,
             ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
@@ -2253,6 +2281,8 @@ impl<'a> ResolvedMark<'a> {
             Self::Hist { .. } => SwatchFill::Histogram,
             Self::Bar { .. } | Self::Grouped { .. } | Self::Stacked { .. } => SwatchFill::Solid,
             Self::Bubbles { .. } | Self::Scatter { .. } | Self::Stem { .. } => SwatchFill::Marker,
+            // A heatmap has no legend entry; the colorbar explains its colors.
+            Self::Heatmap { .. } => SwatchFill::Solid,
             Self::Line { .. }
             | Self::Step { .. }
             | Self::HLine { .. }
@@ -2327,6 +2357,8 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Bubbles {
                 mark, color, size, ..
             } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
+            // A heatmap has no legend entry; the colorbar explains its colors.
+            ResolvedMark::Heatmap { .. } => Vec::new(),
             ResolvedMark::Stem {
                 mark, color, size, ..
             } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
@@ -2473,6 +2505,8 @@ impl<'a> ResolvedMark<'a> {
                 },
                 anchor: None,
             }],
+            // A heatmap has no legend entry; the colorbar explains its colors.
+            ResolvedMark::Heatmap { .. } => Vec::new(),
             &ResolvedMark::Stem {
                 mark, color, size, ..
             } => vec![SeriesKey {
@@ -2666,6 +2700,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::Stem { .. }
+            | ResolvedMark::Heatmap { .. }
             | ResolvedMark::ErrorBars { .. } => None,
         }
     }
@@ -2734,6 +2769,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::Stem { .. }
+            | ResolvedMark::Heatmap { .. }
             | ResolvedMark::ErrorBars { .. } => &[],
         };
         DomainValues::Data(values.iter().copied())
@@ -2748,6 +2784,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mapped, .. } | ResolvedMark::Bubbles { mapped, .. } => {
                 mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
             }
+            ResolvedMark::Heatmap { mapped, .. } => Some((&mapped.spec, mapped.values)),
             ResolvedMark::Line { .. }
             | ResolvedMark::Area { .. }
             | ResolvedMark::Bar { .. }
@@ -3297,6 +3334,8 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::Scatter(m) => uniform(&m.options().label, &m.options().color),
         Mark::Bubbles(m) => uniform(&m.options().label, &m.options().color),
         Mark::Stem(m) => vec![(&m.options().label, m.options().color)],
+        // A heatmap takes no palette color.
+        Mark::Heatmap(_) => Vec::new(),
         Mark::Area(m) => vec![(&m.options().label, m.options().color)],
         Mark::Bar(m) => vec![(&m.options().label, m.options().color)],
         Mark::Violin(m) => vec![(&m.options().label, m.options().color)],
@@ -3413,6 +3452,14 @@ fn resolve_panel_marks<'a>(
                     mapped,
                 }
             }
+            Mark::Heatmap(mark) => ResolvedMark::Heatmap {
+                mark,
+                geometry: None,
+                mapped: MappedColors {
+                    spec: mark.color_scale(),
+                    values: mark.values(),
+                },
+            },
             Mark::Stem(mark) => ResolvedMark::Stem {
                 mark,
                 geometry: None,

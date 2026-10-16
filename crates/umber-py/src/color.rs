@@ -182,25 +182,33 @@ impl ColorBy {
         base: f64,
         center: Option<f64>,
     ) -> PyResult<ColorBy> {
-        let scale = match scale_kind(scale, base)? {
-            ScaleKind::Linear => Transform::Linear,
-            ScaleKind::Log { base } => Transform::Log(base),
-            _ => {
-                return Err(internal_value(
-                    "a color mapping needs a linear or log scale",
-                ));
-            }
-        };
         let by = umber_core::ColorBy {
             values: shared_floats(values)?,
-            cmap: cmap.map_or(CmapChoice::Theme, |cmap| {
-                CmapChoice::Fixed(cmap.core().clone())
-            }),
-            scale,
+            cmap: cmap_choice(cmap),
+            scale: color_transform(scale, base)?,
             center,
         };
         by.check().map_err(core_error)?;
         Ok(ColorBy(by))
+    }
+}
+
+/// The colormap argument of a color mapping: `None` for the theme's.
+pub(crate) fn cmap_choice(cmap: Option<PyRef<'_, Cmap>>) -> CmapChoice {
+    cmap.map_or(CmapChoice::Theme, |cmap| {
+        CmapChoice::Fixed(cmap.core().clone())
+    })
+}
+
+/// The scale argument `(scale, base)` of a color mapping as its transform; any scale but a
+/// linear or log one is an internal `ValueError`.
+pub(crate) fn color_transform(scale: i64, base: f64) -> PyResult<Transform> {
+    match scale_kind(scale, base)? {
+        ScaleKind::Linear => Ok(Transform::Linear),
+        ScaleKind::Log { base } => Ok(Transform::Log(base)),
+        _ => Err(internal_value(
+            "a color mapping needs a linear or log scale",
+        )),
     }
 }
 
