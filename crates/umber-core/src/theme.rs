@@ -16,7 +16,7 @@
 //! ```
 
 use crate::error::number;
-use crate::{Error, Font, Result, Rgba, SizeSpec};
+use crate::{Cmap, Error, Font, Result, Rgba, SizeSpec};
 
 /// The largest accepted `font_scale`.
 const MAX_FONT_SCALE: f64 = 10.0;
@@ -279,6 +279,8 @@ pub struct Theme {
     box_width: f32,
     violin_width: f32,
     palette: Vec<Rgba>,
+    cmap: Cmap,
+    diverging_cmap: Cmap,
 }
 
 /// An opaque color from `0xRRGGBB`.
@@ -377,6 +379,8 @@ impl Theme {
             palette: palette_of([
                 0xC4553A, 0x2E6B70, 0xE2A33B, 0x4F6FA3, 0x86A37A, 0x8B5279, 0x6E4C38, 0xA69F94,
             ]),
+            cmap: Cmap::from_hexes(&[0xEDE3C8, 0xA9C08E, 0x4F8F86, 0x3E5B8C, 0x3B2A55]),
+            diverging_cmap: Cmap::from_hexes(&[0x2E6B70, 0xF3EDE4, 0xC4553A]),
         }
     }
 
@@ -424,6 +428,8 @@ impl Theme {
             palette: palette_of([
                 0x233F86, 0xE4572E, 0xF2A900, 0x17A398, 0x9B5DE5, 0x5BA4E6, 0xD9658F, 0xA3A3A3,
             ]),
+            cmap: Cmap::from_hexes(&[0xD8E5F6, 0xC3D7F2, 0x5BA4E6, 0x233F86, 0x101D45]),
+            diverging_cmap: Cmap::from_hexes(&[0x233F86, 0xF5F5F5, 0xE4572E]),
         }
     }
 
@@ -471,6 +477,8 @@ impl Theme {
             palette: palette_of([
                 0x75AEF5, 0xDF7F78, 0x96E7A7, 0xE0AE57, 0xC9A3F5, 0x3ACED6, 0xF5A06F, 0x9DA5B1,
             ]),
+            cmap: Cmap::from_hexes(&[0x263A52, 0x1F4E66, 0x3ACED6, 0x96E7A7, 0xF0F7C8]),
+            diverging_cmap: Cmap::from_hexes(&[0x75AEF5, 0x2A2F3A, 0xDF7F78]),
         }
     }
 
@@ -969,6 +977,74 @@ impl Theme {
     #[must_use]
     pub fn violin_width(&self) -> f32 {
         self.violin_width
+    }
+
+    /// The default sequential colormap, for color-mapped marks that name none.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    /// assert_eq!(Theme::pigment().cmap().at(0.0).to_hex(), "#EDE3C8");
+    /// assert_eq!(Theme::graphite().cmap().at(1.0).to_hex(), "#101D45");
+    /// assert_eq!(Theme::midnight().cmap().at(0.0).to_hex(), "#263A52");
+    /// ```
+    #[must_use]
+    pub fn cmap(&self) -> &Cmap {
+        &self.cmap
+    }
+
+    /// The default diverging colormap, for color-mapped marks centered on a value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    /// assert_eq!(Theme::pigment().diverging_cmap().at(0.5).to_hex(), "#F3EDE4");
+    /// assert_eq!(Theme::graphite().diverging_cmap().at(0.5).to_hex(), "#F5F5F5");
+    /// assert_eq!(Theme::midnight().diverging_cmap().at(0.5).to_hex(), "#2A2F3A");
+    /// ```
+    #[must_use]
+    pub fn diverging_cmap(&self) -> &Cmap {
+        &self.diverging_cmap
+    }
+
+    /// Returns a copy with the default sequential colormap `cmap`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Cmap, Theme};
+    ///
+    /// let theme = Theme::pigment().with_cmap(Cmap::magma());
+    /// assert_eq!(theme.cmap(), &Cmap::magma());
+    /// assert_ne!(Theme::pigment().cmap(), theme.cmap());
+    /// ```
+    #[must_use]
+    pub fn with_cmap(&self, cmap: Cmap) -> Theme {
+        Theme {
+            cmap,
+            ..self.clone()
+        }
+    }
+
+    /// Returns a copy with the default diverging colormap `cmap`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Cmap, Theme};
+    ///
+    /// let theme = Theme::pigment().with_diverging_cmap(Cmap::blue_red().reversed());
+    /// assert_eq!(theme.diverging_cmap(), &Cmap::blue_red().reversed());
+    /// assert_ne!(Theme::pigment().diverging_cmap(), theme.diverging_cmap());
+    /// ```
+    #[must_use]
+    pub fn with_diverging_cmap(&self, cmap: Cmap) -> Theme {
+        Theme {
+            diverging_cmap: cmap,
+            ..self.clone()
+        }
     }
 
     /// Replace the palette.

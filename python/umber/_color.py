@@ -1,6 +1,6 @@
 """``Color``: an immutable color, either fixed or resolved from the theme when drawn."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from operator import attrgetter
 from operator import index as integer_index
 from typing import ClassVar, Final, Self, cast, final
@@ -10,6 +10,9 @@ from umber._errors import StyleError, new_error
 from umber._report import api_call
 
 _INT64_MAX = 2**63 - 1
+
+COLOR_HINT: Final = 'use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.'
+COLORS_HINT: Final = "pass a list of colors, e.g. [Color.RED, Color.BLUE]."
 
 # The native color argument kinds; see ``umber._umber``.
 _AUTO = 0
@@ -336,6 +339,50 @@ def native(color: Color) -> tuple[int, int, float]:
         (1, 2, 0.5)
     """
     return cast(tuple[int, int, float], _NATIVE(color))
+
+
+def native_sequence(context: str, colors: Sequence[Color]) -> list[tuple[int, int, float]]:
+    """Check that ``colors`` is a sequence of ``Color`` and return the native form of each.
+
+    Args:
+        context: The API call, such as ``"Theme.with_palette()"``.
+        colors: The ``colors`` argument of the call.
+
+    Returns:
+        The native color arguments, in order.
+
+    Raises:
+        TypeError: If ``colors`` is not a sequence, or an element is not a ``Color``. The
+            message of an element names its index, such as ``colors[2]``.
+
+    Example:
+        >>> import umber as ub
+        >>> from umber._color import native_sequence
+        >>> native_sequence("Theme.with_palette()", [ub.Color.RED, ub.Color.AUTO])
+        [(2, 3595121663, 1.0), (0, 0, 1.0)]
+    """
+    given = cast(object, colors)
+    if _args.is_text_or_buffer(given) or not isinstance(given, Sequence):
+        raise new_error(
+            TypeError,
+            context,
+            f"colors is {_args.type_name(colors)}; colors must be a sequence of Color.",
+            parameter="colors",
+            hint=COLORS_HINT,
+        )
+    arguments: list[tuple[int, int, float]] = []
+    for index, color in enumerate(cast(Sequence[object], colors)):
+        if not isinstance(color, Color):
+            label = f"colors[{index}]"
+            raise new_error(
+                TypeError,
+                context,
+                f"{label} is {_args.type_name(color)}; {label} must be of type Color.",
+                parameter="colors",
+                hint=COLOR_HINT,
+            )
+        arguments.append(native(color))
+    return arguments
 
 
 def _new(kind: int, payload: int, alpha: float) -> "Color":

@@ -5,20 +5,18 @@ from enum import Enum
 from operator import attrgetter
 from typing import ClassVar, Final, Never, Self, cast, final
 
-from umber import _color, _umber
-from umber._args import instance, is_text_or_buffer, real, type_name
-from umber._color import Color
+from umber import _cmap, _color, _umber
+from umber._args import instance, real
+from umber._cmap import CMAP_HINT, Cmap
+from umber._color import COLOR_HINT, Color
 from umber._enums import Align, Dash, FillStyle, Font, GridLines, LegendPosition, LegendStyle
 from umber._errors import new_error
 from umber._report import api_call
 
-_COLOR_HINT: Final = 'use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.'
-_COLORS_HINT: Final = "pass a list of colors, e.g. [Color.RED, Color.BLUE]."
-
 
 def _color_argument(context: str, name: str, value: object) -> tuple[int, int, float]:
     """Check a color argument and return its native form."""
-    return _color.native(instance(context, name, value, Color, _COLOR_HINT))
+    return _color.native(instance(context, name, value, Color, COLOR_HINT))
 
 
 def _member(context: str, value: object, cls: type[Enum]) -> int:
@@ -26,20 +24,6 @@ def _member(context: str, value: object, cls: type[Enum]) -> int:
     names = [f"{cls.__name__}.{member.name}" for member in cls]
     hint = f"use {', '.join(names[:-1])} or {names[-1]}."
     return int(instance(context, "value", value, cls, hint).value)
-
-
-def _checked_element(context: str, index: int, value: object) -> tuple[int, int, float]:
-    """Check one palette color and return its native form."""
-    if not isinstance(value, Color):
-        label = f"colors[{index}]"
-        raise new_error(
-            TypeError,
-            context,
-            f"{label} is {type_name(value)}; {label} must be of type Color.",
-            parameter="colors",
-            hint=_COLOR_HINT,
-        )
-    return _color.native(value)
 
 
 @final
@@ -123,19 +107,7 @@ class Theme:
             False
         """
         with api_call():
-            context = "Theme.with_palette()"
-            given = cast(object, colors)
-            if is_text_or_buffer(given) or not isinstance(given, Sequence):
-                raise new_error(
-                    TypeError,
-                    context,
-                    f"colors is {type_name(colors)}; colors must be a sequence of Color.",
-                    parameter="colors",
-                    hint=_COLORS_HINT,
-                )
-            arguments = [
-                _checked_element(context, index, color) for index, color in enumerate(colors)
-            ]
+            arguments = _color.native_sequence("Theme.with_palette()", colors)
             return _wrap(self._native.with_palette(arguments))
 
     def with_background(self, value: Color) -> "Theme":
@@ -601,6 +573,50 @@ class Theme:
         with api_call():
             number = real("Theme.with_hist_gap()", "value", value)
             return _wrap(self._native.with_hist_gap(number))
+
+    def with_cmap(self, cmap: Cmap) -> "Theme":
+        """Return this theme with the default sequential colormap set to ``cmap``.
+
+        Args:
+            cmap: The colormap.
+
+        Returns:
+            A new theme; this one is unchanged.
+
+        Raises:
+            TypeError: If ``cmap`` is not a ``Cmap``.
+
+        Example:
+            >>> import umber as ub
+            >>> theme = ub.Theme.PIGMENT.with_cmap(ub.Cmap.MAGMA)
+            >>> theme == ub.Theme.PIGMENT
+            False
+        """
+        with api_call():
+            checked = instance("Theme.with_cmap()", "cmap", cmap, Cmap, CMAP_HINT)
+            return _wrap(self._native.with_cmap(_cmap.native(checked)))
+
+    def with_diverging_cmap(self, cmap: Cmap) -> "Theme":
+        """Return this theme with the default diverging colormap set to ``cmap``.
+
+        Args:
+            cmap: The colormap.
+
+        Returns:
+            A new theme; this one is unchanged.
+
+        Raises:
+            TypeError: If ``cmap`` is not a ``Cmap``.
+
+        Example:
+            >>> import umber as ub
+            >>> theme = ub.Theme.PIGMENT.with_diverging_cmap(ub.Cmap.BLUE_RED.reversed())
+            >>> theme == ub.Theme.PIGMENT
+            False
+        """
+        with api_call():
+            checked = instance("Theme.with_diverging_cmap()", "cmap", cmap, Cmap, CMAP_HINT)
+            return _wrap(self._native.with_diverging_cmap(_cmap.native(checked)))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Theme):

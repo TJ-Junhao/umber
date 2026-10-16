@@ -1,7 +1,8 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: e22b55c53cd9286ffceb02d15abc7ea5af22433a
+# revision: 900310ba741bf86c80b616dd2da64af3f138eb4f
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
+98b449c19537d448f9fcf9915a5bd659ed208ad3a0943343c6f970a480eb2dba  api/cmaps.txt
 e56c73176662595cd3ef79573282c24d9f1ed87891c0bc128adf8df5c8d02f86  api/constants-error-bars.txt
 ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-hist.txt
 2996e5b773b01d52f1fa0313fa876ecc1674c75ede7b61aefb16842680e0091a  api/constants-stem.txt
@@ -11,6 +12,7 @@ ef5cf9fd222fa6d2d0edea89796a6509153c3b26a26365ab744ff881b58f803a  api/constants-
 149d05f25fa3d408684c51d0f2282a6ff2e55ca837e4d486c6b31da4ce326981  api/legend.txt
 3536acf5506c4d594e4520ef89a61f18df3c74e4d6ffbd924622509c69d9dab4  api/text-layout.txt
 4cc917e72448535423f8a3ae0402d3e0cc180be04ffc28cd8d2a3943fa028fe2  api/themes-bubbles.txt
+c8639ac753183c512fbcb24ee2cd7f467578ef030763ee381c830e8ec22dfdc9  api/themes-cmap.txt
 55381e48cd0a7b88b4dfa9b2e22a743e7820fad51e8e6c93ea650e404299d90c  api/themes.txt
 5a0770fed2366600342f31c39541ac3e7afce9106ac883a969e9cfa9d5fe55ed  errors/api.txt
 f5570630344f0834c355bafc5594c3d4df960728f63559772a50696dc9ecbe3b  errors/area.txt

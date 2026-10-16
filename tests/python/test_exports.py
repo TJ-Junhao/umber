@@ -16,6 +16,7 @@ EXPECTED = [
     "Axes",
     "Cell",
     "Series",
+    "Cmap",
     "Color",
     "DataError",
     "Dash",

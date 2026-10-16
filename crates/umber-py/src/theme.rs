@@ -8,7 +8,8 @@
 use pyo3::prelude::*;
 use umber_core::{Align, Dash, FillStyle, Font, GridLines, LegendPosition, LegendStyle, Rgba};
 
-use crate::color::{ColorArg, color_spec, concrete};
+use crate::cmap::Cmap;
+use crate::color::{ColorArg, color_spec, concrete, concrete_list};
 use crate::enums::{IntEnum, enum_value};
 use crate::errors::core_error;
 
@@ -34,7 +35,8 @@ impl Theme {
         value: ColorArg,
         with: With<Rgba>,
     ) -> PyResult<Theme> {
-        let color = concrete(color_spec(value)?, context, "value", "value").map_err(core_error)?;
+        let color =
+            concrete(color_spec(value)?, context, "value", "value", "theme").map_err(core_error)?;
         self.with(with, color)
     }
 
@@ -72,20 +74,7 @@ impl Theme {
     /// This theme with the palette `colors`, each of which must be concrete. The message of a
     /// color that is not concrete names its index, e.g. `colors[2]`.
     fn with_palette(&self, colors: Vec<ColorArg>) -> PyResult<Theme> {
-        const CONTEXT: &str = "Theme.with_palette()";
-        let colors = colors
-            .into_iter()
-            .enumerate()
-            .map(|(index, color)| {
-                concrete(
-                    color_spec(color)?,
-                    CONTEXT,
-                    "colors",
-                    &format!("colors[{index}]"),
-                )
-                .map_err(core_error)
-            })
-            .collect::<PyResult<Vec<Rgba>>>()?;
+        let colors = concrete_list(colors, "Theme.with_palette()", "theme")?;
         self.with(umber_core::Theme::with_palette, colors.as_slice())
     }
 
@@ -192,5 +181,15 @@ impl Theme {
     /// This theme with the gap between histogram bars `value`, in points.
     fn with_hist_gap(&self, value: f64) -> PyResult<Theme> {
         self.with(umber_core::Theme::with_hist_gap, value)
+    }
+
+    /// This theme with the default sequential colormap `cmap`.
+    fn with_cmap(&self, cmap: &Cmap) -> Theme {
+        Theme(self.0.with_cmap(cmap.core().clone()))
+    }
+
+    /// This theme with the default diverging colormap `cmap`.
+    fn with_diverging_cmap(&self, cmap: &Cmap) -> Theme {
+        Theme(self.0.with_diverging_cmap(cmap.core().clone()))
     }
 }
