@@ -5,15 +5,16 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Final, Never, Self, final
 
-from umber import _args, _axes, _cell, _scale, _theme, _umber
+from umber import _args, _axes, _cell, _scale, _theme, _ticks, _umber
 from umber._args import instance, integer, real
 from umber._axes import Axes, X, Y
 from umber._cell import Cell
-from umber._enums import AUTO, Auto, Legend, Share, SvgText
+from umber._enums import AUTO, Auto, ColorbarPosition, Legend, Share, SvgText
 from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._theme import Theme
+from umber._ticks import TickFormat
 
 _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
 _SCALE_HINT: Final = "use Scale.linear(), Scale.log(), Scale.category() or Scale.time()."
@@ -87,6 +88,7 @@ class Figure:
         cols: int = 1,
         share_x: Share = Share.NONE,
         share_y: Share = Share.NONE,
+        share_color: Share = Share.NONE,
         legend: Legend = Legend.MERGED,
         theme: Theme = Theme.PIGMENT,
     ) -> None:
@@ -101,6 +103,10 @@ class Figure:
             cols: The number of columns, from 1 to 32.
             share_x: Which panels share their x scale, limits, ticks and tick format.
             share_y: Which panels share their y scale, limits, ticks and tick format.
+            share_color: Which panels share their color range and colorbar. Only panels
+                with color-mapped marks take part. Members must use the same colormap,
+                scale and center; ``clim()`` sets the group limits. A color-mapped mark
+                cannot span different row or column color groups.
             legend: One merged legend or a separate legend per panel.
             theme: The theme that styles the figure.
 
@@ -121,6 +127,7 @@ class Figure:
             col_count = integer(context, "cols", cols)
             instance(context, "share_x", share_x, Share, _SHARE_HINT)
             instance(context, "share_y", share_y, Share, _SHARE_HINT)
+            instance(context, "share_color", share_color, Share, _SHARE_HINT)
             instance(context, "legend", legend, Legend, _LEGEND_HINT)
             instance(context, "theme", theme, Theme, _THEME_HINT)
             self._native = _umber.Figure(
@@ -132,10 +139,80 @@ class Figure:
                 share_x.value,
                 share_y.value,
                 legend.value,
+                share_color.value,
             )
             self._rows = row_count
             self._cols = col_count
             self._axes = {}
+
+    def colorbar(
+        self,
+        label: str = "",
+        *,
+        position: ColorbarPosition | Auto = AUTO,
+        format: TickFormat | Auto = AUTO,
+    ) -> Self:
+        """Set the label, position and tick format of every shared colorbar.
+
+        Row colorbars sit right of each row and column colorbars below each column.
+        With ``Share.ALL``, one colorbar spans the grid on the chosen side. Each call
+        replaces all settings, including previous overrides. Settings may precede marks;
+        groups without finite color values draw no bar.
+
+        Args:
+            label: The horizontal label above each bar, at most 1,000 characters.
+            position: ``AUTO`` hides the bars in every sharing mode if the theme's
+                colorbar position is ``NONE``. Otherwise it uses the required side for
+                ``ROW`` or ``COL`` and the theme's side for ``ALL``. An explicit position
+                overrides the theme; only ``ALL`` accepts ``NONE`` to hide the bar.
+            format: The tick format. ``AUTO`` follows the first color-mapped panel's y
+                tick format in each group's row-major order.
+
+        Returns:
+            This figure.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            UsageError: If ``share_color`` is ``Share.NONE``.
+            StyleError: If the position conflicts with sharing or the label is invalid.
+
+        Example:
+            >>> import umber as ub
+            >>> fig = ub.Figure(cols=2, share_color=ub.Share.ALL)
+            >>> fig = fig.colorbar("Intensity", position=ub.ColorbarPosition.BOTTOM)
+            >>> ax = fig.add_axes(col=0).scatter([1, 2], [2, 3], color=ub.ColorBy([4, 8]))
+        """
+        with api_call():
+            context = "Figure.colorbar()"
+            _args.require_text(context, "label", label)
+            placement = (
+                None
+                if position is AUTO
+                else instance(
+                    context,
+                    "position",
+                    position,
+                    ColorbarPosition,
+                    "use ColorbarPosition.RIGHT, ColorbarPosition.BOTTOM, "
+                    "ColorbarPosition.NONE or ub.AUTO.",
+                ).value
+            )
+            checked = (
+                None
+                if format is AUTO
+                else instance(
+                    context,
+                    "format",
+                    format,
+                    TickFormat,
+                    "use a TickFormat, or ub.AUTO for the y tick format.",
+                )
+            )
+            name = _args.text(context, "label", label)
+            self._native.figure_colorbar(
+                name, placement, None if checked is None else _ticks.native(checked)
+            )
+            return self
 
     def title(self, text: str) -> Self:
         """Set the figure title, shown above every panel and the merged legend.

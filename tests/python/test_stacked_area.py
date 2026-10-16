@@ -236,7 +236,7 @@ def test_facade_matches_native(theme: ub.Theme, native_theme: Callable[[], _umbe
     a, b = np.array([1.0, 2.0, 3.0]), np.array([3.0, 1.0, 2.0])
     fig = ub.Figure(6, 4, theme=theme)
     fig.add_axes().stacked_area(x, [ub.Series("a", a), ub.Series("b", b)])
-    native = _umber.Figure(6, 4, native_theme(), 1, 1, 0, 0, 0)
+    native = _umber.Figure(6, 4, native_theme(), 1, 1, 0, 0, 0, 0)
     native.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
     native.stacked_area(0, 0, x, [("a", a, (0, 0, 1.0)), ("b", b, (0, 0, 1.0))])
     assert fig.to_svg() == native.to_svg(0)

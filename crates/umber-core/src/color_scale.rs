@@ -73,6 +73,35 @@ impl ColorScaleSpec {
         .with_hint(SAME_SCALE_HINT))
     }
 
+    /// Checks a shared member's mapping, naming the panel that owns the conflicting mapping.
+    /// Without a containing `parameter`, names the first differing color argument itself.
+    pub fn check_shared(
+        &self,
+        existing: &ColorScaleSpec,
+        cells: crate::CellRange,
+        context: &'static str,
+        parameter: Option<&'static str>,
+    ) -> Result<()> {
+        let Some(differs) = self.first_difference(existing) else {
+            return Ok(());
+        };
+        let parameter = parameter.unwrap_or_else(|| differs.argument());
+        Err(Error::usage(
+            context,
+            format!(
+                "{parameter} uses {}; row {}, col {} maps colors with {}.",
+                self.describe(differs),
+                cells.row(),
+                cells.col(),
+                existing.describe(differs),
+            ),
+        )
+        .with_parameter(parameter)
+        .with_hint(
+            "use the same cmap, scale and center for every color-mapped mark in the shared group.",
+        ))
+    }
+
     /// Checks that this spec, of a new mark that takes its colormap, scale and center as the
     /// arguments `cmap`, `scale` and `center`, is the spec `existing` of the axes' color
     /// scale: `Error::Usage` under `context` about the first of them that differs.
@@ -468,15 +497,14 @@ impl ResolvedColorScale {
     /// limits, or else over the extent of the finite mapped values (positive ones on a log
     /// scale). `None` when no mark is color-mapped or no mapped value is finite, even with
     /// limits: then nothing color-mapped is drawn.
-    pub fn resolve(
-        marks: &[ResolvedMark<'_>],
+    pub fn resolve<'a, 'm: 'a>(
+        marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
         limits: Option<(f64, f64)>,
         theme: &Theme,
     ) -> Option<ResolvedColorScale> {
-        let (spec, _) = marks.iter().find_map(ResolvedMark::color_values)?;
+        let (spec, _) = marks.clone().find_map(ResolvedMark::color_values)?;
         let log = matches!(spec.scale, Transform::Log(_));
         let extent = marks
-            .iter()
             .filter_map(ResolvedMark::color_values)
             .flat_map(|(_, values)| values.iter().copied())
             .filter(|v| v.is_finite() && (!log || *v > 0.0))

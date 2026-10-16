@@ -631,7 +631,11 @@ class Theme:
         """Return this theme with the default colorbar position changed.
 
         Args:
-            position: ``RIGHT``, ``BOTTOM`` or ``NONE``. Axes may override this setting.
+            position: ``RIGHT``, ``BOTTOM`` or ``NONE``. ``NONE`` hides colorbars by
+                default in every sharing mode. ``RIGHT`` and ``BOTTOM`` choose the side
+                for unshared panels and ``Share.ALL``; ``Share.ROW`` stays right and
+                ``Share.COL`` stays below. ``Axes.colorbar()`` or ``Figure.colorbar()``
+                may override the default with a position allowed by the sharing mode.
 
         Returns:
             A new theme; this theme is unchanged.

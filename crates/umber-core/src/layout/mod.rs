@@ -28,8 +28,8 @@ mod panel;
 pub(crate) mod placement;
 mod program;
 
-pub(crate) use colorbar::{ColorbarSide, PlacedColorbar};
-pub(crate) use grid::{GridInput, check_panel_contents, solve_grid};
+pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
+pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
 

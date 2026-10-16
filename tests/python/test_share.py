@@ -16,7 +16,7 @@ EDITABLE = 1
 
 
 def figure(share_x: int = ALL, share_y: int = ALL) -> _umber.Figure:
-    return _umber.Figure(12.0, 8.0, _umber.Theme.graphite(), 2, 2, share_x, share_y, 1)
+    return _umber.Figure(12.0, 8.0, _umber.Theme.graphite(), 2, 2, share_x, share_y, 1, NONE)
 
 
 def add(fig: _umber.Figure, row: int, col: int) -> None:

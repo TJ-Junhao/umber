@@ -404,7 +404,7 @@ impl PanelBands {
     }
 
     /// The same measured axes without a colorbar, for attributing room errors.
-    pub(super) fn without_colorbar(&self, direct_cap: f64) -> Self {
+    pub(crate) fn without_colorbar(&self, direct_cap: f64) -> Self {
         let mut bands = self.clone();
         bands.colorbar = None;
         bands.right_colorbar = 0.0;

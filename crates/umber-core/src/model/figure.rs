@@ -51,6 +51,10 @@ pub struct Figure {
     x_groups: BTreeMap<usize, Group>,
     /// Settings stored once per y group.
     y_groups: BTreeMap<usize, Group>,
+    /// Explicit color limits and the cells that set them.
+    color_groups: BTreeMap<usize, share::ColorGroup>,
+    /// Settings of every shared colorbar.
+    colorbar: super::ColorbarOptions,
 }
 
 impl Figure {
@@ -97,7 +101,72 @@ impl Figure {
             panels: Vec::new(),
             x_groups: BTreeMap::new(),
             y_groups: BTreeMap::new(),
+            color_groups: BTreeMap::new(),
+            colorbar: super::ColorbarOptions::default(),
         })
+    }
+
+    /// Replaces the shared colorbars' label, position and tick format.
+    ///
+    /// Row colorbars sit on the right and column colorbars below. An unset position hides
+    /// bars in every sharing mode when the theme's position is [`crate::ColorbarPosition::None`].
+    /// Otherwise only all-panel sharing follows the theme's side. An explicit position
+    /// overrides the theme, but only all-panel sharing accepts [`crate::ColorbarPosition::None`].
+    /// An unset format follows the first color-mapped panel in each group's row-major order.
+    /// Settings may precede marks.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` when colors are not shared; `Error::Style` for a position incompatible
+    /// with row or column sharing or an invalid label. Failed calls leave the figure unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ColorbarOptions, Figure, Grid, Share, Theme};
+    /// let grid = Grid::new(2, 2)?.with_share_color(Share::All);
+    /// let mut figure = Figure::with_grid(12.0, 8.0, Theme::pigment(), grid)?;
+    /// figure.colorbar(ColorbarOptions { label: "Intensity".into(), ..Default::default() })?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn colorbar(&mut self, options: super::ColorbarOptions) -> Result<&mut Self> {
+        use crate::{ColorbarPosition, Share};
+        const CONTEXT: &str = "Figure.colorbar()";
+        let (mode, required, where_) = match self.grid.share_color() {
+            Share::None => {
+                return Err(
+                    Error::usage(CONTEXT, "colors are not shared across panels.").with_hint(
+                        "set each panel's colorbar with Axes.colorbar(), or share colors.",
+                    ),
+                );
+            }
+            Share::Row => ("ROW", Some(ColorbarPosition::Right), "right of each row"),
+            Share::Col => ("COL", Some(ColorbarPosition::Bottom), "below each column"),
+            Share::All => ("ALL", None, ""),
+        };
+        if let (Some(position), Some(required)) = (options.position, required)
+            && position != required
+        {
+            let name = match position {
+                ColorbarPosition::Right => "RIGHT",
+                ColorbarPosition::Bottom => "BOTTOM",
+                ColorbarPosition::None => "NONE",
+            };
+            return Err(Error::style(
+                CONTEXT,
+                format!("position is {name}; with share_color={mode} the colorbar sits {where_}."),
+            )
+            .with_parameter("position")
+            .with_hint("use AUTO for the shared colorbar position, or share colors with ALL."));
+        }
+        super::check_text(CONTEXT, "label", "label", &options.label)?;
+        self.colorbar = options;
+        Ok(self)
+    }
+
+    /// The settings of shared colorbars.
+    pub(crate) fn colorbar_options(&self) -> &super::ColorbarOptions {
+        &self.colorbar
     }
 
     /// Sets the figure title, above the panels and the merged legend.
@@ -286,8 +355,12 @@ impl Figure {
         let index = self
             .panels
             .partition_point(|axes| (axes.cells().row(), axes.cells().col()) < (row, col));
-        self.panels
-            .insert(index, Axes::new(x, y, cells, x_settings, y_settings));
+        let mut axes = Axes::new(x, y, cells, x_settings, y_settings);
+        axes.color_limits = self
+            .color_groups
+            .get(&self.color_group_of(row, col))
+            .and_then(|group| group.limits);
+        self.panels.insert(index, axes);
         Ok(AxesMut::new(self, index))
     }
 
@@ -472,6 +545,117 @@ impl Figure {
     /// The stable y group key of a cell.
     pub(crate) fn y_group_of(&self, row: usize, col: usize) -> usize {
         share::group_key(&self.grid, self.grid.share_y(), row, col)
+    }
+
+    /// The stable color group key of a cell.
+    pub(crate) fn color_group_of(&self, row: usize, col: usize) -> usize {
+        share::group_key(&self.grid, self.grid.share_color(), row, col)
+    }
+
+    /// Checks a point mapping against the other members before a mark is stored.
+    pub(super) fn check_shared_point_color(
+        &self,
+        index: usize,
+        color: &super::PointColor,
+        context: &'static str,
+    ) -> Result<()> {
+        let super::PointColor::By(by) = color else {
+            return Ok(());
+        };
+        self.check_shared_color(
+            index,
+            &crate::color_scale::ColorScaleSpec::of(by),
+            context,
+            Some("color"),
+        )
+    }
+
+    /// Checks a new color mapping against the existing mappings in its group.
+    /// `parameter` contains a point mapping; other marks take separate color arguments.
+    pub(super) fn check_shared_color(
+        &self,
+        index: usize,
+        spec: &crate::color_scale::ColorScaleSpec,
+        context: &'static str,
+        parameter: Option<&'static str>,
+    ) -> Result<()> {
+        let cell = self.panels[index].cells();
+        let crossed = match self.grid.share_color() {
+            super::Share::Row if cell.row_span() > 1 => Some((
+                "rows",
+                "share colors by ALL, or place the color-mapped mark on a panel inside one row.",
+            )),
+            super::Share::Col if cell.col_span() > 1 => Some((
+                "columns",
+                "share colors by ALL, or place the color-mapped mark on a panel inside one column.",
+            )),
+            _ => None,
+        };
+        if let Some((dimension, hint)) = crossed {
+            return Err(Error::usage(
+                context,
+                format!("the panel spans {dimension} that share colors in different groups."),
+            )
+            .with_parameter(parameter.unwrap_or("cmap"))
+            .with_hint(hint));
+        }
+        let key = self.color_group_of(cell.row(), cell.col());
+        for other in self.panels.iter().filter(|axes| {
+            let c = axes.cells();
+            self.color_group_of(c.row(), c.col()) == key && c != cell
+        }) {
+            if let Some(existing) = other.marks().iter().find_map(super::Mark::color_scale) {
+                spec.check_shared(&existing, other.cells(), context, parameter)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates all members, then records and propagates shared color limits atomically.
+    pub(super) fn set_color_limits(&mut self, index: usize, limits: (f64, f64)) -> Result<()> {
+        let c = self.panels[index].cells();
+        let cell = super::Cell {
+            row: c.row(),
+            col: c.col(),
+        };
+        let key_of = |cells: CellRange| {
+            share::group_key(
+                &self.grid,
+                self.grid.share_color(),
+                cells.row(),
+                cells.col(),
+            )
+        };
+        let key = key_of(c);
+        for axes in &self.panels {
+            let other = axes.cells();
+            if key_of(other) == key
+                && let Some(spec) = axes.marks().iter().find_map(super::Mark::color_scale)
+            {
+                spec.check_range(limits, "Axes.clim()", None)
+                    .map_err(|error| {
+                        if other == c {
+                            error
+                        } else {
+                            error.with_message_prefix(&format!(
+                                "row {}, col {}: ",
+                                other.row(),
+                                other.col(),
+                            ))
+                        }
+                    })?;
+            }
+        }
+        self.color_groups
+            .entry(key)
+            .or_default()
+            .set(cell, limits)?;
+        for axes in &mut self.panels {
+            if key_of(axes.cells()) == key {
+                axes.color_limits = Some(limits);
+            }
+        }
+        Ok(())
     }
 
     /// Checks and replaces one group setting, then points every member at the new allocation.
