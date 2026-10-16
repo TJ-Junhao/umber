@@ -1,8 +1,10 @@
 """Tests of the native extension's themes, figures, marks and rendering."""
 
 import struct
+import sysconfig
 import threading
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import numpy as np
@@ -35,6 +37,9 @@ RED = (2, 0xD64933FF, 1.0)
 BLUE = (2, 0x3366B8FF, 1.0)
 LINEAR, LOG, CATEGORY = 0, 1, 2
 OUTLINES, EDITABLE = 0, 1
+FREE_THREADED = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+# PyO3's messages when a figure is already borrowed by another thread's call.
+BORROW_ERRORS = frozenset({"Already borrowed", "Already mutably borrowed"})
 CONCRETE_HINT = "use Color.hex(), Color.rgb() or a named color."
 X_SCALE_HINT = "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."
 CATEGORY_X_HINT = "pass x=Scale.category() to Figure.add_axes()."
@@ -1257,6 +1262,7 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
     unchanged_png = unchanged.to_png(40)
 
     errors: list[BaseException] = []
+    refused: list[str] = []
     svgs: list[str] = []
     pngs: list[bytes] = []
     still_svgs: list[str] = []
@@ -1264,11 +1270,22 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
     retitled = 0
     stop = threading.Event()
 
+    def when_free[T](call: Callable[[], T]) -> T:
+        # Without the GIL, two threads' calls on one figure can overlap, and PyO3 refuses the
+        # one that finds the figure borrowed; try again until it is free.
+        while True:
+            try:
+                return call()
+            except RuntimeError as err:
+                if str(err) not in BORROW_ERRORS:
+                    raise
+                refused.append(str(err))
+
     def render() -> None:
         try:
             for _ in range(15):
-                svgs.append(changing.to_svg(OUTLINES))
-                pngs.append(changing.to_png(40))
+                svgs.append(when_free(lambda: changing.to_svg(OUTLINES)))
+                pngs.append(when_free(lambda: changing.to_png(40)))
                 still_svgs.append(unchanged.to_svg(OUTLINES))
                 still_pngs.append(unchanged.to_png(40))
         except BaseException as err:  # reported below
@@ -1278,7 +1295,7 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
         nonlocal retitled
         try:
             while not stop.is_set():
-                changing.title(0, 0, titles[retitled % 2])
+                when_free(partial(changing.title, 0, 0, titles[retitled % 2]))
                 retitled += 1
         except BaseException as err:  # reported below
             errors.append(err)
@@ -1295,6 +1312,9 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
     writer.join()
 
     assert errors == []
+    # With the GIL, a call never overlaps another: rendering releases it only after copying
+    # the figure.
+    assert FREE_THREADED or refused == []
     assert retitled > 0
     assert len(svgs) == len(pngs) == 30
     assert set(svgs) <= expected_svgs

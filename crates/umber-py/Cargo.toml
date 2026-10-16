@@ -15,6 +15,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 umber-core = { path = "../umber-core" }
+# The workspace enables `abi3-py312`, which applies to GIL builds only: the stable ABI does not
+# cover free-threaded CPython 3.14t, so PyO3 and maturin build a version-specific `cp314t`
+# extension for it from the same code.
 pyo3.workspace = true
 
 [lints]
