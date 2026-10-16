@@ -695,6 +695,129 @@ fn plan(
     })
 }
 
+/// Resolves cell geometry against the solved plot, then settles its limits and measured
+/// labels together. Once rows are chosen, an automatic hexagon lattice keeps its assignments;
+/// only the symmetric extra room changes as the plot aspect settles.
+fn plan_cells(
+    figure: &Figure,
+    panels: &mut [Panel<'_>],
+    lib: &FontLibrary,
+    context: &'static str,
+) -> Result<FigurePlan> {
+    let mut planned = plan(figure, panels, lib, context)?;
+    if !panels.iter().any(|panel| {
+        panel
+            .marks
+            .iter()
+            .any(|mark| matches!(mark, ResolvedMark::Hexbin { .. }))
+    }) {
+        return Ok(planned);
+    }
+    let groups = ShareGroups::new(figure);
+    for pass in 0..64 {
+        let aspects: Vec<_> = planned
+            .panels
+            .iter()
+            .map(|(_, layout)| layout.plot.width / layout.plot.height)
+            .collect();
+        let scales: Vec<_> = planned
+            .panels
+            .iter()
+            .map(|(r, _)| {
+                [&r.x, &r.y].map(|axis| {
+                    axis.continuous()
+                        .copied()
+                        .unwrap_or_else(|| crate::ContinuousScale::unit(crate::Transform::Linear))
+                })
+            })
+            .collect();
+        for (i, panel) in panels.iter_mut().enumerate() {
+            let limits = [panel.axes.x_limits(), panel.axes.y_limits()];
+            let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
+                || groups.y.iter().filter(|&&g| g == groups.y[i]).count() > 1;
+            let independent = !shared && limits == [None, None];
+            let only_hexbin = panel
+                .marks
+                .iter()
+                .all(|m| matches!(m, ResolvedMark::Hexbin { .. }));
+            for mark in &mut panel.marks {
+                if let ResolvedMark::Hexbin { mark, bins, .. } = mark {
+                    if pass == 0 {
+                        *bins = if independent {
+                            crate::bin2d::HexBins::new(
+                                &mark.x,
+                                &mark.y,
+                                mark.gridsize,
+                                mark.transforms,
+                                aspects[i],
+                            )
+                        } else {
+                            crate::bin2d::HexBins::on_axes(
+                                &mark.x,
+                                &mark.y,
+                                mark.gridsize,
+                                scales[i],
+                                aspects[i],
+                                limits,
+                            )
+                        };
+                    }
+                    if independent && only_hexbin {
+                        bins.fit(aspects[i]);
+                    } else {
+                        bins.fit_on_axes(aspects[i], scales[i], limits, context)?;
+                    }
+                    for j in 0..2 {
+                        if let [lo, hi] = bins.domain(j) {
+                            crate::ContinuousScale::new(mark.transforms[j], *lo, *hi, context)
+                                .map_err(|_| {
+                                    crate::Error::data(
+                                        context,
+                                        "the whole hexagons exceed the supported axis range; \
+                                         their bounds must fit a numeric axis.",
+                                    )
+                                    .with_parameter(if j == 0 { "x" } else { "y" })
+                                    .with_hint("rescale the coordinates, or use hist2d().")
+                                })?;
+                        }
+                    }
+                }
+            }
+            panel.color = ResolvedColorScale::resolve(
+                &panel.marks,
+                panel.axes.color_limits(),
+                figure.theme(),
+            );
+        }
+        planned = plan(figure, panels, lib, context)?;
+        if planned
+            .panels
+            .iter()
+            .zip(&aspects)
+            .zip(&scales)
+            .all(|(((r, layout), aspect), old)| {
+                ((layout.plot.width / layout.plot.height) / aspect - 1.0).abs() < 1e-12
+                    && [&r.x, &r.y].iter().zip(old).all(|(new, old)| {
+                        let Some(new) = new.continuous() else {
+                            return true;
+                        };
+                        let (lo, hi) = new.domain();
+                        old.normalize(lo).abs() < 1e-10 && (old.normalize(hi) - 1.0).abs() < 1e-10
+                    })
+            })
+        {
+            return Ok(planned);
+        }
+    }
+    Err(crate::Error::data(
+        context,
+        "the hexagon bounds and tick labels do not settle at this plot size; \
+         a stable numeric range is required.",
+    )
+    .with_parameter("gridsize")
+    .with_hint("choose a larger gridsize, or increase the figure size."))
+}
+
 /// [`plan`] for the axes of `figure` whose top-left cell is at `cell`, with the figure laid out
 /// as [`scene`] lays it out. Panics when the cell holds no axes or the figure cannot be laid
 /// out.
@@ -717,8 +840,8 @@ pub(crate) fn try_plan_figure(
     lib: &FontLibrary,
 ) -> Result<(Resolved, Layout)> {
     let index = panel_index(figure, cell);
-    let panels = panels(figure, lib);
-    let mut planned = plan(figure, &panels, lib, "Figure.to_scene()")?;
+    let mut panels = panels(figure, lib);
+    let mut planned = plan_cells(figure, &mut panels, lib, "Figure.to_scene()")?;
     Ok(planned.panels.swap_remove(index))
 }
 
@@ -729,7 +852,8 @@ pub(crate) fn try_plan_panels(
     figure: &Figure,
     lib: &FontLibrary,
 ) -> Result<Vec<(Resolved, Layout)>> {
-    plan(figure, &panels(figure, lib), lib, "Figure.to_scene()").map(|planned| planned.panels)
+    plan_cells(figure, &mut panels(figure, lib), lib, "Figure.to_scene()")
+        .map(|planned| planned.panels)
 }
 
 /// The index, in the order of [`Figure::panels`], of the axes of `figure` whose top-left cell
@@ -803,7 +927,7 @@ pub(crate) fn scene(
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
-    let panels = panels(figure, library);
+    let mut panels = panels(figure, library);
     if panels.is_empty() {
         let header = figure_header(figure, &panels, library);
         header.check(figure, context)?;
@@ -812,7 +936,7 @@ pub(crate) fn scene(
         }
         return Ok(scene);
     }
-    let planned = plan(figure, &panels, library, context)?;
+    let planned = plan_cells(figure, &mut panels, library, context)?;
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         scene.push(draw::chrome(theme, layout));
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {

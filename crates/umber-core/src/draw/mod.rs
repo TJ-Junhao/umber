@@ -42,11 +42,13 @@ mod clip;
 pub(crate) mod colorbar;
 mod error_bars;
 pub(crate) mod fill;
+mod hexbin;
 mod hist;
 pub(crate) mod legend;
 mod line;
 mod mapping;
 mod marker;
+mod mesh;
 mod rule;
 mod scatter;
 pub(crate) use scatter::{MARKER_OUTLINE, marker_reach};
@@ -218,6 +220,21 @@ pub(crate) fn marks(
                 stacked_area::stacked_area_items(
                     &context, resolved, mark, series, stacks, width, &mut items,
                 );
+            }
+            ResolvedMark::Mesh { mark, .. } => {
+                if let Some(color) = &resolved.color {
+                    mesh::mesh_items(&context, resolved, mark, color, &mut items);
+                }
+            }
+            ResolvedMark::Hist2d { mark, .. } => {
+                if let Some(color) = &resolved.color {
+                    mesh::hist2d_items(&context, resolved, mark, color, &mut items);
+                }
+            }
+            ResolvedMark::Hexbin { ref bins, .. } => {
+                if let Some(color) = &resolved.color {
+                    hexbin::hexbin_items(&context, resolved, bins, color, &mut items);
+                }
             }
             ResolvedMark::Hist {
                 ref histogram,

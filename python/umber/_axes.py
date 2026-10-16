@@ -12,8 +12,9 @@ from typing_extensions import TypeVar
 # so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
 # ``umber.Figure`` through the package once it has loaded.
 import umber
-from umber import _args, _color, _series, _size, _ticks, _time, _umber
+from umber import _args, _cmap, _color, _scale, _series, _size, _ticks, _time, _umber
 from umber._args import instance, integer, is_text_or_buffer, real, type_name
+from umber._cmap import CMAP_HINT, Cmap
 from umber._color import Color
 from umber._color_by import ColorBy, native_point_color
 from umber._enums import (
@@ -26,7 +27,7 @@ from umber._enums import (
     Marker,
     Step,
 )
-from umber._errors import DataError, new_error
+from umber._errors import DataError, StyleError, UsageError, new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._series import Distribution, Series
@@ -1191,6 +1192,165 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.hist(self._row, self._col, data, count, name, spec)
             return self
 
+    def mesh(
+        self,
+        x_edges: Values[X],
+        y_edges: Values[Y],
+        values: object,
+        *,
+        cmap: Cmap | Auto = AUTO,
+        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        center: float | Auto = AUTO,
+    ) -> Self:
+        """Add rectangular cells whose colors map a row-major matrix of values.
+
+        Cells span their edges exactly, without padding their extents. Other marks on the
+        axes keep their usual padding; the domain is the union. NaN values leave cells
+        blank. Both axes must be numeric; the outer edge ranges must meet the axis
+        precision limits, as for ``xlim()`` and ``ylim()``. All color-mapped marks share one
+        color scale.
+
+        Args:
+            x_edges: Strictly increasing column edges, one more than the number of columns.
+            y_edges: Strictly increasing row edges, one more than the number of rows.
+            values: A two-dimensional numeric matrix; rows run along y and columns along x.
+            cmap: The colormap, or ``AUTO`` for the theme's colormap.
+            scale: A linear or log color scale, independent of the axis scales.
+            center: The middle of a diverging mapping, or ``AUTO`` for sequential colors.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If the matrix shape or edges are invalid, or a value is invalid.
+            StyleError: If the color center is invalid.
+            UsageError: If an axis is not numeric, or color scales conflict.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.mesh([0, 1, 3], [0, 2], [[1.0, 4.0]])
+        """
+        with api_call():
+            context = "Axes.mesh()"
+            check_floats_type(context, "x_edges", x_edges)
+            check_floats_type(context, "y_edges", y_edges)
+            check_floats_type(context, "values", values)
+            colors = _cell_colors(context, cmap, scale, center)
+            _numeric_cells(context, self)
+            xs = floats(context, "x_edges", x_edges)
+            ys = floats(context, "y_edges", y_edges)
+            data, rows, columns = _matrix(context, values)
+            for name, edges, count, dimension in (
+                ("x_edges", xs, columns, "columns"),
+                ("y_edges", ys, rows, "rows"),
+            ):
+                if len(edges) != count + 1:
+                    raise new_error(
+                        DataError,
+                        context,
+                        f"{name} has {len(edges)} values; values has {count} {dimension}, "
+                        f"so {name} needs {count + 1}.",
+                        parameter=name,
+                        hint=f"pass one more edge than the number of {dimension}.",
+                    )
+            self._native.mesh(self._row, self._col, xs, ys, data, *colors)
+            return self
+
+    def hist2d(
+        self: "Axes[float, float]",
+        x: Values[float],
+        y: Values[float],
+        *,
+        bins: int | tuple[int, int] = 30,
+        cmap: Cmap | Auto = AUTO,
+        scale: Scale[float] = Scale.linear(),  # noqa: B008
+    ) -> "Axes[float, float]":
+        """Count paired points in equal-width rectangular bins over their data ranges.
+
+        Widths are equal in axis space: in data on a linear axis, in the logarithm on a log
+        axis. A pair with either coordinate NaN is skipped. Empty bins are blank, including
+        on a log color scale. Both axes must be numeric; counts share the axes' color scale.
+
+        Args:
+            x: The x coordinates.
+            y: The y coordinates, one per x coordinate.
+            bins: One count for both axes, or ``(x_count, y_count)``, each in 1..MAX_BINS.
+            cmap: The colormap, or ``AUTO`` for the theme's sequential colormap.
+            scale: A linear or log color scale.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If coordinates are invalid or their lengths differ.
+            StyleError: If a bin count is out of range.
+            UsageError: If an axis is not numeric, or color scales conflict.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.hist2d([0, 1, 1], [0, 2, 2], bins=(4, 3))
+        """
+        with api_call():
+            context = "Axes.hist2d()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            counts = _rect_counts(context, bins)
+            colors = _cell_colors(context, cmap, scale, AUTO)
+            _numeric_cells(context, self)
+            xs, ys = floats(context, "x", x), floats(context, "y", y)
+            self._native.hist2d(self._row, self._col, xs, ys, counts, *colors[:3])
+            return self
+
+    def hexbin(
+        self: "Axes[float, float]",
+        x: Values[float],
+        y: Values[float],
+        *,
+        gridsize: int = 30,
+        cmap: Cmap | Auto = AUTO,
+        scale: Scale[float] = Scale.linear(),  # noqa: B008
+    ) -> "Axes[float, float]":
+        """Count paired points in pointy-top hexagons, regular in screen coordinates.
+
+        Automatic limits include whole hexagons without changing the plot's shape. Explicit
+        limits clip cells. Pairs containing NaN are skipped and empty cells stay blank.
+
+        Args:
+            x: The x coordinates on numeric axes.
+            y: The y coordinates, one per x coordinate.
+            gridsize: The number of hexagons across the x data range, in 1..MAX_BINS.
+            cmap: The colormap, or ``AUTO`` for the theme's sequential colormap.
+            scale: A linear or log color scale; counts share the axes' color scale.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If coordinates are invalid or their lengths differ.
+            StyleError: If ``gridsize`` is out of range.
+            UsageError: If an axis is not numeric, or color scales conflict.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.hexbin([0, 1, 1], [0, 2, 2], gridsize=5, scale=ub.Scale.log())
+        """
+        with api_call():
+            context = "Axes.hexbin()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            count = _cell_count(context, "gridsize", gridsize)
+            colors = _cell_colors(context, cmap, scale, AUTO)
+            _numeric_cells(context, self)
+            xs, ys = floats(context, "x", x), floats(context, "y", y)
+            self._native.hexbin(self._row, self._col, xs, ys, count, *colors[:3])
+            return self
+
     def step(
         self: SY,
         x: Values[X],
@@ -2002,6 +2162,112 @@ def _distribution_arguments(
             )
         arguments.append(_series.native_distribution(item))
     return arguments
+
+
+def _cell_colors(
+    context: str, cmap: object, scale: object, center: object
+) -> tuple[_umber.Cmap | None, int, float, float | None]:
+    """Check cell color options and convert them without constructing a second mapping."""
+    colormap = None if cmap is AUTO else instance(context, "cmap", cmap, Cmap, CMAP_HINT)
+    instance(context, "scale", scale, Scale, "use Scale.linear() or Scale.log().")
+    transform = cast(Scale[Any], scale)
+    if transform == _CATEGORY:
+        raise new_error(
+            TypeError,
+            context,
+            "scale is Scale.category(); scale must be Scale.linear() or Scale.log().",
+            parameter="scale",
+            hint="use Scale.linear() or Scale.log().",
+        )
+    middle = None if center is AUTO else real(context, "center", center)
+    return None if colormap is None else _cmap.native(colormap), *_scale.native(transform), middle
+
+
+def _numeric_cells(context: str, axes: Axes[Any, Any]) -> None:
+    """Reject nonnumeric axes before converting cell data."""
+    for name, scale in zip(("x", "y"), scales(axes), strict=True):
+        if scale == _CATEGORY:
+            raise new_error(
+                UsageError,
+                context,
+                f"{name} must be a numeric axis.",
+                parameter=name,
+                hint="use Scale.linear() or Scale.log() for both axes.",
+            )
+
+
+def _cell_count(context: str, name: str, value: object) -> int:
+    """Check a count before converting it to a native unsigned integer."""
+    count = integer(context, name, value)
+    if not 1 <= count <= umber.MAX_BINS:
+        raise new_error(
+            StyleError,
+            context,
+            f"{name} is {count}; it must be between 1 and {umber.MAX_BINS}.",
+            parameter=name,
+            hint="choose a positive count no greater than MAX_BINS.",
+        )
+    return count
+
+
+def _rect_counts(context: str, bins: object) -> tuple[int, int]:
+    """Normalize one count or a pair of counts."""
+    if isinstance(bins, tuple):
+        pair = cast(tuple[object, ...], bins)
+        if len(pair) != 2:
+            raise new_error(
+                TypeError,
+                context,
+                "bins must be an int or a pair of ints.",
+                parameter="bins",
+                hint="pass bins=30 or bins=(30, 20).",
+            )
+        return _cell_count(context, "bins", pair[0]), _cell_count(context, "bins", pair[1])
+    count = _cell_count(context, "bins", bins)
+    return count, count
+
+
+def _matrix(context: str, values: object) -> tuple[FloatArray, int, int]:
+    """Flatten a numeric matrix without coercing bool or text elements into numbers."""
+    hint = "pass a non-empty two-dimensional matrix of numbers; use NaN for blank cells."
+    if isinstance(values, np.ma.MaskedArray):
+        raise new_error(
+            DataError,
+            context,
+            "values is a masked array; masked values cannot be plotted.",
+            parameter="values",
+            hint=hint,
+        )
+    try:
+        # Object dtype preserves the element types of nested Python sequences.
+        array = np.asarray(values, dtype=None if hasattr(values, "__array__") else object)
+    except (TypeError, ValueError):
+        raise new_error(
+            DataError,
+            context,
+            "values must be a rectangular two-dimensional matrix.",
+            parameter="values",
+            hint=hint,
+        ) from None
+    if array.ndim != 2 or 0 in array.shape:
+        raise new_error(
+            DataError,
+            context,
+            "values must be a non-empty two-dimensional matrix.",
+            parameter="values",
+            hint=hint,
+        )
+    rows, columns = array.shape
+    try:
+        flattened = floats(context, "values", array.reshape(-1))
+    except DataError as error:
+        prefix = f"{context}: values["
+        index, closing, rest = str(error).removeprefix(prefix).partition("]")
+        if str(error).startswith(prefix) and closing and index.isdecimal():
+            row, column = divmod(int(index), columns)
+            error.args = (f"{context}: values[{row}, {column}]{rest}",)
+        raise
+    return flattened, rows, columns
 
 
 _SCALES: Final = attrgetter("_x", "_y")
