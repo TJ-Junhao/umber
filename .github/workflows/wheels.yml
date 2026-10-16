@@ -76,19 +76,54 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Three wheels per platform: the stable ABI for GIL builds from 3.12, a version-specific
+      # wheel for 3.14t, and the free-threaded stable ABI for 3.15t and later. 3.12 is set up
+      # last so that it stays the default interpreter.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python314t
+        with:
+          python-version: "3.14t"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python315t
+        with:
+          python-version: "3.15t"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python312
         with:
           python-version: "3.12"
       # Linux wheels build in a manylinux container, where before-script-linux sets the flags.
       - name: Remap build-machine paths
         if: runner.os != 'Linux'
         run: echo "RUSTFLAGS=$(scripts/release/remap-rustflags.sh)" >> "$GITHUB_ENV"
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+      - name: Build the GIL stable-ABI wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           maturin-version: ${{ env.MATURIN_VERSION }}
           target: ${{ matrix.target }}
           manylinux: auto
-          args: --release --locked --out dist
+          args: >-
+            --release --locked --out dist
+            --interpreter "${{ runner.os == 'Linux' && 'python3.12' || steps.python312.outputs.python-path }}"
+          before-script-linux: export RUSTFLAGS="$(scripts/release/remap-rustflags.sh)"
+      - name: Build the Python 3.14t wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: >-
+            --release --locked --out dist
+            --interpreter "${{ runner.os == 'Linux' && 'python3.14t' || steps.python314t.outputs.python-path }}"
+          before-script-linux: export RUSTFLAGS="$(scripts/release/remap-rustflags.sh)"
+      - name: Build the free-threaded stable-ABI wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: >-
+            --release --locked --out dist
+            --interpreter "${{ runner.os == 'Linux' && 'python3.15t' || steps.python315t.outputs.python-path }}"
           before-script-linux: export RUSTFLAGS="$(scripts/release/remap-rustflags.sh)"
       - name: Check that no build-machine path is embedded
         run: scripts/release/check-wheel-paths.sh dist/*.whl
@@ -117,8 +152,8 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
-  # Each wheel is installed into a clean environment on its own platform, with the oldest and
-  # the newest supported Python, and tested there.
+  # Each wheel is installed into a clean environment on its own platform and tested there with
+  # the interpreters it serves.
   test:
     needs: build
     # Keep this platform list in step with the build job's.
@@ -149,10 +184,18 @@ jobs:
         with:
           name: wheel-${{ matrix.platform }}
           path: dist
-      - name: Test the wheel with Python 3.12
-        run: scripts/release/test-wheel.sh dist/*.whl 3.12
-      - name: Test the wheel with Python 3.14
-        run: scripts/release/test-wheel.sh dist/*.whl 3.14
+      - name: Test the GIL wheel with Python 3.12
+        run: scripts/release/test-wheel.sh dist/*-cp312-abi3-*.whl 3.12
+      - name: Test the GIL wheel with Python 3.14
+        run: scripts/release/test-wheel.sh dist/*-cp312-abi3-*.whl 3.14
+      - name: Test the GIL wheel with Python 3.15
+        run: scripts/release/test-wheel.sh dist/*-cp312-abi3-*.whl 3.15
+      - name: Test the Python 3.14t wheel
+        run: scripts/release/test-wheel.sh dist/*-cp314-cp314t-*.whl 3.14t
+      - name: Test the free-threaded stable-ABI wheel with Python 3.15t
+        run: scripts/release/test-wheel.sh dist/*-cp315-abi3.abi3t-*.whl 3.15t
+      - name: Test the free-threaded stable-ABI wheel with GIL Python 3.15
+        run: scripts/release/test-wheel.sh dist/*-cp315-abi3.abi3t-*.whl 3.15
 
   # The sdist is installed from the archive itself, away from the source tree, and tested the
   # same way as the wheels.
