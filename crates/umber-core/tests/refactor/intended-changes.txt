@@ -1,1 +1,12 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+
+# Required text widths round up; available panel widths still round down.
+errors/grid-room
+errors/grid
+
+# Required legend label widths and legend heights round up instead of to the nearest point.
+errors/legend_position
+
+# Required x/y tick label widths round up instead of to the nearest point.
+errors/x-label-min-width
+errors/x-label-overflow

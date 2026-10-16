@@ -12,7 +12,7 @@ HINT = "shorten the labels or widen the figure."
 WIDE = "W" * 60
 # A 6 in midnight figure: the last tick may move in to 318 pt and its label may reach 426 pt,
 # so labels fit up to 216 pt wide; 60 W's are 306 pt wide.
-MESSAGE = f'x tick label "{"W" * 38}… is 306 pt wide; at most 216 pt fits this figure.'
+MESSAGE = f'x tick label "{"W" * 38}… is 307 pt wide; at most 216 pt fits this figure.'
 
 
 def _figure(last: str) -> ub.Figure:
@@ -86,7 +86,7 @@ def test_y_labels_that_leave_no_room_for_the_plot_raise_style_error(
     with pytest.raises(ub.StyleError) as caught:
         render(_end_after_wide_y_labels(100), tmp_path)
     assert str(caught.value) == (
-        f'{context}: y tick label "{"W" * 38}… is 510 pt wide; at most 113 pt leaves room for '
+        f'{context}: y tick label "{"W" * 38}… is 511 pt wide; at most 113 pt leaves room for '
         "the plot area."
     )
     hint = "shorten the y tick labels or widen the figure."
@@ -101,7 +101,7 @@ def test_x_labels_need_a_plot_at_least_one_point_wide() -> None:
     with pytest.raises(ub.StyleError) as caught:
         _end_after_wide_y_labels(22).to_svg()
     assert str(caught.value) == (
-        'Figure.to_svg(): x tick label "END" is 15 pt wide; at most 13 pt fits this figure.'
+        'Figure.to_svg(): x tick label "END" is 16 pt wide; at most 13 pt fits this figure.'
     )
     # 21 W's leave room for END.
     assert _end_after_wide_y_labels(21).to_svg().startswith("<svg")
