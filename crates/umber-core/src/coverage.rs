@@ -34,6 +34,7 @@ fn visible(paint: &Paint) -> bool {
     match paint {
         Paint::Solid(color) => color.a > 0,
         Paint::Linear(gradient) => gradient.stops.iter().any(|s| s.color.a > 0),
+        Paint::Sampled { .. } => true,
     }
 }
 

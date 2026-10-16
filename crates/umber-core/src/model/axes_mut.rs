@@ -31,6 +31,30 @@ use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat};
 
+/// The label and optional overrides of an axes' colorbar. Unset overrides follow the theme's
+/// position and the y axis tick format; a new call replaces every setting.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{ColorbarOptions, ColorbarPosition};
+/// let options = ColorbarOptions {
+///     label: "Intensity".into(),
+///     position: Some(ColorbarPosition::Bottom),
+///     ..ColorbarOptions::default()
+/// };
+/// assert_eq!(options.label, "Intensity");
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ColorbarOptions {
+    /// The horizontal label above the bar; empty means no label.
+    pub label: String,
+    /// Overrides the theme's position when set.
+    pub position: Option<crate::ColorbarPosition>,
+    /// Overrides the y tick format when set.
+    pub format: Option<TickFormat>,
+}
+
 /// One axes of a figure, held for changing: the setters of its texts, limits, ticks and legend
 /// style, and its mark methods. It borrows the whole figure, and dereferences to the [`Axes`]
 /// for its getters.
@@ -1855,6 +1879,38 @@ impl<'a> AxesMut<'a> {
             spec.check_range((low, high), CONTEXT, None)?;
         }
         self.axes_mut().color_limits = Some((low, high));
+        Ok(self)
+    }
+
+    /// Replaces the colorbar settings. With no overrides the colorbar follows the theme's
+    /// position and the y tick format. The bar is drawn automatically for finite mapped values.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` if no color-mapped mark has been added, or `Error::Style` for an invalid
+    /// label. A failed call leaves all settings unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, ColorBy, ColorbarOptions, Figure, PointColor, ScaleKind,
+    ///                  ScatterOptions, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.scatter(AxisData::Numbers(vec![1.0]), &[2.0], ScatterOptions {
+    ///     color: PointColor::By(ColorBy::new(vec![3.0])), ..ScatterOptions::default()
+    /// })?;
+    /// axes.colorbar(ColorbarOptions { label: "Intensity".into(), ..ColorbarOptions::default() })?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn colorbar(&mut self, options: ColorbarOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.colorbar()";
+        if !self.marks().iter().any(|mark| mark.color_scale().is_some()) {
+            return Err(Error::usage(CONTEXT, "this axes has no color-mapped mark.")
+                .with_hint("add a heatmap, mesh, hist2d, hexbin, or a scatter with color=ColorBy(...) first."));
+        }
+        super::check_text(CONTEXT, "label", "label", &options.label)?;
+        self.axes_mut().colorbar = options;
         Ok(self)
     }
 

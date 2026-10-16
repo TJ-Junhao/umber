@@ -254,6 +254,26 @@ impl TickChoice {
     }
 }
 
+/// The axis whose tick-room geometry a colorbar follows.
+fn color_side(side: layout::ColorbarSide) -> Side {
+    match side {
+        layout::ColorbarSide::Bottom => Side::X,
+        layout::ColorbarSide::Right => Side::Y,
+    }
+}
+
+/// Relabels and spaces a visible colorbar without changing its norm or colormap.
+fn choose_color_ticks(panel: &Panel<'_>, resolved: &mut Resolved, room: &layout::TickRoom<'_>) {
+    let options = panel.axes.colorbar_options();
+    if let Some(color) = &resolved.color {
+        let format = options
+            .format
+            .as_ref()
+            .unwrap_or(panel.axes.y_tick_format());
+        resolved.color = Some(color.with_ticks(room, format));
+    }
+}
+
 /// Resolves each group once, in row-major panel order, in the role its members' marks give it
 /// ([`AxisRole::of_group`]), then gives its members identical scales and ticks, with each
 /// group's data extent widened to fit its bubbles as `fits` says. Each panel's baseline is the
@@ -364,6 +384,10 @@ fn plan(
         context,
         panels: &inputs,
     };
+    let color_sides: Vec<_> = panels
+        .iter()
+        .map(|panel| layout::ColorbarSide::resolve(panel.axes, theme).map(color_side))
+        .collect();
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
     let groups = ShareGroups::new(figure);
     let marks: Vec<&[ResolvedMark<'_>]> =
@@ -399,13 +423,19 @@ fn plan(
         .iter()
         .map(|input| grid.initial_plot_size(input.axes.cells()))
         .collect();
-    let first = resolve_groups(
+    let mut first = resolve_groups(
         panels,
         &limits,
         &groups,
         &rooms_for(&guesses, TickSpacing::Target),
         &fits,
     );
+    for (i, resolved) in first.iter_mut().enumerate() {
+        if let Some(side) = color_sides[i] {
+            let room = side.room(guesses[i], theme, lib);
+            choose_color_ticks(&panels[i], resolved, &room);
+        }
+    }
     let first: Vec<PanelBands> = first
         .iter()
         .enumerate()
@@ -415,7 +445,7 @@ fn plan(
     let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
 
     // The final pass: tick labels kept apart on the plot sizes of the first.
-    let resolve_choices = |choices: &[[TickChoice; 2]], fits: &BubbleFits| {
+    let resolve_choices = |choices: &[[TickChoice; 3]], fits: &BubbleFits| {
         let rooms: Vec<_> = choices
             .iter()
             .map(|c| {
@@ -425,12 +455,20 @@ fn plan(
                 ]
             })
             .collect();
-        resolve_groups(panels, &limits, &groups, &rooms, fits)
+        let mut resolved = resolve_groups(panels, &limits, &groups, &rooms, fits);
+        for (i, r) in resolved.iter_mut().enumerate() {
+            if let Some(side) = color_sides[i] {
+                let room = choices[i][2].room(side, theme, lib);
+                choose_color_ticks(&panels[i], r, &room);
+            }
+        }
+        resolved
     };
-    let mut choices: Vec<[TickChoice; 2]> = (0..panels.len())
+    let mut choices: Vec<[TickChoice; 3]> = (0..panels.len())
         .map(|i| {
-            Side::BOTH
-                .map(|side| TickChoice::first(side.group_plot(&groups, i, &plots, &show_labels)))
+            let [x, y] = Side::BOTH
+                .map(|side| TickChoice::first(side.group_plot(&groups, i, &plots, &show_labels)));
+            [x, y, TickChoice::first(plots[i])]
         })
         .collect();
     // First keep the complete previous constrained search. Its fallback may crowd on the
@@ -443,6 +481,12 @@ fn plan(
         &rooms_for(&plots, TickSpacing::Deferred),
         &fits,
     );
+    for (i, r) in resolved.iter_mut().enumerate() {
+        if let Some(side) = color_sides[i] {
+            let room = side.room(plots[i], theme, lib);
+            choose_color_ticks(&panels[i], r, &room);
+        }
+    }
     let mut bands: Vec<PanelBands> = resolved
         .iter()
         .enumerate()
@@ -477,12 +521,15 @@ fn plan(
     // Each side is chosen again at most twice per number of ticks.
     let rounds: usize = resolved
         .iter()
-        .map(|r| 2 * (r.x.ticks.len() + r.y.ticks.len()) + 1)
+        .map(|r| {
+            2 * (r.x.ticks.len() + r.y.ticks.len() + r.color.as_ref().map_or(0, |c| c.ticks.len()))
+                + 1
+        })
         .sum();
     // Resolves the axes for the current tick choices and bubble fits and solves the grid
     // again. When the grid cannot hold the fitted limits, every fit is clipped, and the axes
     // are resolved and the grid solved with the limits of the data positions.
-    let refit = |fits: &mut BubbleFits, choices: &[[TickChoice; 2]]| {
+    let refit = |fits: &mut BubbleFits, choices: &[[TickChoice; 3]]| {
         let resolved = resolve_choices(choices, fits);
         let bands: Vec<PanelBands> = resolved
             .iter()
@@ -537,7 +584,27 @@ fn plan(
                 }
             }
         }
-        if again.is_empty() {
+        let mut color_again = Vec::new();
+        for (i, r) in resolved.iter().enumerate() {
+            let Some(color) = &r.color else {
+                continue;
+            };
+            let Some(side) = color_sides[i] else {
+                continue;
+            };
+            if side.room(plots[i], theme, lib).slack(&color.ticks) >= 0.0 {
+                continue;
+            }
+            let choice = &mut next[i][2];
+            match choice.again(plots[i], color.ticks.len()) {
+                Some(new) => {
+                    *choice = new;
+                    color_again.push(i);
+                }
+                None => choice.state = ChoiceState::Settled,
+            }
+        }
+        if again.is_empty() && color_again.is_empty() {
             break;
         }
         let tried_resolved = resolve_choices(&next, &fits);
@@ -557,6 +624,14 @@ fn plan(
                 choice.state = ChoiceState::Settled;
             }
         }
+        for &i in &color_again {
+            if let Some(color) = &tried_resolved[i].color
+                && let Some(side) = color_sides[i]
+                && next[i][2].room(side, theme, lib).slack(&color.ticks) < 0.0
+            {
+                next[i][2].state = ChoiceState::Settled;
+            }
+        }
         match layout::solve_grid(&grid, &tried_bands) {
             Ok(tried) => {
                 resolved = tried_resolved;
@@ -568,6 +643,9 @@ fn plan(
                 // The grid cannot hold the new choices: those sides keep their ticks.
                 for &(i, side) in &again {
                     choices[i][side.index()].state = ChoiceState::Settled;
+                }
+                for &i in &color_again {
+                    choices[i][2].state = ChoiceState::Settled;
                 }
             }
         }
@@ -744,6 +822,9 @@ pub(crate) fn scene(
             scene.push(legend);
         }
         scene.push(draw::baseline(theme, layout));
+        if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
+            scene.push(draw::colorbar::draw(theme, color, bar));
+        }
     }
     if let Some(header) = draw::figure_header(theme, &planned.header) {
         scene.push(header);

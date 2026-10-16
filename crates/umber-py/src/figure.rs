@@ -945,6 +945,29 @@ impl Figure {
         Self::svg(slf, text, "Figure.save_svg()")
     }
 
+    /// Replaces the axes' colorbar label and optional overrides.
+    #[pyo3(signature = (row, col, label, position, format))]
+    fn colorbar(
+        &mut self,
+        row: i64,
+        col: i64,
+        label: String,
+        position: Option<i64>,
+        format: Option<TickFormatArg>,
+    ) -> PyResult<()> {
+        let options = umber_core::ColorbarOptions {
+            label,
+            position: position
+                .map(enum_value::<umber_core::ColorbarPosition>)
+                .transpose()?,
+            format: format.map(tick_format).transpose()?,
+        };
+        self.axes(row, col)?
+            .colorbar(options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Sets the color range of the axes' color-mapped marks.
     fn clim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
         self.axes(row, col)?

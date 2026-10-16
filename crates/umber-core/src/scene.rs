@@ -192,6 +192,26 @@ pub struct LinearGradient {
     pub stops: Vec<GradientStop>,
 }
 
+impl LinearGradient {
+    /// Samples a colormap into 256 intervals for SVG and shared endpoint normalization.
+    pub(crate) fn sampled(cmap: &crate::Cmap, from: Point, to: Point) -> Self {
+        const INTERVALS: usize = 256;
+        Self {
+            start: from,
+            end: to,
+            stops: (0..=INTERVALS)
+                .map(|i| {
+                    let t = i as f64 / INTERVALS as f64;
+                    GradientStop {
+                        offset: t as f32,
+                        color: cmap.at(t),
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
 /// What a fill is painted with.
 ///
 /// # Examples
@@ -209,6 +229,18 @@ pub enum Paint {
     Solid(Rgba),
     /// A linear gradient.
     Linear(LinearGradient),
+    /// An opaque colormap sampled along a line. PNG evaluates [`crate::Cmap::at`] at each
+    /// device-pixel center; SVG approximates it with a linear gradient of 256 intervals.
+    /// This preserves the colormap's Oklab interpolation without changing [`Paint::Linear`].
+    /// Invalid endpoints are skipped; a degenerate vector uses the final colormap color.
+    Sampled {
+        /// The colormap, including its original interpolation stops.
+        cmap: crate::Cmap,
+        /// The point at offset zero.
+        from: Point,
+        /// The point at offset one.
+        to: Point,
+    },
 }
 
 /// Text that has already been shaped and outlined, plus what is needed to re-emit it as
