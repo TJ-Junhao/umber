@@ -1,5 +1,9 @@
 """Figures from several threads: parallel figures render as they do serially, and a shared
-figure refuses concurrent changes without ever corrupting its state."""
+figure refuses concurrent changes without ever corrupting its state.
+
+The threaded checks run in a fresh interpreter with a deadline, so a deadlock fails the test
+instead of hanging the suite: a thread pool cannot abandon a thread that never returns.
+"""
 
 import os
 import subprocess
@@ -8,6 +12,7 @@ import sysconfig
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -18,6 +23,28 @@ THEMES = (ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT)
 # PyO3's messages when a figure is already borrowed by another thread's call.
 BORROW_ERRORS = frozenset({"Already borrowed", "Already mutably borrowed"})
 FREE_THREADED = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+# Seconds a threaded check may take before it counts as deadlocked; it needs a few seconds.
+DEADLINE = 300
+
+
+def run_in_subprocess(check: Callable[[], None]) -> None:
+    """Run ``check``, a function of this module, in a fresh interpreter within ``DEADLINE``."""
+    here = str(Path(__file__).resolve().parent)
+    paths = [here, *filter(None, os.environ.get("PYTHONPATH", "").split(os.pathsep))]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(paths)}
+    script = f"import {Path(__file__).stem} as module; module.{check.__name__}()"
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=DEADLINE,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"{check.__name__} did not finish within {DEADLINE} s: a thread deadlocked")
+    assert result.returncode == 0, result.stderr
 
 
 def run_in_threads[T](count: int, work: Callable[[int], T]) -> list[T]:
@@ -30,7 +57,7 @@ def run_in_threads[T](count: int, work: Callable[[int], T]) -> list[T]:
 
     with ThreadPoolExecutor(max_workers=count) as pool:
         futures = [pool.submit(task, thread) for thread in range(count)]
-        return [future.result(timeout=300) for future in futures]
+        return [future.result() for future in futures]
 
 
 def build(index: int) -> ub.Figure:
@@ -57,7 +84,7 @@ def render(fig: ub.Figure) -> tuple[bytes, str]:
     return fig.to_png(dpi=40), fig.to_svg()
 
 
-def test_figures_built_and_rendered_in_parallel_threads() -> None:
+def check_parallel_figures() -> None:
     threads, figures = 16, 20
     serial = [render(build(index)) for index in range(figures)]
 
@@ -84,7 +111,7 @@ def lines_svg(count: int) -> str:
     return fig.to_svg()
 
 
-def test_one_figure_shared_across_threads_never_crashes() -> None:
+def check_shared_figure() -> None:
     writers, readers, calls = 4, 4, 8
     fig = ub.Figure(3, 2)
     fig.add_axes().title("Shared")
@@ -111,6 +138,14 @@ def test_one_figure_shared_across_threads_never_crashes() -> None:
             assert svg in states, "a render saw a state no sequence of calls produces"
     added = sum(count for count, _, _ in results)
     assert states[fig.to_svg()] == added
+
+
+def test_figures_built_and_rendered_in_parallel_threads() -> None:
+    run_in_subprocess(check_parallel_figures)
+
+
+def test_one_figure_shared_across_threads_never_crashes() -> None:
+    run_in_subprocess(check_shared_figure)
 
 
 @pytest.mark.skipif(not FREE_THREADED, reason="needs a free-threaded interpreter")
