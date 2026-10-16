@@ -124,7 +124,7 @@ fn assert_bubbles_inside(f: &Figure, case: &str) {
     }
 }
 
-/// The review's line and two corner bubbles, and the population bubbles of the cities chart.
+/// A diagonal line with two corner bubbles, and the population bubbles of the cities chart.
 fn corner_and_population(marker: Marker) -> [Figure; 2] {
     let mut corner = Figure::new(3.0, 2.5, Theme::pigment()).unwrap();
     corner
