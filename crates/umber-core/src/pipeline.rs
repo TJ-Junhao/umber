@@ -1034,7 +1034,8 @@ pub(crate) fn with_layout_input<R>(
 /// - the values written on annotated heatmap cells, when there are any, as one group clipped
 ///   to the plot area;
 /// - the legend, when it has row entries or direct labels, as one unclipped group;
-/// - the baseline, as an unclipped group of its own, unless both axes are category axes.
+/// - the baseline, as an unclipped group of its own, unless both axes are category axes or
+///   the axes hold any mesh, 2-D histogram or hexbin mark.
 ///
 /// Every axes is laid out by one solve of the grid ([`plan`]); a figure of one axes has the
 /// canvas as its frame. The figure header follows the panels as its own unclipped group when
@@ -1084,7 +1085,7 @@ pub(crate) fn scene(
         if let Some(legend) = draw::legend::legend(theme, layout) {
             scene.push(legend);
         }
-        if resolved.draws_baseline() {
+        if resolved.draws_baseline(panel.axes.marks()) {
             scene.push(draw::baseline(theme, layout));
         }
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {

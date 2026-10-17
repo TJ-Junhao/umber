@@ -1,1 +1,12 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Axes with mesh, hist2d or hexbin marks omit the baseline and keep its tick's gridline.
+hexbin-graphite
+hexbin-midnight
+hexbin-pigment
+hist2d-graphite
+hist2d-midnight
+hist2d-pigment
+mesh-graphite
+mesh-midnight
+mesh-pigment
+time-mesh

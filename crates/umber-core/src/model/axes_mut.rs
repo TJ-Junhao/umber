@@ -1917,6 +1917,7 @@ impl<'a> AxesMut<'a> {
 
     /// Adds row-major numeric cells spanning their strictly increasing edges.
     /// Automatic limits are the outer edges, without padding. NaN cells are empty.
+    /// Axes with a mesh draw no baseline, even when they also hold other marks.
     ///
     /// # Errors
     ///
@@ -1949,6 +1950,7 @@ impl<'a> AxesMut<'a> {
     /// `x_edges` and `y_edges` each hold numbers on a linear or log axis and times on a time
     /// axis. The edges are strictly increasing, a missing time is refused, and the automatic
     /// limits of a time axis are the outer edges exactly, as those of a numeric axis are.
+    /// Axes with a mesh draw no baseline, even when they also hold other marks.
     ///
     /// # Errors
     ///
@@ -1988,6 +1990,7 @@ impl<'a> AxesMut<'a> {
 
     /// Counts paired finite coordinates in equal-width bins over their data ranges.
     /// Empty bins are not drawn, including with a log color scale.
+    /// Axes with a 2-D histogram draw no baseline, even when they also hold other marks.
     ///
     /// # Errors
     ///
@@ -2016,6 +2019,7 @@ impl<'a> AxesMut<'a> {
     /// With a narrow explicit `xlim` and automatic y limits, hexagons keep their size;
     /// the y range may grow far beyond the data to keep every hexagon whole and regular.
     /// Set `ylim()` or choose a larger `gridsize` to control that range.
+    /// Axes with a hexbin mark draw no baseline, even when they also hold other marks.
     ///
     /// # Errors
     ///

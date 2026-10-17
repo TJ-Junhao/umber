@@ -318,10 +318,13 @@ impl Resolved {
         }
     }
 
-    /// Whether the baseline is drawn: on every axes with a value axis, so not on two category
-    /// axes, whose heatmap cells fill the plot up to its edges.
-    pub fn draws_baseline(&self) -> bool {
+    /// Whether the baseline is drawn: not on two category axes or on axes holding any mesh,
+    /// 2-D histogram or hexbin mark, even alongside other marks.
+    pub fn draws_baseline(&self, marks: &[Mark]) -> bool {
         !(self.x.is_category() && self.y.is_category())
+            && !marks
+                .iter()
+                .any(|mark| matches!(mark, Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_)))
     }
 }
 

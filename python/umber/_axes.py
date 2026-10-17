@@ -1221,7 +1221,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         axes, on a numeric or a time axis, keep their usual padding; the domain is the union.
         NaN values leave cells blank. Neither axis may be a category axis; the outer edge
         ranges of a numeric axis must meet the axis precision limits, as for ``xlim()`` and
-        ``ylim()``. All color-mapped marks share one color scale.
+        ``ylim()``. All color-mapped marks share one color scale. Axes with a mesh draw no
+        baseline, even when they also hold other marks.
 
         Args:
             x_edges: Strictly increasing column edges, one more than the number of columns:
@@ -1293,6 +1294,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Widths are equal in axis space: in data on a linear axis, in the logarithm on a log
         axis. A pair with either coordinate NaN is skipped. Empty bins are blank, including
         on a log color scale. Both axes must be numeric; counts share the axes' color scale.
+        Axes with a 2-D histogram draw no baseline, even when they also hold other marks.
 
         Args:
             x: The x coordinates.
@@ -1342,6 +1344,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         With a narrow explicit ``xlim`` and automatic y limits, hexagons keep their size;
         the y range may grow far beyond the data to keep every hexagon whole and regular.
         Set ``ylim()`` or choose a larger ``gridsize`` to control that range.
+        Axes with a hexbin mark draw no baseline, even when they also hold other marks.
 
         Args:
             x: The x coordinates on numeric axes.
