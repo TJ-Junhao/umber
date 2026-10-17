@@ -387,7 +387,11 @@ fn resolve_groups(
 /// choice does not fit even on the plot it was made for, or whose new choice the grid cannot
 /// hold (the solve fails, and the previous solve is kept) keeps its ticks. Each side is chosen
 /// again at most twice per number of ticks, and its ticks never grow in number while the
-/// domain stays fixed.
+/// domain stays fixed. Before retaining a single or crowded set, pairs are tried on their own
+/// solved layouts without moving any domain: whole-step pairs on linear axes, the existing
+/// outer ticks on log axes. A pair can fit without the wider labels that made the preferred
+/// choice fail the solve. If no linear pair fits, a crowded set can keep its existing tick
+/// nearest zero when inside the domain, otherwise the midpoint.
 ///
 /// Category axes provisionally thin their labels on the guessed plot sizes. Each final solve
 /// tries category candidates on the layouts their own labels produce, starting with only
@@ -889,14 +893,26 @@ fn plan(
         (resolved, bands, solution) = refit(&mut fits, &choices)?;
     }
 
-    // A single label can release room that the previous crowded set needed. Before keeping
-    // it, try whole-step pairs on their own layouts, without moving any domain. Each accepted
-    // change replaces one single tick, so this finishes even when the axes affect each other.
+    // A single label can release room that the previous crowded set needed. A crowded set
+    // can also survive a failed solve: the preferred wider step may need wider labels, while
+    // another pair fits. Try pairs, then a single linear tick, on their own layouts without
+    // moving any domain. An accepted change leaves every label apart; fitting pairs are never
+    // retried, so this finishes even when the axes affect each other.
     loop {
         let mut changed = false;
         for side in [Side::Y, Side::X] {
             for i in 0..panels.len() {
-                if side.groups(groups)[i] != i || side.ticks(&resolved[i]).len() != 1 {
+                if side.groups(groups)[i] != i {
+                    continue;
+                }
+                let plots: Vec<_> = solution
+                    .panels
+                    .iter()
+                    .map(|slot| slot.plot.size())
+                    .collect();
+                let plot = side.group_plot(groups, i, &plots, &show_labels);
+                let ticks = side.ticks(&resolved[i]);
+                if ticks.len() != 1 && side.room(plot, theme, lib).slack(ticks) >= 0.0 {
                     continue;
                 }
                 let resolve::AxisLimits::Continuous(axis) = limits[i].axis(side.axis()) else {
@@ -912,14 +928,43 @@ fn plan(
                 let Some(scale) = scale.copied() else {
                     continue;
                 };
-                for pair in scale.tick_pairs(axis.ticks.format()) {
-                    let ticks: Vec<_> = pair
+                let mut candidates: Vec<Vec<_>> = if scale.transform() == crate::Transform::Linear {
+                    scale
+                        .tick_pairs(axis.ticks.format())
                         .into_iter()
-                        .map(|tick| resolve::AxisTick {
-                            pos: NormalizedPos::new(scale.normalize(tick.value)),
-                            label: tick.label,
+                        .map(|pair| {
+                            pair.into_iter()
+                                .map(|tick| resolve::AxisTick {
+                                    pos: NormalizedPos::new(scale.normalize(tick.value)),
+                                    label: tick.label,
+                                })
+                                .collect()
                         })
-                        .collect();
+                        .collect()
+                } else if ticks.len() > 2 {
+                    // Keep the existing outer log ticks: refitting fewer powers can widen
+                    // automatic limits and their labels, making the same solve fail again.
+                    vec![vec![ticks[0].clone(), ticks[ticks.len() - 1].clone()]]
+                } else {
+                    Vec::new()
+                };
+                if scale.transform() == crate::Transform::Linear && ticks.len() > 1 {
+                    let (lo, hi) = scale.domain();
+                    let middle = if lo <= 0.0 && hi >= 0.0 {
+                        scale.normalize(0.0)
+                    } else {
+                        0.5
+                    };
+                    let tick = ticks.iter().min_by(|a, b| {
+                        (a.pos.get() - middle)
+                            .abs()
+                            .total_cmp(&(b.pos.get() - middle).abs())
+                    });
+                    if let Some(tick) = tick {
+                        candidates.push(vec![tick.clone()]);
+                    }
+                }
+                for ticks in candidates {
                     let mut tried = resolved.clone();
                     for (j, r) in tried.iter_mut().enumerate() {
                         if side.groups(groups)[j] == i {
@@ -2669,6 +2714,100 @@ mod tests {
                 prop_assert!(is_round(scale, ticks), "{}: {:?}", name, ticks);
             }
             Ok(())
+        }
+
+        #[test]
+        fn narrow_explicit_y_limits_keep_labels_apart() {
+            // Step 0.0025 fits vertically, but its extra decimal makes the x percent label
+            // too wide for the figure. Step 0.002 fits both axes on its own solved layout.
+            let theme = Theme::midnight()
+                .with_font_scale(2.024411942327032)
+                .unwrap();
+            let spec = Spec {
+                logs: (false, false),
+                ranges: (
+                    (-6876.48483212639, -6875.48483212639),
+                    (6768.551347618901, 6768.555197244765),
+                ),
+                kind: Kind::Line,
+                limits: (false, true),
+                percent: true,
+            };
+            let f = figure(theme, (2.3959016648743408, 2.31922920500325), &spec);
+            let lib = FontLibrary::global();
+            let (resolved, layout) = try_plan_panels(&f, lib).unwrap().remove(0);
+            assert_eq!(resolved.y.continuous().unwrap().domain(), spec.ranges.1);
+            for side in Side::BOTH {
+                let ticks = side.ticks(&resolved);
+                let slack = side.room(layout.plot.size(), f.theme(), lib).slack(ticks);
+                assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
+            }
+            assert_eq!(tick_labels(&resolved.y.ticks), ["6768.552", "6768.554"]);
+            assert!(is_round(
+                resolved.y.continuous().unwrap(),
+                &resolved.y.ticks
+            ));
+            f.to_svg(crate::SvgText::Editable).unwrap();
+        }
+
+        #[test]
+        fn narrow_explicit_y_limits_use_one_tick_when_pairs_do_not_fit() {
+            // Step 0.002 still crowds vertically; step 0.0025 makes the x label too wide.
+            // No whole-step pair fits, but one existing tick fits without moving the domain.
+            let theme = Theme::midnight()
+                .with_font_scale(1.1861975422164643)
+                .unwrap();
+            let spec = Spec {
+                logs: (false, false),
+                ranges: (
+                    (9452.723644157226, 9453.723644157226),
+                    (6356.58126608091, 6356.589845896476),
+                ),
+                kind: Kind::Line,
+                limits: (false, true),
+                percent: true,
+            };
+            let f = figure(theme, (1.4407630357200345, 1.6462928522871103), &spec);
+            let lib = FontLibrary::global();
+            let (resolved, layout) = try_plan_panels(&f, lib).unwrap().remove(0);
+            assert_eq!(resolved.y.continuous().unwrap().domain(), spec.ranges.1);
+            for side in Side::BOTH {
+                let ticks = side.ticks(&resolved);
+                let slack = side.room(layout.plot.size(), f.theme(), lib).slack(ticks);
+                assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
+            }
+            assert_eq!(tick_labels(&resolved.y.ticks), ["6356.586"]);
+            f.to_svg(crate::SvgText::Editable).unwrap();
+        }
+
+        #[test]
+        fn narrow_log_y_axis_keeps_labels_apart() {
+            // Refitting fewer powers lowers the domain again and writes 0.001, which leaves
+            // no room for the x percent label. Thin the existing powers without refitting.
+            let theme = Theme::pigment()
+                .with_font_scale(1.7418145436733836)
+                .unwrap();
+            let spec = Spec {
+                logs: (false, true),
+                ranges: ((0.0, 1.0), (0.10207785494925446, 2.2643981627494667)),
+                kind: Kind::Line,
+                limits: (false, false),
+                percent: true,
+            };
+            let f = figure(theme, (1.04728763133498, 1.767157525467884), &spec);
+            let lib = FontLibrary::global();
+            let (resolved, layout) = try_plan_panels(&f, lib).unwrap().remove(0);
+            let (target, _, _) =
+                resolved_at(&f, layout.plot.size(), TickSpacing::Target, lib).remove(0);
+            assert_eq!(resolved.y.scale, target.y.scale);
+            assert_eq!(tick_labels(&target.y.ticks), ["0.01", "0.1", "1", "10"]);
+            for side in Side::BOTH {
+                let ticks = side.ticks(&resolved);
+                let slack = side.room(layout.plot.size(), f.theme(), lib).slack(ticks);
+                assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
+            }
+            assert_eq!(tick_labels(&resolved.y.ticks), ["0.01", "10"]);
+            f.to_svg(crate::SvgText::Editable).unwrap();
         }
 
         proptest! {
