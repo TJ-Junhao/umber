@@ -169,6 +169,16 @@ impl Coordinate {
     }
 }
 
+/// The longest side, in cells, of a lattice that counts exactly: every row and column fits an
+/// `i64` exactly, and each point's lattice position in `f64` lies within 1e-3 of a cell of
+/// its true position.
+pub(crate) const MAX_LATTICE_LENGTH: f64 = (1u64 << 40) as f64;
+
+/// A lattice longer than [`MAX_LATTICE_LENGTH`] on a side, in which counts would merge: the
+/// axes' range is too wide for cells of a hexbin's own size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LatticeTooLarge;
+
 /// Cell geometry before layout, empty data, or a counted lattice.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum HexBins {
@@ -262,18 +272,18 @@ impl HexBins {
         gridsize: BinCount,
         transforms: [Transform; 2],
         aspect: f64,
-    ) -> Self {
+    ) -> Result<Self, LatticeTooLarge> {
         let Some(mut coordinates) = Self::coordinates(x, y, gridsize, transforms) else {
-            return Self::Empty;
+            return Ok(Self::Empty);
         };
         let row_height = 3.0_f64.sqrt() / 2.0;
         let ny = (coordinates[0].length / (aspect * row_height))
             .round()
             .max(1.0);
         coordinates[1].length = ny * row_height;
-        let mut bins = Self::count(x, y, coordinates);
+        let mut bins = Self::count(x, y, coordinates)?;
         bins.fit(aspect);
-        bins
+        Ok(bins)
     }
 
     /// Counts in the metric of the solved axes, including shared or explicit limits.
@@ -284,11 +294,11 @@ impl HexBins {
         scales: [ContinuousScale; 2],
         aspect: f64,
         limits: [Option<(f64, f64)>; 2],
-    ) -> Self {
+    ) -> Result<Self, LatticeTooLarge> {
         let Some(mut coordinates) =
             Self::coordinates(x, y, gridsize, scales.map(|s| s.transform()))
         else {
-            return Self::Empty;
+            return Ok(Self::Empty);
         };
         let span = |scale: ContinuousScale| {
             let (lo, hi) = scale.domain();
@@ -311,8 +321,16 @@ impl HexBins {
         Self::count(x, y, coordinates)
     }
 
-    /// Counts against a fixed lattice and computes its occupied bounds.
-    fn count(x: &[f64], y: &[f64], coordinates: [Coordinate; 2]) -> Self {
+    /// Counts against a fixed lattice and computes its occupied bounds. Every point lies
+    /// within the lattice's lengths, so a lattice no longer than [`MAX_LATTICE_LENGTH`] on
+    /// either side counts every point in its own cell.
+    fn count(x: &[f64], y: &[f64], coordinates: [Coordinate; 2]) -> Result<Self, LatticeTooLarge> {
+        if !coordinates
+            .iter()
+            .all(|c| c.length.is_finite() && c.length <= MAX_LATTICE_LENGTH)
+        {
+            return Err(LatticeTooLarge);
+        }
         #[cfg(test)]
         COUNT_CALLS.with(|calls| calls.set(calls.get() + 1));
         let row_height = 3.0_f64.sqrt() / 2.0;
@@ -353,7 +371,7 @@ impl HexBins {
                 ],
                 |b, [x, y]| [b[0].min(x), b[1].max(x), b[2].min(y), b[3].max(y)],
             );
-        Self::Occupied(HexCells {
+        Ok(Self::Occupied(HexCells {
             coordinates,
             positions,
             counts,
@@ -368,7 +386,7 @@ impl HexBins {
                     coordinates[1].value(bounds[3]),
                 ],
             ],
-        })
+        }))
     }
 
     /// The positive counts; empty until a lattice has been counted.
@@ -508,7 +526,8 @@ mod tests {
             scales,
             1.0,
             limits,
-        );
+        )
+        .unwrap();
         (bins, scales)
     }
 

@@ -612,6 +612,16 @@ def test_hexbin_one_point_is_renderable(count: int) -> None:
     assert "linearGradient" in ax.figure.to_svg()
 
 
+@pytest.mark.parametrize("seed", [0, 1])
+@pytest.mark.parametrize("gridsize", [10, 50])
+def test_dense_normal_hexbin_settles(seed: int, gridsize: int) -> None:
+    rng = np.random.default_rng(seed)
+    x = rng.normal(size=1_000_000)
+    y = 0.6 * x + rng.normal(scale=0.7, size=x.size)
+    png = ub.Figure(6, 4).add_axes().hexbin(x, y, gridsize=gridsize).figure.to_png(dpi=200)
+    assert png.startswith(b"\x89PNG")
+
+
 def test_hexbin_explicit_limits_clip() -> None:
     ax = axes().xlim(0.2, 0.8).ylim(0.2, 0.8)
     ax.hexbin([0, 0.5, 1], [0, 0.5, 1], gridsize=3)
