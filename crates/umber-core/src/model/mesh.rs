@@ -318,14 +318,14 @@ impl MeshMark {
         check_mapping(context, figure, index, &colors)?;
         let uneven = [("x", x_kind, &x), ("y", y_kind, &y)]
             .into_iter()
-            .find_map(|(axis, kind, edges)| uneven_step(axis, kind, edges));
-        if let (Render::Raster, Some(step)) = (options.render, &uneven) {
+            .find_map(|(axis, kind, edges)| uneven_edge(axis, kind, edges));
+        if let (Render::Raster, Some(edge)) = (options.render, &uneven) {
             return Err(Error::usage(
                 context,
                 format!(
-                    "{step}; drawing the cells as one image needs evenly spaced edges on the {} \
+                    "{edge}; drawing the cells as one image needs evenly spaced edges on the {} \
                      axis.",
-                    step.axis
+                    edge.axis
                 ),
             )
             .with_parameter("render")
@@ -341,123 +341,90 @@ impl MeshMark {
     }
 }
 
-/// The relative tolerance within which every step between neighbouring edges must equal the
-/// first step for the edges to count as evenly spaced.
-const EVEN_STEP_TOLERANCE: f64 = 1e-6;
+/// How far, in steps of the lattice, an edge may lie from the evenly spaced lattice from the
+/// first edge to the last for the edges to count as evenly spaced.
+const LATTICE_TOLERANCE: f64 = 1e-4;
 
-/// The first step between two neighbouring edges that differs from the first step of the same
-/// edges, as an error message describes it.
+/// The first edge that lies off the evenly spaced lattice from the first edge to the last, as
+/// an error message describes it.
 #[derive(Debug, Clone, PartialEq)]
-struct UnevenStep {
+struct UnevenEdge {
     /// The axis, `"x"` or `"y"`.
     axis: &'static str,
-    /// The index of the step's first edge; the step ends at the next edge.
-    at: usize,
-    /// The step and the first step, written for the axis kind: differences of numbers, ratios
-    /// on a log axis, durations on a time axis.
-    sizes: (String, String),
-    /// The two edges of the step, written as in the data.
-    ends: (String, String),
+    /// What the lattice spaces evenly: `"edges"`, `"logarithms"` or `"times"`.
+    spacing: &'static str,
+    /// The index of the edge, and of the last edge.
+    at: (usize, usize),
+    /// The edge, the first edge and the last edge, written as in the data.
+    values: [String; 3],
+    /// Where the lattice puts the edge, written as in the data.
+    expected: String,
 }
 
-impl std::fmt::Display for UnevenStep {
+impl std::fmt::Display for UnevenEdge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = format!("{}_edges", self.axis);
+        let [edge, first, last] = &self.values;
         write!(
             f,
-            "the step from {name}[{}] = {} to {name}[{}] = {} is {}, not {} as from {name}[0] \
-             to {name}[1]",
-            self.at,
-            self.ends.0,
-            self.at + 1,
-            self.ends.1,
-            self.sizes.0,
-            self.sizes.1,
+            "{name}[{}] = {edge} is off the evenly spaced {} from {name}[0] = {first} to \
+             {name}[{}] = {last}, which put it at {}",
+            self.at.0, self.spacing, self.at.1, self.expected,
         )
     }
 }
 
-/// The first step of `edges`, on the `axis` axis of kind `kind`, that is not the size of the
-/// first step on screen; `None` when the edges are evenly spaced. A step counts as equal to
-/// the first when the two differ by at most [`EVEN_STEP_TOLERANCE`] of the first, plus four
-/// units of rounding error of the largest of the edges involved (in axis space: numbers on a
-/// linear axis, their logarithms on a log axis, microseconds on a time axis).
-fn uneven_step(axis: &'static str, kind: EdgeAxis, edges: &Edges) -> Option<UnevenStep> {
-    let positions: Vec<f64> = match (kind, edges) {
-        (EdgeAxis::Numeric(Transform::Linear), Edges::Numbers(edges)) => edges.to_vec(),
-        (EdgeAxis::Numeric(Transform::Log(_)), Edges::Numbers(edges)) => {
-            edges.iter().map(|v| v.ln()).collect()
+/// The first of `edges`, on the `axis` axis of kind `kind`, that lies off the evenly spaced
+/// lattice the image of the cells uses, from the first edge to the last; `None` when every edge
+/// lies on it. Positions are compared in axis space: numbers on a linear axis, their
+/// logarithms on a log axis, whole microseconds on a time axis. An edge lies on the lattice
+/// when it is within [`LATTICE_TOLERANCE`] of a step of its place there; numbers may also be
+/// off by two units of rounding error of the largest end, as far as a float can place them.
+/// Times are compared exactly, in integers.
+fn uneven_edge(axis: &'static str, kind: EdgeAxis, edges: &Edges) -> Option<UnevenEdge> {
+    let n = edges.len().checked_sub(1).filter(|&n| n > 1)?;
+    let (at, spacing, values, expected) = match (kind, edges) {
+        (EdgeAxis::Numeric(transform), Edges::Numbers(v)) => {
+            let log = matches!(transform, Transform::Log(_));
+            let position = |x: f64| if log { x.ln() } else { x };
+            let (first, last) = (position(v[0]), position(v[n]));
+            let step = (last - first) / n as f64;
+            let slack = LATTICE_TOLERANCE * step + 2.0 * f64::EPSILON * first.abs().max(last.abs());
+            let place = |i: usize| first + (last - first) * (i as f64 / n as f64);
+            let at = (1..n).find(|&i| (position(v[i]) - place(i)).abs() > slack)?;
+            let expected = if log {
+                v[0] * (v[n] / v[0]).powf(at as f64 / n as f64)
+            } else {
+                place(at)
+            };
+            let spacing = if log { "logarithms" } else { "edges" };
+            let values = [v[at], v[0], v[n]].map(|x| number(x).to_string());
+            (at, spacing, values, number(expected).to_string())
         }
-        (EdgeAxis::Time, Edges::Times(edges)) => {
-            let first = edges.first()?.micros();
-            edges
-                .iter()
-                .map(|t| (t.micros() as f64) - (first as f64))
-                .collect()
+        (EdgeAxis::Time, Edges::Times(t)) => {
+            let base = i128::from(t[0].micros());
+            let span = i128::from(t[n].micros()) - base;
+            let count = n as i128;
+            // `n` times the distance of edge `i` from its place on the lattice, in microseconds,
+            // exactly: within the tolerance when at most `LATTICE_TOLERANCE` of the span.
+            let off = |i: usize| (i128::from(t[i].micros()) - base) * count - span * i as i128;
+            let at =
+                (1..n).find(|&i| off(i).unsigned_abs() as f64 > LATTICE_TOLERANCE * span as f64)?;
+            let place = base + span * at as i128 / count;
+            let expected = Instant::clamped(i64::try_from(place).unwrap_or(i64::MAX)).label();
+            let values = [t[at], t[0], t[n]].map(Instant::label);
+            (at, "times", values, expected)
         }
         // `check_edges` matches the edges to their axis.
         _ => return None,
     };
-    let step = |i: usize| positions[i + 1] - positions[i];
-    let first = step(0);
-    let at = (1..positions.len() - 1).find(|&i| {
-        let magnitude = [positions[0], positions[1], positions[i], positions[i + 1]]
-            .iter()
-            .fold(0.0_f64, |m, v| m.max(v.abs()));
-        (step(i) - first).abs() > EVEN_STEP_TOLERANCE * first + 4.0 * f64::EPSILON * magnitude
-    })?;
-    let (sizes, ends) = match (kind, edges) {
-        (EdgeAxis::Numeric(Transform::Log(_)), Edges::Numbers(edges)) => (
-            (
-                format!("a factor of {}", number(edges[at + 1] / edges[at])),
-                number(edges[1] / edges[0]).to_string(),
-            ),
-            (
-                number(edges[at]).to_string(),
-                number(edges[at + 1]).to_string(),
-            ),
-        ),
-        (EdgeAxis::Numeric(_), Edges::Numbers(edges)) => (
-            (
-                number(edges[at + 1] - edges[at]).to_string(),
-                number(edges[1] - edges[0]).to_string(),
-            ),
-            (
-                number(edges[at]).to_string(),
-                number(edges[at + 1]).to_string(),
-            ),
-        ),
-        (_, Edges::Times(edges)) => (
-            (
-                duration(edges[at + 1].micros() - edges[at].micros()),
-                duration(edges[1].micros() - edges[0].micros()),
-            ),
-            (edges[at].label(), edges[at + 1].label()),
-        ),
-        (EdgeAxis::Time, Edges::Numbers(_)) => return None,
-    };
-    Some(UnevenStep {
+    Some(UnevenEdge {
         axis,
-        at,
-        sizes,
-        ends,
+        spacing,
+        at: (at, n),
+        values,
+        expected,
     })
-}
-
-/// A positive duration of `micros` microseconds in the largest of days, hours, minutes,
-/// seconds and microseconds that measures it in whole units, such as `31 days` or `90 seconds`.
-fn duration(micros: i64) -> String {
-    const UNITS: [(i64, &str, &str); 4] = [
-        (86_400_000_000, "day", "days"),
-        (3_600_000_000, "hour", "hours"),
-        (60_000_000, "minute", "minutes"),
-        (1_000_000, "second", "seconds"),
-    ];
-    let (count, one, many) = UNITS.iter().find(|(unit, ..)| micros % unit == 0).map_or(
-        (micros, "microsecond", "microseconds"),
-        |&(unit, one, many)| (micros / unit, one, many),
-    );
-    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// The edges `given` along the axis `axis` of kind `kind`, whose argument is `name`: of the

@@ -364,6 +364,35 @@ pub(crate) fn marks(
     })
 }
 
+/// Checks that every mark of `marks` whose options draw its cells as one image
+/// ([`Render::Raster`](crate::Render::Raster)) can be drawn so on `layout`: `Error::Style` under
+/// `context` naming the first mark, by its place among the axes' marks, and the axis whose
+/// explicit limits cut its cells too far from their edges for an image (see
+/// [`mesh::too_wide_image`]).
+pub(crate) fn check_images(
+    resolved: &Resolved,
+    layout: &Layout,
+    marks: &[ResolvedMark<'_>],
+    context: &'static str,
+) -> crate::Result<()> {
+    let maps = AxisMaps::new(&resolved.x, &resolved.y, layout.plot);
+    let Some((index, kind, axis, reach)) = mesh::too_wide_image(&maps, resolved, marks) else {
+        return Ok(());
+    };
+    Err(crate::Error::style(
+        context,
+        format!(
+            "mark {} of these axes, {kind}, has a cell cut by the {axis} limits that reaches {} \
+             pt past them; drawing the cells as one image needs every cut cell to end within \
+             {} pt of the limits.",
+            index + 1,
+            crate::error::number(reach.round()),
+            cells::MAX_IMAGE_REACH,
+        ),
+    )
+    .with_hint("use render=ub.Render.VECTOR or ub.AUTO, or widen the limits."))
+}
+
 /// How the points of a scatter or bubble mark in `color` are filled: in that color, or, when
 /// the mark maps its colors from values (`mapped`), in the colors of the axes' color scale.
 /// `None` for a color-mapped mark without a color scale (no finite mapped value), which draws

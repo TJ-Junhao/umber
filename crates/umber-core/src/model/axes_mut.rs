@@ -1998,17 +1998,18 @@ impl<'a> AxesMut<'a> {
     /// `options.render` chooses between one filled rectangle per cell and one image with one
     /// pixel per cell ([`Render`](crate::Render)). An image needs edges evenly spaced on
     /// screen: evenly spaced numbers on a linear axis and evenly spaced logarithms on a log
-    /// axis, each step equal to the first to within one part in a million (allowing for the
-    /// rounding of edges of large magnitude). [`Render::Auto`](crate::Render::Auto) draws an
-    /// image from 10,000 cells when the edges allow it, and vector shapes otherwise.
+    /// axis, each edge within 1/10,000 of a cell of the evenly spaced lattice from the first
+    /// edge to the last (see [`Render`](crate::Render) for the rounding allowed).
+    /// [`Render::Auto`](crate::Render::Auto) draws an image from 10,000 cells when the edges
+    /// allow it, and vector shapes otherwise.
     ///
     /// # Errors
     ///
     /// `Error::Usage` for nonnumeric axes or a conflicting color mapping; `Error::Data`
     /// for invalid edges or values; `Error::Style` for an invalid center or color limits;
     /// `Error::Usage`, naming `render`, for [`Render::Raster`](crate::Render::Raster) with
-    /// edges that are not evenly spaced on screen: the message names the axis and its first
-    /// uneven step. Failed calls change nothing.
+    /// edges that are not evenly spaced on screen: the message names the first edge off the
+    /// lattice and where the lattice puts it. Failed calls change nothing.
     ///
     /// # Examples
     ///

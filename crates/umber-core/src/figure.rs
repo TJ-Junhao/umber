@@ -131,6 +131,12 @@ impl Figure {
     /// has. This is checked before any axes is laid out, and so is found even when another axes
     /// does not fit; on a grid the message starts with the axes' cell as above.
     ///
+    /// `Error::Style` in the same context, with the hint `use render=ub.Render.VECTOR or
+    /// ub.AUTO, or widen the limits.`, when a mesh or 2-D histogram drawn with
+    /// [`Render::Raster`] has a cell cut by explicit limits that reaches more than 10,000 pt
+    /// past them (`mark 1 of these axes, a mesh, has a cell cut by the x limits that reaches …
+    /// pt past them; …`); on a grid the message starts with the axes' cell as above.
+    ///
     /// # Examples
     ///
     /// ```

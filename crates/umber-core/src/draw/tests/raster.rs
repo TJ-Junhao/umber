@@ -378,8 +378,31 @@ fn raster_error(kinds: [ScaleKind; 2], x: AxisData, y: AxisData, values: &[f64])
     err
 }
 
+/// Microseconds since the epoch of 9999-01-01 and 2500-01-01.
+const YEAR_9999: i64 = 253_370_764_800_000_000;
+const YEAR_2500: i64 = 16_725_225_600_000_000;
+
+/// Times `offsets` microseconds after `start` microseconds since the epoch.
+fn micros(start: i64, offsets: &[i64]) -> AxisData {
+    AxisData::Times(
+        offsets
+            .iter()
+            .map(|&us| Some(Instant::from_micros(start + us).unwrap()))
+            .collect(),
+    )
+}
+
+/// 1,201 edges near 1e12: 600 steps of 0.1, then 600 steps of 0.1008. Each step is within a
+/// part in a hundred of the first, but the edges drift from one evenly spaced lattice.
+fn drifting_edges() -> Vec<f64> {
+    (0..=600)
+        .map(|i| 1e12 + f64::from(i) * 0.1)
+        .chain((1..=600).map(|i| 1e12 + 60.0 + f64::from(i) * 0.1008))
+        .collect()
+}
+
 #[test]
-fn raster_refuses_uneven_edges_naming_the_first_uneven_step() {
+fn raster_refuses_uneven_edges_naming_the_first_edge_off_the_lattice() {
     let log = ScaleKind::Log { base: LogBase::TEN };
     let numbers = |v: &[f64]| AxisData::Numbers(v.to_vec());
     let cases = [
@@ -390,21 +413,21 @@ fn raster_refuses_uneven_edges_naming_the_first_uneven_step() {
                 numbers(&[0.0, 1.0]),
                 &[1.0; 3],
             ),
-            "Axes.mesh(): the step from x_edges[2] = 2 to x_edges[3] = 4 is 2, not 1 as from \
-             x_edges[0] to x_edges[1]; drawing the cells as one image needs evenly spaced edges \
-             on the x axis.",
+            "Axes.mesh(): x_edges[1] = 1 is off the evenly spaced edges from x_edges[0] = 0 to \
+             x_edges[3] = 4, which put it at 1.3333333333333333; drawing the cells as one image \
+             needs evenly spaced edges on the x axis.",
         ),
         (
             // Evenly spaced numbers are uneven on a log axis.
             raster_error(
                 [ScaleKind::Linear, log],
                 numbers(&[0.0, 1.0]),
-                numbers(&[1.0, 2.0, 3.0]),
+                numbers(&[1.0, 2.0, 16.0]),
                 &[1.0; 2],
             ),
-            "Axes.mesh(): the step from y_edges[1] = 2 to y_edges[2] = 3 is a factor of 1.5, \
-             not 2 as from y_edges[0] to y_edges[1]; drawing the cells as one image needs \
-             evenly spaced edges on the y axis.",
+            "Axes.mesh(): y_edges[1] = 2 is off the evenly spaced logarithms from y_edges[0] = 1 \
+             to y_edges[2] = 16, which put it at 4; drawing the cells as one image needs evenly \
+             spaced edges on the y axis.",
         ),
         (
             raster_error(
@@ -413,9 +436,22 @@ fn raster_refuses_uneven_edges_naming_the_first_uneven_step() {
                 numbers(&[0.0, 1.0]),
                 &[1.0; 3],
             ),
-            "Axes.mesh(): the step from x_edges[1] = 1970-02-01 to x_edges[2] = 1970-03-01 is \
-             28 days, not 31 days as from x_edges[0] to x_edges[1]; drawing the cells as one \
-             image needs evenly spaced edges on the x axis.",
+            "Axes.mesh(): x_edges[1] = 1970-02-01 is off the evenly spaced times from x_edges[0] \
+             = 1970-01-01 to x_edges[3] = 1970-04-01, which put it at 1970-01-31; drawing the \
+             cells as one image needs evenly spaced edges on the x axis.",
+        ),
+        (
+            // Steps of 1 and 8 microseconds late in the year 9999.
+            raster_error(
+                [ScaleKind::Time, ScaleKind::Linear],
+                micros(YEAR_9999, &[0, 1, 9]),
+                numbers(&[0.0, 1.0]),
+                &[1.0; 2],
+            ),
+            "Axes.mesh(): x_edges[1] = 9999-01-01T00:00:00.000001 is off the evenly spaced \
+             times from x_edges[0] = 9999-01-01 to x_edges[2] = 9999-01-01T00:00:00.000009, \
+             which put it at 9999-01-01T00:00:00.000004; drawing the cells as one image needs \
+             evenly spaced edges on the x axis.",
         ),
     ];
     for (err, message) in cases {
@@ -427,6 +463,34 @@ fn raster_refuses_uneven_edges_naming_the_first_uneven_step() {
             Some("use render=ub.Render.VECTOR, or evenly spaced edges.")
         );
     }
+}
+
+#[test]
+fn edges_drifting_off_one_lattice_are_uneven() {
+    let x = drifting_edges();
+    let err = raster_error(
+        [ScaleKind::Linear, ScaleKind::Linear],
+        AxisData::Numbers(x.clone()),
+        AxisData::Numbers(vec![0.0, 1.0, 2.0]),
+        &[1.0; 2400],
+    );
+    assert!(
+        err.to_string()
+            .starts_with("Axes.mesh(): x_edges[2] = 1.0000000000002e12 is off the evenly spaced"),
+        "{err}"
+    );
+    // Automatic drawing keeps vector cells for them, even with 12,000 cells.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .mesh(
+            &x,
+            &even(0.0, 1.0, 10),
+            &mesh_values(1200, 10),
+            MeshOptions::default(),
+        )
+        .unwrap();
+    assert!(!is_image(drawn(&f)));
 }
 
 #[test]
@@ -453,6 +517,19 @@ fn raster_accepts_edges_even_on_screen() {
         (
             [ScaleKind::Time, ScaleKind::Linear],
             AxisData::Times((0..=3).map(day).collect()),
+            numbers(vec![0.0, 1.0]),
+        ),
+        // Steps of one microsecond in the year 2500, beyond what a float of microseconds
+        // since the epoch can tell apart.
+        (
+            [ScaleKind::Time, ScaleKind::Linear],
+            micros(YEAR_2500, &[0, 1, 2, 3]),
+            numbers(vec![0.0, 1.0]),
+        ),
+        // 1,200 steps of 0.1 near 1e12, each edge rounded to the nearest float.
+        (
+            [ScaleKind::Linear, ScaleKind::Linear],
+            numbers((0..=1200).map(|i| 1e12 + f64::from(i) * 0.1).collect()),
             numbers(vec![0.0, 1.0]),
         ),
     ];
@@ -823,24 +900,81 @@ fn image_output_is_deterministic() {
     }
 }
 
-#[test]
-fn cells_far_wider_than_the_plot_fall_back_to_vector_shapes() {
-    // Limits inside a sliver of two cells 1e9 wide on screen: an image would place their
-    // shared edge in coordinates too large for points to hold exactly.
+/// A mesh of 100 by 100 cells, one unit each, drawn as `render` says, with x limits inside
+/// a sliver around the edge at 50, which makes the two cells there millions of points wide.
+fn sliver(render: Render) -> Figure {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .mesh(
-            &[0.0, 1.0, 2.0],
-            &[0.0, 1.0],
-            &[1.0, 2.0],
+            &even(0.0, 1.0, 100),
+            &even(0.0, 1.0, 100),
+            &vec![1.0; 100 * 100],
             MeshOptions {
-                render: Render::Raster,
+                render,
                 ..MeshOptions::default()
             },
         )
         .unwrap()
-        .xlim(1.0 - 1e-7, 1.0 + 1e-7)
+        .xlim(50.0 - 1e-4, 50.0 + 1e-4)
         .unwrap();
-    assert_eq!(drawn(&f), Drawn::Fills(2));
+    f
+}
+
+#[test]
+fn cells_far_wider_than_the_plot_fall_back_to_vector_shapes_automatically() {
+    // Two shown columns of 100 rows.
+    assert_eq!(drawn(&sliver(Render::Auto)), Drawn::Fills(200));
+}
+
+#[test]
+fn raster_refuses_cells_far_wider_than_the_plot_at_render_time() {
+    let err = sliver(Render::Raster)
+        .to_scene(FontLibrary::global())
+        .unwrap_err();
+    assert!(matches!(err, Error::Style { .. }), "{err:?}");
+    let message = err.to_string();
+    assert!(
+        message.starts_with(
+            "Figure.to_scene(): mark 1 of these axes, a mesh, has a cell cut by the x limits that \
+             reaches "
+        ),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(
+            " pt past them; drawing the cells as one image needs every cut cell to end within \
+             10000 pt of the limits."
+        ),
+        "{message}"
+    );
+    assert_eq!(
+        err.hint(),
+        Some("use render=ub.Render.VECTOR or ub.AUTO, or widen the limits.")
+    );
+    // A 2-D histogram names itself the same way: bins 0..1, 1..2, ... with y limits around 2.
+    let values = [0.0, 1.0, 2.0, 3.0, 4.0];
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .hist2d(
+            &values,
+            &values,
+            Hist2dOptions {
+                bins: (4, 4),
+                render: Render::Raster,
+                ..Hist2dOptions::default()
+            },
+        )
+        .unwrap()
+        .ylim(2.0 - 1e-6, 2.0 + 1e-6)
+        .unwrap();
+    let message = f.to_scene(FontLibrary::global()).unwrap_err().to_string();
+    assert!(
+        message.starts_with(
+            "Figure.to_scene(): mark 1 of these axes, a 2-D histogram, has a cell cut by the y \
+             limits"
+        ),
+        "{message}"
+    );
 }

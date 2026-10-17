@@ -1310,9 +1310,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         The cells can be drawn as one image (see ``Render``) only when the edges are evenly
         spaced on screen: evenly spaced numbers on a linear axis, evenly spaced logarithms on a
-        log axis, evenly spaced times on a time axis. Each step between neighbouring edges must
-        equal the first step to within one part in a million, allowing also for the rounding
-        of edges of large magnitude.
+        log axis, evenly spaced times on a time axis. Every edge must lie within 1/10,000 of a
+        cell of its place on the evenly spaced lattice from the first edge to the last (numbers
+        may also be off by two units of rounding error of the largest end edge; times are
+        compared exactly, in microseconds). With ``AUTO``, cells that explicit limits cut to a
+        sliver more than 10,000 pt wide are drawn as vector shapes; with ``Render.RASTER``,
+        rendering such a figure raises ``StyleError``.
 
         Args:
             x_edges: Strictly increasing column edges, one more than the number of columns:
@@ -1339,7 +1342,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             UsageError: If an axis is a category axis (type checkers refuse such axes, so this is
                 raised only for calls they do not check), color scales conflict, or
                 ``render`` is ``Render.RASTER`` and the edges are not evenly spaced on screen;
-                that message names the axis and the first uneven step.
+                that message names the first edge off the lattice and where it belongs.
 
         Example:
             >>> import umber as ub

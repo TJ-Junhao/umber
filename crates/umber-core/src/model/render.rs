@@ -21,9 +21,16 @@ pub(crate) const AUTO_RASTER_CELLS: usize = 10_000;
 ///
 /// A mesh can be drawn as an image only when its edges are evenly spaced on screen: evenly
 /// spaced numbers on a linear axis, evenly spaced logarithms on a log axis and evenly spaced
-/// times on a time axis. Edges count as evenly spaced when every step between two neighbouring
-/// edges equals the first step to within one part in a million, allowing also for the
-/// rounding of edges of large magnitude.
+/// times on a time axis. Edges count as evenly spaced when every edge lies within 1/10,000 of
+/// a cell of its place on the evenly spaced lattice from the first edge to the last, so no
+/// cell boundary of the image moves by a visible amount. Numbers may also be off by two units
+/// of rounding error of the largest end edge, as far as a float can place them; times, whole
+/// microseconds, are compared exactly.
+///
+/// An image covers whole cells, so a cell cut by explicit limits is drawn whole and clipped at
+/// the limits. When a cut cell would reach more than 10,000 pt past the limits, which only
+/// limits inside a sliver of a few cells give, its edges cannot be placed exactly: `Auto`
+/// draws such a mark as vector shapes, and `Raster` makes rendering fail with `Error::Style`.
 ///
 /// # Examples
 ///
@@ -41,13 +48,16 @@ pub(crate) const AUTO_RASTER_CELLS: usize = 10_000;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Render {
     /// An image when the mark's grid has at least 10,000 cells (rows times columns, such as
-    /// 100 × 100), vector shapes otherwise. A mesh whose edges are not evenly spaced on screen
-    /// is drawn as vector shapes whatever its size.
+    /// 100 × 100), vector shapes otherwise. A mesh whose edges are not evenly spaced on screen,
+    /// and a mark whose cut cells reach more than 10,000 pt past the limits, are drawn as
+    /// vector shapes whatever their size.
     #[default]
     Auto,
     /// One filled rectangle per cell.
     Vector,
-    /// One image with one pixel per cell. A mesh drawn this way needs evenly spaced edges.
+    /// One image with one pixel per cell. A mesh drawn this way needs evenly spaced edges,
+    /// and rendering fails when explicit limits cut a cell to a sliver of it more than
+    /// 10,000 pt wide.
     Raster,
 }
 

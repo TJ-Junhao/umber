@@ -5,12 +5,15 @@
 //! image pixels, of each one's premultiplied color times the area of the device pixel it
 //! covers. Every image pixel covers a product of an interval along x and one along y, so the
 //! sum is computed one axis at a time: first along the axis where that leaves less to do, then
-//! along the other. The work is proportional to the device pixels plus the image pixels.
+//! along the other. The work is proportional to the device pixels plus the image pixels. Sums
+//! are kept in `f64`, so a uniform image keeps its exact color however many of its pixels
+//! share a device pixel. A rectangular clip enters the same sums: each device pixel counts only
+//! the part of its area inside the clip.
 
 use crate::color::Rgba;
 
 /// A premultiplied color, each channel in `0..=255`.
-type Premultiplied = [f32; 4];
+type Premultiplied = [f64; 4];
 
 /// One overlap of a device pixel and an image pixel along one axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -20,13 +23,19 @@ struct Overlap {
     /// The image pixel.
     pixel: usize,
     /// The length of the overlap, in device pixels, in `0..=1`.
-    length: f32,
+    length: f64,
 }
 
-/// The overlaps of the device pixels `first..first + count` along one axis with the `pixels`
-/// image pixels that divide `start..end` (device coordinates, `start < end`) into equal parts,
-/// by device pixel and then by image pixel. Overlaps of length zero are left out.
-fn overlaps(start: f64, end: f64, pixels: usize, first: usize, count: usize) -> Vec<Overlap> {
+/// The overlaps of the parts inside `window` (device coordinates) of the device pixels
+/// `first..first + count` along one axis with the `pixels` image pixels that divide
+/// `start..end` (device coordinates, `start < end`) into equal parts, by device pixel and then
+/// by image pixel. Overlaps of length zero are left out.
+fn overlaps(
+    (start, end): (f64, f64),
+    pixels: usize,
+    (first, count): (usize, usize),
+    window: (f64, f64),
+) -> Vec<Overlap> {
     let size = (end - start) / pixels as f64;
     // Each boundary is computed one way only, so neighbouring pixels share it exactly.
     let edge = |i: usize| {
@@ -38,7 +47,11 @@ fn overlaps(start: f64, end: f64, pixels: usize, first: usize, count: usize) -> 
     };
     let mut out = Vec::with_capacity(count + pixels);
     for device in 0..count {
-        let (lo, hi) = ((first + device) as f64, (first + device + 1) as f64);
+        let lo = ((first + device) as f64).max(window.0);
+        let hi = ((first + device + 1) as f64).min(window.1);
+        if lo >= hi {
+            continue;
+        }
         let mut pixel = (((lo - start) / size).floor().max(0.0) as usize).min(pixels - 1);
         // The division can land one pixel late; step back while the previous one still reaches in.
         while pixel > 0 && edge(pixel) > lo {
@@ -50,7 +63,7 @@ fn overlaps(start: f64, end: f64, pixels: usize, first: usize, count: usize) -> 
                 out.push(Overlap {
                     device,
                     pixel,
-                    length: length as f32,
+                    length,
                 });
             }
             pixel += 1;
@@ -69,32 +82,44 @@ fn touched(overlaps: &[Overlap]) -> std::ops::Range<usize> {
 /// The device pixels `columns` by `rows` (ranges of whole device pixels) of an image of
 /// `width` by `height` `pixels` that covers `rect` (left, top, right and bottom, in device
 /// coordinates, with left < right and top < bottom), each the area-weighted sum of the
-/// premultiplied colors of the image pixels it covers, row by row from the top. A device pixel
-/// fully inside one image pixel is exactly that pixel's color; one the image covers in part is
-/// as transparent as the part it leaves uncovered.
+/// premultiplied colors of the image pixels it covers inside the rectangle `clip` (left, top,
+/// right and bottom, in device coordinates), row by row from the top. A device pixel fully
+/// inside one image pixel and the clip is exactly that pixel's color; one the image or the clip
+/// covers in part is as transparent as the part it leaves uncovered.
 pub(super) fn resample(
     rect: [f64; 4],
     (width, height): (usize, usize),
     pixels: &[Rgba],
     (columns, rows): (std::ops::Range<usize>, std::ops::Range<usize>),
+    clip: [f64; 4],
 ) -> Vec<Premultiplied> {
     let [left, top, right, bottom] = rect;
     let (device_w, device_h) = (columns.len(), rows.len());
-    let along_x = overlaps(left, right, width, columns.start, device_w);
-    let along_y = overlaps(top, bottom, height, rows.start, device_h);
+    let along_x = overlaps(
+        (left, right),
+        width,
+        (columns.start, device_w),
+        (clip[0], clip[2]),
+    );
+    let along_y = overlaps(
+        (top, bottom),
+        height,
+        (rows.start, device_h),
+        (clip[1], clip[3]),
+    );
     let (used_x, used_y) = (touched(&along_x), touched(&along_y));
     let (used_w, used_h) = (used_x.len(), used_y.len());
     let source = |row: usize, column: usize| -> Premultiplied {
         let c = pixels[row * width + column];
-        let a = f32::from(c.a) / 255.0;
+        let a = f64::from(c.a) / 255.0;
         [
-            f32::from(c.r) * a,
-            f32::from(c.g) * a,
-            f32::from(c.b) * a,
-            f32::from(c.a),
+            f64::from(c.r) * a,
+            f64::from(c.g) * a,
+            f64::from(c.b) * a,
+            f64::from(c.a),
         ]
     };
-    let add = |into: &mut Premultiplied, from: Premultiplied, weight: f32| {
+    let add = |into: &mut Premultiplied, from: Premultiplied, weight: f64| {
         for (to, value) in into.iter_mut().zip(from) {
             *to += value * weight;
         }
@@ -198,6 +223,14 @@ mod tests {
         a: 255,
     };
 
+    /// A clip that keeps everything.
+    const NO_CLIP: [f64; 4] = [
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::INFINITY,
+    ];
+
     const RED: Rgba = Rgba {
         r: 255,
         g: 0,
@@ -237,8 +270,8 @@ mod tests {
     #[test]
     fn overlaps_cover_each_device_pixel_by_the_image_it_holds() {
         // Three image pixels over device x 0.5..3.5: pixel i spans 0.5 + i .. 1.5 + i.
-        let found = overlaps(0.5, 3.5, 3, 0, 4);
-        let lengths: Vec<(usize, usize, f32)> = found
+        let found = overlaps((0.5, 3.5), 3, (0, 4), (f64::NEG_INFINITY, f64::INFINITY));
+        let lengths: Vec<(usize, usize, f64)> = found
             .iter()
             .map(|o| (o.device, o.pixel, o.length))
             .collect();
@@ -254,27 +287,52 @@ mod tests {
             ]
         );
         // Many image pixels in one device pixel share it in full.
-        let total: f32 = overlaps(0.0, 1.0, 1000, 0, 1)
+        let total: f64 = overlaps((0.0, 1.0), 1000, (0, 1), (f64::NEG_INFINITY, f64::INFINITY))
             .iter()
             .map(|o| o.length)
             .sum();
-        assert!((total - 1.0).abs() < 1e-4, "{total}");
+        assert!((total - 1.0).abs() < 1e-12, "{total}");
+        // A window keeps only the part of each device pixel inside it.
+        let clipped = overlaps((0.0, 2.0), 4, (0, 2), (0.5, 2.0));
+        let lengths: Vec<(usize, usize, f64)> = clipped
+            .iter()
+            .map(|o| (o.device, o.pixel, o.length))
+            .collect();
+        assert_eq!(lengths, [(0, 1, 0.5), (1, 2, 0.5), (1, 3, 0.5)]);
     }
 
     #[test]
     fn resampling_keeps_interiors_and_averages_edges() {
         // Two image pixels, red then blue, over device x 0..4 and y 0..1.
-        let out = resample([0.0, 0.0, 4.0, 1.0], (2, 1), &[RED, BLUE], (0..4, 0..1));
+        let out = resample(
+            [0.0, 0.0, 4.0, 1.0],
+            (2, 1),
+            &[RED, BLUE],
+            (0..4, 0..1),
+            NO_CLIP,
+        );
         assert_eq!(out[0], [255.0, 0.0, 0.0, 255.0]);
         assert_eq!(out[3], [0.0, 0.0, 255.0, 255.0]);
         // Offset by half a device pixel, the shared edge falls inside device pixel 2.
-        let out = resample([0.5, 0.0, 4.5, 1.0], (2, 1), &[RED, BLUE], (0..5, 0..1));
+        let out = resample(
+            [0.5, 0.0, 4.5, 1.0],
+            (2, 1),
+            &[RED, BLUE],
+            (0..5, 0..1),
+            NO_CLIP,
+        );
         assert_eq!(out[0], [127.5, 0.0, 0.0, 127.5]);
         assert_eq!(out[1], [255.0, 0.0, 0.0, 255.0]);
         assert_eq!(out[2], [127.5, 0.0, 127.5, 255.0]);
         assert_eq!(out[4], [0.0, 0.0, 127.5, 127.5]);
         // A transparent pixel contributes nothing.
-        let out = resample([0.0, 0.0, 2.0, 2.0], (1, 2), &[CLEAR, RED], (0..2, 0..2));
+        let out = resample(
+            [0.0, 0.0, 2.0, 2.0],
+            (1, 2),
+            &[CLEAR, RED],
+            (0..2, 0..2),
+            NO_CLIP,
+        );
         assert_eq!(out[0], [0.0; 4]);
         assert_eq!(out[2], [255.0, 0.0, 0.0, 255.0]);
     }
@@ -295,17 +353,27 @@ mod tests {
             ((10, 6), [0.3, 0.7, 3.9, 40.2], (0..4, 0..41)),
             ((6, 10), [0.3, 0.7, 40.2, 3.9], (0..41, 0..4)),
         ] {
-            let out = resample(rect, (w, h), &pixels, region.clone());
+            let out = resample(rect, (w, h), &pixels, region.clone(), NO_CLIP);
             let device_w = region.0.len();
-            let xs = overlaps(rect[0], rect[2], w, 0, region.0.len());
-            let ys = overlaps(rect[1], rect[3], h, 0, region.1.len());
+            let xs = overlaps(
+                (rect[0], rect[2]),
+                w,
+                (0, region.0.len()),
+                (f64::NEG_INFINITY, f64::INFINITY),
+            );
+            let ys = overlaps(
+                (rect[1], rect[3]),
+                h,
+                (0, region.1.len()),
+                (f64::NEG_INFINITY, f64::INFINITY),
+            );
             for dy in region.1.clone() {
                 for dx in region.0.clone() {
                     let mut want = [0.0_f64; 4];
                     for oy in ys.iter().filter(|o| o.device == dy) {
                         for ox in xs.iter().filter(|o| o.device == dx) {
                             let c = pixels[oy.pixel * w + ox.pixel];
-                            let weight = f64::from(oy.length) * f64::from(ox.length);
+                            let weight = oy.length * ox.length;
                             for (to, v) in want.iter_mut().zip([c.r, c.g, c.b, c.a]) {
                                 *to += f64::from(v) * weight;
                             }
@@ -313,7 +381,7 @@ mod tests {
                     }
                     let got = out[dy * device_w + dx];
                     for (g, w) in got.iter().zip(want) {
-                        assert!((f64::from(*g) - w).abs() < 1e-2, "{got:?} {want:?}");
+                        assert!((*g - w).abs() < 1e-9, "{got:?} {want:?}");
                     }
                 }
             }
@@ -390,6 +458,71 @@ mod tests {
         for x in 0..4 {
             assert_eq!(image.at(x, 0), [128, 0, 128, 255], "{x}");
         }
+    }
+
+    #[test]
+    fn a_uniform_image_keeps_its_color_at_any_minification() {
+        let color = Rgba {
+            r: 91,
+            g: 120,
+            b: 170,
+            a: 255,
+        };
+        // Four million pixels into one device pixel, and other shapes into a few.
+        for ((width, height), (w, h)) in [
+            ((4_000_000, 1), (1.0, 1.0)),
+            ((1, 4_000_000), (1.0, 1.0)),
+            ((2_000, 2_000), (1.0, 1.0)),
+            ((999_983, 3), (7.0, 2.0)),
+        ] {
+            let scene = scene_with(Item::Image {
+                rect: Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: w,
+                    height: h,
+                },
+                width,
+                height,
+                pixels: vec![color; (width * height) as usize],
+            });
+            let image = decode_rgba8(&render_png(&scene, 72).unwrap()).unwrap();
+            for y in 0..h as u32 {
+                for x in 0..w as u32 {
+                    assert_eq!(image.at(x, y), [91, 120, 170, 255], "{width} x {height}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_fractional_clip_keeps_only_the_pixels_it_shows() {
+        // Four columns red, blue, red, blue over 0..2 pt, clipped to x 0.5..2 pt, at 72 dpi on
+        // a transparent canvas: device pixel 0 shows only the blue half of its width.
+        let clear = Rgba { a: 0, ..WHITE };
+        let mut scene = Scene::new(2.0, 1.0, clear);
+        scene.push(Item::Group {
+            clip: Some(Rect {
+                x: 0.5,
+                y: 0.0,
+                width: 1.5,
+                height: 1.0,
+            }),
+            items: vec![Item::Image {
+                rect: Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 2.0,
+                    height: 1.0,
+                },
+                width: 4,
+                height: 1,
+                pixels: vec![RED, BLUE, RED, BLUE],
+            }],
+        });
+        let image = decode_rgba8(&render_png(&scene, 72).unwrap()).unwrap();
+        assert_eq!(image.at(0, 0), [0, 0, 255, 128]);
+        assert_eq!(image.at(1, 0), [128, 0, 128, 255]);
     }
 
     #[test]

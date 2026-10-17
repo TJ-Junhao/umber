@@ -339,7 +339,9 @@ class Render(Enum):
     by area, so cells meet without seams. In SVG output the image is an ``<image>`` holding a
     PNG. NaN values and empty bins are transparent either way. The marks take ``AUTO`` by
     default, which draws an image from 10,000 cells (rows times columns, such as 100 x 100)
-    and vector shapes below that.
+    and vector shapes below that. An image covers whole cells and is clipped at explicit
+    limits; when the limits cut a cell to a sliver of a cell more than 10,000 pt wide, ``AUTO``
+    draws vector shapes and ``RASTER`` makes rendering raise ``StyleError``.
 
     Example:
         >>> import umber as ub
@@ -353,4 +355,5 @@ class Render(Enum):
     """One filled rectangle per cell."""
 
     RASTER = 1
-    """One image with one pixel per cell. A mesh needs edges evenly spaced on screen."""
+    """One image with one pixel per cell. A mesh needs edges evenly spaced on screen, and
+    rendering fails when limits cut a cell to a sliver of a cell more than 10,000 pt wide."""

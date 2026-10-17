@@ -30,7 +30,8 @@ pub(super) const CLEAR: Rgba = Rgba {
 /// How far, in points, the image of a grid may reach past the part of it that is shown. Cells
 /// cut by explicit limits are drawn whole and clipped, so an image reaches past the limits by
 /// at most one cell; a cell wider than this, which only limits inside a few cells give, is too
-/// wide to place exactly in the scene's precision, and such a grid is drawn as vector shapes.
+/// wide to place exactly in the scene's precision: [`Render::Auto`](crate::Render::Auto) draws
+/// such a grid as vector shapes, and [`Render::Raster`](crate::Render::Raster) fails.
 pub(super) const MAX_IMAGE_REACH: f64 = 10_000.0;
 
 /// The grid of `width` by `height` cells whose colors are `pixels` (row by row from the top,

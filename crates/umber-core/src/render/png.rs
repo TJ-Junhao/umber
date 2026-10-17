@@ -619,28 +619,22 @@ impl Canvas {
                 width,
                 height,
                 pixels,
-            } => draw_image(
-                pixmap,
-                *scale,
-                clip.zip(mask),
-                rect,
-                (*width, *height),
-                pixels,
-            ),
+            } => draw_image(pixmap, *scale, clip, rect, (*width, *height), pixels),
             Item::Group { .. } => {}
         }
     }
 }
 
-/// Draws the image of `width` by `height` `pixels` over `rect`, through `clip` and its mask when
-/// there is one: each device pixel the image reaches takes the area-weighted average of the
-/// image pixels it covers ([`super::image::resample`]), composited source-over onto the pixmap,
-/// in integer arithmetic, through the mask's coverage. Only the device pixels inside both the
+/// Draws the image of `width` by `height` `pixels` over `rect`, inside `clip` when there is
+/// one: each device pixel the image reaches takes the area-weighted sum of the image pixels it
+/// covers inside the clip ([`super::image::resample`]), composited source-over onto the pixmap
+/// in integer arithmetic. Every clip of a scene is a rectangle, so the clip enters the area
+/// weights exactly and no clip mask is applied on top. Only the device pixels inside both the
 /// image and the clip are resampled.
 fn draw_image(
     pixmap: &mut sk::Pixmap,
     scale: DeviceScale,
-    clip: Option<(ClipRect, &sk::Mask)>,
+    clip: Option<ClipRect>,
     rect: &Rect,
     (width, height): (u32, u32),
     pixels: &[Rgba],
@@ -652,15 +646,15 @@ fn draw_image(
     let (left, top) = (f64::from(rect.x) * s, f64::from(rect.y) * s);
     let right = (f64::from(rect.x) + f64::from(rect.width)) * s;
     let bottom = (f64::from(rect.y) + f64::from(rect.height)) * s;
-    let (mut lo_x, mut lo_y) = (left.floor().max(0.0), top.floor().max(0.0));
-    let mut hi_x = right.ceil().min(f64::from(pixmap.width()));
-    let mut hi_y = bottom.ceil().min(f64::from(pixmap.height()));
-    if let Some((c, _)) = clip {
-        lo_x = lo_x.max(f64::from(c.left).floor());
-        lo_y = lo_y.max(f64::from(c.top).floor());
-        hi_x = hi_x.min(f64::from(c.right).ceil());
-        hi_y = hi_y.min(f64::from(c.bottom).ceil());
-    }
+    let (canvas_w, canvas_h) = (f64::from(pixmap.width()), f64::from(pixmap.height()));
+    // The visible window: the clip, or the whole pixmap.
+    let window = clip.map_or([0.0, 0.0, canvas_w, canvas_h], |c| {
+        [c.left, c.top, c.right, c.bottom].map(f64::from)
+    });
+    let lo_x = left.max(window[0]).floor().max(0.0);
+    let lo_y = top.max(window[1]).floor().max(0.0);
+    let hi_x = right.min(window[2]).ceil().min(canvas_w);
+    let hi_y = bottom.min(window[3]).ceil().min(canvas_h);
     if lo_x >= hi_x || lo_y >= hi_y {
         return;
     }
@@ -672,29 +666,24 @@ fn draw_image(
         (width as usize, height as usize),
         pixels,
         (columns.clone(), rows.clone()),
+        window,
     );
-    let width = pixmap.width() as usize;
-    let mask = clip.map(|(_, mask)| mask.data());
+    let stride = pixmap.width() as usize;
     let data = pixmap.data_mut();
-    let channel = |v: f32| v.round().clamp(0.0, 255.0) as u32;
+    let channel = |v: f64| v.round().clamp(0.0, 255.0) as u32;
     for (row, line) in rows.zip(device.chunks(columns.len())) {
         for (column, &[r, g, b, a]) in columns.clone().zip(line) {
-            let at = row * width + column;
-            // The mask's coverage of the pixel, 255 without a clip.
-            let coverage = mask.map_or(255, |m| m.get(at).copied().map_or(0, u32::from));
             let a = channel(a);
-            if a == 0 || coverage == 0 {
+            if a == 0 {
                 continue;
             }
             // A premultiplied channel never exceeds the alpha.
-            let mut source = [channel(r).min(a), channel(g).min(a), channel(b).min(a), a];
-            if coverage < 255 {
-                source = source.map(|v| div255(v * coverage));
-            }
-            let Some(target) = data.get_mut(at * 4..at * 4 + 4) else {
+            let source = [channel(r).min(a), channel(g).min(a), channel(b).min(a), a];
+            let at = (row * stride + column) * 4;
+            let Some(target) = data.get_mut(at..at + 4) else {
                 continue;
             };
-            let keep = 255 - source[3];
+            let keep = 255 - a;
             for (to, from) in target.iter_mut().zip(source) {
                 // Source-over in premultiplied form: at most 255, so it fits a byte.
                 *to = (from + div255(u32::from(*to) * keep)) as u8;

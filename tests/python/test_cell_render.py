@@ -159,21 +159,21 @@ def test_type_errors_highlight_render(tmp_path: Path, argument: str) -> None:
     [
         (
             "linear",
-            "Axes.mesh(): the step from x_edges[2] = 2 to x_edges[3] = 4 is 2, not 1 as from "
-            "x_edges[0] to x_edges[1]; drawing the cells as one image needs evenly spaced "
-            "edges on the x axis.",
+            "Axes.mesh(): x_edges[1] = 1 is off the evenly spaced edges from x_edges[0] = 0 to "
+            "x_edges[3] = 4, which put it at 1.3333333333333333; drawing the cells as one image "
+            "needs evenly spaced edges on the x axis.",
         ),
         (
             "log",
-            "Axes.mesh(): the step from y_edges[1] = 2 to y_edges[2] = 3 is a factor of 1.5, "
-            "not 2 as from y_edges[0] to y_edges[1]; drawing the cells as one image needs "
-            "evenly spaced edges on the y axis.",
+            "Axes.mesh(): y_edges[1] = 2 is off the evenly spaced logarithms from y_edges[0] = 1 "
+            "to y_edges[2] = 16, which put it at 4; drawing the cells as one image needs evenly "
+            "spaced edges on the y axis.",
         ),
         (
             "time",
-            "Axes.mesh(): the step from x_edges[1] = 2026-02-01 to x_edges[2] = 2026-03-01 is "
-            "28 days, not 31 days as from x_edges[0] to x_edges[1]; drawing the cells as one "
-            "image needs evenly spaced edges on the x axis.",
+            "Axes.mesh(): x_edges[1] = 2026-02-01 is off the evenly spaced times from x_edges[0] "
+            "= 2026-01-01 to x_edges[3] = 2026-04-01, which put it at 2026-01-31; drawing the "
+            "cells as one image needs evenly spaced edges on the x axis.",
         ),
     ],
 )
@@ -185,7 +185,7 @@ def test_raster_refuses_uneven_edges(kind: str, message: str) -> None:
         y: Any = [0, 1]
     elif kind == "log":
         ax = ub.Figure(6, 4).add_axes(y=ub.Scale.log())
-        x, y = [0, 1, 2, 3], [1, 2, 3]
+        x, y = [0, 1, 2, 3], [1, 2, 16]
     else:
         ax = ub.Figure(6, 4).add_axes(x=ub.Scale.time())
         x = [dt.date(2026, month, 1) for month in (1, 2, 3, 4)]
@@ -200,6 +200,51 @@ def test_raster_refuses_uneven_edges(kind: str, message: str) -> None:
     # Without an explicit image the same edges draw vector cells.
     ax.mesh(x, y, values)
     assert not images(ax.figure)
+
+
+def test_microsecond_steps_are_compared_exactly() -> None:
+    start = dt.datetime(9999, 1, 1)
+    uneven = [start + dt.timedelta(microseconds=us) for us in (0, 1, 9)]
+    ax = ub.Figure(6, 4).add_axes(x=ub.Scale.time())
+    with pytest.raises(ub.UsageError, match=r"x_edges\[1\] = 9999-01-01T00:00:00.000001 is off"):
+        ax.mesh(uneven, [0, 1], [[1.0, 2.0]], render=ub.Render.RASTER)
+    late = dt.datetime(2500, 1, 1)
+    even = [late + dt.timedelta(microseconds=us) for us in range(4)]
+    ax = ub.Figure(6, 4).add_axes(x=ub.Scale.time())
+    ax.mesh(even, [0, 1], [[1.0, 2.0, 3.0]], render=ub.Render.RASTER)
+    assert len(images(ax.figure)) == 1
+
+
+def test_edges_must_lie_on_one_lattice() -> None:
+    x = 1e12 + np.concatenate([np.arange(601) * 0.1, 60 + np.arange(1, 601) * 0.1008])
+    ax = ub.Figure(6, 4).add_axes()
+    with pytest.raises(ub.UsageError, match=r"x_edges\[2\] = 1\.0000000000002e12 is off"):
+        ax.mesh(x, [0, 1, 2], np.ones((2, 1200)), render=ub.Render.RASTER)
+    ax.mesh(x, np.arange(11.0), np.ones((10, 1200)))
+    assert not images(ax.figure)
+    rounded = 1e12 + np.arange(1201) * 0.1
+    ub.Figure(6, 4).add_axes().mesh(rounded, [0, 1], np.ones((1, 1200)), render=ub.Render.RASTER)
+
+
+def test_raster_refuses_cells_too_wide_for_an_image_when_rendering() -> None:
+    def sliver(render: ub.Render | ub.Auto) -> ub.Figure:
+        edges = np.arange(101.0)
+        ax = ub.Figure(6, 4).add_axes()
+        ax.mesh(edges, edges, np.ones((100, 100)), render=render).xlim(50 - 1e-4, 50 + 1e-4)
+        return ax.figure
+
+    assert not images(sliver(ub.AUTO))
+    with pytest.raises(ub.StyleError) as caught:
+        sliver(ub.Render.RASTER).to_svg()
+    message = str(caught.value)
+    assert message.startswith(
+        "Figure.to_svg(): mark 1 of these axes, a mesh, has a cell cut by the x limits that "
+        "reaches "
+    ), message
+    assert details(caught.value) == (
+        None,
+        "use render=ub.Render.VECTOR or ub.AUTO, or widen the limits.",
+    )
 
 
 def test_hexbin_has_no_render_argument() -> None:

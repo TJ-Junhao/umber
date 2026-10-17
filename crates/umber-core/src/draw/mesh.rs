@@ -13,14 +13,16 @@
 //! with a shown part, one pixel per cell, and the image covers them whole: an outer cell that
 //! an explicit limit cuts reaches past it, and a clip at the limits cuts it there, as the vector
 //! cells are cut. A grid whose cut cells would reach more than [`MAX_IMAGE_REACH`] points past
-//! the limits is drawn as vector shapes.
+//! the limits cannot be placed exactly in the scene's precision: with
+//! [`Render::Auto`](crate::Render::Auto) it is drawn as vector shapes, and with
+//! [`Render::Raster`](crate::Render::Raster) rendering fails ([`too_wide_image`]).
 
 use super::MarkContext;
 use super::cells::{CLEAR, MAX_IMAGE_REACH, Reach, cell_path, image_item, reach};
-use super::mapping::{AxisMap, axis_time, axis_value};
+use super::mapping::{AxisMap, AxisMaps, axis_time, axis_value};
 use crate::color_scale::ResolvedColorScale;
 use crate::model::{Edges, Hist2dMark, MeshMark};
-use crate::resolve::{Resolved, ResolvedAxis};
+use crate::resolve::{Resolved, ResolvedAxis, ResolvedMark};
 use crate::{FillRule, Item, Paint, Rgba};
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -117,6 +119,52 @@ pub(super) fn hist2d_items(
     }
 }
 
+/// For a mesh or a 2-D histogram among `marks` that is drawn as one image because its options
+/// say [`Render::Raster`](crate::Render::Raster), but whose cells cut by explicit limits reach
+/// more than [`MAX_IMAGE_REACH`] points past the limits, the first such mark: its index among
+/// `marks`, what it is (`"a mesh"`, `"a 2-D histogram"`), the axis (`"x"` or `"y"`) and how
+/// far, in points, the cut cells reach. [`Render::Auto`](crate::Render::Auto) draws such marks
+/// as vector shapes instead.
+pub(super) fn too_wide_image(
+    maps: &AxisMaps,
+    resolved: &Resolved,
+    marks: &[ResolvedMark<'_>],
+) -> Option<(usize, &'static str, &'static str, f64)> {
+    marks.iter().enumerate().find_map(|(i, mark)| {
+        let (kind, x, y) = match mark {
+            ResolvedMark::Mesh { mark, .. } if mark.render == crate::Render::Raster => (
+                "a mesh",
+                axis_edges(&resolved.x, &mark.x_edges),
+                axis_edges(&resolved.y, &mark.y_edges),
+            ),
+            ResolvedMark::Hist2d { mark, .. } if mark.render == crate::Render::Raster => {
+                let edges = |axis: &ResolvedAxis, edges: &[f64]| -> Vec<f64> {
+                    edges.iter().map(|&v| axis_value(axis, v)).collect()
+                };
+                (
+                    "a 2-D histogram",
+                    edges(&resolved.x, &mark.bins.x_edges),
+                    edges(&resolved.y, &mark.bins.y_edges),
+                )
+            }
+            _ => return None,
+        };
+        if x.len() < 2 || y.len() < 2 {
+            return None;
+        }
+        let (x, y) = (GridAxis::new(&maps.x, &x), GridAxis::new(&maps.y, &y));
+        // Nothing is drawn when either axis shows no cell.
+        x.shown_cells()?;
+        y.shown_cells()?;
+        let (axis, reach) = match (x.too_wide(), y.too_wide()) {
+            (Some(reach), _) => ("x", reach),
+            (None, Some(reach)) => ("y", reach),
+            (None, None) => return None,
+        };
+        Some((i, kind, axis, reach))
+    })
+}
+
 /// One axis of a grid of cells: where its edges lie on the plot once clipped to the axis
 /// domain, and which of the cells between them are left.
 struct GridAxis {
@@ -149,19 +197,31 @@ impl GridAxis {
 
     /// The plot coordinates of the outer edges of the image of `cells`, its first and last
     /// edges before clipping, and of their shown part. A single cell needs no edge beyond the
-    /// shown part, so both are the shown part. `None` when an outer edge lies more than
-    /// [`MAX_IMAGE_REACH`] points beyond the shown part.
-    fn image_span(&self, cells: &std::ops::Range<usize>) -> Option<([f64; 2], [f64; 2])> {
+    /// shown part, so both are the shown part. `Err` with how far, in points, an outer edge
+    /// lies beyond the shown part when that is more than [`MAX_IMAGE_REACH`].
+    fn image_span(&self, cells: &std::ops::Range<usize>) -> Result<([f64; 2], [f64; 2]), f64> {
         let shown = [self.at[cells.start], self.at[cells.end]];
         if cells.len() == 1 {
-            return Some((shown, shown));
+            return Ok((shown, shown));
         }
         let whole = [self.unclipped[cells.start], self.unclipped[cells.end]];
-        let near = whole
+        let reach = whole
             .iter()
             .zip(shown)
-            .all(|(edge, at)| (edge - at).abs() <= MAX_IMAGE_REACH);
-        near.then_some((whole, shown))
+            .map(|(edge, at)| (edge - at).abs())
+            .fold(0.0_f64, f64::max);
+        // A reach that is not a number (edges far beyond the domain) is too far too.
+        if reach <= MAX_IMAGE_REACH {
+            Ok((whole, shown))
+        } else {
+            Err(reach)
+        }
+    }
+
+    /// How far, in points, the image of the shown cells would reach past the limits, when that
+    /// is more than [`MAX_IMAGE_REACH`]; `None` when it can be drawn, or nothing is shown.
+    fn too_wide(&self) -> Option<f64> {
+        self.image_span(&self.shown_cells()?).err()
     }
 
     /// Whether cell `i` exists and is left after clipping.
@@ -205,7 +265,7 @@ impl<F: Fn(usize, usize) -> Option<Rgba>> Grid<F> {
         let (Some(columns), Some(rows)) = (self.x.shown_cells(), self.y.shown_cells()) else {
             return Raster::Nothing;
         };
-        let (Some((x_whole, x_shown)), Some((y_whole, y_shown))) =
+        let (Ok((x_whole, x_shown)), Ok((y_whole, y_shown))) =
             (self.x.image_span(&columns), self.y.image_span(&rows))
         else {
             return Raster::TooWide;
