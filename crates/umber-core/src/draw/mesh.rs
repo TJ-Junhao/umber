@@ -1,11 +1,23 @@
-//! Opaque, edge-spanning cells. Geometry is clipped before conversion to scene points.
+//! Meshes and 2-D histograms: one opaque rectangle per cell between numeric or time edges, in
+//! the color its value maps to on the axes' color scale.
+//!
+//! Each cell is clipped to the axis domains in axis space before it is mapped to plot points:
+//! a cell beyond an explicit limit is left out and a cell across one ends at it. The cells meet
+//! without a seam, as [`cells`](super::cells) describes. Edges increase and continuous and time
+//! axes never run backwards, so the columns of a grid run left to right and its rows bottom to
+//! top; the rows are drawn from the top down, each from left to right, and a cell reaches under
+//! its drawn neighbours to the right and below. It never reaches into an empty cell (a NaN
+//! value, an empty bin or a cell clipped away) or past the outer edges of the grid.
 
 use super::MarkContext;
-use super::mapping::{AxisPoint, axis_time, axis_value, point};
+use super::cells::{Reach, cell_path, reach};
+use super::mapping::{AxisMap, axis_time, axis_value};
 use crate::color_scale::ResolvedColorScale;
 use crate::model::{Edges, Hist2dMark, MeshMark};
 use crate::resolve::{Resolved, ResolvedAxis};
-use crate::{FillRule, Item, Paint, Path, Rgba};
+use crate::{FillRule, Item, Paint, Rgba};
+use std::cmp::Reverse;
+use std::collections::HashMap;
 
 /// The edges in axis space: numbers through the axis' scale, times as seconds from its origin.
 fn axis_edges(axis: &ResolvedAxis, edges: &Edges) -> Vec<f64> {
@@ -24,17 +36,22 @@ pub(super) fn mesh_items(
     items: &mut Vec<Item>,
 ) {
     let columns = mark.x_edges.len() - 1;
-    let x = axis_edges(&resolved.x, &mark.x_edges);
-    let y = axis_edges(&resolved.y, &mark.y_edges);
-    for (i, &value) in mark.colors.values.iter().enumerate() {
-        if let Some(fill) = color.color(value) {
-            rectangle(
-                context,
-                [x[i % columns], x[i % columns + 1]],
-                [y[i / columns], y[i / columns + 1]],
-                fill,
-                items,
-            );
+    let rows = mark.y_edges.len() - 1;
+    // Each value is mapped once; the neighbours of a cell look their colors up.
+    let colors: Vec<Option<Rgba>> = mark
+        .colors
+        .values
+        .iter()
+        .map(|&value| color.color(value))
+        .collect();
+    let grid = Grid {
+        x: GridAxis::new(&context.maps.x, &axis_edges(&resolved.x, &mark.x_edges)),
+        y: GridAxis::new(&context.maps.y, &axis_edges(&resolved.y, &mark.y_edges)),
+        color: |column: usize, row: usize| colors.get(row * columns + column).copied().flatten(),
+    };
+    for row in (0..rows).rev() {
+        for column in 0..columns {
+            grid.push(column, row, items);
         }
     }
 }
@@ -47,72 +64,114 @@ pub(super) fn hist2d_items(
     color: &ResolvedColorScale,
     items: &mut Vec<Item>,
 ) {
-    for (&(col, row), &count) in mark.bins.cells.iter().zip(&mark.bins.counts) {
-        if let Some(fill) = color.color(count) {
-            let x = [mark.bins.x_edges[col], mark.bins.x_edges[col + 1]];
-            let y = [mark.bins.y_edges[row], mark.bins.y_edges[row + 1]];
-            rectangle(
-                context,
-                x.map(|v| axis_value(&resolved.x, v)),
-                y.map(|v| axis_value(&resolved.y, v)),
-                fill,
-                items,
-            );
+    let bins = &mark.bins;
+    // Each count is mapped once; the neighbours of a cell look their colors up.
+    let colors: HashMap<(usize, usize), Rgba> = bins
+        .cells
+        .iter()
+        .zip(&bins.counts)
+        .filter_map(|(&cell, &count)| Some((cell, color.color(count)?)))
+        .collect();
+    let edges = |axis: &ResolvedAxis, edges: &[f64]| -> Vec<f64> {
+        edges.iter().map(|&v| axis_value(axis, v)).collect()
+    };
+    let grid = Grid {
+        x: GridAxis::new(&context.maps.x, &edges(&resolved.x, &bins.x_edges)),
+        y: GridAxis::new(&context.maps.y, &edges(&resolved.y, &bins.y_edges)),
+        color: |column: usize, row: usize| colors.get(&(column, row)).copied(),
+    };
+    let mut cells = bins.cells.clone();
+    cells.sort_unstable_by_key(|&(column, row)| (Reverse(row), column));
+    for (column, row) in cells {
+        grid.push(column, row, items);
+    }
+}
+
+/// One axis of a grid of cells: where its edges lie on the plot once clipped to the axis
+/// domain, and which of the cells between them are left.
+struct GridAxis {
+    /// The plot coordinate of each edge, clipped to the axis domain, in order.
+    at: Vec<f64>,
+    /// For each cell, whether it keeps a positive extent once its edges are clipped.
+    shown: Vec<bool>,
+}
+
+impl GridAxis {
+    /// The axis of the increasing axis-space `edges` on `map`.
+    fn new(map: &AxisMap, edges: &[f64]) -> GridAxis {
+        let clipped: Vec<f64> = edges.iter().map(|v| v.clamp(map.lo, map.hi)).collect();
+        GridAxis {
+            at: clipped.iter().map(|&v| map.plot_at(v)).collect(),
+            shown: clipped.windows(2).map(|pair| pair[0] < pair[1]).collect(),
         }
     }
+
+    /// Whether cell `i` exists and is left after clipping.
+    fn shown(&self, i: usize) -> bool {
+        self.shown.get(i).copied().unwrap_or(false)
+    }
+
+    /// The size of cell `i`, which must exist, in points.
+    fn size(&self, i: usize) -> f64 {
+        (self.at[i + 1] - self.at[i]).abs()
+    }
 }
 
-/// Clips an axis-aligned cell exactly, keeping every finite projected coordinate bounded. `x`
-/// and `y` are its edges in axis space.
-fn rectangle(
-    context: &MarkContext<'_>,
-    x: [f64; 2],
-    y: [f64; 2],
-    color: Rgba,
-    items: &mut Vec<Item>,
-) {
-    let x = x.map(|v| v.clamp(context.maps.x.lo, context.maps.x.hi));
-    let y = y.map(|v| v.clamp(context.maps.y.lo, context.maps.y.hi));
-    if x[0] >= x[1] || y[0] >= y[1] {
-        return;
-    }
-    fill(
-        context,
-        &[
-            AxisPoint::new(x[0], y[0]),
-            AxisPoint::new(x[1], y[0]),
-            AxisPoint::new(x[1], y[1]),
-            AxisPoint::new(x[0], y[1]),
-        ],
-        color,
-        items,
-    );
+/// The cells between the edges of two grid axes, with `color(column, row)` looking up the color
+/// a cell's value was mapped to, `None` for an empty cell. Columns count from the left and rows
+/// from the bottom.
+struct Grid<F> {
+    /// The columns.
+    x: GridAxis,
+    /// The rows.
+    y: GridAxis,
+    /// The color each cell's value was mapped to, `None` when it is empty.
+    color: F,
 }
 
-/// Fills a clipped polygon, without an outline or an area-opacity multiplier.
-pub(super) fn fill(
-    context: &MarkContext<'_>,
-    vertices: &[AxisPoint],
-    color: Rgba,
-    items: &mut Vec<Item>,
-) {
-    if vertices.len() < 3 {
-        return;
-    }
-    let mut path = Path::new();
-    for (i, &v) in vertices.iter().enumerate() {
-        let p = context.maps.to_plot(v);
-        let p = point(p.x, p.y);
-        if i == 0 {
-            path.move_to(p);
+impl<F: Fn(usize, usize) -> Option<Rgba>> Grid<F> {
+    /// The color of the cell at `column` and `row` when it is drawn: when it exists, is left
+    /// after clipping, and is not empty.
+    fn drawn(&self, column: usize, row: usize) -> Option<Rgba> {
+        if self.x.shown(column) && self.y.shown(row) {
+            (self.color)(column, row)
         } else {
-            path.line_to(p);
+            None
         }
     }
-    path.close();
-    items.push(Item::Fill {
-        path,
-        paint: Paint::Solid(color),
-        rule: FillRule::NonZero,
-    });
+
+    /// Appends the fill of the cell at `column` and `row` to `items` when it is drawn, reaching
+    /// under its drawn neighbours to the right and below, which are drawn after it.
+    fn push(&self, column: usize, row: usize, items: &mut Vec<Item>) {
+        let Some(color) = self.drawn(column, row) else {
+            return;
+        };
+        let right = self.drawn(column + 1, row).is_some();
+        let below = row
+            .checked_sub(1)
+            .filter(|&below| self.drawn(column, below).is_some());
+        let corner = row
+            .checked_sub(1)
+            .is_some_and(|below| self.drawn(column + 1, below).is_some());
+        let reaching = Reach {
+            right: if right {
+                reach(self.x.size(column + 1))
+            } else {
+                0.0
+            },
+            down: below.map_or(0.0, |below| reach(self.y.size(below))),
+            corner,
+        };
+        let bounds = [
+            self.x.at[column],
+            self.y.at[row + 1],
+            self.x.at[column + 1],
+            self.y.at[row],
+        ];
+        items.push(Item::Fill {
+            path: cell_path(bounds, reaching),
+            paint: Paint::Solid(color),
+            rule: FillRule::NonZero,
+        });
+    }
 }

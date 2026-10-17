@@ -1,18 +1,17 @@
 //! Heatmaps: one opaque rectangle per cell over its category bands, in the color its value maps
 //! to on the axes' color scale, and the values written on annotated cells.
 //!
-//! The cells fill their bands exactly and meet without a seam: rows are drawn top to bottom and
-//! each row left to right, in axis order, and each cell reaches up to [`OVERLAP`] under its
-//! neighbours to the right and below, which are drawn after it, so their antialiased edges
-//! cover it rather than letting the background show between them. A cell ends exactly at its
+//! The cells fill their bands exactly and meet without a seam, as [`cells`](super::cells)
+//! describes: rows are drawn top to bottom and each row left to right, in axis order, and each
+//! cell reaches under its drawn neighbours to the right and below. A cell ends exactly at its
 //! bands where it has no drawn neighbour: at the heatmap's right and bottom edges, and next to
 //! an empty cell.
 
 use super::MarkContext;
+use super::cells::{Reach, cell_path, reach};
 use super::chrome::text;
-use super::mapping::{AxisMaps, point};
+use super::mapping::AxisMaps;
 use crate::color_scale::ResolvedColorScale;
-use crate::geometry::Path;
 use std::collections::HashSet;
 
 use crate::error::quoted;
@@ -21,10 +20,6 @@ use crate::model::HeatmapMark;
 use crate::resolve::{AxisScale, Resolved, ResolvedMark};
 use crate::scene::{FillRule, Item, Paint, Rect};
 use crate::{CategoryScale, Error, FontLibrary, Result, Rgba, Theme, TickFormat};
-
-/// How far, in points, a cell reaches under a neighbour drawn after it; at most half the
-/// neighbour's size along that axis.
-const OVERLAP: f64 = 1.0;
 
 /// How far, in points, a label may exceed its cell and still count as fitting: the cell size
 /// comes from two rounded edges, so a label of exactly the cell's size can measure larger by a
@@ -62,13 +57,8 @@ struct Cell {
     color: Rgba,
     /// The left, top, right and bottom edges of its bands, in plot points.
     bounds: [f64; 4],
-    /// How far it reaches right, under the next cell in its row: 0 without one.
-    right: f64,
-    /// How far it reaches down, under the next cell in its column: 0 without one.
-    down: f64,
-    /// Whether the cell diagonally below it to the right is drawn, so that the corner where
-    /// both reaches meet lies under a cell too.
-    corner: bool,
+    /// How far it reaches under its neighbours to the right and below.
+    reach: Reach,
 }
 
 /// The drawn cells of `mark` on the axes `resolved`, mapped onto the plot by `maps`, colored by
@@ -100,10 +90,10 @@ fn cells(
         .map(|&row| column_at.iter().map(|&column| color(row, column)).collect())
         .collect();
     let at = |r: usize, c: usize| drawn.get(r).and_then(|row| row.get(c)).copied().flatten();
-    let reach = |count: usize, extent: f64| OVERLAP.min(extent.abs() / count.max(1) as f64 / 2.0);
+    let band_reach = |count: usize, extent: f64| reach(extent.abs() / count.max(1) as f64);
     let (reach_right, reach_down) = (
-        reach(columns.categories().len(), maps.x.extent),
-        reach(rows.categories().len(), maps.y.extent),
+        band_reach(columns.categories().len(), maps.x.extent),
+        band_reach(rows.categories().len(), maps.y.extent),
     );
     let mut cells = Vec::new();
     for r in 0..rows.categories().len() {
@@ -124,9 +114,11 @@ fn cells(
                     maps.x.plot_at(right),
                     maps.y.plot_at(bottom),
                 ],
-                right: if has_right { reach_right } else { 0.0 },
-                down: if has_below { reach_down } else { 0.0 },
-                corner: at(r + 1, c + 1).is_some(),
+                reach: Reach {
+                    right: if has_right { reach_right } else { 0.0 },
+                    down: if has_below { reach_down } else { 0.0 },
+                    corner: at(r + 1, c + 1).is_some(),
+                },
             });
         }
     }
@@ -145,27 +137,6 @@ fn mark_indices(axis: &CategoryScale, names: &[String]) -> Vec<Option<usize>> {
     indices
 }
 
-/// The outline of `cell`: its bands, widened by its reach to the right and down. When it
-/// reaches both ways but no cell lies diagonally below it, the corner where the two reaches
-/// meet is cut out, so nothing of the cell shows over the empty cell there.
-fn cell_path(cell: &Cell) -> Path {
-    let [left, top, right, bottom] = cell.bounds;
-    let (far_right, far_bottom) = (right + cell.right, bottom + cell.down);
-    let mut path = Path::new();
-    path.move_to(point(left, top));
-    path.line_to(point(far_right, top));
-    if cell.right > 0.0 && cell.down > 0.0 && !cell.corner {
-        path.line_to(point(far_right, bottom));
-        path.line_to(point(right, bottom));
-        path.line_to(point(right, far_bottom));
-    } else {
-        path.line_to(point(far_right, far_bottom));
-    }
-    path.line_to(point(left, far_bottom));
-    path.close();
-    path
-}
-
 /// The cells of `mark` as opaque fills, appended to `items`; nothing without a color scale
 /// (no finite value on the axes).
 pub(super) fn heatmap_items(
@@ -181,7 +152,7 @@ pub(super) fn heatmap_items(
         cells(context.maps, resolved, mark, scale)
             .iter()
             .map(|cell| Item::Fill {
-                path: cell_path(cell),
+                path: cell_path(cell.bounds, cell.reach),
                 paint: Paint::Solid(cell.color),
                 rule: FillRule::NonZero,
             }),
@@ -335,8 +306,9 @@ fn relative_luminance(color: Rgba) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::cells::OVERLAP;
     use super::*;
-    use crate::geometry::{PathVerb, Point};
+    use crate::geometry::{Path, PathVerb, Point};
     use crate::model::{Figure, HeatmapOptions};
     use crate::render::render_png;
     use crate::scene::Scene;
@@ -806,9 +778,11 @@ mod tests {
             value: 1.0,
             color: Rgba::BLACK,
             bounds: [0.0, 0.0, width, height],
-            right: 0.0,
-            down: 0.0,
-            corner: false,
+            reach: Reach {
+                right: 0.0,
+                down: 0.0,
+                corner: false,
+            },
         };
         let nudge = 1e-13 * width.max(height);
         let fitting = cell_of(width - nudge, height - nudge);
