@@ -243,7 +243,7 @@ Medians from the [criterion](https://github.com/criterion-rs/criterion.rs) suite
 | Histogram of 1,000,000 values → PNG | 21 ms |
 | 2-D histogram of 1,000,000 points, 100 × 100 bins → PNG | 12 ms |
 | Hexbin of 1,000,000 points, grid size 50 → PNG | 69 ms |
-| Heatmap of 1,000 × 1,000 cells → PNG | 1.26 s |
+| Heatmap of 1,000 × 1,000 cells → PNG | 0.96 s |
 | 4 × 5 grid, one 10,000-point line per panel → PNG | 103 ms |
 
 Lines with sorted numeric or time x values are downsampled when they have more than four points per pixel column of the plot (counted at a nominal 300 dpi), keeping the first, last, minimum and maximum point in each column, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads.
