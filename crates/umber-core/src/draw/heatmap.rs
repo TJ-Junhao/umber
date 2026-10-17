@@ -95,12 +95,11 @@ fn cells(
         let value = *mark.values().get(row * width + column)?;
         Some((value, scale.color(value)?))
     };
-    let at = |r: usize, c: usize| {
-        color(
-            row_at.get(r).copied().flatten(),
-            column_at.get(c).copied().flatten(),
-        )
-    };
+    let drawn: Vec<Vec<_>> = row_at
+        .iter()
+        .map(|&row| column_at.iter().map(|&column| color(row, column)).collect())
+        .collect();
+    let at = |r: usize, c: usize| drawn.get(r).and_then(|row| row.get(c)).copied().flatten();
     let reach = |count: usize, extent: f64| OVERLAP.min(extent.abs() / count.max(1) as f64 / 2.0);
     let (reach_right, reach_down) = (
         reach(columns.categories().len(), maps.x.extent),
@@ -152,31 +151,17 @@ fn mark_indices(axis: &CategoryScale, names: &[String]) -> Vec<Option<usize>> {
 fn cell_path(cell: &Cell) -> Path {
     let [left, top, right, bottom] = cell.bounds;
     let (far_right, far_bottom) = (right + cell.right, bottom + cell.down);
-    let corners: Vec<(f64, f64)> = if cell.right > 0.0 && cell.down > 0.0 && !cell.corner {
-        vec![
-            (left, top),
-            (far_right, top),
-            (far_right, bottom),
-            (right, bottom),
-            (right, far_bottom),
-            (left, far_bottom),
-        ]
-    } else {
-        vec![
-            (left, top),
-            (far_right, top),
-            (far_right, far_bottom),
-            (left, far_bottom),
-        ]
-    };
     let mut path = Path::new();
-    for (i, &(x, y)) in corners.iter().enumerate() {
-        if i == 0 {
-            path.move_to(point(x, y));
-        } else {
-            path.line_to(point(x, y));
-        }
+    path.move_to(point(left, top));
+    path.line_to(point(far_right, top));
+    if cell.right > 0.0 && cell.down > 0.0 && !cell.corner {
+        path.line_to(point(far_right, bottom));
+        path.line_to(point(right, bottom));
+        path.line_to(point(right, far_bottom));
+    } else {
+        path.line_to(point(far_right, far_bottom));
     }
+    path.line_to(point(left, far_bottom));
     path.close();
     path
 }
@@ -228,8 +213,6 @@ pub(crate) fn annotations(
     let Some(scale) = resolved.color.as_ref() else {
         return Ok(None);
     };
-    let plot = layout.plot;
-    let maps = AxisMaps::new(&resolved.x, &resolved.y, plot);
     let heatmaps: Vec<&HeatmapMark> = marks
         .iter()
         .filter_map(|mark| match mark {
@@ -237,6 +220,11 @@ pub(crate) fn annotations(
             _ => None,
         })
         .collect();
+    if !heatmaps.iter().any(|mark| mark.options().annotate) {
+        return Ok(None);
+    }
+    let plot = layout.plot;
+    let maps = AxisMaps::new(&resolved.x, &resolved.y, plot);
     let layers: Vec<Vec<Cell>> = heatmaps
         .iter()
         .map(|mark| cells(maps, resolved, mark, scale))
