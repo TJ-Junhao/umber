@@ -1041,6 +1041,14 @@ fn plan(
 /// colorbar first appears. A wider plot can grow automatic x limits without changing rows;
 /// with both limits fixed, any aspect change needs a recount. Fitting never stretches the
 /// coordinate map of counted cells.
+///
+/// A lone automatic hexbin is fitted tightly: its whole cells plus the least room, on one
+/// axis, that gives the plot's shape. That room moves the automatic ticks, and their labels
+/// can change the plot's shape back, so tight fits can alternate between shapes forever. The
+/// tight fit depends on the plot aspects alone, so aspects that repeat those of a pass before
+/// the last one mean they alternate. From then on each fit only grows the limits of the last
+/// pass to the new shape, as shared and mixed axes always do: the room that gave a shape is
+/// kept, and the limits settle once the labels keep the shape.
 fn plan_cells(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -1077,6 +1085,8 @@ fn plan_cells(
         .iter()
         .map(|(_, layout)| layout.plot.width / layout.plot.height)
         .collect();
+    let mut seen_aspects: Vec<Vec<f64>> = Vec::new();
+    let mut tight = true;
     for pass in 0..64 {
         let aspects: Vec<_> = planned
             .panels
@@ -1084,6 +1094,13 @@ fn plan_cells(
             .map(|(_, layout)| layout.plot.width / layout.plot.height)
             .collect();
         let scales = axis_scales(&planned);
+        // Aspects seen before the last pass repeat: the tight fits alternate between shapes.
+        tight &= !seen_aspects
+            .iter()
+            .rev()
+            .skip(1)
+            .any(|seen| *seen == aspects);
+        seen_aspects.push(aspects.clone());
         for (i, panel) in panels.iter_mut().enumerate() {
             let limits = [panel.axes.x_limits(), panel.axes.y_limits()];
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
@@ -1122,7 +1139,7 @@ fn plan_cells(
                             )
                         };
                     }
-                    if independent && only_hexbin {
+                    if independent && only_hexbin && tight {
                         bins.fit(aspects[i]);
                     } else {
                         bins.fit_on_axes(aspects[i], scales[i], limits, context)?;
