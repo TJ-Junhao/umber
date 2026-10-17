@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
-use super::{Axes, AxisData, CmapChoice, ColorBy, Figure, Mark};
+use super::{Axes, AxisData, CmapChoice, ColorBy, Figure, Mark, Render};
 use crate::bin2d::RectBins;
 use crate::binning::BinCount;
 use crate::color_scale::ColorScaleSpec;
 use crate::error::number;
+use crate::scale::log_offset;
 use crate::{Error, Instant, MAX_BINS, Result, ScaleKind, Transform};
 
 /// Colormap and normalization of numeric cells.
@@ -14,8 +15,9 @@ use crate::{Error, Instant, MAX_BINS, Result, ScaleKind, Transform};
 /// # Examples
 ///
 /// ```
-/// use umber_core::{MeshOptions, Transform};
+/// use umber_core::{MeshOptions, Render, Transform};
 /// assert_eq!(MeshOptions::default().scale, Transform::Linear);
+/// assert_eq!(MeshOptions::default().render, Render::Auto);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeshOptions {
@@ -25,6 +27,9 @@ pub struct MeshOptions {
     pub scale: Transform,
     /// The middle value of a symmetric, linear diverging mapping.
     pub center: Option<f64>,
+    /// Whether the cells are drawn as vector shapes or as one image (see [`Render`]); an
+    /// image needs edges evenly spaced on screen.
+    pub render: Render,
 }
 
 impl Default for MeshOptions {
@@ -33,6 +38,7 @@ impl Default for MeshOptions {
             cmap: CmapChoice::Theme,
             scale: Transform::Linear,
             center: None,
+            render: Render::Auto,
         }
     }
 }
@@ -42,8 +48,9 @@ impl Default for MeshOptions {
 /// # Examples
 ///
 /// ```
-/// use umber_core::Hist2dOptions;
+/// use umber_core::{Hist2dOptions, Render};
 /// assert_eq!(Hist2dOptions::default().bins, (30, 30));
+/// assert_eq!(Hist2dOptions::default().render, Render::Auto);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hist2dOptions {
@@ -53,6 +60,8 @@ pub struct Hist2dOptions {
     pub cmap: CmapChoice,
     /// Linear or log color normalization.
     pub scale: Transform,
+    /// Whether the bins are drawn as vector shapes or as one image (see [`Render`]).
+    pub render: Render,
 }
 
 impl Default for Hist2dOptions {
@@ -61,6 +70,7 @@ impl Default for Hist2dOptions {
             bins: (30, 30),
             cmap: CmapChoice::Theme,
             scale: Transform::Linear,
+            render: Render::Auto,
         }
     }
 }
@@ -176,6 +186,11 @@ pub struct MeshMark {
     pub(crate) x_edges: Edges,
     pub(crate) y_edges: Edges,
     pub(crate) colors: ColorBy,
+    /// How the cells are drawn, as given.
+    pub(crate) render: Render,
+    /// Whether the edges along both axes are evenly spaced on screen, so that the cells can be
+    /// drawn as one image.
+    pub(crate) evenly_spaced: bool,
 }
 
 impl MeshMark {
@@ -302,12 +317,131 @@ impl MeshMark {
             center: options.center,
         };
         check_mapping(context, figure, index, &colors)?;
+        let uneven = [("x", x_kind, &x), ("y", y_kind, &y)]
+            .into_iter()
+            .find_map(|(axis, kind, edges)| uneven_edge(axis, kind, edges));
+        if let (Render::Raster, Some(edge)) = (options.render, &uneven) {
+            return Err(Error::usage(
+                context,
+                format!(
+                    "{edge}; drawing the cells as one image needs evenly spaced edges on the {} \
+                     axis.",
+                    edge.axis
+                ),
+            )
+            .with_parameter("render")
+            .with_hint("use render=ub.Render.VECTOR, or evenly spaced edges."));
+        }
         Ok(Self {
             x_edges: x,
             y_edges: y,
             colors,
+            render: options.render,
+            evenly_spaced: uneven.is_none(),
         })
     }
+}
+
+/// How far, in steps of the lattice, an edge may lie from the evenly spaced lattice from the
+/// first edge to the last for the edges to count as evenly spaced.
+const LATTICE_TOLERANCE: f64 = 1e-4;
+
+/// The first edge that lies off the evenly spaced lattice from the first edge to the last, as
+/// an error message describes it.
+#[derive(Debug, Clone, PartialEq)]
+struct UnevenEdge {
+    /// The axis, `"x"` or `"y"`.
+    axis: &'static str,
+    /// What the lattice spaces evenly: `"edges"`, `"logarithms"` or `"times"`.
+    spacing: &'static str,
+    /// The index of the edge, and of the last edge.
+    at: (usize, usize),
+    /// The edge, the first edge and the last edge, written as in the data.
+    values: [String; 3],
+    /// Where the lattice puts the edge, written as in the data.
+    expected: String,
+}
+
+impl std::fmt::Display for UnevenEdge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = format!("{}_edges", self.axis);
+        let [edge, first, last] = &self.values;
+        write!(
+            f,
+            "{name}[{}] = {edge} is off the evenly spaced {} from {name}[0] = {first} to \
+             {name}[{}] = {last}, which put it at {}",
+            self.at.0, self.spacing, self.at.1, self.expected,
+        )
+    }
+}
+
+/// The first of `edges`, on the `axis` axis of kind `kind`, that lies off the evenly spaced
+/// lattice the image of the cells uses, from the first edge to the last; `None` when every edge
+/// lies on it. Positions are compared in axis space: numbers on a linear axis, their
+/// logarithms measured from the first edge ([`log_offset`]) on a log axis, whole microseconds
+/// on a time axis. An edge lies on the lattice
+/// when it is within [`LATTICE_TOLERANCE`] of a step of its place there; numbers may also be
+/// off by two units of rounding error of the largest end, as far as a float can place them.
+/// Times are compared exactly, in integers.
+fn uneven_edge(axis: &'static str, kind: EdgeAxis, edges: &Edges) -> Option<UnevenEdge> {
+    let n = edges.len().checked_sub(1).filter(|&n| n > 1)?;
+    let (at, spacing, values, expected) = match (kind, edges) {
+        (EdgeAxis::Numeric(transform), Edges::Numbers(v)) => {
+            let log = matches!(transform, Transform::Log(_));
+            // A log position is measured from the first edge, as the axis measures it, which
+            // keeps narrow ranges far from 1 resolvable.
+            let position = |x: f64| if log { log_offset(x, v[0]) } else { x };
+            let (first, last) = (position(v[0]), position(v[n]));
+            let step = (last - first) / n as f64;
+            let slack = LATTICE_TOLERANCE * step + 2.0 * f64::EPSILON * first.abs().max(last.abs());
+            let place = |i: usize| first + (last - first) * (i as f64 / n as f64);
+            let at = (1..n).find(|&i| (position(v[i]) - place(i)).abs() > slack)?;
+            let expected = if log {
+                // Interpolated in logarithms, which stay within the supported range, and written
+                // with 12 significant digits, the precision of logarithms of this size.
+                let exact = (v[0].ln() + place(at)).exp();
+                format!("{exact:.11e}").parse::<f64>().unwrap_or(exact)
+            } else {
+                place(at)
+            };
+            let spacing = if log { "logarithms" } else { "edges" };
+            let values = [v[at], v[0], v[n]].map(|x| number(x).to_string());
+            (at, spacing, values, number(expected).to_string())
+        }
+        (EdgeAxis::Time, Edges::Times(t)) => {
+            let base = i128::from(t[0].micros());
+            let span = i128::from(t[n].micros()) - base;
+            let count = n as i128;
+            // `n` times the distance of edge `i` from its place on the lattice, in microseconds,
+            // exactly: within the tolerance when at most `LATTICE_TOLERANCE` of the span.
+            let off = |i: usize| (i128::from(t[i].micros()) - base) * count - span * i as i128;
+            let at =
+                (1..n).find(|&i| off(i).unsigned_abs() as f64 > LATTICE_TOLERANCE * span as f64)?;
+            // The place in whole microseconds, and the fraction of one beyond it.
+            let exact = base * count + span * at as i128;
+            let (whole, rest) = (exact.div_euclid(count), exact.rem_euclid(count));
+            let label = Instant::clamped(i64::try_from(whole).unwrap_or(i64::MAX)).label();
+            let expected = if rest == 0 {
+                label
+            } else {
+                format!(
+                    "{label} plus {} microseconds",
+                    number(rest as f64 / count as f64)
+                )
+            };
+            let values = [t[at], t[0], t[n]].map(Instant::label);
+            (at, "times", values, expected)
+        }
+        // `check_edges` matches the edges to their axis.
+        _ => return None,
+    };
+    Some(UnevenEdge {
+        axis,
+        spacing,
+        at: (at, n),
+        values,
+        expected,
+    })
 }
 
 /// The edges `given` along the axis `axis` of kind `kind`, whose argument is `name`: of the
@@ -458,6 +592,8 @@ fn check_edge_range(
 pub struct Hist2dMark {
     pub(crate) bins: Arc<RectBins>,
     pub(crate) colors: ColorScaleSpec,
+    /// How the bins are drawn, as given.
+    pub(crate) render: Render,
 }
 
 impl Hist2dMark {
@@ -485,6 +621,7 @@ impl Hist2dMark {
         Ok(Self {
             bins: Arc::new(RectBins::new(x, y, bins, transforms)),
             colors: ColorScaleSpec::of(&colors),
+            render: options.render,
         })
     }
 }

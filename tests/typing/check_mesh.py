@@ -16,6 +16,13 @@ assert_type(ax.hist2d(x, y, bins=(4, 5), scale=ub.Scale.log()), ub.Axes[float, f
 assert_type(ax.hexbin(np.arange(3.0), y, gridsize=4), ub.Axes[float, float])
 ax.mesh(x, y, np.ones((2, 2)), cmap=ub.Cmap.BLUE_RED, center=0)
 ax.hexbin(x, y, cmap=ub.Cmap.MAGMA, scale=ub.Scale.log())
+assert_type(ax.mesh(x, y, [[1, 2], [3, 4]], render=ub.Render.RASTER), ub.Axes[float, float])
+assert_type(ax.hist2d(x, y, render=ub.Render.VECTOR), ub.Axes[float, float])
+ax.mesh(x, y, [[1, 2], [3, 4]], render=ub.AUTO)
+ax.hist2d(x, y, render=ub.AUTO)
+ax.mesh(x, y, [[1, 2], [3, 4]], render="raster")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+ax.hist2d(x, y, render=True)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+ax.hexbin(x, y, render=ub.Render.RASTER)  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue]
 days = [dt.date(2026, 1, 1), dt.date(2026, 1, 2), dt.date(2026, 1, 4)]
 timed = ub.Figure().add_axes(x=ub.Scale.time())
 assert_type(timed.mesh(days, y, [[1, 2], [3, 4]]), ub.Axes[ub.Time, float])

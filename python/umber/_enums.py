@@ -326,3 +326,36 @@ class ColorbarPosition(Enum):
 
     NONE = 2
     """Hidden, without reserving space."""
+
+
+@unique
+class Render(Enum):
+    """How the cells of a heatmap, a 2-D histogram or a mesh are drawn.
+
+    The cells form a grid of solid colors. As vector shapes, each cell is one filled
+    rectangle. As an image, the grid is one image with one pixel per cell, stretched over the
+    cells with nearest-neighbour scaling: it looks the same, while the file stays small and
+    fast to open. In PNG output each pixel takes the average of the cells it covers, weighted
+    by area, so cells meet without seams. In SVG output the image is an ``<image>`` holding a
+    PNG. NaN values and empty bins are transparent either way. The marks take ``AUTO`` by
+    default, which draws an image from 10,000 cells (rows times columns, such as 100 x 100)
+    and vector shapes below that. An image is used only where it is exact: on the final plot,
+    no edge of the image lies more than 0.001 pt from the cell edge it stands for, and a cell
+    cut by explicit limits reaches at most 10,000 pt past them (the image covers whole cells
+    and is clipped at the limits). Limits that zoom in far on a mesh can break either bound;
+    then ``AUTO`` draws vector shapes and ``RASTER`` makes rendering raise ``StyleError``.
+
+    Example:
+        >>> import umber as ub
+        >>> ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+        >>> ax = ax.heatmap(["a", "b"], ["r"], [[1, 2]], render=ub.Render.RASTER)
+    """
+
+    __slots__ = ()
+
+    VECTOR = 0
+    """One filled rectangle per cell."""
+
+    RASTER = 1
+    """One image with one pixel per cell. A mesh needs edges evenly spaced on screen, and
+    rendering fails when the image would not be exact on the final plot."""

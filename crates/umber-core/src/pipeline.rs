@@ -1331,6 +1331,8 @@ pub(crate) fn scene(
     }
     let planned = plan_cells(figure, &mut panels, &groups, library, context)?;
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
+        draw::check_images(resolved, layout, &panel.marks, context)
+            .map_err(|err| in_cell(figure, panel.axes, err))?;
         scene.push(draw::chrome(theme, layout));
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
             scene.push(marks);

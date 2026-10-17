@@ -25,6 +25,7 @@ from umber._enums import (
     LegendPosition,
     LegendStyle,
     Marker,
+    Render,
     Step,
 )
 from umber._errors import DataError, StyleError, UsageError, new_error
@@ -90,6 +91,9 @@ _SIZE_HINT: Final = (
 _LEGEND_HINT: Final = _members_hint(LegendStyle)
 _LEGEND_POSITION_HINT: Final = (
     _members_hint(LegendPosition) + " Use ub.AUTO for the theme's position."
+)
+_RENDER_HINT: Final = (
+    "use ub.Render.VECTOR or ub.Render.RASTER, or ub.AUTO to choose by the number of cells."
 )
 _FORMAT_HINT: Final = (
     "use TickFormat.fixed(2), TickFormat.percent(), TickFormat.scientific() or TickFormat.AUTO."
@@ -1292,6 +1296,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         cmap: Cmap | Auto = AUTO,
         scale: Scale[float] = Scale.linear(),  # noqa: B008
         center: float | Auto = AUTO,
+        render: Render | Auto = AUTO,
     ) -> SXY:
         """Add rectangular cells whose colors map a row-major matrix of values.
 
@@ -1303,6 +1308,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         draws no baseline; one is drawn only alongside a mark that grows from zero, such as
         an area, histogram or stem. ``baseline(shown=...)`` overrides it.
 
+        The cells can be drawn as one image (see ``Render``) only when the edges are evenly
+        spaced on screen: evenly spaced numbers on a linear axis, evenly spaced logarithms on a
+        log axis, evenly spaced times on a time axis. Every edge must lie within 1/10,000 of a
+        cell of its place on the evenly spaced lattice from the first edge to the last (numbers
+        may also be off by two units of rounding error of the largest end edge; times are
+        compared exactly, in microseconds). When drawn, the image must also be exact on the
+        final plot (see ``Render``): no edge more than 0.001 pt from its place, and no cut cell
+        reaching more than 10,000 pt past the limits. Otherwise ``AUTO`` draws vector shapes,
+        and with ``Render.RASTER`` rendering raises ``StyleError``.
+
         Args:
             x_edges: Strictly increasing column edges, one more than the number of columns:
                 numbers on a linear or log x axis, times on a time x axis.
@@ -1312,6 +1327,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             cmap: The colormap, or ``AUTO`` for the theme's colormap.
             scale: A linear or log color scale, independent of the axis scales.
             center: The middle of a diverging mapping, or ``AUTO`` for sequential colors.
+            render: ``Render.VECTOR`` draws one rectangle per cell, ``Render.RASTER`` one
+                image with one pixel per cell. ``AUTO`` draws an image from 10,000 cells
+                (rows times columns) when the edges are evenly spaced, and vector shapes
+                otherwise.
 
         Returns:
             These axes.
@@ -1322,7 +1341,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 edges included), or a value is invalid.
             StyleError: If the color center is invalid.
             UsageError: If an axis is a category axis (type checkers refuse such axes, so this is
-                raised only for calls they do not check), or color scales conflict.
+                raised only for calls they do not check), color scales conflict, or
+                ``render`` is ``Render.RASTER`` and the edges are not evenly spaced on screen;
+                that message names the first edge off the lattice and where it belongs.
 
         Example:
             >>> import umber as ub
@@ -1332,6 +1353,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> hours = ub.Figure().add_axes(x=ub.Scale.time())
             >>> times = [dt.datetime(2026, 1, 1, hour) for hour in (0, 6, 12)]
             >>> hours = hours.mesh(times, [0, 2], [[1.0, 4.0]])
+            >>> ax = ax.mesh([0, 1, 2], [0, 1], [[2.0, 3.0]], render=ub.Render.RASTER)
         """
         with api_call():
             context = "Axes.mesh()"
@@ -1339,6 +1361,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _check_coordinates_type(context, "y_edges", y_edges, self._y)
             check_floats_type(context, "values", values)
             colors = _cell_colors(context, cmap, scale, center)
+            drawn = _render_argument(context, render)
             _numeric_cells(context, self, time=True)
             xs = _limit_values(context, "x_edges", x_edges, self._x)
             ys = _limit_values(context, "y_edges", y_edges, self._y)
@@ -1356,7 +1379,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         parameter=name,
                         hint=f"pass one more edge than the number of {dimension}.",
                     )
-            self._native.mesh(self._row, self._col, xs, ys, data, *colors)
+            self._native.mesh(self._row, self._col, xs, ys, data, *colors, drawn)
             return self
 
     def hist2d(
@@ -1367,6 +1390,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         bins: int | tuple[int, int] = 30,
         cmap: Cmap | Auto = AUTO,
         scale: Scale[float] = Scale.linear(),  # noqa: B008
+        render: Render | Auto = AUTO,
     ) -> "Axes[float, float]":
         """Count paired points in equal-width rectangular bins over their data ranges.
 
@@ -1383,6 +1407,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             bins: One count for both axes, or ``(x_count, y_count)``, each in 1..MAX_BINS.
             cmap: The colormap, or ``AUTO`` for the theme's sequential colormap.
             scale: A linear or log color scale.
+            render: ``Render.VECTOR`` draws one rectangle per bin, ``Render.RASTER`` one image
+                with one pixel per bin (see ``Render``). ``AUTO`` draws an image from 10,000
+                bins (``x_count`` times ``y_count``) and vector shapes below that.
 
         Returns:
             These axes.
@@ -1397,6 +1424,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.hist2d([0, 1, 1], [0, 2, 2], bins=(4, 3))
+            >>> ax = ax.hist2d([0, 1, 1], [0, 2, 2], bins=200, render=ub.Render.VECTOR)
         """
         with api_call():
             context = "Axes.hist2d()"
@@ -1404,9 +1432,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "y", y)
             counts = _rect_counts(context, bins)
             colors = _cell_colors(context, cmap, scale, AUTO)
+            drawn = _render_argument(context, render)
             _numeric_cells(context, self, time=False)
             xs, ys = floats(context, "x", x), floats(context, "y", y)
-            self._native.hist2d(self._row, self._col, xs, ys, counts, *colors[:3])
+            self._native.hist2d(self._row, self._col, xs, ys, counts, *colors[:3], drawn)
             return self
 
     def hexbin(
@@ -2226,6 +2255,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         center: float | Auto = AUTO,
         annotate: bool = False,
         format: TickFormat | Auto = AUTO,
+        render: Render | Auto = AUTO,
     ) -> "Axes[str, str]":
         """Add a heatmap: one cell per pair of an x and a y category, colored by its value.
 
@@ -2249,6 +2279,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             format: The format of the values shown by ``annotate``. ``AUTO`` follows the y
                 tick format, which writes each value with the decimals of the colorbar's tick
                 step, or with up to 12 significant digits on a log scale.
+            render: ``Render.VECTOR`` draws one rectangle per cell, ``Render.RASTER`` one
+                image with one pixel per cell (see ``Render``). ``AUTO`` draws an image from
+                10,000 cells (``len(x_categories) * len(y_categories)``) and vector shapes
+                below that. Annotations are text over the cells either way.
 
         Returns:
             These axes.
@@ -2270,6 +2304,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
             >>> days, periods = ["Mon", "Tue", "Wed"], ["Day", "Night"]
             >>> ax = ax.heatmap(days, periods, [[12, 18, 15], [4, 7, 6]], annotate=True)
+            >>> im = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+            >>> im = im.heatmap(days, periods, [[1, 2, 3], [4, 5, 6]], render=ub.Render.RASTER)
         """
         with api_call():
             context = "Axes.heatmap()"
@@ -2282,6 +2318,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 if format is AUTO
                 else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
             )
+            drawn = _render_argument(context, render)
             if (self._x, self._y) != (_CATEGORY, _CATEGORY):
                 # The core refuses the axes before it reads the data, with its own error.
                 empty = np.empty(0, dtype=np.float64)
@@ -2297,6 +2334,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     middle,
                     shows,
                     checked,
+                    drawn,
                 )
             x_names = names(context, "x_categories", x_categories)
             y_names = names(context, "y_categories", y_categories)
@@ -2313,8 +2351,24 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 middle,
                 shows,
                 checked,
+                drawn,
             )
             return self
+
+
+def _render_argument(context: str, value: object) -> int | None:
+    """Check a ``render`` argument and return its native form: ``None`` for ``AUTO``."""
+    if value is AUTO:
+        return None
+    if not isinstance(value, Render):
+        raise new_error(
+            TypeError,
+            context,
+            f"render is {type_name(value)}; render must be a Render or ub.AUTO.",
+            parameter="render",
+            hint=_RENDER_HINT,
+        )
+    return int(value.value)
 
 
 def _color_argument(context: str, value: object) -> tuple[int, int, float]:

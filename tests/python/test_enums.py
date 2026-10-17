@@ -18,6 +18,7 @@ ENUMS = [
     ub.LegendPosition,
     ub.Align,
     ub.Step,
+    ub.Render,
 ]
 
 

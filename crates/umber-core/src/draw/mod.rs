@@ -364,6 +364,56 @@ pub(crate) fn marks(
     })
 }
 
+/// Checks that every mark of `marks` that draws something and whose options draw its cells as
+/// one image ([`Render::Raster`](crate::Render::Raster)) can be drawn so on `layout`:
+/// `Error::Style` under `context` naming the first mark, by its place among the axes' marks,
+/// and the axis along which explicit limits cut its cells too far from their edges, or along
+/// which an edge would lie more than 0.001 pt from its place in the image (see
+/// [`mesh::unplaceable_image`]).
+pub(crate) fn check_images(
+    resolved: &Resolved,
+    layout: &Layout,
+    marks: &[ResolvedMark<'_>],
+    context: &'static str,
+) -> crate::Result<()> {
+    let maps = AxisMaps::new(&resolved.x, &resolved.y, layout.plot);
+    let Some((index, kind, axis, why)) = mesh::unplaceable_image(&maps, resolved, marks) else {
+        return Ok(());
+    };
+    let mark = index + 1;
+    let error = match why {
+        mesh::Unplaceable::Reach(reach) => crate::Error::style(
+            context,
+            format!(
+                "mark {mark} of these axes, {kind}, has a cell cut by the {axis} limits that \
+                 reaches {} pt past them; drawing the cells as one image needs every cut cell to \
+                 end within {} pt of the limits.",
+                crate::error::number(reach.round()),
+                cells::MAX_IMAGE_REACH,
+            ),
+        )
+        .with_hint("use render=ub.Render.VECTOR or ub.AUTO, or widen the limits."),
+        mesh::Unplaceable::Edge { index, offset } => {
+            let edge = if kind == "a mesh" {
+                format!("{axis}_edges[{index}]")
+            } else {
+                format!("{axis} bin edge {index}")
+            };
+            crate::Error::style(
+                context,
+                format!(
+                    "mark {mark} of these axes, {kind}, has {edge} {offset:.3} pt from its place \
+                     in the image of the cells; drawing the cells as one image needs every edge \
+                     within {} pt of its place.",
+                    cells::MAX_EDGE_OFFSET,
+                ),
+            )
+            .with_hint("use render=ub.Render.VECTOR or ub.AUTO.")
+        }
+    };
+    Err(error)
+}
+
 /// How the points of a scatter or bubble mark in `color` are filled: in that color, or, when
 /// the mark maps its colors from values (`mapped`), in the colors of the axes' color scale.
 /// `None` for a color-mapped mark without a color scale (no finite mapped value), which draws

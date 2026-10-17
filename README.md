@@ -115,7 +115,7 @@ Use `fig.axes_at(row=..., col=..., x=..., y=...)` to retrieve axes, including th
 
 ## Colors and colorbars
 
-Heatmaps, meshes, 2-D histograms and hexbins color each cell by its value, and `color=ub.ColorBy(values)` does the same for the points of a scatter or bubble chart. The color-mapped marks of one axes share a single color scale, and a colorbar beside the plot explains it.
+Heatmaps, meshes, 2-D histograms and hexbins color each cell by its value, and `color=ub.ColorBy(values)` does the same for the points of a scatter or bubble chart. The color-mapped marks of one axes share a single color scale, and a colorbar beside the plot explains it. From 10,000 cells, heatmaps, meshes and 2-D histograms draw their cells as one image with one pixel per cell instead of one shape per cell, which keeps large grids small and fast; `render=ub.Render.VECTOR` or `render=ub.Render.RASTER` chooses the form explicitly.
 
 ```python
 import numpy as np

@@ -1995,11 +1995,21 @@ impl<'a> AxesMut<'a> {
     /// By default a mesh alone draws no baseline; one is drawn only alongside a mark that
     /// grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
+    /// `options.render` chooses between one filled rectangle per cell and one image with one
+    /// pixel per cell ([`Render`](crate::Render)). An image needs edges evenly spaced on
+    /// screen: evenly spaced numbers on a linear axis and evenly spaced logarithms on a log
+    /// axis, each edge within 1/10,000 of a cell of the evenly spaced lattice from the first
+    /// edge to the last (see [`Render`](crate::Render) for the rounding allowed).
+    /// [`Render::Auto`](crate::Render::Auto) draws an image from 10,000 cells when the edges
+    /// allow it, and vector shapes otherwise.
+    ///
     /// # Errors
     ///
     /// `Error::Usage` for nonnumeric axes or a conflicting color mapping; `Error::Data`
-    /// for invalid edges or values; `Error::Style` for an invalid center or color limits.
-    /// Failed calls change nothing.
+    /// for invalid edges or values; `Error::Style` for an invalid center or color limits;
+    /// `Error::Usage`, naming `render`, for [`Render::Raster`](crate::Render::Raster) with
+    /// edges that are not evenly spaced on screen: the message names the first edge off the
+    /// lattice and where the lattice puts it. Failed calls change nothing.
     ///
     /// # Examples
     ///
@@ -2028,13 +2038,17 @@ impl<'a> AxesMut<'a> {
     /// limits of a time axis are the outer edges exactly, as those of a numeric axis are.
     /// By default a mesh alone draws no baseline; one is drawn only alongside a mark that
     /// grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
+    /// Cells are drawn as [`AxesMut::mesh`] describes; on a time axis, an image needs evenly
+    /// spaced times.
     ///
     /// # Errors
     ///
     /// Errors leave the axes unchanged: `Error::Usage` on a category axis; `Error::Data` for
     /// edges of the wrong kind for their axis, too few, not strictly increasing or missing, as
     /// for [`AxesMut::mesh`], and for invalid values; `Error::Style` for an invalid center or
-    /// color limits.
+    /// color limits; `Error::Usage`, naming `render`, for
+    /// [`Render::Raster`](crate::Render::Raster) with edges that are not evenly spaced on
+    /// screen, as for [`AxesMut::mesh`].
     ///
     /// # Examples
     ///
@@ -2069,6 +2083,9 @@ impl<'a> AxesMut<'a> {
     /// Empty bins are not drawn, including with a log color scale.
     /// By default a 2-D histogram alone draws no baseline; one is drawn only alongside a mark
     /// that grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
+    /// `options.render` chooses between one filled rectangle per bin and one image with one
+    /// pixel per bin ([`Render`](crate::Render)); [`Render::Auto`](crate::Render::Auto) draws
+    /// an image from 10,000 bins (the product of the two counts).
     ///
     /// # Errors
     ///
@@ -2678,6 +2695,11 @@ impl<'a> AxesMut<'a> {
     /// whose automatic labels write each value with the decimals of the step between the
     /// automatic ticks of the color range, or with up to 12 significant digits on a log color
     /// scale.
+    ///
+    /// `options.render` chooses between one filled rectangle per cell and one image with one
+    /// pixel per cell ([`Render`](crate::Render)); [`Render::Auto`](crate::Render::Auto) draws
+    /// an image from 10,000 cells (`x.len() * y.len()`). Annotations are text over the cells
+    /// either way.
     ///
     /// The mark stores its own copy of `values`, made once. To store values already held in
     /// an `Arc` without copying them, use [`AxesMut::heatmap_shared`].

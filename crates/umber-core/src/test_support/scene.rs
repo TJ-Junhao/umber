@@ -50,6 +50,16 @@ fn check_items(items: &[Item]) {
                 check_path(&t.outline);
                 assert!(t.width.is_finite());
             }
+            Item::Image { rect, .. } => {
+                check(Point {
+                    x: rect.x,
+                    y: rect.y,
+                });
+                check(Point {
+                    x: rect.x + rect.width,
+                    y: rect.y + rect.height,
+                });
+            }
             Item::Group { clip, items } => {
                 if let Some(r) = clip {
                     check(Point { x: r.x, y: r.y });

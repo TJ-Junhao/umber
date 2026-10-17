@@ -9,8 +9,8 @@ use std::ops::Range;
 use tiny_skia as sk;
 
 use super::normalize::{
-    GradientKind, NormalizedPath, Segment, clip_is_valid, normalize_dash, normalize_gradient,
-    normalize_path, stroke_is_visible, text_is_visible, valid_point,
+    GradientKind, NormalizedPath, Segment, clip_is_valid, image_is_drawable, normalize_dash,
+    normalize_gradient, normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
 use crate::color::Rgba;
 use crate::error::{Error, Result};
@@ -614,9 +614,83 @@ impl Canvas {
                     );
                 }
             }
+            Item::Image {
+                rect,
+                width,
+                height,
+                pixels,
+            } => draw_image(pixmap, *scale, clip, rect, (*width, *height), pixels),
             Item::Group { .. } => {}
         }
     }
+}
+
+/// Draws the image of `width` by `height` `pixels` over `rect`, inside `clip` when there is
+/// one: each device pixel the image reaches takes the area-weighted sum of the image pixels it
+/// covers inside the clip ([`super::image::resample`]), composited source-over onto the pixmap
+/// in integer arithmetic, one device row at a time. Every clip of a scene is a rectangle, so
+/// the clip enters the area weights exactly and no clip mask is applied on top. Only the device
+/// pixels inside both the image and the clip are resampled.
+fn draw_image(
+    pixmap: &mut sk::Pixmap,
+    scale: DeviceScale,
+    clip: Option<ClipRect>,
+    rect: &Rect,
+    (width, height): (u32, u32),
+    pixels: &[Rgba],
+) {
+    if !image_is_drawable(rect, width, height, pixels) {
+        return;
+    }
+    let s = f64::from(scale.get());
+    let (left, top) = (f64::from(rect.x) * s, f64::from(rect.y) * s);
+    let right = (f64::from(rect.x) + f64::from(rect.width)) * s;
+    let bottom = (f64::from(rect.y) + f64::from(rect.height)) * s;
+    let (canvas_w, canvas_h) = (f64::from(pixmap.width()), f64::from(pixmap.height()));
+    // The visible window: the clip, or the whole pixmap.
+    let window = clip.map_or([0.0, 0.0, canvas_w, canvas_h], |c| {
+        [c.left, c.top, c.right, c.bottom].map(f64::from)
+    });
+    let lo_x = left.max(window[0]).floor().max(0.0);
+    let lo_y = top.max(window[1]).floor().max(0.0);
+    let hi_x = right.min(window[2]).ceil().min(canvas_w);
+    let hi_y = bottom.min(window[3]).ceil().min(canvas_h);
+    if lo_x >= hi_x || lo_y >= hi_y {
+        return;
+    }
+    // All four are whole numbers within the pixmap here.
+    let columns = lo_x as usize..hi_x as usize;
+    let rows = lo_y as usize..hi_y as usize;
+    let stride = pixmap.width() as usize;
+    let data = pixmap.data_mut();
+    let channel = |v: f64| v.round().clamp(0.0, 255.0) as u32;
+    let first = rows.start;
+    super::image::resample(
+        [left, top, right, bottom],
+        (width as usize, height as usize),
+        pixels,
+        (columns.clone(), rows),
+        window,
+        |row, line| {
+            for (column, &[r, g, b, a]) in columns.clone().zip(line) {
+                let a = channel(a);
+                if a == 0 {
+                    continue;
+                }
+                // A premultiplied channel never exceeds the alpha.
+                let source = [channel(r).min(a), channel(g).min(a), channel(b).min(a), a];
+                let at = ((first + row) * stride + column) * 4;
+                let Some(target) = data.get_mut(at..at + 4) else {
+                    continue;
+                };
+                let keep = 255 - a;
+                for (to, from) in target.iter_mut().zip(source) {
+                    // Source-over in premultiplied form: at most 255, so it fits a byte.
+                    *to = (from + div255(u32::from(*to) * keep)) as u8;
+                }
+            }
+        },
+    );
 }
 
 /// One marker, ready to draw at any position.

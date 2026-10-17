@@ -38,7 +38,7 @@ pub use crate::model::{CmapChoice, ColorBy, PointColor};
 pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use crate::model::{HeatmapMark, HeatmapOptions};
 pub use crate::model::{
-    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions,
+    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
 };
 pub use crate::model::{StemMark, StemOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
@@ -66,6 +66,12 @@ impl Figure {
     /// A non-empty figure header follows as one unclipped group: the figure title,
     /// subtitle and merged legend. Without axes it holds the background and any figure
     /// title or subtitle. The same figure always gives the same scene.
+    ///
+    /// Heatmaps, 2-D histograms and meshes draw their cells, as their options'
+    /// [`Render`] says, either as one [`Item::Fill`](crate::Item::Fill) per
+    /// cell or as one [`Item::Image`](crate::Item::Image) with one pixel per cell, in the
+    /// mark's place among the marks; an image whose outer cells explicit limits cut is drawn
+    /// whole inside a group clipped to the limits.
     ///
     /// A 1 × 1 grid is laid out on the whole canvas. On a larger grid every axes' plot area
     /// has the same size and the axes line up: each grid column has room left of its plots
@@ -124,6 +130,15 @@ impl Figure {
     /// ([`AxesMut::vline`]) on a category x axis names a category that no other mark of its axes
     /// has. This is checked before any axes is laid out, and so is found even when another axes
     /// does not fit; on a grid the message starts with the axes' cell as above.
+    ///
+    /// `Error::Style` in the same context, with the hint `use render=ub.Render.VECTOR or
+    /// ub.AUTO, or widen the limits.`, when a mesh or 2-D histogram drawn with
+    /// [`Render::Raster`] has a cell cut by explicit limits that reaches more than 10,000 pt
+    /// past them (`mark 1 of these axes, a mesh, has a cell cut by the x limits that reaches …
+    /// pt past them; …`), or an edge that would lie more than 0.001 pt from its place in the
+    /// image (`mark 1 of these axes, a mesh, has x_edges[1] 0.950 pt from its place in the
+    /// image of the cells; …`, with the hint `use render=ub.Render.VECTOR or ub.AUTO.`); on a
+    /// grid the message starts with the axes' cell as above.
     ///
     /// # Examples
     ///

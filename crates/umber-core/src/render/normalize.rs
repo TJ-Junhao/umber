@@ -50,6 +50,28 @@ pub(crate) fn clip_is_valid(rect: &Rect) -> bool {
         && rect.height > 0.0
 }
 
+/// Whether an image can be drawn: a rectangle that is finite, positive in size and within
+/// [`MAX_COORD`] at every corner, at least one pixel, and `width * height` pixels.
+///
+/// Both backends skip an image that fails this.
+pub(crate) fn image_is_drawable(rect: &Rect, width: u32, height: u32, pixels: &[Rgba]) -> bool {
+    let corners = [
+        Point {
+            x: rect.x,
+            y: rect.y,
+        },
+        Point {
+            x: rect.x + rect.width,
+            y: rect.y + rect.height,
+        },
+    ];
+    clip_is_valid(rect)
+        && corners.into_iter().all(valid_point)
+        && width > 0
+        && height > 0
+        && u64::from(width) * u64::from(height) == pixels.len() as u64
+}
+
 /// Whether a text item can be drawn: a visible color and an origin within [`MAX_COORD`].
 ///
 /// Both backends skip text that fails this, in every SVG text mode.

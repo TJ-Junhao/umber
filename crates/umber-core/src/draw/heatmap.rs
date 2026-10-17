@@ -6,9 +6,13 @@
 //! cell reaches under its drawn neighbours to the right and below. A cell ends exactly at its
 //! bands where it has no drawn neighbour: at the heatmap's right and bottom edges, and next to
 //! an empty cell.
+//!
+//! Drawn as one image ([`Render`](crate::Render)), a heatmap is one pixel per pair of category
+//! bands from its first to its last category on each axis, over exactly those bands: a band of
+//! another heatmap's category between them, and an empty cell, is a transparent pixel.
 
 use super::MarkContext;
-use super::cells::{Reach, cell_path, reach};
+use super::cells::{CLEAR, Reach, cell_path, image_item, reach};
 use super::chrome::text;
 use super::mapping::AxisMaps;
 use crate::color_scale::ResolvedColorScale;
@@ -137,8 +141,56 @@ fn mark_indices(axis: &CategoryScale, names: &[String]) -> Vec<Option<usize>> {
     indices
 }
 
-/// The cells of `mark` as opaque fills, appended to `items`; nothing without a color scale
-/// (no finite value on the axes).
+/// The cells of `mark` as one image, one pixel per pair of category bands from its first to
+/// its last x and y category on the axes, over those bands (see the module documentation);
+/// `None` when no cell is drawn or either axis is not a category axis, which the model rules
+/// out.
+fn image(
+    maps: AxisMaps,
+    resolved: &Resolved,
+    mark: &HeatmapMark,
+    scale: &ResolvedColorScale,
+) -> Option<Item> {
+    let (AxisScale::Category(columns), AxisScale::Category(rows)) =
+        (&resolved.x.scale, &resolved.y.scale)
+    else {
+        return None;
+    };
+    let column_at = mark_indices(columns, mark.x_categories());
+    let row_at = mark_indices(rows, mark.y_categories());
+    let span = |indices: &[Option<usize>]| {
+        let first = indices.iter().position(Option::is_some)?;
+        let end = indices.iter().rposition(Option::is_some)? + 1;
+        Some(first..end)
+    };
+    let (x_span, y_span) = (span(&column_at)?, span(&row_at)?);
+    let width = mark.x_categories().len();
+    let color = |row: Option<usize>, column: Option<usize>| {
+        let value = *mark.values().get(row? * width + column?)?;
+        scale.color(value)
+    };
+    let pixels: Vec<Rgba> = row_at[y_span.clone()]
+        .iter()
+        .flat_map(|&row| {
+            column_at[x_span.clone()]
+                .iter()
+                .map(move |&column| color(row, column).unwrap_or(CLEAR))
+        })
+        .collect();
+    let (left, top) = (columns.band(x_span.start).0, rows.band(y_span.start).0);
+    let (right, bottom) = (columns.band(x_span.end - 1).1, rows.band(y_span.end - 1).1);
+    let bounds = [
+        maps.x.plot_at(left),
+        maps.y.plot_at(top),
+        maps.x.plot_at(right),
+        maps.y.plot_at(bottom),
+    ];
+    image_item(bounds, bounds, (x_span.len(), y_span.len()), pixels)
+}
+
+/// The cells of `mark` appended to `items`: as one image when its options draw it as one
+/// ([`Render`](crate::Render)), else as opaque fills; nothing without a color scale (no finite
+/// value on the axes).
 pub(super) fn heatmap_items(
     context: &MarkContext<'_>,
     resolved: &Resolved,
@@ -148,6 +200,14 @@ pub(super) fn heatmap_items(
     let Some(scale) = &resolved.color else {
         return;
     };
+    let count = mark
+        .x_categories()
+        .len()
+        .saturating_mul(mark.y_categories().len());
+    if mark.options().render.draws_image(count, true) {
+        items.extend(image(context.maps, resolved, mark, scale));
+        return;
+    }
     items.extend(
         cells(context.maps, resolved, mark, scale)
             .iter()

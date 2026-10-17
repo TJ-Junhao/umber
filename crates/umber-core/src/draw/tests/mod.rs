@@ -19,6 +19,7 @@ mod mapping;
 mod marker;
 mod marks;
 mod oracle;
+mod raster;
 mod rule;
 mod scatter;
 mod stacked_area;
