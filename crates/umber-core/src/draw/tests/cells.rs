@@ -15,6 +15,7 @@ use crate::render::render_png;
 use crate::resolve::ResolvedMark;
 use crate::scene::{Item, Paint, Scene};
 use crate::test_support::image::decode_rgba8;
+use crate::test_support::polygon::{bounds, edges, inside, segment_distance};
 use crate::{
     Cmap, CmapChoice, FontLibrary, HexbinOptions, Hist2dOptions, LogBase, MeshOptions, Rgba,
     ScaleKind, Theme,
@@ -163,45 +164,10 @@ fn fills(f: &Figure) -> Vec<Polygon> {
         .collect()
 }
 
-/// The left, right, top and bottom of `polygon`.
-fn bounds(polygon: &[(f64, f64)]) -> [f64; 4] {
-    polygon.iter().fold(
-        [f64::MAX, f64::MIN, f64::MAX, f64::MIN],
-        |[x0, x1, y0, y1], p| [x0.min(p.0), x1.max(p.0), y0.min(p.1), y1.max(p.1)],
-    )
-}
-
 /// Whether `p` lies inside `polygon`, whose bounds are `[x0, x1, y0, y1]`, by the nonzero
 /// winding rule.
 fn inside_bounded(polygon: &[(f64, f64)], [x0, x1, y0, y1]: [f64; 4], p: (f64, f64)) -> bool {
     p.0 >= x0 && p.0 <= x1 && p.1 >= y0 && p.1 <= y1 && inside(polygon, p)
-}
-
-/// Whether `p` lies inside `polygon`, by the nonzero winding rule.
-fn inside(polygon: &[(f64, f64)], (x, y): (f64, f64)) -> bool {
-    let mut winding = 0;
-    for (i, &(x0, y0)) in polygon.iter().enumerate() {
-        let (x1, y1) = polygon[(i + 1) % polygon.len()];
-        let side = (x1 - x0) * (y - y0) - (x - x0) * (y1 - y0);
-        if y0 <= y && y1 > y && side > 0.0 {
-            winding += 1;
-        } else if y1 <= y && y0 > y && side < 0.0 {
-            winding -= 1;
-        }
-    }
-    winding != 0
-}
-
-/// The distance from `p` to the segment from `a` to `b`.
-fn distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
-    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-    let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-    (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy)
-}
-
-/// The edges of `polygon`.
-fn edges(polygon: &[(f64, f64)]) -> impl Iterator<Item = ((f64, f64), (f64, f64))> + '_ {
-    (0..polygon.len()).map(|i| (polygon[i], polygon[(i + 1) % polygon.len()]))
 }
 
 /// The edges of the drawn cells that no other drawn cell shares: the outline of the drawn
@@ -254,7 +220,7 @@ fn assert_seamless(f: &Figure, exact: &Exact) {
                         .any(|&(cell, b)| inside_bounded(cell, b, center))
                     || outer
                         .iter()
-                        .any(|&(a, b)| distance(center, a, b) < clearance)
+                        .any(|&(a, b)| segment_distance(center, a, b) < clearance)
                 {
                     continue;
                 }
@@ -294,7 +260,7 @@ fn assert_exact_outline(f: &Figure, exact: &Exact) {
                     (y0 + j as f64 * step).min(y1),
                 );
                 // Points on or next to the hole's outline belong to its neighbours too.
-                if !inside(hole, p) || edges(hole).any(|(a, b)| distance(p, a, b) < 1e-3) {
+                if !inside(hole, p) || edges(hole).any(|(a, b)| segment_distance(p, a, b) < 1e-3) {
                     continue;
                 }
                 if let Some((fill, _)) = bounded
@@ -309,7 +275,8 @@ fn assert_exact_outline(f: &Figure, exact: &Exact) {
     for fill in &fills {
         for &corner in fill {
             let within = exact.drawn.iter().any(|cell| {
-                inside(cell, corner) || edges(cell).any(|(a, b)| distance(corner, a, b) < 1e-3)
+                inside(cell, corner)
+                    || edges(cell).any(|(a, b)| segment_distance(corner, a, b) < 1e-3)
             });
             assert!(
                 within,

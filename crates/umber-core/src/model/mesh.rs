@@ -781,110 +781,122 @@ mod tests {
             .unzip()
     }
 
-    /// A point in plot points.
-    type Pt = (f64, f64);
+    use crate::test_support::polygon::{
+        Pt, area, clip_to_rectangle, covers, edge_distance, inner_samples, inside, outline_samples,
+        simple,
+    };
 
     /// How far, in points, a checked point may lie off the outline it is checked against: the
     /// scene's coordinates are `f32`.
     const TOLERANCE: f64 = 2e-3;
 
-    /// The distance from `p` to the nearest edge of `polygon`.
-    fn edge_distance(polygon: &[Pt], p: Pt) -> f64 {
-        (0..polygon.len())
-            .map(|i| {
-                let (a, b) = (polygon[i], polygon[(i + 1) % polygon.len()]);
-                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-                let t =
-                    (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-                (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy)
-            })
-            .fold(f64::INFINITY, f64::min)
-    }
+    /// How much, in square points, a measured area may differ from its bound.
+    const AREA_TOLERANCE: f64 = 1e-2;
 
-    /// Whether `p` lies inside `polygon` by the nonzero winding rule.
-    fn inside(polygon: &[Pt], p: Pt) -> bool {
-        let mut winding = 0;
-        for (i, &a) in polygon.iter().enumerate() {
-            let b = polygon[(i + 1) % polygon.len()];
-            let side = (b.0 - a.0) * (p.1 - a.1) - (p.0 - a.0) * (b.1 - a.1);
-            if a.1 <= p.1 && b.1 > p.1 && side > 0.0 {
-                winding += 1;
-            } else if b.1 <= p.1 && a.1 > p.1 && side < 0.0 {
-                winding -= 1;
-            }
-        }
-        winding != 0
-    }
-
-    /// Whether `p` lies inside `polygon` or within `tolerance` of its outline.
-    fn covers(polygon: &[Pt], p: Pt, tolerance: f64) -> bool {
-        inside(polygon, p) || edge_distance(polygon, p) <= tolerance
-    }
-
-    /// The corners of `polygon` and points every quarter point along its edges.
-    fn samples(polygon: &[Pt]) -> Vec<Pt> {
-        let mut out = Vec::new();
-        for i in 0..polygon.len() {
-            let (a, b) = (polygon[i], polygon[(i + 1) % polygon.len()]);
-            let steps = ((b.0 - a.0).hypot(b.1 - a.1) / 0.25).ceil().max(1.0) as usize;
-            out.extend((0..steps).map(|k| {
-                let t = k as f64 / steps as f64;
-                (a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1))
-            }));
-        }
-        out
-    }
-
-    /// Checks the drawn `outline` of the cell whose exact hexagon is `hexagon`, given the exact
-    /// hexagons of the drawn cells drawn after it, `later`. The outline must cover the whole
-    /// hexagon, and may reach past it only under a later cell across one of its edges, at most
-    /// as deep as a heatmap cell reaches: 1 pt, or half that cell when it is smaller.
-    fn check_outline(outline: &[Pt], hexagon: &[Pt; 6], later: &[[Pt; 6]]) -> Result<(), String> {
-        if let Some(p) = samples(hexagon)
-            .into_iter()
-            .find(|&p| !covers(outline, p, TOLERANCE))
-        {
-            return Err(format!("{outline:?} leaves {p:?} of {hexagon:?} uncovered"));
-        }
-        if let Some(p) = outline
-            .iter()
-            .find(|&&p| inside(hexagon, p) && edge_distance(hexagon, p) > TOLERANCE)
-        {
-            return Err(format!("{outline:?} has a corner {p:?} inside {hexagon:?}"));
-        }
+    /// Where a cell's fill may reach under the later cells, `later` (their exact hexagons),
+    /// across the edges of its exact `hexagon`: each such cell with the edge and the depth a
+    /// heatmap cell would reach, 1 pt or half that cell when it is smaller.
+    fn strips<'a>(hexagon: &[Pt; 6], later: &'a [[Pt; 6]]) -> Vec<(&'a [Pt; 6], Pt, Pt, f64)> {
         let center = (
             hexagon.iter().map(|p| p.0).sum::<f64>() / 6.0,
             hexagon.iter().map(|p| p.1).sum::<f64>() / 6.0,
         );
-        let line_distance = |p: Pt, a: Pt, b: Pt| {
-            ((b.0 - a.0) * (p.1 - a.1) - (p.0 - a.0) * (b.1 - a.1)).abs()
-                / (b.0 - a.0).hypot(b.1 - a.1)
-        };
         let same = |p: Pt, q: Pt| (p.0 - q.0).hypot(p.1 - q.1) < 1e-3;
-        // Each later neighbour across an edge, with the edge and how deep a reach under it may go.
-        let strips: Vec<(&[Pt; 6], Pt, Pt, f64)> = (0..6)
-            .flat_map(|i| {
-                let (a, b) = (hexagon[i], hexagon[(i + 1) % 6]);
-                let depth = line_distance(center, a, b).min(1.0);
+        let mut out = Vec::new();
+        for i in 0..6 {
+            let (a, b) = (hexagon[i], hexagon[(i + 1) % 6]);
+            let depth = line_distance(center, a, b).min(1.0);
+            out.extend(
                 later
                     .iter()
-                    .filter(move |n| n.iter().any(|&q| same(q, a)) && n.iter().any(|&q| same(q, b)))
-                    .map(move |n| (n, a, b, depth))
-            })
-            .collect();
+                    .filter(|n| n.iter().any(|&q| same(q, a)) && n.iter().any(|&q| same(q, b)))
+                    .map(|n| (n, a, b, depth)),
+            );
+        }
+        out
+    }
+
+    /// The distance from `p` to the line through `a` and `b`.
+    fn line_distance(p: Pt, a: Pt, b: Pt) -> f64 {
+        ((b.0 - a.0) * (p.1 - a.1) - (p.0 - a.0) * (b.1 - a.1)).abs() / (b.0 - a.0).hypot(b.1 - a.1)
+    }
+
+    /// Checks the drawn `fill` of the cell whose exact hexagon is `hexagon`, inside the plot
+    /// `plot` (left, top, right, bottom), given the exact hexagons of the cells whose fills
+    /// come after it, `later`. Where the fill may lie is the hexagon and the [`strips`] under
+    /// later cells, within the plot. A whole cell's fill must be a simple outline covering its
+    /// whole hexagon and lying where it may, so its area is at least the hexagon's and at most
+    /// that plus the strips'. A clipped cell's fill (clipping can leave edges of no area along
+    /// the plot's edge) must cover the visible part of the hexagon, every point inside it must
+    /// lie where it may, and its area must stay within those same bounds for the visible part.
+    fn check_fill(
+        fill: &[Pt],
+        hexagon: &[Pt; 6],
+        later: &[[Pt; 6]],
+        plot: [f64; 4],
+        whole: bool,
+    ) -> Result<(), String> {
+        let strips = strips(hexagon, later);
         let allowed = |p: Pt| {
-            covers(hexagon, p, TOLERANCE)
-                || strips.iter().any(|&(n, a, b, depth)| {
-                    covers(n, p, TOLERANCE) && line_distance(p, a, b) <= depth + TOLERANCE
-                })
+            p.0 >= plot[0] - TOLERANCE
+                && p.0 <= plot[2] + TOLERANCE
+                && p.1 >= plot[1] - TOLERANCE
+                && p.1 <= plot[3] + TOLERANCE
+                && (covers(hexagon, p, TOLERANCE)
+                    || strips.iter().any(|&(n, a, b, depth)| {
+                        covers(n, p, TOLERANCE) && line_distance(p, a, b) <= depth + TOLERANCE
+                    }))
         };
-        match samples(outline).into_iter().find(|&p| !allowed(p)) {
+        let visible = clip_to_rectangle(hexagon, plot);
+        let strip_area: f64 = strips
+            .iter()
+            .map(|&(_, a, b, depth)| depth * ((b.0 - a.0).hypot(b.1 - a.1) + 2.0 * depth))
+            .sum();
+        let filled = area(fill);
+        if filled < area(&visible) - AREA_TOLERANCE
+            || filled > area(&visible) + strip_area + AREA_TOLERANCE
+        {
+            return Err(format!(
+                "{fill:?} fills {filled} pt², not at least the {} pt² of {hexagon:?} on the plot \
+                 and at most {strip_area} pt² more",
+                area(&visible)
+            ));
+        }
+        if let Some(p) = outline_samples(&visible, 0.25)
+            .into_iter()
+            .find(|&p| !covers(fill, p, TOLERANCE))
+        {
+            return Err(format!("{fill:?} leaves {p:?} of {hexagon:?} uncovered"));
+        }
+        let stray = if whole {
+            if !simple(fill, 1e-4) {
+                return Err(format!("{fill:?} crosses or retraces itself"));
+            }
+            if let Some(p) = fill
+                .iter()
+                .find(|&&p| inside(hexagon, p) && edge_distance(hexagon, p) > TOLERANCE)
+            {
+                return Err(format!("{fill:?} has a corner {p:?} inside {hexagon:?}"));
+            }
+            // A simple outline lies where its edges lie.
+            outline_samples(fill, 0.25)
+                .into_iter()
+                .find(|&p| !allowed(p))
+        } else {
+            inner_samples(fill, 0.25).into_iter().find(|&p| !allowed(p))
+        };
+        match stray {
             Some(p) => Err(format!(
-                "{outline:?} reaches {p:?}, past {hexagon:?} and the reach under its later \
-                 neighbours"
+                "{fill:?} reaches {p:?}, past {hexagon:?} and the reach under its later cells"
             )),
             None => Ok(()),
         }
+    }
+
+    /// [`check_fill`] for a whole cell, its fill drawn by itself on a plot that holds it all.
+    fn check_outline(outline: &[Pt], hexagon: &[Pt; 6], later: &[[Pt; 6]]) -> Result<(), String> {
+        let plot = [f64::MIN, f64::MIN, f64::MAX, f64::MAX];
+        check_fill(outline, hexagon, later, plot, true)
     }
 
     /// One drawn hexbin cell: its exact hexagon, from the lattice mapped onto the plot as the
@@ -965,52 +977,61 @@ mod tests {
         out
     }
 
-    /// Checks every fill of `panel`: the fill of each whole cell, the one holding its center and
-    /// corners, by [`check_outline`]; every other fill, of a cell the plot clips, lies inside the
-    /// drawn cells or on the plot's edge (clipping can leave edges of no area along it).
+    /// Checks every fill of `panel`. Each cell that shows on the plot owns the fill that holds
+    /// the center of its visible part and covers its corners, the first such fill left when the
+    /// cells are taken in order; each fill is checked by [`check_fill`] against the cells whose
+    /// fills come after it. Every other fill must pass as the fill of a cell that does not show.
     fn check_panel(panel: &HexPanel) -> Result<(), String> {
-        let mut used = vec![false; panel.fills.len()];
+        let p = panel.plot;
+        let plot = [p.x, p.y, p.right(), p.bottom()];
+        let mut owner: Vec<Option<usize>> = vec![None; panel.fills.len()];
+        let mut fill_of = vec![None; panel.cells.len()];
         for (i, cell) in panel.cells.iter().enumerate() {
-            if !cell.whole {
+            let visible = clip_to_rectangle(&cell.hexagon, plot);
+            if area(&visible) <= AREA_TOLERANCE {
                 continue;
             }
             let center = (
-                cell.hexagon.iter().map(|p| p.0).sum::<f64>() / 6.0,
-                cell.hexagon.iter().map(|p| p.1).sum::<f64>() / 6.0,
+                visible.iter().map(|p| p.0).sum::<f64>() / visible.len() as f64,
+                visible.iter().map(|p| p.1).sum::<f64>() / visible.len() as f64,
             );
-            // The cell's own fill holds its center and its corners; a neighbour's reach under
-            // a small cell may touch its center too, never its far corners.
-            let own = |fill: &Vec<Pt>| {
-                inside(fill, center) && cell.hexagon.iter().all(|&p| covers(fill, p, TOLERANCE))
+            let own = |(f, fill): &(usize, &Vec<Pt>)| {
+                owner[*f].is_none()
+                    && inside(fill, center)
+                    && visible.iter().all(|&p| covers(fill, p, TOLERANCE))
             };
-            let Some(fill) = panel.fills.iter().position(own) else {
+            let Some((f, _)) = panel.fills.iter().enumerate().find(own) else {
                 return Err(format!("no fill covers the cell {:?}", cell.hexagon));
             };
-            if std::mem::replace(&mut used[fill], true) {
-                return Err(format!("two cells share the fill {:?}", panel.fills[fill]));
-            }
-            let later: Vec<[Pt; 6]> = panel.cells[i + 1..].iter().map(|c| c.hexagon).collect();
-            check_outline(&panel.fills[fill], &cell.hexagon, &later)?;
+            owner[f] = Some(i);
+            fill_of[i] = Some(f);
         }
-        let plot = panel.plot;
-        let on_edge = |p: Pt| {
-            let rectangle = [
-                (plot.x, plot.y),
-                (plot.right(), plot.y),
-                (plot.right(), plot.bottom()),
-                (plot.x, plot.bottom()),
-            ];
-            edge_distance(&rectangle, p) <= TOLERANCE
+        let later = |f: usize| -> Vec<[Pt; 6]> {
+            panel
+                .cells
+                .iter()
+                .zip(&fill_of)
+                .filter(|(_, other)| other.is_some_and(|other| other > f))
+                .map(|(cell, _)| cell.hexagon)
+                .collect()
         };
-        for (fill, _) in panel.fills.iter().zip(&used).filter(|(_, used)| !**used) {
-            if let Some(p) = samples(fill).into_iter().find(|&p| {
-                !on_edge(p)
-                    && !panel
-                        .cells
-                        .iter()
-                        .any(|cell| covers(&cell.hexagon, p, TOLERANCE))
-            }) {
-                return Err(format!("{fill:?} reaches {p:?}, outside the drawn cells"));
+        for (i, cell) in panel.cells.iter().enumerate() {
+            if let Some(f) = fill_of[i] {
+                check_fill(&panel.fills[f], &cell.hexagon, &later(f), plot, cell.whole)?;
+            }
+        }
+        // A fill left over is what shows of a cell off the plot: its reach under a later cell.
+        for (f, _) in owner
+            .iter()
+            .enumerate()
+            .filter(|(_, owner)| owner.is_none())
+        {
+            let fits = panel.cells.iter().zip(&fill_of).any(|(cell, own)| {
+                own.is_none()
+                    && check_fill(&panel.fills[f], &cell.hexagon, &later(f), plot, false).is_ok()
+            });
+            if !fits {
+                return Err(format!("no cell owns the fill {:?}", panel.fills[f]));
             }
         }
         Ok(())
@@ -1067,6 +1088,138 @@ mod tests {
             // Without that cell drawn after it, no reach is allowed.
             assert!(check_outline(&pushed, &hexagon, &[]).is_err());
         }
+    }
+
+    #[test]
+    fn outline_check_rejects_outlines_that_retrace_themselves() {
+        let s = 10.0 * 3.0_f64.sqrt() / 2.0;
+        let h = [
+            (0.0, 10.0),
+            (s, 5.0),
+            (s, -5.0),
+            (0.0, -10.0),
+            (-s, -5.0),
+            (-s, 5.0),
+        ];
+        // The hexagon traced forward and back covers its outline and fills nothing; with the
+        // triangle of every other corner added, it fills only that triangle.
+        let mut retraced = h.to_vec();
+        retraced.push(h[0]);
+        retraced.extend(h[1..].iter().rev());
+        let mut triangle = retraced.clone();
+        triangle.extend([h[0], h[2], h[4]]);
+        let plot = crate::layout::Area {
+            x: -30.0,
+            y: -30.0,
+            width: 80.0,
+            height: 60.0,
+        };
+        for fill in [retraced, triangle] {
+            assert!(check_outline(&fill, &h, &[]).is_err(), "{fill:?}");
+            let panel = HexPanel {
+                plot,
+                cells: vec![HexCell {
+                    hexagon: h,
+                    whole: true,
+                }],
+                fills: vec![fill],
+            };
+            assert!(check_panel(&panel).is_err());
+        }
+    }
+
+    #[test]
+    fn panel_check_takes_later_cells_from_the_fill_order() {
+        let s = 10.0 * 3.0_f64.sqrt() / 2.0;
+        let h = [
+            (0.0, 10.0),
+            (s, 5.0),
+            (s, -5.0),
+            (0.0, -10.0),
+            (-s, -5.0),
+            (-s, 5.0),
+        ];
+        let right = h.map(|(x, y)| (x + 2.0 * s, y));
+        let lift = 1.0 / 3.0_f64.sqrt();
+        let pushed = vec![
+            h[0],
+            h[1],
+            (s + 1.0, 5.0 + lift),
+            (s + 1.0, -5.0 - lift),
+            h[2],
+            h[3],
+            h[4],
+            h[5],
+        ];
+        let panel = |fills| HexPanel {
+            plot: crate::layout::Area {
+                x: -30.0,
+                y: -30.0,
+                width: 80.0,
+                height: 60.0,
+            },
+            cells: vec![
+                HexCell {
+                    hexagon: h,
+                    whole: true,
+                },
+                HexCell {
+                    hexagon: right,
+                    whole: true,
+                },
+            ],
+            fills,
+        };
+        // The left cell reaches under the right one only when the right one is drawn after it.
+        assert_eq!(
+            check_panel(&panel(vec![pushed.clone(), right.to_vec()])),
+            Ok(())
+        );
+        assert!(check_panel(&panel(vec![right.to_vec(), pushed])).is_err());
+    }
+
+    #[test]
+    fn panel_check_bounds_the_area_of_clipped_fills() {
+        // A whole hexagon at (20, 20) and one cut in half by the left edge of a 40 pt plot.
+        let s = 10.0 * 3.0_f64.sqrt() / 2.0;
+        let h = [
+            (0.0, -10.0),
+            (s, -5.0),
+            (s, 5.0),
+            (0.0, 10.0),
+            (-s, 5.0),
+            (-s, -5.0),
+        ];
+        let whole = h.map(|(x, y)| (x + 20.0, y + 20.0));
+        let clipped = h.map(|(x, y)| (x, y + 20.0));
+        let panel = |fill| HexPanel {
+            plot: crate::layout::Area {
+                x: 0.0,
+                y: 0.0,
+                width: 40.0,
+                height: 40.0,
+            },
+            cells: vec![
+                HexCell {
+                    hexagon: whole,
+                    whole: true,
+                },
+                HexCell {
+                    hexagon: clipped,
+                    whole: false,
+                },
+            ],
+            fills: vec![whole.to_vec(), fill],
+        };
+        let half = vec![(0.0, 10.0), (s, 15.0), (s, 25.0), (0.0, 30.0)];
+        assert_eq!(check_panel(&panel(half.clone())), Ok(()));
+        // An edge of no area along the plot's edge, as clipping can leave, is accepted.
+        let mut bridge = half;
+        bridge.push((0.0, 40.0));
+        assert_eq!(check_panel(&panel(bridge)), Ok(()));
+        // The whole plot is not what shows of the clipped cell.
+        let plot = vec![(0.0, 0.0), (40.0, 0.0), (40.0, 40.0), (0.0, 40.0)];
+        assert!(check_panel(&panel(plot)).is_err());
     }
 
     fn assert_regular_whole(f: &Figure) {

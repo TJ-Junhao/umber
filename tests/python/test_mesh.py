@@ -121,15 +121,69 @@ def samples(polygon: list[Point]) -> list[Point]:
     return out
 
 
+def area(polygon: list[Point]) -> float:
+    """The area ``polygon`` encloses, by the shoelace formula: its filled area when simple."""
+    n = len(polygon)
+    return (
+        abs(
+            sum(
+                a[0] * b[1] - b[0] * a[1]
+                for a, b in zip(polygon, polygon[1:] + polygon[:1], strict=True)
+            )
+        )
+        / 2
+        if n
+        else 0.0
+    )
+
+
+def segment_distance(p: Point, a: Point, b: Point) -> float:
+    """The distance from ``p`` to the segment from ``a`` to ``b``."""
+    return edge_distance([a, b], p)
+
+
+def simple(polygon: list[Point], tolerance: float) -> bool:
+    """Whether ``polygon`` neither crosses nor retraces itself.
+
+    No edge has zero length, and no two edges meet or come within ``tolerance`` of each other,
+    except neighbouring edges at their shared corner.
+    """
+    n = len(polygon)
+    edges = [(polygon[i], polygon[(i + 1) % n]) for i in range(n)]
+
+    def cross(o: Point, p: Point, q: Point) -> float:
+        return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+
+    if n < 3 or any(math.dist(a, b) <= tolerance for a, b in edges):
+        return False
+    for i in range(n):
+        for j in range(i + 1, n):
+            (a, b), (c, d) = edges[i], edges[j]
+            if j == i + 1:
+                pairs = [(d, a, b), (a, c, d)]
+            elif i == 0 and j == n - 1:
+                pairs = [(c, a, b), (b, c, d)]
+            else:
+                if cross(c, d, a) * cross(c, d, b) < 0 and cross(a, b, c) * cross(a, b, d) < 0:
+                    return False
+                pairs = [(a, c, d), (b, c, d), (c, a, b), (d, a, b)]
+            if any(segment_distance(p, e, f) <= tolerance for p, e, f in pairs):
+                return False
+    return True
+
+
 def outline_error(
     outline: list[Point], hexagon: list[Point], later: list[list[Point]], tolerance: float = 0.005
 ) -> str | None:
     """Why ``outline`` is not a valid drawing of the cell ``hexagon``, or None when it is.
 
-    The outline must cover the whole exact hexagon, and may reach past it only under a cell
-    drawn after it (``later``, their exact hexagons) across one of its edges, at most 1 pt deep
-    or half that cell when it is smaller.
+    The outline must be simple, cover the whole exact hexagon, and reach past it only under a
+    cell drawn after it (``later``, their exact hexagons) across one of its edges, at most 1 pt
+    deep or half that cell when it is smaller; so its area is at least the hexagon's and at
+    most that plus the area of those strips.
     """
+    if not simple(outline, tolerance / 10):
+        return f"{outline} crosses or retraces itself"
     for p in samples(hexagon):
         if not covers(outline, p, tolerance):
             return f"{p} of {hexagon} is not covered"
@@ -151,6 +205,9 @@ def outline_error(
                 math.dist(q, b) < 0.01 for q in cell
             ):
                 strips.append((cell, a, b, depth))
+    most = area(hexagon) + sum(depth * (math.dist(a, b) + 2 * depth) for _, a, b, depth in strips)
+    if not area(hexagon) - 10 * tolerance <= area(outline) <= most + 10 * tolerance:
+        return f"{outline} fills {area(outline)} pt², not {area(hexagon)} to {most} pt²"
     for p in samples(outline):
         if not covers(hexagon, p, tolerance) and not any(
             covers(cell, p, tolerance) and line_distance(p, a, b) <= depth + tolerance
@@ -288,6 +345,16 @@ def test_outline_check_rejects_notches_and_deep_reaches() -> None:
         ]
         assert (outline_error(pushed, hexagon, [right]) is None) == ok
         assert outline_error(pushed, hexagon, []) is not None
+
+
+def test_outline_check_rejects_outlines_that_retrace_themselves() -> None:
+    hexagon = pointy_hexagon((0.0, 0.0), 10.0)
+    # The hexagon traced forward and back covers its outline and fills nothing; with the
+    # triangle of every other corner added, it fills only that triangle.
+    retraced = [*hexagon, hexagon[0], *hexagon[:0:-1]]
+    triangle = [*retraced, hexagon[0], hexagon[2], hexagon[4]]
+    for outline in (retraced, triangle):
+        assert outline_error(outline, hexagon, []) is not None
 
 
 @pytest.mark.parametrize("shape", [(12, 2.5), (3, 10)])
