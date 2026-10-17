@@ -190,39 +190,69 @@ pub(super) fn resample(
 /// encoder refuses them, which needs more pixels than any scene holds.
 pub(super) fn png_bytes(width: u32, height: u32, pixels: &[Rgba]) -> Option<Vec<u8>> {
     let data: Vec<u8> = pixels.iter().flat_map(|c| [c.r, c.g, c.b, c.a]).collect();
-    let mut out = Vec::new();
-    let mut encoder = ::png::Encoder::new(&mut out, width, height);
-    encoder.set_color(::png::ColorType::Rgba);
-    encoder.set_depth(::png::BitDepth::Eight);
-    encoder.set_deflate_compression(::png::DeflateCompression::Level(6));
-    encoder.set_filter(::png::Filter::Adaptive);
-    let mut writer = encoder.write_header().ok()?;
-    writer.write_image_data(&data).ok()?;
-    writer.finish().ok()?;
-    Some(out)
+    let encode = |level| {
+        let mut out = Vec::new();
+        let mut encoder = ::png::Encoder::new(&mut out, width, height);
+        encoder.set_color(::png::ColorType::Rgba);
+        encoder.set_depth(::png::BitDepth::Eight);
+        encoder.set_deflate_compression(::png::DeflateCompression::Level(level));
+        encoder.set_filter(::png::Filter::NoFilter);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(&data).ok()?;
+        writer.finish().ok()?;
+        Some(out)
+    };
+    let fast = encode(1)?;
+    // Smooth and sparse cell images benefit from a stronger search. Their fast encoding is
+    // already below a third of the raw RGBA size; noisy images skip the second encoding.
+    // Keep the fast bytes on a tie, so the decision depends only on the input pixels.
+    if fast.len() <= data.len() / 3 {
+        let compact = encode(3)?;
+        if compact.len() < fast.len() {
+            return Some(compact);
+        }
+    }
+    Some(fast)
 }
 
 /// `bytes` in standard base64 (RFC 4648, with `+`, `/` and `=` padding), as data URIs carry it.
 pub(super) fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
-            if i <= chunk.len() {
-                out.push(char::from(ALPHABET[((n >> shift) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
+    let mut out = Vec::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut chunks = bytes.chunks_exact(3);
+    for chunk in &mut chunks {
+        out.extend_from_slice(&[
+            ALPHABET[usize::from(chunk[0] >> 2)],
+            ALPHABET[usize::from((chunk[0] & 3) << 4 | chunk[1] >> 4)],
+            ALPHABET[usize::from((chunk[1] & 15) << 2 | chunk[2] >> 6)],
+            ALPHABET[usize::from(chunk[2] & 63)],
+        ]);
     }
-    out
+    match *chunks.remainder() {
+        [a] => out.extend_from_slice(&[
+            ALPHABET[usize::from(a >> 2)],
+            ALPHABET[usize::from((a & 3) << 4)],
+            b'=',
+            b'=',
+        ]),
+        [a, b] => out.extend_from_slice(&[
+            ALPHABET[usize::from(a >> 2)],
+            ALPHABET[usize::from((a & 3) << 4 | b >> 4)],
+            ALPHABET[usize::from((b & 15) << 2)],
+            b'=',
+        ]),
+        _ => {}
+    }
+    #[allow(
+        clippy::expect_used,
+        reason = "the alphabet and padding are exclusively ASCII"
+    )]
+    String::from_utf8(out).expect("base64 is ASCII")
 }
+
+#[cfg(test)]
+#[path = "image_encoding_tests.rs"]
+mod encoding_tests;
 
 #[cfg(test)]
 mod tests {

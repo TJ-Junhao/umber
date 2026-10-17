@@ -19,6 +19,8 @@
 //! measured ([`panel::measure_panel`]), the solve chooses every plot area at once, and each
 //! panel is placed for its plot area ([`panel::place_panel`]).
 
+#[cfg(test)]
+mod cache_tests;
 mod colorbar;
 mod grid;
 mod inset;
@@ -329,6 +331,71 @@ fn measure(lib: &FontLibrary, text: &str, style: TextStyle) -> Label {
     }
 }
 
+/// Measurements reused within one scene construction. The library is fixed for this cache;
+/// every style field, including the exact size bits, and the uncut text identify a label.
+/// Placing a returned label never changes the unplaced copy kept here.
+pub(crate) struct LabelCache<'a> {
+    lib: &'a FontLibrary,
+    labels: RefCell<HashMap<LabelStyle, HashMap<String, Label>>>,
+    #[cfg(test)]
+    enabled: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct LabelStyle {
+    font: crate::Font,
+    weight: Weight,
+    size: u32,
+    tabular_figures: bool,
+}
+
+impl<'a> LabelCache<'a> {
+    pub(crate) fn new(lib: &'a FontLibrary) -> Self {
+        Self {
+            lib,
+            labels: RefCell::new(HashMap::new()),
+            #[cfg(test)]
+            enabled: true,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn uncached(lib: &'a FontLibrary) -> Self {
+        Self {
+            enabled: false,
+            ..Self::new(lib)
+        }
+    }
+
+    fn measure(&self, text: &str, style: TextStyle) -> Label {
+        #[cfg(test)]
+        if !self.enabled {
+            return measure(self.lib, text, style);
+        }
+        let key = LabelStyle {
+            font: style.font,
+            weight: style.weight,
+            size: style.size.to_bits(),
+            tabular_figures: style.tabular_figures,
+        };
+        let mut labels = self.labels.borrow_mut();
+        let by_text = labels.entry(key).or_default();
+        if let Some(label) = by_text.get(text) {
+            return label.clone();
+        }
+        let label = measure(self.lib, text, style);
+        by_text.insert(text.to_owned(), label.clone());
+        label
+    }
+
+    fn ticks(&self, ticks: &[AxisTick], style: TextStyle) -> Vec<(NormalizedPos, Label)> {
+        ticks
+            .iter()
+            .map(|tick| (tick.pos, self.measure(&tick.label, style)))
+            .collect()
+    }
+}
+
 /// Measures the label of every tick, keeping each tick's position.
 fn measure_ticks(
     lib: &FontLibrary,
@@ -445,6 +512,8 @@ pub(crate) struct TickRoom<'a> {
     style: TextStyle,
     /// The widths of the labels measured so far: tick searches judge the same labels often.
     widths: RefCell<HashMap<String, f64>>,
+    /// Measurements shared with the panel layout and other candidate tick sets.
+    labels: Option<&'a LabelCache<'a>>,
     /// The most ticks that fit, whatever their labels; `None` for no such limit.
     most: Option<usize>,
 }
@@ -469,6 +538,7 @@ pub(crate) fn tick_rooms<'a>(
         lib,
         style,
         widths: RefCell::new(HashMap::new()),
+        labels: None,
         most: None,
     };
     (
@@ -477,7 +547,15 @@ pub(crate) fn tick_rooms<'a>(
     )
 }
 
-impl TickRoom<'_> {
+impl<'a> TickRoom<'a> {
+    /// Reuses the scene's label measurements without changing the spacing calculation.
+    pub(crate) fn with_labels(self, labels: &'a LabelCache<'a>) -> Self {
+        Self {
+            labels: Some(labels),
+            ..self
+        }
+    }
+
     /// Whether the final constrained choice is checked on the solved layout.
     pub fn deferred(&self) -> bool {
         self.spacing == TickSpacing::Deferred
@@ -501,7 +579,13 @@ impl TickRoom<'_> {
         if let Some(&width) = self.widths.borrow().get(label) {
             return width;
         }
-        let width = measure(self.lib, label, self.style).width();
+        let width = self
+            .labels
+            .map_or_else(
+                || measure(self.lib, label, self.style),
+                |labels| labels.measure(label, self.style),
+            )
+            .width();
         self.widths.borrow_mut().insert(label.to_owned(), width);
         width
     }

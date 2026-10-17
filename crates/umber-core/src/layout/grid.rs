@@ -3067,6 +3067,7 @@ mod tests {
                             &resolved,
                             grid.span(input.axes.cells()),
                             [true; 2],
+                            None,
                         )
                     })
                     .collect();

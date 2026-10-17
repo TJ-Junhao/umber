@@ -121,6 +121,19 @@ fn heatmap_figure() -> Figure {
     figure
 }
 
+/// The 200-category vertical bars from the exact-output corpus.
+fn category_figure() -> Figure {
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let names = (0..200).map(|i| format!("c{i}")).collect();
+    let values: Vec<_> = (0..200).map(|i| 1.0 + f64::from(i % 20)).collect();
+    figure
+        .add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap()
+        .bar(names, &values, umber_core::BarOptions::default())
+        .unwrap();
+    figure
+}
+
 /// Correlated points: y follows x plus bell-shaped noise, so the bins hold uneven counts.
 fn correlated(n: usize) -> (Vec<f64>, Vec<f64>) {
     let x: Vec<f64> = (0..n)
@@ -357,6 +370,16 @@ fn benches(c: &mut Criterion) {
     });
     group.bench_function("heatmap_1000x1000_svg", |b| {
         b.iter(|| black_box(heatmap.to_svg(SvgText::Outlines).unwrap()));
+    });
+    let categories = category_figure();
+    group.bench_function("category_200_png", |b| {
+        b.iter(|| black_box(categories.to_png(i64::from(DPI)).unwrap()));
+    });
+    group.bench_function("category_200_scene", |b| {
+        b.iter(|| black_box(categories.to_scene(library).unwrap()));
+    });
+    group.bench_function("category_200_svg", |b| {
+        b.iter(|| black_box(categories.to_svg(SvgText::Outlines).unwrap()));
     });
     let hist2d = hist2d_figure(1_000_000);
     group.bench_function("hist2d_1m_png", |b| {
