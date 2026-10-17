@@ -45,6 +45,8 @@ pub struct Axes {
     pub(super) x_settings: Arc<AxisSettings>,
     /// The y group's settings.
     pub(super) y_settings: Arc<AxisSettings>,
+    /// Whether these axes draw their baseline; never inherited through shared axes.
+    pub(super) baseline: super::BaselineVisibility,
     /// The legend style set for these axes; the theme's applies when unset.
     pub(super) legend: Option<LegendStyle>,
     /// The legend position set for these axes; the theme's applies when unset.
@@ -76,6 +78,7 @@ impl Axes {
             ylabel: String::new(),
             x_settings,
             y_settings,
+            baseline: super::BaselineVisibility::Auto,
             legend: None,
             legend_position: None,
             marks: Vec::new(),
@@ -445,6 +448,22 @@ impl Axes {
     #[must_use]
     pub fn legend_position(&self) -> Option<LegendPosition> {
         self.legend_position
+    }
+
+    /// The baseline visibility set for these axes alone; `Auto` unless overridden.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BaselineVisibility, Figure, ScaleKind, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert_eq!(axes.baseline_visibility(), BaselineVisibility::Auto);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn baseline_visibility(&self) -> super::BaselineVisibility {
+        self.baseline
     }
 
     /// The marks, in the order they were added.

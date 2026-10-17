@@ -318,10 +318,47 @@ impl Resolved {
         }
     }
 
-    /// Whether the baseline is drawn: on every axes with a value axis, so not on two category
-    /// axes, whose heatmap cells fill the plot up to its edges.
-    pub fn draws_baseline(&self) -> bool {
+    /// Whether to draw the baseline, and replace its coincident gridline. `Shown` and `Hidden`
+    /// override the marks; the setter refuses `Shown` on two category axes, with no value axis.
+    /// `Auto` draws it only for marks that grow from zero: bars (including grouped and stacked
+    /// bars), histograms, areas (including stacked areas) or stems. One such mark is enough,
+    /// regardless of the other marks. Empty axes and two category axes draw none in `Auto`.
+    /// This is the one visibility decision; the resolved baseline position, limits, padding,
+    /// bar bases, area fills and reference-line clipping are unchanged.
+    pub fn draws_baseline(&self, marks: &[Mark], shown: crate::BaselineVisibility) -> bool {
+        match shown {
+            crate::BaselineVisibility::Shown => return true,
+            crate::BaselineVisibility::Hidden => return false,
+            crate::BaselineVisibility::Auto => {}
+        }
         !(self.x.is_category() && self.y.is_category())
+            && marks.iter().any(|mark| match mark {
+                Mark::Bar(_)
+                | Mark::GroupedBar(_)
+                | Mark::StackedBar(_)
+                | Mark::Hist(_)
+                | Mark::Area(_)
+                | Mark::StackedArea(_)
+                | Mark::Stem(_) => true,
+                Mark::Line(_)
+                | Mark::Step(_)
+                | Mark::Scatter(_)
+                | Mark::Bubbles(_)
+                | Mark::Box(_)
+                | Mark::GroupedBox(_)
+                | Mark::Violin(_)
+                | Mark::GroupedViolin(_)
+                | Mark::ErrorBars(_)
+                | Mark::Band(_)
+                | Mark::HLine(_)
+                | Mark::VLine(_)
+                | Mark::HSpan(_)
+                | Mark::VSpan(_)
+                | Mark::Mesh(_)
+                | Mark::Hist2d(_)
+                | Mark::Hexbin(_)
+                | Mark::Heatmap(_) => false,
+            })
     }
 }
 

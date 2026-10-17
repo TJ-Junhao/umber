@@ -1139,7 +1139,8 @@ pub(crate) fn with_layout_input<R>(
 /// - the values written on annotated heatmap cells, when there are any, as one group clipped
 ///   to the plot area;
 /// - the legend, when it has row entries or direct labels, as one unclipped group;
-/// - the baseline, as an unclipped group of its own, unless both axes are category axes.
+/// - the baseline, as an unclipped group of its own, when the axes hold a mark that grows
+///   from zero, unless overridden by `AxesMut::baseline` (see [`Resolved::draws_baseline`]).
 ///
 /// Every axes is laid out by one solve of the grid ([`plan`]); a figure of one axes has the
 /// canvas as its frame. The figure header follows the panels as its own unclipped group when
@@ -1189,7 +1190,7 @@ pub(crate) fn scene(
         if let Some(legend) = draw::legend::legend(theme, layout) {
             scene.push(legend);
         }
-        if resolved.draws_baseline() {
+        if resolved.draws_baseline(panel.axes.marks(), panel.axes.baseline_visibility()) {
             scene.push(draw::baseline(theme, layout));
         }
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
@@ -1291,7 +1292,7 @@ mod tests {
     }
 
     /// The number of legend entries laid out, and the number of top-level groups in the scene:
-    /// chrome, marks and baseline, plus one with a legend.
+    /// chrome and line marks, plus one with a legend.
     fn legend_and_groups(f: &Figure) -> (usize, usize) {
         let lib = FontLibrary::global();
         let entries = plan_figure(f, (0, 0), lib).1.legend.entries().len();
@@ -1305,11 +1306,11 @@ mod tests {
     }
 
     #[test]
-    fn header_theme_shows_the_legend_between_marks_and_baseline() {
+    fn header_theme_shows_the_legend_after_marks() {
         let f = labelled_figure(Theme::pigment());
-        assert_eq!(legend_and_groups(&f), (2, 4));
+        assert_eq!(legend_and_groups(&f), (2, 3));
         let s = scene(&f, FontLibrary::global(), "Figure.to_scene()").unwrap();
-        // Chrome, marks, legend (unclipped), baseline.
+        // Chrome, marks, legend (unclipped).
         assert!(
             matches!(s.items.get(2), Some(Item::Group { clip: None, items }) if items.len() == 4)
         );
@@ -1321,14 +1322,14 @@ mod tests {
             .with_legend_style(LegendStyle::None)
             .unwrap();
         assert_eq!(theme.legend_style(), LegendStyle::None);
-        assert_eq!(legend_and_groups(&labelled_figure(theme)), (0, 3));
+        assert_eq!(legend_and_groups(&labelled_figure(theme)), (0, 2));
     }
 
     #[test]
     fn axes_none_hides_the_legend_under_a_header_theme() {
         let mut f = labelled_figure(Theme::pigment());
         f.single_axes_mut().legend(LegendStyle::None);
-        assert_eq!(legend_and_groups(&f), (0, 3));
+        assert_eq!(legend_and_groups(&f), (0, 2));
         // Without a legend the figure draws as if its marks were unlabelled.
         let mut unlabelled = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         let mut axes = unlabelled
@@ -1355,7 +1356,7 @@ mod tests {
             .unwrap();
         let mut f = labelled_figure(none);
         f.single_axes_mut().legend(LegendStyle::Header);
-        assert_eq!(legend_and_groups(&f), (2, 4));
+        assert_eq!(legend_and_groups(&f), (2, 3));
         // The same scene as under a theme whose own style is the header row.
         let scene_of = |f: &Figure| scene(f, FontLibrary::global(), "Figure.to_scene()").unwrap();
         assert_eq!(scene_of(&f), scene_of(&labelled_figure(Theme::pigment())));
@@ -1367,15 +1368,15 @@ mod tests {
         // legend group.
         let mut f = labelled_figure(Theme::graphite());
         let direct = |f: &Figure| plan_figure(f, (0, 0), FontLibrary::global()).1.direct.len();
-        assert_eq!(legend_and_groups(&f), (0, 4));
+        assert_eq!(legend_and_groups(&f), (0, 3));
         assert_eq!(direct(&f), 2);
         // The axes ask for the header row.
         f.single_axes_mut().legend(LegendStyle::Header);
-        assert_eq!(legend_and_groups(&f), (2, 4));
+        assert_eq!(legend_and_groups(&f), (2, 3));
         assert_eq!(direct(&f), 0);
         // Calling it again replaces the style.
         f.single_axes_mut().legend(LegendStyle::None);
-        assert_eq!(legend_and_groups(&f), (0, 3));
+        assert_eq!(legend_and_groups(&f), (0, 2));
         assert_eq!(direct(&f), 0);
     }
 
@@ -1648,19 +1649,18 @@ mod tests {
         assert_eq!(a.frame.right(), b.frame.x);
         assert_eq!(a.frame.bottom(), c.frame.y);
         assert_eq!((a.frame.x, a.frame.y), (0.0, 0.0));
-        // Chrome, marks and baseline for each axes, in row-major order; nothing for the empty
-        // cell.
+        // Chrome and line marks for each axes, in row-major order; nothing for the empty cell.
         let s = scene(&f, lib, "Figure.to_scene()").unwrap();
         let groups = s
             .items
             .iter()
             .filter(|item| matches!(item, Item::Group { .. }))
             .count();
-        assert_eq!((s.items.len(), groups), (9, 9));
+        assert_eq!((s.items.len(), groups), (6, 6));
         let chrome_titles: Vec<bool> = s
             .items
             .iter()
-            .step_by(3)
+            .step_by(2)
             .zip(["0, 0", "0, 1", "1, 0"])
             .map(|(chrome, title)| {
                 let Item::Group { items, .. } = chrome else {

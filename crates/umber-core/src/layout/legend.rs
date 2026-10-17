@@ -1360,7 +1360,7 @@ mod tests {
     }
 
     /// The legend's one swatch box, and the marks and legend items of the scene, which must
-    /// hold chrome, marks, legend and baseline groups.
+    /// hold chrome, marks and legend groups, with an optional baseline.
     fn swatch_and_items(f: &Figure) -> (SwatchBox, Vec<Item>, Vec<Item>) {
         let layout = plan_figure(f, (0, 0), FontLibrary::global()).1;
         let [entry] = layout.legend.entries() else {
@@ -1372,10 +1372,10 @@ mod tests {
             _,
             Item::Group { items: marks, .. },
             Item::Group { items: legend, .. },
-            _,
+            ..,
         ] = scene.items.as_slice()
         else {
-            panic!("chrome, marks, legend and baseline groups");
+            panic!("chrome, marks and legend groups, with an optional baseline");
         };
         (entry.swatch, marks.clone(), legend.clone())
     }

@@ -16,6 +16,7 @@ import umber as ub
 from umber import _args
 from umber._args import (
     MAX_TEXT_LENGTH,
+    boolean,
     checked_text,
     instance,
     integer,
@@ -146,6 +147,7 @@ def test_checked_text_uses_the_given_label_and_class() -> None:
         (3, 3.0),
         (-2.5, -2.5),
         (np.int8(-4), -4.0),
+        (np.int64(3), 3.0),
         (np.uint64(2**64 - 1), float(2**64 - 1)),
         (np.float16(0.5), 0.5),
         (np.float32(1.25), 1.25),
@@ -173,14 +175,14 @@ def test_real_turns_ints_beyond_the_float_range_into_infinity() -> None:
     ("value", "shown"),
     [
         (True, "bool"),
-        (np.True_, "bool"),
+        (np.True_, "numpy.bool"),
         ("1.5", "str"),
         (None, "None"),
         (Decimal("1.5"), "Decimal"),
         (Fraction(1, 3), "Fraction"),
         (Fraction(10**400, 3), "Fraction"),
-        (np.timedelta64(2, "s"), "timedelta64"),
-        (np.complex128(1), "complex128"),
+        (np.timedelta64(2, "s"), "numpy.timedelta64"),
+        (np.complex128(1), "numpy.complex128"),
         (1j, "complex"),
         ([1.0], "list"),
     ],
@@ -209,7 +211,13 @@ def test_real_uses_the_given_type_error_hint() -> None:
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [(30, 30), (np.int32(-7), -7), (np.uint8(200), 200), (np.uint64(2**64 - 1), 2**63 - 1)],
+    [
+        (30, 30),
+        (np.int32(-7), -7),
+        (np.int64(3), 3),
+        (np.uint8(200), 200),
+        (np.uint64(2**64 - 1), 2**63 - 1),
+    ],
 )
 def test_integer_accepts_ints(value: object, expected: int) -> None:
     result = integer("Axes.hist()", "bins", value)
@@ -228,10 +236,11 @@ def test_integer_clamps_to_the_i64_range() -> None:
     ("value", "shown"),
     [
         (True, "bool"),
-        (np.False_, "bool"),
+        (np.True_, "numpy.bool"),
+        (np.False_, "numpy.bool"),
         (3.0, "float"),
-        (np.float64(3.0), "float64"),
-        (np.timedelta64(2, "s"), "timedelta64"),
+        (np.float64(3.0), "numpy.float64"),
+        (np.timedelta64(2, "s"), "numpy.timedelta64"),
         (Fraction(3, 1), "Fraction"),
         (Decimal(3), "Decimal"),
         ("3", "str"),
@@ -243,6 +252,32 @@ def test_integer_rejects_other_types(value: object, shown: str) -> None:
         f"Axes.hist(): bins is {shown}; bins must be an int.",
         "bins",
         INTEGER_HINT,
+    )
+
+
+# --- boolean ---
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_boolean_returns_bool_unchanged(value: bool) -> None:
+    assert boolean("Axes.y_error_bars()", "caps", value) is value
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        (1, "int"),
+        (None, "None"),
+        (np.True_, "numpy.bool"),
+        (np.float64(1.5), "numpy.float64"),
+        (np.int64(1), "numpy.int64"),
+    ],
+)
+def test_boolean_rejects_other_types(value: object, shown: str) -> None:
+    assert error(TypeError, lambda: boolean("Axes.y_error_bars()", "caps", value)) == (
+        f"Axes.y_error_bars(): caps is {shown}; caps must be a bool.",
+        "caps",
+        "pass True or False.",
     )
 
 
@@ -329,10 +364,27 @@ def test_path_rejects_other_types(value: object, shown: str) -> None:
 # --- message helpers ---
 
 
-def test_type_name() -> None:
-    assert type_name(None) == "None"
-    assert type_name(np.float32(1)) == "float32"
-    assert type_name(Dash.SOLID) == "Dash"
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        (None, "None"),
+        (True, "bool"),
+        (1.5, "float"),
+        (3, "int"),
+        (Dash.SOLID, "Dash"),
+        (np.True_, "numpy.bool"),
+        (np.float32(1), "numpy.float32"),
+        (np.float64(1), "numpy.float64"),
+        (np.int64(1), "numpy.int64"),
+        (np.datetime64("2020-01-01"), "numpy.datetime64"),
+        (np.str_("a"), "numpy.str_"),
+        (np.bytes_(b"a"), "numpy.bytes_"),
+        (np.void(b"a"), "numpy.void"),
+        (np.array([1]), "ndarray"),
+    ],
+)
+def test_type_name(value: object, shown: str) -> None:
+    assert type_name(value) == shown
 
 
 def test_short_repr_cuts_at_forty_characters() -> None:

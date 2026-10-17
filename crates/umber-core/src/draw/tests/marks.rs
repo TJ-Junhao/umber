@@ -73,13 +73,13 @@ fn marks_group_is_clipped_to_the_plot_area_widened_for_line_ends() {
             height: plot.height as f32,
         }
     );
-    // No marks, or none visible: no marks group.
+    // No visible line marks: only chrome, with neither marks nor a baseline.
     let mut f = Figure::new(6.0, 4.0, Theme::graphite()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .line(nums(&[f64::NAN]), &[f64::NAN], LineOptions::default())
         .unwrap();
-    assert_eq!(f.to_scene(FontLibrary::global()).unwrap().items.len(), 2);
+    assert_eq!(f.to_scene(FontLibrary::global()).unwrap().items.len(), 1);
 }
 
 #[test]

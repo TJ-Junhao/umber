@@ -83,6 +83,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/area.rs
   crates/umber-core/tests/support/corpus/band.rs
   crates/umber-core/tests/support/corpus/bars.rs
+  crates/umber-core/tests/support/corpus/baseline.rs
   crates/umber-core/tests/support/corpus/box.rs
   crates/umber-core/tests/support/corpus/bubbles.rs
   crates/umber-core/tests/support/corpus/category_labels.rs

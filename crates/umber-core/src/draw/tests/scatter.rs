@@ -52,9 +52,9 @@ fn scatter_drops_points_far_outside() {
     assert_eq!((stroke.color, stroke.width), (theme.background(), 0.8));
     assert!(stroke.dash.is_empty());
 
-    // Every point outside: no marks group at all.
+    // Every point outside: only chrome, with neither marks nor a baseline.
     let f = scatter_figure(theme, &[5.0, -5.0], &[0.5, 0.5], Marker::Circle);
-    assert_eq!(f.to_scene(FontLibrary::global()).unwrap().items.len(), 2);
+    assert_eq!(f.to_scene(FontLibrary::global()).unwrap().items.len(), 1);
 }
 
 #[test]

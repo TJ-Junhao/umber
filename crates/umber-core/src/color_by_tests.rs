@@ -57,8 +57,12 @@ fn marker_fills(f: &Figure) -> Vec<(Rgba, usize)> {
 /// The fills of the bubbles of the scene's marks group, in drawing order.
 fn bubble_fills(f: &Figure) -> Vec<Rgba> {
     let scene = f.to_scene(FontLibrary::global()).unwrap();
-    let Item::Group { items, .. } = &scene.items[1] else {
-        panic!("marks")
+    let Some(Item::Group {
+        clip: Some(_),
+        items,
+    }) = scene.items.get(1)
+    else {
+        return Vec::new();
     };
     items
         .iter()

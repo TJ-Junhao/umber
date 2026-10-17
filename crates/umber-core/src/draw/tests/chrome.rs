@@ -23,9 +23,12 @@ fn grid_dashes_follow_the_theme() {
         (Theme::midnight(), vec![2.0, 4.0], LineCap::Butt),
     ];
     for (theme, dash, cap) in cases {
-        let scene = chrome_figure(theme.clone())
-            .to_scene(FontLibrary::global())
+        let mut figure = chrome_figure(theme.clone());
+        figure
+            .single_axes_mut()
+            .stem(AxisData::Numbers(vec![]), &[], Default::default())
             .unwrap();
+        let scene = figure.to_scene(FontLibrary::global()).unwrap();
         let all = strokes(&scene);
         let (grid, baseline) = all.split_at(all.len() - 1);
         assert!(!grid.is_empty());
@@ -54,7 +57,11 @@ fn grid_dashes_follow_the_theme() {
 fn baseline_is_at_zero_or_bottom() {
     let baseline_y = |lo: f64, hi: f64| {
         let mut f = chrome_figure(Theme::graphite());
-        f.single_axes_mut().ylim(lo, hi).unwrap();
+        f.single_axes_mut()
+            .ylim(lo, hi)
+            .unwrap()
+            .stem(AxisData::Numbers(vec![]), &[], Default::default())
+            .unwrap();
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         let all = strokes(&scene);
         let (path, _) = all.last().copied().unwrap();
@@ -222,7 +229,7 @@ fn end_label_inset_grows_only_for_the_first_x_label() {
         let (path, _) = all.last().copied().unwrap();
         match path.verbs().first() {
             Some(PathVerb::MoveTo(p)) => p.x,
-            _ => panic!("baseline must start with a move"),
+            _ => panic!("gridline must start with a move"),
         }
     };
     let narrow = plot_left("a", "c");
@@ -249,10 +256,10 @@ fn baseline_is_drawn_last_over_the_marks() {
     let theme = Theme::pigment();
     let mut f = chrome_figure(theme.clone());
     f.single_axes_mut()
-        .line(
+        .stem(
             AxisData::Numbers(vec![0.0, 100.0]),
             &[0.0, 1.0],
-            LineOptions::default(),
+            Default::default(),
         )
         .unwrap();
     let layout = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1;
@@ -291,10 +298,13 @@ fn baseline_is_drawn_last_over_the_marks() {
     assert!(!marks.is_empty() && !marks.iter().any(is_baseline));
     assert!(matches!(baseline.as_slice(), [only] if is_baseline(only)));
 
-    // Without visible marks the baseline still follows the chrome.
-    let scene = chrome_figure(theme.clone())
-        .to_scene(FontLibrary::global())
+    // An empty anchored mark still draws the baseline after the chrome.
+    let mut empty = chrome_figure(theme.clone());
+    empty
+        .single_axes_mut()
+        .stem(AxisData::Numbers(vec![]), &[], Default::default())
         .unwrap();
+    let scene = empty.to_scene(FontLibrary::global()).unwrap();
     let [
         Item::Group { clip: None, .. },
         Item::Group {
@@ -320,6 +330,8 @@ fn a_baseline_on_the_x_axis_runs_from_top_to_bottom() {
     f.add_axes(ScaleKind::Linear, ScaleKind::Category)
         .unwrap()
         .xlim(-2.0, 6.0)
+        .unwrap()
+        .bar(vec![], &[], Default::default())
         .unwrap();
     let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
     assert_eq!(resolved.baseline.axis, ValueAxis::X);

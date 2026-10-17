@@ -37,7 +37,7 @@ pub use violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 mod share_tests;
 
 pub use axes::Axes;
-pub use axes_mut::{AxesMut, ColorbarOptions};
+pub use axes_mut::{AxesMut, BaselineVisibility, ColorbarOptions};
 pub use axis_data::AxisData;
 pub(crate) use axis_data::SharedValues;
 pub use band::{BandMark, BandOptions};

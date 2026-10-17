@@ -515,6 +515,49 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.ytick_format(self._row, self._col, _ticks.native(checked))
             return self
 
+    def baseline(self, *, shown: bool | Auto) -> Self:
+        """Set whether these axes draw their baseline.
+
+        Each call replaces the setting for these axes alone; panels sharing an axis do not
+        inherit it. Copies of the figure keep the setting. Only drawing changes: the baseline
+        stays at zero on the value axis, or at its lower edge when zero is out of range. Limits,
+        padding, bar bases, area fills and reference-line clipping stay unchanged. A gridline
+        at the baseline tick is kept when the baseline is hidden.
+
+        Args:
+            shown: ``True`` draws the baseline; ``False`` hides it. ``AUTO`` restores the
+                default: draw it when the axes hold a bar, grouped bar, stacked bar, histogram,
+                area, stacked area or stem. Other marks do not suppress it.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``shown`` is neither a bool nor ``AUTO``. Integers are not accepted.
+            UsageError: If ``shown=True`` on two category axes, which have no value axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1], [1, 2])
+            >>> ax = ax.baseline(shown=True)
+            >>> ax = ax.baseline(shown=False)
+            >>> ax = ax.baseline(shown=ub.AUTO)
+        """
+        with api_call():
+            flag = (
+                None
+                if shown is AUTO
+                else _args.boolean(
+                    "Axes.baseline()",
+                    "shown",
+                    shown,
+                    expected="a bool or ub.AUTO",
+                    hint="pass True or False, or ub.AUTO to follow the marks.",
+                )
+            )
+            self._native.baseline(self._row, self._col, flag)
+            return self
+
     def legend(self, style: LegendStyle, *, position: LegendPosition | Auto = AUTO) -> Self:
         """Set the legend style and position, overriding the theme's.
 
@@ -624,8 +667,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> SY:
         """Add a line through the points ``(x[i], y[i])``, in order, and fill the region below it.
 
-        The fill reaches down to the baseline of the axes. A NaN in ``x`` or ``y`` leaves a gap in
-        the line and in the fill. The theme's fill style sets how the fill looks.
+        The fill reaches down to the baseline of the axes. The baseline is drawn at zero, or
+        at the lower edge when zero is out of range, even alongside other marks. A NaN in ``x``
+        or ``y`` leaves a gap in the line and in the fill. The theme's fill style sets how the
+        fill looks.
 
         Args:
             x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -830,6 +875,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Add a line from the baseline to each value, with a marker at its tip.
 
         A linear y domain includes zero. On a log y axis, stems start at the baseline.
+        The baseline is drawn at zero, or at the lower edge when zero is out of range,
+        even alongside other marks.
         Category x values sit at band centres. A NaN coordinate leaves out that point.
         Explicit limits clip stems and markers; points are not downsampled. A labelled
         series takes a legend row entry, including under ``LegendStyle.DIRECT``.
@@ -885,7 +932,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         On a category x axis the bars stand on the baseline and a negative height draws below
         it. On a category y axis the bars are horizontal: the categories run top to bottom in
         order of first appearance, and the bars grow rightwards from the baseline, leftwards for
-        a negative height. A NaN height leaves its category without a bar.
+        a negative height. A NaN height leaves its category without a bar. The baseline is
+        drawn at zero on the value axis, or at its lower edge when zero is out of range,
+        even alongside other marks.
 
         Args:
             categories: The category names, each at most once.
@@ -1031,7 +1080,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> "Axes[X, Y]":
         """Add grouped bars: in each category, one bar per series, side by side.
 
-        The bars grow as in ``bar()``. Within a category they follow the order of the series,
+        The bars grow and draw a baseline as in ``bar()``, even alongside other marks.
+        Within a category they follow the order of the series,
         which is the order of the legend: left to right, or top to bottom on a category y axis.
 
         Args:
@@ -1076,7 +1126,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Add stacked bars: in each category, the series stacked on one another.
 
         Positive and negative values stack separately, above and below the baseline, or on a
-        category y axis right and left of it.
+        category y axis right and left of it. The baseline is drawn as in ``bar()``, even
+        alongside other marks.
 
         Args:
             categories: The category names, each at most once.
@@ -1121,7 +1172,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         line width. The first layer starts at the baseline. A linear y axis includes zero;
         on log y the baseline is the lower limit. A NaN in x or any series breaks every layer
         at that index. Long inputs are reduced per device column, keeping every cumulative
-        curve's envelope and exact crossings at explicit limits.
+        curve's envelope and exact crossings at explicit limits. The baseline is drawn at
+        zero, or at the lower edge when zero is out of range, even alongside other marks.
 
         Args:
             x: Numeric x values in non-decreasing order, NaN apart; times on a time x axis,
@@ -1171,7 +1223,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     ) -> "Axes[float, float]":
         """Add a histogram: the count of ``values`` in equal-width bins over their range.
 
-        NaN values are left out of the counts. The x axis must be linear.
+        NaN values are left out of the counts. The x axis must be linear. The baseline is
+        drawn at zero, or at the lower edge when zero is out of range, even alongside other
+        marks.
 
         Args:
             values: The values to count.
@@ -1221,7 +1275,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         axes, on a numeric or a time axis, keep their usual padding; the domain is the union.
         NaN values leave cells blank. Neither axis may be a category axis; the outer edge
         ranges of a numeric axis must meet the axis precision limits, as for ``xlim()`` and
-        ``ylim()``. All color-mapped marks share one color scale.
+        ``ylim()``. All color-mapped marks share one color scale. By default a mesh alone
+        draws no baseline; one is drawn only alongside a mark that grows from zero, such as
+        an area, histogram or stem. ``baseline(shown=...)`` overrides it.
 
         Args:
             x_edges: Strictly increasing column edges, one more than the number of columns:
@@ -1293,6 +1349,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Widths are equal in axis space: in data on a linear axis, in the logarithm on a log
         axis. A pair with either coordinate NaN is skipped. Empty bins are blank, including
         on a log color scale. Both axes must be numeric; counts share the axes' color scale.
+        By default a 2-D histogram alone draws no baseline; one is drawn only alongside a
+        mark that grows from zero, such as an area, histogram or stem.
+        ``baseline(shown=...)`` overrides it.
 
         Args:
             x: The x coordinates.
@@ -1342,6 +1401,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         With a narrow explicit ``xlim`` and automatic y limits, hexagons keep their size;
         the y range may grow far beyond the data to keep every hexagon whole and regular.
         Set ``ylim()`` or choose a larger ``gridsize`` to control that range.
+        By default a hexbin mark alone draws no baseline; one is drawn only alongside a
+        mark that grows from zero, such as an area, histogram or stem.
+        ``baseline(shown=...)`` overrides it.
 
         Args:
             x: The x coordinates on numeric axes.

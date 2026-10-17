@@ -73,7 +73,8 @@ def _raised(tmp_path: Path, line: str) -> BaseException:
 
 
 def _type_name(value: object) -> str:
-    return "None" if value is None else type(value).__name__
+    name = "None" if value is None else type(value).__name__
+    return f"numpy.{name}" if isinstance(value, np.generic) else name
 
 
 def _setter(theme: ub.Theme, name: str) -> Callable[[object], ub.Theme]:

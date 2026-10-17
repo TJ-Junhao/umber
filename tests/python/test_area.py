@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 import umber as ub
+from baseline_check import assert_only_baseline_added
 from umber import _umber
 from umber._errors import details
 
@@ -118,8 +119,10 @@ def test_empty_x_follows_the_x_scale(category: bool) -> None:
     ax = _axes(ub.Scale.category() if category else None)
     before = ax.figure.to_svg()
     ax.area([], [])
+    after = ax.figure.to_svg()
+    assert_only_baseline_added(before, after)
     ax.area(np.array([]), np.array([]))
-    assert ax.figure.to_svg() == before
+    assert ax.figure.to_svg() == after
 
 
 def test_a_nan_leaves_a_gap_and_the_style_arguments_reach_the_figure() -> None:

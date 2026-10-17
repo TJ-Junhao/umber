@@ -587,10 +587,11 @@ def test_hexbin_shared_axes(share: ub.Share) -> None:
     assert fig.to_svg() == fig.to_svg()
 
 
-def test_empty_counts_do_not_change_other_marks() -> None:
+@pytest.mark.parametrize("method", ["hist2d", "hexbin"])
+def test_empty_counts_leave_scatter_output_unchanged(method: str) -> None:
     ax = axes().scatter([0, 1], [0, 2])
     before = ax.figure.to_svg()
-    ax.hist2d([], []).hexbin([], [])
+    call(getattr(ax, method))([], [])
     assert ax.figure.to_svg() == before
 
 
