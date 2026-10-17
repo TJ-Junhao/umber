@@ -1,5 +1,5 @@
-//! Automatic hexbin limits settle for any finite data: dense normal clouds with sparse tails,
-//! heavy-tailed samples and far outliers all lay out.
+//! Automatic hexbin limits settle for dense normal clouds with sparse tails, heavy-tailed
+//! samples, far outliers, random finite clouds and several hexbins on one axes.
 
 use proptest::prelude::*;
 use umber_core::{
@@ -181,6 +181,30 @@ proptest! {
                 &y,
                 HexbinOptions { gridsize, ..HexbinOptions::default() },
             ).unwrap();
+        }
+        let laid_out = f.to_scene(FontLibrary::global());
+        prop_assert!(laid_out.is_ok(), "{:?}", laid_out.err());
+    }
+
+    #[test]
+    fn several_random_hexbins_on_one_axes_settle(
+        points in prop::collection::vec(point(), 1..8),
+        others in prop::collection::vec(
+            (0.01f64..100.0, -5.0f64..5.0, 0.01f64..100.0, -5.0f64..5.0, 1usize..=120),
+            1..=2,
+        ),
+        gridsize in 1usize..=120,
+        width in 3.0f64..10.0,
+        height in 2.5f64..8.0,
+    ) {
+        let (x, y): (Vec<f64>, Vec<f64>) = points.into_iter().unzip();
+        let mut f = Figure::new(width, height, Theme::pigment()).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        axes.hexbin(&x, &y, HexbinOptions { gridsize, ..HexbinOptions::default() }).unwrap();
+        for (sx, dx, sy, dy, gridsize) in others {
+            let x: Vec<f64> = x.iter().map(|x| sx * x + dx).collect();
+            let y: Vec<f64> = y.iter().map(|y| sy * y + dy).collect();
+            axes.hexbin(&x, &y, HexbinOptions { gridsize, ..HexbinOptions::default() }).unwrap();
         }
         let laid_out = f.to_scene(FontLibrary::global());
         prop_assert!(laid_out.is_ok(), "{:?}", laid_out.err());

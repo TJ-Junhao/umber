@@ -1042,13 +1042,18 @@ fn plan(
 /// with both limits fixed, any aspect change needs a recount. Fitting never stretches the
 /// coordinate map of counted cells.
 ///
+/// Several hexbins on one axes are counted in the metric of the axes, as shared axes are, so
+/// that all of their hexagons are regular on the same limits.
+///
 /// A lone automatic hexbin is fitted tightly: its whole cells plus the least room, on one
 /// axis, that gives the plot's shape. That room moves the automatic ticks, and their labels
-/// can change the plot's shape back, so tight fits can alternate between shapes forever. The
-/// tight fit depends on the plot aspects alone, so aspects that repeat those of a pass before
-/// the last one mean they alternate. From then on each fit only grows the limits of the last
-/// pass to the new shape, as shared and mixed axes always do: the room that gave a shape is
-/// kept, and the limits settle once the labels keep the shape.
+/// can change the plot's shape back, so tight fits can alternate between shapes forever.
+/// After the first pass, each pass depends only on the plot aspects, the axis domains and the
+/// aspects the lattices were counted at; when all of them repeat those of an earlier pass,
+/// the passes repeat forever. From then on each tight fit instead only grows the limits of
+/// the last pass to the new shape, as shared and mixed axes always do: the room that gave a
+/// shape is kept, so the limits stop moving once the labels keep the shape. The passes are
+/// still bounded, and a layout that does not settle within them is an error.
 fn plan_cells(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -1085,7 +1090,7 @@ fn plan_cells(
         .iter()
         .map(|(_, layout)| layout.plot.width / layout.plot.height)
         .collect();
-    let mut seen_aspects: Vec<Vec<f64>> = Vec::new();
+    let mut seen_states = Vec::new();
     let mut tight = true;
     for pass in 0..64 {
         let aspects: Vec<_> = planned
@@ -1094,18 +1099,23 @@ fn plan_cells(
             .map(|(_, layout)| layout.plot.width / layout.plot.height)
             .collect();
         let scales = axis_scales(&planned);
-        // Aspects seen before the last pass repeat: the tight fits alternate between shapes.
-        tight &= !seen_aspects
-            .iter()
-            .rev()
-            .skip(1)
-            .any(|seen| *seen == aspects);
-        seen_aspects.push(aspects.clone());
+        if pass > 0 && tight && !keeps_tight_fits() {
+            // Everything this pass reads: a repeat means the passes cycle.
+            let domains: Vec<_> = scales.iter().map(|s| s.map(|s| s.domain())).collect();
+            let state = (aspects.clone(), domains, counting_aspects.clone());
+            tight = !seen_states.contains(&state);
+            seen_states.push(state);
+        }
         for (i, panel) in panels.iter_mut().enumerate() {
             let limits = [panel.axes.x_limits(), panel.axes.y_limits()];
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
                 || groups.y.iter().filter(|&&g| g == groups.y[i]).count() > 1;
-            let independent = !shared && limits == [None, None];
+            let hexbins = panel
+                .marks
+                .iter()
+                .filter(|m| matches!(m, ResolvedMark::Hexbin { .. }))
+                .count();
+            let independent = !shared && limits == [None, None] && hexbins == 1;
             let only_hexbin = panel
                 .marks
                 .iter()
@@ -1192,6 +1202,24 @@ fn plan_cells(
     )
     .with_parameter("gridsize")
     .with_hint("choose a larger gridsize, or increase the figure size."))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether [`plan_cells`] keeps fitting lone hexbins tightly even when the passes cycle.
+    pub(crate) static KEEP_TIGHT_FITS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether lone hexbins stay tightly fitted when the passes cycle, as tests may ask.
+#[cfg(test)]
+fn keeps_tight_fits() -> bool {
+    KEEP_TIGHT_FITS.with(std::cell::Cell::get)
+}
+
+/// Whether lone hexbins stay tightly fitted when the passes cycle: never.
+#[cfg(not(test))]
+fn keeps_tight_fits() -> bool {
+    false
 }
 
 /// [`plan`] for the axes of `figure` whose top-left cell is at `cell`, with the figure laid out
