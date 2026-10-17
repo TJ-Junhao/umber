@@ -6,7 +6,7 @@ umber is a plotting library for Python with a rendering core written in Rust. It
 
 ![A line chart of daily temperature at two stations, in the Graphite theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
 
-- **Fast on large data.** Rendering runs in Rust: a 1,000,000-point line renders to PNG in about 61 ms, and a 100,000-point scatter in about 49 ms (see [Performance](#performance)).
+- **Fast on large data.** Rendering runs in Rust: a 1,000,000-point line renders to PNG in about 57 ms, and a 100,000-point scatter in about 47 ms (see [Performance](#performance)).
 - **Explicit.** Every option is a typed value (`Color`, `Size`, `Dash`, `TickFormat`, …). There are no format strings, no positional style arguments and no silent conversions.
 - **Fails fast, pointing at the problem.** Invalid input raises at the call that caused it, with a message, a hint and the offending argument highlighted in the traceback.
 - **Statically typed.** Category and numeric axes are distinct types: calling `bar` on a numeric axes is reported by pyright and mypy before the code runs.
@@ -236,15 +236,16 @@ Medians from the [criterion](https://github.com/criterion-rs/criterion.rs) suite
 
 | Case | Time |
 | --- | ---: |
-| 1,000,000-point line → PNG | 61 ms |
-| 1,000,000-point line on a time axis → PNG | 59 ms |
-| 1,000,000-point line → SVG | 20 ms |
-| 100,000-point scatter → PNG | 49 ms |
-| Histogram of 1,000,000 values → PNG | 21 ms |
-| 2-D histogram of 1,000,000 points, 100 × 100 bins → PNG | 15 ms |
-| Hexbin of 1,000,000 points, grid size 50 → PNG | 70 ms |
-| Heatmap of 1,000 × 1,000 cells → PNG | 0.92 s |
-| 4 × 5 grid, one 10,000-point line per panel → PNG | 111 ms |
+| 1,000,000-point line → PNG | 57 ms |
+| 1,000,000-point line on a time axis → PNG | 52 ms |
+| 1,000,000-point line → SVG | 18 ms |
+| 100,000-point scatter → PNG | 47 ms |
+| Histogram of 1,000,000 values → PNG | 20 ms |
+| 2-D histogram of 1,000,000 points, 100 × 100 bins → PNG | 11 ms |
+| Hexbin of 1,000,000 points, grid size 50 → PNG | 67 ms |
+| Heatmap of 1,000 × 1,000 cells → PNG | 153 ms |
+| Heatmap of 1,000 × 1,000 cells → SVG | 196 ms |
+| 4 × 5 grid, one 10,000-point line per panel → PNG | 103 ms |
 
 Lines with sorted numeric or time x values are downsampled when they have more than four points per pixel column of the plot (counted at a nominal 300 dpi), keeping the first, last, minimum and maximum point in each column, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads.
 
