@@ -46,6 +46,10 @@ pub enum ScaleKind {
         base: LogBase,
     },
     /// Discrete categories; order = first appearance across marks, resolved at render time.
+    /// Automatic labels start at category 0 and show every k-th category, with the smallest k
+    /// in 1, 2, 5, 10, 20, 50, ... whose label widths (x) or heights (y) leave at least half
+    /// the tick label font size between neighbours, as numeric ticks do. Shared axes use the
+    /// same labels. Explicit tick labels and heatmap annotations are unchanged.
     Category,
     /// Times ([`Instant`]s), which map linearly, with calendar ticks and labels.
     Time,

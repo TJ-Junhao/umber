@@ -182,13 +182,13 @@ impl Side {
         }
     }
 
-    /// Whether this side of an axes with `limits` gets automatic ticks: a linear, log or time
-    /// axis without explicit ticks.
+    /// Whether this side of an axes with `limits` gets automatic ticks: a category axis, or a
+    /// linear, log or time axis without explicit ticks.
     fn is_automatic(self, limits: &Limits<'_>) -> bool {
         match limits.axis(self.axis()) {
             resolve::AxisLimits::Continuous(axis) => axis.ticks.explicit().is_none(),
             resolve::AxisLimits::Time(axis) => axis.ticks.explicit().is_none(),
-            resolve::AxisLimits::Category => false,
+            resolve::AxisLimits::Category => true,
         }
     }
 
@@ -363,14 +363,19 @@ fn resolve_groups(
 /// the layout stay unchanged. Otherwise it resolves and solves again, repairing crowded
 /// choices with candidates that draw at least two ticks.
 ///
-/// That solve can give a plot smaller than the one the ticks were chosen for. While the labels
-/// of a side with automatic ticks crowd on the solved plot, its ticks are chosen again for that
+/// That solve can give a plot smaller than the one the ticks were chosen for. While automatic
+/// numeric or time tick labels crowd on the solved plot, its ticks are chosen again for that
 /// plot ([`TickChoice::again`]): at most as many ticks the first time at a number of ticks, one
 /// fewer the next, and the grid is solved again. A side whose ticks number two, whose new
 /// choice does not fit even on the plot it was made for, or whose new choice the grid cannot
 /// hold (the solve fails, and the previous solve is kept) keeps its ticks. Each side is chosen
 /// again at most twice per number of ticks, and its ticks never grow in number while the
 /// domain stays fixed.
+///
+/// Category axes keep labels apart in every pass, including the first, and choose their
+/// smallest fitting 1/2/5 decade step again on each solved plot. They may show only category 0,
+/// or gain labels when another axis releases space. Shared axes choose for their smallest
+/// visible member and copy the same ticks to the whole group.
 ///
 /// Before each round the bubble fits are asked again on the solved plots ([`BubbleFits`]):
 /// the first time, every automatic axis holding bubbles widens its data extent to fit them on
@@ -611,7 +616,7 @@ fn plan(
         }
     };
 
-    // Each side is chosen again at most twice per number of ticks.
+    // Numeric and time sides retry at most twice per tick count; categories share this budget.
     let rounds: usize = resolved
         .iter()
         .map(|r| {
@@ -663,6 +668,25 @@ fn plan(
                 }
                 let plot = side.group_plot(groups, i, &plots, &show_labels);
                 let ticks = side.ticks(r);
+                let axis = match side {
+                    Side::X => &r.x,
+                    Side::Y => &r.y,
+                };
+                if let resolve::AxisScale::Category(scale) = &axis.scale {
+                    // A thinner y axis can release width for x labels, so categories choose
+                    // their smallest fitting step again even when their current labels fit.
+                    let choice = &mut next[i][side.index()];
+                    if choice.state != ChoiceState::Settled
+                        && side
+                            .room(plot, theme, lib)
+                            .category_ticks(resolve::category_ticks(scale, side.axis()))
+                            != ticks
+                    {
+                        *choice = TickChoice::first(plot);
+                        again.push((i, side));
+                    }
+                    continue;
+                }
                 if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
                 {
                     continue;
@@ -1112,6 +1136,10 @@ fn in_cell(figure: &Figure, axes: &Axes, err: Error) -> Error {
     let cells = axes.cells();
     err.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
 }
+
+#[cfg(test)]
+#[path = "category_label_tests.rs"]
+mod category_label_tests;
 
 #[cfg(test)]
 #[path = "header_tests.rs"]

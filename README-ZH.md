@@ -77,7 +77,7 @@ fig.save_svg("temperature.svg")
 | 二维直方图、六边形分箱图 | `ax.hist2d(x, y, bins=40)`、`ax.hexbin(x, y, gridsize=30)` |
 | 按值着色的散点 | `ax.scatter(x, y, color=ub.ColorBy(values))` |
 
-柱状图、箱线图和小提琴图需要一条类别轴。在类别 x 轴（`fig.add_axes(x=ub.Scale.category())`）上它们是竖直的；在类别 y 轴（`fig.add_axes(y=ub.Scale.category())`）上它们是水平的，以数值对类别画散点即为点图（dot plot）。热力图要求两条轴都是类别轴。对数轴用 `ub.Scale.log()`，时间轴用 `ub.Scale.time()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
+柱状图、箱线图和小提琴图需要一条类别轴。在类别 x 轴（`fig.add_axes(x=ub.Scale.category())`）上它们是竖直的；在类别 y 轴（`fig.add_axes(y=ub.Scale.category())`）上它们是水平的，以数值对类别画散点即为点图（dot plot）。热力图要求两条轴都是类别轴。自动 category labels 从第 0 个类别起，使用 1、2、5、10、20、50、…… 中能让相邻 labels 保持数值 ticks 最小间距的最小步长；共享轴显示相同 labels。对数轴用 `ub.Scale.log()`，时间轴用 `ub.Scale.time()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
 
 自动 limits 包含完整的 bubble marker 及其 outline；显式 limits 会裁切它们。Legend swatch 显示 mark 实际绘制的 fill，即与 plot background 合成后的颜色。
 
