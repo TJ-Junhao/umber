@@ -387,7 +387,7 @@ fn references_alone_draw_no_data_marks_and_nothing_visible_draws_no_group() {
 }
 
 /// A line chart over the y values 33 to 68 with every reference mark of the kind: auto y limits,
-/// so the baseline sits at the lower limit before padding, above the plot bottom.
+/// so the baseline sits at the padded lower limit, on the plot bottom.
 fn lower_limit_figure(ylim: Option<(f64, f64)>) -> Figure {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
@@ -416,7 +416,7 @@ fn baseline_y_of(figure: &Figure) -> (Area, f64) {
 fn vertical_references_end_at_a_lower_limit_baseline() {
     let f = lower_limit_figure(None);
     let (plot, baseline) = baseline_y_of(&f);
-    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    assert_near(baseline, plot.bottom());
     let items = items(&f);
     let (_, top, _, bottom) = rect(&items[0]);
     assert_near(top, plot.y);
@@ -500,10 +500,10 @@ fn horizontal_references_never_reach_below_a_lower_limit_baseline() {
         .hline(25.0, RuleOptions::default())
         .unwrap();
     let (plot, baseline) = baseline_y_of(&f);
-    assert!(baseline < plot.bottom() - 1.0, "{baseline} {plot:?}");
+    assert_near(baseline, plot.bottom());
     let drawn = items(&f);
-    // The span's bottom is the value 20, the lowest value of the chart; the lower limit is a
-    // nice number at or below it.
+    // The span's bottom is the value 20, the lowest value of the chart; the padded lower
+    // limit lies below it.
     let bottom = rect(&drawn[0]).3;
     assert!(bottom <= baseline + 1e-3, "{bottom} vs {baseline}");
     let ((_, y0), (_, y1)) = ends(drawn.last().unwrap());
@@ -553,16 +553,19 @@ fn a_shared_y_grid_ends_every_panel_at_the_common_baseline() {
             let layout = crate::pipeline::plan_figure(&f, (0, col), FontLibrary::global()).1;
             (layout.plot, layout.baseline_y())
         };
-        assert!(baseline < plot.bottom() - 1.0, "{col}: {baseline} {plot:?}");
+        assert_near(baseline, plot.bottom());
         assert_near(rect(&items[0]).3, baseline);
         assert_near(ends(items.last().unwrap()).1.1, baseline);
     }
 }
 
-/// Data 33 to 68 on y ticks 20 to 80: the baseline is the tick 20, above the plot bottom.
+/// Log data 33 to 68 on y ticks 20 to 80: the baseline remains at the unpadded tick 20,
+/// above the plot bottom, so references need an additional clip there.
 fn ticked_figure(rule: RuleOptions, vertical: bool) -> Figure {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    let mut axes = f
+        .add_axes(ScaleKind::Linear, ScaleKind::Log { base: LogBase::TEN })
+        .unwrap();
     axes.line(
         nums(&[0.0, 30.0, 60.0]),
         &[33.0, 50.0, 68.0],

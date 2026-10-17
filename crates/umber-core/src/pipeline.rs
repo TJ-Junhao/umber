@@ -646,7 +646,33 @@ fn plan(
         .enumerate()
         .map(|(i, r)| measure(i, r))
         .collect();
-    let first = solve(&first, &first_bands)?;
+    let first = solve(&first, &first_bands).or_else(|error| {
+        // Automatic x labels can exceed the canvas inset before their first fit. Obtain
+        // a provisional plot without them, then let the normal tick choice retry on it.
+        // Explicit ticks and every other layout constraint still take part in this solve.
+        let mut provisional = first.clone();
+        let mut changed = false;
+        for (i, r) in provisional.iter_mut().enumerate() {
+            if Side::X.is_automatic(&limits[i])
+                && r.x
+                    .continuous()
+                    .is_some_and(|scale| scale.transform() == crate::Transform::Linear)
+                && !r.x.ticks.is_empty()
+            {
+                r.x.ticks.clear();
+                changed = true;
+            }
+        }
+        if !changed {
+            return Err(error);
+        }
+        let bands: Vec<_> = provisional
+            .iter()
+            .enumerate()
+            .map(|(i, r)| measure(i, r))
+            .collect();
+        solve(&provisional, &bands).map_err(|_| error)
+    })?;
     let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
     let bar_plots = color_plots(&first);
 
@@ -841,6 +867,88 @@ fn plan(
         .collect();
     if fits.clip_unsettled(&resolved, &plots) {
         (resolved, bands, solution) = refit(&mut fits, &choices)?;
+    }
+
+    // A single label can release room that the previous crowded set needed. Before keeping
+    // it, try whole-step pairs on their own layouts, without moving any domain. Each accepted
+    // change replaces one single tick, so this finishes even when the axes affect each other.
+    loop {
+        let mut changed = false;
+        for side in [Side::Y, Side::X] {
+            for i in 0..panels.len() {
+                if side.groups(groups)[i] != i || side.ticks(&resolved[i]).len() != 1 {
+                    continue;
+                }
+                let resolve::AxisLimits::Continuous(axis) = limits[i].axis(side.axis()) else {
+                    continue;
+                };
+                if axis.ticks.explicit().is_some() {
+                    continue;
+                }
+                let scale = match side {
+                    Side::X => resolved[i].x.continuous(),
+                    Side::Y => resolved[i].y.continuous(),
+                };
+                let Some(scale) = scale.copied() else {
+                    continue;
+                };
+                for pair in scale.tick_pairs(axis.ticks.format()) {
+                    let ticks: Vec<_> = pair
+                        .into_iter()
+                        .map(|tick| resolve::AxisTick {
+                            pos: NormalizedPos::new(scale.normalize(tick.value)),
+                            label: tick.label,
+                        })
+                        .collect();
+                    let mut tried = resolved.clone();
+                    for (j, r) in tried.iter_mut().enumerate() {
+                        if side.groups(groups)[j] == i {
+                            match side {
+                                Side::X => r.x.ticks = ticks.clone(),
+                                Side::Y => r.y.ticks = ticks.clone(),
+                            }
+                        }
+                    }
+                    let Ok((tried, tried_bands, tried_solution)) = solve_ticks(tried) else {
+                        continue;
+                    };
+                    let axes_fit = tried_solution.panels.iter().enumerate().all(|(j, slot)| {
+                        Side::BOTH.into_iter().all(|side| {
+                            !show_labels[j][side.index()]
+                                || !side.is_automatic(&limits[j])
+                                || side
+                                    .room(slot.plot.size(), theme, lib)
+                                    .slack(side.ticks(&tried[j]))
+                                    >= 0.0
+                        })
+                    });
+                    let bars = color_plots(&tried_solution);
+                    let colors_fit =
+                        tried
+                            .iter()
+                            .enumerate()
+                            .all(|(j, r)| match (color_sides[j], &r.color) {
+                                (Some(side), Some(color)) => {
+                                    side.room(bars[j], theme, lib).slack(&color.ticks) >= 0.0
+                                }
+                                _ => true,
+                            });
+                    let plots: Vec<_> = tried_solution
+                        .panels
+                        .iter()
+                        .map(|slot| slot.plot.size())
+                        .collect();
+                    if axes_fit && colors_fit && !fits.clone().clip_unsettled(&tried, &plots) {
+                        (resolved, bands, solution) = (tried, tried_bands, tried_solution);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
     }
 
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = inputs
@@ -1996,17 +2104,128 @@ mod tests {
     }
 
     #[test]
-    fn long_percent_labels_keep_the_existing_layout_limit() {
+    fn long_percent_labels_retry_before_rejecting_the_figure() {
         let f = short_percent_scatter(
             [-4680165.074054506, -4023576.5694846567],
             [-3168066.8464300144, -2327272.4889245224],
         );
-        // These labels exceed the existing canvas-edge inset limit. Do not widen the
-        // data domain to zero just to replace them with a short "0.0%" label.
-        let error = try_plan_figure(&f, (0, 0), FontLibrary::global())
-            .expect_err("the labels do not fit this figure");
+        let (resolved, layout) = try_plan_figure(&f, (0, 0), FontLibrary::global()).unwrap();
+        assert!(
+            Side::X
+                .room(layout.plot.size(), f.theme(), FontLibrary::global())
+                .slack(&resolved.x.ticks)
+                >= 0.0
+        );
+        assert_eq!(resolved.x.ticks.len(), 1);
+        assert_eq!(tick_labels(&resolved.x.ticks), ["−450000000.0%"]);
+        assert!(resolved.x.continuous().unwrap().domain().1 < 0.0);
+        f.to_scene(FontLibrary::global()).unwrap();
+
+        let mut explicit = f.clone();
+        let (low, high) = resolved.x.continuous().unwrap().domain();
+        explicit
+            .single_axes_mut()
+            .xlim(low, high)
+            .unwrap()
+            .xticks(&[-4600000.0, -4400000.0, -4200000.0, -4000000.0])
+            .unwrap();
+        let error = explicit.to_scene(FontLibrary::global()).unwrap_err();
         assert!(error.to_string().contains("x tick label"), "{error}");
-        assert!(error.to_string().contains("at most 91 pt"), "{error}");
+    }
+
+    #[test]
+    fn single_ticks_do_not_replace_pairs_that_fit_their_own_layout() {
+        let lib = FontLibrary::global();
+        for (x, y) in [
+            (
+                [-0.0004267591936039441, 0.00038715044386950377],
+                [0.001408778775249747, 0.005912739894112307],
+            ),
+            (
+                [8084.741921390828, 70243.01067776655],
+                [37488.93087405191, 115616.02260363969],
+            ),
+            (
+                [479470.348278096, 653703.333820003],
+                [-403678.5715343826, 425554.13491157634],
+            ),
+        ] {
+            for (w, h) in [(2.5, 1.8), (3.2, 2.6)] {
+                let theme = Theme::pigment().with_font_scale(1.4).unwrap();
+                let mut f = Figure::new(w, h, theme).unwrap();
+                f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                    .unwrap()
+                    .scatter(
+                        AxisData::Numbers(x.to_vec()),
+                        &y,
+                        crate::ScatterOptions::default(),
+                    )
+                    .unwrap();
+                let (r, _) = try_plan_figure(&f, (0, 0), lib).unwrap();
+                for side in Side::BOTH {
+                    if side.ticks(&r).len() != 1 {
+                        continue;
+                    }
+                    let (xlo, xhi) = r.x.continuous().unwrap().domain();
+                    let (ylo, yhi) = r.y.continuous().unwrap().domain();
+                    let (lo, hi) = match side {
+                        Side::X => (xlo, xhi),
+                        Side::Y => (ylo, yhi),
+                    };
+                    let exponent = (hi - lo).log10().floor() as i32;
+                    for power in exponent - 2..=exponent + 1 {
+                        for mantissa in [1.0, 2.0, 2.5, 5.0] {
+                            let step = mantissa * 10f64.powi(power);
+                            let first = (lo / step).ceil() as i64;
+                            let last = (hi / step).floor() as i64;
+                            for index in first..last {
+                                let pair = [index as f64 * step, (index + 1) as f64 * step];
+                                if lo <= 0.0 && hi >= 0.0 && !pair.contains(&0.0) {
+                                    continue;
+                                }
+                                let mut trial = f.clone();
+                                let mut a = trial.single_axes_mut();
+                                a.xlim(xlo, xhi).unwrap().ylim(ylo, yhi).unwrap();
+                                let xs: Vec<_> =
+                                    r.x.ticks
+                                        .iter()
+                                        .map(|t| xlo + t.pos.get() * (xhi - xlo))
+                                        .collect();
+                                let ys: Vec<_> =
+                                    r.y.ticks
+                                        .iter()
+                                        .map(|t| ylo + t.pos.get() * (yhi - ylo))
+                                        .collect();
+                                a.xticks_labeled(
+                                    &xs,
+                                    r.x.ticks.iter().map(|t| t.label.clone()).collect(),
+                                )
+                                .unwrap();
+                                a.yticks_labeled(
+                                    &ys,
+                                    r.y.ticks.iter().map(|t| t.label.clone()).collect(),
+                                )
+                                .unwrap();
+                                match side {
+                                    Side::X => a.xticks(&pair),
+                                    Side::Y => a.yticks(&pair),
+                                }
+                                .unwrap();
+                                if let Ok((tr, layout)) = try_plan_figure(&trial, (0, 0), lib) {
+                                    let slack = side
+                                        .room(layout.plot.size(), trial.theme(), lib)
+                                        .slack(side.ticks(&tr));
+                                    assert!(
+                                        slack < 0.0,
+                                        "{x:?} {y:?} {w}x{h} {side:?}: fitting pair {pair:?}, slack {slack}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -2240,8 +2459,8 @@ mod tests {
             Ok(())
         }
 
-        /// A previous constrained choice whose labels all fit on its final layout keeps
-        /// every axis (including positions and domains) and the complete layout unchanged.
+        /// Fitting multi-tick choices stay unchanged. A single tick can become a pair that
+        /// fits its own layout; every domain and every other tick set stays unchanged.
         fn check_previous(figure: &Figure) -> std::result::Result<(), TestCaseError> {
             let lib = FontLibrary::global();
             let Ok(previous) = previous_plan(figure, lib) else {
@@ -2258,9 +2477,33 @@ mod tests {
             }
             let current = try_plan_panels(figure, lib)?;
             prop_assert_eq!(current.len(), previous.len());
+            let upgraded = current.iter().zip(&previous).any(|((new, _), (old, _))| {
+                Side::BOTH
+                    .into_iter()
+                    .any(|side| side.ticks(old).len() == 1 && side.ticks(new).len() == 2)
+            });
             for ((current, layout), (previous, previous_layout)) in current.iter().zip(&previous) {
-                prop_assert_eq!(current, previous);
-                prop_assert_eq!(format!("{layout:?}"), format!("{previous_layout:?}"));
+                for (side, new, old) in [
+                    (Side::X, &current.x, &previous.x),
+                    (Side::Y, &current.y, &previous.y),
+                ] {
+                    prop_assert_eq!(&new.scale, &old.scale);
+                    if old.ticks.len() == 1 && new.ticks.len() == 2 {
+                        prop_assert!(is_round(new.continuous().unwrap(), &new.ticks));
+                        prop_assert!(
+                            side.room(layout.plot.size(), figure.theme(), lib)
+                                .slack(&new.ticks)
+                                >= 0.0
+                        );
+                    } else {
+                        prop_assert_eq!(new, old);
+                    }
+                }
+                prop_assert_eq!(current.baseline, previous.baseline);
+                prop_assert_eq!(&current.color, &previous.color);
+                if !upgraded {
+                    prop_assert_eq!(format!("{layout:?}"), format!("{previous_layout:?}"));
+                }
             }
             Ok(())
         }

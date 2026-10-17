@@ -423,7 +423,7 @@ impl Norm {
             Norm::Linear { .. } | Norm::Log { .. } => low + (high - low) / 2.0,
         };
         let mut ticks = match ContinuousScale::new(transform, low, high, CONTEXT) {
-            Ok(scale) => scale.ticks(target),
+            Ok(scale) => scale.auto_ticks(target, format).ticks,
             Err(_) => labelled(vec![middle]),
         };
         if let Norm::Centered { center, radius } = *self
@@ -600,6 +600,32 @@ mod tests {
 
     fn labels(ticks: &[AxisTick]) -> Vec<&str> {
         ticks.iter().map(|tick| tick.label.as_str()).collect()
+    }
+
+    #[test]
+    fn fixed_colorbar_steps_match_their_labels() {
+        for center in [None, Some(0.0)] {
+            for (factor, format) in [
+                (1.0, TickFormat::fixed(0).unwrap()),
+                (0.1, TickFormat::fixed(1).unwrap()),
+                (0.01, TickFormat::percent(0).unwrap()),
+                (0.001, TickFormat::percent(1).unwrap()),
+            ] {
+                let norm = Norm::new(
+                    &spec(Transform::Linear, center),
+                    (-7.5 * factor, 7.5 * factor),
+                );
+                let ticks = norm.ticks_for(5, &format);
+                assert!(ticks.len() >= 2);
+                for tick in &ticks {
+                    let units = -7.5 + 15.0 * tick.pos.get();
+                    assert!(
+                        (units - units.round()).abs() < 1e-9,
+                        "{format:?}: {ticks:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

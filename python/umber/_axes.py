@@ -276,9 +276,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Automatic linear limits follow the data, with 5% of its span added on each side;
         an end at zero stays there for bars, histograms, areas and stems. Ticks are round
-        values inside the limits, not the limits themselves. Lines keep their exact x
-        extent, cells keep their edges, and bubbles fit their whole markers. Single values
-        expand to a usable range. Explicit limits are used as given.
+        values inside the limits, not the limits themselves. Cells keep their edges, and
+        bubbles fit their whole markers. Single values expand to a usable range.
+        Explicit limits are used as given.
 
         Args:
             low: The lower limit; finite, and positive on a log axis; a time on a time axis.

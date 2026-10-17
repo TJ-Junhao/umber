@@ -179,9 +179,8 @@ pub(crate) struct Baseline {
     /// The axis the baseline sits on: the value axis.
     pub axis: ValueAxis,
     /// Where the baseline sits along that axis, in `[0, 1]`: at 0 when 0 is inside the domain
-    /// of a linear axis, otherwise at the axis's lower limit before padding (the lowest nice
-    /// tick for auto limits, the explicit low limit, which is the plot edge, for explicit
-    /// ones), and at the low end of a category axis.
+    /// of a linear axis, otherwise at its lower edge. Log axes retain their lower limit
+    /// before padding; category axes use their low end.
     pub pos: NormalizedPos,
 }
 
@@ -688,6 +687,10 @@ struct DrawnTicks<'a> {
 }
 
 impl TickJudge for DrawnTicks<'_> {
+    fn quantum(&self) -> f64 {
+        self.format.quantum()
+    }
+
     fn deferred(&self) -> bool {
         self.room.deferred()
     }
@@ -797,12 +800,17 @@ fn holds_zero(scale: &ContinuousScale) -> bool {
     scale.transform() == Transform::Linear && lo <= 0.0 && 0.0 <= hi
 }
 
-/// Where the baseline sits on the continuous axis `scale`, whose lower limit
-/// before padding is `unpadded_low`: at 0 when 0 lies inside the domain of a linear axis,
-/// otherwise at `unpadded_low`. A position that does not map (impossible for a validated
-/// scale) falls back to the low end.
+/// Where the baseline sits on `scale`: at zero on a linear axis that holds it, otherwise
+/// at its lower edge. Log axes retain their lower limit before padding, `unpadded_low`.
+/// A position that does not map falls back to the low end.
 fn baseline(scale: &ContinuousScale, unpadded_low: f64) -> NormalizedPos {
-    let value = if holds_zero(scale) { 0.0 } else { unpadded_low };
+    let value = if holds_zero(scale) {
+        0.0
+    } else if scale.transform() == Transform::Linear {
+        scale.domain().0
+    } else {
+        unpadded_low
+    };
     let pos = scale.normalize(value);
     if pos.is_finite() {
         NormalizedPos::new(pos)
@@ -4432,7 +4440,7 @@ mod tests {
     }
 
     #[test]
-    fn baseline_sits_at_zero_or_the_unpadded_lower_limit() {
+    fn baseline_sits_at_zero_or_the_lower_limit() {
         // Auto limits that hold 0: the baseline is at 0, wherever 0 is.
         let mut f = figure(LIN, LIN);
         axes(&mut f)
@@ -4442,7 +4450,7 @@ mod tests {
         let scale = r.y.continuous_scale();
         assert_eq!(r.baseline.pos.get(), scale.normalize(0.0));
         assert!(r.baseline.pos.get() > r.y.ticks[0].pos.get());
-        // Away from 0, the baseline is at the unpadded data minimum, not at a tick.
+        // Away from 0, the baseline is at the padded edge, below the data minimum.
         let (xs, ys) = sinusoid();
         for ys in [ys.clone(), ys.iter().map(|y| -y).collect()] {
             let mut f = figure(LIN, LIN);
@@ -4451,13 +4459,7 @@ mod tests {
                 .unwrap();
             let r = resolve_axes(f.single_axes(), 5, 4);
             let lowest = &r.y.ticks[0];
-            let low = ys.iter().copied().fold(f64::INFINITY, f64::min);
-            assert_eq!(r.baseline.pos.get(), r.y.continuous_scale().normalize(low));
-            assert!(
-                (r.baseline.pos.get() - 0.05 / 1.1).abs() < 1e-9,
-                "{:?}",
-                r.baseline.pos
-            );
+            assert_eq!(r.baseline.pos.get(), 0.0);
             // Whole-step ticks lie inside the positive and negative domains.
             let expected = if ys[0] > 0.0 { "40" } else { "\u{2212}60" };
             assert_eq!(lowest.label, expected);
@@ -5538,9 +5540,9 @@ mod tests {
         let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(close(r.y.continuous_scale().domain(), pad(10.0, 20.0)));
         assert_eq!(labels(&r.y.ticks), ["10", "15", "20"]);
-        // The baseline uses the unpadded lower limit of the resulting domain: the lowest tick.
-        assert!(coincides(r.baseline.pos, r.y.ticks[0].pos));
-        assert!((r.baseline.pos.get() - 0.05 / 1.1).abs() < 1e-12);
+        // The baseline uses the padded edge, below both the data and the lowest tick.
+        assert_eq!(r.baseline.pos, NormalizedPos::LOW);
+        assert!(r.baseline.pos.get() < r.y.ticks[0].pos.get());
 
         // Bars keep 0 in a linear y domain, and the zero side stays unpadded.
         let mut f = bar_figure(LIN, &[3.0, 7.0]);
@@ -5692,13 +5694,13 @@ mod tests {
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.y.ticks), ["1.00", "1.00"]);
-        // A coarse fixed format may merge automatic ticks too.
+        // Automatic ticks instead choose a step the fixed format can represent exactly.
         let mut f = scatter_figure(LIN, LIN, &[0.0, 1.0], &[0.0, 1.0]);
         axes(&mut f)
             .ytick_format(TickFormat::fixed(0).unwrap())
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 5);
-        assert_eq!(labels(&r.y.ticks), ["0", "0", "0", "1", "1"]);
+        assert_eq!(labels(&r.y.ticks), ["0", "1"]);
     }
 
     /// The y tick labels of an axes without marks whose y axis of `y` has ticks at `positions`

@@ -138,17 +138,77 @@ fn a_zero_tick_is_not_snapped_to_a_nearby_padding_endpoint() {
     }
 }
 
+#[test]
+fn single_tick_labels_describe_their_own_value() {
+    let theme = Theme::pigment();
+    let (room, _) = tick_rooms(
+        PlotSize {
+            width: 1.0,
+            height: 100.0,
+        },
+        &theme,
+        FontLibrary::global(),
+        TickSpacing::LabelsApart,
+    );
+    let judge = DrawnTicks {
+        format: &TickFormat::AUTO,
+        room: &room,
+    };
+    for (low, high, label) in [(-0.0004, 0.0004, "0"), (0.00151, 0.00169, "0.0016")] {
+        let scale = ContinuousScale::new(Transform::Linear, low, high, CONTEXT).unwrap();
+        let ticks = scale.auto_ticks(5, &judge);
+        assert_eq!(ticks.ticks.len(), 1);
+        assert_eq!(ticks.ticks[0].label, label);
+    }
+}
+
+#[test]
+fn fixed_decimals_choose_exactly_representable_steps() {
+    let theme = Theme::pigment();
+    let (room, _) = tick_rooms(
+        PlotSize {
+            width: 800.0,
+            height: 200.0,
+        },
+        &theme,
+        FontLibrary::global(),
+        TickSpacing::LabelsApart,
+    );
+    for (factor, format) in [
+        (1.0, TickFormat::fixed(0).unwrap()),
+        (0.1, TickFormat::fixed(1).unwrap()),
+        (0.01, TickFormat::percent(0).unwrap()),
+        (0.001, TickFormat::percent(1).unwrap()),
+    ] {
+        let scale =
+            ContinuousScale::new(Transform::Linear, -7.5 * factor, 7.5 * factor, CONTEXT).unwrap();
+        let judge = DrawnTicks {
+            format: &format,
+            room: &room,
+        };
+        let ticks = scale.auto_ticks(5, &judge);
+        assert!(ticks.ticks.len() >= 2);
+        for tick in &ticks.ticks {
+            let units = tick.value / factor;
+            assert!(
+                (units - units.round()).abs() < 1e-9,
+                "{format:?}: {ticks:?}"
+            );
+        }
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
     #[test]
     fn random_linear_limits_are_padded_data_with_inside_whole_ticks(
-        start in -100i32..100,
-        width in 1i32..100,
+        start in -100.0f64..100.0,
+        width in 0.01f64..100.0,
         exponent in -295i32..=295,
-        length in 180.0f64..1200.0,
+        length in prop_oneof![40.0f64..120.0, 180.0f64..1200.0],
     ) {
         let factor = 10f64.powi(exponent);
-        let (low, high) = (f64::from(start) * factor, f64::from(start + width) * factor);
+        let (low, high) = (start * factor, (start + width) * factor);
         let data = Some((low, high));
         let initial = ContinuousScale::from_extent(Transform::Linear, data, CONTEXT).unwrap();
         let expected = if is_single_value(Transform::Linear, low, high) {
@@ -158,12 +218,26 @@ proptest! {
             (low - pad, high + pad)
         };
         let theme = Theme::pigment();
-        let (x, y) = tick_rooms(PlotSize { width: length, height: length }, &theme, FontLibrary::global(), TickSpacing::Target);
-        for room in [&x, &y] {
-            let (scale, _, ticks) = automatic(Transform::Linear, None, data, AutoLimits::Padded(Padding::BothSides), room.target, &AnySpacing);
-            prop_assert_eq!(scale.domain(), expected);
-            let values: Vec<_> = ticks.ticks.iter().map(|tick| tick.value).collect();
-            assert_grid(&values, scale.domain(), room.target);
+        for spacing in [TickSpacing::Target, TickSpacing::LabelsApart] {
+            let (x, y) = tick_rooms(PlotSize { width: length, height: length }, &theme, FontLibrary::global(), spacing);
+            for room in [&x, &y] {
+                let judge = DrawnTicks { format: &TickFormat::AUTO, room };
+                let (scale, _, ticks) = automatic(Transform::Linear, None, data, AutoLimits::Padded(Padding::BothSides), room.target, &judge);
+                prop_assert_eq!(scale.domain(), expected);
+                let values: Vec<_> = ticks.ticks.iter().map(|tick| tick.value).collect();
+                prop_assert!(judge.slack(&scale, &ticks) >= 0.0);
+                if values.len() >= 2 {
+                    assert_grid(&values, scale.domain(), room.target);
+                } else {
+                    prop_assert_eq!(values.len(), 1);
+                    prop_assert!(expected.0 <= values[0] && values[0] <= expected.1);
+                    if expected.0 <= 0.0 && expected.1 >= 0.0 { prop_assert_eq!(values[0], 0.0); }
+                    // A single label is justified only when no whole-step pair fits this room.
+                    for pair in scale.tick_pairs(&TickFormat::AUTO) {
+                        prop_assert!(room.slack(&positioned(&scale, pair)) < 0.0);
+                    }
+                }
+            }
         }
     }
 }

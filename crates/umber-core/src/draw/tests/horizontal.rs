@@ -643,7 +643,7 @@ fn vertical_reference_lines_run_the_full_height_of_a_horizontal_chart() {
     let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
     // The baseline sits at the x axis's lower limit, on the left.
     assert!(!resolved.x.holds_zero());
-    assert!(layout.baseline.at > layout.plot.x);
+    assert_eq!(layout.baseline.at, layout.plot.x);
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     let items = flattened(mark_group(&scene).1);
     let [span, Item::Markers { .. }, line] = items.as_slice() else {

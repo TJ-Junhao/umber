@@ -1,5 +1,5 @@
 # Cases whose committed outputs change on purpose in this change.
-# Data-relative linear limits and whole-step ticks inside them.
+# Data-relative linear limits, fitting whole-step ticks and exactly represented fixed decimals.
 band-200k-points
 band-gaps-graphite
 band-gaps-midnight

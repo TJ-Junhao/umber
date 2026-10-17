@@ -157,6 +157,8 @@ pub(crate) enum TickCoverage {
 /// leave room between them on screen.
 #[derive(Clone, Copy)]
 pub(crate) struct Fit<'a> {
+    /// The smallest exactly writable unit of a linear step, or zero for no restriction.
+    pub quantum: f64,
     /// The least step, as a share of the searched range `dmax - dmin`, that can fit whatever
     /// the labels: on a linear axis that shows at least the range, ticks are never further
     /// apart on screen than their step's share of it. A candidate with a smaller step does not
@@ -179,6 +181,7 @@ pub(crate) enum Room {
 impl Fit<'_> {
     /// Every candidate fits: the search chooses for its target alone.
     pub(crate) const ANY: Fit<'static> = Fit {
+        quantum: 0.0,
         least_share: 0.0,
         slack: &unjudged,
     };
@@ -200,6 +203,16 @@ impl Fit<'_> {
     fn admits(&self, values: &[f64], step: f64, range: f64) -> bool {
         self.steps_apart(step, range)
             && matches!((self.slack)(values), Room::Slack(slack) if slack >= 0.0)
+    }
+
+    /// Whether the step is a whole number of writable units, within floating-point error.
+    pub(crate) fn represents(&self, step: f64) -> bool {
+        if self.quantum == 0.0 {
+            return true;
+        }
+        let units = step / self.quantum;
+        units >= 1.0 - 1e-9
+            && (!units.is_finite() || (units - units.round()).abs() <= 4.0 * f64::EPSILON * units)
     }
 
     /// Whether `step` reaches the least share of a range `range` wide.
@@ -356,6 +369,9 @@ fn extended_in(
 ) -> Vec<f64> {
     let target = clamp_target(target);
     let evenly = || {
+        if mode == SearchMode::Linear && fit.quantum > 0.0 {
+            return Vec::new();
+        }
         let values = evenly_spaced(dmin, dmax, target);
         let fits = match (fit.slack)(&values) {
             Room::TooFewTicks => true,
@@ -371,7 +387,10 @@ fn extended_in(
         return evenly();
     }
     let range = dmax - dmin;
-    let best = search(dmin, dmax, target, tick_coverage, mode, &|_| true).best;
+    let best = search(dmin, dmax, target, tick_coverage, mode, &|c| {
+        fit.represents(c.step)
+    })
+    .best;
     if let Some(best) = best {
         if fit.keeps(&best.values(), best.step, range) {
             return best.values();
@@ -382,7 +401,9 @@ fn extended_in(
     // A candidate in place of the best needs two ticks drawn: one that does not would only
     // raise the bar for the others.
     let admits = |c: &Candidate| fit.admits(&c.values(), c.step, range);
-    let (round, whole) = round_candidates(dmin, dmax, target, tick_coverage, mode);
+    let (mut round, mut whole) = round_candidates(dmin, dmax, target, tick_coverage, mode);
+    round.retain(|c| fit.represents(c.step));
+    whole.retain(|c| fit.represents(c.step));
     let better = |chosen: Option<Candidate>, c: Candidate| match chosen {
         Some(chosen) if chosen.score >= c.score => Some(chosen),
         _ => Some(c),
@@ -511,6 +532,24 @@ fn round_candidates(
         z += 1.0;
     }
     (round, whole)
+}
+
+/// Whole-step pairs inside the domain, widest first, for testing on their own solved layout.
+/// Zero remains a tick whenever the domain holds it. The same candidates serve the main search.
+pub(crate) fn linear_pairs(dmin: f64, dmax: f64, quantum: f64) -> Vec<Vec<f64>> {
+    let (_, mut whole) = round_candidates(dmin, dmax, 2, TickCoverage::Free, SearchMode::Linear);
+    let fit = Fit {
+        quantum,
+        ..Fit::ANY
+    };
+    whole.retain(|c| c.k == 2 && fit.represents(c.step));
+    whole.sort_by(|a, b| {
+        b.step
+            .total_cmp(&a.step)
+            .then_with(|| b.score.total_cmp(&a.score))
+    });
+    whole.dedup_by(|a, b| a.step == b.step && a.lmin == b.lmin);
+    whole.into_iter().map(|c| c.values()).collect()
 }
 
 /// One pass of the Extended Wilkinson search over `[dmin, dmax]` for about `target` ticks,
@@ -937,10 +976,7 @@ mod tests {
 
     /// A fit that admits the values `slack` finds room for, judging every candidate.
     fn judged(slack: &dyn Fn(&[f64]) -> Room) -> Fit<'_> {
-        Fit {
-            least_share: 0.0,
-            slack,
-        }
+        Fit { slack, ..Fit::ANY }
     }
 
     /// The smallest gap between adjacent values, less `least`.
@@ -1026,6 +1062,7 @@ mod tests {
         let fit = Fit {
             least_share: 2.0 / 5.7,
             slack: &slack,
+            ..Fit::ANY
         };
         let values = extended(-0.01, 5.69, 3, TickCoverage::Loose, &fit);
         assert!(judged.get() >= 2.0 - 1e-9, "{}", judged.get());

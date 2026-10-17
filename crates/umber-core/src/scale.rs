@@ -643,6 +643,8 @@ impl ContinuousScale {
 
     /// A scale whose domain is widened to enclosing round values: the outer ticks for linear,
     /// the enclosing powers of the base for log. Degenerate domains are returned unchanged.
+    /// This explicit operation does not choose automatic linear axis limits; those follow
+    /// the data with padding.
     ///
     /// # Examples
     ///
@@ -656,7 +658,16 @@ impl ContinuousScale {
         let target = ticks::clamp_target(target);
         let widened = match self.transform {
             Transform::Linear => {
-                let values = self.loose_values(target, &ticks::Fit::ANY);
+                if is_degenerate(self.lo, self.hi) {
+                    return *self;
+                }
+                let values = ticks::extended(
+                    self.lo,
+                    self.hi,
+                    target,
+                    TickCoverage::Loose,
+                    &ticks::Fit::ANY,
+                );
                 values.first().copied().zip(values.last().copied())
             }
             Transform::Log(base) => {
@@ -667,16 +678,6 @@ impl ContinuousScale {
             }
         };
         self.widened(widened)
-    }
-
-    /// The loose Extended Wilkinson tick values that cover a linear domain, chosen among those
-    /// `fit` admits; empty when the domain is degenerate. Their ends are the nice limits.
-    fn loose_values(&self, target: usize, fit: &ticks::Fit<'_>) -> Vec<f64> {
-        if is_degenerate(self.lo, self.hi) {
-            Vec::new()
-        } else {
-            ticks::extended(self.lo, self.hi, target, TickCoverage::Loose, fit)
-        }
     }
 
     /// This scale widened to `(lo, hi)`, never narrowed and kept within the supported
@@ -752,20 +753,28 @@ impl ContinuousScale {
         chosen
     }
 
-    /// If no multi-tick linear set fits, keep one of its ticks, preferring zero or the nearest
-    /// value to it. The searched domain and grid stay unchanged. If even that set is rejected,
-    /// retain the search's largest-slack choice. Log axes keep their existing fallbacks.
+    /// If no multi-tick linear set fits, keep zero when inside, otherwise the tick nearest
+    /// the domain's midpoint. Label it for its own value, not the former grid's precision.
+    /// If even that set is rejected, retain the largest-slack choice. Log axes are unchanged.
     fn uncrowded(&self, ticks: AutoTicks, judge: &dyn TickJudge) -> AutoTicks {
         if self.transform == Transform::Linear && judge.slack(self, &ticks) < 0.0 {
-            let tick = ticks
-                .ticks
-                .iter()
-                .min_by(|a, b| a.value.abs().total_cmp(&b.value.abs()));
+            let middle = if self.lo <= 0.0 && self.hi >= 0.0 {
+                0.0
+            } else {
+                self.lo + (self.hi - self.lo) / 2.0
+            };
+            let tick = ticks.ticks.iter().min_by(|a, b| {
+                (a.value - middle)
+                    .abs()
+                    .total_cmp(&(b.value - middle).abs())
+            });
             if let Some(tick) = tick {
-                let single = AutoTicks {
-                    ticks: vec![tick.clone()],
-                    values: ticks.values,
+                let values = match ticks.values {
+                    TickValues::Grid { step } => ticks::snapped_to_zero(&[tick.value], step),
+                    TickValues::Exact => vec![tick.value],
                 };
+                let labels = ticks::format_values(&values);
+                let single = Self::labelled(values, labels, ticks.values);
                 if judge.slack(self, &single) >= 0.0 {
                     return single;
                 }
@@ -1020,6 +1029,11 @@ impl ContinuousScale {
                 None => missing,
             };
             let fit = ticks::Fit {
+                quantum: if self.transform == Transform::Linear {
+                    judge.quantum()
+                } else {
+                    0.0
+                },
                 least_share,
                 slack: &slack,
             };
@@ -1030,6 +1044,21 @@ impl ContinuousScale {
                 };
                 if let Some(ticks) = self.inside_ticks(&values) {
                     return ticks;
+                }
+                if values.is_empty() && fit.quantum > 0.0 {
+                    let middle = lo + (hi - lo) / 2.0;
+                    let value = if lo <= 0.0 && hi >= 0.0 {
+                        0.0
+                    } else {
+                        (middle / fit.quantum).round() * fit.quantum
+                    };
+                    let values = if (lo..=hi).contains(&value) {
+                        vec![value]
+                    } else {
+                        Vec::new()
+                    };
+                    let labels = ticks::format_values(&values);
+                    return Self::labelled(values, labels, TickValues::Exact);
                 }
             }
             self.end_ticks()
@@ -1044,6 +1073,18 @@ impl ContinuousScale {
         }
         // Only repair a crowded choice: an empty candidate must not hide a pair that fits.
         self.uncrowded(choose(Room::TooFewTicks), judge)
+    }
+
+    /// Labelled whole-step pairs for a linear axis, for trying on the layouts they produce.
+    pub(crate) fn tick_pairs(&self, format: &crate::TickFormat) -> Vec<Vec<Tick>> {
+        if self.transform != Transform::Linear {
+            return Vec::new();
+        }
+        ticks::linear_pairs(self.lo, self.hi, format.quantum())
+            .into_iter()
+            .filter_map(|values| self.inside_ticks(&values))
+            .map(|ticks| format.relabel(ticks.ticks, ticks.values))
+            .collect()
     }
 
     /// The ticks of a free Extended Wilkinson `candidate` that lie inside this domain, with
@@ -1161,6 +1202,11 @@ impl ContinuousScale {
 
 /// Judges automatic ticks by the room their labels leave on the axis.
 pub(crate) trait TickJudge {
+    /// The smallest exactly writable unit of a linear tick step, or zero for no restriction.
+    fn quantum(&self) -> f64 {
+        0.0
+    }
+
     /// Whether the previous constrained choice is checked by the layout instead of here.
     fn deferred(&self) -> bool {
         false
@@ -1181,6 +1227,21 @@ pub(crate) trait TickJudge {
 pub(crate) struct AnySpacing;
 
 impl TickJudge for AnySpacing {
+    fn least_share(&self) -> f64 {
+        0.0
+    }
+
+    fn slack(&self, _: &ContinuousScale, _: &AutoTicks) -> f64 {
+        f64::INFINITY
+    }
+}
+
+// A color range chooses representable steps before checking their label spacing.
+impl TickJudge for crate::TickFormat {
+    fn quantum(&self) -> f64 {
+        self.quantum()
+    }
+
     fn least_share(&self) -> f64 {
         0.0
     }

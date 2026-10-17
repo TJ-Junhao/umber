@@ -328,6 +328,18 @@ impl TickFormat {
         }
     }
 
+    /// The smallest exactly writable unit for a fixed-decimal linear tick grid; zero when
+    /// the format does not restrict the step. Percent labels have two more decimal places
+    /// in data space than they print.
+    pub(crate) fn quantum(&self) -> f64 {
+        let places = match self.style {
+            NumberStyle::Fixed(decimals) => decimals.get(),
+            NumberStyle::Percent(decimals) => decimals.get() + 2,
+            _ => return 0.0,
+        };
+        10f64.powi(-(places as i32))
+    }
+
     /// `ticks` labelled in this format. [`NumberStyle::Auto`] keeps the labels the ticks carry,
     /// which are the automatic ones, and so does [`NumberStyle::Iso`], whose labels a time axis
     /// writes with its ticks; the other styles write each tick's value, which on a
