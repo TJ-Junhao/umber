@@ -7,6 +7,7 @@ use crate::bin2d::RectBins;
 use crate::binning::BinCount;
 use crate::color_scale::ColorScaleSpec;
 use crate::error::number;
+use crate::scale::log_offset;
 use crate::{Error, Instant, MAX_BINS, Result, ScaleKind, Transform};
 
 /// Colormap and normalization of numeric cells.
@@ -377,7 +378,8 @@ impl std::fmt::Display for UnevenEdge {
 /// The first of `edges`, on the `axis` axis of kind `kind`, that lies off the evenly spaced
 /// lattice the image of the cells uses, from the first edge to the last; `None` when every edge
 /// lies on it. Positions are compared in axis space: numbers on a linear axis, their
-/// logarithms on a log axis, whole microseconds on a time axis. An edge lies on the lattice
+/// logarithms measured from the first edge ([`log_offset`]) on a log axis, whole microseconds
+/// on a time axis. An edge lies on the lattice
 /// when it is within [`LATTICE_TOLERANCE`] of a step of its place there; numbers may also be
 /// off by two units of rounding error of the largest end, as far as a float can place them.
 /// Times are compared exactly, in integers.
@@ -386,14 +388,19 @@ fn uneven_edge(axis: &'static str, kind: EdgeAxis, edges: &Edges) -> Option<Unev
     let (at, spacing, values, expected) = match (kind, edges) {
         (EdgeAxis::Numeric(transform), Edges::Numbers(v)) => {
             let log = matches!(transform, Transform::Log(_));
-            let position = |x: f64| if log { x.ln() } else { x };
+            // A log position is measured from the first edge, as the axis measures it, which
+            // keeps narrow ranges far from 1 resolvable.
+            let position = |x: f64| if log { log_offset(x, v[0]) } else { x };
             let (first, last) = (position(v[0]), position(v[n]));
             let step = (last - first) / n as f64;
             let slack = LATTICE_TOLERANCE * step + 2.0 * f64::EPSILON * first.abs().max(last.abs());
             let place = |i: usize| first + (last - first) * (i as f64 / n as f64);
             let at = (1..n).find(|&i| (position(v[i]) - place(i)).abs() > slack)?;
             let expected = if log {
-                v[0] * (v[n] / v[0]).powf(at as f64 / n as f64)
+                // Interpolated in logarithms, which stay within the supported range, and written
+                // with 12 significant digits, the precision of logarithms of this size.
+                let exact = (v[0].ln() + place(at)).exp();
+                format!("{exact:.11e}").parse::<f64>().unwrap_or(exact)
             } else {
                 place(at)
             };
@@ -410,8 +417,18 @@ fn uneven_edge(axis: &'static str, kind: EdgeAxis, edges: &Edges) -> Option<Unev
             let off = |i: usize| (i128::from(t[i].micros()) - base) * count - span * i as i128;
             let at =
                 (1..n).find(|&i| off(i).unsigned_abs() as f64 > LATTICE_TOLERANCE * span as f64)?;
-            let place = base + span * at as i128 / count;
-            let expected = Instant::clamped(i64::try_from(place).unwrap_or(i64::MAX)).label();
+            // The place in whole microseconds, and the fraction of one beyond it.
+            let exact = base * count + span * at as i128;
+            let (whole, rest) = (exact.div_euclid(count), exact.rem_euclid(count));
+            let label = Instant::clamped(i64::try_from(whole).unwrap_or(i64::MAX)).label();
+            let expected = if rest == 0 {
+                label
+            } else {
+                format!(
+                    "{label} plus {} microseconds",
+                    number(rest as f64 / count as f64)
+                )
+            };
             let values = [t[at], t[0], t[n]].map(Instant::label);
             (at, "times", values, expected)
         }

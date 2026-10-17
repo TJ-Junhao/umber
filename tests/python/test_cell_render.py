@@ -247,6 +247,55 @@ def test_raster_refuses_cells_too_wide_for_an_image_when_rendering() -> None:
     )
 
 
+ZOOM_HINT = "use render=ub.Render.VECTOR or ub.AUTO."
+
+
+def test_raster_refuses_edges_that_zooming_moves_on_screen() -> None:
+    f = ub.Figure(6, 3)
+    f.add_axes().mesh([0, 1.0000999, 2], [0, 1], [[1, 2]], render=ub.Render.RASTER).xlim(0.98, 1.02)
+    with pytest.raises(ub.StyleError) as caught:
+        f.to_png(dpi=600)
+    assert str(caught.value).startswith(
+        "Figure.to_png(): mark 1 of these axes, a mesh, has x_edges[1] "
+    ), caught.value
+    assert details(caught.value) == (None, ZOOM_HINT)
+    start = dt.datetime(2500, 1, 1)
+    times = [start + dt.timedelta(microseconds=us) for us in (0, 10_000_999, 20_000_000)]
+    t = ub.Figure(6, 3)
+    t.add_axes(x=ub.Scale.time()).mesh(times, [0, 1], [[1, 2]], render=ub.Render.RASTER).xlim(
+        start + dt.timedelta(seconds=9.8), start + dt.timedelta(seconds=10.2)
+    )
+    with pytest.raises(ub.StyleError, match="a mesh, has x_edges"):
+        t.to_png(dpi=600)
+
+
+@pytest.mark.parametrize("base", [1e299, 1e-299])
+def test_narrow_log_edges_far_from_one_are_refused(base: float) -> None:
+    x = [base, base * (1 + 5.504e-10), base * (1 + 1.1e-9)]
+    ax = ub.Figure(14, 3).add_axes(x=ub.Scale.log())
+    with pytest.raises(ub.UsageError, match="is off the evenly spaced logarithms"):
+        ax.mesh(x, [0, 1], [[1, 2]], render=ub.Render.RASTER)
+
+
+def test_a_blank_raster_mesh_renders() -> None:
+    f = ub.Figure(6, 4)
+    f.add_axes().mesh([0, 1, 2], [0, 1], [[np.nan, np.nan]], render=ub.Render.RASTER).xlim(
+        1 - 1e-6, 1 + 1e-6
+    )
+    assert "<image" not in f.to_svg()
+
+
+def test_expected_edges_are_written_exactly() -> None:
+    ax = ub.Figure(6, 4).add_axes(x=ub.Scale.log())
+    with pytest.raises(ub.UsageError, match=", which put it at 1; "):
+        ax.mesh([1e-300, 1e-100, 1e300], [0, 1], [[1, 2]], render=ub.Render.RASTER)
+    epoch = dt.datetime(1970, 1, 1)
+    times = [epoch + dt.timedelta(microseconds=us) for us in (0, 1, 3)]
+    tx = ub.Figure(6, 4).add_axes(x=ub.Scale.time())
+    with pytest.raises(ub.UsageError, match=r"at 1970-01-01T00:00:00\.000001 plus 0\.5 micro"):
+        tx.mesh(times, [0, 1], [[1, 2]], render=ub.Render.RASTER)
+
+
 def test_hexbin_has_no_render_argument() -> None:
     ax = ub.Figure(6, 4).add_axes()
     with pytest.raises(TypeError, match="render"):

@@ -21,16 +21,18 @@ pub(crate) const AUTO_RASTER_CELLS: usize = 10_000;
 ///
 /// A mesh can be drawn as an image only when its edges are evenly spaced on screen: evenly
 /// spaced numbers on a linear axis, evenly spaced logarithms on a log axis and evenly spaced
-/// times on a time axis. Edges count as evenly spaced when every edge lies within 1/10,000 of
-/// a cell of its place on the evenly spaced lattice from the first edge to the last, so no
-/// cell boundary of the image moves by a visible amount. Numbers may also be off by two units
-/// of rounding error of the largest end edge, as far as a float can place them; times, whole
-/// microseconds, are compared exactly.
+/// times on a time axis. The mesh call checks that every edge lies within 1/10,000 of a cell
+/// of its place on the evenly spaced lattice from the first edge to the last (numbers may also
+/// be off by two units of rounding error of the largest end edge; logarithms are measured from
+/// the first edge, and times, whole microseconds, are compared exactly).
 ///
-/// An image covers whole cells, so a cell cut by explicit limits is drawn whole and clipped at
-/// the limits. When a cut cell would reach more than 10,000 pt past the limits, which only
-/// limits inside a sliver of a few cells give, its edges cannot be placed exactly: `Auto`
-/// draws such a mark as vector shapes, and `Raster` makes rendering fail with `Error::Style`.
+/// When the figure is drawn, an image is used only where it is exact: no edge of the image lies
+/// more than 0.001 pt from the edge of the cells it stands for, on the final plot. Explicit
+/// limits that zoom in on edges slightly off the lattice can move them further. An image also
+/// covers whole cells, so a cell cut by explicit limits is drawn whole and clipped at the
+/// limits, and a cut cell may reach at most 10,000 pt past them (more only with limits inside
+/// a sliver of a few cells). A mesh or 2-D histogram that would break either bound is drawn as
+/// vector shapes by `Auto`, and makes rendering fail with `Error::Style` with `Raster`.
 ///
 /// # Examples
 ///
@@ -49,15 +51,14 @@ pub(crate) const AUTO_RASTER_CELLS: usize = 10_000;
 pub enum Render {
     /// An image when the mark's grid has at least 10,000 cells (rows times columns, such as
     /// 100 × 100), vector shapes otherwise. A mesh whose edges are not evenly spaced on screen,
-    /// and a mark whose cut cells reach more than 10,000 pt past the limits, are drawn as
+    /// and a mark whose image would break the bounds above on the final plot, are drawn as
     /// vector shapes whatever their size.
     #[default]
     Auto,
     /// One filled rectangle per cell.
     Vector,
     /// One image with one pixel per cell. A mesh drawn this way needs evenly spaced edges,
-    /// and rendering fails when explicit limits cut a cell to a sliver of it more than
-    /// 10,000 pt wide.
+    /// and rendering fails when the image would break the bounds above on the final plot.
     Raster,
 }
 

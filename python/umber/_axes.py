@@ -1313,9 +1313,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         log axis, evenly spaced times on a time axis. Every edge must lie within 1/10,000 of a
         cell of its place on the evenly spaced lattice from the first edge to the last (numbers
         may also be off by two units of rounding error of the largest end edge; times are
-        compared exactly, in microseconds). With ``AUTO``, cells that explicit limits cut to a
-        sliver more than 10,000 pt wide are drawn as vector shapes; with ``Render.RASTER``,
-        rendering such a figure raises ``StyleError``.
+        compared exactly, in microseconds). When drawn, the image must also be exact on the
+        final plot (see ``Render``): no edge more than 0.001 pt from its place, and no cut cell
+        reaching more than 10,000 pt past the limits. Otherwise ``AUTO`` draws vector shapes,
+        and with ``Render.RASTER`` rendering raises ``StyleError``.
 
         Args:
             x_edges: Strictly increasing column edges, one more than the number of columns:

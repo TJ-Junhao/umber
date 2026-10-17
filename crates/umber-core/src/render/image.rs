@@ -5,7 +5,8 @@
 //! image pixels, of each one's premultiplied color times the area of the device pixel it
 //! covers. Every image pixel covers a product of an interval along x and one along y, so the
 //! sum is computed one axis at a time: first along the axis where that leaves less to do, then
-//! along the other. The work is proportional to the device pixels plus the image pixels. Sums
+//! along the other, one device row at a time. The work is proportional to the device pixels
+//! plus the image pixels, and the memory to the width of the device and the image. Sums
 //! are kept in `f64`, so a uniform image keeps its exact color however many of its pixels
 //! share a device pixel. A rectangular clip enters the same sums: each device pixel counts only
 //! the part of its area inside the clip.
@@ -83,16 +84,22 @@ fn touched(overlaps: &[Overlap]) -> std::ops::Range<usize> {
 /// `width` by `height` `pixels` that covers `rect` (left, top, right and bottom, in device
 /// coordinates, with left < right and top < bottom), each the area-weighted sum of the
 /// premultiplied colors of the image pixels it covers inside the rectangle `clip` (left, top,
-/// right and bottom, in device coordinates), row by row from the top. A device pixel fully
-/// inside one image pixel and the clip is exactly that pixel's color; one the image or the clip
-/// covers in part is as transparent as the part it leaves uncovered.
+/// right and bottom, in device coordinates). A device pixel fully inside one image pixel and
+/// the clip is exactly that pixel's color; one the image or the clip covers in part is as
+/// transparent as the part it leaves uncovered.
+///
+/// The device rows are passed to `emit` one at a time, from the top, each with its index among
+/// `rows` and its `columns.len()` pixels; a row the image and clip do not reach is not passed.
+/// Only a few rows exist at a time, so the memory used grows with the width of the device and
+/// of the image, not with the number of device pixels.
 pub(super) fn resample(
     rect: [f64; 4],
     (width, height): (usize, usize),
     pixels: &[Rgba],
     (columns, rows): (std::ops::Range<usize>, std::ops::Range<usize>),
     clip: [f64; 4],
-) -> Vec<Premultiplied> {
+    mut emit: impl FnMut(usize, &[Premultiplied]),
+) {
     let [left, top, right, bottom] = rect;
     let (device_w, device_h) = (columns.len(), rows.len());
     let along_x = overlaps(
@@ -108,7 +115,6 @@ pub(super) fn resample(
         (clip[1], clip[3]),
     );
     let (used_x, used_y) = (touched(&along_x), touched(&along_y));
-    let (used_w, used_h) = (used_x.len(), used_y.len());
     let source = |row: usize, column: usize| -> Premultiplied {
         let c = pixels[row * width + column];
         let a = f64::from(c.a) / 255.0;
@@ -124,50 +130,59 @@ pub(super) fn resample(
             *to += value * weight;
         }
     };
-    let mut out = vec![[0.0; 4]; device_w * device_h];
-    // Resampling along x first costs a pass over the used rows for each x overlap, then one
-    // over the device columns for each y overlap; the other order the reverse.
-    let x_first = used_h * along_x.len() + device_w * along_y.len();
-    let y_first = used_w * along_y.len() + device_h * along_x.len();
+    // Resampling along x first costs a pass over each used image row for each x overlap, then
+    // one over the device columns for each y overlap; the other order the reverse.
+    let x_first = used_y.len() * along_x.len() + device_w * along_y.len();
+    let y_first = used_x.len() * along_y.len() + device_h * along_x.len();
+    let mut line = vec![[0.0; 4]; device_w];
+    // The overlaps along y come by device row, so each device row is one run of them.
     if x_first <= y_first {
-        // The used rows, each resampled to the device columns.
-        let mut rows_out = vec![[0.0; 4]; used_h * device_w];
-        for (r, row) in used_y.clone().enumerate() {
-            for o in &along_x {
-                add(
-                    &mut rows_out[r * device_w + o.device],
-                    source(row, o.pixel),
-                    o.length,
-                );
+        // The last image row resampled to the device columns, which the next device row
+        // usually needs again.
+        let mut cached: Option<(usize, Vec<Premultiplied>)> = None;
+        for run in along_y.chunk_by(|a, b| a.device == b.device) {
+            line.fill([0.0; 4]);
+            for o in run {
+                if cached.as_ref().is_none_or(|(row, _)| *row != o.pixel) {
+                    let mut resampled = vec![[0.0; 4]; device_w];
+                    for ox in &along_x {
+                        add(
+                            &mut resampled[ox.device],
+                            source(o.pixel, ox.pixel),
+                            ox.length,
+                        );
+                    }
+                    cached = Some((o.pixel, resampled));
+                }
+                if let Some((_, resampled)) = &cached {
+                    for (to, &from) in line.iter_mut().zip(resampled) {
+                        add(to, from, o.length);
+                    }
+                }
             }
-        }
-        for o in &along_y {
-            let r = o.pixel - used_y.start;
-            for column in 0..device_w {
-                let value = rows_out[r * device_w + column];
-                add(&mut out[o.device * device_w + column], value, o.length);
-            }
+            emit(run[0].device, &line);
         }
     } else {
-        // The used columns, each resampled to the device rows.
-        let mut columns_out = vec![[0.0; 4]; device_h * used_w];
-        for o in &along_y {
-            for (c, column) in used_x.clone().enumerate() {
+        // The used image columns, resampled to one device row at a time.
+        let mut down = vec![[0.0; 4]; used_x.len()];
+        for run in along_y.chunk_by(|a, b| a.device == b.device) {
+            down.fill([0.0; 4]);
+            for o in run {
+                for (to, column) in down.iter_mut().zip(used_x.clone()) {
+                    add(to, source(o.pixel, column), o.length);
+                }
+            }
+            line.fill([0.0; 4]);
+            for ox in &along_x {
                 add(
-                    &mut columns_out[o.device * used_w + c],
-                    source(o.pixel, column),
-                    o.length,
+                    &mut line[ox.device],
+                    down[ox.pixel - used_x.start],
+                    ox.length,
                 );
             }
-        }
-        for row in 0..device_h {
-            for o in &along_x {
-                let value = columns_out[row * used_w + (o.pixel - used_x.start)];
-                add(&mut out[row * device_w + o.device], value, o.length);
-            }
+            emit(run[0].device, &line);
         }
     }
-    out
 }
 
 /// The PNG encoding of `width` by `height` `pixels`, row by row from the top, as straight
@@ -222,6 +237,22 @@ mod tests {
         b: 255,
         a: 255,
     };
+
+    /// [`resample`] collected into one row-major list of device pixels.
+    fn resample_all(
+        rect: [f64; 4],
+        size: (usize, usize),
+        pixels: &[Rgba],
+        region: (std::ops::Range<usize>, std::ops::Range<usize>),
+        clip: [f64; 4],
+    ) -> Vec<Premultiplied> {
+        let width = region.0.len();
+        let mut out = vec![[0.0; 4]; width * region.1.len()];
+        resample(rect, size, pixels, region, clip, |row, line| {
+            out[row * width..(row + 1) * width].copy_from_slice(line);
+        });
+        out
+    }
 
     /// A clip that keeps everything.
     const NO_CLIP: [f64; 4] = [
@@ -304,7 +335,7 @@ mod tests {
     #[test]
     fn resampling_keeps_interiors_and_averages_edges() {
         // Two image pixels, red then blue, over device x 0..4 and y 0..1.
-        let out = resample(
+        let out = resample_all(
             [0.0, 0.0, 4.0, 1.0],
             (2, 1),
             &[RED, BLUE],
@@ -314,7 +345,7 @@ mod tests {
         assert_eq!(out[0], [255.0, 0.0, 0.0, 255.0]);
         assert_eq!(out[3], [0.0, 0.0, 255.0, 255.0]);
         // Offset by half a device pixel, the shared edge falls inside device pixel 2.
-        let out = resample(
+        let out = resample_all(
             [0.5, 0.0, 4.5, 1.0],
             (2, 1),
             &[RED, BLUE],
@@ -326,7 +357,7 @@ mod tests {
         assert_eq!(out[2], [127.5, 0.0, 127.5, 255.0]);
         assert_eq!(out[4], [0.0, 0.0, 127.5, 127.5]);
         // A transparent pixel contributes nothing.
-        let out = resample(
+        let out = resample_all(
             [0.0, 0.0, 2.0, 2.0],
             (1, 2),
             &[CLEAR, RED],
@@ -353,7 +384,7 @@ mod tests {
             ((10, 6), [0.3, 0.7, 3.9, 40.2], (0..4, 0..41)),
             ((6, 10), [0.3, 0.7, 40.2, 3.9], (0..41, 0..4)),
         ] {
-            let out = resample(rect, (w, h), &pixels, region.clone(), NO_CLIP);
+            let out = resample_all(rect, (w, h), &pixels, region.clone(), NO_CLIP);
             let device_w = region.0.len();
             let xs = overlaps(
                 (rect[0], rect[2]),

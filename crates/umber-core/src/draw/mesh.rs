@@ -12,13 +12,16 @@
 //! Drawn as one image ([`Render`](crate::Render)), the grid keeps only its rows and columns
 //! with a shown part, one pixel per cell, and the image covers them whole: an outer cell that
 //! an explicit limit cuts reaches past it, and a clip at the limits cuts it there, as the vector
-//! cells are cut. A grid whose cut cells would reach more than [`MAX_IMAGE_REACH`] points past
-//! the limits cannot be placed exactly in the scene's precision: with
+//! cells are cut. The image's pixels are evenly spaced, so before it is drawn every edge is
+//! mapped to the final plot and compared with its place among them. A grid whose cut cells
+//! would reach more than [`MAX_IMAGE_REACH`] points past the limits, or one with an edge more
+//! than [`MAX_EDGE_OFFSET`] points from its place (edges evenly spaced to the call's tolerance
+//! that the limits zoom in on), cannot be drawn exactly as one image: with
 //! [`Render::Auto`](crate::Render::Auto) it is drawn as vector shapes, and with
-//! [`Render::Raster`](crate::Render::Raster) rendering fails ([`too_wide_image`]).
+//! [`Render::Raster`](crate::Render::Raster) rendering fails ([`unplaceable_image`]).
 
 use super::MarkContext;
-use super::cells::{CLEAR, MAX_IMAGE_REACH, Reach, cell_path, image_item, reach};
+use super::cells::{CLEAR, MAX_EDGE_OFFSET, MAX_IMAGE_REACH, Reach, cell_path, image_item, reach};
 use super::mapping::{AxisMap, AxisMaps, axis_time, axis_value};
 use crate::color_scale::ResolvedColorScale;
 use crate::model::{Edges, Hist2dMark, MeshMark};
@@ -35,6 +38,55 @@ fn axis_edges(axis: &ResolvedAxis, edges: &Edges) -> Vec<f64> {
     }
 }
 
+/// The grid of `mark` on `maps`, its cells colored through `color`.
+fn mesh_grid(
+    maps: &AxisMaps,
+    resolved: &Resolved,
+    mark: &MeshMark,
+    color: &ResolvedColorScale,
+) -> Grid<impl Fn(usize, usize) -> Option<Rgba> + use<>> {
+    let columns = mark.x_edges.len() - 1;
+    // Each value is mapped once; the neighbours of a cell look their colors up.
+    let colors: Vec<Option<Rgba>> = mark
+        .colors
+        .values
+        .iter()
+        .map(|&value| color.color(value))
+        .collect();
+    Grid {
+        x: GridAxis::new(&maps.x, &axis_edges(&resolved.x, &mark.x_edges)),
+        y: GridAxis::new(&maps.y, &axis_edges(&resolved.y, &mark.y_edges)),
+        color: move |column: usize, row: usize| {
+            colors.get(row * columns + column).copied().flatten()
+        },
+    }
+}
+
+/// The grid of the bins of `mark` on `maps`, its non-empty bins colored through `color`.
+fn hist2d_grid(
+    maps: &AxisMaps,
+    resolved: &Resolved,
+    mark: &Hist2dMark,
+    color: &ResolvedColorScale,
+) -> Grid<impl Fn(usize, usize) -> Option<Rgba> + use<>> {
+    let bins = &mark.bins;
+    // Each count is mapped once; the neighbours of a cell look their colors up.
+    let colors: HashMap<(usize, usize), Rgba> = bins
+        .cells
+        .iter()
+        .zip(&bins.counts)
+        .filter_map(|(&cell, &count)| Some((cell, color.color(count)?)))
+        .collect();
+    let edges = |axis: &ResolvedAxis, edges: &[f64]| -> Vec<f64> {
+        edges.iter().map(|&v| axis_value(axis, v)).collect()
+    };
+    Grid {
+        x: GridAxis::new(&maps.x, &edges(&resolved.x, &bins.x_edges)),
+        y: GridAxis::new(&maps.y, &edges(&resolved.y, &bins.y_edges)),
+        color: move |column: usize, row: usize| colors.get(&(column, row)).copied(),
+    }
+}
+
 /// Draws finite row-major values, leaving NaN cells empty.
 pub(super) fn mesh_items(
     context: &MarkContext<'_>,
@@ -43,20 +95,8 @@ pub(super) fn mesh_items(
     color: &ResolvedColorScale,
     items: &mut Vec<Item>,
 ) {
-    let columns = mark.x_edges.len() - 1;
-    let rows = mark.y_edges.len() - 1;
-    // Each value is mapped once; the neighbours of a cell look their colors up.
-    let colors: Vec<Option<Rgba>> = mark
-        .colors
-        .values
-        .iter()
-        .map(|&value| color.color(value))
-        .collect();
-    let grid = Grid {
-        x: GridAxis::new(&context.maps.x, &axis_edges(&resolved.x, &mark.x_edges)),
-        y: GridAxis::new(&context.maps.y, &axis_edges(&resolved.y, &mark.y_edges)),
-        color: |column: usize, row: usize| colors.get(row * columns + column).copied().flatten(),
-    };
+    let (columns, rows) = (mark.x_edges.len() - 1, mark.y_edges.len() - 1);
+    let grid = mesh_grid(&context.maps, resolved, mark, color);
     if mark
         .render
         .draws_image(columns.saturating_mul(rows), mark.evenly_spaced)
@@ -67,7 +107,7 @@ pub(super) fn mesh_items(
                 return;
             }
             Raster::Nothing => return,
-            Raster::TooWide => {}
+            Raster::Unplaceable => {}
         }
     }
     for row in (0..rows).rev() {
@@ -86,21 +126,7 @@ pub(super) fn hist2d_items(
     items: &mut Vec<Item>,
 ) {
     let bins = &mark.bins;
-    // Each count is mapped once; the neighbours of a cell look their colors up.
-    let colors: HashMap<(usize, usize), Rgba> = bins
-        .cells
-        .iter()
-        .zip(&bins.counts)
-        .filter_map(|(&cell, &count)| Some((cell, color.color(count)?)))
-        .collect();
-    let edges = |axis: &ResolvedAxis, edges: &[f64]| -> Vec<f64> {
-        edges.iter().map(|&v| axis_value(axis, v)).collect()
-    };
-    let grid = Grid {
-        x: GridAxis::new(&context.maps.x, &edges(&resolved.x, &bins.x_edges)),
-        y: GridAxis::new(&context.maps.y, &edges(&resolved.y, &bins.y_edges)),
-        color: |column: usize, row: usize| colors.get(&(column, row)).copied(),
-    };
+    let grid = hist2d_grid(&context.maps, resolved, mark, color);
     let count = bins.x_edges.len().saturating_sub(1) * bins.y_edges.len().saturating_sub(1);
     if mark.render.draws_image(count, true) {
         match grid.image() {
@@ -109,7 +135,7 @@ pub(super) fn hist2d_items(
                 return;
             }
             Raster::Nothing => return,
-            Raster::TooWide => {}
+            Raster::Unplaceable => {}
         }
     }
     let mut cells = bins.cells.clone();
@@ -119,49 +145,52 @@ pub(super) fn hist2d_items(
     }
 }
 
-/// For a mesh or a 2-D histogram among `marks` that is drawn as one image because its options
-/// say [`Render::Raster`](crate::Render::Raster), but whose cells cut by explicit limits reach
-/// more than [`MAX_IMAGE_REACH`] points past the limits, the first such mark: its index among
-/// `marks`, what it is (`"a mesh"`, `"a 2-D histogram"`), the axis (`"x"` or `"y"`) and how
-/// far, in points, the cut cells reach. [`Render::Auto`](crate::Render::Auto) draws such marks
-/// as vector shapes instead.
-pub(super) fn too_wide_image(
+/// Why a grid cannot be drawn as one image.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Unplaceable {
+    /// A cell cut by explicit limits reaches this many points past them, more than
+    /// [`MAX_IMAGE_REACH`].
+    Reach(f64),
+    /// The edge `index` (counted from the first edge of the grid) lies `offset` points from its
+    /// place in the image, more than [`MAX_EDGE_OFFSET`].
+    Edge {
+        /// The edge, counted from the first edge of the grid.
+        index: usize,
+        /// How far it lies from its place in the image, in points.
+        offset: f64,
+    },
+}
+
+/// A mesh or a 2-D histogram among `marks` that draws something, whose options say
+/// [`Render::Raster`](crate::Render::Raster), but whose cells cannot be drawn as one image on
+/// `maps` ([`Unplaceable`]): the first such mark, as its index among `marks`, what it is
+/// (`"a mesh"`, `"a 2-D histogram"`), the axis (`"x"` or `"y"`) and why.
+/// [`Render::Auto`](crate::Render::Auto) draws such marks as vector shapes instead.
+pub(super) fn unplaceable_image(
     maps: &AxisMaps,
     resolved: &Resolved,
     marks: &[ResolvedMark<'_>],
-) -> Option<(usize, &'static str, &'static str, f64)> {
+) -> Option<(usize, &'static str, &'static str, Unplaceable)> {
+    // Without a color scale no cell is drawn.
+    let color = resolved.color.as_ref()?;
     marks.iter().enumerate().find_map(|(i, mark)| {
-        let (kind, x, y) = match mark {
+        let (kind, found) = match mark {
             ResolvedMark::Mesh { mark, .. } if mark.render == crate::Render::Raster => (
                 "a mesh",
-                axis_edges(&resolved.x, &mark.x_edges),
-                axis_edges(&resolved.y, &mark.y_edges),
+                mesh_grid(maps, resolved, mark, color).unplaceable(),
             ),
-            ResolvedMark::Hist2d { mark, .. } if mark.render == crate::Render::Raster => {
-                let edges = |axis: &ResolvedAxis, edges: &[f64]| -> Vec<f64> {
-                    edges.iter().map(|&v| axis_value(axis, v)).collect()
-                };
+            ResolvedMark::Hist2d { mark, .. }
+                if mark.render == crate::Render::Raster && !mark.bins.x_edges.is_empty() =>
+            {
                 (
                     "a 2-D histogram",
-                    edges(&resolved.x, &mark.bins.x_edges),
-                    edges(&resolved.y, &mark.bins.y_edges),
+                    hist2d_grid(maps, resolved, mark, color).unplaceable(),
                 )
             }
             _ => return None,
         };
-        if x.len() < 2 || y.len() < 2 {
-            return None;
-        }
-        let (x, y) = (GridAxis::new(&maps.x, &x), GridAxis::new(&maps.y, &y));
-        // Nothing is drawn when either axis shows no cell.
-        x.shown_cells()?;
-        y.shown_cells()?;
-        let (axis, reach) = match (x.too_wide(), y.too_wide()) {
-            (Some(reach), _) => ("x", reach),
-            (None, Some(reach)) => ("y", reach),
-            (None, None) => return None,
-        };
-        Some((i, kind, axis, reach))
+        let (axis, why) = found?;
+        Some((i, kind, axis, why))
     })
 }
 
@@ -197,9 +226,13 @@ impl GridAxis {
 
     /// The plot coordinates of the outer edges of the image of `cells`, its first and last
     /// edges before clipping, and of their shown part. A single cell needs no edge beyond the
-    /// shown part, so both are the shown part. `Err` with how far, in points, an outer edge
-    /// lies beyond the shown part when that is more than [`MAX_IMAGE_REACH`].
-    fn image_span(&self, cells: &std::ops::Range<usize>) -> Result<([f64; 2], [f64; 2]), f64> {
+    /// shown part, so both are the shown part. `Err` when an outer edge lies more than
+    /// [`MAX_IMAGE_REACH`] points beyond the shown part, or an edge between the cells more than
+    /// [`MAX_EDGE_OFFSET`] points from where the image's evenly spaced pixels put it.
+    fn image_span(
+        &self,
+        cells: &std::ops::Range<usize>,
+    ) -> Result<([f64; 2], [f64; 2]), Unplaceable> {
         let shown = [self.at[cells.start], self.at[cells.end]];
         if cells.len() == 1 {
             return Ok((shown, shown));
@@ -211,17 +244,19 @@ impl GridAxis {
             .map(|(edge, at)| (edge - at).abs())
             .fold(0.0_f64, f64::max);
         // A reach that is not a number (edges far beyond the domain) is too far too.
-        if reach <= MAX_IMAGE_REACH {
-            Ok((whole, shown))
-        } else {
-            Err(reach)
+        if reach.is_nan() || reach > MAX_IMAGE_REACH {
+            return Err(Unplaceable::Reach(reach));
         }
-    }
-
-    /// How far, in points, the image of the shown cells would reach past the limits, when that
-    /// is more than [`MAX_IMAGE_REACH`]; `None` when it can be drawn, or nothing is shown.
-    fn too_wide(&self) -> Option<f64> {
-        self.image_span(&self.shown_cells()?).err()
+        // Each edge on the final plot, against its place among the image's pixels.
+        let size = (whole[1] - whole[0]) / cells.len() as f64;
+        for index in cells.start + 1..cells.end {
+            let place = whole[0] + size * (index - cells.start) as f64;
+            let offset = (self.unclipped[index] - place).abs();
+            if offset.is_nan() || offset > MAX_EDGE_OFFSET {
+                return Err(Unplaceable::Edge { index, offset });
+            }
+        }
+        Ok((whole, shown))
     }
 
     /// Whether cell `i` exists and is left after clipping.
@@ -253,22 +288,42 @@ enum Raster {
     Image(Item),
     /// No cell is drawn.
     Nothing,
-    /// A cut outer cell reaches too far past the limits to place exactly; the grid is drawn
-    /// as vector shapes.
-    TooWide,
+    /// The image cannot place the cells exactly ([`Unplaceable`]); the grid is drawn as vector
+    /// shapes.
+    Unplaceable,
 }
 
 impl<F: Fn(usize, usize) -> Option<Rgba>> Grid<F> {
+    /// The axis, `"x"` or `"y"`, along which the shown cells cannot be drawn as one image and
+    /// why, when at least one shown cell is drawn; `None` when they can, or nothing is drawn.
+    fn unplaceable(&self) -> Option<(&'static str, Unplaceable)> {
+        let (columns, rows) = (self.x.shown_cells()?, self.y.shown_cells()?);
+        let found = match (self.x.image_span(&columns), self.y.image_span(&rows)) {
+            (Err(why), _) => ("x", why),
+            (Ok(_), Err(why)) => ("y", why),
+            (Ok(_), Ok(_)) => return None,
+        };
+        let drawn = rows.clone().any(|row| {
+            columns
+                .clone()
+                .any(|column| (self.color)(column, row).is_some())
+        });
+        drawn.then_some(found)
+    }
+
     /// The cells left after clipping as one image, one pixel per cell (transparent for an
     /// empty cell), over the whole extent of those cells and clipped to their shown part.
     fn image(&self) -> Raster {
         let (Some(columns), Some(rows)) = (self.x.shown_cells(), self.y.shown_cells()) else {
             return Raster::Nothing;
         };
-        let (Ok((x_whole, x_shown)), Ok((y_whole, y_shown))) =
-            (self.x.image_span(&columns), self.y.image_span(&rows))
-        else {
-            return Raster::TooWide;
+        let (x_whole, x_shown) = match self.x.image_span(&columns) {
+            Ok(span) => span,
+            Err(_) => return Raster::Unplaceable,
+        };
+        let (y_whole, y_shown) = match self.y.image_span(&rows) {
+            Ok(span) => span,
+            Err(_) => return Raster::Unplaceable,
         };
         // Rows count from the bottom; the image starts at the top row.
         let pixels: Vec<Rgba> = rows

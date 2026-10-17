@@ -628,9 +628,9 @@ impl Canvas {
 /// Draws the image of `width` by `height` `pixels` over `rect`, inside `clip` when there is
 /// one: each device pixel the image reaches takes the area-weighted sum of the image pixels it
 /// covers inside the clip ([`super::image::resample`]), composited source-over onto the pixmap
-/// in integer arithmetic. Every clip of a scene is a rectangle, so the clip enters the area
-/// weights exactly and no clip mask is applied on top. Only the device pixels inside both the
-/// image and the clip are resampled.
+/// in integer arithmetic, one device row at a time. Every clip of a scene is a rectangle, so
+/// the clip enters the area weights exactly and no clip mask is applied on top. Only the device
+/// pixels inside both the image and the clip are resampled.
 fn draw_image(
     pixmap: &mut sk::Pixmap,
     scale: DeviceScale,
@@ -661,35 +661,36 @@ fn draw_image(
     // All four are whole numbers within the pixmap here.
     let columns = lo_x as usize..hi_x as usize;
     let rows = lo_y as usize..hi_y as usize;
-    let device = super::image::resample(
-        [left, top, right, bottom],
-        (width as usize, height as usize),
-        pixels,
-        (columns.clone(), rows.clone()),
-        window,
-    );
     let stride = pixmap.width() as usize;
     let data = pixmap.data_mut();
     let channel = |v: f64| v.round().clamp(0.0, 255.0) as u32;
-    for (row, line) in rows.zip(device.chunks(columns.len())) {
-        for (column, &[r, g, b, a]) in columns.clone().zip(line) {
-            let a = channel(a);
-            if a == 0 {
-                continue;
+    let first = rows.start;
+    super::image::resample(
+        [left, top, right, bottom],
+        (width as usize, height as usize),
+        pixels,
+        (columns.clone(), rows),
+        window,
+        |row, line| {
+            for (column, &[r, g, b, a]) in columns.clone().zip(line) {
+                let a = channel(a);
+                if a == 0 {
+                    continue;
+                }
+                // A premultiplied channel never exceeds the alpha.
+                let source = [channel(r).min(a), channel(g).min(a), channel(b).min(a), a];
+                let at = ((first + row) * stride + column) * 4;
+                let Some(target) = data.get_mut(at..at + 4) else {
+                    continue;
+                };
+                let keep = 255 - a;
+                for (to, from) in target.iter_mut().zip(source) {
+                    // Source-over in premultiplied form: at most 255, so it fits a byte.
+                    *to = (from + div255(u32::from(*to) * keep)) as u8;
+                }
             }
-            // A premultiplied channel never exceeds the alpha.
-            let source = [channel(r).min(a), channel(g).min(a), channel(b).min(a), a];
-            let at = (row * stride + column) * 4;
-            let Some(target) = data.get_mut(at..at + 4) else {
-                continue;
-            };
-            let keep = 255 - a;
-            for (to, from) in target.iter_mut().zip(source) {
-                // Source-over in premultiplied form: at most 255, so it fits a byte.
-                *to = (from + div255(u32::from(*to) * keep)) as u8;
-            }
-        }
-    }
+        },
+    );
 }
 
 /// One marker, ready to draw at any position.

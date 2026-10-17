@@ -135,7 +135,10 @@ impl Figure {
     /// ub.AUTO, or widen the limits.`, when a mesh or 2-D histogram drawn with
     /// [`Render::Raster`] has a cell cut by explicit limits that reaches more than 10,000 pt
     /// past them (`mark 1 of these axes, a mesh, has a cell cut by the x limits that reaches …
-    /// pt past them; …`); on a grid the message starts with the axes' cell as above.
+    /// pt past them; …`), or an edge that would lie more than 0.001 pt from its place in the
+    /// image (`mark 1 of these axes, a mesh, has x_edges[1] 0.950 pt from its place in the
+    /// image of the cells; …`, with the hint `use render=ub.Render.VECTOR or ub.AUTO.`); on a
+    /// grid the message starts with the axes' cell as above.
     ///
     /// # Examples
     ///

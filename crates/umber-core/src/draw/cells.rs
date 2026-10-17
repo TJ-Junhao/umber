@@ -34,6 +34,10 @@ pub(super) const CLEAR: Rgba = Rgba {
 /// such a grid as vector shapes, and [`Render::Raster`](crate::Render::Raster) fails.
 pub(super) const MAX_IMAGE_REACH: f64 = 10_000.0;
 
+/// How far, in points, an edge of a grid drawn as one image may lie from its place among the
+/// image's evenly spaced pixels, on the final plot.
+pub(super) const MAX_EDGE_OFFSET: f64 = 0.001;
+
 /// The grid of `width` by `height` cells whose colors are `pixels` (row by row from the top,
 /// [`CLEAR`] for an empty cell) as one image over `bounds`, the left, top, right and bottom
 /// edges of its outer cells in plot points. When explicit limits cut its outer cells, `visible`

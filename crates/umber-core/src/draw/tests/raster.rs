@@ -450,8 +450,8 @@ fn raster_refuses_uneven_edges_naming_the_first_edge_off_the_lattice() {
             ),
             "Axes.mesh(): x_edges[1] = 9999-01-01T00:00:00.000001 is off the evenly spaced \
              times from x_edges[0] = 9999-01-01 to x_edges[2] = 9999-01-01T00:00:00.000009, \
-             which put it at 9999-01-01T00:00:00.000004; drawing the cells as one image needs \
-             evenly spaced edges on the x axis.",
+             which put it at 9999-01-01T00:00:00.000004 plus 0.5 microseconds; drawing the \
+             cells as one image needs evenly spaced edges on the x axis.",
         ),
     ];
     for (err, message) in cases {
@@ -977,4 +977,213 @@ fn raster_refuses_cells_far_wider_than_the_plot_at_render_time() {
         ),
         "{message}"
     );
+}
+
+/// A 6 x 3 in mesh of two cells drawn as `render` says, with x edges `x` and x limits
+/// `limits`: the edge between the cells lies 0.0000999 of a cell off the evenly spaced lattice,
+/// which the call accepts, and the limits zoom in on it.
+fn zoomed(x: &[f64], limits: (f64, f64), render: Render) -> Figure {
+    let mut f = Figure::new(6.0, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .mesh(
+            x,
+            &[0.0, 1.0],
+            &[1.0, 2.0],
+            MeshOptions {
+                render,
+                ..MeshOptions::default()
+            },
+        )
+        .unwrap()
+        .xlim(limits.0, limits.1)
+        .unwrap();
+    f
+}
+
+/// The message of the error of rendering `f`.
+fn render_message(f: &Figure) -> String {
+    let err = f.to_scene(FontLibrary::global()).unwrap_err();
+    assert!(matches!(err, Error::Style { .. }), "{err:?}");
+    assert_eq!(err.hint(), Some("use render=ub.Render.VECTOR or ub.AUTO."));
+    err.to_string()
+}
+
+#[test]
+fn raster_refuses_edges_that_zooming_moves_on_screen() {
+    let message = render_message(&zoomed(
+        &[0.0, 1.000_099_9, 2.0],
+        (0.98, 1.02),
+        Render::Raster,
+    ));
+    assert!(
+        message.starts_with("Figure.to_scene(): mark 1 of these axes, a mesh, has x_edges[1] "),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(
+            " pt from its place in the image of the cells; drawing the cells as one image needs \
+             every edge within 0.001 pt of its place."
+        ),
+        "{message}"
+    );
+    // Year 2500 times 10 s apart, the middle one 999 microseconds late, zoomed to 9.8..10.2 s.
+    let mut f = Figure::new(6.0, 3.0, Theme::pigment()).unwrap();
+    let at = |us: i64| Instant::from_micros(YEAR_2500 + us).unwrap();
+    f.add_axes(ScaleKind::Time, ScaleKind::Linear)
+        .unwrap()
+        .mesh_time(
+            micros(YEAR_2500, &[0, 10_000_999, 20_000_000]),
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[1.0, 2.0],
+            MeshOptions {
+                render: Render::Raster,
+                ..MeshOptions::default()
+            },
+        )
+        .unwrap()
+        .xlim_time(at(9_800_000), at(10_200_000))
+        .unwrap();
+    let message = render_message(&f);
+    assert!(
+        message.starts_with("Figure.to_scene(): mark 1 of these axes, a mesh, has x_edges[1] "),
+        "{message}"
+    );
+}
+
+#[test]
+fn auto_draws_edges_that_zooming_moves_as_vector_shapes() {
+    let mut x = even(0.0, 1.0, 100);
+    x[50] += 0.000_099_9;
+    let mut f = Figure::new(6.0, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .mesh(
+            &x,
+            &even(0.0, 1.0, 100),
+            &mesh_values(100, 100),
+            MeshOptions::default(),
+        )
+        .unwrap()
+        .xlim(49.98, 50.02)
+        .unwrap();
+    assert!(!is_image(drawn(&f)));
+    // Unzoomed, the same edges are drawn as one image.
+    f.axes_at_mut(crate::GridIndex::Auto, crate::GridIndex::Auto)
+        .unwrap()
+        .xlim(0.0, 100.0)
+        .unwrap();
+    assert!(is_image(drawn(&f)));
+}
+
+#[test]
+fn raster_draws_what_vector_draws_or_refuses_at_every_zoom() {
+    // Zooming in on an edge near 1 by factors of ten: wherever the image is drawn,
+    // its interior pixels are those of the vector cells; once the edge would move by more
+    // than 0.001 pt, rendering fails instead.
+    let (mut drawn_images, mut refused) = (0, 0);
+    for x in [[0.0, 1.000_099_9, 2.0], [0.0, 1.000_000_000_1, 2.0]] {
+        for k in 0..7 {
+            let half = 1.0 / 10f64.powi(k);
+            let limits = (1.0 - half, 1.0 + half);
+            let raster = zoomed(&x, limits, Render::Raster);
+            if raster.to_scene(FontLibrary::global()).is_err() {
+                refused += 1;
+                continue;
+            }
+            drawn_images += 1;
+            let vector = zoomed(&x, limits, Render::Vector);
+            let (xs, ys) = edge_lines(&vector);
+            let dpi = 600;
+            let (a, b) = (png(&vector, dpi), png(&raster, dpi));
+            let scale = f64::from(dpi) / 72.0;
+            for py in (0..a.height).filter(|&p| !near(p, scale, &ys)) {
+                for px in (0..a.width).filter(|&p| !near(p, scale, &xs)) {
+                    let off = a
+                        .at(px, py)
+                        .iter()
+                        .zip(b.at(px, py))
+                        .map(|(u, v)| u.abs_diff(v))
+                        .max();
+                    assert!(off <= Some(1), "{x:?} zoom 1e{k}: pixel ({px}, {py})");
+                }
+            }
+        }
+    }
+    assert!(
+        drawn_images > 0 && refused > 0,
+        "{drawn_images} drawn, {refused} refused"
+    );
+}
+
+#[test]
+fn narrow_log_edges_far_from_one_are_checked_relative_to_the_first() {
+    let log = ScaleKind::Log { base: LogBase::TEN };
+    for base in [1e299, 1e-299] {
+        let x = vec![base, base * (1.0 + 5.504e-10), base * (1.0 + 1.1e-9)];
+        let err = raster_error(
+            [log, ScaleKind::Linear],
+            AxisData::Numbers(x),
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[1.0, 2.0],
+        );
+        assert!(
+            err.to_string().starts_with("Axes.mesh(): x_edges[1] = ")
+                && err
+                    .to_string()
+                    .contains(" is off the evenly spaced logarithms "),
+            "{err}"
+        );
+    }
+}
+
+#[test]
+fn expected_edges_are_written_exactly() {
+    let log = ScaleKind::Log { base: LogBase::TEN };
+    let err = raster_error(
+        [log, ScaleKind::Linear],
+        AxisData::Numbers(vec![1e-300, 1e-100, 1e300]),
+        AxisData::Numbers(vec![0.0, 1.0]),
+        &[1.0, 2.0],
+    );
+    assert!(err.to_string().contains(", which put it at 1; "), "{err}");
+    let err = raster_error(
+        [ScaleKind::Time, ScaleKind::Linear],
+        micros(0, &[0, 1, 3]),
+        AxisData::Numbers(vec![0.0, 1.0]),
+        &[1.0, 2.0],
+    );
+    assert_eq!(
+        err.to_string(),
+        "Axes.mesh(): x_edges[1] = 1970-01-01T00:00:00.000001 is off the evenly spaced times \
+         from x_edges[0] = 1970-01-01 to x_edges[2] = 1970-01-01T00:00:00.000003, which put it \
+         at 1970-01-01T00:00:00.000001 plus 0.5 microseconds; drawing the cells as one image \
+         needs evenly spaced edges on the x axis."
+    );
+}
+
+#[test]
+fn a_blank_raster_mesh_draws_nothing_at_any_zoom() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .mesh(
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0],
+            &[f64::NAN, f64::NAN],
+            MeshOptions {
+                render: Render::Raster,
+                ..MeshOptions::default()
+            },
+        )
+        .unwrap()
+        .xlim(1.0 - 1e-6, 1.0 + 1e-6)
+        .unwrap();
+    assert!(f.to_scene(FontLibrary::global()).is_ok());
+    // Also beside a mark that gives the axes a color scale.
+    f.axes_at_mut(crate::GridIndex::Auto, crate::GridIndex::Auto)
+        .unwrap()
+        .mesh(&[5.0, 6.0], &[0.0, 1.0], &[1.0], MeshOptions::default())
+        .unwrap();
+    assert!(f.to_scene(FontLibrary::global()).is_ok());
 }
