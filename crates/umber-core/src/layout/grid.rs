@@ -3067,7 +3067,7 @@ mod tests {
                             &resolved,
                             grid.span(input.axes.cells()),
                             [true; 2],
-                            None,
+                            &super::super::LabelCache::new(lib()),
                         )
                     })
                     .collect();

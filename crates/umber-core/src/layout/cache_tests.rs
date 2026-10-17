@@ -29,6 +29,14 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
     ];
     for style in styles {
         let expected = measure(&lib, text, style);
+        assert_eq!(
+            cache.width(text, style).to_bits(),
+            expected.width().to_bits()
+        );
+        assert_eq!(
+            cache.width(text, style).to_bits(),
+            expected.width().to_bits()
+        );
         let mut first = cache.measure(text, style);
         first.x = 123.0;
         first.y = 456.0;
@@ -55,6 +63,10 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
     let long = "W".repeat(5000);
     for text in ["", "ffi", &long] {
         let expected = measure(&lib, text, regular);
+        assert_eq!(
+            cache.width(text, regular).to_bits(),
+            expected.width().to_bits()
+        );
         let label = cache.measure(text, regular);
         assert_eq!(label.text, expected.text);
         assert_eq!(

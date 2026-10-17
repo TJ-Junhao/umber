@@ -12,7 +12,7 @@ use super::legend::{self, LegendRow};
 use super::{
     AXIS_LABEL_GAP, Area, BODY_LINE, END_LABEL_SHARE, HEADER_GAP, Label, Layout, LayoutInput,
     PADDING, PlacedBaseline, Styles, TITLE_GAP, TITLE_LINE, X_LABEL_GAP, Y_LABEL_CENTER,
-    Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, measure_ticks, metrics,
+    Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, metrics,
 };
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
 use crate::{Align, Figure, FontLibrary, Result};
@@ -464,7 +464,7 @@ pub(crate) fn measure_panel(
     resolved: &Resolved,
     span: PanelSpan,
     show_labels: [bool; 2],
-    labels: Option<&super::LabelCache<'_>>,
+    labels: &super::LabelCache<'_>,
 ) -> PanelBands {
     let LayoutInput {
         theme,
@@ -481,19 +481,13 @@ pub(crate) fn measure_panel(
     // Tick labels.
     let (tick_ascent, tick_descent) = metrics(lib, &styles.tick);
     let tick_size = f64::from(styles.tick.size);
-    let ticks = |ticks: &[crate::resolve::AxisTick]| {
-        labels.map_or_else(
-            || measure_ticks(lib, ticks, styles.tick),
-            |labels| labels.ticks(ticks, styles.tick),
-        )
-    };
     let y_labels = if show_labels[1] {
-        ticks(&resolved.y.ticks)
+        labels.ticks(&resolved.y.ticks, styles.tick)
     } else {
         Vec::new()
     };
     let x_labels = if show_labels[0] {
-        ticks(&resolved.x.ticks)
+        labels.ticks(&resolved.x.ticks, styles.tick)
     } else {
         Vec::new()
     };
@@ -1097,7 +1091,7 @@ mod tests {
                     &resolved,
                     grid.span(input.axes.cells()),
                     [true; 2],
-                    None,
+                    &super::super::LabelCache::new(lib),
                 );
                 // A figure of one axes has the canvas as its frame.
                 let slot = single_slot(grid, layout.plot, &bands);
@@ -1123,7 +1117,7 @@ mod tests {
                     &resolved,
                     grid.span(input.axes.cells()),
                     [true; 2],
-                    None,
+                    &super::super::LabelCache::new(lib),
                 );
                 let header = bands.heading.bottom(0.0);
                 let plot = layout.plot;
@@ -1166,7 +1160,7 @@ mod tests {
                 &resolved,
                 grid.span(input.axes.cells()),
                 [true; 2],
-                None,
+                &super::super::LabelCache::new(lib),
             );
             assert!(bands.y_tick_column > Y_LABEL_GAP);
             assert!(
@@ -1195,7 +1189,7 @@ mod tests {
                 &resolved,
                 grid.span(input.axes.cells()),
                 [true; 2],
-                None,
+                &super::super::LabelCache::new(lib),
             );
             let mut slot = single_slot(grid, layout.plot, &bands);
             slot.header.left += 30.0;

@@ -518,7 +518,7 @@ fn plan(
             // Keep direct labels inside their panel, before any shared colorbar.
             span.reserve_cap = f64::INFINITY;
         }
-        let bands = layout::measure_panel(input, resolved, span, show_labels[i], Some(labels));
+        let bands = layout::measure_panel(input, resolved, span, show_labels[i], labels);
         if shared {
             bands.without_colorbar(span.reserve_cap)
         } else {
@@ -2135,7 +2135,7 @@ mod tests {
                         resolved,
                         grid.span(input.axes.cells()),
                         [true; 2],
-                        None,
+                        &layout::LabelCache::new(lib),
                     )
                 })
                 .collect();

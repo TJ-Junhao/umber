@@ -245,7 +245,7 @@ fn smallest_self_fitting_step(
                     &candidate,
                     grid.span(input.axes.cells()),
                     [true, true],
-                    None,
+                    &layout::LabelCache::new(lib),
                 );
                 if let Ok(solution) = layout::solve_grid(grid, &[bands])
                     && Side::X

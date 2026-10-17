@@ -367,10 +367,15 @@ impl<'a> LabelCache<'a> {
         }
     }
 
-    fn measure(&self, text: &str, style: TextStyle) -> Label {
+    fn with_label<T>(
+        &self,
+        text: &str,
+        style: TextStyle,
+        use_label: impl FnOnce(&Label) -> T,
+    ) -> T {
         #[cfg(test)]
         if !self.enabled {
-            return measure(self.lib, text, style);
+            return use_label(&measure(self.lib, text, style));
         }
         let key = LabelStyle {
             font: style.font,
@@ -381,11 +386,21 @@ impl<'a> LabelCache<'a> {
         let mut labels = self.labels.borrow_mut();
         let by_text = labels.entry(key).or_default();
         if let Some(label) = by_text.get(text) {
-            return label.clone();
+            return use_label(label);
         }
         let label = measure(self.lib, text, style);
-        by_text.insert(text.to_owned(), label.clone());
-        label
+        let result = use_label(&label);
+        by_text.insert(text.to_owned(), label);
+        result
+    }
+
+    fn measure(&self, text: &str, style: TextStyle) -> Label {
+        self.with_label(text, style, Label::clone)
+    }
+
+    /// Reads only the width, without copying the cached text or glyph runs.
+    fn width(&self, text: &str, style: TextStyle) -> f64 {
+        self.with_label(text, style, Label::width)
     }
 
     fn ticks(&self, ticks: &[AxisTick], style: TextStyle) -> Vec<(NormalizedPos, Label)> {
@@ -512,7 +527,8 @@ pub(crate) struct TickRoom<'a> {
     style: TextStyle,
     /// The widths of the labels measured so far: tick searches judge the same labels often.
     widths: RefCell<HashMap<String, f64>>,
-    /// Measurements shared with the panel layout and other candidate tick sets.
+    /// Measurements shared with panel layout by `pipeline::plan`'s category-candidate slack
+    /// checks, per-pass tick rooms, and final constrained-choice rooms.
     labels: Option<&'a LabelCache<'a>>,
     /// The most ticks that fit, whatever their labels; `None` for no such limit.
     most: Option<usize>,
@@ -579,13 +595,10 @@ impl<'a> TickRoom<'a> {
         if let Some(&width) = self.widths.borrow().get(label) {
             return width;
         }
-        let width = self
-            .labels
-            .map_or_else(
-                || measure(self.lib, label, self.style),
-                |labels| labels.measure(label, self.style),
-            )
-            .width();
+        let width = self.labels.map_or_else(
+            || measure(self.lib, label, self.style).width(),
+            |labels| labels.width(label, self.style),
+        );
         self.widths.borrow_mut().insert(label.to_owned(), width);
         width
     }
