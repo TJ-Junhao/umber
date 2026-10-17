@@ -75,7 +75,8 @@ def _x_bars(ax: AnyAxes) -> Callable[..., object]:
 
 
 def _type_name(value: object) -> str:
-    return "None" if value is None else type(value).__name__
+    name = "None" if value is None else type(value).__name__
+    return f"numpy.{name}" if isinstance(value, np.generic) else name
 
 
 def _parameter(err: BaseException) -> object:
@@ -195,6 +196,8 @@ STYLE_TYPE_ERRORS: list[tuple[str, object, str, str]] = [
     ("caps", 1, "a bool", "pass True or False."),
     ("caps", None, "a bool", "pass True or False."),
     ("caps", np.True_, "a bool", "pass True or False."),
+    ("caps", np.float64(1.5), "a bool", "pass True or False."),
+    ("caps", np.int64(1), "a bool", "pass True or False."),
 ]
 
 

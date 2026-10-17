@@ -91,6 +91,7 @@ mod corpus {
     pub mod baseline;
     pub mod r#box;
     pub mod bubbles;
+    pub mod category_labels;
     pub mod cmap;
     pub mod color_by;
     pub mod colorbar;
@@ -157,6 +158,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::area::cases(&lib, &mut sink);
     corpus::bars::cases(&lib, &mut sink);
     corpus::baseline::cases(&lib, &mut sink);
+    corpus::category_labels::cases(&lib, &mut sink);
     corpus::hist::cases(&lib, &mut sink);
     corpus::inputs::cases(&lib, &mut sink);
     corpus::legend::cases(&lib, &mut sink);

@@ -2060,8 +2060,8 @@ impl<'a> AxesMut<'a> {
 
     /// Counts paired finite coordinates in equal-width bins over their data ranges.
     /// Empty bins are not drawn, including with a log color scale.
-    /// A 2-D histogram alone draws no baseline; one is drawn only alongside a mark that grows
-    /// from zero, such as an area, histogram or stem.
+    /// By default a 2-D histogram alone draws no baseline; one is drawn only alongside a mark
+    /// that grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
     /// # Errors
     ///
@@ -2090,8 +2090,8 @@ impl<'a> AxesMut<'a> {
     /// With a narrow explicit `xlim` and automatic y limits, hexagons keep their size;
     /// the y range may grow far beyond the data to keep every hexagon whole and regular.
     /// Set `ylim()` or choose a larger `gridsize` to control that range.
-    /// A hexbin mark alone draws no baseline; one is drawn only alongside a mark that grows
-    /// from zero, such as an area, histogram or stem.
+    /// By default a hexbin mark alone draws no baseline; one is drawn only alongside a mark
+    /// that grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
     /// # Errors
     ///

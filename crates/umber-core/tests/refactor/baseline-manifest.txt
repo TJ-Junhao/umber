@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 24ce4c50d31ad6351644b954b8ce96919178caf6
+# revision: d58ddd1a13267893603b29791dbb39d5132e0058
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 af10b9e8d0c96cc7d716f99ca46cde4e34a86ef0adaf415e43c55ff3a0fb1800  api/cmaps.txt
@@ -43,7 +43,7 @@ ac3a456142b3d778025f4175604fb54b9a5921da6fcee8a8746216c8db714d90  errors/stem.tx
 9462b011f0d9e7e16eb616df70d0366fa89fcee79a064cec0542f6397fad59f0  errors/time.txt
 293d9d32ad643d24a6d2ba0834b9950129dc1193ece84ab57db91665ef3e994a  errors/violin.txt
 9251811e6d36273dad7820067d80b231dffebd161626ab35f19002e3193b773e  errors/x-label-min-width.txt
-e539c6a2dbc8c0556d99aacd4b8efe09e9b027f9644a11fd525a96ed3ccbda68  errors/x-label-overflow.txt
+00c1dca9f7d6743c31a5d31b02f4e168be190fa20961d672670da13fa7759967  errors/x-label-overflow.txt
 42fc52dff40a6b573a1cedd833213376ff2b49be19e3ea27c084d368818dbddb  png/band-200k-points.dpi200.png
 6394208d0b60edec87d6e27cad22a5aea422ac8555591b6a2080d7db50ee2787  png/band-200k-points.dpi72.png
 0a354cf6d597b38d5593d215bf52cfa4f6f81f43367343091de9c8e310d2354d  png/band-gaps-graphite.dpi200.png
@@ -328,6 +328,16 @@ d58cacca4854bbbec8ea6a12d2b820cdecdedc6bc7921669a80cbd23f26e5b7e  png/fig-bars-n
 08b16b8296425b0b91ec8c1e22f6d4b18b2166aff0e1e229e68f4a70616a26a8  png/fig-bars-pigment.dpi72.png
 e16dcb147e255b89dfa1ed00d980d2ab9ac28babb7d69e86a2d5f5703f893c70  png/fig-bars-with-category-lines.dpi200.png
 63cf366641366517d5f9097b1c034df52d4ec35158d18582a79fffee714b1a90  png/fig-bars-with-category-lines.dpi72.png
+742290740d143e0017fe45a1d8919008361f2ab3491e96c4741f2514389f38f8  png/fig-category-labels-bars-200-horizontal.dpi200.png
+2a0886b327361770386037f99d0b98d3c9dbfafd8a9c62e06e316d57cb9e584c  png/fig-category-labels-bars-200-horizontal.dpi72.png
+df3bbfc11513153aedc0e067c7dad62927621e740e3423b4b5eec8544f7cbdc1  png/fig-category-labels-bars-200-vertical.dpi200.png
+9d4bae99051c3df785cb34aa4ca6dca339135af81cb552743c00d212a0d7384d  png/fig-category-labels-bars-200-vertical.dpi72.png
+314ea2ed8f2f4a8ff883bc03d23d26c55ab9f5e65f6834891973dfdfec9fd6fd  png/fig-category-labels-heatmap-1000.dpi200.png
+4e9cceaff4a7aa313a1e8fff8f663759e2b3a5a86840f1c7805de0ec8d0c34b2  png/fig-category-labels-heatmap-1000.dpi72.png
+4311556f2433bf3c2fbf22574a3828bab89aa595702c9df010e646c94fbcd317  png/fig-category-labels-wide-end-three.dpi200.png
+de2dae8b4b85f4cd3e7e5d8a67df252193fd20a4d64d5c885ffa7a89c8364187  png/fig-category-labels-wide-end-three.dpi72.png
+a9dadc622cf094e7e837434e9ed3a73962dc7a455daa78763637a401535e699a  png/fig-category-labels-wide-end-two.dpi200.png
+e4d3e180742e6cf0c5f496c56025287fea6a47a766b94314dceb29d14dfcef99  png/fig-category-labels-wide-end-two.dpi72.png
 7045b48d8a282c44e82e54862f819fd7076d14da6a87322d5f53da3835759489  png/fig-category.dpi200.png
 47fb01fd67847935efe9f48bb82508e8e923daff1785a8a38f1586f979d232b7  png/fig-category.dpi72.png
 3f1ab9741e954e0c5f95e068a3de92c3662fe6a8f3d739bb4a6d6df83c02b9ff  png/fig-constant-values.dpi200.png
@@ -1472,6 +1482,11 @@ be504e77a6f2dffaf080d5dcd4b54a8052fb4b8bea719c032cb81f4bd6568121  scene/fig-bars
 3f258cf6e9eba4905ec0a1f31b94bc24c739c96691e7d750b76dd8b66831fb07  scene/fig-bars-negative-pigment.txt
 f565a74abf7674e7a4eec744de92fcbc7816f76e9fd4f7c1a048c61156ef0e1d  scene/fig-bars-pigment.txt
 07972ced27b317fb884b36ab29a8da8fbffc621e3b3169ce741a7804689d46b9  scene/fig-bars-with-category-lines.txt
+483e7562d9ed3345d275a4e5d415a457da4ff49bb31b59bae833e9b5e3dc8015  scene/fig-category-labels-bars-200-horizontal.txt
+903ea1927dbcd5aa5bca3605d57e96a1ebcc4014066528966eb16517c8480f04  scene/fig-category-labels-bars-200-vertical.txt
+f92180e2f1ff220b5ea8b4aaf85d6dd093bdde74fca0799c4e52983cae72af7f  scene/fig-category-labels-heatmap-1000.txt
+210010cdbad69a1d4a4da1ab53465eb845239e7e4c26a108270d6897acfb7df0  scene/fig-category-labels-wide-end-three.txt
+d3985b2c4142ec0f2018f7ccd33cfbe8942bd81d81dc51e5d54edd58071e5be9  scene/fig-category-labels-wide-end-two.txt
 ca25b8c8b11a0f64c3bd4908afe2767804c5e479bf57e9cc038dac5ba1e251ce  scene/fig-category.txt
 29fa17b1b6a0004114bed11f8da2fa1444c94f36f5ef6bde0aaf2816fb481b00  scene/fig-constant-values.txt
 160c04e78d0993a52afefd8917bb362b64bb4fe4123475d2e5e67404583bbefa  scene/fig-direct-all-nan.txt
@@ -2257,6 +2272,16 @@ dc2cea31f246682ae7c440b3a9a7789552342417e39611546ff8da8111474096  svg/fig-bars-n
 8d1c17c4aaf85048b738d6795b4a8198e2f5cf10c268c23aed893376c34e21a4  svg/fig-bars-pigment.outlines.svg
 24c73ca8fd5a88b91535b2328a3b17de5cc602a1040cd68f3c84f57de81e9c94  svg/fig-bars-with-category-lines.editable.svg
 f974bfbd6881925af5e50ba80b35ba223f8fdeb01e87863f14b617d74ae10136  svg/fig-bars-with-category-lines.outlines.svg
+f23d48be022f0e5d59f32b38af67ec329db1e77e35b8f76966f84a86e0546ca4  svg/fig-category-labels-bars-200-horizontal.editable.svg
+aa411f200014e24bf6eb1a3b144bb6dd3de7cefdc1c703f4f452e447bffd710e  svg/fig-category-labels-bars-200-horizontal.outlines.svg
+ad57980e0d09504620f6efa16c564c7569a1d36ed93fb024af8438dca1ae2835  svg/fig-category-labels-bars-200-vertical.editable.svg
+2c4ff3777214e8ad24b633a1322b4abded29a8420bce11e45f1eaf49b07bda97  svg/fig-category-labels-bars-200-vertical.outlines.svg
+1cca9c154f049bdc894ffe8659b64fe61b4a4a50e076b9814b6fd53556c3b243  svg/fig-category-labels-heatmap-1000.editable.svg
+c3281fadcab3ab268807752897d5234f60bfadd9b3affe26ef6b468daf85e6eb  svg/fig-category-labels-heatmap-1000.outlines.svg
+ca1c085289a5bf8d5550228f6a2a5ac50d115af2753753c81d1b704a0f280993  svg/fig-category-labels-wide-end-three.editable.svg
+19138b009a019be679d69685532fb98bf4bf785aa4be9366b81433231696d058  svg/fig-category-labels-wide-end-three.outlines.svg
+1f8537a689932eea23e60fee414dfb2b3e6b7c843b01dd70f6f92b0d8310ebf3  svg/fig-category-labels-wide-end-two.editable.svg
+0bd2c0c575595774f96486c1d07cdf5b72a88b3e8d0a759a5edda89d32288d2a  svg/fig-category-labels-wide-end-two.outlines.svg
 21ef6a861aa6881c786da16fcd22cf43fb16cced2224bdd3aeda5f62a69fcf91  svg/fig-category.editable.svg
 9d2aa429db0f22ea9fc753c415e503da0854f7069da39aad79a2baf416379953  svg/fig-category.outlines.svg
 d8541a37801cf8915b4d1bde4647e33b44760751d3effa52d583fa43169a2aa2  svg/fig-constant-values.editable.svg

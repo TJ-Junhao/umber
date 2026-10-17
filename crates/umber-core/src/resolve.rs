@@ -832,7 +832,7 @@ fn positioned(scale: &ContinuousScale, ticks: Vec<Tick>) -> Vec<AxisTick> {
 /// The ticks of a category axis along `which` of `scale`: one per category, at the centre of
 /// its band, labelled with its name. Categories run left to right along x and top to bottom
 /// along y, so the first category of a y axis sits at its high end.
-fn category_ticks(scale: &CategoryScale, which: ValueAxis) -> Vec<AxisTick> {
+pub(crate) fn category_ticks(scale: &CategoryScale, which: ValueAxis) -> Vec<AxisTick> {
     scale
         .categories()
         .iter()
@@ -1003,7 +1003,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
         AxisLimits::Category => {
             let scale = categories(marks, which);
             let axis = ResolvedAxis {
-                ticks: category_ticks(&scale, which),
+                ticks: room.category_ticks(category_ticks(&scale, which)),
                 scale: AxisScale::Category(scale),
             };
             return (axis, NormalizedPos::LOW);

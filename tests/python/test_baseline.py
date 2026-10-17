@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import pytest
 
 import umber as ub
@@ -77,7 +78,17 @@ def test_zero_gridline_follows_visibility(kind: str) -> None:
     )
 
 
-@pytest.mark.parametrize(("value", "name"), [(None, "None"), (1, "int"), ("yes", "str")])
+@pytest.mark.parametrize(
+    ("value", "name"),
+    [
+        (None, "None"),
+        (1, "int"),
+        ("yes", "str"),
+        (np.True_, "numpy.bool"),
+        (np.float64(1.5), "numpy.float64"),
+        (np.int64(1), "numpy.int64"),
+    ],
+)
 def test_wrong_types_are_atomic(value: object, name: str) -> None:
     ax = axes("bar").baseline(shown=False)
     before = ax.figure.to_svg()
@@ -91,11 +102,23 @@ def test_wrong_types_are_atomic(value: object, name: str) -> None:
     assert ax.figure.to_svg() == before
 
 
-@pytest.mark.parametrize("argument", ["shown=None", "shown=1", 'shown="yes"', "shown=True"])
+@pytest.mark.parametrize(
+    "argument",
+    [
+        "shown=None",
+        "shown=1",
+        'shown="yes"',
+        "shown=np.True_",
+        "shown=np.float64(1.5)",
+        "shown=np.int64(1)",
+        "shown=True",
+    ],
+)
 def test_errors_highlight_shown(tmp_path: Path, argument: str) -> None:
     line = f"ax.baseline({argument})"
     path = tmp_path / "baseline_call.py"
     source = (
+        "import numpy as np\n"
         "import umber as ub\n"
         "ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())\n"
         f"{line}\n"
@@ -114,6 +137,9 @@ def test_error_text_corpus() -> None:
         ("shown=None", None),
         ("shown=1", 1),
         ('shown="yes"', "yes"),
+        ("shown=np.True_", np.True_),
+        ("shown=np.float64(1.5)", np.float64(1.5)),
+        ("shown=np.int64(1)", np.int64(1)),
         ("shown=True on two category axes", True),
     ]
     records: list[str] = []

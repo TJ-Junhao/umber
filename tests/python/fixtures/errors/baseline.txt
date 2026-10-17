@@ -13,6 +13,21 @@ TypeError: Axes.baseline(): shown is str; shown must be a bool or ub.AUTO.
 parameter=shown
 hint=pass True or False, or ub.AUTO to follow the marks.
 
+shown=np.True_
+TypeError: Axes.baseline(): shown is numpy.bool; shown must be a bool or ub.AUTO.
+parameter=shown
+hint=pass True or False, or ub.AUTO to follow the marks.
+
+shown=np.float64(1.5)
+TypeError: Axes.baseline(): shown is numpy.float64; shown must be a bool or ub.AUTO.
+parameter=shown
+hint=pass True or False, or ub.AUTO to follow the marks.
+
+shown=np.int64(1)
+TypeError: Axes.baseline(): shown is numpy.int64; shown must be a bool or ub.AUTO.
+parameter=shown
+hint=pass True or False, or ub.AUTO to follow the marks.
+
 shown=True on two category axes
 UsageError: Axes.baseline(): these axes have two category axes and no value axis; a baseline cannot be shown.
 parameter=shown

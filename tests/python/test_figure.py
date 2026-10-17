@@ -107,6 +107,8 @@ def test_size_must_be_a_number_or_auto(name: str, value: object) -> None:
     with pytest.raises(TypeError) as caught:
         cast(Any, ub.Figure)(**{name: value})
     shown = "None" if value is None else type(value).__name__
+    if isinstance(value, np.generic):
+        shown = f"numpy.{shown}"
     assert str(caught.value) == f"Figure(): {name} is {shown}; {name} must be a float or AUTO."
     assert details(caught.value) == (
         name,
