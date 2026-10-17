@@ -1042,18 +1042,24 @@ fn plan(
 /// with both limits fixed, any aspect change needs a recount. Fitting never stretches the
 /// coordinate map of counted cells.
 ///
-/// Several hexbins on one axes are counted in the metric of the axes, as shared axes are, so
-/// that all of their hexagons are regular on the same limits.
+/// Several hexbins with points on one axes are counted in the metric of the axes, as shared
+/// axes are, so that all of their hexagons are regular on the same limits. A metric in which a
+/// hexbin's own range spans more than [`MAX_LATTICE_LENGTH`](crate::bin2d::MAX_LATTICE_LENGTH)
+/// cells cannot count it exactly, and is an error.
 ///
 /// A lone automatic hexbin is fitted tightly: its whole cells plus the least room, on one
 /// axis, that gives the plot's shape. That room moves the automatic ticks, and their labels
 /// can change the plot's shape back, so tight fits can alternate between shapes forever.
-/// After the first pass, each pass depends only on the plot aspects, the axis domains and the
-/// aspects the lattices were counted at; when all of them repeat those of an earlier pass,
-/// the passes repeat forever. From then on each tight fit instead only grows the limits of
-/// the last pass to the new shape, as shared and mixed axes always do: the room that gave a
-/// shape is kept, so the limits stop moving once the labels keep the shape. The passes are
-/// still bounded, and a layout that does not settle within them is an error.
+/// Tight fits end on either of two triggers. After the first pass, each pass depends only on
+/// the plot aspects, the axis domains and the aspects the lattices were counted at; when all
+/// of them repeat those of an earlier pass, the passes repeat forever. And a lone panel can
+/// alternate while another panel's limits keep growing, so that nothing repeats: tight fits
+/// also end at pass [`TIGHT_PASSES`], half the budget. From then on each tight fit instead only
+/// grows the limits of the last pass to the new shape, as shared and mixed axes always do: the
+/// room that gave a shape is kept, so the limits stop moving once the labels keep the shape. A
+/// figure that settles within [`TIGHT_PASSES`] passes lays out as with tight fits alone; one
+/// that needed more tight passes may lay out differently. The passes are still bounded, and a
+/// layout that does not settle within them is an error.
 fn plan_cells(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -1099,7 +1105,9 @@ fn plan_cells(
             .map(|(_, layout)| layout.plot.width / layout.plot.height)
             .collect();
         let scales = axis_scales(&planned);
-        if pass > 0 && tight && !keeps_tight_fits() {
+        if pass >= TIGHT_PASSES && !keeps_tight_fits() {
+            tight = false;
+        } else if pass > 0 && tight && !keeps_tight_fits() {
             // Everything this pass reads: a repeat means the passes cycle.
             let domains: Vec<_> = scales.iter().map(|s| s.map(|s| s.domain())).collect();
             let state = (aspects.clone(), domains, counting_aspects.clone());
@@ -1110,12 +1118,15 @@ fn plan_cells(
             let limits = [panel.axes.x_limits(), panel.axes.y_limits()];
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
                 || groups.y.iter().filter(|&&g| g == groups.y[i]).count() > 1;
+            // Hexbins without paired finite points count no cells, and leave the others alone.
             let hexbins = panel
                 .marks
                 .iter()
-                .filter(|m| matches!(m, ResolvedMark::Hexbin { .. }))
+                .filter(|m| {
+                    matches!(m, ResolvedMark::Hexbin { mark, .. } if !mark.extents[0].is_empty())
+                })
                 .count();
-            let independent = !shared && limits == [None, None] && hexbins == 1;
+            let independent = !shared && limits == [None, None] && hexbins <= 1;
             let only_hexbin = panel
                 .marks
                 .iter()
@@ -1127,10 +1138,11 @@ fn plan_cells(
                 } else {
                     aspect_change < -1e-12
                 };
+            let axes = panel.axes;
             for mark in &mut panel.marks {
                 if let ResolvedMark::Hexbin { mark, bins, .. } = mark {
                     if pass == 0 || recount {
-                        *bins = if independent {
+                        let counted = if independent {
                             crate::bin2d::HexBins::new(
                                 &mark.x,
                                 &mark.y,
@@ -1148,6 +1160,18 @@ fn plan_cells(
                                 limits,
                             )
                         };
+                        *bins = counted.map_err(|_| {
+                            in_cell(
+                                figure,
+                                axes,
+                                crate::Error::data(
+                                    context,
+                                    "the hexbin ranges are too far apart for one lattice of \
+                                     regular hexagons on these axes.",
+                                )
+                                .with_hint("draw them on separate axes, or set explicit limits."),
+                            )
+                        })?;
                     }
                     if independent && only_hexbin && tight {
                         bins.fit(aspects[i]);
@@ -1192,6 +1216,8 @@ fn plan_cells(
                     })
             })
         {
+            #[cfg(test)]
+            SETTLED_PASS.with(|settled| settled.set(pass));
             return Ok(planned);
         }
     }
@@ -1204,19 +1230,24 @@ fn plan_cells(
     .with_hint("choose a larger gridsize, or increase the figure size."))
 }
 
+/// The passes after which [`plan_cells`] stops fitting lone hexbins tightly.
+pub(crate) const TIGHT_PASSES: usize = 32;
+
 #[cfg(test)]
 thread_local! {
-    /// Whether [`plan_cells`] keeps fitting lone hexbins tightly even when the passes cycle.
+    /// Whether [`plan_cells`] keeps fitting lone hexbins tightly through every pass.
     pub(crate) static KEEP_TIGHT_FITS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The pass at which [`plan_cells`] last settled.
+    pub(crate) static SETTLED_PASS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Whether lone hexbins stay tightly fitted when the passes cycle, as tests may ask.
+/// Whether lone hexbins stay tightly fitted through every pass, as tests may ask.
 #[cfg(test)]
 fn keeps_tight_fits() -> bool {
     KEEP_TIGHT_FITS.with(std::cell::Cell::get)
 }
 
-/// Whether lone hexbins stay tightly fitted when the passes cycle: never.
+/// Whether lone hexbins stay tightly fitted through every pass: never.
 #[cfg(not(test))]
 fn keeps_tight_fits() -> bool {
     false

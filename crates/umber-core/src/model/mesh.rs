@@ -2017,7 +2017,8 @@ mod tests {
         };
         assert!(bins.counts().is_empty());
         let bins =
-            crate::bin2d::HexBins::new(&mark.x, &mark.y, mark.gridsize, mark.transforms, 1.0);
+            crate::bin2d::HexBins::new(&mark.x, &mark.y, mark.gridsize, mark.transforms, 1.0)
+                .unwrap();
         assert_eq!(bins.counts().iter().sum::<f64>(), 4.0);
         assert!(bins.counts().iter().all(|v| *v > 0.0));
     }
@@ -2216,14 +2217,22 @@ mod tests {
         f
     }
 
-    /// The scene of `f` laid out keeping tight hexbin fits through cycling passes, as before
-    /// cycles were detected, and the scene laid out as it is now.
+    /// The scene of `f` laid out keeping tight hexbin fits through every pass, as before
+    /// cycles were handled, with the pass it settled at, and the scene laid out as it is now.
     fn scenes_keeping_and_leaving_tight_fits(
         f: &Figure,
-    ) -> (crate::Result<crate::Scene>, crate::Result<crate::Scene>) {
+    ) -> (
+        crate::Result<(crate::Scene, usize)>,
+        crate::Result<crate::Scene>,
+    ) {
         let keep = |yes| crate::pipeline::KEEP_TIGHT_FITS.with(|k| k.set(yes));
         keep(true);
-        let kept = f.to_scene(FontLibrary::global());
+        let kept = f.to_scene(FontLibrary::global()).map(|scene| {
+            (
+                scene,
+                crate::pipeline::SETTLED_PASS.with(std::cell::Cell::get),
+            )
+        });
         keep(false);
         (kept, f.to_scene(FontLibrary::global()))
     }
@@ -2241,8 +2250,12 @@ mod tests {
             ],
         );
         let (kept, now) = scenes_keeping_and_leaving_tight_fits(&f);
-        assert!(kept.is_ok(), "{:?}", kept.err());
-        assert_eq!(now.unwrap(), kept.unwrap());
+        let (kept, pass) = kept.unwrap();
+        assert!(
+            pass < crate::pipeline::TIGHT_PASSES,
+            "settled at pass {pass}"
+        );
+        assert_eq!(now.unwrap(), kept);
     }
 
     fn hex_panel_spec() -> impl proptest::strategy::Strategy<Value = HexPanelSpec> {
@@ -2269,7 +2282,9 @@ mod tests {
         ) {
             let f = hex_grid(width, height, &specs);
             let (kept, now) = scenes_keeping_and_leaving_tight_fits(&f);
-            if let Ok(kept) = kept {
+            if let Ok((kept, pass)) = kept
+                && pass < crate::pipeline::TIGHT_PASSES
+            {
                 proptest::prop_assert_eq!(now.ok(), Some(kept));
             }
         }
@@ -2348,5 +2363,175 @@ mod tests {
                 assert!(regular(&cell.hexagon), "{sx} {sy}: {:?}", cell.hexagon);
             }
         }
+    }
+
+    /// A figure of one lone hexbin beside a hexbin with a line and a legend at the right: the
+    /// lone panel alternates between tight shapes while the other panel's limits keep growing.
+    fn alternating_beside_growing(
+        (x, y, span): (f64, f64, f64),
+        gridsize: usize,
+        (width, height): (f64, f64),
+    ) -> Figure {
+        let grid = crate::Grid::new(1, 2).unwrap();
+        let mut f = Figure::with_grid(width, height, Theme::pigment(), grid).unwrap();
+        let at = |col| crate::Placement {
+            col: crate::GridIndex::At(col),
+            ..Default::default()
+        };
+        let options = HexbinOptions {
+            gridsize,
+            ..Default::default()
+        };
+        f.add_axes_at(at(0), ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .hexbin(&[x], &[y], options.clone())
+            .unwrap();
+        f.add_axes_at(at(1), ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .hexbin(&[1.3 * x + span], &[0.7 * y - 0.2], options)
+            .unwrap()
+            .line(
+                crate::AxisData::Numbers(vec![-span, span]),
+                &[-1.0, 1.0],
+                crate::LineOptions {
+                    label: "reference".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .legend_at(crate::LegendStyle::Chips, crate::LegendPosition::Right)
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn alternating_panel_beside_growing_panel_settles() {
+        let f = alternating_beside_growing(
+            (
+                -235.041_537_564_207_7,
+                -0.546_357_062_448_124_9,
+                212.648_455_513_756_86,
+            ),
+            58,
+            (7.489_136_393_708_419, 7.976_442_061_018_854),
+        );
+        let laid_out = f.to_scene(FontLibrary::global());
+        assert!(laid_out.is_ok(), "{:?}", laid_out.err());
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(256))]
+        #[test]
+        fn alternating_panels_beside_growing_panels_settle(
+            x in -300.0f64..300.0,
+            y in -1.0f64..1.0,
+            span in 1.0f64..300.0,
+            gridsize in 1usize..=100,
+            width in 4.0f64..10.0,
+            height in 3.0f64..10.0,
+        ) {
+            let f = alternating_beside_growing((x, y, span), gridsize, (width, height));
+            let laid_out = f.to_scene(FontLibrary::global());
+            proptest::prop_assert!(laid_out.is_ok(), "{:?}", laid_out.err());
+        }
+    }
+
+    #[test]
+    fn hexbins_too_far_apart_for_one_lattice_are_refused() {
+        for far in [1e20, 1e200] {
+            let mut f = figure(6.0, 4.0);
+            f.single_axes_mut()
+                .hexbin(&[0.0, 1.0, 1.0], &[0.0, 0.5, 1.0], HexbinOptions::default())
+                .unwrap()
+                .hexbin(&[0.0, far], &[0.0, 1.0], HexbinOptions::default())
+                .unwrap();
+            let error = f.to_scene(FontLibrary::global()).unwrap_err();
+            assert!(matches!(error, crate::Error::Data { .. }), "{error}");
+            assert!(
+                error.to_string().contains("too far apart for one lattice"),
+                "{error}"
+            );
+            assert_eq!(
+                error.hint(),
+                Some("draw them on separate axes, or set explicit limits.")
+            );
+        }
+        // Shared axes count every hexbin in the metric of the shared limits too; a grid of
+        // more than one cell names the axes.
+        let grid = crate::Grid::new(1, 2)
+            .unwrap()
+            .with_share_x(crate::Share::All);
+        let mut f = Figure::with_grid(10.0, 4.0, Theme::pigment(), grid).unwrap();
+        for (col, far) in [(0, 1.0), (1, 1e20)] {
+            f.add_axes_at(
+                crate::Placement {
+                    col: crate::GridIndex::At(col),
+                    ..Default::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap()
+            .hexbin(&[0.0, 0.5, far], &[0.0, 0.5, 1.0], HexbinOptions::default())
+            .unwrap();
+        }
+        let error = f.to_scene(FontLibrary::global()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .starts_with("Figure.to_scene(): row 0, col 0: "),
+            "{error}"
+        );
+        assert!(error.to_string().contains("too far apart for one lattice"));
+    }
+
+    #[test]
+    fn hexbins_far_apart_on_one_lattice_keep_their_counts() {
+        let mut f = figure(6.0, 4.0);
+        f.single_axes_mut()
+            .hexbin(&[0.0, 1.0, 1.0], &[0.0, 0.5, 1.0], HexbinOptions::default())
+            .unwrap()
+            .hexbin(&[0.0, 1e6], &[0.0, 1.0], HexbinOptions::default())
+            .unwrap();
+        let (_, _, marks) =
+            crate::pipeline::plan_panel_marks(&f, FontLibrary::global()).swap_remove(0);
+        let counts: Vec<_> = marks
+            .iter()
+            .map(|mark| match mark {
+                crate::resolve::ResolvedMark::Hexbin { bins, .. } => bins.counts().to_vec(),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(counts, [vec![1.0; 3], vec![1.0; 2]]);
+    }
+
+    #[test]
+    fn hexbins_without_paired_points_leave_their_neighbour_unchanged() {
+        let x: Vec<f64> = (0..300)
+            .map(|i| (i as f64 * 0.618_033_988_7).fract() * 3.0)
+            .collect();
+        let y: Vec<f64> = (0..300)
+            .map(|i| (i as f64 * 0.414_213_562_3).fract())
+            .collect();
+        let svg = |extra: Option<(Vec<f64>, Vec<f64>)>| {
+            let mut f = figure(6.0, 4.0);
+            let mut axes = f.single_axes_mut();
+            axes.hexbin(&x, &y, HexbinOptions::default()).unwrap();
+            if let Some((ex, ey)) = extra {
+                axes.hexbin(
+                    &ex,
+                    &ey,
+                    HexbinOptions {
+                        gridsize: 10,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            }
+            f.to_svg(crate::SvgText::Editable).unwrap()
+        };
+        let alone = svg(None);
+        assert_eq!(svg(Some((Vec::new(), Vec::new()))), alone);
+        assert_eq!(svg(Some((vec![f64::NAN, 1.0], vec![2.0, f64::NAN]))), alone);
     }
 }
