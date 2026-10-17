@@ -5,9 +5,11 @@ Each case times the Python call that builds a figure through the encoded bytes: 
 ``to_svg()`` for umber, ``savefig`` to a ``BytesIO`` for matplotlib (Agg backend, default style,
 ``plt.close`` included). Figures are 6 x 4 in, PNG at 200 dpi, both libraries with identical
 deterministic input data that is built outside the timed region. Every case runs once as a
-warm-up, then ``--runs`` times (at least 7 are meant); the table shows the median. Each library
-runs in its own process, so they share no caches, and the import time of each is measured in a
-fresh interpreter.
+warm-up, then ``--runs`` times (at least 7 are meant); the table shows the median with the
+interquartile range (IQR) and the raw samples stay in the JSON. Each library runs in its own
+process, so they share no caches. The samples come in two interleaved batches, the libraries
+alternating per case and swapping order in the second batch, so changing host load affects both.
+The import time of each is measured in fresh interpreters.
 
 Usage::
 
@@ -18,8 +20,8 @@ Usage::
 ``run`` writes ``DIR/<tag>.json``; ``combine`` joins the runs found in ``DIR`` into
 ``DIR/results.json`` and ``DIR/results.md``. The ratio in the table is matplotlib's median divided
 by umber's, so a ratio above 1 means umber is faster. umber has no thread setting of its own: it
-encodes large PNGs on as many threads as ``std::thread::available_parallelism`` reports, which
-follows the CPU affinity, so ``taskset -c 0`` is the single-threaded measure.
+composites scatter markers on up to 8 threads, as many as ``std::thread::available_parallelism``
+reports, which follows the CPU affinity, so ``taskset -c 0`` is the single-threaded measure.
 
 What the two libraries do differently, with both left at their defaults as users get them:
 
@@ -28,12 +30,16 @@ What the two libraries do differently, with both left at their defaults as users
   but draws every cell of a ``pcolormesh``; the heatmap cases use ``imshow``, which a matplotlib
   user picks for a 1,000 x 1,000 array and which also draws one image.
 * matplotlib's ``hist2d`` and ``hexbin`` count the bins with NumPy in Python before drawing;
-  umber counts them in Rust. ``hexbin`` bins differ in construction (a gridsize of 50 gives
-  matplotlib 50 hexagons across, umber 50 columns of its own hexagon grid), so those two cases
-  compare two similar charts, not identical bins.
+  umber counts them in Rust. The hexbin row is an approximate workload, not identical work:
+  the grids are built differently (a gridsize of 50 gives matplotlib 50 hexagons across, umber
+  50 columns of its own hexagon grid). Empty hexagons are not drawn by either (``mincnt=1``).
+* ``hist2d``, ``hexbin`` and the heatmap draw a colorbar in umber, so the matplotlib side adds
+  ``fig.colorbar`` too and both plot areas shrink alike. The matplotlib SVG heatmap uses
+  ``interpolation="none"`` so the embedded image holds one pixel per cell, as umber's does;
+  the PNG heatmap keeps the default, since both libraries then resample to the output pixels.
 * matplotlib's default text is paths in SVG (``svg.fonttype = "path"``), as umber's default
   ``SvgText.OUTLINES`` is, so SVG sizes and times compare like with like.
-* The hexbin input is the normal sample clipped to +-3 standard deviations for both libraries:
+* The hexbin input is the normal sample clamped to [-3, 3] on both axes for both libraries:
   umber refuses the unclipped sample at grid size 50 (its hexagon bounds do not settle).
 * The 4 x 5 grid uses a 12 x 8 in figure, because 6 x 4 in leaves no room for 20 panels.
 * The heatmap names its 1,000 columns and rows with strings for umber, whose heatmap is
@@ -281,7 +287,8 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
 
         def build() -> int:
             fig, ax = single()
-            ax.hist2d(x, y, bins=(100, 100))
+            *_, mappable = ax.hist2d(x, y, bins=(100, 100))
+            fig.colorbar(mappable, ax=ax)
             return save(fig, "png")
 
         return build
@@ -291,7 +298,8 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
 
         def build() -> int:
             fig, ax = single()
-            ax.hexbin(x, y, gridsize=50)
+            mappable = ax.hexbin(x, y, gridsize=50, mincnt=1)
+            fig.colorbar(mappable, ax=ax)
             return save(fig, "png")
 
         return build
@@ -302,7 +310,12 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
 
             def build() -> int:
                 fig, ax = single()
-                ax.imshow(values, aspect="auto")
+                # An SVG embeds the image pixels; without interpolation it holds one pixel
+                # per cell, as umber's does, instead of a resampled copy at plot size.
+                image = ax.imshow(
+                    values, aspect="auto", interpolation="none" if fmt == "svg" else None
+                )
+                fig.colorbar(image, ax=ax)
                 return save(fig, fmt)
 
             return build
@@ -363,40 +376,31 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
     }
 
 
-def worker(library: str, runs: int) -> dict[str, Any]:
-    """Time every case of one library in this process and return the results."""
+def worker(library: str, case: str, runs: int) -> dict[str, Any]:
+    """Time one case of one library in this process and return its samples."""
     if library == "umber":
         import umber
 
-        version = umber.__version__
-        setups = _umber_cases()
+        version, setups = umber.__version__, _umber_cases()
     else:
         import matplotlib
 
-        version = matplotlib.__version__
-        setups = _matplotlib_cases()
-    cases: dict[str, Any] = {}
-    for name in CASES:
-        try:
-            build = setups[name]()
-            size = build()  # warm-up
-            times = []
-            for _ in range(runs):
-                start = time.perf_counter()
-                size = build()
-                times.append((time.perf_counter() - start) * 1000.0)
-            cases[name] = {
-                "median_ms": statistics.median(times),
-                "runs_ms": times,
-                "output_bytes": size,
-            }
-        except Exception as error:  # noqa: BLE001 - a case that fails is reported, not hidden
-            cases[name] = {"error": f"{type(error).__name__}: {error}"}
-    return {"version": version, "cases": cases}
+        version, setups = matplotlib.__version__, _matplotlib_cases()
+    try:
+        build = setups[case]()
+        size = build()  # warm-up
+        times = []
+        for _ in range(runs):
+            start = time.perf_counter()
+            size = build()
+            times.append((time.perf_counter() - start) * 1000.0)
+    except Exception as error:  # noqa: BLE001 - a case that fails is reported, not hidden
+        return {"version": version, "error": f"{type(error).__name__}: {error}"}
+    return {"version": version, "runs_ms": times, "output_bytes": size}
 
 
-def import_time_ms(library: str, runs: int) -> float:
-    """Median wall time in milliseconds to import a library in a fresh interpreter."""
+def import_time_ms(library: str, runs: int) -> list[float]:
+    """Wall times in milliseconds to import a library, each in a fresh interpreter."""
     statement = "import umber" if library == "umber" else "import matplotlib.pyplot"
     code = f"import time; t = time.perf_counter(); {statement}; print(time.perf_counter() - t)"
     times = []
@@ -405,7 +409,13 @@ def import_time_ms(library: str, runs: int) -> float:
             [sys.executable, "-c", code], check=True, capture_output=True, text=True
         )
         times.append(float(out.stdout) * 1000.0)
-    return statistics.median(times)
+    return times
+
+
+def spread(samples: list[float]) -> dict[str, float]:
+    """The median, the quartiles and the interquartile range of ``samples``."""
+    q1, median, q3 = statistics.quantiles(samples, n=4, method="inclusive")
+    return {"median_ms": median, "q1_ms": q1, "q3_ms": q3, "iqr_ms": q3 - q1}
 
 
 def cpu_model() -> str:
@@ -419,42 +429,69 @@ def cpu_model() -> str:
     return platform.processor() or "unknown"
 
 
+def _load() -> list[float] | None:
+    """The load averages, or ``None`` where the platform has none."""
+    return list(os.getloadavg()) if hasattr(os, "getloadavg") else None
+
+
 def run(tag: str, out: Path, runs: int) -> int:
-    """Run every case for both libraries and write ``out/<tag>.json``; return an exit code."""
-    results: dict[str, Any] = {}
-    for library in ("umber", "matplotlib"):
-        child = subprocess.run(
-            [sys.executable, __file__, "worker", library, "--runs", str(runs)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        results[library] = json.loads(child.stdout)
-        results[library]["import_ms"] = import_time_ms(library, max(runs, 7))
+    """Time both libraries and write ``out/<tag>.json``; return an exit code.
+
+    The samples come in two batches. In each batch the libraries alternate per case, and the
+    second batch swaps the order, so a change of host load reaches both libraries.
+    """
+    libraries = ("umber", "matplotlib")
+    batches, loads = 2, [_load()]
+    per_batch = -(-runs // batches)
+    samples: dict[str, dict[str, Any]] = {lib: {"version": "", "cases": {}} for lib in libraries}
+    imports: dict[str, list[float]] = {lib: [] for lib in libraries}
+    for batch in range(batches):
+        for index, case in enumerate(CASES):
+            order = libraries if (index + batch) % 2 == 0 else libraries[::-1]
+            for library in order:
+                child = subprocess.run(
+                    [sys.executable, __file__, "worker", library, case, "--runs", str(per_batch)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                result = json.loads(child.stdout)
+                samples[library]["version"] = result["version"]
+                entry = samples[library]["cases"].setdefault(case, {"runs_ms": []})
+                if "error" in result:
+                    entry["error"] = result["error"]
+                else:
+                    entry["runs_ms"] += result["runs_ms"]
+                    entry["output_bytes"] = result["output_bytes"]
+        for library in libraries if batch % 2 == 0 else libraries[::-1]:
+            imports[library] += import_time_ms(library, -(-max(runs, 7) // batches))
+        loads.append(_load())
+    errors = []
+    for library, data in samples.items():
+        for case, entry in data["cases"].items():
+            if "error" in entry:
+                errors.append(f"{library}/{case}: {entry['error']}")
+            else:
+                entry.update(spread(entry["runs_ms"]))
+        data["import_runs_ms"] = imports[library]
+        data.update({f"import_{k}": v for k, v in spread(imports[library]).items()})
     affinity = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None
-    load = os.getloadavg() if hasattr(os, "getloadavg") else None
     document = {
         "tag": tag,
-        "runs": runs,
+        "runs": per_batch * batches,
         "machine": {
             "cpu": cpu_model(),
             "cores": os.cpu_count(),
             "cores_usable": affinity,
-            "load_average": load,
+            "load_average_before_and_after_each_batch": loads,
             "platform": platform.platform(),
             "python": platform.python_version(),
             "numpy": np.__version__,
         },
-        "libraries": results,
+        "libraries": samples,
     }
     out.mkdir(parents=True, exist_ok=True)
     (out / f"{tag}.json").write_text(json.dumps(document, indent=2) + "\n")
-    errors = [
-        f"{library}/{name}: {case['error']}"
-        for library, data in results.items()
-        for name, case in data["cases"].items()
-        if "error" in case
-    ]
     for line in errors:
         print(f"error: {line}", file=sys.stderr)
     return 1 if errors else 0
@@ -465,23 +502,29 @@ def _format_ms(value: float) -> str:
     return f"{value:,.0f}" if value >= 100 else f"{value:.1f}"
 
 
+def _cell(entry: dict[str, Any], prefix: str = "") -> str:
+    """A median with its interquartile range, such as ``63.5 (IQR 2.1)``."""
+    return f"{_format_ms(entry[prefix + 'median_ms'])} (IQR {_format_ms(entry[prefix + 'iqr_ms'])})"
+
+
 def _table(document: dict[str, Any]) -> list[str]:
     """The Markdown table lines for one run."""
     umber, mpl = document["libraries"]["umber"], document["libraries"]["matplotlib"]
-    lines = ["| Case | umber (ms) | matplotlib (ms) | ratio |", "| --- | ---: | ---: | ---: |"]
+    lines = [
+        "| Case | umber, median (IQR) ms | matplotlib, median (IQR) ms | ratio |",
+        "| --- | ---: | ---: | ---: |",
+    ]
     for name, description in CASES.items():
         a, b = umber["cases"].get(name, {}), mpl["cases"].get(name, {})
         if "median_ms" not in a or "median_ms" not in b:
             lines.append(f"| {description} | error | error | |")
             continue
-        ratio = b["median_ms"] / a["median_ms"]
         lines.append(
-            f"| {description} | {_format_ms(a['median_ms'])} | {_format_ms(b['median_ms'])} "
-            f"| {ratio:.1f}x |"
+            f"| {description} | {_cell(a)} | {_cell(b)} | {b['median_ms'] / a['median_ms']:.1f}x |"
         )
     lines.append(
-        f"| import (fresh interpreter) | {_format_ms(umber['import_ms'])} "
-        f"| {_format_ms(mpl['import_ms'])} | {mpl['import_ms'] / umber['import_ms']:.1f}x |"
+        f"| import (fresh interpreter) | {_cell(umber, 'import_')} | {_cell(mpl, 'import_')} "
+        f"| {mpl['import_median_ms'] / umber['import_median_ms']:.1f}x |"
     )
     return lines
 
@@ -503,28 +546,30 @@ def combine(directory: Path) -> None:
         f"umber {libraries['umber']['version']}, matplotlib {libraries['matplotlib']['version']}, "
         f"Python {machine['python']}, NumPy {machine['numpy']}.",
         f"CPU: {machine['cpu']}, {machine['cores']} logical cores. {machine['platform']}.",
-        f"Median of {first['runs']} runs after one warm-up, each library in its own process. "
+        f"Median and interquartile range (IQR) of {first['runs']} runs per case, in two "
+        "interleaved batches with one warm-up each, each library in its own process. "
         "Ratio is matplotlib's time divided by umber's: above 1, umber is faster.",
         "",
         "Each time is the Python call that builds the figure through the encoded bytes, "
         "6 x 4 in, PNG at 200 dpi, identical data for both. Both libraries run with their "
         "defaults: umber downsamples dense sorted lines and draws large cell grids as one "
         "image; matplotlib simplifies line paths and the heatmap uses `imshow`. matplotlib's "
-        "`hist2d` and `hexbin` count their bins in NumPy, and its hexagon grid is not the same "
-        "as umber's. The 4 x 5 grid is 12 x 8 in.",
+        "`hist2d` and `hexbin` count their bins in NumPy, and the hexbin row is an approximate "
+        "workload because the hexagon grids are built differently. All three colored charts "
+        "draw a colorbar. The 4 x 5 grid is 12 x 8 in.",
         "",
     ]
     for tag in ("multi", "single"):
         if tag not in documents:
             continue
         document = documents[tag]
-        load = document["machine"]["load_average"]
+        loads = document["machine"]["load_average_before_and_after_each_batch"]
         usable = document["machine"]["cores_usable"]
         lines += [
             f"### {titles[tag]}",
             "",
-            f"CPUs usable: {usable}. Load average at the end: "
-            + (", ".join(f"{value:.2f}" for value in load) if load else "unknown")
+            f"CPUs usable: {usable}. 1-minute load average at the start and after each batch: "
+            + (", ".join(f"{load[0]:.2f}" for load in loads if load) or "unknown")
             + ".",
             "",
             *_table(document),
@@ -542,14 +587,15 @@ def main() -> int:
     runner.add_argument("--tag", required=True, help="name of the run, e.g. multi or single")
     runner.add_argument("--out", type=Path, required=True, help="output directory")
     runner.add_argument("--runs", type=int, default=7, help="timed runs per case (default 7)")
-    inner = sub.add_parser("worker", help="time one library and print JSON")
+    inner = sub.add_parser("worker", help="time one case of one library and print JSON")
     inner.add_argument("library", choices=["umber", "matplotlib"])
+    inner.add_argument("case", choices=list(CASES))
     inner.add_argument("--runs", type=int, default=7)
     joiner = sub.add_parser("combine", help="write results.json and results.md from a directory")
     joiner.add_argument("directory", type=Path)
     args = parser.parse_args()
     if args.command == "worker":
-        print(json.dumps(worker(args.library, args.runs)))
+        print(json.dumps(worker(args.library, args.case, args.runs)))
         return 0
     if args.command == "combine":
         combine(args.directory)
