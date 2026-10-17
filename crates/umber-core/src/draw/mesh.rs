@@ -37,13 +37,17 @@ pub(super) fn mesh_items(
 ) {
     let columns = mark.x_edges.len() - 1;
     let rows = mark.y_edges.len() - 1;
+    // Each value is mapped once; the neighbours of a cell look their colors up.
+    let colors: Vec<Option<Rgba>> = mark
+        .colors
+        .values
+        .iter()
+        .map(|&value| color.color(value))
+        .collect();
     let grid = Grid {
         x: GridAxis::new(&context.maps.x, &axis_edges(&resolved.x, &mark.x_edges)),
         y: GridAxis::new(&context.maps.y, &axis_edges(&resolved.y, &mark.y_edges)),
-        color: |column: usize, row: usize| {
-            let value = *mark.colors.values.get(row * columns + column)?;
-            color.color(value)
-        },
+        color: |column: usize, row: usize| colors.get(row * columns + column).copied().flatten(),
     };
     for row in (0..rows).rev() {
         for column in 0..columns {
@@ -61,11 +65,12 @@ pub(super) fn hist2d_items(
     items: &mut Vec<Item>,
 ) {
     let bins = &mark.bins;
-    let counts: HashMap<(usize, usize), f64> = bins
+    // Each count is mapped once; the neighbours of a cell look their colors up.
+    let colors: HashMap<(usize, usize), Rgba> = bins
         .cells
         .iter()
-        .copied()
-        .zip(bins.counts.iter().copied())
+        .zip(&bins.counts)
+        .filter_map(|(&cell, &count)| Some((cell, color.color(count)?)))
         .collect();
     let edges = |axis: &ResolvedAxis, edges: &[f64]| -> Vec<f64> {
         edges.iter().map(|&v| axis_value(axis, v)).collect()
@@ -73,7 +78,7 @@ pub(super) fn hist2d_items(
     let grid = Grid {
         x: GridAxis::new(&context.maps.x, &edges(&resolved.x, &bins.x_edges)),
         y: GridAxis::new(&context.maps.y, &edges(&resolved.y, &bins.y_edges)),
-        color: |column: usize, row: usize| color.color(*counts.get(&(column, row))?),
+        color: |column: usize, row: usize| colors.get(&(column, row)).copied(),
     };
     let mut cells = bins.cells.clone();
     cells.sort_unstable_by_key(|&(column, row)| (Reverse(row), column));
@@ -112,14 +117,15 @@ impl GridAxis {
     }
 }
 
-/// The cells between the edges of two grid axes, with `color(column, row)` the color of a cell
-/// or `None` for an empty one. Columns count from the left and rows from the bottom.
+/// The cells between the edges of two grid axes, with `color(column, row)` looking up the color
+/// a cell's value was mapped to, `None` for an empty cell. Columns count from the left and rows
+/// from the bottom.
 struct Grid<F> {
     /// The columns.
     x: GridAxis,
     /// The rows.
     y: GridAxis,
-    /// The color of each cell, `None` when it is empty.
+    /// The color each cell's value was mapped to, `None` when it is empty.
     color: F,
 }
 

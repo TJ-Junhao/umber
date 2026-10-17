@@ -50,7 +50,7 @@ fn rectangle([left, right]: [f64; 2], [top, bottom]: [f64; 2]) -> Polygon {
 
 fn exact(f: &Figure) -> Exact {
     let (resolved, layout, marks) =
-        crate::pipeline::plan_figure_marks(f, (0, 0), FontLibrary::global());
+        crate::pipeline::plan_panel_marks(f, FontLibrary::global()).swap_remove(0);
     let maps = AxisMaps::new(&resolved.x, &resolved.y, layout.plot);
     let xs = |edges: &[f64]| -> Vec<f64> {
         edges

@@ -781,18 +781,32 @@ mod tests {
             .unzip()
     }
 
-    /// Whether `p` lies inside `polygon` by the nonzero winding rule, or within `tolerance` of
-    /// its outline.
-    fn covers(polygon: &[(f64, f64)], p: (f64, f64), tolerance: f64) -> bool {
+    /// A point in plot points.
+    type Pt = (f64, f64);
+
+    /// How far, in points, a checked point may lie off the outline it is checked against: the
+    /// scene's coordinates are `f32`.
+    const TOLERANCE: f64 = 2e-3;
+
+    /// The distance from `p` to the nearest edge of `polygon`.
+    fn edge_distance(polygon: &[Pt], p: Pt) -> f64 {
+        (0..polygon.len())
+            .map(|i| {
+                let (a, b) = (polygon[i], polygon[(i + 1) % polygon.len()]);
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let t =
+                    (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy)
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Whether `p` lies inside `polygon` by the nonzero winding rule.
+    fn inside(polygon: &[Pt], p: Pt) -> bool {
         let mut winding = 0;
         for (i, &a) in polygon.iter().enumerate() {
             let b = polygon[(i + 1) % polygon.len()];
-            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-            let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-            if (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy) <= tolerance {
-                return true;
-            }
-            let side = dx * (p.1 - a.1) - (p.0 - a.0) * dy;
+            let side = (b.0 - a.0) * (p.1 - a.1) - (p.0 - a.0) * (b.1 - a.1);
             if a.1 <= p.1 && b.1 > p.1 && side > 0.0 {
                 winding += 1;
             } else if b.1 <= p.1 && a.1 > p.1 && side < 0.0 {
@@ -802,81 +816,271 @@ mod tests {
         winding != 0
     }
 
-    /// The whole hexagon that the drawn cell `outline` is, `None` when it is clipped or not a
-    /// hexagon of equal sides. A drawn hexagon pushes its edges shared with neighbours drawn
-    /// after it out under them by at most 1 pt, its corners along the edges between those
-    /// neighbours (at most `2 / sqrt(3)` pt), but keeps four consecutive corners: those give
-    /// the hexagon, whose two other corners the outline must contain, and the outline must lie
-    /// that close to it.
-    fn whole_hexagon(outline: &[Point]) -> Option<Vec<Point>> {
-        let n = outline.len();
-        if n < 6 {
-            return None;
+    /// Whether `p` lies inside `polygon` or within `tolerance` of its outline.
+    fn covers(polygon: &[Pt], p: Pt, tolerance: f64) -> bool {
+        inside(polygon, p) || edge_distance(polygon, p) <= tolerance
+    }
+
+    /// The corners of `polygon` and points every quarter point along its edges.
+    fn samples(polygon: &[Pt]) -> Vec<Pt> {
+        let mut out = Vec::new();
+        for i in 0..polygon.len() {
+            let (a, b) = (polygon[i], polygon[(i + 1) % polygon.len()]);
+            let steps = ((b.0 - a.0).hypot(b.1 - a.1) / 0.25).ceil().max(1.0) as usize;
+            out.extend((0..steps).map(|k| {
+                let t = k as f64 / steps as f64;
+                (a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1))
+            }));
         }
-        let points: Vec<(f64, f64)> = outline
+        out
+    }
+
+    /// Checks the drawn `outline` of the cell whose exact hexagon is `hexagon`, given the exact
+    /// hexagons of the drawn cells drawn after it, `later`. The outline must cover the whole
+    /// hexagon, and may reach past it only under a later cell across one of its edges, at most
+    /// as deep as a heatmap cell reaches: 1 pt, or half that cell when it is smaller.
+    fn check_outline(outline: &[Pt], hexagon: &[Pt; 6], later: &[[Pt; 6]]) -> Result<(), String> {
+        if let Some(p) = samples(hexagon)
+            .into_iter()
+            .find(|&p| !covers(outline, p, TOLERANCE))
+        {
+            return Err(format!("{outline:?} leaves {p:?} of {hexagon:?} uncovered"));
+        }
+        if let Some(p) = outline
             .iter()
-            .map(|p| (f64::from(p.x), f64::from(p.y)))
-            .collect();
-        let length = |u: (f64, f64), v: (f64, f64)| (u.0 - v.0).hypot(u.1 - v.1);
-        (0..n).find_map(|k| {
-            let [a, b, c, d] = [0, 1, 2, 3].map(|i| points[(k + i) % n]);
-            let side = length(a, b);
-            if side <= 0.0
-                || (length(b, c) - side).abs() >= 1e-3
-                || (length(c, d) - side).abs() >= 1e-3
-            {
-                return None;
-            }
-            let hexagon = [
-                a,
-                b,
-                c,
-                d,
-                (a.0 + d.0 - b.0, a.1 + d.1 - b.1),
-                (a.0 + d.0 - c.0, a.1 + d.1 - c.1),
-            ];
-            let whole = hexagon.iter().all(|&corner| covers(&points, corner, 1e-3))
-                && points
+            .find(|&&p| inside(hexagon, p) && edge_distance(hexagon, p) > TOLERANCE)
+        {
+            return Err(format!("{outline:?} has a corner {p:?} inside {hexagon:?}"));
+        }
+        let center = (
+            hexagon.iter().map(|p| p.0).sum::<f64>() / 6.0,
+            hexagon.iter().map(|p| p.1).sum::<f64>() / 6.0,
+        );
+        let line_distance = |p: Pt, a: Pt, b: Pt| {
+            ((b.0 - a.0) * (p.1 - a.1) - (p.0 - a.0) * (b.1 - a.1)).abs()
+                / (b.0 - a.0).hypot(b.1 - a.1)
+        };
+        let same = |p: Pt, q: Pt| (p.0 - q.0).hypot(p.1 - q.1) < 1e-3;
+        // Each later neighbour across an edge, with the edge and how deep a reach under it may go.
+        let strips: Vec<(&[Pt; 6], Pt, Pt, f64)> = (0..6)
+            .flat_map(|i| {
+                let (a, b) = (hexagon[i], hexagon[(i + 1) % 6]);
+                let depth = line_distance(center, a, b).min(1.0);
+                later
                     .iter()
-                    .all(|&p| covers(&hexagon, p, 2.0 / 3.0_f64.sqrt() + 1e-3));
-            whole.then(|| {
-                hexagon
-                    .iter()
-                    .map(|&(x, y)| Point {
-                        x: x as f32,
-                        y: y as f32,
-                    })
-                    .collect()
+                    .filter(move |n| n.iter().any(|&q| same(q, a)) && n.iter().any(|&q| same(q, b)))
+                    .map(move |n| (n, a, b, depth))
             })
-        })
+            .collect();
+        let allowed = |p: Pt| {
+            covers(hexagon, p, TOLERANCE)
+                || strips.iter().any(|&(n, a, b, depth)| {
+                    covers(n, p, TOLERANCE) && line_distance(p, a, b) <= depth + TOLERANCE
+                })
+        };
+        match samples(outline).into_iter().find(|&p| !allowed(p)) {
+            Some(p) => Err(format!(
+                "{outline:?} reaches {p:?}, past {hexagon:?} and the reach under its later \
+                 neighbours"
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// One drawn hexbin cell: its exact hexagon, from the lattice mapped onto the plot as the
+    /// axes map it, and whether it lies wholly inside the plot.
+    struct HexCell {
+        hexagon: [Pt; 6],
+        whole: bool,
+    }
+
+    /// The hexbin cells of one panel, in drawing order, and the fills drawn for them.
+    struct HexPanel {
+        plot: crate::layout::Area,
+        cells: Vec<HexCell>,
+        fills: Vec<Vec<Pt>>,
+    }
+
+    /// The hexbin cells and fills of every panel of `f`.
+    fn hex_panels(f: &Figure) -> Vec<HexPanel> {
+        let mut out = Vec::new();
+        for (resolved, layout, marks) in crate::pipeline::plan_panel_marks(f, FontLibrary::global())
+        {
+            let plot = layout.plot;
+            let (xs, ys) = (resolved.x.continuous_scale(), resolved.y.continuous_scale());
+            let mut panel = HexPanel {
+                plot,
+                cells: Vec::new(),
+                fills: Vec::new(),
+            };
+            for mark in &marks {
+                let crate::resolve::ResolvedMark::Hexbin {
+                    bins: crate::bin2d::HexBins::Occupied(bins),
+                    ..
+                } = mark
+                else {
+                    continue;
+                };
+                let scale = resolved.color.as_ref().expect("a color scale");
+                for (&position, &count) in bins.positions.iter().zip(&bins.counts) {
+                    if scale.color(count).is_none() {
+                        continue;
+                    }
+                    let hexagon = bins.vertices(position).map(|[x, y]| {
+                        (
+                            plot.x + xs.normalize(x) * plot.width,
+                            plot.bottom() - ys.normalize(y) * plot.height,
+                        )
+                    });
+                    let whole = hexagon.iter().all(|p| {
+                        p.0 >= plot.x - 1e-3
+                            && p.0 <= plot.right() + 1e-3
+                            && p.1 >= plot.y - 1e-3
+                            && p.1 <= plot.bottom() + 1e-3
+                    });
+                    panel.cells.push(HexCell { hexagon, whole });
+                }
+                if let Some(Item::Group { items, .. }) =
+                    crate::draw::marks(f.theme(), &resolved, &layout, std::slice::from_ref(mark))
+                {
+                    panel.fills.extend(items.iter().map(|item| {
+                        match item {
+                            Item::Fill { path, .. } => path
+                                .verbs()
+                                .iter()
+                                .filter_map(|verb| match verb {
+                                    PathVerb::MoveTo(p) | PathVerb::LineTo(p) => {
+                                        Some((f64::from(p.x), f64::from(p.y)))
+                                    }
+                                    _ => None,
+                                })
+                                .collect(),
+                            other => panic!("expected a hexagon fill, got {other:?}"),
+                        }
+                    }));
+                }
+            }
+            out.push(panel);
+        }
+        out
+    }
+
+    /// Checks every fill of `panel`: the fill of each whole cell, the one holding its center and
+    /// corners, by [`check_outline`]; every other fill, of a cell the plot clips, lies inside the
+    /// drawn cells or on the plot's edge (clipping can leave edges of no area along it).
+    fn check_panel(panel: &HexPanel) -> Result<(), String> {
+        let mut used = vec![false; panel.fills.len()];
+        for (i, cell) in panel.cells.iter().enumerate() {
+            if !cell.whole {
+                continue;
+            }
+            let center = (
+                cell.hexagon.iter().map(|p| p.0).sum::<f64>() / 6.0,
+                cell.hexagon.iter().map(|p| p.1).sum::<f64>() / 6.0,
+            );
+            // The cell's own fill holds its center and its corners; a neighbour's reach under
+            // a small cell may touch its center too, never its far corners.
+            let own = |fill: &Vec<Pt>| {
+                inside(fill, center) && cell.hexagon.iter().all(|&p| covers(fill, p, TOLERANCE))
+            };
+            let Some(fill) = panel.fills.iter().position(own) else {
+                return Err(format!("no fill covers the cell {:?}", cell.hexagon));
+            };
+            if std::mem::replace(&mut used[fill], true) {
+                return Err(format!("two cells share the fill {:?}", panel.fills[fill]));
+            }
+            let later: Vec<[Pt; 6]> = panel.cells[i + 1..].iter().map(|c| c.hexagon).collect();
+            check_outline(&panel.fills[fill], &cell.hexagon, &later)?;
+        }
+        let plot = panel.plot;
+        let on_edge = |p: Pt| {
+            let rectangle = [
+                (plot.x, plot.y),
+                (plot.right(), plot.y),
+                (plot.right(), plot.bottom()),
+                (plot.x, plot.bottom()),
+            ];
+            edge_distance(&rectangle, p) <= TOLERANCE
+        };
+        for (fill, _) in panel.fills.iter().zip(&used).filter(|(_, used)| !**used) {
+            if let Some(p) = samples(fill).into_iter().find(|&p| {
+                !on_edge(p)
+                    && !panel
+                        .cells
+                        .iter()
+                        .any(|cell| covers(&cell.hexagon, p, TOLERANCE))
+            }) {
+                return Err(format!("{fill:?} reaches {p:?}, outside the drawn cells"));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether the sides of `hexagon` are equal.
+    fn regular(hexagon: &[Pt; 6]) -> bool {
+        let sides: Vec<f64> = (0..6)
+            .map(|i| {
+                let (a, b) = (hexagon[i], hexagon[(i + 1) % 6]);
+                (a.0 - b.0).hypot(a.1 - b.1)
+            })
+            .collect();
+        sides[0] > 0.0 && sides.iter().all(|side| (side - sides[0]).abs() < 1e-4)
+    }
+
+    #[test]
+    fn outline_check_rejects_notches_and_deep_reaches() {
+        let s = 10.0 * 3.0_f64.sqrt() / 2.0;
+        let hexagon = [
+            (0.0, 10.0),
+            (s, 5.0),
+            (s, -5.0),
+            (0.0, -10.0),
+            (-s, -5.0),
+            (-s, 5.0),
+        ];
+        assert_eq!(check_outline(&hexagon, &hexagon, &[]), Ok(()));
+        // A corner halfway along the left edge, half a point in or out: the outline leaves part
+        // of the hexagon uncovered, or reaches past it where no later cell lies.
+        for offset in [0.5, -0.5] {
+            let mut notched = hexagon.to_vec();
+            notched.insert(5, (-s + offset, 0.0));
+            assert!(check_outline(&notched, &hexagon, &[]).is_err(), "{offset}");
+        }
+        // Under the cell to the right, drawn later, the right edge may reach 1 pt, not more.
+        let right = hexagon.map(|(x, y)| (x + 2.0 * s, y));
+        for (reach, ok) in [(1.0, true), (1.5, false)] {
+            let pushed = [
+                hexagon[0],
+                hexagon[1],
+                (s + reach, 5.0 + reach / 3.0_f64.sqrt()),
+                (s + reach, -5.0 - reach / 3.0_f64.sqrt()),
+                hexagon[2],
+                hexagon[3],
+                hexagon[4],
+                hexagon[5],
+            ];
+            assert_eq!(
+                check_outline(&pushed, &hexagon, &[right]).is_ok(),
+                ok,
+                "{reach}"
+            );
+            // Without that cell drawn after it, no reach is allowed.
+            assert!(check_outline(&pushed, &hexagon, &[]).is_err());
+        }
     }
 
     fn assert_regular_whole(f: &Figure) {
-        let polygons = cells(f);
-        assert!(polygons.len() >= 10, "{} cells", polygons.len());
-        for outline in polygons.into_iter().filter(|p| p.len() > 1) {
-            let points =
-                whole_hexagon(&outline).unwrap_or_else(|| panic!("clipped hexagon: {outline:?}"));
-            let sides: Vec<_> = (0..6)
-                .map(|i| {
-                    let a = points[i];
-                    let b = points[(i + 1) % 6];
-                    f64::from((a.x - b.x).hypot(a.y - b.y))
-                })
-                .collect();
-            assert!(sides[0] > 0.0);
-            for side in &sides {
-                assert!((side - sides[0]).abs() < 1e-4, "{sides:?}");
+        let panels = hex_panels(f);
+        let cells: usize = panels.iter().map(|panel| panel.cells.len()).sum();
+        assert!(cells >= 10, "{cells} cells");
+        for panel in &panels {
+            for cell in &panel.cells {
+                assert!(cell.whole, "clipped hexagon: {:?}", cell.hexagon);
+                assert!(regular(&cell.hexagon), "{:?}", cell.hexagon);
             }
+            check_panel(panel).unwrap();
+            assert_eq!(panel.fills.len(), panel.cells.len());
         }
-    }
-
-    fn contains_point(polygon: &[Point], x: f64, y: f64) -> bool {
-        let points: Vec<(f64, f64)> = polygon
-            .iter()
-            .map(|p| (f64::from(p.x), f64::from(p.y)))
-            .collect();
-        points.len() >= 3 && covers(&points, (x, y), 1e-4)
     }
 
     fn assert_hexbin_points_covered(limits: [bool; 2], columns: i64) {
@@ -925,11 +1129,13 @@ mod tests {
                 .unwrap();
             }
             crate::bin2d::COUNT_CALLS.with(|calls| calls.set(0));
-            let polygons = cells(&f);
+            cells(&f);
             let count_calls = crate::bin2d::COUNT_CALLS.with(|calls| calls.get());
+            let panels = hex_panels(&f);
             for col in 0..columns {
                 let (resolved, layout) = plan_figure(&f, (0, col as usize), FontLibrary::global());
                 let plot = layout.plot;
+                let panel = &panels[col as usize];
                 let xs = resolved.x.continuous_scale();
                 let ys = resolved.y.continuous_scale();
                 let mut in_window = 0;
@@ -947,47 +1153,28 @@ mod tests {
                     in_window += 1;
                     let x = plot.x + x * plot.width;
                     let y = plot.bottom() - y * plot.height;
-                    if !polygons.iter().any(|polygon| contains_point(polygon, x, y)) {
+                    if !panel
+                        .fills
+                        .iter()
+                        .any(|fill| fill.len() >= 3 && covers(fill, (x, y), 1e-4))
+                    {
                         uncovered += 1;
                     }
                 }
-                let whole: Vec<_> = polygons
-                    .iter()
-                    .filter(|polygon| {
-                        !polygon.is_empty()
-                            && polygon.iter().all(|p| {
-                                f64::from(p.x) > plot.x + 1e-4
-                                    && f64::from(p.x) < plot.right() - 1e-4
-                                    && f64::from(p.y) > plot.y + 1e-4
-                                    && f64::from(p.y) < plot.bottom() - 1e-4
-                            })
-                    })
-                    .collect();
+                let whole: Vec<_> = panel.cells.iter().filter(|cell| cell.whole).collect();
                 assert!(in_window > 0);
                 assert!(!whole.is_empty());
-                let irregular = whole
-                    .iter()
-                    .filter(|outline| {
-                        let Some(polygon) = whole_hexagon(outline) else {
-                            return true;
-                        };
-                        let sides: Vec<_> = polygon
-                            .iter()
-                            .zip(polygon.iter().cycle().skip(1))
-                            .map(|(a, b)| f64::from((a.x - b.x).hypot(a.y - b.y)))
-                            .collect();
-                        sides[0] <= 0.0 || sides.iter().any(|side| (side - sides[0]).abs() >= 1e-4)
-                    })
-                    .count();
+                let irregular = whole.iter().filter(|cell| !regular(&cell.hexagon)).count();
+                let outlines = check_panel(panel).err().unwrap_or_default();
                 let result = format!(
                     "limits={limits:?} columns={columns} col={col} normal={normal} \
                      {width}x{height} g{gridsize} ylim={ylim:?}: \
                      uncovered={uncovered}/{in_window}, irregular={irregular}/{}, \
-                     count_calls={count_calls}",
+                     count_calls={count_calls} {outlines}",
                     whole.len(),
                 );
                 eprintln!("{result}");
-                if uncovered != 0 || irregular != 0 {
+                if uncovered != 0 || irregular != 0 || !outlines.is_empty() {
                     failures.push(result);
                 }
             }
@@ -1604,21 +1791,15 @@ mod tests {
                     .unwrap();
                 }
             }
-            let mut whole = 0;
-            for points in cells(&f).iter().filter_map(|p| whole_hexagon(p)) {
-                whole += 1;
-                let sides: Vec<_> = (0..6)
-                    .map(|i| {
-                        let a = points[i];
-                        let b = points[(i + 1) % 6];
-                        f64::from((a.x - b.x).hypot(a.y - b.y))
-                    })
-                    .collect();
-                for side in &sides {
-                    assert!((side - sides[0]).abs() < 1e-4, "mode={mode}: {sides:?}");
-                }
+            let [panel] = &hex_panels(&f)[..] else {
+                panic!("expected one panel");
+            };
+            let whole: Vec<_> = panel.cells.iter().filter(|cell| cell.whole).collect();
+            for cell in &whole {
+                assert!(regular(&cell.hexagon), "mode={mode}: {:?}", cell.hexagon);
             }
-            assert!(whole > 0);
+            assert!(!whole.is_empty());
+            check_panel(panel).unwrap_or_else(|error| panic!("mode={mode}: {error}"));
         }
     }
 
@@ -1657,21 +1838,14 @@ mod tests {
                 )
                 .unwrap();
             }
-            let polygons = cells(&f);
-            assert!(!polygons.is_empty());
-            for outline in polygons {
-                let points = whole_hexagon(&outline)
-                    .unwrap_or_else(|| panic!("log={log}: clipped hexagon: {outline:?}"));
-                let sides: Vec<_> = (0..6)
-                    .map(|i| {
-                        let a = points[i];
-                        let b = points[(i + 1) % 6];
-                        f64::from((a.x - b.x).hypot(a.y - b.y))
-                    })
-                    .collect();
-                for side in &sides {
-                    assert!((side - sides[0]).abs() < 1e-4, "log={log}: {sides:?}");
+            let panels = hex_panels(&f);
+            assert!(panels.iter().all(|panel| !panel.cells.is_empty()));
+            for panel in &panels {
+                for cell in &panel.cells {
+                    assert!(cell.whole, "log={log}: clipped hexagon {:?}", cell.hexagon);
+                    assert!(regular(&cell.hexagon), "log={log}: {:?}", cell.hexagon);
                 }
+                check_panel(panel).unwrap_or_else(|error| panic!("log={log}: {error}"));
             }
         }
     }
