@@ -1,0 +1,55 @@
+name: Python bench
+
+# Informational: times end-to-end Python calls of umber and matplotlib on the standard GitHub
+# runner, once on all CPUs and once pinned to one. The job fails only when a case itself errors,
+# never on a time or a ratio.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "python/**"
+      - "scripts/bench/**"
+      - ".github/workflows/python-bench.yml"
+
+concurrency:
+  group: python-bench-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the benchmark dependencies
+        run: uv sync --locked --only-group bench --no-install-project
+
+      - name: Build umber in release mode
+        run: |
+          uv pip install "maturin>=1.15,<2" "numpy>=2.0" "typing_extensions>=4.12"
+          RUSTFLAGS="$(scripts/release/remap-rustflags.sh)"
+          export RUSTFLAGS
+          uv run --no-sync maturin develop --release --uv
+
+      - name: Time umber and matplotlib
+        run: |
+          out="$RUNNER_TEMP/python-bench"
+          uv run --no-sync python scripts/bench/python_vs_matplotlib.py run --tag multi --out "$out"
+          taskset -c 0 uv run --no-sync python scripts/bench/python_vs_matplotlib.py run --tag single --out "$out"
+          uv run --no-sync python scripts/bench/python_vs_matplotlib.py combine "$out" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-bench
+          path: ${{ runner.temp }}/python-bench/results.json
