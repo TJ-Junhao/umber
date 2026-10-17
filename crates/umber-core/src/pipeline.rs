@@ -1797,7 +1797,7 @@ mod tests {
     #[test]
     fn fitting_constrained_ticks_keep_their_final_layout() {
         let theme = Theme::pigment().with_font_scale(1.4).unwrap();
-        let mut f = Figure::new(3.2, 5.35, theme).unwrap();
+        let mut f = Figure::new(3.5, 5.35, theme).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap()
             .line(
@@ -1816,13 +1816,13 @@ mod tests {
         let slack = Side::X
             .room(layout.plot.size(), f.theme(), lib)
             .slack(&resolved.x.ticks);
-        assert_eq!(tick_labels(&resolved.x.ticks), ["2500000.0%", "7500000.0%"]);
+        assert_eq!(tick_labels(&resolved.x.ticks), ["4000000.0%", "8000000.0%"]);
         assert!(
-            (layout.plot.width - 141.6240371357311).abs() < 1e-8,
-            "{:?}",
+            (layout.plot.width - 154.4674148022289).abs() < 1e-8,
+            "{:?}, slack {slack}",
             layout.plot
         );
-        assert!((slack - 17.07792527747877).abs() < 1e-8, "{slack}");
+        assert!((slack - 5.044521748180117).abs() < 1e-8, "{slack}");
     }
 
     #[test]

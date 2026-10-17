@@ -821,7 +821,8 @@ impl ContinuousScale {
 
     /// This nice scale and its `ticks` finished as `finish` says: the padded domain, the nice
     /// domain before padding and the ticks, with the lowest tick moved below the data by
-    /// [`below_data`](Self::below_data) for `target` and `fewer`.
+    /// [`below_data`](Self::below_data) for `target` and `fewer`. With `finish.nonnegative`, a
+    /// linear value axis stops at zero, including its padding and expanded single-value extent.
     fn finished(
         &self,
         ticks: AutoTicks,
@@ -829,11 +830,20 @@ impl ContinuousScale {
         target: usize,
         fewer: usize,
     ) -> (ContinuousScale, ContinuousScale, AutoTicks) {
-        let (nice, ticks) = match finish.below_data {
+        let (mut nice, mut ticks) = match finish.below_data {
             Some(data_low) => self.below_data(ticks, data_low, target, fewer),
             None => (*self, ticks),
         };
-        let padded = finish.padding.map_or(nice, |padding| nice.padded(padding));
+        let nonnegative = self.transform == Transform::Linear && finish.nonnegative;
+        if nonnegative {
+            nice.lo = nice.lo.max(0.0);
+            ticks.ticks.retain(|tick| tick.value >= 0.0);
+        }
+        let mut padded = finish.padding.map_or(nice, |padding| nice.padded(padding));
+        // Check after lowering too: padding must not cross zero once the domain reaches it.
+        if nonnegative {
+            padded.lo = padded.lo.max(0.0);
+        }
         (padded, nice, ticks)
     }
 
@@ -848,7 +858,8 @@ impl ContinuousScale {
     /// such as a sampled sine trough, does not sit on the baseline either. When it does and the
     /// limit carries the first tick, the limit moves down by one tick step and gets a tick of its
     /// own. On a linear axis the limit moves to `lo - step`, with `step` the gap between the first
-    /// two ticks, and the new tick goes in front of the others. On a log axis it moves down by
+    /// two ticks, stopping at 0 for nonnegative data; the new tick goes in front of the others.
+    /// On a log axis it moves down by
     /// the exponent gap between the first two ticks, and the ticks are chosen again for the wider
     /// domain as `nice_with_ticks` chooses them for about `target` ticks and `fewer`, so thinned
     /// powers stay evenly spaced. All ticks are
@@ -882,7 +893,17 @@ impl ContinuousScale {
         }
         let step = second.value - first.value;
         let (lowered, floor) = match self.transform {
-            Transform::Linear => (lo - step, -MAX_MAGNITUDE),
+            Transform::Linear => {
+                let lowered = lo - step;
+                (
+                    if data_low >= 0.0 {
+                        lowered.max(0.0)
+                    } else {
+                        lowered
+                    },
+                    -MAX_MAGNITUDE,
+                )
+            }
             Transform::Log(base) => {
                 let gap = (log_offset(second.value, first.value) / base.get().ln()).round();
                 (lo / base.get().powf(gap), MIN_LOG_VALUE)
@@ -1033,7 +1054,8 @@ impl ContinuousScale {
 
     /// Tick positions and labels for about `target` ticks (at least 2).
     ///
-    /// Linear ticks lie inside the domain. Log ticks are the powers of the base inside the
+    /// Linear ticks lie inside the domain at whole multiples of their step, including zero
+    /// whenever the domain holds it. Log ticks are the powers of the base inside the
     /// domain, thinned to every n-th power when there are more than `2 * target`; when fewer
     /// than two powers fit, they are ordinary linear ticks over the domain. Distinct tick values
     /// always get distinct labels.
@@ -1124,7 +1146,10 @@ impl ContinuousScale {
                 slack: &slack,
             };
             for t in target..=target + 6 {
-                let values = ticks::extended(lo, hi, t, TickCoverage::Free, &fit);
+                let values = match self.transform {
+                    Transform::Linear => ticks::extended(lo, hi, t, TickCoverage::Free, &fit),
+                    Transform::Log(_) => ticks::log_fallback(lo, hi, t, &fit),
+                };
                 if let Some(ticks) = self.inside_ticks(&values) {
                     return ticks;
                 }
@@ -1291,6 +1316,8 @@ impl TickJudge for AnySpacing {
 /// [`ContinuousScale::fitted`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Finish {
+    /// Whether this is a value axis with nonnegative data: linear limits and padding stop at zero.
+    pub nonnegative: bool,
     /// The smallest data value, when the lowest tick moves strictly below the data that starts
     /// on it ([`ContinuousScale::below_data`]); `None` to keep the ticks.
     pub below_data: Option<f64>,
@@ -1498,6 +1525,32 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
+    fn below_data_stops_at_zero_before_it_crosses() {
+        // A zero-aligned first tick can miss its exact step by a rounding error.
+        let scale = lin(0.3, 1.2);
+        let values = vec![0.3, 0.6000000000000001, 0.9, 1.2];
+        let labels = ticks::format_ticks(&values, 0.3);
+        let ticks = ContinuousScale::labelled(values, labels, TickValues::Grid { step: 0.3 });
+        let (lowered, ticks) = scale.below_data(ticks, 0.3, 4, 0);
+        assert_eq!(lowered.domain().0, 0.0);
+        assert_eq!(ticks.ticks[0].value, 0.0);
+        let (again, again_ticks) = lowered.below_data(ticks.clone(), 0.3, 4, 0);
+        assert_eq!(again, lowered);
+        assert_eq!(again_ticks, ticks);
+    }
+
+    #[test]
+    fn below_data_does_not_clip_a_negative_step_to_the_supported_floor() {
+        let scale = lin(-9e299, -3e299);
+        let values = vec![-9e299, -6e299, -3e299];
+        let labels = ticks::format_ticks(&values, 3e299);
+        let ticks = ContinuousScale::labelled(values, labels, TickValues::Grid { step: 3e299 });
+        let (lowered, chosen) = scale.below_data(ticks.clone(), -9e299, 3, 0);
+        assert_eq!(lowered, scale);
+        assert_eq!(chosen, ticks);
+    }
+
+    #[test]
     fn below_data_moves_log_limit_by_the_thinned_step() {
         let scale = ContinuousScale::new(Transform::Log(LogBase::TEN), 1.0, 1e30, "test").unwrap();
         for fewer in [0, 1, 2] {
@@ -1694,12 +1747,12 @@ mod tests {
 
     #[test]
     fn nice_with_ticks_puts_ticks_on_both_ends() {
-        // `ticks(5)` of the nice domain (10, 90) would give 25, 50, 75 only.
+        // Whole-step ticks enclose the data and agree with the nice limits.
         let scale = lin(12.0, 88.0);
-        assert_eq!(scale.nice(5).domain(), (10.0, 90.0));
+        assert_eq!(scale.nice(5).domain(), (0.0, 100.0));
         let ticks = assert_nice_ticks_agree(scale, 5);
         let labels: Vec<&str> = ticks.iter().map(|t| t.label.as_str()).collect();
-        assert_eq!(labels, ["10", "30", "50", "70", "90"]);
+        assert_eq!(labels, ["0", "25", "50", "75", "100"]);
 
         for (lo, hi) in [
             (3.0, 97.0),
@@ -2269,7 +2322,7 @@ mod tests {
     fn nice_is_scale_invariant_for_extreme_spans() {
         for scale in [1e-290, 1e-180, 1e180, 1e299] {
             let (lo, hi) = lin(1.3 * scale, 8.7 * scale).nice(5).domain();
-            assert!(rel_close(lo, 1.0 * scale), "{lo} vs {}", 1.0 * scale);
+            assert_eq!(lo, 0.0);
             assert!(rel_close(hi, 9.0 * scale), "{hi} vs {}", 9.0 * scale);
         }
     }
