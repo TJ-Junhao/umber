@@ -168,7 +168,7 @@ pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
-pub use model::ColorbarOptions;
+pub use model::{BaselineVisibility, ColorbarOptions};
 pub use render::SvgText;
 pub use scale::{
     CategoryScale, ContinuousScale, LogBase, MAX_MAGNITUDE, MIN_LOG_VALUE, ScaleKind, Transform,

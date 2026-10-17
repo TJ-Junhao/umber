@@ -377,8 +377,11 @@ mod tests {
         // Bar needs a category axis and Mesh forbids one; test the rule with validated marks.
         let bar = bars.single_axes().marks()[0].clone();
         let mesh = mesh.single_axes().marks()[0].clone();
-        assert!(resolved.draws_baseline(&[bar.clone(), mesh.clone()]));
-        assert!(resolved.draws_baseline(&[mesh, bar]));
+        assert!(resolved.draws_baseline(
+            &[bar.clone(), mesh.clone()],
+            crate::BaselineVisibility::Auto,
+        ));
+        assert!(resolved.draws_baseline(&[mesh, bar], crate::BaselineVisibility::Auto));
     }
 
     #[test]

@@ -23,7 +23,6 @@
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
-pub use crate::model::StackedAreaMark;
 pub use crate::model::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
@@ -32,6 +31,7 @@ pub use crate::model::{
 };
 pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use crate::model::{BandMark, BandOptions};
+pub use crate::model::{BaselineVisibility, StackedAreaMark};
 pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use crate::model::{BubbleMark, BubbleOptions};
 pub use crate::model::{CmapChoice, ColorBy, PointColor};
@@ -57,11 +57,13 @@ impl Figure {
     /// beside the plot allows, so line ends stay whole), the values written on annotated
     /// heatmap cells as one group clipped to the plot area when there are any, the legend as
     /// one unclipped group when it shows anything, and last the baseline as an unclipped group
-    /// of its own, so marks never cover it. The baseline is drawn only when the axes hold a
-    /// bar (including grouped and stacked bars), histogram, area (including stacked areas) or
-    /// stem: at zero on the value axis, or at its lower edge when zero is out of range. Other
-    /// marks do not suppress it. Axes without these marks draw no baseline. A non-empty figure
-    /// header follows as one unclipped group: the figure title,
+    /// of its own, so marks never cover it. By default, the baseline is drawn only when the
+    /// axes hold a bar (including grouped and stacked bars), histogram, area (including stacked
+    /// areas) or stem: at zero on the value axis, or at its lower edge when zero is out of range.
+    /// Other marks do not suppress it. [`AxesMut::baseline`] overrides visibility for these axes
+    /// alone; `Auto` restores the default. It changes neither the baseline position nor limits,
+    /// padding or mark geometry. A hidden baseline leaves its coincident gridline visible.
+    /// A non-empty figure header follows as one unclipped group: the figure title,
     /// subtitle and merged legend. Without axes it holds the background and any figure
     /// title or subtitle. The same figure always gives the same scene.
     ///

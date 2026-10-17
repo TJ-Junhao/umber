@@ -515,6 +515,46 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.ytick_format(self._row, self._col, _ticks.native(checked))
             return self
 
+    def baseline(self, *, shown: bool | Auto) -> Self:
+        """Set whether these axes draw their baseline.
+
+        Each call replaces the setting for these axes alone; panels sharing an axis do not
+        inherit it. Copies of the figure keep the setting. Only drawing changes: the baseline
+        stays at zero on the value axis, or at its lower edge when zero is out of range. Limits,
+        padding, bar bases, area fills and reference-line clipping stay unchanged. A gridline
+        at the baseline tick is kept when the baseline is hidden.
+
+        Args:
+            shown: ``True`` draws the baseline; ``False`` hides it. ``AUTO`` restores the
+                default: draw it when the axes hold a bar, grouped bar, stacked bar, histogram,
+                area, stacked area or stem. Other marks do not suppress it.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``shown`` is neither a bool nor ``AUTO``. Integers are not accepted.
+            UsageError: If ``shown=True`` on two category axes, which have no value axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1], [1, 2])
+            >>> ax = ax.baseline(shown=True)
+            >>> ax = ax.baseline(shown=False)
+            >>> ax = ax.baseline(shown=ub.AUTO)
+        """
+        with api_call():
+            if shown is not AUTO and type(shown) is not bool:
+                raise new_error(
+                    TypeError,
+                    "Axes.baseline()",
+                    f"shown is {type_name(shown)}; shown must be a bool or ub.AUTO.",
+                    parameter="shown",
+                    hint="pass True or False, or ub.AUTO to follow the marks.",
+                )
+            self._native.baseline(self._row, self._col, None if shown is AUTO else shown)
+            return self
+
     def legend(self, style: LegendStyle, *, position: LegendPosition | Auto = AUTO) -> Self:
         """Set the legend style and position, overriding the theme's.
 

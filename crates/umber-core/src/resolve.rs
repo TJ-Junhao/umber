@@ -318,11 +318,19 @@ impl Resolved {
         }
     }
 
-    /// Whether the axes hold a mark that grows from zero: bars (including grouped and stacked
+    /// Whether to draw the baseline, and replace its coincident gridline. `Shown` and `Hidden`
+    /// override the marks; the setter refuses `Shown` on two category axes, with no value axis.
+    /// `Auto` draws it only for marks that grow from zero: bars (including grouped and stacked
     /// bars), histograms, areas (including stacked areas) or stems. One such mark is enough,
-    /// regardless of the other marks. Empty axes and two category axes draw no baseline.
-    /// This controls drawing only; the resolved baseline position is unchanged.
-    pub fn draws_baseline(&self, marks: &[Mark]) -> bool {
+    /// regardless of the other marks. Empty axes and two category axes draw none in `Auto`.
+    /// This is the one visibility decision; the resolved baseline position, limits, padding,
+    /// bar bases, area fills and reference-line clipping are unchanged.
+    pub fn draws_baseline(&self, marks: &[Mark], shown: crate::BaselineVisibility) -> bool {
+        match shown {
+            crate::BaselineVisibility::Shown => return true,
+            crate::BaselineVisibility::Hidden => return false,
+            crate::BaselineVisibility::Auto => {}
+        }
         !(self.x.is_category() && self.y.is_category())
             && marks.iter().any(|mark| match mark {
                 Mark::Bar(_)

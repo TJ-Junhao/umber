@@ -79,7 +79,7 @@ This is the chart at the top of this page. Data can be a list, a tuple, a NumPy 
 
 Bar, box and violin charts need a category axis. On a category x axis, `fig.add_axes(x=ub.Scale.category())`, they are vertical; on a category y axis, `fig.add_axes(y=ub.Scale.category())`, they are horizontal, and a scatter of values against categories is a dot plot. A heatmap needs category axes on both sides. Log axes use `ub.Scale.log()` and time axes `ub.Scale.time()`. Limits, ticks and tick label formats are set with `xlim`, `ylim`, `xticks`, `xticks_labeled`, `ytick_format(ub.TickFormat.percent())` and their counterparts on the other axis.
 
-Bars, histograms, areas and stems draw a baseline at zero (or at the lower edge when zero is out of range); other charts draw none.
+Bars, histograms, areas and stems draw a baseline at zero (or at the lower edge when zero is out of range); other charts draw none. Override this for each axes with `ax.baseline(shown=True)` or `ax.baseline(shown=False)`; `ax.baseline(shown=ub.AUTO)` restores the default.
 
 Automatic limits contain whole bubble markers, outlines included; explicit limits clip them. Legend swatches show each mark's fill as drawn over the plot background.
 

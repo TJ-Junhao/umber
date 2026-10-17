@@ -404,6 +404,20 @@ impl Figure {
             .map_err(core_error)
     }
 
+    /// Sets baseline visibility: `None` follows the marks, otherwise the given boolean.
+    #[pyo3(signature = (row, col, shown))]
+    fn baseline(&mut self, row: i64, col: i64, shown: Option<bool>) -> PyResult<()> {
+        let shown = match shown {
+            None => umber_core::BaselineVisibility::Auto,
+            Some(true) => umber_core::BaselineVisibility::Shown,
+            Some(false) => umber_core::BaselineVisibility::Hidden,
+        };
+        self.axes(row, col)?
+            .baseline(shown)
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Sets the legend style (a `LegendStyle` value).
     fn legend(&mut self, row: i64, col: i64, style: i64) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;

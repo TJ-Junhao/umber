@@ -33,6 +33,26 @@ use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat};
 
+/// Whether an axes draws its baseline, independently of any shared axis settings.
+/// This changes drawing only, not the baseline position or the marks that grow from it.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::BaselineVisibility;
+/// assert_eq!(BaselineVisibility::default(), BaselineVisibility::Auto);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BaselineVisibility {
+    /// Draws the baseline only for bars, histograms, areas and stems.
+    #[default]
+    Auto,
+    /// Draws the baseline, even without a mark that grows from zero.
+    Shown,
+    /// Hides the baseline, even when marks grow from zero.
+    Hidden,
+}
+
 /// The label and optional overrides of an axes' colorbar. Unset overrides follow the theme's
 /// position and the y axis tick format; a new call replaces every setting.
 ///
@@ -82,7 +102,7 @@ pub struct ColorbarOptions {
 /// Limits, explicit ticks and tick formats apply to the whole shared group. A member may
 /// replace its own setting, but a different value already set by another member is an
 /// `Error::Usage`. Setting the same value again is allowed. Members added later inherit the
-/// group's settings; text, legend and mark methods always apply to this axes alone.
+/// group's settings; text, baseline, legend and mark methods always apply to this axes alone.
 ///
 /// # Examples
 ///
@@ -479,6 +499,43 @@ impl<'a> AxesMut<'a> {
             settings,
             CONTEXT,
         )?;
+        Ok(self)
+    }
+
+    /// Sets whether these axes draw their baseline. Each call replaces the setting for these
+    /// axes alone; shared panels do not inherit it and cloned figures keep it.
+    /// [`BaselineVisibility::Auto`] restores drawing for bars, histograms, areas and stems.
+    /// The baseline position, limits, padding, bar bases, area fills and reference-line clipping
+    /// are unchanged. A hidden baseline leaves its coincident gridline visible.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage`, naming `shown`, for [`BaselineVisibility::Shown`] on two category axes:
+    /// they have no value axis. A failed call changes nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BaselineVisibility, Figure, ScaleKind, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.baseline(BaselineVisibility::Shown)?.baseline(BaselineVisibility::Auto)?;
+    /// assert_eq!(axes.baseline_visibility(), BaselineVisibility::Auto);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn baseline(&mut self, shown: BaselineVisibility) -> Result<&mut Self> {
+        if shown == BaselineVisibility::Shown
+            && self.x == ScaleKind::Category
+            && self.y == ScaleKind::Category
+        {
+            return Err(Error::usage(
+                "Axes.baseline()",
+                "these axes have two category axes and no value axis; a baseline cannot be shown.",
+            )
+            .with_parameter("shown")
+            .with_hint("use shown=False or shown=ub.AUTO, or create axes with a numeric or time value axis."));
+        }
+        self.axes_mut().baseline = shown;
         Ok(self)
     }
 
@@ -1928,8 +1985,8 @@ impl<'a> AxesMut<'a> {
 
     /// Adds row-major numeric cells spanning their strictly increasing edges.
     /// Automatic limits are the outer edges, without padding. NaN cells are empty.
-    /// A mesh alone draws no baseline; one is drawn only alongside a mark that grows from
-    /// zero, such as an area, histogram or stem.
+    /// By default a mesh alone draws no baseline; one is drawn only alongside a mark that
+    /// grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
     /// # Errors
     ///
@@ -1962,8 +2019,8 @@ impl<'a> AxesMut<'a> {
     /// `x_edges` and `y_edges` each hold numbers on a linear or log axis and times on a time
     /// axis. The edges are strictly increasing, a missing time is refused, and the automatic
     /// limits of a time axis are the outer edges exactly, as those of a numeric axis are.
-    /// A mesh alone draws no baseline; one is drawn only alongside a mark that grows from
-    /// zero, such as an area, histogram or stem.
+    /// By default a mesh alone draws no baseline; one is drawn only alongside a mark that
+    /// grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
     /// # Errors
     ///

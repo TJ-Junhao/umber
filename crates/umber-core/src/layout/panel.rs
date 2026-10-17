@@ -705,7 +705,8 @@ pub(crate) fn place_panel(
         .map(|bar| bar.place(plot, bands.direct_reserve, bottom, label_rise));
     let direct = input.legend.direct.placed(resolved, plot, frame);
     let baseline = resolved.baseline;
-    let draws_baseline = resolved.draws_baseline(input.axes.marks());
+    let draws_baseline =
+        resolved.draws_baseline(input.axes.marks(), input.axes.baseline_visibility());
     // A drawn baseline replaces the gridline it coincides with.
     let off_baseline = |axis: ValueAxis| {
         move |tick: &&AxisTick| {
