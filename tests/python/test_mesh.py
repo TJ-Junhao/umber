@@ -74,25 +74,287 @@ def test_dense_hexbin_grid_geometry(
     assert_svg_hexagons_regular_and_whole(fig.to_svg())
 
 
+Point = tuple[float, float]
+
+SVG = "{http://www.w3.org/2000/svg}"
+
+
+def edge_distance(polygon: list[Point], p: Point) -> float:
+    """The distance from ``p`` to the nearest edge of ``polygon``."""
+    best = math.inf
+    for i, a in enumerate(polygon):
+        b = polygon[(i + 1) % len(polygon)]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        t = min(1.0, max(0.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)))
+        best = min(best, math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy))
+    return best
+
+
+def inside(polygon: list[Point], p: Point) -> bool:
+    """Whether ``p`` lies inside ``polygon`` by the nonzero winding rule."""
+    winding = 0
+    for i, a in enumerate(polygon):
+        b = polygon[(i + 1) % len(polygon)]
+        side = (b[0] - a[0]) * (p[1] - a[1]) - (p[0] - a[0]) * (b[1] - a[1])
+        if a[1] <= p[1] < b[1] and side > 0:
+            winding += 1
+        elif b[1] <= p[1] < a[1] and side < 0:
+            winding -= 1
+    return winding != 0
+
+
+def covers(polygon: list[Point], p: Point, tolerance: float) -> bool:
+    """Whether ``p`` lies inside ``polygon`` or within ``tolerance`` of its outline."""
+    return inside(polygon, p) or edge_distance(polygon, p) <= tolerance
+
+
+def samples(polygon: list[Point]) -> list[Point]:
+    """The corners of ``polygon`` and points every quarter point along its edges."""
+    out: list[Point] = []
+    for i, a in enumerate(polygon):
+        b = polygon[(i + 1) % len(polygon)]
+        steps = max(1, math.ceil(math.dist(a, b) / 0.25))
+        out += [
+            (a[0] + k / steps * (b[0] - a[0]), a[1] + k / steps * (b[1] - a[1]))
+            for k in range(steps)
+        ]
+    return out
+
+
+def area(polygon: list[Point]) -> float:
+    """The area ``polygon`` encloses, by the shoelace formula: its filled area when simple."""
+    n = len(polygon)
+    return (
+        abs(
+            sum(
+                a[0] * b[1] - b[0] * a[1]
+                for a, b in zip(polygon, polygon[1:] + polygon[:1], strict=True)
+            )
+        )
+        / 2
+        if n
+        else 0.0
+    )
+
+
+def segment_distance(p: Point, a: Point, b: Point) -> float:
+    """The distance from ``p`` to the segment from ``a`` to ``b``."""
+    return edge_distance([a, b], p)
+
+
+def simple(polygon: list[Point], tolerance: float) -> bool:
+    """Whether ``polygon`` neither crosses nor retraces itself.
+
+    No edge has zero length, and no two edges meet or come within ``tolerance`` of each other,
+    except neighbouring edges at their shared corner.
+    """
+    n = len(polygon)
+    edges = [(polygon[i], polygon[(i + 1) % n]) for i in range(n)]
+
+    def cross(o: Point, p: Point, q: Point) -> float:
+        return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+
+    if n < 3 or any(math.dist(a, b) <= tolerance for a, b in edges):
+        return False
+    for i in range(n):
+        for j in range(i + 1, n):
+            (a, b), (c, d) = edges[i], edges[j]
+            if j == i + 1:
+                pairs = [(d, a, b), (a, c, d)]
+            elif i == 0 and j == n - 1:
+                pairs = [(c, a, b), (b, c, d)]
+            else:
+                if cross(c, d, a) * cross(c, d, b) < 0 and cross(a, b, c) * cross(a, b, d) < 0:
+                    return False
+                pairs = [(a, c, d), (b, c, d), (c, a, b), (d, a, b)]
+            if any(segment_distance(p, e, f) <= tolerance for p, e, f in pairs):
+                return False
+    return True
+
+
+def outline_error(
+    outline: list[Point], hexagon: list[Point], later: list[list[Point]], tolerance: float = 0.005
+) -> str | None:
+    """Why ``outline`` is not a valid drawing of the cell ``hexagon``, or None when it is.
+
+    The outline must be simple, cover the whole exact hexagon, and reach past it only under a
+    cell drawn after it (``later``, their exact hexagons) across one of its edges, at most 1 pt
+    deep or half that cell when it is smaller; so its area is at least the hexagon's and at
+    most that plus the area of those strips.
+    """
+    if not simple(outline, tolerance / 10):
+        return f"{outline} crosses or retraces itself"
+    for p in samples(hexagon):
+        if not covers(outline, p, tolerance):
+            return f"{p} of {hexagon} is not covered"
+    for p in outline:
+        if inside(hexagon, p) and edge_distance(hexagon, p) > tolerance:
+            return f"corner {p} lies inside {hexagon}"
+    center = (sum(p[0] for p in hexagon) / 6, sum(p[1] for p in hexagon) / 6)
+
+    def line_distance(p: Point, a: Point, b: Point) -> float:
+        cross = (b[0] - a[0]) * (p[1] - a[1]) - (p[0] - a[0]) * (b[1] - a[1])
+        return abs(cross) / math.dist(a, b)
+
+    strips: list[tuple[list[Point], Point, Point, float]] = []
+    for i, a in enumerate(hexagon):
+        b = hexagon[(i + 1) % 6]
+        depth = min(1.0, line_distance(center, a, b))
+        for cell in later:
+            if any(math.dist(q, a) < 0.01 for q in cell) and any(
+                math.dist(q, b) < 0.01 for q in cell
+            ):
+                strips.append((cell, a, b, depth))
+    most = area(hexagon) + sum(depth * (math.dist(a, b) + 2 * depth) for _, a, b, depth in strips)
+    if not area(hexagon) - 10 * tolerance <= area(outline) <= most + 10 * tolerance:
+        return f"{outline} fills {area(outline)} pt², not {area(hexagon)} to {most} pt²"
+    for p in samples(outline):
+        if not covers(hexagon, p, tolerance) and not any(
+            covers(cell, p, tolerance) and line_distance(p, a, b) <= depth + tolerance
+            for cell, a, b, depth in strips
+        ):
+            return f"{p} lies past {hexagon} and the reach under later cells"
+    return None
+
+
+def pointy_hexagon(center: Point, side: float) -> list[Point]:
+    """The regular pointy-top hexagon of ``side`` around ``center``, in SVG coordinates."""
+    (x, y), half = center, side * math.sqrt(3) / 2
+    return [
+        (x, y - side),
+        (x + half, y - side / 2),
+        (x + half, y + side / 2),
+        (x, y + side),
+        (x - half, y + side / 2),
+        (x - half, y - side / 2),
+    ]
+
+
+def clip_box(root: ET.Element, group: ET.Element) -> tuple[float, float, float, float]:
+    """The left, top, right and bottom of the clip of ``group``."""
+    clip_id = group.attrib["clip-path"][len("url(#") : -1]
+    clip = next(c for c in root.iter(SVG + "clipPath") if c.attrib.get("id") == clip_id)
+    rect = clip.find(SVG + "rect")
+    if rect is not None:
+        x, y, w, h = (float(rect.attrib.get(k, 0)) for k in ("x", "y", "width", "height"))
+        return x, y, x + w, y + h
+    path = clip.find(SVG + "path")
+    assert path is not None
+    points = [
+        (float(x), float(y)) for x, y in re.findall(r"[ML]([-\d.e]+) ([-\d.e]+)", path.attrib["d"])
+    ]
+    xs, ys = zip(*points, strict=True)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
 def assert_svg_hexagons_regular_and_whole(svg: str) -> None:
+    """Checks every hexbin of ``svg`` against a regular lattice computed from its own cells.
+
+    In each marks group, the lattice is that of regular pointy-top hexagons whose side is half
+    the height of the shortest cell outline, through the center of that outline (a cell with no
+    later neighbour is drawn exactly), refined over the outlines that reach no further than it
+    does. Each outline must snap to its own lattice cell, lie whole inside the plot, and draw
+    that cell as ``outline_error`` requires.
+    """
     count = 0
     root = ET.fromstring(svg)
-    for group in root.iter("{http://www.w3.org/2000/svg}g"):
+    for group in root.iter(SVG + "g"):
         if "clip-path" not in group.attrib:
             continue
-        for path in group.findall("{http://www.w3.org/2000/svg}path"):
+        outlines: list[list[Point]] = []
+        for path in group.findall(SVG + "path"):
             data = path.attrib.get("d", "")
             if "C" in data or path.attrib.get("fill") in (None, "none"):
                 continue
-            points = [
-                (float(x), float(y)) for x, y in re.findall(r"[ML]([-\d.e]+) ([-\d.e]+)", data)
-            ]
-            assert len(points) == 6, data
-            sides = [math.dist(points[j], points[(j + 1) % 6]) for j in range(6)]
-            assert min(sides) > 0
-            assert max(sides) - min(sides) < 0.003, sides
+            outlines.append(
+                [(float(x), float(y)) for x, y in re.findall(r"[ML]([-\d.e]+) ([-\d.e]+)", data)]
+            )
+        if not outlines:
+            continue
+        boxes = [
+            (min(p[0] for p in o), min(p[1] for p in o), max(p[0] for p in o), max(p[1] for p in o))
+            for o in outlines
+        ]
+        heights = [b[3] - b[1] for b in boxes]
+        widths = [b[2] - b[0] for b in boxes]
+        centers = [((b[0] + b[2]) / 2, (b[1] + b[3]) / 2) for b in boxes]
+        short = [k for k in range(len(boxes)) if heights[k] < min(heights) + 0.003]
+        narrow = [k for k in range(len(boxes)) if widths[k] < min(widths) + 0.003]
+        exact = [k for k in short if k in narrow]
+        assert exact, "no outline is as short as the shortest and as narrow as the narrowest"
+        reference = exact[0]
+        side = heights[reference] / 2
+        width = side * math.sqrt(3)
+        assert abs(widths[reference] - width) < 0.01, (boxes[reference], side)
+        cells: list[tuple[int, int]] = []
+        for x, y in centers:
+            row = round((y - centers[reference][1]) / (1.5 * side))
+            col = round((x - centers[reference][0] - row * width / 2) / width)
+            cells.append((row, col))
+        assert len(set(cells)) == len(cells), "two outlines draw one cell"
+        # Refine the lattice from the outlines that reach neither up nor down (as short as the
+        # shortest), whose centers are their cells' centers, and then the columns from those
+        # that reach neither left nor right.
+        rows = [cells[k][0] for k in short]
+        if len(set(rows)) > 1:
+            step, top_row = np.polyfit(rows, [centers[k][1] for k in short], 1)
+            side = float(step) / 1.5
+        else:
+            top_row = float(np.mean([centers[k][1] - 1.5 * side * cells[k][0] for k in short]))
+        width = side * math.sqrt(3)
+        left_col = float(
+            np.mean([centers[k][0] - (cells[k][1] + cells[k][0] / 2) * width for k in narrow])
+        )
+        hexagons = [
+            pointy_hexagon(
+                (left_col + (col + row / 2) * width, float(top_row) + row * 1.5 * side), side
+            )
+            for row, col in cells
+        ]
+        left, top, right, bottom = clip_box(root, group)
+        for i, (outline, hexagon) in enumerate(zip(outlines, hexagons, strict=True)):
+            assert all(
+                left - 0.005 <= x <= right + 0.005 and top - 0.005 <= y <= bottom + 0.005
+                for x, y in hexagon
+            ), f"clipped hexagon {hexagon}"
+            error = outline_error(outline, hexagon, hexagons[i + 1 :])
+            assert error is None, error
             count += 1
     assert count >= 10
+
+
+def test_outline_check_rejects_notches_and_deep_reaches() -> None:
+    side = 10.0
+    half = side * math.sqrt(3) / 2
+    hexagon = pointy_hexagon((0.0, 0.0), side)
+    assert outline_error(hexagon, hexagon, []) is None
+    # A corner halfway along the left edge, half a point in or out.
+    for offset in (0.5, -0.5):
+        notched = [*hexagon[:5], (-half + offset, 0.0), hexagon[5]]
+        assert outline_error(notched, hexagon, []) is not None
+    # Under the cell to the right, drawn later, the right edge may reach 1 pt, not more.
+    right = pointy_hexagon((2 * half, 0.0), side)
+    for reach, ok in ((1.0, True), (1.5, False)):
+        lift = reach / math.sqrt(3)
+        pushed = [
+            hexagon[0],
+            hexagon[1],
+            (half + reach, -side / 2 - lift),
+            (half + reach, side / 2 + lift),
+            *hexagon[2:],
+        ]
+        assert (outline_error(pushed, hexagon, [right]) is None) == ok
+        assert outline_error(pushed, hexagon, []) is not None
+
+
+def test_outline_check_rejects_outlines_that_retrace_themselves() -> None:
+    hexagon = pointy_hexagon((0.0, 0.0), 10.0)
+    # The hexagon traced forward and back covers its outline and fills nothing; with the
+    # triangle of every other corner added, it fills only that triangle.
+    retraced = [*hexagon, hexagon[0], *hexagon[:0:-1]]
+    triangle = [*retraced, hexagon[0], hexagon[2], hexagon[4]]
+    for outline in (retraced, triangle):
+        assert outline_error(outline, hexagon, []) is not None
 
 
 @pytest.mark.parametrize("shape", [(12, 2.5), (3, 10)])

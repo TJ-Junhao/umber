@@ -184,14 +184,41 @@ pub(crate) enum HexBins {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HexCells {
     coordinates: [Coordinate; 2],
-    /// Centers in lattice units, row-major.
-    pub centers: Vec<[f64; 2]>,
-    /// Positive counts, aligned with `centers`.
+    /// The row and column of each cell in the lattice, row-major.
+    pub positions: Vec<[i64; 2]>,
+    /// Positive counts, aligned with `positions`.
     pub counts: Vec<f64>,
     /// Whole-cell limits in data coordinates, after aspect correction.
     pub domains: [[f64; 2]; 2],
     /// Tight bounds in lattice units, before aspect correction.
     bounds: [f64; 4],
+}
+
+/// The lattice positions of the six cells around the cell at `[row, col]`, in the order of
+/// its edges: the cell across the edge from vertex `i` to vertex `i + 1` of [`hex_vertices`]
+/// comes `i`-th (the cells to the upper right, right, lower right, lower left, left and upper
+/// left). Rows alternate their offset: an odd row is shifted half a cell to the right.
+pub(crate) fn hex_neighbours([row, col]: [i64; 2]) -> [[i64; 2]; 6] {
+    // The column of the cell above or below to the right; the one to the left is one less.
+    let next = col.saturating_add(row.rem_euclid(2));
+    let (up, down) = (row.saturating_add(1), row.saturating_sub(1));
+    [
+        [up, next],
+        [row, col.saturating_add(1)],
+        [down, next],
+        [down, next.saturating_sub(1)],
+        [row, col.saturating_sub(1)],
+        [up, next.saturating_sub(1)],
+    ]
+}
+
+/// The center, in lattice units, of the cell at `[row, col]`: rows are `sqrt(3) / 2` apart and
+/// an odd row is shifted half a cell to the right.
+pub(crate) fn hex_center([row, col]: [i64; 2]) -> [f64; 2] {
+    [
+        col as f64 + row.rem_euclid(2) as f64 * 0.5,
+        row as f64 * (3.0_f64.sqrt() / 2.0),
+    ]
 }
 
 /// Vertices of a unit-width pointy-top hexagon, counterclockwise.
@@ -310,30 +337,25 @@ impl HexBins {
             }
             *counts.entry(nearest).or_default() += 1;
         }
-        let (centers, counts): (Vec<_>, Vec<_>) = counts
+        let (positions, counts): (Vec<_>, Vec<_>) = counts
             .into_iter()
-            .map(|((row, col), count)| {
-                (
-                    [
-                        col as f64 + row.rem_euclid(2) as f64 * 0.5,
-                        row as f64 * row_height,
-                    ],
-                    count as f64,
-                )
-            })
+            .map(|((row, col), count)| ([row, col], count as f64))
             .unzip();
-        let bounds = centers.iter().flat_map(|c| hex_vertices(*c)).fold(
-            [
-                f64::INFINITY,
-                f64::NEG_INFINITY,
-                f64::INFINITY,
-                f64::NEG_INFINITY,
-            ],
-            |b, [x, y]| [b[0].min(x), b[1].max(x), b[2].min(y), b[3].max(y)],
-        );
+        let bounds = positions
+            .iter()
+            .flat_map(|&p| hex_vertices(hex_center(p)))
+            .fold(
+                [
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                ],
+                |b, [x, y]| [b[0].min(x), b[1].max(x), b[2].min(y), b[3].max(y)],
+            );
         Self::Occupied(HexCells {
             coordinates,
-            centers,
+            positions,
             counts,
             bounds,
             domains: [
@@ -464,10 +486,11 @@ impl HexCells {
         ];
     }
 
-    /// A cell's six vertices in data coordinates.
-    pub fn vertices(&self, center: [f64; 2]) -> [[f64; 2]; 6] {
+    /// The six vertices, in data coordinates, of the cell at lattice `position`, in the order
+    /// of [`hex_vertices`].
+    pub fn vertices(&self, position: [i64; 2]) -> [[f64; 2]; 6] {
         let c = self.coordinates;
-        hex_vertices(center).map(|[x, y]| [c[0].value(x), c[1].value(y)])
+        hex_vertices(hex_center(position)).map(|[x, y]| [c[0].value(x), c[1].value(y)])
     }
 }
 
@@ -502,10 +525,10 @@ mod tests {
                 panic!("nonempty cells");
             };
             assert_eq!(after.coordinates, before.coordinates);
-            assert_eq!(after.centers, before.centers);
+            assert_eq!(after.positions, before.positions);
             assert_eq!(after.counts, before.counts);
-            for &center in &before.centers {
-                assert_eq!(after.vertices(center), before.vertices(center));
+            for &position in &before.positions {
+                assert_eq!(after.vertices(position), before.vertices(position));
             }
             if xlim.is_none() {
                 let c = after.coordinates;

@@ -7,6 +7,7 @@ mod band;
 mod bar;
 mod baseline;
 mod box_plot;
+mod cells;
 mod chrome;
 mod clip;
 mod downsample;
