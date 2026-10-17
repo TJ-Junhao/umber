@@ -20,8 +20,8 @@ use std::fmt::Write as _;
 
 use umber_core::figure::{BarOptions, LineOptions, ScatterOptions};
 use umber_core::{
-    AxesMut, ColorBy, ColorbarOptions, ExplicitTicks, Figure, FontLibrary, GridIndex, NumberStyle,
-    PointColor, ScaleKind, TickFormat,
+    AxesMut, ColorBy, ColorbarOptions, ExplicitTicks, Figure, FontLibrary, Grid, GridIndex,
+    NumberStyle, Placement, PointColor, ScaleKind, Share, Theme, TickFormat,
 };
 
 use super::super::{
@@ -84,6 +84,80 @@ fn unshowable_tick_formats(lib: &FontLibrary) -> String {
                 "rendered".into()
             });
         }
+    }
+    for (shared, inherited) in [(false, true), (true, false), (true, true)] {
+        for (name, format) in [
+            ("fixed(0)", TickFormat::fixed(0).unwrap()),
+            ("fixed(1)", TickFormat::fixed(1).unwrap()),
+            ("percent(0)", TickFormat::percent(0).unwrap()),
+        ] {
+            let cols = if shared { 2 } else { 1 };
+            let grid = Grid::new(1, cols).unwrap().with_share_color(if shared {
+                Share::All
+            } else {
+                Share::None
+            });
+            let mut f = Figure::with_grid(10.0, 4.0, Theme::pigment(), grid).unwrap();
+            for col in 0..cols {
+                let mut a = f
+                    .add_axes_at(
+                        Placement {
+                            col: GridIndex::At(col),
+                            ..Placement::default()
+                        },
+                        linear(),
+                        linear(),
+                    )
+                    .unwrap();
+                a.scatter(
+                    numbers(vec![1.0, 2.0, 3.0]),
+                    &[0.0, 500.0, 1000.0],
+                    ScatterOptions {
+                        color: PointColor::By(ColorBy::new(vec![0.005, 0.007, 0.009])),
+                        ..ScatterOptions::default()
+                    },
+                )
+                .unwrap();
+                if inherited {
+                    a.ytick_format(format.clone()).unwrap();
+                }
+            }
+            if !inherited {
+                f.colorbar(ColorbarOptions {
+                    format: Some(format),
+                    ..ColorbarOptions::default()
+                })
+                .unwrap();
+            }
+            let target = if shared {
+                "shared colorbar"
+            } else {
+                "colorbar"
+            };
+            let source = if inherited { "inherited" } else { "explicit" };
+            rec.result(
+                &format!("{target} {source} {name}"),
+                f.to_scene(lib),
+                |_| "rendered".into(),
+            );
+        }
+    }
+    for (low, high) in [(0.2, 0.8), (0.001, 0.009), (2.2, 2.8)] {
+        let mut f = figure(6.0, 4.0, Theme::pigment(), linear(), linear());
+        axes(&mut f)
+            .line(
+                numbers(vec![1.0, 2.0]),
+                &[low, high],
+                LineOptions::default(),
+            )
+            .unwrap()
+            .ytick_format(TickFormat::fixed(0).unwrap())
+            .unwrap();
+        rec.result(
+            &format!("padded y {low} to {high}"),
+            f.to_scene(lib),
+            |_| "rendered".into(),
+        );
     }
     rec.out
 }
