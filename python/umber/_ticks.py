@@ -70,6 +70,10 @@ class TickFormat:
     def fixed(decimals: int) -> "TickFormat":
         """Return a format that writes every label with ``decimals`` decimals, such as ``2.50``.
 
+        Automatic linear axes and colorbars use whole steps this format can show exactly.
+        If their domain contains no such value, rendering raises ``StyleError``; use more
+        decimals or set axis ticks explicitly. Explicit ticks and log axes are unaffected.
+
         Args:
             decimals: The number of decimals, from 0 to 12.
 
@@ -92,6 +96,11 @@ class TickFormat:
     @staticmethod
     def percent(decimals: int = 0) -> "TickFormat":
         """Return a format that writes each value times 100 followed by ``%``, such as ``12.5%``.
+
+        Automatic linear axes and colorbars use whole steps this format can show exactly
+        after multiplying by 100. If their domain contains no such value, rendering raises
+        ``StyleError``; use more decimals or set axis ticks explicitly. Explicit ticks and
+        log axes are unaffected.
 
         Args:
             decimals: The number of decimals of the percentage, from 0 to 12.

@@ -20,7 +20,8 @@ use std::fmt::Write as _;
 
 use umber_core::figure::{BarOptions, LineOptions, ScatterOptions};
 use umber_core::{
-    AxesMut, ExplicitTicks, Figure, FontLibrary, GridIndex, NumberStyle, ScaleKind, TickFormat,
+    AxesMut, ColorBy, ColorbarOptions, ExplicitTicks, Figure, FontLibrary, Grid, GridIndex,
+    NumberStyle, Placement, PointColor, ScaleKind, Share, Theme, TickFormat,
 };
 
 use super::super::{
@@ -37,6 +38,128 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         file: "ticks.txt".into(),
         bytes: tick_errors().into_bytes(),
     });
+    sink(Output {
+        kind: "errors",
+        file: "unshowable-tick-format.txt".into(),
+        bytes: unshowable_tick_formats(lib).into_bytes(),
+    });
+}
+
+/// Fixed-decimal formats that cannot label a value in the automatic tick domain.
+fn unshowable_tick_formats(lib: &FontLibrary) -> String {
+    let mut rec = Log::default();
+    for axis in ["x", "y", "colorbar"] {
+        for (name, format) in [
+            ("fixed(0)", TickFormat::fixed(0).unwrap()),
+            ("fixed(1)", TickFormat::fixed(1).unwrap()),
+            ("percent(0)", TickFormat::percent(0).unwrap()),
+        ] {
+            let mut f = figure(6.0, 4.0, umber_core::Theme::pigment(), linear(), linear());
+            let mut a = axes(&mut f);
+            match axis {
+                "x" => {
+                    a.xlim(0.005, 0.009).unwrap().xtick_format(format).unwrap();
+                }
+                "y" => {
+                    a.ylim(0.005, 0.009).unwrap().ytick_format(format).unwrap();
+                }
+                _ => {
+                    a.scatter(
+                        numbers(vec![1.0, 2.0]),
+                        &[1.0, 2.0],
+                        ScatterOptions {
+                            color: PointColor::By(ColorBy::new(vec![0.005, 0.009])),
+                            ..ScatterOptions::default()
+                        },
+                    )
+                    .unwrap()
+                    .colorbar(ColorbarOptions {
+                        format: Some(format),
+                        ..ColorbarOptions::default()
+                    })
+                    .unwrap();
+                }
+            }
+            rec.result(&format!("{axis} {name}"), f.to_scene(lib), |_| {
+                "rendered".into()
+            });
+        }
+    }
+    for (shared, inherited) in [(false, true), (true, false), (true, true)] {
+        for (name, format) in [
+            ("fixed(0)", TickFormat::fixed(0).unwrap()),
+            ("fixed(1)", TickFormat::fixed(1).unwrap()),
+            ("percent(0)", TickFormat::percent(0).unwrap()),
+        ] {
+            let cols = if shared { 2 } else { 1 };
+            let grid = Grid::new(1, cols).unwrap().with_share_color(if shared {
+                Share::All
+            } else {
+                Share::None
+            });
+            let mut f = Figure::with_grid(10.0, 4.0, Theme::pigment(), grid).unwrap();
+            for col in 0..cols {
+                let mut a = f
+                    .add_axes_at(
+                        Placement {
+                            col: GridIndex::At(col),
+                            ..Placement::default()
+                        },
+                        linear(),
+                        linear(),
+                    )
+                    .unwrap();
+                a.scatter(
+                    numbers(vec![1.0, 2.0, 3.0]),
+                    &[0.0, 500.0, 1000.0],
+                    ScatterOptions {
+                        color: PointColor::By(ColorBy::new(vec![0.005, 0.007, 0.009])),
+                        ..ScatterOptions::default()
+                    },
+                )
+                .unwrap();
+                if inherited {
+                    a.ytick_format(format.clone()).unwrap();
+                }
+            }
+            if !inherited {
+                f.colorbar(ColorbarOptions {
+                    format: Some(format),
+                    ..ColorbarOptions::default()
+                })
+                .unwrap();
+            }
+            let target = if shared {
+                "shared colorbar"
+            } else {
+                "colorbar"
+            };
+            let source = if inherited { "inherited" } else { "explicit" };
+            rec.result(
+                &format!("{target} {source} {name}"),
+                f.to_scene(lib),
+                |_| "rendered".into(),
+            );
+        }
+    }
+    for (low, high) in [(0.2, 0.8), (0.001, 0.009), (2.2, 2.8)] {
+        let mut f = figure(6.0, 4.0, Theme::pigment(), linear(), linear());
+        axes(&mut f)
+            .line(
+                numbers(vec![1.0, 2.0]),
+                &[low, high],
+                LineOptions::default(),
+            )
+            .unwrap()
+            .ytick_format(TickFormat::fixed(0).unwrap())
+            .unwrap();
+        rec.result(
+            &format!("padded y {low} to {high}"),
+            f.to_scene(lib),
+            |_| "rendered".into(),
+        );
+    }
+    rec.out
 }
 
 fn strings(labels: &[&str]) -> Vec<String> {

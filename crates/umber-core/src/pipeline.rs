@@ -17,6 +17,7 @@ use crate::resolve::{
     self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
 };
 use crate::scene::Scene;
+use crate::tick_format::AutomaticTickTarget;
 use crate::{Error, FontLibrary, Result, Theme, draw};
 
 /// One panel's records that layout and drawing share: its axes, its marks resolved against the
@@ -285,6 +286,29 @@ fn color_side(side: layout::ColorbarSide) -> Side {
     }
 }
 
+/// The visible colorbar's format and whether it came from its source panel's y tick format.
+fn color_tick_format<'a>(
+    figure: &'a Figure,
+    panel: &'a Panel<'_>,
+) -> (&'a crate::TickFormat, AutomaticTickTarget) {
+    let shared = figure.grid().share_color() != crate::Share::None;
+    let options = if shared {
+        figure.colorbar_options()
+    } else {
+        panel.axes.colorbar_options()
+    };
+    (
+        options
+            .format
+            .as_ref()
+            .unwrap_or(panel.axes.y_tick_format()),
+        AutomaticTickTarget::Colorbar {
+            shared,
+            inherited: options.format.is_none(),
+        },
+    )
+}
+
 /// Relabels and spaces a visible colorbar without changing its norm or colormap.
 fn choose_color_ticks(
     figure: &Figure,
@@ -292,16 +316,8 @@ fn choose_color_ticks(
     resolved: &mut Resolved,
     room: &layout::TickRoom<'_>,
 ) {
-    let options = if figure.grid().share_color() == crate::Share::None {
-        panel.axes.colorbar_options()
-    } else {
-        figure.colorbar_options()
-    };
     if let Some(color) = &resolved.color {
-        let format = options
-            .format
-            .as_ref()
-            .unwrap_or(panel.axes.y_tick_format());
+        let (format, _) = color_tick_format(figure, panel);
         resolved.color = Some(color.with_ticks(room, format));
     }
 }
@@ -948,6 +964,38 @@ fn plan(
         }
         if !changed {
             break;
+        }
+    }
+
+    // Check only final domains: shared data, cells and bubble fitting can widen them, and
+    // provisional layouts may deliberately omit automatic x ticks.
+    for (i, r) in resolved.iter().enumerate() {
+        for (side, axis, name) in [(Side::X, &r.x, "x"), (Side::Y, &r.y, "y")] {
+            if let resolve::AxisLimits::Continuous(limits) = limits[i].axis(side.axis())
+                && limits.transform == crate::Transform::Linear
+                && limits.ticks.explicit().is_none()
+                && let Some(scale) = axis.continuous()
+            {
+                limits
+                    .ticks
+                    .format()
+                    .check_automatic_ticks(
+                        &axis.ticks,
+                        scale.domain(),
+                        AutomaticTickTarget::Axis(name),
+                        context,
+                    )
+                    .map_err(|error| in_cell(figure, panels[i].axes, error))?;
+            }
+        }
+        if color_sides[i].is_some()
+            && let Some(color) = &r.color
+            && !matches!(color.norm, crate::color_scale::Norm::Log { .. })
+        {
+            let (format, target) = color_tick_format(figure, &panels[i]);
+            format
+                .check_automatic_ticks(&color.ticks, color.norm.range(), target, context)
+                .map_err(|error| in_cell(figure, panels[i].axes, error))?;
         }
     }
 
