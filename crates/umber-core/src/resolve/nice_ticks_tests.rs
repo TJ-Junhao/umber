@@ -57,9 +57,9 @@ fn check_panel(f: &Figure, col: usize, starts_at_zero: bool) {
 #[test]
 fn short_positive_scatter_ranges_start_on_whole_steps() {
     for (low, high, starts_at_zero) in [
-        (11.0, 65.0, true),
-        (0.11, 0.65, true),
-        (1100.0, 6500.0, true),
+        (11.0, 65.0, false),
+        (0.11, 0.65, false),
+        (1100.0, 6500.0, false),
         (21.0, 95.0, false),
         (51.0, 95.0, false),
     ] {
@@ -77,7 +77,7 @@ fn short_positive_scatter_ranges_start_on_whole_steps() {
 }
 
 #[test]
-fn short_four_column_box_violin_and_scatter_start_at_zero() {
+fn short_four_column_box_violin_and_scatter_follow_the_data() {
     let mut f = Figure::with_grid(16.0, 2.6, Theme::pigment(), Grid::new(1, 4).unwrap()).unwrap();
     for col in 0..4 {
         let mut a = f
@@ -109,7 +109,9 @@ fn short_four_column_box_violin_and_scatter_start_at_zero() {
         };
     }
     for col in 0..4 {
-        check_panel(&f, col, true);
+        check_panel(&f, col, false);
+        let resolved = crate::pipeline::plan_figure(&f, (0, col), FontLibrary::global()).0;
+        assert_eq!(resolved.y.continuous_scale().domain(), (8.3, 67.7));
     }
 }
 
@@ -171,11 +173,7 @@ fn single_values_keep_padding_and_whole_step_ticks() {
     };
     let (_, room) = TickRoom::unlimited(5, 5, FontLibrary::global());
     for value in [-1e295, -3.0, -1e-295, 0.0, 1e-295, 1e-290, 3.0, 1e295] {
-        for auto in [
-            AutoLimits::Exact,
-            AutoLimits::Nice(Padding::BothSides),
-            AutoLimits::NiceBelowData(Padding::BothSides),
-        ] {
+        for auto in [AutoLimits::Exact, AutoLimits::Padded(Padding::BothSides)] {
             let axis = continuous(limits, Some((value, value)), auto, &room);
             let domain = axis.scale.domain();
             assert!(domain.0 < value && value < domain.1, "{value}: {domain:?}");
@@ -195,7 +193,7 @@ fn single_values_keep_padding_and_whole_step_ticks() {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
     #[test]
-    fn automatic_linear_axes_keep_whole_steps_and_nonnegative_lowering(
+    fn automatic_linear_axes_keep_whole_steps_and_data_padding(
         start in -100i32..100,
         width in prop_oneof![Just(0i32), 1i32..100],
         exponent in -295i32..=295,
@@ -210,15 +208,18 @@ proptest! {
         for spacing in [TickSpacing::Target, TickSpacing::Deferred, TickSpacing::LabelsApart] {
             let (x, y) = tick_rooms(PlotSize { width: length, height: length }, &theme, FontLibrary::global(), spacing);
             for room in [&x, &y] {
-                for auto in [AutoLimits::Exact, AutoLimits::Nice(Padding::BothSides), AutoLimits::NiceBelowData(Padding::BothSides)] {
+                for auto in [AutoLimits::Exact, AutoLimits::Padded(Padding::BothSides)] {
                     let axis = continuous(limits, Some((low, high)), auto, room);
                     let domain = axis.scale.domain();
                     let values: Vec<_> = axis.ticks.iter().map(|tick| domain.0 + tick.pos.get() * (domain.1 - domain.0)).collect();
                     assert_grid(&values, domain);
                     let expanded = ContinuousScale::from_extent(Transform::Linear, Some((low, high)), CONTEXT).unwrap();
-                    if low >= 0.0 && expanded.domain().0 >= 0.0 && matches!(auto, AutoLimits::NiceBelowData(_)) {
-                        prop_assert!(axis.unpadded_low >= 0.0, "data {low}..{high}, domain {domain:?}, ticks {values:?}");
-                    }
+                    let expected = if auto == AutoLimits::Exact || is_single_value(Transform::Linear, low, high) {
+                        expanded
+                    } else {
+                        expanded.padded(Padding::BothSides)
+                    };
+                    prop_assert_eq!(domain, expected.domain());
                 }
             }
         }

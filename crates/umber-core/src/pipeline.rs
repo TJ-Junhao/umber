@@ -255,12 +255,13 @@ impl TickChoice {
 
     /// The choice again for the plot size `plot`, of `ticks` ticks whose labels crowd on it:
     /// as many ticks at most the first time at that number, one fewer when the last choice
-    /// gave that number already. `None` for two ticks or fewer, which cannot be fewer.
-    fn again(&self, plot: PlotSize, ticks: usize) -> Option<TickChoice> {
+    /// gave that number already. A linear pair can retry once on the final plot, where it
+    /// may need the single-tick fallback. Other axes keep their two-tick minimum.
+    fn again(&self, plot: PlotSize, ticks: usize, retry_pair: bool) -> Option<TickChoice> {
         let ChoiceState::Open { last } = self.state else {
             return None;
         };
-        if ticks <= 2 {
+        if ticks <= 2 && !(retry_pair && ticks == 2 && last != Some(2)) {
             return None;
         }
         let most = if last == Some(ticks) {
@@ -380,7 +381,7 @@ fn resolve_groups(
 ///
 /// Before each round the bubble fits are asked again on the solved plots ([`BubbleFits`]):
 /// the first time, every automatic axis holding bubbles widens its data extent to fit them on
-/// those plots, before tick rounding and padding, and later whenever a bubble reaches past a
+/// those plots, before padding (and log-axis rounding), and later whenever a bubble reaches past a
 /// plot edge, shared panels with hidden tick labels included. A changed extent resolves the
 /// axes and solves the grid again, with the same tick choices. A fit the grid cannot hold, or
 /// one still unsettled after the rounds, leaves its axis with the limits of the data positions,
@@ -760,7 +761,10 @@ fn plan(
                     continue;
                 }
                 let choice = &mut next[i][side.index()];
-                match choice.again(plot, ticks.len()) {
+                let retry_pair = axis
+                    .continuous()
+                    .is_some_and(|scale| scale.transform() == crate::Transform::Linear);
+                match choice.again(plot, ticks.len(), retry_pair) {
                     Some(new) => {
                         *choice = new;
                         again.push((i, side));
@@ -782,7 +786,7 @@ fn plan(
                 continue;
             }
             let choice = &mut next[i][2];
-            match choice.again(bar_plots[i], color.ticks.len()) {
+            match choice.again(bar_plots[i], color.ticks.len(), false) {
                 Some(new) => {
                     *choice = new;
                     color_again.push(i);
@@ -1772,8 +1776,8 @@ mod tests {
 
     #[test]
     fn crowded_y_ticks_keep_their_labels_apart() {
-        // Data from −0.01 to 5.69 on a short plot: the capped target alone gives five ticks,
-        // whose labels still need more room than the 60 pt height allows.
+        // Data from −0.01 to 5.69 on a short plot: data-relative limits let the target
+        // choose three round ticks whose labels fit the 60 pt height.
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         let (x, y) = walk(54);
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
@@ -1786,13 +1790,12 @@ mod tests {
             height: 60.0,
         };
         let (old, _, _) = resolved_at(&f, size, TickSpacing::Target, lib).remove(0);
-        assert_eq!(tick_labels(&old.y.ticks), ["\u{2212}2", "0", "2", "4", "6"]);
+        assert_eq!(tick_labels(&old.y.ticks), ["0.0", "2.5", "5.0"]);
         let (new, _, room) = resolved_at(&f, size, TickSpacing::LabelsApart, lib).remove(0);
-        assert!(room.slack(&old.y.ticks) < 0.0);
+        assert!(room.slack(&old.y.ticks) >= 0.0);
         assert!(room.slack(&new.y.ticks) >= 0.0);
-        // A line (11.05 pt) and the gap (4.25 pt) apart, on a domain padded to 1.1 times the
-        // span of the ticks, at most 1 + 60 / (1.1 × 15.3) = 4.6 ticks fit: round ones.
-        assert_eq!(tick_labels(&new.y.ticks), ["\u{2212}5", "0", "5", "10"]);
+        // The label-constrained pass keeps an already fitting grid.
+        assert_eq!(new.y.ticks, old.y.ticks);
         // The x ticks were apart already, and stay as they were.
         assert_eq!(new.x.ticks, old.x.ticks);
     }
@@ -1815,10 +1818,10 @@ mod tests {
         // tick: before, 6, 8, 6 and 8 ticks one step apart.
         let y_labels = |sensor: usize| tick_labels(&planned[sensor - 1].0.y.ticks);
         let m = |n: &str| format!("\u{2212}{n}");
-        assert_eq!(y_labels(2), [&m("5.0"), &m("2.5"), "0.0", "2.5"]);
-        assert_eq!(y_labels(5), [&m("2"), "0", "2", "4", "6"]);
-        assert_eq!(y_labels(15), [&m("2"), "0", "2", "4"]);
-        assert_eq!(y_labels(19), [&m("6"), &m("4"), &m("2"), "0", "2"]);
+        assert_eq!(y_labels(2), [&m("4"), &m("2"), "0"]);
+        assert_eq!(y_labels(5), ["0.0", "2.5", "5.0"]);
+        assert_eq!(y_labels(15), ["0.0", "2.5"]);
+        assert_eq!(y_labels(19), [&m("5.0"), &m("2.5"), "0.0"]);
     }
 
     /// The labels of `side` of the first panel of `figure` as laid out, and the room they
@@ -1924,7 +1927,7 @@ mod tests {
             .slack(&resolved.x.ticks);
         // No whole-step pair fits this width; one grid label keeps the solved layout and
         // never crowds another label. A fitting pair must not be replaced by this fallback.
-        assert_eq!(tick_labels(&resolved.x.ticks), ["4000000.0%"]);
+        assert_eq!(tick_labels(&resolved.x.ticks), ["5000000.0%"]);
         assert_eq!(slack, f64::INFINITY);
     }
 
@@ -1935,7 +1938,7 @@ mod tests {
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap()
             .line(
-                AxisData::Numbers(vec![9000.0, 46500.0, 84000.0]),
+                AxisData::Numbers(vec![0.0, 37500.0, 75000.0]),
                 &[-7781.0, -7780.5, -7780.0],
                 LineOptions::default(),
             )
@@ -1943,7 +1946,7 @@ mod tests {
             .xtick_format(crate::TickFormat::percent(1).unwrap())
             .unwrap();
         let (labels, slack) = final_ticks(&f, Side::X);
-        assert_eq!(labels, ["4000000.0%", "8000000.0%"]);
+        assert_eq!(labels, ["0.0%", "5000000.0%"]);
         assert!(slack >= 0.0, "{slack}");
     }
 
@@ -1964,6 +1967,46 @@ mod tests {
         let (labels, slack) = final_ticks(&f, Side::X);
         assert_eq!(labels, ["0", "100"]);
         assert!(slack >= 0.0, "{slack}");
+    }
+
+    fn short_percent_scatter(x: [f64; 2], y: [f64; 2]) -> Figure {
+        let theme = Theme::pigment().with_font_scale(1.4).unwrap();
+        let mut f = Figure::new(2.5, 1.8, theme).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .scatter(
+                AxisData::Numbers(vec![x[0], (x[0] + x[1]) / 2.0, x[1]]),
+                &[y[0], (y[0] + y[1]) / 2.0, y[1]],
+                crate::ScatterOptions::default(),
+            )
+            .unwrap()
+            .xtick_format(crate::TickFormat::percent(1).unwrap())
+            .unwrap();
+        f
+    }
+
+    #[test]
+    fn percent_pair_is_rechecked_on_the_final_plot() {
+        let f = short_percent_scatter(
+            [0.07579250753325248, 0.14422238351939026],
+            [0.08045950529471643, 0.08810734423115522],
+        );
+        let (labels, slack) = final_ticks(&f, Side::X);
+        assert!(slack >= 0.0, "{labels:?}: {slack}");
+    }
+
+    #[test]
+    fn long_percent_labels_keep_the_existing_layout_limit() {
+        let f = short_percent_scatter(
+            [-4680165.074054506, -4023576.5694846567],
+            [-3168066.8464300144, -2327272.4889245224],
+        );
+        // These labels exceed the existing canvas-edge inset limit. Do not widen the
+        // data domain to zero just to replace them with a short "0.0%" label.
+        let error = try_plan_figure(&f, (0, 0), FontLibrary::global())
+            .expect_err("the labels do not fit this figure");
+        assert!(error.to_string().contains("x tick label"), "{error}");
+        assert!(error.to_string().contains("at most 91 pt"), "{error}");
     }
 
     #[test]
@@ -2047,9 +2090,9 @@ mod tests {
         /// How the marks of a random figure fit their axes.
         #[derive(Debug, Clone, Copy)]
         enum Kind {
-            /// A line: exact x limits, nice y limits.
+            /// A line: exact x limits, padded y limits (rounded first on a log axis).
             Line,
-            /// Points: nice limits on both axes.
+            /// Points: padded limits on both axes (rounded first on log axes).
             Scatter,
             /// An area: its y axis keeps 0 on the plot edge.
             Area,

@@ -236,10 +236,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def xlim(self: SX, low: X, high: X) -> SX:
         """Set the x limits, replacing the automatic ones; for linear, log and time x axes.
 
-        Automatic linear ticks are whole multiples of their step. On the axis bars, boxes
-        and points are measured along, the automatic lower limit can move down one tick step
-        to leave room below the data. For nonnegative data, that move stops at zero. Padding
-        can still extend below zero to keep marks whole. Explicit limits are used as given.
+        Automatic linear limits follow the data, with 5% of its span added on each side;
+        an end at zero stays there for bars, histograms, areas and stems. Ticks are round
+        values inside the limits, not the limits themselves. Lines keep their exact x
+        extent, cells keep their edges, and bubbles fit their whole markers. Single values
+        expand to a usable range. Explicit limits are used as given.
 
         Args:
             low: The lower limit; finite, and positive on a log axis; a time on a time axis.
@@ -273,10 +274,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def ylim(self: SY, low: Y, high: Y) -> SY:
         """Set the y limits, replacing the automatic ones.
 
-        Automatic linear ticks are whole multiples of their step. On the axis bars, boxes
-        and points are measured along, the automatic lower limit can move down one tick step
-        to leave room below the data. For nonnegative data, that move stops at zero. Padding
-        can still extend below zero to keep marks whole. Explicit limits are used as given.
+        Automatic linear limits follow the data, with 5% of its span added on each side;
+        an end at zero stays there for bars, histograms, areas and stems. Ticks are round
+        values inside the limits, not the limits themselves. Lines keep their exact x
+        extent, cells keep their edges, and bubbles fit their whole markers. Single values
+        expand to a usable range. Explicit limits are used as given.
 
         Args:
             low: The lower limit; finite, and positive on a log axis; a time on a time axis.
@@ -309,9 +311,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def xticks(self: SX, positions: Values[X]) -> SX:
         """Set the x ticks to ``positions``, replacing the automatic ones.
 
-        Automatic linear ticks are whole multiples of their step, with a tick at zero when
-        the domain includes it. Their number depends on the available space and the size of
-        their labels. Explicit positions need not follow that grid.
+        Automatic linear ticks are round values inside the limits, at whole multiples of
+        a 1, 2, 2.5 or 5 times a power of ten step, including zero when it lies inside.
+        Limits follow the data with 5% padding, keeping an end at zero for bars, histograms,
+        areas and stems; lines and cells keep their exact position extents. The tick count
+        depends on available space and label size. Explicit positions need not follow that grid.
 
         The positions are used in the order given. An empty list leaves the x axis without
         ticks and gridlines. Calling any x tick method again replaces the ticks and drops
@@ -351,9 +355,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def yticks(self: SY, positions: Values[Y]) -> SY:
         """Set the y ticks to ``positions``, replacing the automatic ones.
 
-        Automatic linear ticks are whole multiples of their step, with a tick at zero when
-        the domain includes it. Their number depends on the available space and the size of
-        their labels. Explicit positions need not follow that grid.
+        Automatic linear ticks are round values inside the limits, at whole multiples of
+        a 1, 2, 2.5 or 5 times a power of ten step, including zero when it lies inside.
+        Limits follow the data with 5% padding, keeping an end at zero for bars, histograms,
+        areas and stems; lines and cells keep their exact position extents. The tick count
+        depends on available space and label size. Explicit positions need not follow that grid.
 
         The positions are used in the order given. An empty list leaves the y axis without
         ticks and gridlines. Calling any y tick method again replaces the ticks and drops
@@ -765,9 +771,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         point. Markers draw in data order, without downsampling, with the theme's marker outline.
         Automatic limits fit each whole marker and its outline on the final plot, along each
         axis by the marker shape's own extent, in log space on a log axis and in seconds on a
-        time axis, before tick rounding and padding. Shared axes fit bubbles from every panel
-        sharing the scale. When
-        the bubbles cannot all fit on an automatic axis (a marker, outline included, at least
+        time axis, before padding (and rounding on a log axis). Shared axes fit bubbles from
+        every panel sharing the scale. When the bubbles cannot all fit on an automatic axis
+        (a marker, outline included, at least
         as long as the plot along it, limits beyond the supported numeric range, or limits
         that do not settle), that axis's limits come from the data positions alone and the
         plot clips the bubbles that overflow; rendering does not raise. Explicit limits still

@@ -48,8 +48,11 @@ fn area_proportional_to_value() {
             _ => None,
         })
         .collect();
-    assert_eq!(radii, [9.0, 18.0]);
-    assert_eq!((radii[1] / radii[0]).powi(2), 4.0);
+    assert_eq!(radii.len(), 2);
+    for (radius, expected) in radii.iter().zip([9.0, 18.0]) {
+        assert!((radius - expected).abs() < 1e-5, "{radii:?}");
+    }
+    assert!(((radii[1] / radii[0]).powi(2) - 4.0).abs() < 1e-5);
     assert!(items.chunks_exact(2).all(|pair| matches!((&pair[0], &pair[1]),
         (Item::Fill { .. }, Item::Stroke { style, .. }) if style.width == 0.8 && style.color == f.theme().background())));
 }
@@ -277,7 +280,10 @@ fn bubble_maximum_ignores_nan_coordinates_across_marks() {
             _ => None,
         })
         .collect();
-    assert_eq!(radii, [9.0, 18.0]);
+    assert_eq!(radii.len(), 2);
+    for (radius, expected) in radii.iter().zip([9.0, 18.0]) {
+        assert!((radius - expected).abs() < 1e-5, "{radii:?}");
+    }
 }
 
 #[test]
