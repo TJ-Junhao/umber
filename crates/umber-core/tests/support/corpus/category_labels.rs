@@ -1,4 +1,4 @@
-//! Crowded category axes on a million-cell heatmap and two hundred bars.
+//! Crowded category axes on dense charts and bars with wide end labels.
 
 use umber_core::{BarOptions, Figure, FontLibrary, HeatmapOptions, ScaleKind, Theme};
 
@@ -47,6 +47,20 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         bars.add_axes(x, y)
             .unwrap()
             .bar(names("c", 200), &values, BarOptions::default())
+            .unwrap();
+        emit_scene(name, &bars.to_scene(lib).unwrap(), sink);
+    }
+
+    for (name, n, letters) in [
+        ("fig-category-labels-wide-end-two", 2, 10),
+        ("fig-category-labels-wide-end-three", 3, 12),
+    ] {
+        let mut bars = Figure::new(2.0, 4.0, Theme::pigment()).unwrap();
+        let mut categories = names("c", n);
+        categories[n - 1] = "W".repeat(letters);
+        bars.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .bar(categories, &vec![1.0; n], BarOptions::default())
             .unwrap();
         emit_scene(name, &bars.to_scene(lib).unwrap(), sink);
     }

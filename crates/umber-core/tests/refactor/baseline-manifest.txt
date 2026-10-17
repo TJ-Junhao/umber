@@ -329,6 +329,10 @@ df3bbfc11513153aedc0e067c7dad62927621e740e3423b4b5eec8544f7cbdc1  png/fig-catego
 9d4bae99051c3df785cb34aa4ca6dca339135af81cb552743c00d212a0d7384d  png/fig-category-labels-bars-200-vertical.dpi72.png
 314ea2ed8f2f4a8ff883bc03d23d26c55ab9f5e65f6834891973dfdfec9fd6fd  png/fig-category-labels-heatmap-1000.dpi200.png
 4e9cceaff4a7aa313a1e8fff8f663759e2b3a5a86840f1c7805de0ec8d0c34b2  png/fig-category-labels-heatmap-1000.dpi72.png
+4311556f2433bf3c2fbf22574a3828bab89aa595702c9df010e646c94fbcd317  png/fig-category-labels-wide-end-three.dpi200.png
+de2dae8b4b85f4cd3e7e5d8a67df252193fd20a4d64d5c885ffa7a89c8364187  png/fig-category-labels-wide-end-three.dpi72.png
+a9dadc622cf094e7e837434e9ed3a73962dc7a455daa78763637a401535e699a  png/fig-category-labels-wide-end-two.dpi200.png
+e4d3e180742e6cf0c5f496c56025287fea6a47a766b94314dceb29d14dfcef99  png/fig-category-labels-wide-end-two.dpi72.png
 ce65843501e35165a08520cdee0efbec6f2bcb53eca46f304d44d25090ed544f  png/fig-category.dpi200.png
 3514f8c90647fbc917075c1b61ee9c37d851011e6f0725096dee44631c83d950  png/fig-category.dpi72.png
 3f3d872082f7ef58675a2b5eb02c65ac1bfe686d7118ad62258e1de9fa1d19e6  png/fig-constant-values.dpi200.png
@@ -1474,6 +1478,8 @@ f565a74abf7674e7a4eec744de92fcbc7816f76e9fd4f7c1a048c61156ef0e1d  scene/fig-bars
 483e7562d9ed3345d275a4e5d415a457da4ff49bb31b59bae833e9b5e3dc8015  scene/fig-category-labels-bars-200-horizontal.txt
 903ea1927dbcd5aa5bca3605d57e96a1ebcc4014066528966eb16517c8480f04  scene/fig-category-labels-bars-200-vertical.txt
 f92180e2f1ff220b5ea8b4aaf85d6dd093bdde74fca0799c4e52983cae72af7f  scene/fig-category-labels-heatmap-1000.txt
+210010cdbad69a1d4a4da1ab53465eb845239e7e4c26a108270d6897acfb7df0  scene/fig-category-labels-wide-end-three.txt
+d3985b2c4142ec0f2018f7ccd33cfbe8942bd81d81dc51e5d54edd58071e5be9  scene/fig-category-labels-wide-end-two.txt
 4a320a3e926239d8ededeaacee8d69e11ff9488e449ccdde689555927dcae455  scene/fig-category.txt
 498cda81dbafec56d2faa9d80b53bad5fc3e6ce693946f1bed9125c7dec2fb70  scene/fig-constant-values.txt
 0d806ecafca74373e360d9f9c27e52eb16cbf74571c4898e09c07cafc790a4a7  scene/fig-direct-all-nan.txt
@@ -2261,6 +2267,10 @@ ad57980e0d09504620f6efa16c564c7569a1d36ed93fb024af8438dca1ae2835  svg/fig-catego
 2c4ff3777214e8ad24b633a1322b4abded29a8420bce11e45f1eaf49b07bda97  svg/fig-category-labels-bars-200-vertical.outlines.svg
 1cca9c154f049bdc894ffe8659b64fe61b4a4a50e076b9814b6fd53556c3b243  svg/fig-category-labels-heatmap-1000.editable.svg
 c3281fadcab3ab268807752897d5234f60bfadd9b3affe26ef6b468daf85e6eb  svg/fig-category-labels-heatmap-1000.outlines.svg
+ca1c085289a5bf8d5550228f6a2a5ac50d115af2753753c81d1b704a0f280993  svg/fig-category-labels-wide-end-three.editable.svg
+19138b009a019be679d69685532fb98bf4bf785aa4be9366b81433231696d058  svg/fig-category-labels-wide-end-three.outlines.svg
+1f8537a689932eea23e60fee414dfb2b3e6b7c843b01dd70f6f92b0d8310ebf3  svg/fig-category-labels-wide-end-two.editable.svg
+0bd2c0c575595774f96486c1d07cdf5b72a88b3e8d0a759a5edda89d32288d2a  svg/fig-category-labels-wide-end-two.outlines.svg
 660ed7f5cb3fffe76f6e631997fa1e0b6a51a33fcbd3029aa8194377b3997c07  svg/fig-category.editable.svg
 f54e84b4a9331d5408f80d05b69d99223a070ac4c4d2c58f76751d03dce25f0a  svg/fig-category.outlines.svg
 f46643e6cb057444a46f2ddc4aba3c1948822a020006fc6c5d9e4fac87ace412  svg/fig-constant-values.editable.svg

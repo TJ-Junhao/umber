@@ -45,7 +45,7 @@ fn all_ticks(resolved: &Resolved, side: Side) -> Vec<AxisTick> {
         .collect()
 }
 
-/// Checks the smallest fitting 1/2/5 step, including category zero and the band centers.
+/// Checks the smallest fitting 1/2/5 step on this plot, including category zero and band centers.
 fn assert_step(figure: &Figure, resolved: &Resolved, layout: &Layout, side: Side) -> usize {
     let lib = FontLibrary::bundled();
     let room = side.room(layout.plot.size(), figure.theme(), &lib);
@@ -215,9 +215,160 @@ fn category_labels_can_skip_an_overwide_last_label() {
     assert_eq!(assert_step(&figure, &resolved, &layout, Side::X), 2);
 }
 
+fn bars_with_wide_last_label(n: usize, width: f64, letters: usize) -> Figure {
+    let mut figure = Figure::new(width, 4.0, Theme::pigment()).unwrap();
+    let mut categories = names(n);
+    categories[n - 1] = "W".repeat(letters);
+    figure
+        .add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap()
+        .bar(categories, &vec![1.0; n], BarOptions::default())
+        .unwrap();
+    figure
+}
+
+/// Tries each x step on the plot its own labels produce, keeping the other axis fixed.
+fn smallest_self_fitting_step(
+    figure: &Figure,
+    resolved: &Resolved,
+    lib: &FontLibrary,
+) -> (usize, Vec<AxisTick>) {
+    let all = all_ticks(resolved, Side::X);
+    with_layout_input(figure, (0, 0), lib, |input, grid| {
+        for power in 0..10 {
+            for factor in [1, 2, 5] {
+                let k = factor * 10_usize.pow(power);
+                let mut candidate = resolved.clone();
+                candidate.x.ticks = all.iter().step_by(k).cloned().collect();
+                let bands = layout::measure_panel(
+                    input,
+                    &candidate,
+                    grid.span(input.axes.cells()),
+                    [true, true],
+                );
+                if let Ok(solution) = layout::solve_grid(grid, &[bands])
+                    && Side::X
+                        .room(solution.panels[0].plot.size(), figure.theme(), lib)
+                        .slack(&candidate.x.ticks)
+                        >= 0.0
+                {
+                    return (k, candidate.x.ticks);
+                }
+            }
+        }
+        panic!("no self-fitting category step")
+    })
+}
+
+#[test]
+fn category_labels_converge_with_wide_end_labels() {
+    let lib = FontLibrary::bundled();
+    let mut failures = Vec::new();
+    for (n, width, letters, expected_k) in [
+        (2, 1.75, 8, 2),
+        (2, 2.0, 10, 2),
+        (2, 3.0, 20, 2),
+        (3, 2.0, 12, 5),
+    ] {
+        let figure = bars_with_wide_last_label(n, width, letters);
+        let (resolved, layout) = try_plan_figure(&figure, (0, 0), &lib).unwrap();
+        let slack = Side::X
+            .room(layout.plot.size(), figure.theme(), &lib)
+            .slack(&resolved.x.ticks);
+        let (k, expected) = smallest_self_fitting_step(&figure, &resolved, &lib);
+        assert_eq!(k, expected_k);
+        if slack < 0.0 || resolved.x.ticks != expected {
+            failures.push((n, width, letters, slack, k));
+        }
+        assert_eq!(layout.x_tick_labels[0].text, "c0");
+        figure.to_scene(&lib).unwrap();
+    }
+    assert!(
+        failures.is_empty(),
+        "(n, width, letters, slack, expected k): {failures:?}"
+    );
+}
+
+#[test]
+fn category_labels_wide_end_sweep_fits_and_is_minimal() {
+    let lib = FontLibrary::bundled();
+    let mut rendered = 0;
+    let mut errors = 0;
+    let mut overlaps = Vec::new();
+    let mut nonminimal = Vec::new();
+    for n in 2..=15 {
+        for quarters in 6..=16 {
+            let width = f64::from(quarters) / 4.0;
+            for letters in 1..=39 {
+                let figure = bars_with_wide_last_label(n, width, letters);
+                let (resolved, layout) = match try_plan_figure(&figure, (0, 0), &lib) {
+                    Ok(planned) => planned,
+                    Err(error) => {
+                        assert!(matches!(error, crate::Error::Style { .. }), "{error}");
+                        errors += 1;
+                        continue;
+                    }
+                };
+                figure.to_scene(&lib).unwrap();
+                rendered += 1;
+                let slack = Side::X
+                    .room(layout.plot.size(), figure.theme(), &lib)
+                    .slack(&resolved.x.ticks);
+                if slack < 0.0 {
+                    overlaps.push((n, width, letters, slack));
+                }
+                let (k, expected) = smallest_self_fitting_step(&figure, &resolved, &lib);
+                if resolved.x.ticks != expected {
+                    nonminimal.push((n, width, letters, k));
+                }
+                assert_eq!(layout.x_tick_labels[0].text, "c0");
+            }
+        }
+    }
+    eprintln!(
+        "wide end sweep: {rendered} rendered, {errors} layout errors, {} overlaps, {} nonminimal",
+        overlaps.len(),
+        nonminimal.len()
+    );
+    assert_eq!(rendered + errors, 6006);
+    assert!(rendered >= 5679);
+    assert!(overlaps.is_empty(), "overlaps: {overlaps:?}");
+    assert!(nonminimal.is_empty(), "nonminimal: {nonminimal:?}");
+}
+
+#[test]
+fn category_labels_keep_an_overwide_first_label_error() {
+    let lib = FontLibrary::bundled();
+    for side in Side::BOTH {
+        let mut figure = Figure::new(2.0, 4.0, Theme::pigment()).unwrap();
+        let (x, y) = match side {
+            Side::X => (ScaleKind::Category, ScaleKind::Linear),
+            Side::Y => (ScaleKind::Linear, ScaleKind::Category),
+        };
+        figure
+            .add_axes(x, y)
+            .unwrap()
+            .bar(
+                vec!["W".repeat(500), "c1".into()],
+                &[1.0; 2],
+                BarOptions::default(),
+            )
+            .unwrap();
+        let error = try_plan_figure(&figure, (0, 0), &lib).unwrap_err();
+        assert!(matches!(error, crate::Error::Style { .. }));
+        let text = error.to_string();
+        assert!(text.contains("tick label"), "{text}");
+        assert!(
+            text.contains(&crate::error::quoted(&"W".repeat(500))),
+            "{text}"
+        );
+    }
+}
+
 #[test]
 fn category_labels_are_minimal_for_varied_names_and_sizes() {
     let lib = FontLibrary::bundled();
+    let mut combinations = 0;
     for side in Side::BOTH {
         for width in [2.0, 3.0, 4.0, 6.0, 9.0] {
             for height in [1.5, 2.0, 4.0] {
@@ -243,10 +394,12 @@ fn category_labels_are_minimal_for_varied_names_and_sizes() {
                         .unwrap();
                     let (resolved, layout) = try_plan_figure(&figure, (0, 0), &lib).unwrap();
                     assert_step(&figure, &resolved, &layout, side);
+                    combinations += 1;
                 }
             }
         }
     }
+    assert_eq!(combinations, 90);
 }
 
 #[test]
