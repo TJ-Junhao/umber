@@ -284,18 +284,14 @@ impl Widest {
 
 /// Extended Wilkinson tick positions for `[dmin, dmax]` (Talbot, Lin & Hanrahan, 2010).
 ///
-/// `tick_coverage` says whether the ticks must cover the range. Only skip 1 is searched, so
-/// every tick is a whole multiple of its step and 0 is a tick whenever it lies between ticks.
-/// The best scored candidate is the choice when `fit` admits it. Otherwise the choice is the
-/// best scored round candidate that `fit` admits ([`round_candidates`]): a step of 1, 2, 2.5
-/// or 5 times a power of ten, also with every tick a whole multiple of it. When none is
-/// admitted, it is the best scored two-tick candidate that `fit` admits, and when none is
-/// either, a two-tick candidate whose ticks lie furthest apart on the axis (the step as a share
-/// of the wider of its own span and the range), ties going to the better score, then to the
-/// first found among [`whole_pairs`], with a step from [`Q`] times a power of ten and ticks
-/// covering the range ([`TickCoverage::Loose`]) or inside it ([`TickCoverage::Free`]). A loose
-/// range straddling zero needs at least three whole-step ticks: when no pair covers it, the
-/// fewest round ticks are kept, with score breaking ties.
+/// `tick_coverage` says whether the ticks must cover the range. Linear candidates have at most
+/// `ceil(1.5 * target)` ticks, each a whole multiple of the step, so zero belongs to the grid.
+/// The best scored candidate stays when its labels fit, otherwise the best fitting round set
+/// from [`round_candidates`]. If neither fits, the remaining whole-step sets, including pairs
+/// strictly inside a free range, are ranked by fewest ticks, then score. If none fits, the
+/// largest label slack wins,
+/// with fewer ticks, wider spacing and the score breaking ties. Covering both signs needs at
+/// least three whole-step ticks.
 /// Values are computed from their indices, never by accumulation. Invalid input (non-finite or
 /// `dmin >= dmax`) and the case where no candidate is found yield `max(target, 2)` evenly
 /// spaced values instead, or the two range ends when those do not fit.
@@ -306,22 +302,56 @@ pub(crate) fn extended(
     tick_coverage: TickCoverage,
     fit: &Fit<'_>,
 ) -> Vec<f64> {
-    extended_with_skips(dmin, dmax, target, tick_coverage, fit, 1)
+    extended_in(dmin, dmax, target, tick_coverage, fit, SearchMode::Linear)
 }
 
 /// Linear fallback ticks on a log axis, retaining the full Extended Wilkinson search.
 pub(crate) fn log_fallback(dmin: f64, dmax: f64, target: usize, fit: &Fit<'_>) -> Vec<f64> {
-    extended_with_skips(dmin, dmax, target, TickCoverage::Free, fit, 50)
+    extended_in(
+        dmin,
+        dmax,
+        target,
+        TickCoverage::Free,
+        fit,
+        SearchMode::LogFallback,
+    )
+}
+
+/// The grid and density rules of the axis that requested the search.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SearchMode {
+    /// Whole-step ticks, with a cap on their number.
+    Linear,
+    /// The original Extended Wilkinson search for a log axis without two powers.
+    LogFallback,
+}
+
+impl SearchMode {
+    /// The largest skip allowed in the main search.
+    fn max_skip(self) -> u32 {
+        match self {
+            Self::Linear => 1,
+            Self::LogFallback => 50,
+        }
+    }
+
+    /// The largest candidate set for this target.
+    fn max_ticks(self, target: usize) -> usize {
+        match self {
+            Self::Linear => (3 * target).div_ceil(2).min(50),
+            Self::LogFallback => 50,
+        }
+    }
 }
 
 /// The shared search, with skips above one allowed only for a log-axis fallback.
-fn extended_with_skips(
+fn extended_in(
     dmin: f64,
     dmax: f64,
     target: usize,
     tick_coverage: TickCoverage,
     fit: &Fit<'_>,
-    max_skip: u32,
+    mode: SearchMode,
 ) -> Vec<f64> {
     let target = clamp_target(target);
     let evenly = || {
@@ -340,16 +370,18 @@ fn extended_with_skips(
         return evenly();
     }
     let range = dmax - dmin;
-    let Some(best) = search(dmin, dmax, target, tick_coverage, max_skip, &|_| true).best else {
+    let best = search(dmin, dmax, target, tick_coverage, mode, &|_| true).best;
+    if let Some(best) = best {
+        if fit.keeps(&best.values(), best.step, range) {
+            return best.values();
+        }
+    } else if mode == SearchMode::LogFallback {
         return evenly();
-    };
-    if fit.keeps(&best.values(), best.step, range) {
-        return best.values();
     }
     // A candidate in place of the best needs two ticks drawn: one that does not would only
     // raise the bar for the others.
     let admits = |c: &Candidate| fit.admits(&c.values(), c.step, range);
-    let round = round_candidates(dmin, dmax, target, tick_coverage);
+    let (round, whole) = round_candidates(dmin, dmax, target, tick_coverage, mode);
     let better = |chosen: Option<Candidate>, c: Candidate| match chosen {
         Some(chosen) if chosen.score >= c.score => Some(chosen),
         _ => Some(c),
@@ -357,35 +389,39 @@ fn extended_with_skips(
     if let Some(chosen) = round.iter().copied().filter(admits).fold(None, better) {
         return chosen.values();
     }
-    // A free pair can lie strictly inside the data range, outside the starts searched above.
-    if max_skip == 1 {
-        let pairs = whole_pairs(dmin, dmax, target, tick_coverage);
-        if let Some(chosen) = pairs.iter().copied().filter(admits).fold(None, better) {
+    if mode == SearchMode::Linear {
+        if let Some(chosen) = whole
+            .iter()
+            .filter(|c| admits(c))
+            .min_by(|a, b| a.k.cmp(&b.k).then_with(|| b.score.total_cmp(&a.score)))
+        {
             return chosen.values();
         }
-        let widest = pairs.into_iter().map(|c| Widest::of(c, dmin, dmax)).fold(
-            None,
-            |widest: Option<Widest>, c| {
-                if c.beats(widest.as_ref()) {
-                    Some(c)
-                } else {
-                    widest
-                }
-            },
-        );
-        if let Some(widest) = widest {
-            return widest.candidate.values();
-        }
-        // A loose zero-aligned set straddling zero needs at least three ticks.
-        return round
+        // Even equally spaced pairs can have different label widths: compare actual slack.
+        return whole
             .iter()
-            .copied()
-            .min_by(|a, b| a.k.cmp(&b.k).then_with(|| b.score.total_cmp(&a.score)))
-            .map_or_else(evenly, |c| c.values());
+            .map(|c| {
+                let slack = match (fit.slack)(&c.values()) {
+                    Room::Slack(slack) => slack,
+                    Room::TooFewTicks => f64::NEG_INFINITY,
+                };
+                (c, slack)
+            })
+            .max_by(|(a, sa), (b, sb)| {
+                sa.total_cmp(sb)
+                    .then_with(|| b.k.cmp(&a.k))
+                    .then_with(|| {
+                        Widest::of(**a, dmin, dmax)
+                            .share
+                            .total_cmp(&Widest::of(**b, dmin, dmax).share)
+                    })
+                    .then_with(|| a.score.total_cmp(&b.score))
+            })
+            .map_or_else(evenly, |(c, _)| c.values());
     }
     // Log-axis fallback: retain the full search and its two-tick fallbacks.
     let pair = |c: &Candidate| c.k == 2 && admits(c);
-    if let Some(chosen) = search(dmin, dmax, target, tick_coverage, max_skip, &pair).best {
+    if let Some(chosen) = search(dmin, dmax, target, tick_coverage, mode, &pair).best {
         return chosen.values();
     }
     let widest_round = round
@@ -399,36 +435,42 @@ fn extended_with_skips(
                 widest
             }
         });
-    let widest = widest_round
-        .or_else(|| search(dmin, dmax, target, tick_coverage, max_skip, &|_| false).widest);
+    let widest =
+        widest_round.or_else(|| search(dmin, dmax, target, tick_coverage, mode, &|_| false).widest);
     match widest {
         Some(widest) => widest.candidate.values(),
         None => evenly(),
     }
 }
 
-/// The round candidates for about `target` ticks on `[dmin, dmax]`, scored as
-/// [`extended`] scores every candidate: for each step `m * 10^z` with `m` 1, 2, 2.5 or 5, from
-/// a fiftieth of the range up to ten times its next power of ten, the multiples of the step
-/// that cover the range most tightly ([`TickCoverage::Loose`]) or all those inside it
-/// ([`TickCoverage::Free`]), when they are 2 to 50 ticks. In order of step, smallest first.
+/// Whole-step fallback sets, scored as [`extended`] scores every candidate. Each step is a
+/// mantissa times a power of ten, from a fiftieth of the range up to ten times its next power
+/// of ten. Loose sets cover the range tightly; free sets lie inside it. Linear searches also
+/// try adjacent pairs inside each free set, keeping zero whenever the range contains it.
+/// Returns the round sets first, then all whole-step sets. Log fallbacks retain the four
+/// round mantissas and full sets of 2 to 50 ticks.
 fn round_candidates(
     dmin: f64,
     dmax: f64,
     target: usize,
     tick_coverage: TickCoverage,
-) -> Vec<Candidate> {
+    mode: SearchMode,
+) -> (Vec<Candidate>, Vec<Candidate>) {
     let range = dmax - dmin;
     let tol = 1e-9 * range;
-    let m = target as f64;
     let (first, last) = ((range / 50.0).log10().floor(), range.log10().ceil() + 1.0);
     if !(first.is_finite() && last.is_finite()) {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
-    let mut candidates = Vec::new();
+    let mantissas: &[(usize, f64)] = match mode {
+        SearchMode::Linear => &[(0, 1.0), (2, 2.0), (3, 2.5), (5, 3.0), (4, 4.0), (1, 5.0)],
+        SearchMode::LogFallback => &ROUND_MANTISSAS,
+    };
+    let mut round = Vec::new();
+    let mut whole = Vec::new();
     let mut z = first;
     while z <= last {
-        for (qi, mantissa) in ROUND_MANTISSAS {
+        for &(qi, mantissa) in mantissas {
             let step = mantissa * 10f64.powf(z);
             let (lo, hi) = match tick_coverage {
                 TickCoverage::Loose => ((dmin / step).floor(), (dmax / step).ceil()),
@@ -438,69 +480,39 @@ fn round_candidates(
             if !(count.is_finite() && (2.0..=50.0).contains(&count)) {
                 continue;
             }
-            let lmin = lo * step;
-            let lmax = lmin + step * (count - 1.0);
-            let s = simplicity(qi, 1.0, lmin, lmax, step);
-            let c = coverage(dmin, dmax, lmin, lmax);
-            let g = density(count, m, dmin, dmax, lmin, lmax);
-            candidates.push(Candidate {
-                lmin,
-                step,
-                k: count as usize,
-                score: W[0] * s + W[1] * c + W[2] * g + W[3],
-            });
-        }
-        z += 1.0;
-    }
-    candidates
-}
-
-/// Whole-step pairs that cover a loose range or lie inside a free range. Unlike the main
-/// search, the free starts include adjacent ticks strictly inside the range. A range holding
-/// zero only admits pairs with a tick there.
-fn whole_pairs(dmin: f64, dmax: f64, target: usize, coverage_kind: TickCoverage) -> Vec<Candidate> {
-    let range = dmax - dmin;
-    let first = (range / 50.0).log10().floor();
-    let last = range.log10().ceil() + 1.0;
-    if !(first.is_finite() && last.is_finite()) {
-        return Vec::new();
-    }
-    let mut pairs = Vec::new();
-    let mut z = first;
-    while z <= last {
-        for (qi, q) in Q.into_iter().enumerate() {
-            let step = q * 10f64.powf(z);
-            let (lo, hi) = match coverage_kind {
-                TickCoverage::Loose => ((dmin / step).floor(), (dmax / step).ceil()),
-                TickCoverage::Free => ((dmin / step).ceil(), (dmax / step).floor()),
-            };
-            let gaps = hi - lo;
-            if !(gaps.is_finite() && (1.0..=50.0).contains(&gaps))
-                || (coverage_kind == TickCoverage::Loose && gaps != 1.0)
-            {
-                continue;
-            }
-            for i in 0..gaps as usize {
-                let lmin = (lo + i as f64) * step;
-                let lmax = lmin + step;
-                if dmin <= 0.0 && dmax >= 0.0 && !(lmin <= 0.0 && lmax >= 0.0) {
-                    continue;
-                }
-                let score = W[0] * simplicity(qi, 1.0, lmin, lmax, step)
-                    + W[1] * coverage(dmin, dmax, lmin, lmax)
-                    + W[2] * density(2.0, target as f64, dmin, dmax, lmin, lmax)
-                    + W[3];
-                pairs.push(Candidate {
+            let candidate = |start: f64, k: usize| {
+                let lmin = start * step;
+                let lmax = lmin + step * (k - 1) as f64;
+                Candidate {
                     lmin,
                     step,
-                    k: 2,
-                    score,
-                });
+                    k,
+                    score: W[0] * simplicity(qi, 1.0, lmin, lmax, step)
+                        + W[1] * coverage(dmin, dmax, lmin, lmax)
+                        + W[2] * density(k as f64, target as f64, dmin, dmax, lmin, lmax)
+                        + W[3],
+                }
+            };
+            if count <= mode.max_ticks(target) as f64 {
+                let c = candidate(lo, count as usize);
+                if qi < 4 {
+                    round.push(c);
+                }
+                whole.push(c);
+            }
+            if mode == SearchMode::Linear && tick_coverage == TickCoverage::Free && count > 2.0 {
+                for i in 0..(count as usize - 1) {
+                    let start = lo + i as f64;
+                    if dmin <= 0.0 && dmax >= 0.0 && !(start <= 0.0 && start + 1.0 >= 0.0) {
+                        continue;
+                    }
+                    whole.push(candidate(start, 2));
+                }
             }
         }
         z += 1.0;
     }
-    pairs
+    (round, whole)
 }
 
 /// One pass of the Extended Wilkinson search over `[dmin, dmax]` for about `target` ticks,
@@ -511,7 +523,7 @@ fn search(
     dmax: f64,
     target: usize,
     tick_coverage: TickCoverage,
-    max_skip: u32,
+    mode: SearchMode,
     admit: &dyn Fn(&Candidate) -> bool,
 ) -> Search {
     let tol = 1e-9 * (dmax - dmin);
@@ -521,7 +533,7 @@ fn search(
 
     let mut j: u32 = 1;
     // A skip above one permits starts between whole multiples of the step.
-    'jobs: while j <= max_skip {
+    'jobs: while j <= mode.max_skip() {
         let jf = f64::from(j);
         for (qi, &q) in Q.iter().enumerate() {
             let sm = simplicity_max(qi, jf);
@@ -529,7 +541,7 @@ fn search(
                 break 'jobs;
             }
             let mut k: usize = 2;
-            while k <= 50 {
+            while k <= mode.max_ticks(target) {
                 let kf = k as f64;
                 let dm = density_max(kf, m);
                 if W[0] * sm + W[1] + W[2] * dm + W[3] < best_score {
@@ -854,7 +866,7 @@ mod tests {
         let cases: &[(f64, f64, usize, TickCoverage, &[f64])] = &[
             (0.0, 100.0, 5, Free, &[0.0, 25.0, 50.0, 75.0, 100.0]),
             (0.0, 100.0, 4, Free, &[0.0, 50.0, 100.0]),
-            (-1.5, 1.5, 4, Free, &[-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5]),
+            (-1.5, 1.5, 4, Free, &[-1.0, 0.0, 1.0]),
             (0.0, 30.0, 5, Free, &[0.0, 10.0, 20.0, 30.0]),
             (0.0, 25.0, 4, Free, &[0.0, 5.0, 10.0, 15.0, 20.0, 25.0]),
             (0.5, 9.5, 5, Free, &[0.0, 2.5, 5.0, 7.5, 10.0]),
@@ -923,16 +935,53 @@ mod tests {
     }
 
     #[test]
+    fn whole_step_search_caps_tick_count() {
+        for (low, high) in [(11.0, 65.0), (59.9, 94.3), (-0.01, 5.69)] {
+            for target in 2usize..=8 {
+                for coverage in [TickCoverage::Loose, TickCoverage::Free] {
+                    let values = extended(low, high, target, coverage, &Fit::ANY);
+                    assert!(
+                        values.len() <= (3 * target).div_ceil(2),
+                        "target {target}: {values:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn crowded_whole_steps_choose_the_largest_slack() {
+        for (coverage, want) in [
+            (TickCoverage::Loose, [0.0, 20.0]),
+            (TickCoverage::Free, [2.0, 4.0]),
+        ] {
+            let slack =
+                |values: &[f64]| Room::Slack(if close(values, &want) { -1.0 } else { -10.0 });
+            let values = extended(0.5, 9.5, 5, coverage, &judged(&slack));
+            assert!(close(&values, &want), "{values:?}");
+        }
+    }
+
+    #[test]
+    fn a_fitting_whole_step_set_can_use_three_or_four_times_a_power_of_ten() {
+        let slack = |values: &[f64]| {
+            Room::Slack(if close(values, &[-3.0, 0.0, 3.0]) {
+                1.0
+            } else {
+                -1.0
+            })
+        };
+        let values = extended(-2.9, 2.9, 5, TickCoverage::Loose, &judged(&slack));
+        assert!(close(&values, &[-3.0, 0.0, 3.0]), "{values:?}");
+    }
+
+    #[test]
     fn only_admitted_candidates_are_chosen() {
         use TickCoverage::{Free, Loose};
-        // Unjudged, data from −0.01 to 5.69 for a target of 3 gets eight ticks one apart.
+        // The cap allows at most five ticks for a target of three.
         let any = extended(-0.01, 5.69, 3, Loose, &Fit::ANY);
-        assert!(
-            close(&any, &[-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-            "{any:?}"
-        );
-        // Asked for ticks at least 1.5 apart, the best scored round candidate that is: not
-        // −0.4, 1.2, 2.8, 4.4, 6.0, which scores better.
+        assert!(close(&any, &[-2.0, 0.0, 2.0, 4.0, 6.0]), "{any:?}");
+        // The same whole-step set also fits when ticks need to be at least 1.5 apart.
         let slack = |values: &[f64]| Room::Slack(gap_beyond(values, 1.5));
         let fit = judged(&slack);
         let loose = extended(-0.01, 5.69, 3, Loose, &fit);

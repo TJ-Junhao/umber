@@ -182,13 +182,13 @@ impl Side {
         }
     }
 
-    /// Whether this side of an axes with `limits` gets automatic ticks: a linear, log or time
-    /// axis without explicit ticks.
+    /// Whether this side of an axes with `limits` gets automatic ticks: a category axis, or a
+    /// linear, log or time axis without explicit ticks.
     fn is_automatic(self, limits: &Limits<'_>) -> bool {
         match limits.axis(self.axis()) {
             resolve::AxisLimits::Continuous(axis) => axis.ticks.explicit().is_none(),
             resolve::AxisLimits::Time(axis) => axis.ticks.explicit().is_none(),
-            resolve::AxisLimits::Category => false,
+            resolve::AxisLimits::Category => true,
         }
     }
 
@@ -363,14 +363,20 @@ fn resolve_groups(
 /// the layout stay unchanged. Otherwise it resolves and solves again, repairing crowded
 /// choices with candidates that draw at least two ticks.
 ///
-/// That solve can give a plot smaller than the one the ticks were chosen for. While the labels
-/// of a side with automatic ticks crowd on the solved plot, its ticks are chosen again for that
+/// That solve can give a plot smaller than the one the ticks were chosen for. While automatic
+/// numeric or time tick labels crowd on the solved plot, its ticks are chosen again for that
 /// plot ([`TickChoice::again`]): at most as many ticks the first time at a number of ticks, one
 /// fewer the next, and the grid is solved again. A side whose ticks number two, whose new
 /// choice does not fit even on the plot it was made for, or whose new choice the grid cannot
 /// hold (the solve fails, and the previous solve is kept) keeps its ticks. Each side is chosen
 /// again at most twice per number of ticks, and its ticks never grow in number while the
 /// domain stays fixed.
+///
+/// Category axes provisionally thin their labels on the guessed plot sizes. Each final solve
+/// tries category candidates on the layouts their own labels produce, starting with only
+/// category 0. Each accepted change lowers a 1/2/5 decade step while keeping every category
+/// axis apart; finite choices therefore cannot oscillate. Shared axes choose for their
+/// smallest visible member and copy the same ticks to the whole group.
 ///
 /// Before each round the bubble fits are asked again on the solved plots ([`BubbleFits`]):
 /// the first time, every automatic axis holding bubbles widens its data extent to fit them on
@@ -498,6 +504,112 @@ fn plan(
         }
     };
 
+    // Try category steps on their own solved plots, not on the previous step's plot. Y goes
+    // first because its label widths can release room for x. Begin with only category 0, then
+    // only lower steps, accepting a change only when all category groups still fit. Repeating
+    // the search lets a group use room released by another without ever increasing a step.
+    let solve_ticks = |mut resolved: Vec<Resolved>| -> Result<_> {
+        let mut categories = Vec::new();
+        for side in [Side::Y, Side::X] {
+            for (i, r) in resolved.iter().enumerate() {
+                if side.groups(groups)[i] != i {
+                    continue;
+                }
+                let axis = match side {
+                    Side::X => &r.x,
+                    Side::Y => &r.y,
+                };
+                let resolve::AxisScale::Category(scale) = &axis.scale else {
+                    continue;
+                };
+                let ticks = resolve::category_ticks(scale, side.axis());
+                if ticks.len() <= 1 {
+                    continue;
+                }
+                let mut candidates = Vec::new();
+                let mut decade = 1_usize;
+                'steps: loop {
+                    for factor in [1_usize, 2, 5] {
+                        let selected: Vec<_> = ticks
+                            .iter()
+                            .step_by(decade.saturating_mul(factor))
+                            .cloned()
+                            .collect();
+                        let last = selected.len() == 1;
+                        candidates.push(selected);
+                        if last {
+                            break 'steps;
+                        }
+                    }
+                    decade = decade.saturating_mul(10);
+                }
+                categories.push((i, side, candidates));
+            }
+        }
+        let set_ticks =
+            |resolved: &mut [Resolved], i: usize, side: Side, ticks: &[resolve::AxisTick]| {
+                for (j, r) in resolved.iter_mut().enumerate() {
+                    if side.groups(groups)[j] == i {
+                        match side {
+                            Side::X => r.x.ticks = ticks.to_vec(),
+                            Side::Y => r.y.ticks = ticks.to_vec(),
+                        }
+                    }
+                }
+            };
+        let mut selected: Vec<_> = categories
+            .iter()
+            .map(|(i, side, candidates)| {
+                let last = candidates.len() - 1;
+                set_ticks(&mut resolved, *i, *side, &candidates[last]);
+                last
+            })
+            .collect();
+        let mut bands: Vec<_> = resolved
+            .iter()
+            .enumerate()
+            .map(|(i, r)| measure(i, r))
+            .collect();
+        let mut solution = solve(&resolved, &bands)?;
+        loop {
+            let mut changed = false;
+            for (group, (i, side, candidates)) in categories.iter().enumerate() {
+                for (candidate, ticks) in candidates.iter().enumerate().take(selected[group]) {
+                    let mut tried = resolved.clone();
+                    set_ticks(&mut tried, *i, *side, ticks);
+                    let tried_bands: Vec<_> = tried
+                        .iter()
+                        .enumerate()
+                        .map(|(i, r)| measure(i, r))
+                        .collect();
+                    let Ok(tried_solution) = solve(&tried, &tried_bands) else {
+                        continue;
+                    };
+                    let plots: Vec<_> = tried_solution
+                        .panels
+                        .iter()
+                        .map(|slot| slot.plot.size())
+                        .collect();
+                    if categories.iter().all(|(i, side, _)| {
+                        let plot = side.group_plot(groups, *i, &plots, &show_labels);
+                        side.room(plot, theme, lib).slack(side.ticks(&tried[*i])) >= 0.0
+                    }) {
+                        selected[group] = candidate;
+                        resolved = tried;
+                        bands = tried_bands;
+                        solution = tried_solution;
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        Ok((resolved, bands, solution))
+    };
+
     let rooms_for = |plots: &[PlotSize], spacing| {
         (0..panels.len())
             .map(|i| {
@@ -580,13 +692,8 @@ fn plan(
             choose_color_ticks(figure, &panels[i], r, &room);
         }
     }
-    let mut bands: Vec<PanelBands> = resolved
-        .iter()
-        .enumerate()
-        .map(|(i, resolved)| measure(i, resolved))
-        .collect();
-    let mut solution = match solve(&resolved, &bands) {
-        Ok(solution)
+    let (mut resolved, mut bands, mut solution) = match solve_ticks(resolved) {
+        Ok((resolved, bands, solution))
             if solution.panels.iter().enumerate().all(|(i, slot)| {
                 Side::BOTH.into_iter().all(|side| {
                     !show_labels[i][side.index()]
@@ -598,20 +705,12 @@ fn plan(
                 })
             }) =>
         {
-            solution
+            (resolved, bands, solution)
         }
-        _ => {
-            resolved = resolve_choices(&choices, &fits);
-            bands = resolved
-                .iter()
-                .enumerate()
-                .map(|(i, resolved)| measure(i, resolved))
-                .collect();
-            solve(&resolved, &bands)?
-        }
+        _ => solve_ticks(resolve_choices(&choices, &fits))?,
     };
 
-    // Each side is chosen again at most twice per number of ticks.
+    // Numeric and time sides retry at most twice per tick count.
     let rounds: usize = resolved
         .iter()
         .map(|r| {
@@ -622,26 +721,12 @@ fn plan(
     // Resolves the axes for the current tick choices and bubble fits and solves the grid
     // again. When the grid cannot hold the fitted limits, every fit is clipped, and the axes
     // are resolved and the grid solved with the limits of the data positions.
-    let refit = |fits: &mut BubbleFits, choices: &[[TickChoice; 3]]| {
-        let resolved = resolve_choices(choices, fits);
-        let bands: Vec<PanelBands> = resolved
-            .iter()
-            .enumerate()
-            .map(|(i, r)| measure(i, r))
-            .collect();
-        match solve(&resolved, &bands) {
-            Ok(solution) => Ok((resolved, bands, solution)),
-            Err(_) if fits.clip_all() => {
-                let resolved = resolve_choices(choices, fits);
-                let bands: Vec<PanelBands> = resolved
-                    .iter()
-                    .enumerate()
-                    .map(|(i, r)| measure(i, r))
-                    .collect();
-                solve(&resolved, &bands).map(|solution| (resolved, bands, solution))
-            }
-            Err(error) => Err(error),
-        }
+    let refit = |fits: &mut BubbleFits, choices: &[[TickChoice; 3]]| match solve_ticks(
+        resolve_choices(choices, fits),
+    ) {
+        Ok(planned) => Ok(planned),
+        Err(_) if fits.clip_all() => solve_ticks(resolve_choices(choices, fits)),
+        Err(error) => Err(error),
     };
     for _ in 0..rounds + fits.budget() {
         // The sides whose labels crowd on the solved plots, chosen again.
@@ -663,6 +748,13 @@ fn plan(
                 }
                 let plot = side.group_plot(groups, i, &plots, &show_labels);
                 let ticks = side.ticks(r);
+                let axis = match side {
+                    Side::X => &r.x,
+                    Side::Y => &r.y,
+                };
+                if axis.is_category() {
+                    continue;
+                }
                 if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
                 {
                     continue;
@@ -702,11 +794,6 @@ fn plan(
             break;
         }
         let tried_resolved = resolve_choices(&next, &fits);
-        let tried_bands: Vec<_> = tried_resolved
-            .iter()
-            .enumerate()
-            .map(|(i, r)| measure(i, r))
-            .collect();
         for &(i, side) in &again {
             // A choice that crowds even on the plot it was made for is the fallback.
             let choice = &mut next[i][side.index()];
@@ -726,11 +813,9 @@ fn plan(
                 next[i][2].state = ChoiceState::Settled;
             }
         }
-        match solve(&tried_resolved, &tried_bands) {
+        match solve_ticks(tried_resolved) {
             Ok(tried) => {
-                resolved = tried_resolved;
-                bands = tried_bands;
-                solution = tried;
+                (resolved, bands, solution) = tried;
                 choices = next;
             }
             Err(_) => {
@@ -1112,6 +1197,10 @@ fn in_cell(figure: &Figure, axes: &Axes, err: Error) -> Error {
     let cells = axes.cells();
     err.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
 }
+
+#[cfg(test)]
+#[path = "category_label_tests.rs"]
+mod category_label_tests;
 
 #[cfg(test)]
 #[path = "header_tests.rs"]
@@ -1663,8 +1752,8 @@ mod tests {
 
     #[test]
     fn crowded_y_ticks_keep_their_labels_apart() {
-        // "Sensor 5" of a 4 × 5 grid at 12 × 8 in, a plot of about 126 × 72 pt: for data from
-        // −0.01 to 5.69 the target alone (3) gives 8 y ticks about 8.2 pt apart.
+        // Data from −0.01 to 5.69 on a short plot: the capped target alone gives five ticks,
+        // whose labels still need more room than the 60 pt height allows.
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         let (x, y) = walk(54);
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
@@ -1674,19 +1763,16 @@ mod tests {
         let lib = FontLibrary::global();
         let size = PlotSize {
             width: 126.0,
-            height: 72.0,
+            height: 60.0,
         };
         let (old, _, _) = resolved_at(&f, size, TickSpacing::Target, lib).remove(0);
-        assert_eq!(
-            tick_labels(&old.y.ticks),
-            ["\u{2212}1", "0", "1", "2", "3", "4", "5", "6"]
-        );
+        assert_eq!(tick_labels(&old.y.ticks), ["\u{2212}2", "0", "2", "4", "6"]);
         let (new, _, room) = resolved_at(&f, size, TickSpacing::LabelsApart, lib).remove(0);
         assert!(room.slack(&old.y.ticks) < 0.0);
         assert!(room.slack(&new.y.ticks) >= 0.0);
         // A line (11.05 pt) and the gap (4.25 pt) apart, on a domain padded to 1.1 times the
-        // span of the ticks, at most 1 + 72 / (1.1 × 15.3) = 5.3 ticks fit: round ones.
-        assert_eq!(tick_labels(&new.y.ticks), ["\u{2212}2", "0", "2", "4", "6"]);
+        // span of the ticks, at most 1 + 60 / (1.1 × 15.3) = 4.6 ticks fit: round ones.
+        assert_eq!(tick_labels(&new.y.ticks), ["\u{2212}5", "0", "5", "10"]);
         // The x ticks were apart already, and stay as they were.
         assert_eq!(new.x.ticks, old.x.ticks);
     }
@@ -1797,7 +1883,7 @@ mod tests {
     #[test]
     fn fitting_constrained_ticks_keep_their_final_layout() {
         let theme = Theme::pigment().with_font_scale(1.4).unwrap();
-        let mut f = Figure::new(3.5, 5.35, theme).unwrap();
+        let mut f = Figure::new(3.2, 5.35, theme).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap()
             .line(
@@ -1816,13 +1902,29 @@ mod tests {
         let slack = Side::X
             .room(layout.plot.size(), f.theme(), lib)
             .slack(&resolved.x.ticks);
-        assert_eq!(tick_labels(&resolved.x.ticks), ["4000000.0%", "8000000.0%"]);
-        assert!(
-            (layout.plot.width - 154.4674148022289).abs() < 1e-8,
-            "{:?}, slack {slack}",
-            layout.plot
-        );
-        assert!((slack - 5.044521748180117).abs() < 1e-8, "{slack}");
+        // No whole-step pair fits this width; one grid label keeps the solved layout and
+        // never crowds another label. A fitting pair must not be replaced by this fallback.
+        assert_eq!(tick_labels(&resolved.x.ticks), ["4000000.0%"]);
+        assert_eq!(slack, f64::INFINITY);
+    }
+
+    #[test]
+    fn fitting_whole_step_pairs_are_not_reduced_to_one_tick() {
+        let theme = Theme::pigment().with_font_scale(1.4).unwrap();
+        let mut f = Figure::new(3.5, 5.35, theme).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![9000.0, 46500.0, 84000.0]),
+                &[-7781.0, -7780.5, -7780.0],
+                LineOptions::default(),
+            )
+            .unwrap()
+            .xtick_format(crate::TickFormat::percent(1).unwrap())
+            .unwrap();
+        let (labels, slack) = final_ticks(&f, Side::X);
+        assert_eq!(labels, ["4000000.0%", "8000000.0%"]);
+        assert!(slack >= 0.0, "{slack}");
     }
 
     #[test]

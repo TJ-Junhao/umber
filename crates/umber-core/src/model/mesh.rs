@@ -1227,7 +1227,7 @@ mod tests {
         );
     }
 
-    fn assert_scatter_markers_inside_clip(f: &Figure, keeps_zero: bool) {
+    fn assert_scatter_markers_inside_clip(f: &Figure) {
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         let mut markers = 0;
         for item in &scene.items {
@@ -1263,15 +1263,8 @@ mod tests {
                     for vertex in &vertices {
                         let x = position.x + vertex.x;
                         let y = position.y + vertex.y;
-                        // A nonnegative value axis stops at zero, so a mark centered
-                        // there may cross that edge; all other edges retain their padding.
-                        let on_y_zero =
-                            keeps_zero && (position.y - clip.y - clip.height).abs() < 1e-4;
                         assert!(x - outline >= clip.x && x + outline <= clip.x + clip.width);
-                        assert!(
-                            y - outline >= clip.y
-                                && (on_y_zero || y + outline <= clip.y + clip.height)
-                        );
+                        assert!(y - outline >= clip.y && y + outline <= clip.y + clip.height);
                     }
                     markers += 1;
                 }
@@ -1295,7 +1288,7 @@ mod tests {
             f.single_axes_mut()
                 .mesh(&[0.0, 1.0], &[0.0, 1.0], &[1.0], MeshOptions::default())
                 .unwrap();
-            assert_scatter_markers_inside_clip(&f, scatter[0] == 0.0);
+            assert_scatter_markers_inside_clip(&f);
             let (after, _) = plan_figure(&f, (0, 0), FontLibrary::global());
             assert_eq!(
                 after.x.continuous_scale().domain(),

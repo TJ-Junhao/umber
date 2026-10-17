@@ -236,10 +236,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def xlim(self: SX, low: X, high: X) -> SX:
         """Set the x limits, replacing the automatic ones; for linear, log and time x axes.
 
-        Automatic linear ticks are whole multiples of their step. On a value axis with
-        nonnegative data, automatic linear limits and padding stop at zero. A positions axis
-        keeps its padding below zero; explicit limits are used as given. Tick density follows
-        screen direction, not the orientation of the marks.
+        Automatic linear ticks are whole multiples of their step. On the axis bars, boxes
+        and points are measured along, the automatic lower limit can move down one tick step
+        to leave room below the data. For nonnegative data, that move stops at zero. Padding
+        can still extend below zero to keep marks whole. Explicit limits are used as given.
 
         Args:
             low: The lower limit; finite, and positive on a log axis; a time on a time axis.
@@ -273,10 +273,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def ylim(self: SY, low: Y, high: Y) -> SY:
         """Set the y limits, replacing the automatic ones.
 
-        Automatic linear ticks are whole multiples of their step. On a value axis with
-        nonnegative data, automatic linear limits stop at zero, including padding and the
-        extra step below the data. A positions axis keeps its padding below zero; explicit
-        limits are used as given.
+        Automatic linear ticks are whole multiples of their step. On the axis bars, boxes
+        and points are measured along, the automatic lower limit can move down one tick step
+        to leave room below the data. For nonnegative data, that move stops at zero. Padding
+        can still extend below zero to keep marks whole. Explicit limits are used as given.
 
         Args:
             low: The lower limit; finite, and positive on a log axis; a time on a time axis.
@@ -310,9 +310,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Set the x ticks to ``positions``, replacing the automatic ones.
 
         Automatic linear ticks are whole multiples of their step, with a tick at zero when
-        the domain includes it. Their target density is about one interval per 100 pt along
-        x (45 pt along y); labels may require fewer ticks. Explicit positions need not follow
-        that grid.
+        the domain includes it. Their number depends on the available space and the size of
+        their labels. Explicit positions need not follow that grid.
 
         The positions are used in the order given. An empty list leaves the x axis without
         ticks and gridlines. Calling any x tick method again replaces the ticks and drops
@@ -353,9 +352,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Set the y ticks to ``positions``, replacing the automatic ones.
 
         Automatic linear ticks are whole multiples of their step, with a tick at zero when
-        the domain includes it. Their target density is about one interval per 45 pt along
-        y (100 pt along x); labels may require fewer ticks. Explicit positions need not follow
-        that grid.
+        the domain includes it. Their number depends on the available space and the size of
+        their labels. Explicit positions need not follow that grid.
 
         The positions are used in the order given. An empty list leaves the y axis without
         ticks and gridlines. Calling any y tick method again replaces the ticks and drops

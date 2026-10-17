@@ -344,7 +344,7 @@ enum AutoLimits {
     /// As [`Nice`](Self::Nice), with the lowest tick moved strictly below the data before the
     /// padding when the data starts on it (see [`ContinuousScale::below_data`]): the value
     /// axis, whose baseline sits at the lower limit when 0 is not in the domain. For
-    /// nonnegative linear data, the move, padding and single-value expansion stop at 0.
+    /// nonnegative linear data, only the one-step move stops at 0; padding is unchanged.
     NiceBelowData(Padding),
 }
 
@@ -626,16 +626,8 @@ fn automatic(
         let scale = ContinuousScale::unit(transform);
         (scale, scale, scale.auto_ticks(target, judge))
     } else {
-        let mut scale = ContinuousScale::from_extent(transform, data, CONTEXT)
+        let scale = ContinuousScale::from_extent(transform, data, CONTEXT)
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
-        let nonnegative = matches!(auto, AutoLimits::NiceBelowData(_))
-            && transform == Transform::Linear
-            && data.is_some_and(|(low, _)| low >= 0.0);
-        if nonnegative && scale.domain().0 < 0.0 {
-            // A single value at or near zero may have been expanded below it.
-            scale =
-                ContinuousScale::new(transform, 0.0, scale.domain().1, CONTEXT).unwrap_or(scale);
-        }
         match auto {
             AutoLimits::Exact => (scale, scale, scale.auto_ticks(target, judge)),
             AutoLimits::Nice(padding) | AutoLimits::NiceBelowData(padding) => {
@@ -645,7 +637,6 @@ fn automatic(
                 };
                 let single = data.is_some_and(|(lo, hi)| is_single_value(transform, lo, hi));
                 let finish = Finish {
-                    nonnegative,
                     below_data,
                     padding: (!single).then_some(padding),
                 };
@@ -805,7 +796,7 @@ fn positioned(scale: &ContinuousScale, ticks: Vec<Tick>) -> Vec<AxisTick> {
 /// The ticks of a category axis along `which` of `scale`: one per category, at the centre of
 /// its band, labelled with its name. Categories run left to right along x and top to bottom
 /// along y, so the first category of a y axis sits at its high end.
-fn category_ticks(scale: &CategoryScale, which: ValueAxis) -> Vec<AxisTick> {
+pub(crate) fn category_ticks(scale: &CategoryScale, which: ValueAxis) -> Vec<AxisTick> {
     scale
         .categories()
         .iter()
@@ -959,7 +950,7 @@ pub(crate) fn resolve(
 /// A category axis lists the categories of the marks along it in order of first appearance. A
 /// continuous axis fits the values of the marks along it. On the value axis its lowest nice
 /// tick moves below the data unless its linear domain already holds 0; for nonnegative data,
-/// the limit and its padding stop at 0 ([`AutoLimits::NiceBelowData`]). On the other axis, the
+/// that move stops at 0, before padding ([`AutoLimits::NiceBelowData`]). On the other axis, the
 /// positions axis, reference lines and spans do not decide the padding: an axis of lines and
 /// references keeps the exact extent of the lines, while an axis of references alone is padded.
 /// Only references that give the axis values pad it; a reference along the other axis leaves it
@@ -977,7 +968,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
         AxisLimits::Category => {
             let scale = categories(marks, which);
             let axis = ResolvedAxis {
-                ticks: category_ticks(&scale, which),
+                ticks: room.category_ticks(category_ticks(&scale, which)),
                 scale: AxisScale::Category(scale),
             };
             return (axis, NormalizedPos::LOW);
@@ -3893,14 +3884,13 @@ mod tests {
                 ScatterOptions::default(),
             )
             .unwrap();
-        // Nice limits carry whole-step ticks; only the value axis's padding stops at 0.
+        // Nice limits carry whole-step ticks, with padding on both axes.
         let ((x0, x1), (y0, y1)) = domains(&f);
         assert!(close((x0, x1), pad(0.0, 100.0)), "{x0} {x1}");
-        assert!(close((y0, y1), (0.0, 42.0)), "{y0} {y1}");
+        assert!(close((y0, y1), pad(0.0, 40.0)), "{y0} {y1}");
         let r = resolve_axes(f.single_axes(), 5, 4);
         assert_end_ticks_inset(&r.x.ticks);
-        assert_eq!(r.y.ticks[0].pos.get(), 0.0);
-        assert!((r.y.ticks.last().unwrap().pos.get() - 1.0 / 1.05).abs() < 1e-9);
+        assert_end_ticks_inset(&r.y.ticks);
         assert_eq!(labels(&r.x.ticks), ["0", "25", "50", "75", "100"]);
         assert_eq!(labels(&r.y.ticks), ["0", "10", "20", "30", "40"]);
 
@@ -4305,9 +4295,9 @@ mod tests {
         assert_eq!(lowest(&line_axes(LIN, &[21.0, 35.0, 40.0])), "20");
         assert_eq!(lowest(&line_axes(LIN, &[22.0, 35.0, 40.0])), "20");
         assert_eq!(lowest(&line_axes(log, &[2.0, 40.0])), "1");
-        // A linear domain that holds 0 keeps 0 as its limit: the baseline is at 0 already.
+        // A linear domain that holds 0 is not lowered by a step, but is still padded.
         let f = line_axes(LIN, &[0.0, 30.0]);
-        assert!(close(y_domain(&f), (0.0, 31.5)), "{:?}", y_domain(&f));
+        assert!(close(y_domain(&f), pad(0.0, 30.0)), "{:?}", y_domain(&f));
         let f = bar_figure(LIN, &[0.0, 40.0]);
         assert_eq!(y_domain(&f), (0.0, 42.0));
         // Explicit limits are used as given.
@@ -4322,14 +4312,14 @@ mod tests {
         // Log bars: the smallest height counts.
         let f = bar_figure(log, &[10.0, 1000.0]);
         assert_eq!(lowest(&f), "1");
-        // The x axis keeps 35; y adds one whole step of 5 below it.
+        // Both axes choose whole steps of 10; 30 already leaves room below the data.
         let (_, ys) = sinusoid();
         let mut f = figure(LIN, LIN);
         axes(&mut f)
             .scatter(nums(&ys), &ys, ScatterOptions::default())
             .unwrap();
         let r = resolve_axes(f.single_axes(), 4, 4);
-        assert_eq!(labels(&r.x.ticks)[0], "35");
+        assert_eq!(labels(&r.x.ticks)[0], "30");
         assert_eq!(labels(&r.y.ticks)[0], "30");
     }
 
@@ -4468,15 +4458,12 @@ mod tests {
             .line(nums(&xs), &ys, LineOptions::default())
             .unwrap();
         let ((x0, x1), (y0, y1)) = domains(&f);
-        // 35..65 has whole-step ticks 5 apart. The lower limit moves to 30, then both
-        // limits get 5 % padding; the ticks stay 30..65.
-        assert_ne!((y0, y1), (30.0, 65.0));
-        assert!(close((y0, y1), (28.25, 66.75)), "{y0} {y1}");
+        // The capped search chooses whole-step ticks 10 apart on 30..70; both limits
+        // get 5 % padding and the ticks stay on their grid.
+        assert_ne!((y0, y1), (30.0, 70.0));
+        assert!(close((y0, y1), (28.0, 72.0)), "{y0} {y1}");
         let r = resolve_axes(f.single_axes(), 5, 4);
-        assert_eq!(
-            labels(&r.y.ticks),
-            ["30", "35", "40", "45", "50", "55", "60", "65"]
-        );
+        assert_eq!(labels(&r.y.ticks), ["30", "40", "50", "60", "70"]);
         assert_end_ticks_inset(&r.y.ticks);
         // The x axis of an all-line axes keeps the exact extent, unpadded.
         assert_eq!((x0, x1), (0.0, 12.0));

@@ -46,6 +46,12 @@ pub enum ScaleKind {
         base: LogBase,
     },
     /// Discrete categories; order = first appearance across marks, resolved at render time.
+    /// Automatic labels start at category 0 and show every k-th category, with the smallest k
+    /// in 1, 2, 5, 10, 20, 50, ... whose label widths (x) or heights (y) leave at least half
+    /// the tick label font size between neighbours, as numeric ticks do. Shared axes use the
+    /// same labels. Category 0 is always labelled: if its label is wider than the available
+    /// room, rendering still fails with a tick-label error. Explicit tick labels and heatmap
+    /// annotations are unchanged.
     Category,
     /// Times ([`Instant`]s), which map linearly, with calendar ticks and labels.
     Time,
@@ -816,13 +822,36 @@ impl ContinuousScale {
                 }
             }
         }
+        chosen.2 = chosen.0.uncrowded(chosen.2, judge);
         chosen
+    }
+
+    /// If no multi-tick linear set fits, keep one of its ticks, preferring zero or the nearest
+    /// value to it. The searched domain and grid stay unchanged. If even that set is rejected,
+    /// retain the search's largest-slack choice. Log axes keep their existing fallbacks.
+    fn uncrowded(&self, ticks: AutoTicks, judge: &dyn TickJudge) -> AutoTicks {
+        if self.transform == Transform::Linear && judge.slack(self, &ticks) < 0.0 {
+            let tick = ticks
+                .ticks
+                .iter()
+                .min_by(|a, b| a.value.abs().total_cmp(&b.value.abs()));
+            if let Some(tick) = tick {
+                let single = AutoTicks {
+                    ticks: vec![tick.clone()],
+                    values: ticks.values,
+                };
+                if judge.slack(self, &single) >= 0.0 {
+                    return single;
+                }
+            }
+        }
+        ticks
     }
 
     /// This nice scale and its `ticks` finished as `finish` says: the padded domain, the nice
     /// domain before padding and the ticks, with the lowest tick moved below the data by
-    /// [`below_data`](Self::below_data) for `target` and `fewer`. With `finish.nonnegative`, a
-    /// linear value axis stops at zero, including its padding and expanded single-value extent.
+    /// [`below_data`](Self::below_data) for `target` and `fewer`. Padding is applied afterwards,
+    /// including below zero when the mark needs room on both sides.
     fn finished(
         &self,
         ticks: AutoTicks,
@@ -830,20 +859,11 @@ impl ContinuousScale {
         target: usize,
         fewer: usize,
     ) -> (ContinuousScale, ContinuousScale, AutoTicks) {
-        let (mut nice, mut ticks) = match finish.below_data {
+        let (nice, ticks) = match finish.below_data {
             Some(data_low) => self.below_data(ticks, data_low, target, fewer),
             None => (*self, ticks),
         };
-        let nonnegative = self.transform == Transform::Linear && finish.nonnegative;
-        if nonnegative {
-            nice.lo = nice.lo.max(0.0);
-            ticks.ticks.retain(|tick| tick.value >= 0.0);
-        }
-        let mut padded = finish.padding.map_or(nice, |padding| nice.padded(padding));
-        // Check after lowering too: padding must not cross zero once the domain reaches it.
-        if nonnegative {
-            padded.lo = padded.lo.max(0.0);
-        }
+        let padded = finish.padding.map_or(nice, |padding| nice.padded(padding));
         (padded, nice, ticks)
     }
 
@@ -1159,11 +1179,13 @@ impl ContinuousScale {
         // Keep the previous constrained choice, including all its target retries, when it
         // fits. An empty candidate used to pass the search and lead to the next target.
         let previous = choose(Room::Slack(f64::INFINITY));
-        if judge.deferred() || judge.slack(self, &previous) >= 0.0 {
+        if (matches!(self.transform, Transform::Log(_)) && judge.deferred())
+            || judge.slack(self, &previous) >= 0.0
+        {
             return previous;
         }
         // Only repair a crowded choice: an empty candidate must not hide a pair that fits.
-        choose(Room::TooFewTicks)
+        self.uncrowded(choose(Room::TooFewTicks), judge)
     }
 
     /// The ticks of a free Extended Wilkinson `candidate` that lie inside this domain, with
@@ -1316,8 +1338,6 @@ impl TickJudge for AnySpacing {
 /// [`ContinuousScale::fitted`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Finish {
-    /// Whether this is a value axis with nonnegative data: linear limits and padding stop at zero.
-    pub nonnegative: bool,
     /// The smallest data value, when the lowest tick moves strictly below the data that starts
     /// on it ([`ContinuousScale::below_data`]); `None` to keep the ticks.
     pub below_data: Option<f64>,

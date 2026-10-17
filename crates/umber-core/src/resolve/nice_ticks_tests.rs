@@ -9,7 +9,16 @@ use crate::{
 use proptest::prelude::*;
 
 fn assert_grid(values: &[f64], domain: (f64, f64)) {
-    assert!(values.len() >= 2, "{values:?}");
+    assert!(!values.is_empty(), "{values:?}");
+    if values.len() == 1 {
+        if domain.0 <= 0.0 && domain.1 >= 0.0 {
+            assert!(
+                values[0].abs() < (domain.1 - domain.0) * 1e-9,
+                "{domain:?}: {values:?}"
+            );
+        }
+        return;
+    }
     let step = values[1] - values[0];
     assert!(step.is_finite() && step > 0.0, "{values:?}");
     for &value in values {
@@ -37,11 +46,11 @@ fn check_panel(f: &Figure, col: usize, starts_at_zero: bool) {
         .map(|tick| scale.domain().0 + tick.pos.get() * (scale.domain().1 - scale.domain().0))
         .collect();
     assert_grid(&values, scale.domain());
-    assert!(scale.domain().0 >= 0.0, "{:?}: {values:?}", scale.domain());
+    assert!(values[0] >= -1e-9 * (values[1] - values[0]), "{values:?}");
     if starts_at_zero {
-        assert_eq!(scale.domain().0, 0.0, "{values:?}");
+        assert!(scale.domain().0 < 0.0, "{values:?}");
         assert_eq!(resolved.y.ticks[0].label.parse::<f64>().unwrap(), 0.0);
-        assert_eq!(resolved.baseline.pos.get(), 0.0);
+        assert!(resolved.y.ticks[0].pos.get() > 0.0);
     }
 }
 
@@ -105,7 +114,29 @@ fn short_four_column_box_violin_and_scatter_start_at_zero() {
 }
 
 #[test]
-fn scatter_positions_keep_padding_while_nonnegative_values_stop_at_zero() {
+fn zero_endpoint_scatter_domains_are_mirrored_and_padded() {
+    let domains: Vec<_> = [[0.0, 17.0, 31.0], [-31.0, -17.0, 0.0]]
+        .into_iter()
+        .map(|ys| {
+            let mut f = Figure::new(6.0, 2.6, Theme::pigment()).unwrap();
+            f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .scatter(
+                    AxisData::Numbers(vec![0.0, 1.0, 2.0]),
+                    &ys,
+                    ScatterOptions::default(),
+                )
+                .unwrap();
+            let resolved = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).0;
+            resolved.y.continuous_scale().domain()
+        })
+        .collect();
+    assert!(domains[0].0 < 0.0, "{domains:?}");
+    assert_eq!(domains[0], (-domains[1].1, -domains[1].0));
+}
+
+#[test]
+fn scatter_positions_and_values_keep_padding_below_zero() {
     for start in [0.0, 0.1] {
         let mut f = Figure::new(6.0, 2.6, Theme::pigment()).unwrap();
         let xs: Vec<_> = (0..40).map(|i| f64::from(i) + start).collect();
@@ -131,7 +162,7 @@ fn scatter_positions_keep_padding_while_nonnegative_values_stop_at_zero() {
 }
 
 #[test]
-fn only_value_axes_clamp_nonnegative_single_values() {
+fn single_values_keep_padding_and_whole_step_ticks() {
     let settings = AxisTicks::default();
     let limits = ContinuousLimits {
         transform: Transform::Linear,
@@ -139,25 +170,23 @@ fn only_value_axes_clamp_nonnegative_single_values() {
         ticks: &settings,
     };
     let (_, room) = TickRoom::unlimited(5, 5, FontLibrary::global());
-    for value in [0.0, 1e-290, 3.0, 1e290] {
+    for value in [-1e295, -3.0, -1e-295, 0.0, 1e-295, 1e-290, 3.0, 1e295] {
         for auto in [
             AutoLimits::Exact,
             AutoLimits::Nice(Padding::BothSides),
             AutoLimits::NiceBelowData(Padding::BothSides),
         ] {
             let axis = continuous(limits, Some((value, value)), auto, &room);
-            if matches!(auto, AutoLimits::NiceBelowData(_)) {
-                assert!(
-                    axis.scale.domain().0 >= 0.0,
-                    "{value}: {:?}",
-                    axis.scale.domain()
-                );
-            } else if value == 0.0 {
-                assert!(
-                    axis.scale.domain().0 < 0.0,
-                    "{value}: {:?}",
-                    axis.scale.domain()
-                );
+            let domain = axis.scale.domain();
+            assert!(domain.0 < value && value < domain.1, "{value}: {domain:?}");
+            let values: Vec<_> = axis
+                .ticks
+                .iter()
+                .map(|tick| domain.0 + tick.pos.get() * (domain.1 - domain.0))
+                .collect();
+            assert_grid(&values, domain);
+            if value.abs() < 1e-290 {
+                assert!(domain.0 < 0.0 && domain.1 > 0.0, "{value}: {domain:?}");
             }
         }
     }
@@ -166,10 +195,10 @@ fn only_value_axes_clamp_nonnegative_single_values() {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
     #[test]
-    fn automatic_linear_axes_keep_whole_steps_and_nonnegative_limits(
+    fn automatic_linear_axes_keep_whole_steps_and_nonnegative_lowering(
         start in -100i32..100,
-        width in 1i32..100,
-        exponent in -9i32..10,
+        width in prop_oneof![Just(0i32), 1i32..100],
+        exponent in -295i32..=295,
         length in 40.0f64..1200.0,
     ) {
         let factor = 10f64.powi(exponent);
@@ -186,8 +215,9 @@ proptest! {
                     let domain = axis.scale.domain();
                     let values: Vec<_> = axis.ticks.iter().map(|tick| domain.0 + tick.pos.get() * (domain.1 - domain.0)).collect();
                     assert_grid(&values, domain);
-                    if low >= 0.0 && matches!(auto, AutoLimits::NiceBelowData(_)) {
-                        prop_assert!(domain.0 >= 0.0, "data {low}..{high}, domain {domain:?}, ticks {values:?}");
+                    let expanded = ContinuousScale::from_extent(Transform::Linear, Some((low, high)), CONTEXT).unwrap();
+                    if low >= 0.0 && expanded.domain().0 >= 0.0 && matches!(auto, AutoLimits::NiceBelowData(_)) {
+                        prop_assert!(axis.unpadded_low >= 0.0, "data {low}..{high}, domain {domain:?}, ticks {values:?}");
                     }
                 }
             }
