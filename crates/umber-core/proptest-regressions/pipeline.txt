@@ -1,0 +1,5 @@
+# Seeds for failures found by proptest in pipeline.rs.
+# Replayed before new random cases so the same layouts stay covered.
+cc 0f67973c0a095cea040f4b0ebba72b1a8950d19546181fde1fd0a2bb2b42e2e6
+cc 8e0125229c16657f7a64495c84a433f4a20e04be1077eaf84c36415f05fe052d
+cc dceb8217a89b8a111328b88ab15e9a199ee5ae2516d2bc20a636e9dde18d7313
