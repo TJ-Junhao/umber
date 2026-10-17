@@ -28,6 +28,20 @@ use crate::{Error, Result};
 /// The most decimals [`TickFormat::fixed`] and [`TickFormat::percent`] accept.
 const MAX_DECIMALS: i64 = 12;
 
+/// The final automatic tick set being checked, including the source of a colorbar's format.
+#[derive(Clone, Copy)]
+pub(crate) enum AutomaticTickTarget {
+    /// The x or y axis.
+    Axis(&'static str),
+    /// A visible colorbar with its own format or its source panel's y tick format.
+    Colorbar {
+        /// Whether the bar spans a shared color group.
+        shared: bool,
+        /// Whether the format was taken from the source panel's y tick format.
+        inherited: bool,
+    },
+}
+
 /// A number of decimal places, from 0 to 12. Made by [`TickFormat::fixed`] and
 /// [`TickFormat::percent`].
 ///
@@ -143,6 +157,10 @@ impl TickFormat {
 
     /// Fixed-point labels with `decimals` places: `fixed(2)` writes 2.5 as `2.50`.
     ///
+    /// Automatic linear axes and colorbars use whole steps this format can show exactly.
+    /// If their domain contains no such value, rendering returns [`Error::Style`]; use more
+    /// decimals or set axis ticks explicitly. Explicit ticks and log axes are unaffected.
+    ///
     /// # Errors
     ///
     /// `Error::Style` (context `"TickFormat.fixed()"`, parameter `decimals`) unless `decimals`
@@ -168,6 +186,11 @@ impl TickFormat {
 
     /// Percent labels: the value times 100 with `decimals` places, then `%`. `percent(0)`
     /// writes 0.25 as `25%`, `percent(1)` writes 0.125 as `12.5%`.
+    ///
+    /// Automatic linear axes and colorbars use whole steps this format can show exactly
+    /// after multiplying by 100. If their domain contains no such value, rendering returns
+    /// [`Error::Style`]; use more decimals or set axis ticks explicitly. Explicit ticks and
+    /// log axes are unaffected.
     ///
     /// # Errors
     ///
@@ -338,6 +361,131 @@ impl TickFormat {
             _ => return 0.0,
         };
         10f64.powi(-(places as i32))
+    }
+
+    /// Refuses an empty automatic linear tick set caused by fixed decimal precision. Called
+    /// for the final axis or visible colorbar, never for explicit ticks or other scale kinds.
+    pub(crate) fn check_automatic_ticks(
+        &self,
+        ticks: &[crate::resolve::AxisTick],
+        domain: (f64, f64),
+        target: AutomaticTickTarget,
+        context: &'static str,
+    ) -> Result<()> {
+        if !ticks.is_empty() {
+            return Ok(());
+        }
+        use AutomaticTickTarget::{Axis, Colorbar};
+        let (name, decimals, hint) = match (self.style, target) {
+            (NumberStyle::Fixed(d), Axis(_)) => (
+                "fixed",
+                d.get(),
+                "use more decimals with TickFormat.fixed(), or set the ticks explicitly.",
+            ),
+            (
+                NumberStyle::Fixed(d),
+                Colorbar {
+                    inherited: false, ..
+                },
+            ) => (
+                "fixed",
+                d.get(),
+                "use more decimals with TickFormat.fixed().",
+            ),
+            (
+                NumberStyle::Fixed(d),
+                Colorbar {
+                    inherited: true,
+                    shared: false,
+                },
+            ) => (
+                "fixed",
+                d.get(),
+                "set the colorbar's own format with ax.colorbar(format=...), using more decimals with TickFormat.fixed().",
+            ),
+            (
+                NumberStyle::Fixed(d),
+                Colorbar {
+                    inherited: true,
+                    shared: true,
+                },
+            ) => (
+                "fixed",
+                d.get(),
+                "set the colorbar's own format with fig.colorbar(format=...), using more decimals with TickFormat.fixed().",
+            ),
+            (NumberStyle::Percent(d), Axis(_)) => (
+                "percent",
+                d.get(),
+                "use more decimals with TickFormat.percent(), or set the ticks explicitly.",
+            ),
+            (
+                NumberStyle::Percent(d),
+                Colorbar {
+                    inherited: false, ..
+                },
+            ) => (
+                "percent",
+                d.get(),
+                "use more decimals with TickFormat.percent().",
+            ),
+            (
+                NumberStyle::Percent(d),
+                Colorbar {
+                    inherited: true,
+                    shared: false,
+                },
+            ) => (
+                "percent",
+                d.get(),
+                "set the colorbar's own format with ax.colorbar(format=...), using more decimals with TickFormat.percent().",
+            ),
+            (
+                NumberStyle::Percent(d),
+                Colorbar {
+                    inherited: true,
+                    shared: true,
+                },
+            ) => (
+                "percent",
+                d.get(),
+                "set the colorbar's own format with fig.colorbar(format=...), using more decimals with TickFormat.percent().",
+            ),
+            _ => return Ok(()),
+        };
+        let mut format = format!("{name}({decimals})");
+        if !self.prefix.is_empty() || !self.suffix.is_empty() {
+            format.push_str(&format!(
+                ".affix({}, {})",
+                crate::error::quoted(&self.prefix),
+                crate::error::quoted(&self.suffix),
+            ));
+        }
+        let label = match target {
+            Axis(axis) => format!("{axis} axis"),
+            Colorbar { shared: true, .. } => "shared colorbar".into(),
+            Colorbar { shared: false, .. } => "colorbar".into(),
+        };
+        let source = if matches!(
+            target,
+            Colorbar {
+                inherited: true,
+                ..
+            }
+        ) {
+            ", taken from the y tick format,"
+        } else {
+            ""
+        };
+        Err(Error::style(
+            context,
+            format!(
+                "the {label} runs from {} to {}, but its tick format {format}{source} cannot label any value in that range.",
+                crate::error::number(ticks::round_significant(domain.0, 6)),
+                crate::error::number(ticks::round_significant(domain.1, 6)),
+            ),
+        )
+        .with_hint(hint))
     }
 
     /// `ticks` labelled in this format. [`NumberStyle::Auto`] keeps the labels the ticks carry,

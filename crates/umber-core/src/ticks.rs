@@ -835,7 +835,7 @@ pub(crate) fn format_scientific(values: &[f64]) -> Vec<String> {
 }
 
 /// `v` rounded to `digits` significant digits.
-fn round_significant(v: f64, digits: usize) -> f64 {
+pub(crate) fn round_significant(v: f64, digits: usize) -> f64 {
     format!("{v:.prec$e}", prec = digits.saturating_sub(1))
         .parse()
         .unwrap_or(v)
