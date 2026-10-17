@@ -1,8 +1,10 @@
 //! The SVG backend.
 //!
 //! [`render_svg`] writes a [`Scene`] as an SVG document. The output is hand-written XML with
-//! absolute path coordinates, at most three decimals per number, and ids drawn from a single
-//! counter in document order, so the same scene always gives the same bytes. Geometry, dashes
+//! absolute path coordinates, at most three decimals per number, ids drawn from a single
+//! counter in document order and images encoded as PNG with fixed settings, so the same scene
+//! always gives the same bytes. A document with an image also starts with one `<style>` rule
+//! that asks browsers to scale images without smoothing; other documents have none. Geometry, dashes
 //! and gradients go through the shared normalization in [`super::normalize`]; values that
 //! cannot be drawn are skipped and the document stays well-formed.
 //!
@@ -20,9 +22,10 @@
 use std::fmt::Write as _;
 
 use super::SvgText;
+use super::image::{base64, png_bytes};
 use super::normalize::{
-    GradientKind, NormalizedPath, Segment, clip_is_valid, normalize_dash, normalize_gradient,
-    normalize_path, stroke_is_visible, text_is_visible, valid_point,
+    GradientKind, NormalizedPath, Segment, clip_is_valid, image_is_drawable, normalize_dash,
+    normalize_gradient, normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
 use crate::color::Rgba;
 use crate::geometry::{Path, Point};
@@ -36,6 +39,12 @@ use crate::scene::{
 /// [`SvgText::Editable`] it is written as `<text>` elements that name the font family.
 /// Everything that cannot be drawn is skipped, so the result always parses as XML. Content of
 /// groups nested deeper than [`MAX_GROUP_DEPTH`] is omitted.
+///
+/// An [`Item::Image`] is an `<image>` holding its pixels as a PNG data URI, stretched without
+/// keeping its aspect ratio and marked `image-rendering="optimizeSpeed"` with the class
+/// `umber-raster`; a document with at least one image starts with one `<style>` rule that
+/// gives that class `image-rendering: pixelated` where it is supported, so browsers scale it
+/// without smoothing too. A document without images has no `<style>`.
 ///
 /// # Examples
 ///
@@ -59,6 +68,7 @@ pub fn render_svg(scene: &Scene, text: SvgText) -> String {
         body: String::new(),
         next_id: 0,
         text,
+        images: false,
     };
     for item in &scene.items {
         writer.item(item, 0);
@@ -69,6 +79,12 @@ pub fn render_svg(scene: &Scene, text: SvgText) -> String {
         out,
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}pt" height="{h}pt" viewBox="0 0 {w} {h}">"#
     );
+    if writer.images {
+        let _ = writeln!(
+            out,
+            "<style>@supports (image-rendering: pixelated) {{ .{IMAGE_CLASS} {{ image-rendering: pixelated }} }}</style>"
+        );
+    }
     let _ = write!(
         out,
         r#"<rect width="{w}" height="{h}" fill="{}""#,
@@ -215,11 +231,16 @@ fn write_stroke(out: &mut String, style: &StrokeStyle, path_len: f32) -> bool {
     true
 }
 
+/// The class of every `<image>`, which the document's one stylesheet selects.
+const IMAGE_CLASS: &str = "umber-raster";
+
 struct Writer {
     defs: String,
     body: String,
     next_id: usize,
     text: SvgText,
+    /// Whether an image was written, so the document needs the stylesheet of images.
+    images: bool,
 }
 
 impl Writer {
@@ -243,8 +264,42 @@ impl Writer {
                 self.markers(shape, *fill, stroke.as_ref(), positions);
             }
             Item::Text(t) => self.text(t),
+            Item::Image {
+                rect,
+                width,
+                height,
+                pixels,
+            } => self.image(rect, (*width, *height), pixels),
             Item::Group { clip, items } => self.group(*clip, items, depth),
         }
+    }
+
+    /// Writes an image as an `<image>` stretched over `rect` without keeping its aspect ratio,
+    /// scaled without smoothing, holding its pixels as a PNG data URI.
+    ///
+    /// Renderers ask for nearest-neighbour scaling in different words: the attribute
+    /// `image-rendering="optimizeSpeed"` serves cairosvg, librsvg, resvg and Inkscape, and the
+    /// value `pixelated` serves browsers, which smooth `optimizeSpeed`. A `pixelated` written
+    /// on the element would override the attribute in cairosvg, so it comes from the
+    /// document's stylesheet instead, inside `@supports`, which cairosvg ignores: one rule for
+    /// the [`IMAGE_CLASS`] of every image.
+    fn image(&mut self, rect: &Rect, (width, height): (u32, u32), pixels: &[Rgba]) {
+        if !image_is_drawable(rect, width, height, pixels) || pixels.iter().all(|c| c.a == 0) {
+            return;
+        }
+        let Some(png) = png_bytes(width, height, pixels) else {
+            return;
+        };
+        let _ = writeln!(
+            self.body,
+            r#"<image x="{}" y="{}" width="{}" height="{}" preserveAspectRatio="none" image-rendering="optimizeSpeed" class="{IMAGE_CLASS}" href="data:image/png;base64,{}"/>"#,
+            num(rect.x),
+            num(rect.y),
+            num(rect.width),
+            num(rect.height),
+            base64(&png)
+        );
+        self.images = true;
     }
 
     fn fill(&mut self, path: &Path, paint: &Paint, rule: FillRule) {

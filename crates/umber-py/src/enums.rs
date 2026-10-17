@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
     Align, ColorbarPosition, Dash, FillStyle, Font, GridLines, LegendMode, LegendPosition,
-    LegendStyle, Marker, Share, Step, SvgText,
+    LegendStyle, Marker, Render, Share, Step, SvgText,
 };
 
 use crate::errors::internal_value;
@@ -138,6 +138,30 @@ int_enum!("ColorbarPosition", ColorbarPosition {
     "NONE" => ColorbarPosition::None = 2,
 });
 
+/// How cells are drawn, as the Python `Render` enum names the choices other than `AUTO`,
+/// which the bindings pass as `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenderChoice {
+    /// [`Render::Vector`].
+    Vector,
+    /// [`Render::Raster`].
+    Raster,
+}
+
+int_enum!("Render", RenderChoice {
+    "VECTOR" => RenderChoice::Vector = 0,
+    "RASTER" => RenderChoice::Raster = 1,
+});
+
+/// The core [`Render`] of a Python `Render` value, `None` standing for `AUTO`.
+pub(crate) fn render_choice(value: Option<i64>) -> PyResult<Render> {
+    Ok(match value.map(enum_value::<RenderChoice>).transpose()? {
+        None => Render::Auto,
+        Some(RenderChoice::Vector) => Render::Vector,
+        Some(RenderChoice::Raster) => Render::Raster,
+    })
+}
+
 /// The variant of `E` with integer value `value`; an unknown value is an internal `ValueError`.
 pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
     E::from_value(value)
@@ -146,7 +170,7 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 13] = [
+const TABLES: [(&str, &[(&str, i64)]); 14] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (Font::PY_NAME, Font::MEMBERS),
@@ -160,6 +184,7 @@ const TABLES: [(&str, &[(&str, i64)]); 13] = [
     (Align::PY_NAME, Align::MEMBERS),
     (Step::PY_NAME, Step::MEMBERS),
     (ColorbarPosition::PY_NAME, ColorbarPosition::MEMBERS),
+    (RenderChoice::PY_NAME, RenderChoice::MEMBERS),
 ];
 
 /// The member tables of every bound enum, keyed by the Python enum name.
@@ -209,6 +234,14 @@ mod tests {
         round_trips::<Align>();
         round_trips::<Step>();
         round_trips::<ColorbarPosition>();
+        round_trips::<RenderChoice>();
+    }
+
+    #[test]
+    fn render_choices_map_to_the_core_enum() {
+        assert_eq!(render_choice(None).unwrap(), Render::Auto);
+        assert_eq!(render_choice(Some(0)).unwrap(), Render::Vector);
+        assert_eq!(render_choice(Some(1)).unwrap(), Render::Raster);
     }
 
     #[test]
@@ -229,7 +262,8 @@ mod tests {
                 "LegendPosition",
                 "Align",
                 "Step",
-                "ColorbarPosition"
+                "ColorbarPosition",
+                "Render"
             ]
         );
     }

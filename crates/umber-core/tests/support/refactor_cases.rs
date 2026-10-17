@@ -187,6 +187,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::time::cases(&lib, &mut sink);
     corpus::mesh::cases(&lib, &mut sink);
     corpus::heatmap::cases(&lib, &mut sink);
+    corpus::mesh::raster_cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -2059,6 +2060,26 @@ mod record {
                     self.path(shape);
                 }
                 Item::Text(t) => self.text_item(t),
+                Item::Image {
+                    rect: at,
+                    width,
+                    height,
+                    pixels,
+                } => {
+                    self.line(&format!(
+                        "image {} width={width} height={height} pixels={}",
+                        rect(*at),
+                        pixels.len()
+                    ));
+                    // One line per row of pixels, each pixel as eight hex digits (RGBA).
+                    for row in pixels.chunks((*width as usize).max(1)) {
+                        let mut line = String::from(" row ");
+                        for c in row {
+                            let _ = write!(line, "{:02x}{:02x}{:02x}{:02x}", c.r, c.g, c.b, c.a);
+                        }
+                        self.line(&line);
+                    }
+                }
                 Item::Group { clip, items } => {
                     let clip = clip.map_or_else(|| "none".into(), rect);
                     self.line(&format!("group clip={clip} items={}", items.len()));

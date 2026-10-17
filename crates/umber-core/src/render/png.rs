@@ -9,8 +9,8 @@ use std::ops::Range;
 use tiny_skia as sk;
 
 use super::normalize::{
-    GradientKind, NormalizedPath, Segment, clip_is_valid, normalize_dash, normalize_gradient,
-    normalize_path, stroke_is_visible, text_is_visible, valid_point,
+    GradientKind, NormalizedPath, Segment, clip_is_valid, image_is_drawable, normalize_dash,
+    normalize_gradient, normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
 use crate::color::Rgba;
 use crate::error::{Error, Result};
@@ -614,7 +614,91 @@ impl Canvas {
                     );
                 }
             }
+            Item::Image {
+                rect,
+                width,
+                height,
+                pixels,
+            } => draw_image(
+                pixmap,
+                *scale,
+                clip.zip(mask),
+                rect,
+                (*width, *height),
+                pixels,
+            ),
             Item::Group { .. } => {}
+        }
+    }
+}
+
+/// Draws the image of `width` by `height` `pixels` over `rect`, through `clip` and its mask when
+/// there is one: each device pixel the image reaches takes the area-weighted average of the
+/// image pixels it covers ([`super::image::resample`]), composited source-over onto the pixmap,
+/// in integer arithmetic, through the mask's coverage. Only the device pixels inside both the
+/// image and the clip are resampled.
+fn draw_image(
+    pixmap: &mut sk::Pixmap,
+    scale: DeviceScale,
+    clip: Option<(ClipRect, &sk::Mask)>,
+    rect: &Rect,
+    (width, height): (u32, u32),
+    pixels: &[Rgba],
+) {
+    if !image_is_drawable(rect, width, height, pixels) {
+        return;
+    }
+    let s = f64::from(scale.get());
+    let (left, top) = (f64::from(rect.x) * s, f64::from(rect.y) * s);
+    let right = (f64::from(rect.x) + f64::from(rect.width)) * s;
+    let bottom = (f64::from(rect.y) + f64::from(rect.height)) * s;
+    let (mut lo_x, mut lo_y) = (left.floor().max(0.0), top.floor().max(0.0));
+    let mut hi_x = right.ceil().min(f64::from(pixmap.width()));
+    let mut hi_y = bottom.ceil().min(f64::from(pixmap.height()));
+    if let Some((c, _)) = clip {
+        lo_x = lo_x.max(f64::from(c.left).floor());
+        lo_y = lo_y.max(f64::from(c.top).floor());
+        hi_x = hi_x.min(f64::from(c.right).ceil());
+        hi_y = hi_y.min(f64::from(c.bottom).ceil());
+    }
+    if lo_x >= hi_x || lo_y >= hi_y {
+        return;
+    }
+    // All four are whole numbers within the pixmap here.
+    let columns = lo_x as usize..hi_x as usize;
+    let rows = lo_y as usize..hi_y as usize;
+    let device = super::image::resample(
+        [left, top, right, bottom],
+        (width as usize, height as usize),
+        pixels,
+        (columns.clone(), rows.clone()),
+    );
+    let width = pixmap.width() as usize;
+    let mask = clip.map(|(_, mask)| mask.data());
+    let data = pixmap.data_mut();
+    let channel = |v: f32| v.round().clamp(0.0, 255.0) as u32;
+    for (row, line) in rows.zip(device.chunks(columns.len())) {
+        for (column, &[r, g, b, a]) in columns.clone().zip(line) {
+            let at = row * width + column;
+            // The mask's coverage of the pixel, 255 without a clip.
+            let coverage = mask.map_or(255, |m| m.get(at).copied().map_or(0, u32::from));
+            let a = channel(a);
+            if a == 0 || coverage == 0 {
+                continue;
+            }
+            // A premultiplied channel never exceeds the alpha.
+            let mut source = [channel(r).min(a), channel(g).min(a), channel(b).min(a), a];
+            if coverage < 255 {
+                source = source.map(|v| div255(v * coverage));
+            }
+            let Some(target) = data.get_mut(at * 4..at * 4 + 4) else {
+                continue;
+            };
+            let keep = 255 - source[3];
+            for (to, from) in target.iter_mut().zip(source) {
+                // Source-over in premultiplied form: at most 255, so it fits a byte.
+                *to = (from + div255(u32::from(*to) * keep)) as u8;
+            }
         }
     }
 }

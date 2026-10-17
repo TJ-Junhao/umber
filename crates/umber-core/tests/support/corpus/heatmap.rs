@@ -1,11 +1,12 @@
 //! Output cases for heatmaps: an annotated correlation matrix centered at zero in each theme, a
-//! week of counts with an empty cell, counts on a log color scale, and their errors.
+//! week of counts with an empty cell, drawn as vector cells and as one image, counts on a log
+//! color scale, and their errors.
 
 use std::fmt::Write as _;
 
 use umber_core::{
     Cmap, CmapChoice, ColorbarOptions, ColorbarPosition, Figure, FontLibrary, HeatmapOptions,
-    LogBase, ScaleKind, Theme, TickFormat, Transform,
+    LogBase, Render, ScaleKind, Theme, TickFormat, Transform,
 };
 
 use super::super::{Output, axes, emit_scene, figure, record, themes};
@@ -63,6 +64,11 @@ fn correlations(theme: Theme) -> Figure {
 /// Visits by day and period with the theme's sequential colormap, one cell empty, and the
 /// colorbar below.
 fn week() -> Figure {
+    week_drawn(Render::Auto)
+}
+
+/// [`week`] with its cells drawn as `render` says.
+fn week_drawn(render: Render) -> Figure {
     let mut f = figure(4.8, 3.6, Theme::graphite(), categories(), categories());
     axes(&mut f)
         .title("Visits by day")
@@ -91,7 +97,10 @@ fn week() -> Figure {
                 18.0,
                 26.0,
             ],
-            HeatmapOptions::default(),
+            HeatmapOptions {
+                render,
+                ..HeatmapOptions::default()
+            },
         )
         .unwrap()
         .colorbar(ColorbarOptions {
@@ -160,6 +169,11 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     }
     emit_scene("heatmap-week", &week().to_scene(lib).unwrap(), sink);
     emit_scene("heatmap-log", &log_counts().to_scene(lib).unwrap(), sink);
+    emit_scene(
+        "heatmap-raster",
+        &week_drawn(Render::Raster).to_scene(lib).unwrap(),
+        sink,
+    );
 
     let mut out = String::new();
     let add = |x: &'static [&'static str],

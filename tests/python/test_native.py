@@ -47,6 +47,7 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
         "Align": [("LEFT", 0), ("CENTER", 1), ("RIGHT", 2)],
         "Step": [("POST", 0), ("PRE", 1), ("MID", 2)],
         "ColorbarPosition": [("RIGHT", 0), ("BOTTOM", 1), ("NONE", 2)],
+        "Render": [("VECTOR", 0), ("RASTER", 1)],
     }
 
 
@@ -65,6 +66,7 @@ def test_enum_members_keys_are_the_bound_enum_names() -> None:
         "Align",
         "Step",
         "ColorbarPosition",
+        "Render",
     }
 
 

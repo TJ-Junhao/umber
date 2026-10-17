@@ -390,6 +390,7 @@ class Figure:
         scale: int,
         base: float,
         center: float | None,
+        render: int | None,
     ) -> None: ...
     def hist2d(
         self,
@@ -401,6 +402,7 @@ class Figure:
         cmap: Cmap | None,
         scale: int,
         base: float,
+        render: int | None,
     ) -> None: ...
     def hexbin(
         self,
@@ -561,4 +563,5 @@ class Figure:
         center: float | None,
         annotate: bool,
         format: _TickFormatArg | None,
+        render: int | None,
     ) -> None: ...

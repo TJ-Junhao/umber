@@ -63,7 +63,9 @@
 //!   [`ViolinMark`], [`ViolinGroupMark`], [`DistributionView`], [`BandMark`], [`ErrorBarMark`],
 //!   [`HistMark`] and [`HeatmapMark`] that [`Axes::marks`] returns;
 //! - numeric cells: [`MeshOptions`], [`Hist2dOptions`] and [`HexbinOptions`], with the
-//!   read-only [`MeshMark`], [`Hist2dMark`] and [`HexbinMark`] payloads of [`Mark`];
+//!   read-only [`MeshMark`], [`Hist2dMark`] and [`HexbinMark`] payloads of [`Mark`], and
+//!   [`Render`], which draws the cells of heatmaps, 2-D histograms and meshes as vector shapes
+//!   or as one image;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
@@ -163,7 +165,9 @@ pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{CmapChoice, ColorBy, PointColor};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use figure::{HeatmapMark, HeatmapOptions};
-pub use figure::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
+pub use figure::{
+    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
+};
 pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{Font, Weight};

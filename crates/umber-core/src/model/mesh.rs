@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{Axes, AxisData, CmapChoice, ColorBy, Figure, Mark};
+use super::{Axes, AxisData, CmapChoice, ColorBy, Figure, Mark, Render};
 use crate::bin2d::RectBins;
 use crate::binning::BinCount;
 use crate::color_scale::ColorScaleSpec;
@@ -14,8 +14,9 @@ use crate::{Error, Instant, MAX_BINS, Result, ScaleKind, Transform};
 /// # Examples
 ///
 /// ```
-/// use umber_core::{MeshOptions, Transform};
+/// use umber_core::{MeshOptions, Render, Transform};
 /// assert_eq!(MeshOptions::default().scale, Transform::Linear);
+/// assert_eq!(MeshOptions::default().render, Render::Auto);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeshOptions {
@@ -25,6 +26,9 @@ pub struct MeshOptions {
     pub scale: Transform,
     /// The middle value of a symmetric, linear diverging mapping.
     pub center: Option<f64>,
+    /// Whether the cells are drawn as vector shapes or as one image (see [`Render`]); an
+    /// image needs edges evenly spaced on screen.
+    pub render: Render,
 }
 
 impl Default for MeshOptions {
@@ -33,6 +37,7 @@ impl Default for MeshOptions {
             cmap: CmapChoice::Theme,
             scale: Transform::Linear,
             center: None,
+            render: Render::Auto,
         }
     }
 }
@@ -42,8 +47,9 @@ impl Default for MeshOptions {
 /// # Examples
 ///
 /// ```
-/// use umber_core::Hist2dOptions;
+/// use umber_core::{Hist2dOptions, Render};
 /// assert_eq!(Hist2dOptions::default().bins, (30, 30));
+/// assert_eq!(Hist2dOptions::default().render, Render::Auto);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hist2dOptions {
@@ -53,6 +59,8 @@ pub struct Hist2dOptions {
     pub cmap: CmapChoice,
     /// Linear or log color normalization.
     pub scale: Transform,
+    /// Whether the bins are drawn as vector shapes or as one image (see [`Render`]).
+    pub render: Render,
 }
 
 impl Default for Hist2dOptions {
@@ -61,6 +69,7 @@ impl Default for Hist2dOptions {
             bins: (30, 30),
             cmap: CmapChoice::Theme,
             scale: Transform::Linear,
+            render: Render::Auto,
         }
     }
 }
@@ -176,6 +185,11 @@ pub struct MeshMark {
     pub(crate) x_edges: Edges,
     pub(crate) y_edges: Edges,
     pub(crate) colors: ColorBy,
+    /// How the cells are drawn, as given.
+    pub(crate) render: Render,
+    /// Whether the edges along both axes are evenly spaced on screen, so that the cells can be
+    /// drawn as one image.
+    pub(crate) evenly_spaced: bool,
 }
 
 impl MeshMark {
@@ -302,12 +316,148 @@ impl MeshMark {
             center: options.center,
         };
         check_mapping(context, figure, index, &colors)?;
+        let uneven = [("x", x_kind, &x), ("y", y_kind, &y)]
+            .into_iter()
+            .find_map(|(axis, kind, edges)| uneven_step(axis, kind, edges));
+        if let (Render::Raster, Some(step)) = (options.render, &uneven) {
+            return Err(Error::usage(
+                context,
+                format!(
+                    "{step}; drawing the cells as one image needs evenly spaced edges on the {} \
+                     axis.",
+                    step.axis
+                ),
+            )
+            .with_parameter("render")
+            .with_hint("use render=ub.Render.VECTOR, or evenly spaced edges."));
+        }
         Ok(Self {
             x_edges: x,
             y_edges: y,
             colors,
+            render: options.render,
+            evenly_spaced: uneven.is_none(),
         })
     }
+}
+
+/// The relative tolerance within which every step between neighbouring edges must equal the
+/// first step for the edges to count as evenly spaced.
+const EVEN_STEP_TOLERANCE: f64 = 1e-6;
+
+/// The first step between two neighbouring edges that differs from the first step of the same
+/// edges, as an error message describes it.
+#[derive(Debug, Clone, PartialEq)]
+struct UnevenStep {
+    /// The axis, `"x"` or `"y"`.
+    axis: &'static str,
+    /// The index of the step's first edge; the step ends at the next edge.
+    at: usize,
+    /// The step and the first step, written for the axis kind: differences of numbers, ratios
+    /// on a log axis, durations on a time axis.
+    sizes: (String, String),
+    /// The two edges of the step, written as in the data.
+    ends: (String, String),
+}
+
+impl std::fmt::Display for UnevenStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = format!("{}_edges", self.axis);
+        write!(
+            f,
+            "the step from {name}[{}] = {} to {name}[{}] = {} is {}, not {} as from {name}[0] \
+             to {name}[1]",
+            self.at,
+            self.ends.0,
+            self.at + 1,
+            self.ends.1,
+            self.sizes.0,
+            self.sizes.1,
+        )
+    }
+}
+
+/// The first step of `edges`, on the `axis` axis of kind `kind`, that is not the size of the
+/// first step on screen; `None` when the edges are evenly spaced. A step counts as equal to
+/// the first when the two differ by at most [`EVEN_STEP_TOLERANCE`] of the first, plus four
+/// units of rounding error of the largest of the edges involved (in axis space: numbers on a
+/// linear axis, their logarithms on a log axis, microseconds on a time axis).
+fn uneven_step(axis: &'static str, kind: EdgeAxis, edges: &Edges) -> Option<UnevenStep> {
+    let positions: Vec<f64> = match (kind, edges) {
+        (EdgeAxis::Numeric(Transform::Linear), Edges::Numbers(edges)) => edges.to_vec(),
+        (EdgeAxis::Numeric(Transform::Log(_)), Edges::Numbers(edges)) => {
+            edges.iter().map(|v| v.ln()).collect()
+        }
+        (EdgeAxis::Time, Edges::Times(edges)) => {
+            let first = edges.first()?.micros();
+            edges
+                .iter()
+                .map(|t| (t.micros() as f64) - (first as f64))
+                .collect()
+        }
+        // `check_edges` matches the edges to their axis.
+        _ => return None,
+    };
+    let step = |i: usize| positions[i + 1] - positions[i];
+    let first = step(0);
+    let at = (1..positions.len() - 1).find(|&i| {
+        let magnitude = [positions[0], positions[1], positions[i], positions[i + 1]]
+            .iter()
+            .fold(0.0_f64, |m, v| m.max(v.abs()));
+        (step(i) - first).abs() > EVEN_STEP_TOLERANCE * first + 4.0 * f64::EPSILON * magnitude
+    })?;
+    let (sizes, ends) = match (kind, edges) {
+        (EdgeAxis::Numeric(Transform::Log(_)), Edges::Numbers(edges)) => (
+            (
+                format!("a factor of {}", number(edges[at + 1] / edges[at])),
+                number(edges[1] / edges[0]).to_string(),
+            ),
+            (
+                number(edges[at]).to_string(),
+                number(edges[at + 1]).to_string(),
+            ),
+        ),
+        (EdgeAxis::Numeric(_), Edges::Numbers(edges)) => (
+            (
+                number(edges[at + 1] - edges[at]).to_string(),
+                number(edges[1] - edges[0]).to_string(),
+            ),
+            (
+                number(edges[at]).to_string(),
+                number(edges[at + 1]).to_string(),
+            ),
+        ),
+        (_, Edges::Times(edges)) => (
+            (
+                duration(edges[at + 1].micros() - edges[at].micros()),
+                duration(edges[1].micros() - edges[0].micros()),
+            ),
+            (edges[at].label(), edges[at + 1].label()),
+        ),
+        (EdgeAxis::Time, Edges::Numbers(_)) => return None,
+    };
+    Some(UnevenStep {
+        axis,
+        at,
+        sizes,
+        ends,
+    })
+}
+
+/// A positive duration of `micros` microseconds in the largest of days, hours, minutes,
+/// seconds and microseconds that measures it in whole units, such as `31 days` or `90 seconds`.
+fn duration(micros: i64) -> String {
+    const UNITS: [(i64, &str, &str); 4] = [
+        (86_400_000_000, "day", "days"),
+        (3_600_000_000, "hour", "hours"),
+        (60_000_000, "minute", "minutes"),
+        (1_000_000, "second", "seconds"),
+    ];
+    let (count, one, many) = UNITS.iter().find(|(unit, ..)| micros % unit == 0).map_or(
+        (micros, "microsecond", "microseconds"),
+        |&(unit, one, many)| (micros / unit, one, many),
+    );
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// The edges `given` along the axis `axis` of kind `kind`, whose argument is `name`: of the
@@ -458,6 +608,8 @@ fn check_edge_range(
 pub struct Hist2dMark {
     pub(crate) bins: Arc<RectBins>,
     pub(crate) colors: ColorScaleSpec,
+    /// How the bins are drawn, as given.
+    pub(crate) render: Render,
 }
 
 impl Hist2dMark {
@@ -485,6 +637,7 @@ impl Hist2dMark {
         Ok(Self {
             bins: Arc::new(RectBins::new(x, y, bins, transforms)),
             colors: ColorScaleSpec::of(&colors),
+            render: options.render,
         })
     }
 }

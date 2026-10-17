@@ -11,6 +11,7 @@
 //! assert_eq!(SvgText::default(), SvgText::Outlines);
 //! ```
 
+mod image;
 pub(crate) mod normalize;
 mod svg;
 

@@ -115,7 +115,7 @@ variant.axes_at(row=0, col=1).title("Comparison")  # 原图不变
 
 ## 颜色与 colorbar
 
-热力图、网格色块图、二维直方图和六边形分箱图按数值为每个格子着色；`color=ub.ColorBy(values)` 对散点图或气泡图的点做同样的事。同一个 axes 上所有按值着色的 mark 共用一个 color scale，plot 旁的 colorbar 说明这一映射。
+热力图、网格色块图、二维直方图和六边形分箱图按数值为每个格子着色；`color=ub.ColorBy(values)` 对散点图或气泡图的点做同样的事。同一个 axes 上所有按值着色的 mark 共用一个 color scale，plot 旁的 colorbar 说明这一映射。热力图、网格色块图和二维直方图从 10,000 个格子起把格子画成一张每格一个像素的图像，而不是每格一个形状，使大网格的文件更小、渲染更快；`render=ub.Render.VECTOR` 或 `render=ub.Render.RASTER` 可显式指定画法。
 
 ```python
 import numpy as np

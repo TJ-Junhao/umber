@@ -3,7 +3,8 @@
 //! Points and segments are counted once. Filled paths are measured in square points by
 //! horizontal scanlines at most one point apart, with the path's own winding rule. This also
 //! handles overlapping contours and areas that cross themselves, rather than cancelling their
-//! signed areas. Curves in rounded bar corners are flattened before scoring.
+//! signed areas. Curves in rounded bar corners are flattened before scoring. Images count the
+//! exact area of their pixels that are not transparent.
 
 use crate::layout::{Area, Frame};
 use crate::{FillRule, Item, Paint, Path, PathVerb, Point};
@@ -18,12 +19,60 @@ struct Filled {
     rule: FillRule,
 }
 
+/// The pixels of one image that are not transparent, each a rectangle of its share of the
+/// image's rectangle.
+#[derive(Debug, Clone, PartialEq)]
+struct Pixels {
+    /// The left, top, right and bottom edges of the image.
+    bounds: [f64; 4],
+    /// The number of pixel columns.
+    width: usize,
+    /// Whether each pixel, row by row from the top, is drawn (not transparent).
+    drawn: Vec<bool>,
+}
+
+impl Pixels {
+    /// The area of the drawn pixels inside `box_`, in square points.
+    fn overlap(&self, box_: &Frame) -> f64 {
+        let [left, top, right, bottom] = self.bounds;
+        let height = self.drawn.len() / self.width.max(1);
+        // The overlap of each column with the box along x, and of each row along y.
+        let lengths = |start: f64, end: f64, count: usize, lo: f64, hi: f64| -> Vec<f64> {
+            let size = (end - start) / count as f64;
+            (0..count)
+                .map(|i| {
+                    let (a, b) = (start + size * i as f64, start + size * (i + 1) as f64);
+                    (b.min(hi) - a.max(lo)).max(0.0)
+                })
+                .collect()
+        };
+        let columns = lengths(left, right, self.width, box_.x, box_.right());
+        let rows = lengths(top, bottom, height, box_.y, box_.bottom());
+        let mut area = 0.0;
+        for (row, &along_y) in rows.iter().enumerate() {
+            if along_y == 0.0 {
+                continue;
+            }
+            let drawn = &self.drawn[row * self.width..(row + 1) * self.width];
+            let along_x: f64 = columns
+                .iter()
+                .zip(drawn)
+                .filter(|&(_, &d)| d)
+                .map(|(&x, _)| x)
+                .sum();
+            area += along_x * along_y;
+        }
+        area
+    }
+}
+
 /// Geometry after axis mapping, clipping and downsampling, in drawing order within each kind.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Geometry {
     points: Vec<XY>,
     segments: Vec<[XY; 2]>,
     fills: Vec<Filled>,
+    images: Vec<Pixels>,
 }
 
 fn xy(p: Point) -> XY {
@@ -83,6 +132,21 @@ impl Geometry {
                     });
                 }
             }
+            Item::Image {
+                rect,
+                width,
+                height,
+                pixels,
+            } => {
+                if *width > 0 && pixels.len() == (*width as usize) * (*height as usize) {
+                    let (x, y) = (f64::from(rect.x), f64::from(rect.y));
+                    self.images.push(Pixels {
+                        bounds: [x, y, x + f64::from(rect.width), y + f64::from(rect.height)],
+                        width: *width as usize,
+                        drawn: pixels.iter().map(|c| c.a > 0).collect(),
+                    });
+                }
+            }
             Item::Text(_) => {}
         }
     }
@@ -108,9 +172,12 @@ impl Geometry {
             .iter()
             .filter(|s| crosses(**s, &bounds))
             .count() as f64;
-        self.fills.iter().fold(points + segments, |score, fill| {
+        let fills = self.fills.iter().fold(points + segments, |score, fill| {
             score + fill.overlap(&bounds)
-        })
+        });
+        self.images
+            .iter()
+            .fold(fills, |score, image| score + image.overlap(&bounds))
     }
 }
 
@@ -612,6 +679,7 @@ mod tests {
             points: vec![[50.0, 50.0], [10.0, 10.0]],
             segments: vec![[[0.0, 50.0], [100.0, 50.0]], [[0.0, 0.0], [10.0, 10.0]]],
             fills: Vec::new(),
+            images: Vec::new(),
         };
         assert_eq!(geometry.coverage(&area, &box_), 2.0);
     }

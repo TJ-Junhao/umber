@@ -38,7 +38,7 @@ pub use crate::model::{CmapChoice, ColorBy, PointColor};
 pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use crate::model::{HeatmapMark, HeatmapOptions};
 pub use crate::model::{
-    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions,
+    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
 };
 pub use crate::model::{StemMark, StemOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
@@ -66,6 +66,12 @@ impl Figure {
     /// A non-empty figure header follows as one unclipped group: the figure title,
     /// subtitle and merged legend. Without axes it holds the background and any figure
     /// title or subtitle. The same figure always gives the same scene.
+    ///
+    /// Heatmaps, 2-D histograms and meshes draw their cells, as their options'
+    /// [`Render`] says, either as one [`Item::Fill`](crate::Item::Fill) per
+    /// cell or as one [`Item::Image`](crate::Item::Image) with one pixel per cell, in the
+    /// mark's place among the marks; an image whose outer cells explicit limits cut is drawn
+    /// whole inside a group clipped to the limits.
     ///
     /// A 1 × 1 grid is laid out on the whole canvas. On a larger grid every axes' plot area
     /// has the same size and the axes line up: each grid column has room left of its plots

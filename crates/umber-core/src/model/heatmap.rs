@@ -8,6 +8,7 @@ use std::sync::Arc;
 use super::color_by::{CmapChoice, check_center, check_mapped_values};
 use super::figure::Figure;
 use super::mark::Mark;
+use super::render::Render;
 use crate::color_scale::ColorScaleSpec;
 use crate::{Error, NumberStyle, Result, ScaleKind, TickFormat, Transform};
 
@@ -19,12 +20,13 @@ const ROWS_HINT: &str = "pass one row per y category.";
 /// # Examples
 ///
 /// ```
-/// use umber_core::{CmapChoice, HeatmapOptions, Transform};
+/// use umber_core::{CmapChoice, HeatmapOptions, Render, Transform};
 ///
 /// let options = HeatmapOptions::default();
 /// assert_eq!((&options.cmap, options.scale, options.center), (&CmapChoice::Theme, Transform::Linear, None));
 /// assert!(!options.annotate);
 /// assert_eq!(options.format, None);
+/// assert_eq!(options.render, Render::Auto);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeatmapOptions {
@@ -40,6 +42,9 @@ pub struct HeatmapOptions {
     /// The format of the values shown on annotated cells; `None` for the y tick format. Only
     /// annotated heatmaps take one.
     pub format: Option<TickFormat>,
+    /// Whether the cells are drawn as vector shapes or as one image (see [`Render`]). The
+    /// values of annotated cells are text over the cells either way.
+    pub render: Render,
 }
 
 impl Default for HeatmapOptions {
@@ -50,6 +55,7 @@ impl Default for HeatmapOptions {
             center: None,
             annotate: false,
             format: None,
+            render: Render::Auto,
         }
     }
 }
@@ -240,7 +246,7 @@ impl HeatmapMark {
         &self.values
     }
 
-    /// The colormap, scale, center, annotation and format.
+    /// The colormap, scale, center, annotation, format and how the cells are drawn.
     ///
     /// # Examples
     ///

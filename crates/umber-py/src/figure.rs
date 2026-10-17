@@ -38,7 +38,7 @@ use umber_core::{
 };
 
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
-use crate::enums::enum_value;
+use crate::enums::{enum_value, render_choice};
 use crate::errors::{core_error, internal_value};
 use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
@@ -766,8 +766,9 @@ impl Figure {
             .map_err(core_error)
     }
 
-    /// Adds rectangular cells with flattened row-major color values.
-    #[pyo3(signature = (row, col, x_edges, y_edges, values, cmap, scale, base, center))]
+    /// Adds rectangular cells with flattened row-major color values; `render` is a `Render`
+    /// value, or `None` for `AUTO`.
+    #[pyo3(signature = (row, col, x_edges, y_edges, values, cmap, scale, base, center, render))]
     fn mesh(
         &mut self,
         row: i64,
@@ -779,6 +780,7 @@ impl Figure {
         scale: i64,
         base: f64,
         center: Option<f64>,
+        render: Option<i64>,
     ) -> PyResult<()> {
         const CONTEXT: &str = "Axes.mesh()";
         // Edges in an int64 buffer are times, of a time axis.
@@ -797,7 +799,7 @@ impl Figure {
                     cmap,
                     scale,
                     center,
-                    ..Default::default()
+                    render: render_choice(render)?,
                 },
             )
             .map(drop)
@@ -805,7 +807,7 @@ impl Figure {
     }
 
     /// Counts paired coordinates in rectangular bins.
-    #[pyo3(signature = (row, col, x, y, bins, cmap, scale, base))]
+    #[pyo3(signature = (row, col, x, y, bins, cmap, scale, base, render))]
     fn hist2d(
         &mut self,
         row: i64,
@@ -816,6 +818,7 @@ impl Figure {
         cmap: Option<PyRef<'_, Cmap>>,
         scale: i64,
         base: f64,
+        render: Option<i64>,
     ) -> PyResult<()> {
         let (x, y) = (floats(x)?, floats(y)?);
         let (cmap, scale) = cell_colors(cmap, scale, base)?;
@@ -827,7 +830,7 @@ impl Figure {
                     bins,
                     cmap,
                     scale,
-                    ..Default::default()
+                    render: render_choice(render)?,
                 },
             )
             .map(drop)
@@ -1140,8 +1143,9 @@ impl Figure {
     /// Adds a heatmap: `values` holds `len(y_categories) * len(x_categories)` numbers, row by
     /// row, one row per y category; the colormap (`None` for the theme's), the linear or log
     /// scale argument `(scale, base)`, the center and the format (`None` for the y tick format)
-    /// are converted as those of a `ColorBy` and of `colorbar`.
-    #[pyo3(signature = (row, col, x_categories, y_categories, values, cmap, scale, base, center, annotate, format))]
+    /// are converted as those of a `ColorBy` and of `colorbar`; `render` is a `Render` value,
+    /// or `None` for `AUTO`.
+    #[pyo3(signature = (row, col, x_categories, y_categories, values, cmap, scale, base, center, annotate, format, render))]
     fn heatmap(
         &mut self,
         row: i64,
@@ -1155,6 +1159,7 @@ impl Figure {
         center: Option<f64>,
         annotate: bool,
         format: Option<TickFormatArg>,
+        render: Option<i64>,
     ) -> PyResult<()> {
         let options = HeatmapOptions {
             cmap: cmap_choice(cmap),
@@ -1162,6 +1167,7 @@ impl Figure {
             center,
             annotate,
             format: format.map(tick_format).transpose()?,
+            render: render_choice(render)?,
         };
         let (x, y) = (names(x_categories)?, names(y_categories)?);
         self.axes(row, col)?

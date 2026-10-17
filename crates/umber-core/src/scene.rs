@@ -316,6 +316,28 @@ pub enum Item {
     },
     /// Shaped text.
     Text(TextItem),
+    /// A grid of colored pixels stretched over a rectangle, each pixel a solid rectangle of
+    /// its color: scaled with nearest-neighbour sampling, never smoothed. Heatmaps, 2-D
+    /// histograms and meshes draw their cells as one image, one pixel per cell (see
+    /// [`Render`](crate::Render)).
+    ///
+    /// The PNG backend gives each device pixel the average of the image pixels it covers,
+    /// weighted by the area it covers of each, so pixels meet without seams and pixels smaller
+    /// than a device pixel blend. The SVG backend writes an `<image>` holding the pixels as a
+    /// PNG, with `image-rendering="optimizeSpeed"` and, through one `<style>` rule per
+    /// document, `image-rendering: pixelated` for browsers. An image whose rectangle is not finite, not positive in size or beyond the
+    /// renderers' coordinate limit, or whose pixel count is not `width * height`, is skipped.
+    Image {
+        /// The rectangle the pixels cover, in points.
+        rect: Rect,
+        /// The number of pixel columns.
+        width: u32,
+        /// The number of pixel rows.
+        height: u32,
+        /// The pixels, row by row from the top, each row from the left: `width * height` of
+        /// them. A transparent pixel leaves what is under it visible.
+        pixels: Vec<Rgba>,
+    },
     /// Items drawn in order, optionally clipped to a rectangle.
     Group {
         /// The clip rectangle, if any.
@@ -398,7 +420,8 @@ impl Scene {
         self.items.push(item);
     }
 
-    /// Number of leaf items (fills, strokes, markers and text), counted through groups.
+    /// Number of leaf items (fills, strokes, markers, text and images), counted through
+    /// groups.
     ///
     /// # Examples
     ///

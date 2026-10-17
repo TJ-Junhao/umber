@@ -28,6 +28,9 @@ grid.heatmap(
     format=ub.TickFormat.fixed(2),
 )
 grid.heatmap(names, names, cells, cmap=ub.AUTO, center=0, format=ub.AUTO)
+grid.heatmap(names, names, cells, render=ub.Render.RASTER)
+grid.heatmap(names, names, cells, render=ub.Render.VECTOR)
+grid.heatmap(names, names, cells, render=ub.AUTO)
 assert_type(grid.heatmap(names, names, cells).colorbar("Value").clim(0, 4), ub.Axes[str, str])
 
 # Negative: any other axes, and wrong argument types.
@@ -40,5 +43,8 @@ grid.heatmap(names, names, cells, scale=ub.Scale.category())  # type: ignore[arg
 grid.heatmap(names, names, cells, center="0")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 grid.heatmap(names, names, cells, annotate=1)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 grid.heatmap(names, names, cells, format=None)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+grid.heatmap(names, names, cells, render="raster")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+grid.heatmap(names, names, cells, render=True)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+grid.heatmap(names, names, cells, render=None)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 grid.heatmap(names, names, cells, ub.Cmap.MAGMA)  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue]
 grid.heatmap(names, names)  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue]
