@@ -1,3 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# Heatmaps, 2-D histograms and meshes of at least 10,000 cells draw their cells as one image by default.
-fig-category-labels-heatmap-1000
+# Cases whose committed outputs change on purpose in this change; none.
