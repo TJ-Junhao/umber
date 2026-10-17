@@ -32,11 +32,7 @@ fn scene_of(figure: &Figure) -> Scene {
 /// The items of the marks group of `figure`; empty when nothing is visible.
 fn items(figure: &Figure) -> Vec<Item> {
     let scene = scene_of(figure);
-    // Without marks there is no marks group: chrome and baseline only.
-    if scene.items.len() == 2 {
-        return Vec::new();
-    }
-    flatten(mark_group(&scene).1)
+    flatten(super::mark_items(&scene))
 }
 
 /// `items` with the reference layers' own clipped groups opened up.

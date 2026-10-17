@@ -55,7 +55,8 @@ def type_name(value: object) -> str:
     """Return the name of a value's type for an error message; ``None`` is named ``None``.
 
     The name is read from the type itself, bypassing any ``__qualname__`` a metaclass defines,
-    so no user code runs. It is ``"object"`` if the name cannot be read.
+    so no user code runs. NumPy scalar names include ``numpy.`` to distinguish them from
+    built-in types. It is ``"object"`` if the name cannot be read.
 
     Args:
         value: Any object.
@@ -71,8 +72,15 @@ def type_name(value: object) -> str:
     if value is None:
         return "None"
     try:
-        name: object = _QUALNAME.__get__(type(value))
-        return str.__str__(name) if isinstance(name, str) else "object"
+        kind = type(value)
+        name: object = _QUALNAME.__get__(kind)
+        if not isinstance(name, str):
+            return "object"
+        name = str.__str__(name)
+        np = sys.modules.get("numpy")
+        if np is not None and any(kind is scalar for scalar in np.sctypeDict.values()):
+            return f"numpy.{name}"
+        return name
     except Exception:
         return "object"
 
@@ -364,7 +372,14 @@ def integer(
     return min(max(operator.index(cast(SupportsIndex, value)), _I64_MIN), _I64_MAX)
 
 
-def boolean(context: str, name: str, value: object) -> bool:
+def boolean(
+    context: str,
+    name: str,
+    value: object,
+    *,
+    expected: str = "a bool",
+    hint: str = _BOOLEAN_HINT,
+) -> bool:
     """Check a flag argument and return it.
 
     Only ``bool`` is accepted: an int such as ``1`` or a NumPy ``bool`` is a ``TypeError``, so a
@@ -374,6 +389,8 @@ def boolean(context: str, name: str, value: object) -> bool:
         context: The API call, such as ``"Axes.y_error_bars()"``.
         name: The parameter name.
         value: The value passed.
+        expected: The accepted types to name in an error, including any handled by the caller.
+        hint: The hint for a value of another type.
 
     Returns:
         The value, unchanged.
@@ -392,7 +409,7 @@ def boolean(context: str, name: str, value: object) -> bool:
         Axes.y_error_bars(): caps is int; caps must be a bool.
     """
     if not isinstance(value, bool):
-        raise _wrong_type(context, name, value, "a bool", _BOOLEAN_HINT)
+        raise _wrong_type(context, name, value, expected, hint)
     return value
 
 

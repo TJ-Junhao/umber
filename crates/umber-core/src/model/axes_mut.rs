@@ -33,6 +33,26 @@ use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat};
 
+/// Whether an axes draws its baseline, independently of any shared axis settings.
+/// This changes drawing only, not the baseline position or the marks that grow from it.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::BaselineVisibility;
+/// assert_eq!(BaselineVisibility::default(), BaselineVisibility::Auto);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BaselineVisibility {
+    /// Draws the baseline only for bars, histograms, areas and stems.
+    #[default]
+    Auto,
+    /// Draws the baseline, even without a mark that grows from zero.
+    Shown,
+    /// Hides the baseline, even when marks grow from zero.
+    Hidden,
+}
+
 /// The label and optional overrides of an axes' colorbar. Unset overrides follow the theme's
 /// position and the y axis tick format; a new call replaces every setting.
 ///
@@ -82,7 +102,7 @@ pub struct ColorbarOptions {
 /// Limits, explicit ticks and tick formats apply to the whole shared group. A member may
 /// replace its own setting, but a different value already set by another member is an
 /// `Error::Usage`. Setting the same value again is allowed. Members added later inherit the
-/// group's settings; text, legend and mark methods always apply to this axes alone.
+/// group's settings; text, baseline, legend and mark methods always apply to this axes alone.
 ///
 /// # Examples
 ///
@@ -489,6 +509,43 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
+    /// Sets whether these axes draw their baseline. Each call replaces the setting for these
+    /// axes alone; shared panels do not inherit it and cloned figures keep it.
+    /// [`BaselineVisibility::Auto`] restores drawing for bars, histograms, areas and stems.
+    /// The baseline position, limits, padding, bar bases, area fills and reference-line clipping
+    /// are unchanged. A hidden baseline leaves its coincident gridline visible.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage`, naming `shown`, for [`BaselineVisibility::Shown`] on two category axes:
+    /// they have no value axis. A failed call changes nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BaselineVisibility, Figure, ScaleKind, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.baseline(BaselineVisibility::Shown)?.baseline(BaselineVisibility::Auto)?;
+    /// assert_eq!(axes.baseline_visibility(), BaselineVisibility::Auto);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn baseline(&mut self, shown: BaselineVisibility) -> Result<&mut Self> {
+        if shown == BaselineVisibility::Shown
+            && self.x == ScaleKind::Category
+            && self.y == ScaleKind::Category
+        {
+            return Err(Error::usage(
+                "Axes.baseline()",
+                "these axes have two category axes and no value axis; a baseline cannot be shown.",
+            )
+            .with_parameter("shown")
+            .with_hint("use shown=False or shown=ub.AUTO, or create axes with a numeric or time value axis."));
+        }
+        self.axes_mut().baseline = shown;
+        Ok(self)
+    }
+
     /// Sets the legend style of these axes, overriding the theme's style.
     /// [`LegendStyle::None`] hides the legend. Calling it again replaces the style.
     /// A swatch shows a mark's fill as drawn: composited over the plot background, which
@@ -838,6 +895,8 @@ impl<'a> AxesMut<'a> {
     /// Adds a line from the baseline to each value and a scatter marker at the value. Same
     /// validation as [`AxesMut::scatter`]; NaN skips the point. Category x values sit at band
     /// centres. A linear y domain includes 0; a log y axis starts stems at its baseline.
+    /// The baseline is drawn at zero, or at the lower edge when zero is out of range, even
+    /// alongside other marks.
     /// Explicit limits clip stems and markers as they do other marks. Points are not reduced.
     ///
     /// The line width is [`Theme::stem_width`](crate::Theme::stem_width); `options.size` sets
@@ -897,8 +956,9 @@ impl<'a> AxesMut<'a> {
     /// [`FillStyle`](crate::FillStyle) paints it. The fill is drawn first and the line over it.
     /// Like bars, an area puts 0 into a linear y axis, so the filled region is proportional to
     /// the values; on a log y axis it fills down to the baseline, at the lowest y tick (or the
-    /// explicit lower limit). Same rules as [`AxesMut::line`]: NaN breaks both the line and the
-    /// fill.
+    /// explicit lower limit). The baseline is drawn at zero, or at the lower edge when zero is
+    /// out of range, even alongside other marks. Same rules as [`AxesMut::line`]: NaN breaks
+    /// both the line and the fill.
     ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
     /// [`AxisData`] without copying them, use [`AxesMut::area_shared`].
@@ -965,6 +1025,8 @@ impl<'a> AxesMut<'a> {
     /// curve. Every layer is filled flat at the area opacity, whatever the fill style, and
     /// its upper curve is drawn at the theme's line width. Its legend swatch and direct label
     /// follow that curve as an area's do. Linear y includes 0; log y starts at its lower limit.
+    /// The baseline is drawn at zero, or at the lower edge when zero is out of range, even
+    /// alongside other marks.
     /// Long inputs are reduced per device column, keeping every cumulative curve's envelope.
     ///
     /// A category x axis is a usage error. There must be at least one series, each as long as
@@ -1029,6 +1091,8 @@ impl<'a> AxesMut<'a> {
     /// On a category y axis beside a linear or log x axis the bars are horizontal: the same
     /// bars with the axes swapped. The categories run down the y axis, the first at the top,
     /// and the bars grow along x from the baseline, rightwards for positive heights.
+    /// The baseline is drawn at zero on the value axis, or at its lower edge when zero is out
+    /// of range, even alongside other marks.
     ///
     /// Errors leave the axes unchanged. Two category axes are `Error::Usage`, naming `x`. The
     /// others are `Error::Data`, checked in this order: `categories` and `heights` of different
@@ -1106,7 +1170,8 @@ impl<'a> AxesMut<'a> {
     /// Adds grouped bars: in each category, one bar per series, side by side in series order.
     /// The group takes 72 % of the category's band, centered in it, with a 2 pt gap between
     /// its bars; when the bars would be narrower than the gap, they touch. Each bar grows from
-    /// the baseline as in [`AxesMut::bar`]. Automatic colors share one palette slot per label
+    /// the baseline as in [`AxesMut::bar`], and the baseline is drawn even alongside other marks.
+    /// Automatic colors share one palette slot per label
     /// across the figure; unlabelled series take slots after all labels, per axes.
     /// Categories join the x axis in order of first appearance
     /// across all marks. On a category y axis the bars are horizontal, as in [`AxesMut::bar`],
@@ -1294,6 +1359,7 @@ impl<'a> AxesMut<'a> {
     /// segment starts at the baseline, at the lowest y tick (or the explicit lower limit).
     /// Colors and categories work as in [`AxesMut::grouped_bar`]. On a category y axis the
     /// stacks are horizontal, as in [`AxesMut::bar`]: positive values stack rightwards.
+    /// The baseline is drawn as in [`AxesMut::bar`], even alongside other marks.
     ///
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
     /// [`AxesMut::grouped_bar`], with one more check at the end: in each category, the positive
@@ -1351,6 +1417,8 @@ impl<'a> AxesMut<'a> {
     /// each bar gets a solid top edge. On a linear y axis the bars grow from 0; on a log y axis
     /// they grow from the baseline, at the lowest y tick (or the explicit lower limit). Auto
     /// limits put that tick below the smallest count, so every non-empty bin has a height.
+    /// The baseline is drawn at zero, or at the lower edge when zero is out of range, even
+    /// alongside other marks.
     ///
     /// Errors leave the axes unchanged. They are checked in this order: `Error::Style` for
     /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and
@@ -1924,6 +1992,8 @@ impl<'a> AxesMut<'a> {
 
     /// Adds row-major numeric cells spanning their strictly increasing edges.
     /// Automatic limits are the outer edges, without padding. NaN cells are empty.
+    /// By default a mesh alone draws no baseline; one is drawn only alongside a mark that
+    /// grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
     /// # Errors
     ///
@@ -1956,6 +2026,8 @@ impl<'a> AxesMut<'a> {
     /// `x_edges` and `y_edges` each hold numbers on a linear or log axis and times on a time
     /// axis. The edges are strictly increasing, a missing time is refused, and the automatic
     /// limits of a time axis are the outer edges exactly, as those of a numeric axis are.
+    /// By default a mesh alone draws no baseline; one is drawn only alongside a mark that
+    /// grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
     /// # Errors
     ///
@@ -1995,6 +2067,8 @@ impl<'a> AxesMut<'a> {
 
     /// Counts paired finite coordinates in equal-width bins over their data ranges.
     /// Empty bins are not drawn, including with a log color scale.
+    /// By default a 2-D histogram alone draws no baseline; one is drawn only alongside a mark
+    /// that grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
     /// # Errors
     ///
@@ -2023,6 +2097,8 @@ impl<'a> AxesMut<'a> {
     /// With a narrow explicit `xlim` and automatic y limits, hexagons keep their size;
     /// the y range may grow far beyond the data to keep every hexagon whole and regular.
     /// Set `ylim()` or choose a larger `gridsize` to control that range.
+    /// By default a hexbin mark alone draws no baseline; one is drawn only alongside a mark
+    /// that grows from zero, such as an area, histogram or stem. [`AxesMut::baseline`] overrides it.
     ///
     /// # Errors
     ///

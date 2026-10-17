@@ -1,6 +1,6 @@
 //! Box geometry, domain, clipping, degenerate groups and grouped-bar spacing.
 
-use super::{mark_group, plot_of, subpaths};
+use super::{plot_of, subpaths};
 use crate::draw::bar::group_slots;
 use crate::draw::fill::AREA_ALPHA;
 use crate::legend::{Legend, Swatch};
@@ -19,11 +19,7 @@ fn figure(theme: Theme, y: ScaleKind) -> Figure {
 fn items(f: &Figure) -> Vec<Item> {
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
-    if scene.items.len() == 2 {
-        Vec::new()
-    } else {
-        mark_group(&scene).1.to_vec()
-    }
+    super::mark_items(&scene).to_vec()
 }
 
 #[track_caller]

@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 import umber as ub
+from baseline_check import assert_only_baseline_added
 from umber import _umber
 from umber._errors import details
 
@@ -62,13 +63,15 @@ def test_category_names_can_repeat_and_numeric_x_need_not_be_sorted() -> None:
 
 
 @pytest.mark.parametrize("category", [False, True])
-def test_empty_stems_do_not_change_the_figure(category: bool) -> None:
+def test_empty_stems_only_add_a_baseline(category: bool) -> None:
     fig = ub.Figure()
     ax = fig.add_axes(x=ub.Scale.category()) if category else fig.add_axes()
     before = ax.figure.to_svg()
     ax.stem([], [])
+    after = ax.figure.to_svg()
+    assert_only_baseline_added(before, after)
     ax.stem(np.array([]), np.array([]))
-    assert ax.figure.to_svg() == before
+    assert ax.figure.to_svg() == after
 
 
 def test_styling_gaps_and_empty_contributions() -> None:
@@ -81,11 +84,11 @@ def test_styling_gaps_and_empty_contributions() -> None:
     ax = axes().line([1.1, 2.3], [10, 12])
     before = ax.figure.to_svg()
     ax.stem([np.nan], [np.nan])
-    assert ax.figure.to_svg() == before
+    assert_only_baseline_added(before, ax.figure.to_svg())
     ax = axes().yticks([10, 12])
     before = ax.figure.to_svg()
     ax.stem([], [])
-    assert ax.figure.to_svg() == before
+    assert_only_baseline_added(before, ax.figure.to_svg())
 
 
 @pytest.mark.parametrize("style", list(ub.LegendStyle))

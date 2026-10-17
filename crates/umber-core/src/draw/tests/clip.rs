@@ -61,7 +61,7 @@ fn narrow_limits_stay_bounded_on_every_axis_combination() {
                 }
                 let scene = f.to_scene(FontLibrary::global()).unwrap();
                 assert_scene_bounded(&scene);
-                if scene.items.len() == 3 {
+                if !super::mark_items(&scene).is_empty() {
                     visible += 1;
                 }
             }
@@ -135,17 +135,14 @@ fn check_against_oracle(figure: &Figure, a: AxisPoint, b: AxisPoint) -> Option<f
     assert_scene_bounded(&scene);
     let (maps, bounds) = axis_clip(figure);
     let want = oracle::exact_plot(a, b, &bounds, maps);
-    let got: Vec<Vec<Point>> = match scene.items.as_slice() {
-        [_, Item::Group { items, .. }, _] => items
-            .iter()
-            .filter_map(|item| match item {
-                Item::Stroke { path, .. } => Some(subpaths(path)),
-                _ => None,
-            })
-            .flatten()
-            .collect(),
-        _ => Vec::new(),
-    };
+    let got: Vec<Vec<Point>> = super::mark_items(&scene)
+        .iter()
+        .filter_map(|item| match item {
+            Item::Stroke { path, .. } => Some(subpaths(path)),
+            _ => None,
+        })
+        .flatten()
+        .collect();
     match (want, got.as_slice()) {
         (None, []) => None,
         // A rounding-level corner touch of the expanded box: a single point, outside the

@@ -144,6 +144,8 @@ def test_positions_reject_wrong_types(method: str, name: str, value: object) -> 
     with pytest.raises(TypeError) as caught:
         getattr(fig, method)(**{name: value})
     shown = "None" if value is None else type(value).__name__
+    if isinstance(value, np.generic):
+        shown = f"numpy.{shown}"
     assert str(caught.value) == (
         f"Figure.{method}(): {name} is {shown}; {name} must be an int or AUTO."
     )

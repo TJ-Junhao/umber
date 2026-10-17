@@ -79,6 +79,8 @@ fig.save_svg("temperature.svg")
 
 柱状图、箱线图和小提琴图需要一条类别轴。在类别 x 轴（`fig.add_axes(x=ub.Scale.category())`）上它们是竖直的；在类别 y 轴（`fig.add_axes(y=ub.Scale.category())`）上它们是水平的，以数值对类别画散点即为点图（dot plot）。热力图要求两条轴都是类别轴。类别轴的自动刻度标签从第 0 个类别起，使用 1、2、5、10、20、50、…… 中能让相邻刻度标签保持与数值轴相同最小间距的最小步长；共享轴显示相同的刻度标签。第 0 个类别始终显示刻度标签，因此首个刻度标签宽于可用空间时，仍会报刻度标签放不下的错误。对数轴用 `ub.Scale.log()`，时间轴用 `ub.Scale.time()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
 
+柱状图、直方图、面积图和杆状图在零点绘制 baseline（零点不在范围内时绘制在下界）；其他图表不绘制 baseline。每个 axes 可用 `ax.baseline(shown=True)` 或 `ax.baseline(shown=False)` 覆盖此规则；`ax.baseline(shown=ub.AUTO)` 恢复默认规则。
+
 自动 limits 包含完整的 bubble marker 及其 outline；显式 limits 会裁切它们。Legend swatch 显示 mark 实际绘制的 fill，即与 plot background 合成后的颜色。
 
 <p>

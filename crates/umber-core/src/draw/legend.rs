@@ -757,8 +757,8 @@ mod tests {
             )
             .unwrap();
         let scene = f.to_scene(FontLibrary::global()).unwrap();
-        let [_, _, Item::Group { items, .. }, _] = scene.items.as_slice() else {
-            panic!("chrome, marks, legend and baseline groups");
+        let [_, _, Item::Group { items, .. }] = scene.items.as_slice() else {
+            panic!("chrome, marks and legend groups");
         };
         let Item::Fill { path, .. } = &items[0] else {
             panic!("the chip comes first");

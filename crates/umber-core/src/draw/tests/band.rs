@@ -3,7 +3,7 @@
 
 use super::super::fill::AREA_ALPHA;
 use super::super::line::downsample_columns;
-use super::{mark_group, nums, plot_of, subpaths};
+use super::{nums, plot_of, subpaths};
 use crate::geometry::PathVerb;
 use crate::model::{BandOptions, Figure, LineOptions};
 use crate::scene::{FillRule, Item, Paint};
@@ -26,10 +26,7 @@ fn band_figure(theme: Theme, y: ScaleKind, (x, low, high): (&[f64], &[f64], &[f6
 fn items(figure: &Figure) -> Vec<Item> {
     let scene = figure.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
-    match scene.items.as_slice() {
-        [_, _] => Vec::new(),
-        _ => mark_group(&scene).1.to_vec(),
-    }
+    super::mark_items(&scene).to_vec()
 }
 
 /// The polygons of the one fill of `figure`'s marks, as lists of `(x, y)`, each checked to be
