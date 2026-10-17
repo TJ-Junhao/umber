@@ -1,5 +1,5 @@
 # Coverage is measured in .github/workflows/coverage.yml and uploaded as two flags:
-#   rust    line coverage of crates/umber-core/src, from the unit and integration tests, the Python
+#   rust    line coverage of crates/umber-core/src and crates/umber-py/src, from the unit and integration tests, the Python
 #           test suite running against an instrumented extension, and the refactor_outputs example.
 #           Inline #[cfg(test)] items are removed before upload by scripts/coverage/filter_rust_lcov.py.
 #   python  line and branch coverage of python/umber.
@@ -26,13 +26,14 @@ flags:
   rust:
     paths:
       - crates/umber-core/src/
+      - crates/umber-py/src/
   python:
     paths:
       - python/umber/
 
 # Not production code, or not exercised by this workflow.
 ignore:
-  - "crates/umber-py/**"
+  - "crates/umber-py/src/test_support.rs"
   - "crates/umber-core/src/test_support/**"
   - "crates/umber-core/src/**/*_tests.rs"
   - "crates/umber-core/src/**/tests.rs"

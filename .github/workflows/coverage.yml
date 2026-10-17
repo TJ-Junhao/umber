@@ -7,7 +7,10 @@ on:
       - "crates/**"
       - "python/**"
       - "tests/**"
+      - "examples/**"
+      - "conftest.py"
       - "Cargo.*"
+      - "rust-toolchain.toml"
       - "pyproject.toml"
       - "uv.lock"
       - ".coveragerc"
@@ -19,7 +22,10 @@ on:
       - "crates/**"
       - "python/**"
       - "tests/**"
+      - "examples/**"
+      - "conftest.py"
       - "Cargo.*"
+      - "rust-toolchain.toml"
       - "pyproject.toml"
       - "uv.lock"
       - ".coveragerc"
@@ -35,8 +41,11 @@ permissions:
   contents: read
 
 env:
-  # Test code and the Python extension crate are not measured; see codecov.yml.
-  RUST_IGNORE: '/crates/umber-py/|/(tests|examples|benches)/|/test_support/|(_tests|/tests)\.rs$'
+  # Test code is not measured; see codecov.yml. Inline #[cfg(test)] items are removed afterwards.
+  RUST_IGNORE: '/(tests|examples|benches)/|/test_support(/|\.rs$)|(_tests|/tests)\.rs$'
+  # Every step builds and writes profiles in this one directory, so the final report sees them all.
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
+  CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
   MIN_LINE_COVERAGE: "90"
 
 jobs:
@@ -83,9 +92,12 @@ jobs:
 
       - name: Write the Rust report
         run: |
-          cargo llvm-cov report --lcov --output-path rust-raw.lcov --ignore-filename-regex "$RUST_IGNORE"
+          cargo llvm-cov report -v --lcov --output-path rust-raw.lcov --ignore-filename-regex "$RUST_IGNORE"
           uv run --no-project --with tree-sitter==0.25.2 --with tree-sitter-rust==0.24.2 \
             scripts/coverage/filter_rust_lcov.py "$GITHUB_WORKSPACE" rust-raw.lcov rust.lcov
+
+      - name: Test the report filter
+        run: uv run --no-project --with tree-sitter==0.25.2 --with tree-sitter-rust==0.24.2 scripts/coverage/test_filter_rust_lcov.py
 
       - name: Upload the Rust report
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -104,6 +116,7 @@ jobs:
           flags: python
           fail_ci_if_error: true
 
-      # The same bar as the Codecov project status, so the gate holds if the service is unavailable.
+      # The same bar and the same metric as the Codecov project status (a line with missed branches
+      # is a partial, not a hit), so the gate holds if the service is unavailable.
       - name: Require the combined line coverage
-        run: scripts/coverage/check_gate.sh "$MIN_LINE_COVERAGE" rust.lcov python.lcov
+        run: python3 scripts/coverage/check_gate.py "$MIN_LINE_COVERAGE" rust.lcov python.lcov
