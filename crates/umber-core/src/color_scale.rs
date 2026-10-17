@@ -365,7 +365,7 @@ impl Norm {
     }
 
     /// The range, low end first.
-    fn range(&self) -> (f64, f64) {
+    pub(crate) fn range(&self) -> (f64, f64) {
         match *self {
             Norm::Linear { low, high } | Norm::Log { low, high, .. } => (low, high),
             Norm::Centered { center, radius } => (center - radius, center + radius),

@@ -20,7 +20,8 @@ use std::fmt::Write as _;
 
 use umber_core::figure::{BarOptions, LineOptions, ScatterOptions};
 use umber_core::{
-    AxesMut, ExplicitTicks, Figure, FontLibrary, GridIndex, NumberStyle, ScaleKind, TickFormat,
+    AxesMut, ColorBy, ColorbarOptions, ExplicitTicks, Figure, FontLibrary, GridIndex, NumberStyle,
+    PointColor, ScaleKind, TickFormat,
 };
 
 use super::super::{
@@ -37,6 +38,54 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         file: "ticks.txt".into(),
         bytes: tick_errors().into_bytes(),
     });
+    sink(Output {
+        kind: "errors",
+        file: "unshowable-tick-format.txt".into(),
+        bytes: unshowable_tick_formats(lib).into_bytes(),
+    });
+}
+
+/// Fixed-decimal formats that cannot label a value in the automatic tick domain.
+fn unshowable_tick_formats(lib: &FontLibrary) -> String {
+    let mut rec = Log::default();
+    for axis in ["x", "y", "colorbar"] {
+        for (name, format) in [
+            ("fixed(0)", TickFormat::fixed(0).unwrap()),
+            ("fixed(1)", TickFormat::fixed(1).unwrap()),
+            ("percent(0)", TickFormat::percent(0).unwrap()),
+        ] {
+            let mut f = figure(6.0, 4.0, umber_core::Theme::pigment(), linear(), linear());
+            let mut a = axes(&mut f);
+            match axis {
+                "x" => {
+                    a.xlim(0.005, 0.009).unwrap().xtick_format(format).unwrap();
+                }
+                "y" => {
+                    a.ylim(0.005, 0.009).unwrap().ytick_format(format).unwrap();
+                }
+                _ => {
+                    a.scatter(
+                        numbers(vec![1.0, 2.0]),
+                        &[1.0, 2.0],
+                        ScatterOptions {
+                            color: PointColor::By(ColorBy::new(vec![0.005, 0.009])),
+                            ..ScatterOptions::default()
+                        },
+                    )
+                    .unwrap()
+                    .colorbar(ColorbarOptions {
+                        format: Some(format),
+                        ..ColorbarOptions::default()
+                    })
+                    .unwrap();
+                }
+            }
+            rec.result(&format!("{axis} {name}"), f.to_scene(lib), |_| {
+                "rendered".into()
+            });
+        }
+    }
+    rec.out
 }
 
 fn strings(labels: &[&str]) -> Vec<String> {

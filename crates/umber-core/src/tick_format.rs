@@ -143,6 +143,10 @@ impl TickFormat {
 
     /// Fixed-point labels with `decimals` places: `fixed(2)` writes 2.5 as `2.50`.
     ///
+    /// Automatic linear axes and colorbars use whole steps this format can show exactly.
+    /// If their domain contains no such value, rendering returns [`Error::Style`]; use more
+    /// decimals or set axis ticks explicitly. Explicit ticks and log axes are unaffected.
+    ///
     /// # Errors
     ///
     /// `Error::Style` (context `"TickFormat.fixed()"`, parameter `decimals`) unless `decimals`
@@ -168,6 +172,11 @@ impl TickFormat {
 
     /// Percent labels: the value times 100 with `decimals` places, then `%`. `percent(0)`
     /// writes 0.25 as `25%`, `percent(1)` writes 0.125 as `12.5%`.
+    ///
+    /// Automatic linear axes and colorbars use whole steps this format can show exactly
+    /// after multiplying by 100. If their domain contains no such value, rendering returns
+    /// [`Error::Style`]; use more decimals or set axis ticks explicitly. Explicit ticks and
+    /// log axes are unaffected.
     ///
     /// # Errors
     ///
@@ -338,6 +347,60 @@ impl TickFormat {
             _ => return 0.0,
         };
         10f64.powi(-(places as i32))
+    }
+
+    /// Refuses an empty automatic linear tick set caused by fixed decimal precision. Called
+    /// for the final axis or visible colorbar, never for explicit ticks or other scale kinds.
+    pub(crate) fn check_automatic_ticks(
+        &self,
+        ticks: &[crate::resolve::AxisTick],
+        domain: (f64, f64),
+        axis: &str,
+        context: &'static str,
+    ) -> Result<()> {
+        if !ticks.is_empty() {
+            return Ok(());
+        }
+        let (name, decimals, hint) = match (self.style, axis == "colorbar") {
+            (NumberStyle::Fixed(d), false) => (
+                "fixed",
+                d.get(),
+                "use more decimals with TickFormat.fixed(), or set the ticks explicitly.",
+            ),
+            (NumberStyle::Fixed(d), true) => (
+                "fixed",
+                d.get(),
+                "use more decimals with TickFormat.fixed().",
+            ),
+            (NumberStyle::Percent(d), false) => (
+                "percent",
+                d.get(),
+                "use more decimals with TickFormat.percent(), or set the ticks explicitly.",
+            ),
+            (NumberStyle::Percent(d), true) => (
+                "percent",
+                d.get(),
+                "use more decimals with TickFormat.percent().",
+            ),
+            _ => return Ok(()),
+        };
+        let mut format = format!("{name}({decimals})");
+        if !self.prefix.is_empty() || !self.suffix.is_empty() {
+            format.push_str(&format!(
+                ".affix({}, {})",
+                crate::error::quoted(&self.prefix),
+                crate::error::quoted(&self.suffix),
+            ));
+        }
+        Err(Error::style(
+            context,
+            format!(
+                "the {axis} tick format {format} cannot label any value between {} and {}.",
+                crate::error::number(domain.0),
+                crate::error::number(domain.1),
+            ),
+        )
+        .with_hint(hint))
     }
 
     /// `ticks` labelled in this format. [`NumberStyle::Auto`] keeps the labels the ticks carry,

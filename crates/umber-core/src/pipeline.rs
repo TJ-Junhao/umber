@@ -285,6 +285,19 @@ fn color_side(side: layout::ColorbarSide) -> Side {
     }
 }
 
+/// The visible colorbar's format, including its inherited y tick format.
+fn color_tick_format<'a>(figure: &'a Figure, panel: &'a Panel<'_>) -> &'a crate::TickFormat {
+    let options = if figure.grid().share_color() == crate::Share::None {
+        panel.axes.colorbar_options()
+    } else {
+        figure.colorbar_options()
+    };
+    options
+        .format
+        .as_ref()
+        .unwrap_or(panel.axes.y_tick_format())
+}
+
 /// Relabels and spaces a visible colorbar without changing its norm or colormap.
 fn choose_color_ticks(
     figure: &Figure,
@@ -292,17 +305,8 @@ fn choose_color_ticks(
     resolved: &mut Resolved,
     room: &layout::TickRoom<'_>,
 ) {
-    let options = if figure.grid().share_color() == crate::Share::None {
-        panel.axes.colorbar_options()
-    } else {
-        figure.colorbar_options()
-    };
     if let Some(color) = &resolved.color {
-        let format = options
-            .format
-            .as_ref()
-            .unwrap_or(panel.axes.y_tick_format());
-        resolved.color = Some(color.with_ticks(room, format));
+        resolved.color = Some(color.with_ticks(room, color_tick_format(figure, panel)));
     }
 }
 
@@ -948,6 +952,32 @@ fn plan(
         }
         if !changed {
             break;
+        }
+    }
+
+    // Check only final domains: shared data, cells and bubble fitting can widen them, and
+    // provisional layouts may deliberately omit automatic x ticks.
+    for (i, r) in resolved.iter().enumerate() {
+        for (side, axis, name) in [(Side::X, &r.x, "x"), (Side::Y, &r.y, "y")] {
+            if let resolve::AxisLimits::Continuous(limits) = limits[i].axis(side.axis())
+                && limits.transform == crate::Transform::Linear
+                && limits.ticks.explicit().is_none()
+                && let Some(scale) = axis.continuous()
+            {
+                limits
+                    .ticks
+                    .format()
+                    .check_automatic_ticks(&axis.ticks, scale.domain(), name, context)
+                    .map_err(|error| in_cell(figure, panels[i].axes, error))?;
+            }
+        }
+        if color_sides[i].is_some()
+            && let Some(color) = &r.color
+            && !matches!(color.norm, crate::color_scale::Norm::Log { .. })
+        {
+            color_tick_format(figure, &panels[i])
+                .check_automatic_ticks(&color.ticks, color.norm.range(), "colorbar", context)
+                .map_err(|error| in_cell(figure, panels[i].axes, error))?;
         }
     }
 
