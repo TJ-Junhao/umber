@@ -389,11 +389,9 @@ fn a_grid_of_small_panels_renders_with_fitted_or_data_limits() {
 }
 
 #[test]
-fn refitted_limits_are_rounded_and_padded_once() {
-    // On this short plot the first fit, rounded and padded, leaves a bubble past an edge, so the
-    // fit is made again. Made from the raw extent, it is rounded to -15 to 15 and padded once,
-    // by 5 % of that span on each side; refitting the padded domain instead widened it to -25 to
-    // 25 before padding it again.
+fn refitted_limits_are_padded_once() {
+    // On this short plot the fit starts from the raw extent and is padded once, rather than
+    // rounding to ticks or repeatedly widening an already padded domain.
     let mut f = Figure::new(3.951, 2.231, Theme::pigment()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
@@ -418,12 +416,12 @@ fn refitted_limits_are_rounded_and_padded_once() {
     let (r, _) = plan_figure(&f, (0, 0), FontLibrary::global());
     let (lo, hi) = r.y.continuous_scale().domain();
     assert!(
-        (lo + 16.5).abs() < 1e-9 && (hi - 16.5).abs() < 1e-9,
+        (lo + 7.651_399_814_281_006).abs() < 1e-9 && (hi - 11.513_767_384_600_04).abs() < 1e-9,
         "{:?}",
         (lo, hi)
     );
     let ticks: Vec<_> = r.y.ticks.iter().map(|tick| tick.label.as_str()).collect();
-    assert_eq!(ticks.first().zip(ticks.last()), Some((&"−15", &"15")));
+    assert_eq!(ticks.first().zip(ticks.last()), Some((&"0", &"10")));
 }
 
 /// The microseconds in a day.

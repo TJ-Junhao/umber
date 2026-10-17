@@ -227,6 +227,11 @@ impl<'a> AxesMut<'a> {
     /// log axis), and the range is wide enough: on a linear axis at least
     /// `max(1e-10 * max(|low|, |high|), 1e-290)`, on a log axis a factor of `1 + 1e-9`.
     ///
+    /// Automatic linear limits follow the data with 5 % padding on each side, keeping an
+    /// end at zero for bars, histograms, areas and stems. Ticks are round values inside those
+    /// limits. Lines keep their exact x extent, cells keep their edges, bubbles fit whole
+    /// markers, and single values expand to a usable range. Explicit limits are used as given.
+    ///
     /// # Examples
     ///
     /// ```
@@ -293,9 +298,11 @@ impl<'a> AxesMut<'a> {
     /// an empty list leaves the x axis without ticks and gridlines. Calling any x tick setter
     /// again replaces the ticks, and drops labels set with [`AxesMut::xticks_labeled`].
     ///
-    /// Without explicit x limits, the x domain covers both the data and the ticks, with no
-    /// rounding to round values, and is then padded as auto limits are; the lowest tick is not
-    /// moved below the data. With explicit limits, ticks outside them are not drawn.
+    /// Automatic linear ticks are round values inside the domain, at whole multiples of a
+    /// 1, 2, 2.5 or 5 times a power of ten step. Automatic limits follow the data with 5 %
+    /// padding, keeping zero for bars, histograms, areas and stems (see [`AxesMut::xlim`]).
+    /// Without explicit x limits, the x domain covers both the data and the given ticks,
+    /// then applies that padding. With explicit limits, ticks outside them are not drawn.
     ///
     /// # Errors
     ///
@@ -747,7 +754,7 @@ impl<'a> AxesMut<'a> {
     /// largest reference circle remains, with an automatic label for its size, without the y
     /// format or its affixes. An all-zero or empty scale has only label entries.
     /// Automatic limits fit each whole marker and its outline at the final plot size, along
-    /// each axis by the marker shape's own extent, before tick rounding and padding, in log
+    /// each axis by the marker shape's own extent, before padding and log-axis rounding, in log
     /// space on log axes. Shared axes fit all their panels' bubbles. When the bubbles cannot
     /// all fit on an automatic axis (a marker, outline included, at least as long as the plot
     /// along it, limits beyond the supported numeric range, or limits that do not settle in

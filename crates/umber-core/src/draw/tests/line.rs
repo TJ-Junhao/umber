@@ -151,6 +151,16 @@ fn downsampling_kicks_in_above_threshold() {
         &ys[..m].iter().map(|y| y.max(0.0)).collect::<Vec<_>>(),
         LineOptions::default(),
     );
+    let mut f = f;
+    f.single_axes_mut().ylim(-1.0, 2.0).unwrap();
+    let m = m.min(4 * downsample_columns(plot_of(&f).width));
+    let mut f = line_figure(
+        Theme::graphite(),
+        &xs[..m],
+        &ys[..m].iter().map(|y| y.max(0.0)).collect::<Vec<_>>(),
+        LineOptions::default(),
+    );
+    f.single_axes_mut().ylim(-1.0, 2.0).unwrap();
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     let points: usize = subpaths(line_strokes(&scene)[0].0)
         .iter()

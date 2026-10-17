@@ -6,29 +6,24 @@
 //! value axis, which the marks' values are measured on (y unless only the y axis is a category
 //! axis), and the positions axis beside it.
 //!
-//! Auto limits: a continuous axis widens its data extent to nice limits, whose ticks are the
-//! tick set that produced them, then pads that nice domain by 5 % of its span on each side (in
-//! log space on a log axis), so marks never sit on the plot edge and the outermost ticks sit
-//! just inside it. The ticks are not changed by the padding. The exception is an x positions
-//! axis whose marks are all lines, which keeps the exact data extent. Explicit limits replace
-//! the auto range as given and are never padded. Areas count as lines here, since each is drawn
-//! along its line. A linear axis that holds bars, a histogram or an area along it always
-//! includes 0, and a side of its nice domain that ends at 0 is not padded, so bars start on the
-//! plot edge. A category axis lists the marks' categories in order of first appearance.
-//! Bubbles also contribute their whole markers and outlines, not only their centers: the final
-//! layout widens the data extent of each shared automatic axis to fit them on the solved plot
-//! (see [`crate::bubble_fit`]), and this rounding and padding then apply once, to the widened
-//! extent. When they cannot all fit, the extent stays that of the data positions, and the plot
-//! clips the bubbles. Explicit limits and scatter are unchanged.
-//! The baseline lies on the value axis ([`Baseline`]): at 0 when 0 lies inside a linear
-//! domain, and otherwise at the axis's lower limit before padding. Auto limits of the value
-//! axis keep that lower limit strictly below the data: when the smallest value lands on (or
-//! within 5 % of the span above) the lowest nice tick, the limit moves down one tick step.
-//! Explicit ticks replace the automatic ones. Without explicit limits the domain then encloses
-//! the data and the ticks as they are, with no rounding to nice limits and no lowering of the
-//! lowest tick, and is padded as auto limits are; with explicit limits the ticks outside them
-//! are dropped. The axis's tick format labels every tick except those given with their own
-//! labels.
+//! Automatic linear limits follow the data extent, adding 5 % of its span on each side.
+//! Round ticks are chosen inside that domain, independently of the limits. An x positions
+//! axis of lines keeps their exact extent; areas count as lines along their positions axis.
+//! Cells keep exact cell extents, combined with the padded extents of other marks. A linear
+//! value axis holding bars, histograms, areas or stems includes 0 and keeps a zero end fixed.
+//! Single values expand to a usable range without further padding. Explicit limits replace
+//! the automatic range as given. Category axes list categories in order of first appearance.
+//! Log axes enclose data in powers, move a value-axis lower power below data starting on it,
+//! then add 5 % of the log span on each side, retaining those ticks.
+//! Bubbles contribute their whole markers and outlines, not only their centers: the final
+//! layout widens each shared automatic extent to fit them on the solved plot
+//! (see [`crate::bubble_fit`]), before padding (and rounding on log axes). When they cannot
+//! all fit, the extent stays that of the data positions, and the plot clips the bubbles.
+//! The baseline lies on the value axis ([`Baseline`]): at 0 when 0 is inside a linear domain,
+//! and otherwise at the axis's lower limit before padding.
+//! Explicit ticks replace automatic ones. Without explicit limits the domain encloses both
+//! data and ticks, then applies the same padding. With explicit limits, ticks outside them
+//! are dropped. The tick format labels every tick except those with their own labels.
 //! Tick positions are normalized to `[0, 1]` along the axis, so layout and drawing never touch
 //! data values again.
 //!
@@ -184,9 +179,8 @@ pub(crate) struct Baseline {
     /// The axis the baseline sits on: the value axis.
     pub axis: ValueAxis,
     /// Where the baseline sits along that axis, in `[0, 1]`: at 0 when 0 is inside the domain
-    /// of a linear axis, otherwise at the axis's lower limit before padding (the lowest nice
-    /// tick for auto limits, the explicit low limit, which is the plot edge, for explicit
-    /// ones), and at the low end of a category axis.
+    /// of a linear axis, otherwise at its lower edge. Log axes retain their lower limit
+    /// before padding; category axes use their low end.
     pub pos: NormalizedPos,
 }
 
@@ -367,21 +361,16 @@ pub(crate) fn coincides(a: NormalizedPos, b: NormalizedPos) -> bool {
     (a.0 - b.0).abs() <= 1e-9
 }
 
-/// How a continuous axis without explicit limits fits its data. With explicit ticks there is
-/// no rounding to nice limits and no moving of the lowest tick: the nice variants only say how
-/// the domain is padded (see [`enclosing`]).
+/// How a continuous axis without explicit limits fits its data. Explicit ticks extend the
+/// data extent before padding (see [`enclosing`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AutoLimits {
     /// The limits are the data extent.
     Exact,
-    /// The data extent is widened to nice limits, which carry a tick at both ends, and the nice
-    /// domain is then padded on the given sides (see [`ContinuousScale::padded`]); the ticks
-    /// stay as they are.
-    Nice(Padding),
-    /// As [`Nice`](Self::Nice), with the lowest tick moved strictly below the data before the
-    /// padding when the data starts on it (see [`ContinuousScale::below_data`]): the value
-    /// axis, whose baseline sits at the lower limit when 0 is not in the domain.
-    NiceBelowData(Padding),
+    /// The data extent plus 5 % on the given sides. Log axes first enclose it in powers.
+    Padded(Padding),
+    /// A log value axis also moves its lowest power below data starting on that power.
+    LogBelowData(Padding),
 }
 
 /// What a linear or log axis fixes before any data is seen: its transform, its explicit limits,
@@ -491,7 +480,7 @@ impl<'a> Limits<'a> {
 }
 
 /// The extent of the values along `which` of a group's `marks`, on an axis of `transform`,
-/// before rounding and padding: the data, and 0 when a mark grows from the baseline along it on
+/// before padding (and log-axis rounding): the data, and 0 when a mark grows from the baseline along it on
 /// a linear axis (see [`axis_data`]).
 pub(crate) fn axis_extent<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
@@ -501,7 +490,7 @@ pub(crate) fn axis_extent<'a, 'm: 'a>(
     axis_data(marks, which, transform).0
 }
 
-/// The extent along `which` of a group's `marks` and how its nice domain is padded. Bars and
+/// The extent along `which` of a group's `marks` and how its domain is padded. Bars and
 /// areas grow from 0 on a linear axis ([`ResolvedMark::grows_along`]), so the extent includes 0
 /// and the padding keeps it on the plot edge when it is a limit; on a log axis they grow from
 /// the baseline. With no data at all, explicit ticks still use the baseline convention of the
@@ -523,8 +512,8 @@ fn axis_data<'a, 'm: 'a>(
     }
 }
 
-/// The extent that a continuous axis without explicit limits encloses before rounding and
-/// padding: the `data` extent, and with explicit ticks their positions too, as [`continuous`]
+/// The extent that a continuous axis without explicit limits encloses before padding (and log-axis
+/// rounding): the `data` extent, and with explicit ticks their positions too, as [`continuous`]
 /// encloses them.
 pub(crate) fn unrounded_extent(
     limits: &ContinuousLimits<'_>,
@@ -579,8 +568,8 @@ struct ContinuousAxis {
     scale: ContinuousScale,
     /// The ticks, in increasing position.
     ticks: Vec<AxisTick>,
-    /// The lower limit before padding: the nice lower limit of a padded axis, the domain's own
-    /// lower limit otherwise.
+    /// The lower limit before padding: the data minimum on linear axes, the enclosing power
+    /// on log axes, or the domain's own lower limit on exact axes.
     unpadded_low: f64,
 }
 
@@ -589,8 +578,8 @@ struct ContinuousAxis {
 /// The domain is the scale of the explicit limits when set. Otherwise, with automatic ticks, it
 /// is the empty-data range (0 to 1, or 1 to 10 on log) when there is no finite data, else the
 /// data extent fitted as `auto` says; with explicit ticks it is [`enclosing`] the data and the
-/// ticks. Nice axes take the ticks that produced their limits, other automatic axes take
-/// `ticks()`, and explicit ticks are the ones inside the domain ([`explicit_ticks`]). The tick
+/// ticks. Linear axes choose ticks inside the final domain; log axes retain their enclosing
+/// powers. Explicit ticks are the ones inside the domain ([`explicit_ticks`]). The tick
 /// format then labels every tick except those given with labels of their own. Automatic ticks
 /// keep their labels apart along the axis as `room` asks ([`DrawnTicks`]).
 fn continuous(
@@ -639,14 +628,11 @@ fn continuous(
     }
 }
 
-/// The domain, the domain before padding and the automatic ticks of a continuous axis: the
-/// scale of the explicit limits when set; otherwise the empty-data range (0 to 1, or 1 to 10 on
-/// log) when there is no finite data; otherwise the data extent, fitted as `auto` says. Nice
-/// axes take the ticks that produced their limits ([`ContinuousScale::fitted`]); the others
-/// take `ticks()`. Only a nice axis pads its domain, after its ticks are chosen; an extent that
-/// counts as a single value is padded by [`ContinuousScale::from_extent`] alone. The ticks are
-/// those `judge` lets through on the final domain, with the automatic labels, and carry the
-/// step they were written for.
+/// The final domain, its unpadded extent and automatic ticks. Explicit limits and empty-data
+/// ranges stay as given. Linear axes pad the data before choosing round ticks inside it;
+/// log axes retain enclosing powers and their existing padding. Single-value expansions
+/// from [`ContinuousScale::from_extent`] are not padded again. `judge` checks labels on the
+/// final domain, and ticks carry the step their labels were written for.
 fn automatic(
     transform: Transform,
     limits: Option<ContinuousScale>,
@@ -666,17 +652,26 @@ fn automatic(
             .unwrap_or_else(|_| ContinuousScale::unit(transform));
         match auto {
             AutoLimits::Exact => (scale, scale, scale.auto_ticks(target, judge)),
-            AutoLimits::Nice(padding) | AutoLimits::NiceBelowData(padding) => {
-                let below_data = match (auto, data) {
-                    (AutoLimits::NiceBelowData(_), Some((data_low, _))) => Some(data_low),
-                    _ => None,
-                };
+            AutoLimits::Padded(padding) | AutoLimits::LogBelowData(padding) => {
                 let single = data.is_some_and(|(lo, hi)| is_single_value(transform, lo, hi));
-                let finish = Finish {
-                    below_data,
-                    padding: (!single).then_some(padding),
-                };
-                scale.fitted(target, finish, judge)
+                let padding = (!single).then_some(padding);
+                if transform == Transform::Linear {
+                    let padded = padding.map_or(scale, |padding| scale.padded(padding));
+                    (padded, scale, padded.auto_ticks(target, judge))
+                } else {
+                    let log_data_low = match (auto, data) {
+                        (AutoLimits::LogBelowData(_), Some((data_low, _))) => Some(data_low),
+                        _ => None,
+                    };
+                    scale.fitted(
+                        target,
+                        Finish {
+                            log_data_low,
+                            padding,
+                        },
+                        judge,
+                    )
+                }
             }
         }
     }
@@ -692,6 +687,10 @@ struct DrawnTicks<'a> {
 }
 
 impl TickJudge for DrawnTicks<'_> {
+    fn quantum(&self) -> f64 {
+        self.format.quantum()
+    }
+
     fn deferred(&self) -> bool {
         self.room.deferred()
     }
@@ -708,8 +707,8 @@ impl TickJudge for DrawnTicks<'_> {
 
 /// The domain and the domain before padding of a continuous axis with explicit ticks and no
 /// explicit limits: the extent of the `data` and the tick positions together, as it is (no
-/// rounding to nice limits, and the lowest tick is never moved below the data), then padded
-/// as `auto` pads a nice domain. A linear axis padded with [`Padding::KeepZero`] holds bars,
+/// rounding to powers even on log axes), then padded
+/// as `auto` says. A linear axis padded with [`Padding::KeepZero`] holds bars,
 /// a histogram or an area, so its extent includes 0 even when the marks have no finite value.
 /// An exact axis is not padded, and an extent that counts as a single value is padded by
 /// [`ContinuousScale::from_extent`] alone. Without data and without ticks it is the empty-data
@@ -726,7 +725,7 @@ fn enclosing(
     };
     let keeps_zero = matches!(
         auto,
-        AutoLimits::Nice(Padding::KeepZero) | AutoLimits::NiceBelowData(Padding::KeepZero)
+        AutoLimits::Padded(Padding::KeepZero) | AutoLimits::LogBelowData(Padding::KeepZero)
     );
     let (lo, hi) = if keeps_zero && transform == Transform::Linear {
         (lo.min(0.0), hi.max(0.0))
@@ -737,12 +736,12 @@ fn enclosing(
         .unwrap_or_else(|_| ContinuousScale::unit(transform));
     let padded = match auto {
         AutoLimits::Exact => scale,
-        AutoLimits::Nice(_) | AutoLimits::NiceBelowData(_)
+        AutoLimits::Padded(_) | AutoLimits::LogBelowData(_)
             if is_single_value(transform, lo, hi) =>
         {
             scale
         }
-        AutoLimits::Nice(padding) | AutoLimits::NiceBelowData(padding) => scale.padded(padding),
+        AutoLimits::Padded(padding) | AutoLimits::LogBelowData(padding) => scale.padded(padding),
     };
     (padded, scale)
 }
@@ -801,12 +800,17 @@ fn holds_zero(scale: &ContinuousScale) -> bool {
     scale.transform() == Transform::Linear && lo <= 0.0 && 0.0 <= hi
 }
 
-/// Where the baseline sits on the continuous axis `scale`, whose lower limit
-/// before padding is `unpadded_low`: at 0 when 0 lies inside the domain of a linear axis,
-/// otherwise at `unpadded_low`. A position that does not map (impossible for a validated
-/// scale) falls back to the low end.
+/// Where the baseline sits on `scale`: at zero on a linear axis that holds it, otherwise
+/// at its lower edge. Log axes retain their lower limit before padding, `unpadded_low`.
+/// A position that does not map falls back to the low end.
 fn baseline(scale: &ContinuousScale, unpadded_low: f64) -> NormalizedPos {
-    let value = if holds_zero(scale) { 0.0 } else { unpadded_low };
+    let value = if holds_zero(scale) {
+        0.0
+    } else if scale.transform() == Transform::Linear {
+        scale.domain().0
+    } else {
+        unpadded_low
+    };
     let pos = scale.normalize(value);
     if pos.is_finite() {
         NormalizedPos::new(pos)
@@ -984,8 +988,8 @@ pub(crate) fn resolve(
 /// extent that fits the group's bubbles, if the final layout widened the data extent to it.
 ///
 /// A category axis lists the categories of the marks along it in order of first appearance. A
-/// continuous axis fits the values of the marks along it. On the value axis its lowest nice
-/// tick moves strictly below the data ([`AutoLimits::NiceBelowData`]). On the other axis, the
+/// continuous axis fits the values of the marks along it, with 5 % padding on linear axes.
+/// Only a log value axis moves its lowest power below data starting on it. On the other axis, the
 /// positions axis, reference lines and spans do not decide the padding: an axis of lines and
 /// references keeps the exact extent of the lines, while an axis of references alone is padded.
 /// Only references that give the axis values pad it; a reference along the other axis leaves it
@@ -1044,7 +1048,11 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
         }
         AutoLimits::Exact
     } else if role == AxisRole::Value {
-        AutoLimits::NiceBelowData(padding)
+        if transform == Transform::Linear {
+            AutoLimits::Padded(padding)
+        } else {
+            AutoLimits::LogBelowData(padding)
+        }
     } else {
         let contributing = || {
             marks
@@ -1059,7 +1067,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
         if all_lines {
             AutoLimits::Exact
         } else {
-            AutoLimits::Nice(padding)
+            AutoLimits::Padded(padding)
         }
     };
     let ContinuousAxis {
@@ -3775,6 +3783,13 @@ fn resolve_panel_marks<'a>(
 }
 
 #[cfg(test)]
+mod data_limits_tests;
+#[cfg(test)]
+mod horizontal_tests;
+#[cfg(test)]
+mod nice_ticks_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{
@@ -3842,7 +3857,7 @@ mod tests {
 
     const LIN: ScaleKind = ScaleKind::Linear;
 
-    /// The nice domain `lo..hi` padded by 5 % of its span on each side.
+    /// The data domain `lo..hi` padded by 5 % of its span on each side.
     fn pad(lo: f64, hi: f64) -> (f64, f64) {
         let p = 0.05 * (hi - lo);
         (lo - p, hi + p)
@@ -3890,22 +3905,22 @@ mod tests {
             .unwrap();
         let ((x0, x1), (y0, y1)) = domains(&f);
         assert_eq!((x0, x1), (0.3, 9.7));
-        // y is still widened to nice limits.
+        // The y data extent is padded.
         assert!(y0 <= 0.5 && y1 >= 3.3);
         assert_ne!((y0, y1), (0.5, 3.3));
 
-        // Adding a scatter turns the exception off: x gets the nice limits 0..10, padded.
+        // Adding a scatter turns the exception off: x gets its data extent padded.
         axes(&mut f)
             .scatter(nums(&[0.3]), &[1.0], ScatterOptions::default())
             .unwrap();
         let ((x0, x1), _) = domains(&f);
-        assert!(close((x0, x1), pad(0.0, 10.0)), "{x0} {x1}");
+        assert!(close((x0, x1), pad(0.3, 9.7)), "{x0} {x1}");
         let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.x.ticks), ["0.0", "2.5", "5.0", "7.5", "10.0"]);
     }
 
     #[test]
-    fn scatter_uses_nice_limits() {
+    fn scatter_uses_padded_data_limits() {
         let mut f = figure(LIN, LIN);
         axes(&mut f)
             .scatter(
@@ -3914,18 +3929,19 @@ mod tests {
                 ScatterOptions::default(),
             )
             .unwrap();
-        // The nice limits 10..90 and 0..40, padded by 5 % of their span.
+        // Both axes pad their data extents; whole-step ticks stay inside.
         let ((x0, x1), (y0, y1)) = domains(&f);
-        assert!(close((x0, x1), pad(10.0, 90.0)), "{x0} {x1}");
-        assert!(close((y0, y1), pad(0.0, 40.0)), "{y0} {y1}");
-        // The ticks are the set that produced the nice limits, so the outermost ones sit at the
-        // nice limits, just inside the padded domain: x is 10, 30, ..., 90, not 25, 50, 75.
+        assert!(close((x0, x1), pad(12.0, 88.0)), "{x0} {x1}");
+        assert!(close((y0, y1), pad(3.2, 36.5)), "{y0} {y1}");
         let r = resolve_axes(f.single_axes(), 5, 4);
-        for ticks in [&r.x.ticks, &r.y.ticks] {
-            assert_end_ticks_inset(ticks);
-        }
-        assert_eq!(labels(&r.x.ticks), ["10", "30", "50", "70", "90"]);
-        assert_eq!(labels(&r.y.ticks), ["0", "10", "20", "30", "40"]);
+        assert!(
+            r.x.ticks
+                .iter()
+                .chain(&r.y.ticks)
+                .all(|t| (0.0..=1.0).contains(&t.pos.get()))
+        );
+        assert_eq!(labels(&r.x.ticks), ["20", "40", "60", "80"]);
+        assert_eq!(labels(&r.y.ticks), ["10", "20", "30"]);
 
         // The same on a log axis.
         let log = ScaleKind::Log { base: LogBase::TEN };
@@ -4301,7 +4317,7 @@ mod tests {
     }
 
     #[test]
-    fn lowest_tick_lies_strictly_below_the_data() {
+    fn only_log_limits_move_below_the_lowest_power() {
         let log = ScaleKind::Log { base: LogBase::TEN };
         let line_axes = |y_scale, ys: &[f64]| {
             let mut f = figure(LIN, y_scale);
@@ -4316,19 +4332,21 @@ mod tests {
             assert_eq!(r.baseline.pos, r.y.ticks[0].pos);
             r.y.ticks[0].label.clone()
         };
-        // A minimum on a nice tick: the limit moves one tick step down, linear and log.
-        assert_eq!(lowest(&line_axes(LIN, &[20.0, 35.0, 40.0])), "15");
+        // Linear limits pad the data, without moving the tick grid or the extent.
+        for low in [20.0, 20.9, 21.0, 22.0] {
+            assert!(close(
+                y_domain(&line_axes(LIN, &[low, 35.0, 40.0])),
+                pad(low, 40.0)
+            ));
+        }
+        // A log minimum on a power moves down one exponent gap.
         assert_eq!(lowest(&line_axes(log, &[1.0, 40.0])), "0.1");
         assert_eq!(lowest(&line_axes(log, &[10.0, 40.0])), "1");
-        // A minimum within 5 % of the span above the lowest tick counts as on it: 20.9 on
-        // 20..40, and on log 1.2 on 1..100 (a factor of 100^0.05, about 1.26).
-        assert_eq!(lowest(&line_axes(LIN, &[20.9, 35.0, 40.0])), "15");
+        // A log minimum within 5 % of the log span also moves down.
         assert_eq!(lowest(&line_axes(log, &[1.2, 40.0])), "0.1");
         // A minimum further above the lowest tick: unchanged.
-        assert_eq!(lowest(&line_axes(LIN, &[21.0, 35.0, 40.0])), "20");
-        assert_eq!(lowest(&line_axes(LIN, &[22.0, 35.0, 40.0])), "20");
         assert_eq!(lowest(&line_axes(log, &[2.0, 40.0])), "1");
-        // A linear domain that holds 0 keeps 0 as its limit: the baseline is at 0 already.
+        // A linear domain that holds 0 is not lowered by a step, but is still padded.
         let f = line_axes(LIN, &[0.0, 30.0]);
         assert!(close(y_domain(&f), pad(0.0, 30.0)), "{:?}", y_domain(&f));
         let f = bar_figure(LIN, &[0.0, 40.0]);
@@ -4345,15 +4363,15 @@ mod tests {
         // Log bars: the smallest height counts.
         let f = bar_figure(log, &[10.0, 1000.0]);
         assert_eq!(lowest(&f), "1");
-        // The x axis is not affected: x from 35 to 65 keeps its lowest tick at 35.
+        // Both axes choose whole steps of 10 inside 33.5..66.5.
         let (_, ys) = sinusoid();
         let mut f = figure(LIN, LIN);
         axes(&mut f)
             .scatter(nums(&ys), &ys, ScatterOptions::default())
             .unwrap();
         let r = resolve_axes(f.single_axes(), 4, 4);
-        assert_eq!(labels(&r.x.ticks)[0], "35");
-        assert_eq!(labels(&r.y.ticks)[0], "25");
+        assert_eq!(labels(&r.x.ticks)[0], "40");
+        assert_eq!(labels(&r.y.ticks)[0], "40");
     }
 
     #[test]
@@ -4396,9 +4414,8 @@ mod tests {
     }
 
     #[test]
-    fn lowering_works_at_extreme_linear_magnitudes() {
-        // Spans far above or below the tick search's usual range still move their limit below
-        // the data, positive and negative.
+    fn padding_works_at_extreme_linear_magnitudes() {
+        // Extreme positive and negative spans use the same data-relative padding.
         for (low, high) in [
             (1e250, 2e250),
             (1e-250, 2e-250),
@@ -4411,12 +4428,11 @@ mod tests {
                 .unwrap();
             let r = resolve_axes(f.single_axes(), 5, 4);
             let data_low = r.y.continuous_scale().normalize(low);
-            assert!(
-                r.baseline.pos.get() < data_low,
-                "{low:e}..{high:e}: {:?}",
-                r.y.ticks
-            );
-            assert_eq!(r.baseline.pos, r.y.ticks[0].pos);
+            assert!(data_low > 0.0, "{low:e}..{high:e}: {:?}", r.y.ticks);
+            let domain = r.y.continuous_scale().domain();
+            let expected = pad(low, high);
+            assert!((domain.0 / expected.0 - 1.0).abs() < 1e-12);
+            assert!((domain.1 / expected.1 - 1.0).abs() < 1e-12);
             let values: Vec<&str> = labels(&r.y.ticks);
             let unique: std::collections::HashSet<&&str> = values.iter().collect();
             assert_eq!(unique.len(), values.len(), "{values:?}");
@@ -4424,7 +4440,7 @@ mod tests {
     }
 
     #[test]
-    fn baseline_sits_at_zero_or_the_nice_lower_limit() {
+    fn baseline_sits_at_zero_or_the_lower_limit() {
         // Auto limits that hold 0: the baseline is at 0, wherever 0 is.
         let mut f = figure(LIN, LIN);
         axes(&mut f)
@@ -4434,8 +4450,7 @@ mod tests {
         let scale = r.y.continuous_scale();
         assert_eq!(r.baseline.pos.get(), scale.normalize(0.0));
         assert!(r.baseline.pos.get() > r.y.ticks[0].pos.get());
-        // Auto limits away from 0, above or below it: the baseline is at the lowest tick, the
-        // nice lower limit, not at the padded plot bottom.
+        // Away from 0, the baseline is at the padded edge, below the data minimum.
         let (xs, ys) = sinusoid();
         for ys in [ys.clone(), ys.iter().map(|y| -y).collect()] {
             let mut f = figure(LIN, LIN);
@@ -4444,14 +4459,9 @@ mod tests {
                 .unwrap();
             let r = resolve_axes(f.single_axes(), 5, 4);
             let lowest = &r.y.ticks[0];
-            assert_eq!(r.baseline.pos, lowest.pos);
-            assert!(
-                (r.baseline.pos.get() - 0.05 / 1.1).abs() < 1e-9,
-                "{:?}",
-                r.baseline.pos
-            );
-            // The extreme lands on a nice tick, so the limit moves one step below it.
-            let expected = if ys[0] > 0.0 { "25" } else { "\u{2212}75" };
+            assert_eq!(r.baseline.pos.get(), 0.0);
+            // Whole-step ticks lie inside the positive and negative domains.
+            let expected = if ys[0] > 0.0 { "40" } else { "\u{2212}60" };
             assert_eq!(lowest.label, expected);
         }
         // Log auto limits: the lowest power of the base, 10 here.
@@ -4464,7 +4474,7 @@ mod tests {
         assert_eq!(r.y.ticks[0].label, "10");
         assert_eq!(r.baseline.pos, r.y.ticks[0].pos);
         assert!(r.baseline.pos.get() > 0.0);
-        // A single value is not padded, so its nice lower limit is the plot bottom.
+        // A single value is not padded, so its expanded lower limit is the plot bottom.
         let mut f = figure(LIN, LIN);
         axes(&mut f)
             .scatter(nums(&[1.0]), &[20.0], ScatterOptions::default())
@@ -4482,7 +4492,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_limits_pad_the_nice_domain_and_keep_its_ticks() {
+    fn auto_limits_pad_the_data_and_choose_ticks_inside() {
         let (xs, ys) = sinusoid();
         let (lo, hi) = extent(ys.iter().copied()).unwrap();
         assert_eq!((lo, hi), (35.0, 65.0));
@@ -4491,14 +4501,16 @@ mod tests {
             .line(nums(&xs), &ys, LineOptions::default())
             .unwrap();
         let ((x0, x1), (y0, y1)) = domains(&f);
-        // 35..65 is already nice, and the minimum lands on its lowest tick, so the lower limit
-        // moves down one step to 25. The domain 25..65 then grows by 2 on each side, so the
-        // line's minimum and maximum no longer sit on the plot edge, and the ticks stay 25..65.
-        assert_ne!((y0, y1), (25.0, 65.0));
-        assert!(close((y0, y1), (23.0, 67.0)), "{y0} {y1}");
+        // The 35..65 data gets 5 % padding; ticks do not move the limits.
+        assert_ne!((y0, y1), (30.0, 70.0));
+        assert!(close((y0, y1), (33.5, 66.5)), "{y0} {y1}");
         let r = resolve_axes(f.single_axes(), 5, 4);
-        assert_eq!(labels(&r.y.ticks), ["25", "35", "45", "55", "65"]);
-        assert_end_ticks_inset(&r.y.ticks);
+        assert_eq!(labels(&r.y.ticks), ["40", "50", "60"]);
+        assert!(
+            r.y.ticks
+                .iter()
+                .all(|tick| (0.0..=1.0).contains(&tick.pos.get()))
+        );
         // The x axis of an all-line axes keeps the exact extent, unpadded.
         assert_eq!((x0, x1), (0.0, 12.0));
         assert_eq!(r.x.ticks.first().map(|t| t.pos.get()), Some(0.0));
@@ -4585,9 +4597,8 @@ mod tests {
         axes(&mut f)
             .scatter(nums(&[20.0]), &[20.0], ScatterOptions::default())
             .unwrap();
-        let single = ContinuousScale::from_extent(Transform::Linear, Some((20.0, 20.0)), "t")
-            .unwrap()
-            .nice(5);
+        let single =
+            ContinuousScale::from_extent(Transform::Linear, Some((20.0, 20.0)), "t").unwrap();
         let ((x0, x1), _) = domains(&f);
         assert_eq!((x0, x1), single.domain());
         // An extent narrower than the minimum width counts as a single value, unpadded.
@@ -4600,9 +4611,7 @@ mod tests {
                 ScatterOptions::default(),
             )
             .unwrap();
-        let expected = ContinuousScale::from_extent(Transform::Linear, Some(narrow), "t")
-            .unwrap()
-            .nice(5);
+        let expected = ContinuousScale::from_extent(Transform::Linear, Some(narrow), "t").unwrap();
         let ((x0, x1), _) = domains(&f);
         assert_eq!((x0, x1), expected.domain());
         // Empty data still falls back to the unit range.
@@ -4633,25 +4642,29 @@ mod tests {
 
     #[test]
     fn bar_y_extent_includes_zero() {
-        // Positive bars: the nice limits 0..40, padded above only, so the bars start on the
+        // Positive bars: the data extent 0..36.5, padded above only, so the bars start on the
         // bottom edge, where the baseline and the first tick sit.
         let f = bar_figure(LIN, &[12.0, 36.5]);
         let r = resolve_axes(f.single_axes(), 5, 4);
-        assert_eq!(y_domain(&f), (0.0, 42.0));
-        assert_eq!(labels(&r.y.ticks), ["0", "10", "20", "30", "40"]);
+        assert_eq!(y_domain(&f), (0.0, 38.325));
+        assert_eq!(labels(&r.y.ticks), ["0", "10", "20", "30"]);
         assert_eq!(r.y.ticks[0].pos.get(), 0.0);
         assert_eq!(r.baseline.pos.get(), 0.0);
 
         // Negative bars: the mirror image, padded below only.
         let f = bar_figure(LIN, &[-12.0, -36.5]);
         let r = resolve_axes(f.single_axes(), 5, 4);
-        assert_eq!(y_domain(&f), (-42.0, 0.0));
+        assert_eq!(y_domain(&f), (-38.325, 0.0));
         assert_eq!(r.baseline.pos.get(), 1.0);
 
         // Bars on both sides of 0: both sides padded as usual.
         let f = bar_figure(LIN, &[-12.0, 36.5]);
         let r = resolve_axes(f.single_axes(), 5, 4);
-        assert_end_ticks_inset(&r.y.ticks);
+        assert!(
+            r.y.ticks
+                .iter()
+                .all(|tick| (0.0..=1.0).contains(&tick.pos.get()))
+        );
         assert!(labels(&r.y.ticks).contains(&"0"));
 
         // A line below 0 on the same axes moves the lower limit off 0, so it is padded.
@@ -4664,9 +4677,13 @@ mod tests {
             )
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);
-        assert_end_ticks_inset(&r.y.ticks);
+        assert!(
+            r.y.ticks
+                .iter()
+                .all(|tick| (0.0..=1.0).contains(&tick.pos.get()))
+        );
 
-        // Without bars, data away from 0 keeps its own nice limits.
+        // Without bars, data away from 0 gets its own padded extent.
         let mut f = figure(ScaleKind::Category, LIN);
         axes(&mut f)
             .line(
@@ -4790,13 +4807,13 @@ mod tests {
                 vec![auto(&[12.0, f64::NAN]), auto(&[36.5, 3.0])],
             )
             .unwrap();
-        assert_eq!(y_domain(&f), (0.0, 42.0));
+        assert_eq!(y_domain(&f), (0.0, 38.325));
         // The heights of every series count, not only the first's.
         let mut f = figure(ScaleKind::Category, LIN);
         axes(&mut f)
             .grouped_bar(names(&["a"]), vec![auto(&[-12.0]), auto(&[-36.5])])
             .unwrap();
-        assert_eq!(y_domain(&f), (-42.0, 0.0));
+        assert_eq!(y_domain(&f), (-38.325, 0.0));
     }
 
     #[test]
@@ -4834,20 +4851,19 @@ mod tests {
             )
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);
-        assert_eq!(y_domain(&f), (0.0, 42.0));
+        assert_eq!(y_domain(&f), (0.0, 38.325));
         assert_eq!(r.baseline.pos.get(), 0.0);
         // All negative: mirrored.
         let mut f = figure(ScaleKind::Category, LIN);
         axes(&mut f)
             .stacked_bar(names(&["a"]), vec![auto(&[-12.0]), auto(&[-24.5])])
             .unwrap();
-        assert_eq!(y_domain(&f), (-42.0, 0.0));
+        assert_eq!(y_domain(&f), (-38.325, 0.0));
     }
 
     #[test]
     fn mixed_sign_stacks_are_padded_on_both_sides() {
-        // Stacks reach 30 + 6 = 36 above 0 and -(12 + 7) = -19 below it: the nice limits
-        // -20..40 end at neither 0, so `KeepZero` keeps neither side and both are padded.
+        // Stacks reach 36 above 0 and -19 below it: neither end is zero, so both are padded.
         let mut f = figure(ScaleKind::Category, LIN);
         axes(&mut f)
             .stacked_bar(
@@ -4864,7 +4880,7 @@ mod tests {
         );
         assert_ne!(nice.0, "0");
         assert_ne!(nice.1, "0");
-        assert_end_ticks_inset(&r.y.ticks);
+        assert_eq!((lo, hi), (-21.75, 38.75));
         assert!(labels(&r.y.ticks).contains(&"0"));
         // The baseline sits at 0, inside the plot.
         assert!(r.baseline.pos.get() > 0.0 && r.baseline.pos.get() < 1.0);
@@ -4970,15 +4986,18 @@ mod tests {
     }
 
     #[test]
-    fn hist_x_extent_is_nice_over_the_data() {
-        // The bins span the data, 12 to 88; x takes the nice limits 10..90, padded on both
-        // sides like any axes that is not all lines.
+    fn hist_x_extent_pads_the_bin_edges() {
+        // The bins span 12..88; pad those edges, then choose ticks inside.
         let f = hist_figure(LIN, &[12.0, 47.0, 88.0, 30.0, f64::NAN], 4);
         let r = resolve_axes(f.single_axes(), 5, 4);
         let (x, _) = domains(&f);
-        assert!(close(x, pad(10.0, 90.0)), "{x:?}");
-        assert_eq!(labels(&r.x.ticks), ["10", "30", "50", "70", "90"]);
-        assert_end_ticks_inset(&r.x.ticks);
+        assert!(close(x, pad(12.0, 88.0)), "{x:?}");
+        assert_eq!(labels(&r.x.ticks), ["20", "40", "60", "80"]);
+        assert!(
+            r.x.ticks
+                .iter()
+                .all(|tick| (0.0..=1.0).contains(&tick.pos.get()))
+        );
 
         // Constant data is binned over v ± 0.5, which the x axis then encloses.
         let f = hist_figure(LIN, &[3.0, 3.0], 2);
@@ -5449,9 +5468,9 @@ mod tests {
                 assert!((got - want).abs() < 1e-9, "{ticks:?}");
             }
         }
-        // Without explicit ticks the same data gets the nice limits 0 and 10.
+        // Automatic ticks leave the same padded data extent unchanged.
         let f = scatter_figure(LIN, LIN, &[0.3, 9.7], &[1.0, 2.0]);
-        assert!(close(domains(&f).0, pad(0.0, 10.0)));
+        assert!(close(domains(&f).0, pad(0.3, 9.7)));
 
         // On a log axis the domain encloses data and ticks and is padded in log space.
         for (ticks, want) in [
@@ -5512,18 +5531,18 @@ mod tests {
     }
 
     #[test]
-    fn explicit_y_ticks_keep_the_zero_anchor_and_skip_the_lowering() {
-        // Auto ticks move the lowest tick below data that starts on it; explicit ones do not.
+    fn explicit_y_ticks_keep_the_zero_anchor_and_data_padding() {
+        // Auto and explicit ticks inside the data leave the same domain.
         let mut f = scatter_figure(LIN, LIN, &[0.0, 1.0], &[10.0, 20.0]);
         let auto = resolve_axes(f.single_axes(), 5, 4);
-        assert!(auto.y.continuous_scale().domain().0 < 10.0 - 1.0);
+        assert_eq!(auto.y.continuous_scale().domain(), pad(10.0, 20.0));
         axes(&mut f).yticks(&[10.0, 15.0, 20.0]).unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);
         assert!(close(r.y.continuous_scale().domain(), pad(10.0, 20.0)));
         assert_eq!(labels(&r.y.ticks), ["10", "15", "20"]);
-        // The baseline uses the unpadded lower limit of the resulting domain: the lowest tick.
-        assert!(coincides(r.baseline.pos, r.y.ticks[0].pos));
-        assert!((r.baseline.pos.get() - 0.05 / 1.1).abs() < 1e-12);
+        // The baseline uses the padded edge, below both the data and the lowest tick.
+        assert_eq!(r.baseline.pos, NormalizedPos::LOW);
+        assert!(r.baseline.pos.get() < r.y.ticks[0].pos.get());
 
         // Bars keep 0 in a linear y domain, and the zero side stays unpadded.
         let mut f = bar_figure(LIN, &[3.0, 7.0]);
@@ -5675,13 +5694,13 @@ mod tests {
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.y.ticks), ["1.00", "1.00"]);
-        // A coarse fixed format may merge automatic ticks too.
+        // Automatic ticks instead choose a step the fixed format can represent exactly.
         let mut f = scatter_figure(LIN, LIN, &[0.0, 1.0], &[0.0, 1.0]);
         axes(&mut f)
             .ytick_format(TickFormat::fixed(0).unwrap())
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 5);
-        assert_eq!(labels(&r.y.ticks), ["0", "0", "0", "1", "1"]);
+        assert_eq!(labels(&r.y.ticks), ["0", "1"]);
     }
 
     /// The y tick labels of an axes without marks whose y axis of `y` has ticks at `positions`
@@ -5760,9 +5779,8 @@ mod tests {
 
     #[test]
     fn every_format_decides_zero_as_the_automatic_labels_do() {
-        // With the lower limit within 1e-9 of the domain of zero, the zero candidate of the
-        // grid is moved onto the limit. Whether it then reads as zero is decided by the grid
-        // step, never by the gap the move left, and in every format alike.
+        // A zero candidate inside the domain stays exactly zero, even when the lower limit
+        // is within the endpoint tolerance. Every format must agree that it is zero.
         let y_labels = |low: f64, format: TickFormat| {
             let mut f = figure(LIN, LIN);
             axes(&mut f)
@@ -5776,18 +5794,15 @@ mod tests {
             r.y.ticks.into_iter().map(|t| t.label).collect::<Vec<_>>()
         };
         let low = -0.2_f64 * 1e-9;
-        assert_eq!(y_labels(low, TickFormat::AUTO)[0], "\u{2212}2e\u{2212}10");
-        assert_eq!(
-            y_labels(low, TickFormat::scientific())[0],
-            "\u{2212}2e\u{2212}10"
-        );
+        assert_eq!(y_labels(low, TickFormat::AUTO)[0], "0.0");
+        assert_eq!(y_labels(low, TickFormat::scientific())[0], "0");
         assert_eq!(
             y_labels(low, TickFormat::fixed(12).unwrap())[0],
-            "\u{2212}0.000000000200"
+            "0.000000000000"
         );
         assert_eq!(
             y_labels(low, TickFormat::percent(12).unwrap())[0],
-            "\u{2212}0.000000020000%"
+            "0.000000000000%"
         );
 
         let reads_zero = |label: &str| {
@@ -7159,8 +7174,9 @@ mod tests {
 
     /// The y axis and baseline as the resolution of the y axis alone gave them, before both
     /// axes went through [`resolve_axis`]: the y extent, with 0 when a mark grows from the
-    /// baseline on a linear axis, widened by `bubbles`, the lowest nice tick moved below the
-    /// data, and the baseline at 0 or the lower limit before padding.
+    /// baseline on a linear axis, widened by `bubbles`, then padded. Log axes first round to
+    /// powers and may move the lowest power below the data. The baseline is at 0 or the lower
+    /// limit before padding.
     fn y_as_resolved_alone(
         marks: &[ResolvedMark<'_>],
         limits: ContinuousLimits<'_>,
@@ -7180,7 +7196,12 @@ mod tests {
             (data, Padding::BothSides)
         };
         let data = union(data, bubbles);
-        let y = continuous(limits, data, AutoLimits::NiceBelowData(padding), room);
+        let auto = if limits.transform == Transform::Linear {
+            AutoLimits::Padded(padding)
+        } else {
+            AutoLimits::LogBelowData(padding)
+        };
+        let y = continuous(limits, data, auto, room);
         let base = baseline(&y.scale, y.unpadded_low);
         let axis = ResolvedAxis {
             scale: AxisScale::Continuous(y.scale),
@@ -7224,7 +7245,7 @@ mod tests {
         let auto = if all_lines {
             AutoLimits::Exact
         } else {
-            AutoLimits::Nice(Padding::BothSides)
+            AutoLimits::Padded(Padding::BothSides)
         };
         let x = continuous(limits, data, auto, room);
         ResolvedAxis {
@@ -7388,8 +7409,7 @@ mod tests {
         let (lo, hi) = r.x.continuous_scale().domain();
         assert!(lo < -3.0 && hi > 5.0, "{lo}..{hi}");
         assert!(r.x.holds_zero());
-        // A dot plot fits its values with nice limits below the data, as a scatter on a
-        // category x axis fits y.
+        // A dot plot pads its values on both sides, as a scatter on a category x axis fits y.
         let mut h = figure(LIN, ScaleKind::Category);
         axes(&mut h)
             .scatter_shared(

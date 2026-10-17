@@ -5,13 +5,13 @@
 //! every solve ([`BubbleFits::update`]). A fit starts from the axis's raw extent, the extent of
 //! the data and of any explicit tick positions as resolve sees it, and widens it to the smallest
 //! extent in which every bubble reaches no further than the plot edge at its share of the plot
-//! length. Resolve then rounds and pads that extent once, as it does any data extent.
+//! length. Resolve then pads that extent once (rounding it first on log axes), as it does any data extent.
 //!
-//! Rounding, padding or a smaller plot after the solve can still leave a bubble past the plot
+//! Log-axis rounding, padding or a smaller plot after the solve can still leave a bubble past the plot
 //! edge. The fit is then made again from the same raw extent, never from the padded domain, so
-//! resolve still rounds and pads once: on the shortest plot lengths seen so far when a plot
-//! shrank; otherwise rounding and padding moved the bubble out, and every bubble's reach is
-//! measured against at least the span of the rounded and padded domain, which is enough as long
+//! resolve still applies padding and log-axis rounding once: on the shortest plot lengths seen so far when a plot
+//! shrank; otherwise padding or log-axis rounding moved the bubble out, and every bubble's reach is
+//! measured against at least the span of the final domain, which is enough as long
 //! as that span does not grow. The lengths only shrink and the span only grows, so the extents
 //! only grow and the fits settle.
 //!
@@ -115,7 +115,7 @@ enum State {
     Unfitted,
     /// Fitted: the axis encloses `extent`.
     Fitted {
-        /// The fitted extent, before rounding and padding.
+        /// The fitted extent, before padding and log-axis rounding.
         extent: (f64, f64),
         /// The least span the bubbles' reaches were measured against, as a share of the raw
         /// extent's span (in log space on a log axis); 0 at first, when only the fitted extent's
@@ -270,8 +270,8 @@ impl BubbleFit {
                     let lengths = fitted.iter().zip(lengths).map(|(a, b)| a.min(*b)).collect();
                     self.fitted(*span, lengths, refits + 1)
                 } else {
-                    // The plots did not shrink, so rounding and padding moved a bubble out:
-                    // measure the reaches against at least the span of the rounded domain.
+                    // The plots did not shrink, so padding or log-axis rounding moved a bubble out:
+                    // measure the reaches against at least the span of the final domain.
                     let (lo, hi) = scale.domain();
                     let rounded = self.seed.normalize(hi) - self.seed.normalize(lo);
                     self.fitted(span.max(rounded), fitted.clone(), refits + 1)
