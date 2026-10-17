@@ -527,6 +527,28 @@ impl TickRoom<'_> {
         if self.most.is_some_and(|most| ticks.len() > most) {
             return f64::NEG_INFINITY;
         }
+        self.label_slack(ticks)
+    }
+
+    /// Category ticks at indices 0, k, 2k, ... for the smallest fitting 1/2/5 decade step.
+    /// Even the first pass keeps these labels apart, so a skipped wide end label cannot make
+    /// the provisional layout fail before the final plot size is known.
+    pub fn category_ticks(&self, ticks: Vec<AxisTick>) -> Vec<AxisTick> {
+        let mut decade = 1_usize;
+        loop {
+            for factor in [1_usize, 2, 5] {
+                let step = decade.saturating_mul(factor);
+                let selected: Vec<_> = ticks.iter().step_by(step).cloned().collect();
+                if self.label_slack(&selected) >= 0.0 {
+                    return selected;
+                }
+            }
+            decade = decade.saturating_mul(10);
+        }
+    }
+
+    /// Label spacing independent of the search mode and tick count limit.
+    fn label_slack(&self, ticks: &[AxisTick]) -> f64 {
         let extents: Vec<f64> = match self.extent {
             LabelExtent::Width(_) => ticks.iter().map(|tick| self.width(&tick.label)).collect(),
             LabelExtent::Line(line) => vec![line; ticks.len()],

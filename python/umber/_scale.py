@@ -105,7 +105,12 @@ class Scale(Generic[T]):  # noqa: UP046
 
         On x it makes vertical bar, box and violin charts. On y, beside a numeric x axis, it
         makes them horizontal, with the categories running top to bottom, and a scatter a
-        dot plot.
+        dot plot. Automatic labels start at category 0 and show every k-th category, using
+        the smallest k in 1, 2, 5, 10, 20, 50, ... that keeps their widths (x) or heights (y)
+        apart by at least half the tick label font size, as for numeric ticks. Shared axes
+        use the same labels. Category 0 is always labelled: if its label is wider than the
+        available room, rendering still fails with a tick-label error. This does not change
+        explicit tick labels or heatmap annotations.
 
         Returns:
             The scale.
