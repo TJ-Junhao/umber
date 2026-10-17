@@ -1,5 +1,7 @@
 # umber
 
+[![测试覆盖率](https://codecov.io/gh/TJ-Junhao/umber/graph/badge.svg)](https://codecov.io/gh/TJ-Junhao/umber)
+
 umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、阶梯图、散点图、面积图、堆叠面积图、柱状图、直方图、箱线图、小提琴图、气泡图、误差棒、区间带、杆状图、参考线、热力图、网格色块图（mesh）、二维直方图和六边形分箱图（hexbin），支持数值轴、对数轴、类别轴和时间轴，可以单独成图，也可以排成共享坐标轴的多面板网格。它提供 colormap 和 colorbar，排版考究，内置三套主题，输出 PNG 或 SVG。
 
 [English](https://github.com/TJ-Junhao/umber/blob/main/README.md)

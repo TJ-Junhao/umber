@@ -1,0 +1,50 @@
+# Coverage is measured in .github/workflows/coverage.yml and uploaded as two flags:
+#   rust    line coverage of crates/umber-core/src and crates/umber-py/src, from the unit and integration tests, the Python
+#           test suite running against an instrumented extension, and the refactor_outputs example.
+#           Inline #[cfg(test)] items are removed before upload by scripts/coverage/filter_rust_lcov.py.
+#   python  line and branch coverage of python/umber.
+# Doctests of the Rust crate are not measured: instrumenting them needs a nightly toolchain.
+
+coverage:
+  precision: 2
+  round: down
+  range: 90..100
+  status:
+    # The project status is the combined coverage of both flags and must stay at or above 90 %.
+    project:
+      default:
+        target: 90%
+        threshold: 0%
+    # New and changed lines are held to the same bar, with a margin because a few lines in a small
+    # change can swing the percentage a long way.
+    patch:
+      default:
+        target: 90%
+        threshold: 5%
+
+flags:
+  rust:
+    paths:
+      - crates/umber-core/src/
+      - crates/umber-py/src/
+  python:
+    paths:
+      - python/umber/
+
+# Not production code, or not exercised by this workflow.
+ignore:
+  - "crates/umber-py/src/test_support.rs"
+  - "crates/umber-core/src/test_support/**"
+  - "crates/umber-core/src/**/*_tests.rs"
+  - "crates/umber-core/src/**/tests.rs"
+  - "crates/umber-core/tests/**"
+  - "crates/umber-core/examples/**"
+  - "crates/umber-core/benches/**"
+  - "tests/**"
+  - "examples/**"
+  - "scripts/**"
+
+# One short comment per pull request, only when coverage changes; the status checks carry the verdict.
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  require_changes: true
