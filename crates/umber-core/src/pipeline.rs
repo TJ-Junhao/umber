@@ -1045,6 +1045,26 @@ pub(crate) fn try_plan_figure(
     Ok(planned.panels.swap_remove(index))
 }
 
+/// [`plan`] for every axes of `figure`, in the order of [`Figure::panels`], together with the
+/// axes' marks as they are drawn: hexbins counted on the solved lattice. Panics when the figure
+/// cannot be laid out.
+#[cfg(test)]
+pub(crate) fn plan_panel_marks<'a>(
+    figure: &'a Figure,
+    lib: &FontLibrary,
+) -> Vec<(Resolved, Layout, Vec<ResolvedMark<'a>>)> {
+    let groups = ShareGroups::new(figure);
+    let mut panels = panels(figure, &groups, lib);
+    let planned = plan_cells(figure, &mut panels, &groups, lib, "Figure.to_scene()")
+        .expect("the figure lays out");
+    planned
+        .panels
+        .into_iter()
+        .zip(panels)
+        .map(|((resolved, layout), panel)| (resolved, layout, panel.marks))
+        .collect()
+}
+
 /// [`plan`] for every axes of `figure`, in the order of [`Figure::panels`], with layout errors
 /// reported in `"Figure.to_scene()"` as [`scene`] reports them.
 #[cfg(test)]

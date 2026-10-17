@@ -1,3 +1,12 @@
 # Cases whose committed outputs change on purpose in this change.
-# Crowded automatic category labels use the smallest fitting 1/2/5 decade step.
-errors/x-label-overflow
+# Mesh, 2-D histogram and hexbin cells reach under the drawn neighbours after them, so no seam shows between them.
+mesh-pigment
+mesh-graphite
+mesh-midnight
+hist2d-pigment
+hist2d-graphite
+hist2d-midnight
+hexbin-pigment
+hexbin-graphite
+hexbin-midnight
+time-mesh
