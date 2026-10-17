@@ -17,3 +17,5 @@ AGENTS.md
 docs/superpowers/
 docs/design/
 crates/umber-core/tests/golden/*.diff.png
+.coverage
+*.lcov

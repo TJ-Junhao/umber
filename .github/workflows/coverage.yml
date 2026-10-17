@@ -1,0 +1,109 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "python/**"
+      - "tests/**"
+      - "Cargo.*"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".coveragerc"
+      - "codecov.yml"
+      - "scripts/coverage/**"
+      - ".github/workflows/coverage.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "python/**"
+      - "tests/**"
+      - "Cargo.*"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".coveragerc"
+      - "codecov.yml"
+      - "scripts/coverage/**"
+      - ".github/workflows/coverage.yml"
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Test code and the Python extension crate are not measured; see codecov.yml.
+  RUST_IGNORE: '/crates/umber-py/|/(tests|examples|benches)/|/test_support/|(_tests|/tests)\.rs$'
+  MIN_LINE_COVERAGE: "90"
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Codecov authenticates the upload with the job's OIDC token, so no secret is stored.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: coverage
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.12"
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      # rust-toolchain.toml pins the stable toolchain; this adds the LLVM tools it needs.
+      - run: rustup component add llvm-tools-preview
+      # The package itself is built later, with instrumentation.
+      - run: uv sync --locked --group dev --no-install-project
+
+      - name: Measure the Rust unit and integration tests
+        run: |
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov --no-report --locked -p umber-core
+
+      # Everything below runs with the instrumentation environment, so the extension, the example
+      # and the profiles they write all belong to the same llvm-cov run.
+      - name: Measure the Python tests, which run the instrumented extension
+        run: |
+          # shellcheck source=/dev/null
+          source <(cargo llvm-cov show-env --sh)
+          uv run --no-sync maturin develop --uv --locked
+          uv run --no-sync pytest -q --cov --cov-config=.coveragerc --cov-report=lcov:python.lcov
+      - name: Measure the refactor_outputs example
+        run: |
+          # shellcheck source=/dev/null
+          source <(cargo llvm-cov show-env --sh)
+          cargo run --locked -p umber-core --example refactor_outputs -- "$RUNNER_TEMP/refactor-outputs"
+
+      - name: Write the Rust report
+        run: |
+          cargo llvm-cov report --lcov --output-path rust-raw.lcov --ignore-filename-regex "$RUST_IGNORE"
+          uv run --no-project --with tree-sitter==0.25.2 --with tree-sitter-rust==0.24.2 \
+            scripts/coverage/filter_rust_lcov.py "$GITHUB_WORKSPACE" rust-raw.lcov rust.lcov
+
+      - name: Upload the Rust report
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: rust.lcov
+          disable_search: true
+          flags: rust
+          fail_ci_if_error: true
+      - name: Upload the Python report
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: python.lcov
+          disable_search: true
+          flags: python
+          fail_ci_if_error: true
+
+      # The same bar as the Codecov project status, so the gate holds if the service is unavailable.
+      - name: Require the combined line coverage
+        run: scripts/coverage/check_gate.sh "$MIN_LINE_COVERAGE" rust.lcov python.lcov
