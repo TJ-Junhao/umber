@@ -326,23 +326,11 @@ def test_hexbin_shared_axes(share: ub.Share) -> None:
 
 
 @pytest.mark.parametrize("method", ["hist2d", "hexbin"])
-def test_empty_counts_only_replace_baseline_with_gridline(method: str) -> None:
+def test_empty_counts_leave_scatter_output_unchanged(method: str) -> None:
     ax = axes().scatter([0, 1], [0, 2])
-    before = ET.fromstring(ax.figure.to_svg())
+    before = ax.figure.to_svg()
     call(getattr(ax, method))([], [])
-    after = ET.fromstring(ax.figure.to_svg())
-    ns = "{http://www.w3.org/2000/svg}"
-    before_groups = before.findall(f"{ns}g")
-    after_groups = after.findall(f"{ns}g")
-    assert len(before_groups) == 3
-    assert len(after_groups) == 2
-    baseline = before_groups[2][0]
-    gridline = after_groups[0][0]
-    assert baseline.tag == gridline.tag == f"{ns}path"
-    assert gridline.attrib == before_groups[0][0].attrib | {"d": baseline.attrib["d"]}
-    before.remove(before_groups[2])
-    after_groups[0].remove(gridline)
-    assert ET.tostring(after) == ET.tostring(before)
+    assert ax.figure.to_svg() == before
 
 
 @pytest.mark.parametrize("edges", [[1, 1 + 1e-12], [0, 1e-300]])

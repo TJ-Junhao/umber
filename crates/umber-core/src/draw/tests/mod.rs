@@ -36,16 +36,17 @@ use crate::{FontLibrary, Marker, Rgba, ScaleKind, Theme};
 /// The chrome group of `scene`: the first of its groups.
 fn chrome_items(scene: &Scene) -> &[Item] {
     match scene.items.as_slice() {
-        [Item::Group { clip: None, items }, _] | [Item::Group { clip: None, items }, _, _] => items,
-        other => panic!("expected the chrome, the marks and the baseline groups, got {other:?}"),
+        [Item::Group { clip: None, items }, ..] => items,
+        other => panic!("expected the chrome group first, got {other:?}"),
     }
 }
 
-/// The baseline group of `scene`: the last of its groups.
+/// The baseline group of a scene without a legend, or empty when no baseline is drawn.
 fn baseline_items(scene: &Scene) -> &[Item] {
     match scene.items.as_slice() {
         [_, Item::Group { clip: None, items }] | [_, _, Item::Group { clip: None, items }] => items,
-        other => panic!("expected the chrome, the marks and the baseline groups, got {other:?}"),
+        [_] | [_, Item::Group { clip: Some(_), .. }] => &[],
+        other => panic!("expected chrome, optional marks and optional baseline, got {other:?}"),
     }
 }
 
@@ -109,9 +110,20 @@ fn mark_group(scene: &Scene) -> (Rect, &[Item]) {
                 clip: Some(clip),
                 items,
             },
-            Item::Group { clip: None, .. },
+            ..,
         ] => (*clip, items),
-        other => panic!("expected chrome, a clipped marks group and the baseline, got {other:?}"),
+        other => panic!("expected chrome followed by a clipped marks group, got {other:?}"),
+    }
+}
+
+/// The marks group items, or empty when no marks are visible, independently of the baseline.
+fn mark_items(scene: &Scene) -> &[Item] {
+    match scene.items.get(1) {
+        Some(Item::Group {
+            clip: Some(_),
+            items,
+        }) => items,
+        _ => &[],
     }
 }
 

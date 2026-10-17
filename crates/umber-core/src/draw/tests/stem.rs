@@ -1,6 +1,6 @@
 //! Stems, their shared scatter markers, clipping, domains and legend entries.
 
-use super::{mark_group, nums, plot_of, subpaths};
+use super::{nums, plot_of, subpaths};
 use crate::legend::{Legend, Swatch};
 use crate::model::{AxisData, Figure, LineOptions, ScatterOptions, StemOptions};
 use crate::resolve::{Limits, resolve_marks};
@@ -30,11 +30,7 @@ fn limited(theme: Theme) -> Figure {
 fn items(f: &Figure) -> Vec<Item> {
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
-    if scene.items.len() == 2 {
-        Vec::new()
-    } else {
-        mark_group(&scene).1.to_vec()
-    }
+    super::mark_items(&scene).to_vec()
 }
 
 #[track_caller]

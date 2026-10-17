@@ -173,9 +173,10 @@ pub(crate) struct Layout {
     pub x_tick_labels: Vec<Label>,
     /// The y tick labels, to the left of the plot area.
     pub y_tick_labels: Vec<Label>,
-    /// The y coordinates of horizontal gridlines, without the baseline's.
+    /// The y coordinates of horizontal gridlines, excluding a drawn baseline's position.
     pub y_grid: Vec<f64>,
-    /// The x coordinates of vertical gridlines, without the baseline's; none on a category axis.
+    /// The x coordinates of vertical gridlines, excluding a drawn baseline's position;
+    /// none on a category axis.
     pub x_grid: Vec<f64>,
     /// The baseline, across the plot area.
     pub baseline: PlacedBaseline,
@@ -1116,14 +1117,9 @@ mod tests {
             f.single_axes_mut().ylim(0.0, 100.0).unwrap();
             let (resolved, layout) = plan_of(&f);
             assert_eq!(resolved.baseline.pos.get(), 0.0);
-            // The baseline replaces the gridline at 0.
-            assert!(
-                layout
-                    .y_grid
-                    .iter()
-                    .all(|&y| (y - layout.baseline_y()).abs() > 1e-6)
-            );
-            assert_eq!(layout.y_grid.len() + 1, resolved.y.ticks.len());
+            // Without an anchored mark, the tick at 0 keeps its gridline.
+            assert!(layout.y_grid.contains(&layout.baseline_y()));
+            assert_eq!(layout.y_grid.len(), resolved.y.ticks.len());
             // Every tick has a label, the baseline's included, right-aligned 6 pt left of the
             // plot area.
             let labels: Vec<&str> = layout

@@ -318,13 +318,39 @@ impl Resolved {
         }
     }
 
-    /// Whether the baseline is drawn: not on two category axes or on axes holding any mesh,
-    /// 2-D histogram or hexbin mark, even alongside other marks.
+    /// Whether the axes hold a mark that grows from zero: bars (including grouped and stacked
+    /// bars), histograms, areas (including stacked areas) or stems. One such mark is enough,
+    /// regardless of the other marks. Empty axes and two category axes draw no baseline.
+    /// This controls drawing only; the resolved baseline position is unchanged.
     pub fn draws_baseline(&self, marks: &[Mark]) -> bool {
         !(self.x.is_category() && self.y.is_category())
-            && !marks
-                .iter()
-                .any(|mark| matches!(mark, Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_)))
+            && marks.iter().any(|mark| match mark {
+                Mark::Bar(_)
+                | Mark::GroupedBar(_)
+                | Mark::StackedBar(_)
+                | Mark::Hist(_)
+                | Mark::Area(_)
+                | Mark::StackedArea(_)
+                | Mark::Stem(_) => true,
+                Mark::Line(_)
+                | Mark::Step(_)
+                | Mark::Scatter(_)
+                | Mark::Bubbles(_)
+                | Mark::Box(_)
+                | Mark::GroupedBox(_)
+                | Mark::Violin(_)
+                | Mark::GroupedViolin(_)
+                | Mark::ErrorBars(_)
+                | Mark::Band(_)
+                | Mark::HLine(_)
+                | Mark::VLine(_)
+                | Mark::HSpan(_)
+                | Mark::VSpan(_)
+                | Mark::Mesh(_)
+                | Mark::Hist2d(_)
+                | Mark::Hexbin(_)
+                | Mark::Heatmap(_) => false,
+            })
     }
 }
 

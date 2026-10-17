@@ -57,9 +57,11 @@ impl Figure {
     /// beside the plot allows, so line ends stay whole), the values written on annotated
     /// heatmap cells as one group clipped to the plot area when there are any, the legend as
     /// one unclipped group when it shows anything, and last the baseline as an unclipped group
-    /// of its own, so marks never cover it. The baseline group is omitted for two category
-    /// axes, or when the axes hold any mesh, 2-D histogram or hexbin mark, even alongside other
-    /// marks. A non-empty figure header follows as one unclipped group: the figure title,
+    /// of its own, so marks never cover it. The baseline is drawn only when the axes hold a
+    /// bar (including grouped and stacked bars), histogram, area (including stacked areas) or
+    /// stem: at zero on the value axis, or at its lower edge when zero is out of range. Other
+    /// marks do not suppress it. Axes without these marks draw no baseline. A non-empty figure
+    /// header follows as one unclipped group: the figure title,
     /// subtitle and merged legend. Without axes it holds the background and any figure
     /// title or subtitle. The same figure always gives the same scene.
     ///

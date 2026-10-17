@@ -146,9 +146,263 @@ mod tests {
     use super::*;
     use crate::pipeline::plan_figure;
     use crate::{
-        AxesMut, AxisData, Figure, FontLibrary, HexbinOptions, Hist2dOptions, Instant, LineOptions,
-        MeshOptions, ScaleKind,
+        AxesMut, AxisData, AxisValue, Distribution, Figure, FontLibrary, HexbinOptions,
+        Hist2dOptions, Instant, LineOptions, MeshOptions, ScaleKind, Series,
     };
+
+    fn numbers() -> AxisData {
+        AxisData::Numbers(vec![0.0, 1.0])
+    }
+
+    fn categories() -> Vec<String> {
+        vec!["a".into(), "b".into()]
+    }
+
+    fn series() -> Vec<Series> {
+        vec![Series {
+            values: vec![1.0, 2.0],
+            ..Series::default()
+        }]
+    }
+
+    fn groups() -> Vec<Vec<f64>> {
+        vec![vec![1.0, 2.0, 3.0], vec![2.0, 3.0, 4.0]]
+    }
+
+    fn distributions() -> Vec<Distribution> {
+        vec![Distribution {
+            groups: groups(),
+            ..Distribution::default()
+        }]
+    }
+
+    #[test]
+    fn baseline_is_drawn_only_for_zero_anchored_marks() {
+        use ScaleKind::{Category, Linear};
+        type Case = (
+            &'static str,
+            ScaleKind,
+            ScaleKind,
+            bool,
+            fn(&mut AxesMut<'_>),
+        );
+        let cases: &[Case] = &[
+            ("Line", Linear, Linear, false, |a| {
+                a.line(numbers(), &[1.0, 2.0], Default::default()).unwrap();
+            }),
+            ("Step", Linear, Linear, false, |a| {
+                a.step(numbers(), &[1.0, 2.0], Default::default()).unwrap();
+            }),
+            ("Scatter", Linear, Linear, false, |a| {
+                a.scatter(numbers(), &[1.0, 2.0], Default::default())
+                    .unwrap();
+            }),
+            ("Bubbles", Linear, Linear, false, |a| {
+                a.bubbles(&[0.0, 1.0], &[1.0, 2.0], &[1.0, 2.0], Default::default())
+                    .unwrap();
+            }),
+            ("Box", Category, Linear, false, |a| {
+                a.box_plot(categories(), groups(), Default::default())
+                    .unwrap();
+            }),
+            ("GroupedBox", Category, Linear, false, |a| {
+                a.grouped_box_plot(categories(), distributions()).unwrap();
+            }),
+            ("Violin", Category, Linear, false, |a| {
+                a.violin(categories(), groups(), Default::default())
+                    .unwrap();
+            }),
+            ("GroupedViolin", Category, Linear, false, |a| {
+                a.grouped_violin(categories(), distributions()).unwrap();
+            }),
+            ("ErrorBars", Linear, Linear, false, |a| {
+                a.y_error_bars(numbers(), &[1.0, 2.0], &[2.0, 3.0], Default::default())
+                    .unwrap();
+            }),
+            ("Band", Linear, Linear, false, |a| {
+                a.band(&[0.0, 1.0], &[1.0, 2.0], &[2.0, 3.0], Default::default())
+                    .unwrap();
+            }),
+            ("HLine", Linear, Linear, false, |a| {
+                a.hline(1.0, Default::default()).unwrap();
+            }),
+            ("VLine", Linear, Linear, false, |a| {
+                a.vline(AxisValue::Number(1.0), Default::default()).unwrap();
+            }),
+            ("HSpan", Linear, Linear, false, |a| {
+                a.hspan(1.0, 2.0, Default::default()).unwrap();
+            }),
+            ("VSpan", Linear, Linear, false, |a| {
+                a.vspan(1.0, 2.0, Default::default()).unwrap();
+            }),
+            ("Mesh", Linear, Linear, false, |a| {
+                Cells::Mesh.add(a, -1.0, 1.0);
+            }),
+            ("Hist2d", Linear, Linear, false, |a| {
+                Cells::Hist2d.add(a, -1.0, 1.0);
+            }),
+            ("Hexbin", Linear, Linear, false, |a| {
+                Cells::Hexbin.add(a, -1.0, 1.0);
+            }),
+            ("Heatmap", Category, Category, false, |a| {
+                a.heatmap(
+                    &categories(),
+                    &categories(),
+                    &[1.0, 2.0, 3.0, 4.0],
+                    Default::default(),
+                )
+                .unwrap();
+            }),
+            ("Bar", Category, Linear, true, |a| {
+                a.bar(categories(), &[1.0, 2.0], Default::default())
+                    .unwrap();
+            }),
+            ("GroupedBar", Category, Linear, true, |a| {
+                a.grouped_bar(categories(), series()).unwrap();
+            }),
+            ("StackedBar", Category, Linear, true, |a| {
+                a.stacked_bar(categories(), series()).unwrap();
+            }),
+            ("Hist", Linear, Linear, true, |a| {
+                a.hist(&[0.0, 1.0, 2.0], Default::default()).unwrap();
+            }),
+            ("Area", Linear, Linear, true, |a| {
+                a.area(numbers(), &[1.0, 2.0], Default::default()).unwrap();
+            }),
+            ("StackedArea", Linear, Linear, true, |a| {
+                a.stacked_area(&[0.0, 1.0], series()).unwrap();
+            }),
+            ("Stem", Linear, Linear, true, |a| {
+                a.stem(numbers(), &[1.0, 2.0], Default::default()).unwrap();
+            }),
+            ("horizontal Bar", Linear, Category, true, |a| {
+                a.bar(categories(), &[1.0, 2.0], Default::default())
+                    .unwrap();
+            }),
+            ("horizontal GroupedBar", Linear, Category, true, |a| {
+                a.grouped_bar(categories(), series()).unwrap();
+            }),
+            ("horizontal StackedBar", Linear, Category, true, |a| {
+                a.stacked_bar(categories(), series()).unwrap();
+            }),
+            ("dot plot", Category, Linear, false, |a| {
+                a.scatter(
+                    AxisData::Categories(categories()),
+                    &[1.0, 2.0],
+                    Default::default(),
+                )
+                .unwrap();
+            }),
+            ("horizontal dot plot", Linear, Category, false, |a| {
+                a.scatter_shared(
+                    numbers(),
+                    AxisData::Categories(categories()),
+                    Default::default(),
+                )
+                .unwrap();
+            }),
+        ];
+        let lib = FontLibrary::global();
+        let mut wrong = Vec::new();
+        for &(name, x, y, expected, add) in cases {
+            let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+            let mut axes = f.add_axes(x, y).unwrap();
+            add(&mut axes);
+            assert_eq!(axes.marks().len(), 1, "{name}");
+            let (_, layout) = plan_figure(&f, (0, 0), lib);
+            let scene = f.to_scene(lib).unwrap();
+            if scene.items.contains(&baseline(f.theme(), &layout)) != expected {
+                wrong.push(name);
+            }
+        }
+        assert!(wrong.is_empty(), "wrong baseline visibility: {wrong:?}");
+    }
+
+    #[test]
+    fn empty_axes_draw_no_baseline() {
+        for (x, y) in [
+            (ScaleKind::Linear, ScaleKind::Linear),
+            (ScaleKind::Category, ScaleKind::Linear),
+            (ScaleKind::Linear, ScaleKind::Category),
+            (ScaleKind::Category, ScaleKind::Category),
+        ] {
+            let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+            f.add_axes(x, y).unwrap();
+            no_baseline(&f);
+        }
+    }
+
+    #[test]
+    fn line_over_bars_draws_baseline_in_either_order() {
+        for line_first in [false, true] {
+            let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+            let mut axes = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+            let add_line = |a: &mut AxesMut<'_>| {
+                a.line(
+                    AxisData::Categories(categories()),
+                    &[1.0, 2.0],
+                    Default::default(),
+                )
+                .unwrap();
+            };
+            if line_first {
+                add_line(&mut axes);
+            }
+            axes.bar(categories(), &[1.0, 2.0], Default::default())
+                .unwrap();
+            if !line_first {
+                add_line(&mut axes);
+            }
+            let lib = FontLibrary::global();
+            let (_, layout) = plan_figure(&f, (0, 0), lib);
+            assert!(
+                f.to_scene(lib)
+                    .unwrap()
+                    .items
+                    .contains(&baseline(f.theme(), &layout))
+            );
+        }
+    }
+
+    #[test]
+    fn mesh_beside_bar_keeps_baseline() {
+        let mut bars = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        bars.add_axes(ScaleKind::Category, ScaleKind::Linear)
+            .unwrap()
+            .bar(categories(), &[1.0, 2.0], Default::default())
+            .unwrap();
+        let mesh = cells(Cells::Mesh, -1.0, 1.0, GridLines::Horizontal);
+        let lib = FontLibrary::global();
+        let (resolved, _) = plan_figure(&bars, (0, 0), lib);
+        // Bar needs a category axis and Mesh forbids one; test the rule with validated marks.
+        let bar = bars.single_axes().marks()[0].clone();
+        let mesh = mesh.single_axes().marks()[0].clone();
+        assert!(resolved.draws_baseline(&[bar.clone(), mesh.clone()]));
+        assert!(resolved.draws_baseline(&[mesh, bar]));
+    }
+
+    #[test]
+    fn mesh_beside_histogram_bars_draws_baseline_in_either_order() {
+        for hist_first in [false, true] {
+            let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+            let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+            if hist_first {
+                axes.hist(&[0.0, 1.0, 2.0], Default::default()).unwrap();
+            }
+            Cells::Mesh.add(&mut axes, -1.0, 1.0);
+            if !hist_first {
+                axes.hist(&[0.0, 1.0, 2.0], Default::default()).unwrap();
+            }
+            let lib = FontLibrary::global();
+            let (_, layout) = plan_figure(&f, (0, 0), lib);
+            assert!(
+                f.to_scene(lib)
+                    .unwrap()
+                    .items
+                    .contains(&baseline(f.theme(), &layout))
+            );
+        }
+    }
 
     #[derive(Clone, Copy)]
     enum Cells {
@@ -328,19 +582,40 @@ mod tests {
     }
 
     #[test]
-    fn line_alone_keeps_baseline_instead_of_its_gridline() {
-        for (low, high) in [(-1.0, 1.0), (1.0, 3.0)] {
-            let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-            let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-            axes.ylim(low, high).unwrap();
-            axes.yticks(&[low, (low + high) / 2.0, high]).unwrap();
-            line(&mut axes, low, high);
-            let lib = FontLibrary::global();
-            let (_, layout) = plan_figure(&f, (0, 0), lib);
-            let scene = f.to_scene(lib).unwrap();
-            assert!(scene.items.contains(&baseline(f.theme(), &layout)));
-            assert!(!layout.y_grid.contains(&layout.baseline.at));
-            assert_eq!(layout.y_grid.len(), 2);
+    fn line_keeps_gridline_at_zero_or_lower_edge_but_bars_draw_baseline() {
+        for bars in [false, true] {
+            for (low, high) in [(-1.0, 1.0), (1.0, 3.0)] {
+                let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+                let x = if bars {
+                    ScaleKind::Category
+                } else {
+                    ScaleKind::Linear
+                };
+                let mut axes = f.add_axes(x, ScaleKind::Linear).unwrap();
+                axes.ylim(low, high).unwrap();
+                axes.yticks(&[low, (low + high) / 2.0, high]).unwrap();
+                if bars {
+                    axes.bar(categories(), &[low, high], Default::default())
+                        .unwrap();
+                } else {
+                    line(&mut axes, low, high);
+                }
+                let lib = FontLibrary::global();
+                let (_, layout) = plan_figure(&f, (0, 0), lib);
+                let scene = f.to_scene(lib).unwrap();
+                assert_eq!(scene.items.contains(&baseline(f.theme(), &layout)), bars);
+                assert_eq!(layout.y_grid.contains(&layout.baseline.at), !bars);
+                assert_eq!(layout.y_grid.len(), if bars { 2 } else { 3 });
+                let Item::Group { items, clip: None } = &scene.items[0] else {
+                    panic!("expected unclipped chrome");
+                };
+                let y = layout.baseline.at;
+                let gridline = Item::Stroke {
+                    path: segment(point(layout.plot.x, y), point(layout.plot.right(), y)),
+                    style: grid_style(f.theme()),
+                };
+                assert_eq!(items.contains(&gridline), !bars);
+            }
         }
     }
 

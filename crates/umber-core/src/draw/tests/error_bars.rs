@@ -2,7 +2,7 @@
 //! NaN, categories, both orientations, and the edges of the domain, where a bar that touches a
 //! limit, crosses it or lies beyond it each have a defined result.
 
-use super::{mark_group, nums, plot_of, subpaths};
+use super::{nums, plot_of, subpaths};
 use crate::layout::Area;
 use crate::model::{AxisData, ErrorBarOptions, Figure};
 use crate::scene::{Item, LineCap, Scene};
@@ -38,10 +38,7 @@ fn scene_of(figure: &Figure) -> Scene {
 /// The items of the marks group of `figure`; empty when nothing is visible.
 fn items(figure: &Figure) -> Vec<Item> {
     let scene = scene_of(figure);
-    if scene.items.len() == 2 {
-        return Vec::new();
-    }
-    mark_group(&scene).1.to_vec()
+    super::mark_items(&scene).to_vec()
 }
 
 type Segment = ((f64, f64), (f64, f64));
