@@ -352,6 +352,9 @@ fn benches(c: &mut Criterion) {
     group.bench_function("heatmap_1000x1000_png", |b| {
         b.iter(|| black_box(heatmap.to_png(i64::from(DPI)).unwrap()));
     });
+    group.bench_function("heatmap_1000x1000_scene", |b| {
+        b.iter(|| black_box(heatmap.to_scene(library).unwrap()));
+    });
     let hist2d = hist2d_figure(1_000_000);
     group.bench_function("hist2d_1m_png", |b| {
         b.iter(|| black_box(hist2d.to_png(i64::from(DPI)).unwrap()));
