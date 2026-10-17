@@ -781,11 +781,82 @@ mod tests {
             .unzip()
     }
 
+    /// Whether `p` lies inside `polygon` by the nonzero winding rule, or within `tolerance` of
+    /// its outline.
+    fn covers(polygon: &[(f64, f64)], p: (f64, f64), tolerance: f64) -> bool {
+        let mut winding = 0;
+        for (i, &a) in polygon.iter().enumerate() {
+            let b = polygon[(i + 1) % polygon.len()];
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+            if (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy) <= tolerance {
+                return true;
+            }
+            let side = dx * (p.1 - a.1) - (p.0 - a.0) * dy;
+            if a.1 <= p.1 && b.1 > p.1 && side > 0.0 {
+                winding += 1;
+            } else if b.1 <= p.1 && a.1 > p.1 && side < 0.0 {
+                winding -= 1;
+            }
+        }
+        winding != 0
+    }
+
+    /// The whole hexagon that the drawn cell `outline` is, `None` when it is clipped or not a
+    /// hexagon of equal sides. A drawn hexagon pushes its edges shared with neighbours drawn
+    /// after it out under them by at most 1 pt, its corners along the edges between those
+    /// neighbours (at most `2 / sqrt(3)` pt), but keeps four consecutive corners: those give
+    /// the hexagon, whose two other corners the outline must contain, and the outline must lie
+    /// that close to it.
+    fn whole_hexagon(outline: &[Point]) -> Option<Vec<Point>> {
+        let n = outline.len();
+        if n < 6 {
+            return None;
+        }
+        let points: Vec<(f64, f64)> = outline
+            .iter()
+            .map(|p| (f64::from(p.x), f64::from(p.y)))
+            .collect();
+        let length = |u: (f64, f64), v: (f64, f64)| (u.0 - v.0).hypot(u.1 - v.1);
+        (0..n).find_map(|k| {
+            let [a, b, c, d] = [0, 1, 2, 3].map(|i| points[(k + i) % n]);
+            let side = length(a, b);
+            if side <= 0.0
+                || (length(b, c) - side).abs() >= 1e-3
+                || (length(c, d) - side).abs() >= 1e-3
+            {
+                return None;
+            }
+            let hexagon = [
+                a,
+                b,
+                c,
+                d,
+                (a.0 + d.0 - b.0, a.1 + d.1 - b.1),
+                (a.0 + d.0 - c.0, a.1 + d.1 - c.1),
+            ];
+            let whole = hexagon.iter().all(|&corner| covers(&points, corner, 1e-3))
+                && points
+                    .iter()
+                    .all(|&p| covers(&hexagon, p, 2.0 / 3.0_f64.sqrt() + 1e-3));
+            whole.then(|| {
+                hexagon
+                    .iter()
+                    .map(|&(x, y)| Point {
+                        x: x as f32,
+                        y: y as f32,
+                    })
+                    .collect()
+            })
+        })
+    }
+
     fn assert_regular_whole(f: &Figure) {
         let polygons = cells(f);
         assert!(polygons.len() >= 10, "{} cells", polygons.len());
-        for points in polygons.into_iter().filter(|p| p.len() > 1) {
-            assert_eq!(points.len(), 6, "clipped hexagon: {points:?}");
+        for outline in polygons.into_iter().filter(|p| p.len() > 1) {
+            let points =
+                whole_hexagon(&outline).unwrap_or_else(|| panic!("clipped hexagon: {outline:?}"));
             let sides: Vec<_> = (0..6)
                 .map(|i| {
                     let a = points[i];
@@ -801,17 +872,11 @@ mod tests {
     }
 
     fn contains_point(polygon: &[Point], x: f64, y: f64) -> bool {
-        let mut positive = false;
-        let mut negative = false;
-        for (a, b) in polygon.iter().zip(polygon.iter().cycle().skip(1)) {
-            let dx = f64::from(b.x) - f64::from(a.x);
-            let dy = f64::from(b.y) - f64::from(a.y);
-            let cross = dx * (y - f64::from(a.y)) - dy * (x - f64::from(a.x));
-            let tolerance = 1e-4 * dx.hypot(dy);
-            positive |= cross > tolerance;
-            negative |= cross < -tolerance;
-        }
-        polygon.len() >= 3 && !(positive && negative)
+        let points: Vec<(f64, f64)> = polygon
+            .iter()
+            .map(|p| (f64::from(p.x), f64::from(p.y)))
+            .collect();
+        points.len() >= 3 && covers(&points, (x, y), 1e-4)
     }
 
     fn assert_hexbin_points_covered(limits: [bool; 2], columns: i64) {
@@ -902,15 +967,16 @@ mod tests {
                 assert!(!whole.is_empty());
                 let irregular = whole
                     .iter()
-                    .filter(|polygon| {
+                    .filter(|outline| {
+                        let Some(polygon) = whole_hexagon(outline) else {
+                            return true;
+                        };
                         let sides: Vec<_> = polygon
                             .iter()
                             .zip(polygon.iter().cycle().skip(1))
                             .map(|(a, b)| f64::from((a.x - b.x).hypot(a.y - b.y)))
                             .collect();
-                        polygon.len() != 6
-                            || sides[0] <= 0.0
-                            || sides.iter().any(|side| (side - sides[0]).abs() >= 1e-4)
+                        sides[0] <= 0.0 || sides.iter().any(|side| (side - sides[0]).abs() >= 1e-4)
                     })
                     .count();
                 let result = format!(
@@ -1410,9 +1476,12 @@ mod tests {
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
         let cells = cells(&f);
         assert_eq!(cells.len(), 3);
-        assert_eq!(cells[0].len(), 4);
-        let width = (cells[0][1].x - cells[0][0].x).abs() as f64;
-        let height = (cells[0][2].y - cells[0][1].y).abs() as f64;
+        // The top row is drawn first; the bottom left cell, last, has no neighbour after it
+        // to reach under and spans its edges exactly.
+        let cell = &cells[2];
+        assert_eq!(cell.len(), 4);
+        let width = (cell[1].x - cell[0].x).abs() as f64;
+        let height = (cell[2].y - cell[1].y).abs() as f64;
         assert!((width - layout.plot.width / 4.0).abs() < 1e-4);
         assert!((height - layout.plot.height / 5.0).abs() < 1e-4);
     }
@@ -1536,7 +1605,7 @@ mod tests {
                 }
             }
             let mut whole = 0;
-            for points in cells(&f).into_iter().filter(|p| p.len() == 6) {
+            for points in cells(&f).iter().filter_map(|p| whole_hexagon(p)) {
                 whole += 1;
                 let sides: Vec<_> = (0..6)
                     .map(|i| {
@@ -1590,8 +1659,9 @@ mod tests {
             }
             let polygons = cells(&f);
             assert!(!polygons.is_empty());
-            for points in polygons {
-                assert_eq!(points.len(), 6);
+            for outline in polygons {
+                let points = whole_hexagon(&outline)
+                    .unwrap_or_else(|| panic!("log={log}: clipped hexagon: {outline:?}"));
                 let sides: Vec<_> = (0..6)
                     .map(|i| {
                         let a = points[i];

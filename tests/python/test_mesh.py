@@ -74,6 +74,47 @@ def test_dense_hexbin_grid_geometry(
     assert_svg_hexagons_regular_and_whole(fig.to_svg())
 
 
+def covers(polygon: list[tuple[float, float]], p: tuple[float, float], tolerance: float) -> bool:
+    """Whether ``p`` lies inside ``polygon`` (nonzero winding) or within ``tolerance`` of it."""
+    winding = 0
+    for i, a in enumerate(polygon):
+        b = polygon[(i + 1) % len(polygon)]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        t = min(1.0, max(0.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)))
+        if math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy) <= tolerance:
+            return True
+        side = dx * (p[1] - a[1]) - (p[0] - a[0]) * dy
+        if a[1] <= p[1] < b[1] and side > 0:
+            winding += 1
+        elif b[1] <= p[1] < a[1] and side < 0:
+            winding -= 1
+    return winding != 0
+
+
+def whole_hexagon(outline: list[tuple[float, float]]) -> list[tuple[float, float]] | None:
+    """The whole hexagon a drawn cell outline is, or None when it is clipped or irregular.
+
+    A drawn hexagon pushes the edges it shares with neighbours drawn after it out under them by
+    at most 1 pt (its corners by at most 2 / sqrt(3) pt) but keeps four consecutive corners.
+    Those give the hexagon; the outline must contain its two other corners and lie that close
+    to it.
+    """
+    n = len(outline)
+    for k in range(n if n >= 6 else 0):
+        a, b, c, d = (outline[(k + i) % n] for i in range(4))
+        side = math.dist(a, b)
+        if side <= 0 or abs(math.dist(b, c) - side) > 0.003 or abs(math.dist(c, d) - side) > 0.003:
+            continue
+        e = (a[0] + d[0] - b[0], a[1] + d[1] - b[1])
+        f = (a[0] + d[0] - c[0], a[1] + d[1] - c[1])
+        hexagon = [a, b, c, d, e, f]
+        if all(covers(outline, corner, 0.003) for corner in (e, f)) and all(
+            covers(hexagon, p, 2 / math.sqrt(3) + 0.003) for p in outline
+        ):
+            return hexagon
+    return None
+
+
 def assert_svg_hexagons_regular_and_whole(svg: str) -> None:
     count = 0
     root = ET.fromstring(svg)
@@ -84,10 +125,11 @@ def assert_svg_hexagons_regular_and_whole(svg: str) -> None:
             data = path.attrib.get("d", "")
             if "C" in data or path.attrib.get("fill") in (None, "none"):
                 continue
-            points = [
+            outline = [
                 (float(x), float(y)) for x, y in re.findall(r"[ML]([-\d.e]+) ([-\d.e]+)", data)
             ]
-            assert len(points) == 6, data
+            points = whole_hexagon(outline)
+            assert points is not None, data
             sides = [math.dist(points[j], points[(j + 1) % 6]) for j in range(6)]
             assert min(sides) > 0
             assert max(sides) - min(sides) < 0.003, sides
