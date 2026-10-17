@@ -1,1 +1,3 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Crowded automatic category labels use the smallest fitting 1/2/5 decade step.
+errors/x-label-overflow

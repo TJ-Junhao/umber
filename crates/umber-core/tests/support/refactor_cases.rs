@@ -90,6 +90,7 @@ mod corpus {
     pub mod bars;
     pub mod r#box;
     pub mod bubbles;
+    pub mod category_labels;
     pub mod cmap;
     pub mod color_by;
     pub mod colorbar;
@@ -155,6 +156,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     text("api", "text-layout.txt", text_layout_cases(&lib));
     corpus::area::cases(&lib, &mut sink);
     corpus::bars::cases(&lib, &mut sink);
+    corpus::category_labels::cases(&lib, &mut sink);
     corpus::hist::cases(&lib, &mut sink);
     corpus::inputs::cases(&lib, &mut sink);
     corpus::legend::cases(&lib, &mut sink);
