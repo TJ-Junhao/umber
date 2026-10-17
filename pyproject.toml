@@ -46,6 +46,9 @@ dev = [
     "polars>=2.0.0",
     "ipython>=9.17.1",
 ]
+bench = [
+    "matplotlib==3.11.2",
+]
 
 [tool.maturin]
 manifest-path = "crates/umber-py/Cargo.toml"
