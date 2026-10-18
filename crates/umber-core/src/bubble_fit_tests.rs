@@ -344,7 +344,8 @@ fn bubbles_larger_than_the_plot_keep_the_data_limits_and_are_clipped() {
     let make = |draw| {
         let mut f = Figure::new(0.75, 0.75, Theme::pigment()).unwrap();
         let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-        a.legend(LegendStyle::None)
+        a.legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap()
             .xticks(&[])
             .unwrap()
             .yticks(&[])

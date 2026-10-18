@@ -855,10 +855,12 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
     assert!(planned.panels.iter().all(|(_, p)| p.legend.is_empty()));
     f.axes_at_mut(GridIndex::Auto, GridIndex::At(0))
         .unwrap()
-        .legend(LegendStyle::Header);
+        .legend(LegendStyle::Header, crate::SizeSpec::Auto)
+        .unwrap();
     f.axes_at_mut(GridIndex::Auto, GridIndex::At(1))
         .unwrap()
-        .legend(LegendStyle::None);
+        .legend(LegendStyle::None, crate::SizeSpec::Auto)
+        .unwrap();
     let groups = ShareGroups::new(&f);
     let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
     let planned = plan(

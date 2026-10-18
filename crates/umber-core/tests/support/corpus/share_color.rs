@@ -25,6 +25,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                     label: "Temperature".into(),
                     position,
                     format: Some(TickFormat::fixed(0).unwrap().affix("", " °C").unwrap()),
+                    ..ColorbarOptions::default()
                 })
                 .unwrap();
             for row in 0..2 {

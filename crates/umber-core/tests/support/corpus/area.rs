@@ -224,7 +224,8 @@ fn figures() -> Vec<(String, umber_core::Figure)> {
             .unwrap()
             .ylim(6.0, 14.0)
             .unwrap()
-            .legend(LegendStyle::Direct);
+            .legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
+            .unwrap();
         out.push((format!("fig-area-direct-limits-{theme_name}"), f));
     }
 
@@ -278,7 +279,8 @@ fn figures() -> Vec<(String, umber_core::Figure)> {
     axes(&mut f)
         .line(numbers(x), &y, labelled_line("Mean", Dash::Dashed))
         .unwrap()
-        .legend(LegendStyle::Chips);
+        .legend(LegendStyle::Chips, umber_core::SizeSpec::Auto)
+        .unwrap();
     out.push(("fig-area-chips".to_owned(), f));
 
     // Many points: the line and its fill are downsampled together.

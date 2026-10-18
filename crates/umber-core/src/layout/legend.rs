@@ -161,11 +161,20 @@ impl MeasuredRow {
         theme: &Theme,
         legend: &Legend,
         lib: &SceneFonts<'_>,
+        size: SizeSpec,
     ) -> Result<Option<MeasuredRow>> {
         if legend.row().is_empty() {
             return Ok(None);
         }
-        let style = Styles::new(theme).body;
+        let style = Styles::new(
+            theme,
+            super::TextRole::Title,
+            super::StyleSizes {
+                body: size,
+                ..Default::default()
+            },
+        )
+        .body;
         let size = f64::from(style.size);
         let row_style = legend.row_style();
         let (padding_x, entry_gap, line) = match row_style {
@@ -385,14 +394,15 @@ impl<'a> MeasuredLegend<'a> {
         theme: &Theme,
         legend: &Legend<'a>,
         lib: &SceneFonts<'_>,
+        size: SizeSpec,
     ) -> Result<MeasuredLegend<'a>> {
         if legend.is_empty() {
             return Ok(MeasuredLegend::default());
         }
         Ok(MeasuredLegend {
             position: crate::LegendPosition::TopLeft,
-            row: MeasuredRow::measure(theme, legend, lib)?,
-            direct: DirectLabels::measure(theme, legend, lib)?,
+            row: MeasuredRow::measure(theme, legend, lib, size)?,
+            direct: DirectLabels::measure(theme, legend, lib, size)?,
         })
     }
 
@@ -476,13 +486,22 @@ impl<'a> DirectLabels<'a> {
         theme: &Theme,
         legend: &Legend<'a>,
         lib: &SceneFonts<'_>,
+        size: SizeSpec,
     ) -> Result<DirectLabels<'a>> {
         if legend.direct().is_empty() {
             return Ok(DirectLabels::default());
         }
         let style = TextStyle {
             weight: Weight::SemiBold,
-            ..Styles::new(theme).body
+            ..Styles::new(
+                theme,
+                super::TextRole::Title,
+                super::StyleSizes {
+                    body: size,
+                    ..Default::default()
+                },
+            )
+            .body
         };
         let entries = legend
             .direct()
@@ -1181,7 +1200,8 @@ mod tests {
                     },
                 )
                 .unwrap()
-                .legend(crate::LegendStyle::Header);
+                .legend(crate::LegendStyle::Header, crate::SizeSpec::Auto)
+                .unwrap();
             let (b, marks, legend) = swatch_and_items(&f);
             let Item::Stroke { style, .. } = &legend[0] else {
                 panic!("a line swatch is a stroke");
@@ -1611,7 +1631,7 @@ mod tests {
             let limits = crate::resolve::Limits::of(axes);
             let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits);
             let fonts = crate::test_support::figure_fonts(f.theme());
-            DirectLabels::measure(f.theme(), &legend, &fonts)
+            DirectLabels::measure(f.theme(), &legend, &fonts, SizeSpec::Auto)
                 .unwrap()
                 .reserve(cap)
         };

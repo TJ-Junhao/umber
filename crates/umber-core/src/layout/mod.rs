@@ -42,7 +42,7 @@ use crate::error::{number, quoted};
 use crate::model::Axes;
 use crate::resolve::{AxisTick, Baseline, NormalizedPos, ValueAxis};
 use crate::text::{CheckedStyle, FaceId, SceneFonts};
-use crate::{Error, FontLibrary, Result, TextLayout, TextStyle, Theme, Weight};
+use crate::{Error, FontLibrary, Result, SizeSpec, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
 pub(crate) const PADDING: f64 = 12.0;
@@ -252,6 +252,40 @@ fn scaled(size: f32, scale: f32) -> f32 {
     }
 }
 
+/// Resolves a text size against its role and font scale, then applies the font-size cap.
+/// Points ignore the font scale; multiples use the scaled role size.
+pub(crate) fn text_size(spec: SizeSpec, role_size: f32, font_scale: f32) -> f32 {
+    scaled(spec.resolve(role_size * font_scale), 1.0)
+}
+
+/// The theme role whose size an override resolves against.
+#[derive(Clone, Copy)]
+enum TextRole {
+    Title,
+    FigureTitle,
+    Body,
+    Tick,
+}
+
+impl TextRole {
+    fn size(self, theme: &Theme, size: SizeSpec) -> f32 {
+        let role_size = match self {
+            Self::Title => theme.title_size(),
+            Self::FigureTitle => theme.title_size() * panel::FIGURE_TITLE_SCALE,
+            Self::Body | Self::Tick => theme.body_size(),
+        };
+        text_size(size, role_size, theme.font_scale())
+    }
+}
+
+/// Independent overrides for the title, body and tick styles of a text block.
+#[derive(Default)]
+struct StyleSizes {
+    title: SizeSpec,
+    body: SizeSpec,
+    tick: SizeSpec,
+}
+
 /// The face of the title font in the fonts of a figure (see [`figure_fonts`]).
 pub(crate) const TITLE_FACE: FaceId = FaceId::new(0);
 /// The face of the body font in the fonts of a figure (see [`figure_fonts`]).
@@ -271,26 +305,40 @@ struct Styles {
 }
 
 impl Styles {
-    fn new(theme: &Theme) -> Styles {
-        let scale = theme.font_scale();
+    fn new(theme: &Theme, title_role: TextRole, sizes: StyleSizes) -> Styles {
         let body = TextStyle {
             face: BODY_FACE,
             weight: Weight::Regular,
-            size: scaled(theme.body_size(), scale),
+            size: TextRole::Body.size(theme, sizes.body),
             tabular_figures: false,
         };
         Styles {
             title: TextStyle {
                 face: TITLE_FACE,
                 weight: Weight::SemiBold,
-                size: scaled(theme.title_size(), scale),
+                size: title_role.size(theme, sizes.title),
                 tabular_figures: false,
             },
             body,
             tick: TextStyle {
+                size: TextRole::Tick.size(theme, sizes.tick),
                 tabular_figures: true,
                 ..body
             },
+        }
+    }
+}
+
+impl Styles {
+    /// A role style with an independent size, retaining its font and shaping settings.
+    fn sized(&self, theme: &Theme, role: TextRole, size: SizeSpec) -> TextStyle {
+        TextStyle {
+            size: role.size(theme, size),
+            ..match role {
+                TextRole::Title | TextRole::FigureTitle => self.title,
+                TextRole::Body => self.body,
+                TextRole::Tick => self.tick,
+            }
         }
     }
 }
@@ -304,6 +352,12 @@ impl Styles {
 fn metrics(lib: &SceneFonts<'_>, style: &TextStyle) -> Result<(f64, f64)> {
     let (ascent, descent) = lib.metrics(style)?;
     Ok((f64::from(ascent), f64::from(descent)))
+}
+
+/// Extra descent of an independently sized title cannot use the tick font's existing room.
+/// Equal-sized title and tick fonts keep the original baseline gap.
+fn title_tick_gap(title_descent: f64, tick_descent: f64) -> f64 {
+    AXIS_LABEL_GAP.max(title_descent - tick_descent + AXIS_LABEL_GAP)
 }
 
 fn fits(layout: &TextLayout) -> bool {
@@ -507,7 +561,7 @@ pub(crate) fn centered_tick_label(
     text: &str,
     (x, y): (f64, f64),
 ) -> Result<Label> {
-    let style = Styles::new(theme).tick;
+    let style = Styles::new(theme, TextRole::Title, StyleSizes::default()).tick;
     let mut label = measure(lib, text, style)?;
     label.x = x - label.width() / 2.0;
     label.y = y + Y_LABEL_CENTER * f64::from(style.size);
@@ -608,7 +662,7 @@ pub(crate) struct TickRoom<'a> {
 }
 
 /// The tick labels of a figure: their style, checked against the figure's fonts, and the
-/// measures every tick room uses. One per layout, so that tick rooms measure tick labels
+/// measures every tick room uses. One per axis size, so that tick rooms measure tick labels
 /// without errors.
 pub(crate) struct TickFont<'a> {
     /// The fonts.
@@ -628,10 +682,31 @@ impl<'a> TickFont<'a> {
     ///
     /// As [`measure`], naming the digit `0`, which it measures.
     pub(crate) fn new(lib: &'a SceneFonts<'a>, theme: &Theme) -> Result<TickFont<'a>> {
-        let style = Styles::new(theme).tick;
+        Self::sized(lib, theme, SizeSpec::Auto)
+    }
+
+    /// The tick labels with the axis' size override, checked before tick searches begin.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::new`].
+    pub(crate) fn sized(
+        lib: &'a SceneFonts<'a>,
+        theme: &Theme,
+        size: SizeSpec,
+    ) -> Result<TickFont<'a>> {
+        let style = Styles::new(
+            theme,
+            TextRole::Title,
+            StyleSizes {
+                tick: size,
+                ..Default::default()
+            },
+        )
+        .tick;
         let checked = lib.check("0", &style)?;
-        let (ascent, descent) = metrics(lib, &style)?;
         let digit = measure_checked(lib, "0", &checked).width();
+        let (ascent, descent) = metrics(lib, &style)?;
         Ok(TickFont {
             lib,
             style: checked,
@@ -807,6 +882,8 @@ pub(crate) fn initial_plot_size(width: f64, height: f64) -> PlotSize {
 pub(crate) struct LayoutInput<'a> {
     /// The theme.
     pub theme: &'a Theme,
+    /// The figure title size, for attributing vertical room errors.
+    pub figure_title_size: SizeSpec,
     /// The axes, for their texts and cells.
     pub axes: &'a Axes,
     /// The legend, measured by [`MeasuredLegend::measure`].
@@ -1050,6 +1127,39 @@ fn solve_single(
                 true,
             ));
         }
+        if [
+            input.figure_title_size,
+            input.axes.title_size(),
+            input.axes.subtitle_size(),
+            input.axes.xlabel_size(),
+            input.axes.ylabel_size(),
+            input.axes.xtick_size(),
+            input.axes.ytick_size(),
+            input.axes.legend_size(),
+        ]
+        .into_iter()
+        .any(|size| size != SizeSpec::Auto)
+        {
+            let (mut role, mut text, mut band) = bands.largest_vertical_text();
+            let header_band = top - frame.y - PADDING;
+            if header_band > band {
+                (role, text, band) = ("figure header", "", header_band);
+            }
+            let deficit = MIN_PLOT - plot_height;
+            let (needed, available) = widths(band, (band - deficit).max(0.0));
+            let name = if text.is_empty() {
+                role.to_owned()
+            } else {
+                format!("{role} {}", quoted(text))
+            };
+            return Err(Error::style(
+                context,
+                format!(
+                    "the {name} needs {needed} pt vertically; only {available} pt is available."
+                ),
+            )
+            .with_hint("make the figure taller, or use a smaller text size."));
+        }
         return Err(figure_too_short(
             context,
             frame.height,
@@ -1272,6 +1382,18 @@ mod tests {
 
     fn plan_of(figure: &Figure) -> (Resolved, Layout) {
         plan_figure(figure, (0, 0), lib())
+    }
+
+    #[test]
+    fn text_size_resolves_the_role_before_clamping() {
+        assert_eq!(text_size(SizeSpec::Auto, 15.0, 2.0), 30.0);
+        assert_eq!(text_size(SizeSpec::times(1.5).unwrap(), 15.0, 2.0), 45.0);
+        assert_eq!(text_size(SizeSpec::pt(12.0).unwrap(), 15.0, 2.0), 12.0);
+        assert_eq!(
+            text_size(SizeSpec::times(10.0).unwrap(), 1000.0, 10.0),
+            MAX_FONT_SIZE
+        );
+        assert_eq!(text_size(SizeSpec::pt(12.0).unwrap(), 1000.0, 10.0), 12.0);
     }
 
     #[test]
@@ -2113,17 +2235,21 @@ mod tests {
         } else {
             axes.yticks(&[]).unwrap();
         }
-        axes.legend_at(crate::LegendStyle::Header, crate::LegendPosition::Right)
-            .unwrap()
-            .line(
-                AxisData::Numbers(vec![0.0, 1.0]),
-                &[0.0, 1.0],
-                LineOptions {
-                    label: "a".into(),
-                    ..LineOptions::default()
-                },
-            )
-            .unwrap();
+        axes.legend_at(
+            crate::LegendStyle::Header,
+            crate::LegendPosition::Right,
+            crate::SizeSpec::Auto,
+        )
+        .unwrap()
+        .line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: "a".into(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
         f
     }
 
@@ -2150,7 +2276,14 @@ mod tests {
                 err.to_string().contains("the figure is 35 pt wide"),
                 "grid={grid}: {err}"
             );
-            assert_eq!(err.hint(), Some("widen the figure."));
+            assert_eq!(
+                err.hint(),
+                Some(if grid {
+                    "widen the figure, use smaller text, or remove titles or legends."
+                } else {
+                    "widen the figure."
+                })
+            );
         }
     }
 
@@ -2165,7 +2298,11 @@ mod tests {
             .unwrap()
             .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
             .unwrap()
-            .legend_at(crate::LegendStyle::Header, crate::LegendPosition::Bottom)
+            .legend_at(
+                crate::LegendStyle::Header,
+                crate::LegendPosition::Bottom,
+                crate::SizeSpec::Auto,
+            )
             .unwrap()
             .line(
                 AxisData::Numbers(vec![0.0, 1.0]),
@@ -2298,7 +2435,8 @@ mod tests {
             .unwrap()
             .yticks(&[])
             .unwrap()
-            .legend(crate::LegendStyle::Header);
+            .legend(crate::LegendStyle::Header, crate::SizeSpec::Auto)
+            .unwrap();
         if title {
             axes.title("Load");
         }
@@ -2386,7 +2524,9 @@ mod tests {
         // Direct labels and no legend take no header room, and the hint does not name them.
         for style in [crate::LegendStyle::Direct, crate::LegendStyle::None] {
             let mut f = bare(2.0, 0.3, true, false, true);
-            f.single_axes_mut().legend(style);
+            f.single_axes_mut()
+                .legend(style, crate::SizeSpec::Auto)
+                .unwrap();
             assert_eq!(
                 overflow(&f).hint(),
                 Some("make the figure taller, or remove the title.")
@@ -2446,7 +2586,9 @@ mod tests {
         for style in [crate::LegendStyle::Direct, crate::LegendStyle::None] {
             let mut f = bare(2.0, 0.3, true, false, true);
             f.title("Figure");
-            f.single_axes_mut().legend(style);
+            f.single_axes_mut()
+                .legend(style, crate::SizeSpec::Auto)
+                .unwrap();
             assert_eq!(
                 overflow(&f).hint(),
                 Some("make the figure taller, or remove the figure header or title.")
@@ -2462,7 +2604,12 @@ mod tests {
         }
         let lib = FontLibrary::with_fallbacks(Vec::new());
         let fonts = figure_fonts(&lib, &Theme::pigment()).unwrap();
-        let label = measure(&fonts, "WWWW", Styles::new(&Theme::pigment()).body).unwrap();
+        let label = measure(
+            &fonts,
+            "WWWW",
+            Styles::new(&Theme::pigment(), TextRole::Title, StyleSizes::default()).body,
+        )
+        .unwrap();
         let width = label.width().ceil();
         for container in ["figure", "panel"] {
             for (room, shown) in [(width - 0.6, width - 1.0), (-0.1, -1.0)] {
@@ -2489,7 +2636,8 @@ mod tests {
             .subtitle("Daily mean, MW")
             .xlabel("Day")
             .ylabel("MW")
-            .legend(style);
+            .legend(style, crate::SizeSpec::Auto)
+            .unwrap();
         for (i, label) in ["North", "South", "East"].into_iter().enumerate() {
             axes.line(
                 AxisData::Numbers(vec![0.0, 30.0]),
@@ -2599,7 +2747,10 @@ mod tests {
                 for (width, header, lines) in cases {
                     let mut f = Figure::new(width, 2.0, theme.clone()).unwrap();
                     let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-                    axes.xlabel("Day").ylabel("MW").legend(style);
+                    axes.xlabel("Day")
+                        .ylabel("MW")
+                        .legend(style, crate::SizeSpec::Auto)
+                        .unwrap();
                     if header {
                         axes.title("Station output").subtitle("Daily mean, MW");
                     }
@@ -2675,7 +2826,7 @@ mod tests {
                     LegendStyle::None,
                 ];
                 if let Some(&style) = styles.get(style) {
-                    axes.legend(style);
+                    axes.legend(style, crate::SizeSpec::Auto).unwrap();
                 }
                 for i in 0..entries {
                     axes.line(
