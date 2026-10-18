@@ -3,8 +3,9 @@
 //! A [`Scene`] is plain data: a list of drawing primitives in points (1/72 inch), with the y
 //! axis pointing down and the origin at the top-left corner of the figure. Text enters a scene
 //! already shaped and outlined, and keeps its source string and style so that the SVG backend
-//! can also write it as editable text; the style names its font by its index in the scene's font
-//! list. Apart from [`Scene::push_text`], which lays text out and so fails for a face its fonts
+//! can also write it as editable text, and its glyphs so that the PDF backend can embed exactly
+//! the glyphs the outline was drawn from; the style names its font by its index in the scene's
+//! font list. Apart from [`Scene::push_text`], which lays text out and so fails for a face its fonts
 //! do not have, no validation happens when a scene is built; the renderers skip values they
 //! cannot draw.
 //!
@@ -29,7 +30,7 @@
 use crate::color::Rgba;
 use crate::fonts::Font;
 use crate::geometry::{Path, Point};
-use crate::text::{FaceId, TextStyle};
+use crate::text::{FaceId, TextGlyphs, TextStyle};
 
 /// The deepest group nesting the renderers draw. Content of groups nested deeper than this is
 /// omitted, which bounds the renderers' recursion.
@@ -247,7 +248,7 @@ pub enum Paint {
 }
 
 /// Text that has already been shaped and outlined, plus what is needed to re-emit it as
-/// editable SVG text.
+/// editable SVG text and as embedded text in PDF.
 ///
 /// # Examples
 ///
@@ -280,6 +281,9 @@ pub struct TextItem {
     pub outline: Path,
     /// Advance width in points.
     pub width: f32,
+    /// The glyphs the outline was drawn from, placed relative to `origin`. Empty for a record
+    /// built by hand, which backends that write text as text then draw from its outline.
+    pub glyphs: TextGlyphs,
 }
 
 /// One drawing primitive.
