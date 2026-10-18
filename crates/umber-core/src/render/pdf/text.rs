@@ -2,14 +2,25 @@
 //! embedded as CID fonts with a `ToUnicode` map, and the operators that show the glyphs.
 //!
 //! A page's fonts are collected from its text items first ([`FontSet`]), so that each font is
-//! subset once, with exactly the glyphs drawn, before the content refers to it ([`Fonts`]).
-//! Character ids are the glyphs' ids in the subset (`Identity-H`, and `/CIDToGIDMap
-//! /Identity` for TrueType outlines), in the order the glyphs are first used, `.notdef` first.
+//! subset once, with exactly the glyphs drawn, before the content refers to it ([`Fonts`]). A
+//! font is one font program (the same bytes and face), wherever its runs came from. Character
+//! ids are the glyphs' ids in the subset (`Identity-H`, and `/CIDToGIDMap /Identity` for
+//! TrueType outlines), in the order the glyphs are first used, `.notdef` first.
+//!
+//! The `ToUnicode` map gives each glyph the text it first stood for. A glyph can stand for
+//! different text elsewhere: a base letter alone and under a combining mark, or `.notdef` for
+//! different missing characters. A cluster of glyphs for which the map would give other text
+//! than the cluster stands for there is marked with its text as `/ActualText`, so text is
+//! extracted as written. Glyphs of a run whose font could not be embedded are drawn as
+//! outlines and are not extracted.
+//!
+//! Text smaller than [`MIN_TEXT_SIZE`] is not written: the document's precision cannot place
+//! it, and no rasterizer draws it.
 
 use std::collections::HashMap;
 
 use pdf_writer::types::{CidFontType, FontFlags, SystemInfo, UnicodeCmap};
-use pdf_writer::{Chunk, Content, Filter, Finish, Name, Rect as PdfRect, Ref, Str};
+use pdf_writer::{Chunk, Content, Filter, Finish, Name, Rect as PdfRect, Ref, Str, TextStr};
 use read_fonts::types::{GlyphId, Tag};
 use read_fonts::{FontRef, TableProvider};
 use skrifa::MetadataProvider;
@@ -20,18 +31,22 @@ use subsetter::GlyphRemapper;
 use super::super::normalize::text_is_visible;
 use super::write::{Refs, compress, rounded, subset_tag};
 use crate::scene::TextItem;
-use crate::text::{GlyphRun, PlacedGlyph, RunFont, TextGlyphs};
+use crate::text::{GlyphRun, PlacedGlyph, ProgramId, RunFont};
 
 /// The most characters a `ToUnicode` entry maps one glyph to; longer clusters keep their first
 /// characters. PDF readers accept at most 512 bytes per entry.
 const MAX_GLYPH_CHARS: usize = 32;
+
+/// The smallest font size, in points, that text is written at: 0.001 pt, the precision the
+/// document writes positions in, is 0.03 device pixels at the highest PNG resolution.
+pub(super) const MIN_TEXT_SIZE: f32 = 0.001;
 
 /// The fonts of a page's text and the glyphs used of each, collected before anything is
 /// written.
 #[derive(Default)]
 pub(super) struct FontSet<'s> {
     fonts: Vec<FontUse<'s>>,
-    index: HashMap<RunFont<'s>, usize>,
+    index: HashMap<ProgramId, usize>,
 }
 
 /// One font of a [`FontSet`]: the glyphs used, in first-use order after `.notdef`, and the text
@@ -42,20 +57,27 @@ struct FontUse<'s> {
     texts: HashMap<u16, String>,
 }
 
-/// Whether a text item can be written as text: it is visible and has glyphs.
-fn has_glyphs(item: &TextItem) -> bool {
-    text_is_visible(item.color, item.origin) && !item.glyphs.is_empty()
+/// Whether a text item is written as text: it is visible, has glyphs, and is at least
+/// [`MIN_TEXT_SIZE`].
+pub(super) fn written(item: &TextItem) -> bool {
+    text_is_visible(item.color, item.origin)
+        && !item.glyphs.is_empty()
+        && item.glyphs.size() >= MIN_TEXT_SIZE
 }
 
 impl<'s> FontSet<'s> {
     /// Adds the fonts and glyphs of `item`, if it is drawn as text at all.
     pub(super) fn collect(&mut self, item: &'s TextItem) {
-        if !has_glyphs(item) {
+        if !written(item) {
             return;
         }
         for run in item.glyphs.runs() {
             let font = run.run_font();
-            let slot = *self.index.entry(font).or_insert_with(|| {
+            // A font that cannot be read is not embedded; its run is drawn as outlines.
+            let Some(program) = font.program() else {
+                continue;
+            };
+            let slot = *self.index.entry(program).or_insert_with(|| {
                 self.fonts.push(FontUse {
                     font,
                     glyphs: GlyphRemapper::new(),
@@ -70,8 +92,8 @@ impl<'s> FontSet<'s> {
     }
 
     /// Subsets every font to its glyphs. A font that cannot be read again or subset is left
-    /// out; text in it is drawn from its outline.
-    pub(super) fn embed(self) -> Fonts<'s> {
+    /// out; the runs set in it are drawn as outlines.
+    pub(super) fn embed(self) -> Fonts {
         Fonts {
             fonts: self.fonts.into_iter().map(FontUse::embed).collect(),
             index: self.index,
@@ -142,8 +164,8 @@ pub(super) struct Embedded {
     cids: GlyphRemapper,
     /// The advance of each character id, in glyph space.
     widths: Vec<f32>,
-    /// The text of each character id that stands for any, in character id order.
-    texts: Vec<(u16, String)>,
+    /// The text the `ToUnicode` map gives each character id, empty for none.
+    texts: Vec<String>,
     descriptor: Descriptor,
 }
 
@@ -170,13 +192,13 @@ impl Embedded {
                 )
             })
             .collect();
-        let mut cid_texts: Vec<(u16, String)> = texts
-            .iter()
-            .filter_map(|(gid, text)| Some((glyphs.get(*gid)?, text.clone())))
+        let cid_texts = glyphs
+            .remapped_gids()
+            .map(|gid| texts.get(&gid).cloned().unwrap_or_default())
             .collect();
-        cid_texts.sort_by_key(|(cid, _)| *cid);
 
-        let subset = subsetter::subset(data, index, &glyphs).ok()?;
+        // At the default instance: CFF2 outlines become TrueType outlines there.
+        let subset = subsetter::subset_with_variations(data, index, &[], &glyphs).ok()?;
         let cff = {
             let parsed = FontRef::new(&subset).ok()?;
             match parsed.table_data(Tag::new(b"glyf")) {
@@ -227,6 +249,11 @@ impl Embedded {
     fn width(&self, cid: u16) -> f32 {
         self.widths.get(usize::from(cid)).copied().unwrap_or(0.0)
     }
+
+    /// The text the `ToUnicode` map gives character id `cid`, empty for none.
+    fn unicode(&self, cid: u16) -> &str {
+        self.texts.get(usize::from(cid)).map_or("", String::as_str)
+    }
 }
 
 /// The font's PostScript name, or its family name without spaces, reduced to the characters a
@@ -251,10 +278,21 @@ fn postscript_name(font: &FontRef<'_>) -> String {
 }
 
 /// The page's fonts, subset and ready to be written and shown.
-pub(super) struct Fonts<'s> {
+pub(super) struct Fonts {
     /// In first-use order; `None` for a font that could not be embedded.
     fonts: Vec<Option<Embedded>>,
-    index: HashMap<RunFont<'s>, usize>,
+    index: HashMap<ProgramId, usize>,
+}
+
+#[cfg(test)]
+impl Fonts {
+    /// These fonts with font `index` treated as one that could not be embedded.
+    pub(super) fn without(mut self, index: usize) -> Fonts {
+        if let Some(font) = self.fonts.get_mut(index) {
+            *font = None;
+        }
+        self
+    }
 }
 
 /// The resource name of font `index`.
@@ -262,26 +300,26 @@ pub(super) fn font_name(index: usize) -> String {
     format!("F{index}")
 }
 
-impl Fonts<'_> {
+impl Fonts {
     /// The resource index and subset of the font of `run`, when it was embedded.
-    fn get(&self, run: &GlyphRun) -> Option<(usize, &Embedded)> {
-        let index = *self.index.get(&run.run_font())?;
+    pub(super) fn get(&self, run: &GlyphRun) -> Option<(usize, &Embedded)> {
+        let index = *self.index.get(&run.run_font().program()?)?;
         Some((index, self.fonts.get(index)?.as_ref()?))
     }
 
-    /// Whether `item` can be shown as text: it has glyphs, and every font of them was embedded.
-    pub(super) fn can_show(&self, item: &TextItem) -> bool {
-        has_glyphs(item) && item.glyphs.runs().iter().all(|run| self.get(run).is_some())
+    /// Whether any run of `item` is shown as text: the item is [`written`] and some font
+    /// of its runs was embedded.
+    pub(super) fn shows_any(&self, item: &TextItem) -> bool {
+        written(item) && item.glyphs.runs().iter().any(|run| self.get(run).is_some())
     }
 
-    /// Shows the glyphs of `glyphs` in a text object, in a coordinate system whose origin is
-    /// the left end of the baseline and whose y axis points up. Runs whose font was not
-    /// embedded are left out; [`Fonts::can_show`] tells whether there are any.
-    pub(super) fn show(&self, content: &mut Content, glyphs: &TextGlyphs) {
-        let size = rounded(glyphs.size());
+    /// Shows the glyphs of `item` whose fonts were embedded in one text object, in a coordinate
+    /// system whose origin is the left end of the baseline and whose y axis points up.
+    pub(super) fn show(&self, content: &mut Content, item: &TextItem) {
+        let size = item.glyphs.size();
         content.begin_text();
         let mut current = None;
-        for run in glyphs.runs() {
+        for run in item.glyphs.runs() {
             let Some((index, font)) = self.get(run) else {
                 continue;
             };
@@ -289,7 +327,7 @@ impl Fonts<'_> {
                 content.set_font(Name(font_name(index).as_bytes()), size);
                 current = Some(index);
             }
-            show_run(content, font, run.glyphs(), size);
+            show_run(content, &operations(font, run, size));
         }
         content.end_text();
     }
@@ -323,67 +361,159 @@ enum Piece {
     Move(f32),
 }
 
-/// Glyphs on one baseline offset: a text matrix at the first glyph, then one `TJ` array.
+/// One step of showing a run.
 #[derive(Debug, Clone, PartialEq)]
-struct TextLine {
-    x: f32,
-    y: f32,
-    pieces: Vec<Piece>,
+enum Operation {
+    /// Start a line of glyphs at `(x, y)` in text space: a text matrix.
+    Line { x: f32, y: f32 },
+    /// Show glyphs and moves: one `TJ` array.
+    Show(Vec<Piece>),
+    /// Start marking the glyphs that follow with the text they stand for.
+    BeginText(String),
+    /// Stop marking.
+    EndText,
 }
 
-/// Shows `glyphs` of one run in `font` at `size`.
-fn show_run(content: &mut Content, font: &Embedded, glyphs: &[PlacedGlyph], size: f32) {
-    for line in lines(font, glyphs, size) {
-        content.set_text_matrix([1.0, 0.0, 0.0, 1.0, line.x, line.y]);
-        let mut shown = content.show_positioned();
-        let mut items = shown.items();
-        for piece in &line.pieces {
-            match piece {
-                Piece::Codes(codes) => {
-                    items.show(Str(codes));
+/// Writes `operations`.
+fn show_run(content: &mut Content, operations: &[Operation]) {
+    for operation in operations {
+        match operation {
+            Operation::Line { x, y } => {
+                content.set_text_matrix([1.0, 0.0, 0.0, 1.0, *x, *y]);
+            }
+            Operation::Show(pieces) => {
+                let mut shown = content.show_positioned();
+                let mut items = shown.items();
+                for piece in pieces {
+                    match piece {
+                        Piece::Codes(codes) => {
+                            items.show(Str(codes));
+                        }
+                        Piece::Move(amount) => {
+                            items.adjust(*amount);
+                        }
+                    }
                 }
-                Piece::Move(amount) => {
-                    items.adjust(*amount);
-                }
+            }
+            Operation::BeginText(text) => {
+                content
+                    .begin_marked_content_with_properties(Name(b"Span"))
+                    .properties()
+                    .actual_text(TextStr(text));
+            }
+            Operation::EndText => {
+                content.end_marked_content();
             }
         }
     }
 }
 
-/// The lines that show `glyphs` where the shaper put them, in text space (y up). A new line
-/// starts at each change of baseline offset; within a line, each glyph is moved from where the
-/// previous glyph's width left the pen to its own position.
-fn lines(font: &Embedded, glyphs: &[PlacedGlyph], size: f32) -> Vec<TextLine> {
-    let mut lines: Vec<TextLine> = Vec::new();
-    // Where the previous glyph's width leaves the pen.
-    let mut pen = 0.0_f32;
-    for glyph in glyphs {
-        let (x, y) = (glyph.x, rounded(-glyph.y));
-        if lines.last().is_none_or(|line| line.y != y) {
-            lines.push(TextLine {
-                x: rounded(x),
-                y,
-                pieces: Vec::new(),
-            });
-            pen = x;
+/// The operations that show the glyphs of `run` in `font` at `size` where the shaper put them,
+/// in text space (y up). A new line starts at each change of baseline offset; within a line,
+/// each glyph is moved from where the previous glyph's width left the pen to its own position.
+/// A cluster for which the `ToUnicode` map gives other text than it stands for is marked with
+/// that text.
+fn operations(font: &Embedded, run: &GlyphRun, size: f32) -> Vec<Operation> {
+    let mut shower = Shower {
+        font,
+        size,
+        operations: Vec::new(),
+        pieces: Vec::new(),
+        line: None,
+        pen: 0.0,
+    };
+    for (cluster, text) in clusters(run) {
+        let mapped: String = cluster
+            .iter()
+            .map(|glyph| font.unicode(font.cid(glyph.id)))
+            .collect();
+        let marked = mapped != text;
+        if marked {
+            shower.flush();
+            shower
+                .operations
+                .push(Operation::BeginText(text.to_owned()));
         }
-        let Some(line) = lines.last_mut() else {
-            continue;
-        };
-        // Where this glyph lands, which differs from `x` only by the rounding of the move.
-        let shift = rounded((pen - x) * 1000.0 / size);
-        if shift != 0.0 {
-            line.pieces.push(Piece::Move(shift));
+        for glyph in cluster {
+            shower.glyph(glyph);
         }
-        let placed = pen - shift * size / 1000.0;
-        let cid = font.cid(glyph.id);
-        match line.pieces.last_mut() {
-            Some(Piece::Codes(codes)) => codes.extend(cid.to_be_bytes()),
-            _ => line.pieces.push(Piece::Codes(cid.to_be_bytes().to_vec())),
+        if marked {
+            shower.flush();
+            shower.operations.push(Operation::EndText);
         }
-        pen = placed + font.width(cid) * size / 1000.0;
     }
-    lines
+    shower.flush();
+    shower.operations
+}
+
+/// The glyphs of `run` by cluster, each with the text it stands for: a cluster starts at each
+/// glyph that stands for text, and holds the glyphs after it that stand for none.
+fn clusters(run: &GlyphRun) -> Vec<(&[PlacedGlyph], &str)> {
+    let glyphs = run.glyphs();
+    let texts = run.glyph_texts();
+    let mut clusters: Vec<(&[PlacedGlyph], &str)> = Vec::new();
+    let mut start = 0;
+    for (i, text) in texts.iter().enumerate() {
+        if i > start && !text.is_empty() {
+            clusters.push((
+                glyphs.get(start..i).unwrap_or(&[]),
+                texts.get(start).copied().unwrap_or(""),
+            ));
+            start = i;
+        }
+    }
+    if start < glyphs.len() {
+        clusters.push((
+            glyphs.get(start..).unwrap_or(&[]),
+            texts.get(start).copied().unwrap_or(""),
+        ));
+    }
+    clusters
+}
+
+/// The state of [`operations`] between glyphs.
+struct Shower<'f> {
+    font: &'f Embedded,
+    size: f32,
+    operations: Vec<Operation>,
+    /// The `TJ` array being built.
+    pieces: Vec<Piece>,
+    /// The baseline offset of the current line, once one has started.
+    line: Option<f32>,
+    /// Where the previous glyph's width leaves the pen.
+    pen: f32,
+}
+
+impl Shower<'_> {
+    fn glyph(&mut self, glyph: &PlacedGlyph) {
+        let (x, y) = (glyph.x, rounded(-glyph.y));
+        if self.line != Some(y) {
+            self.flush();
+            self.operations.push(Operation::Line { x: rounded(x), y });
+            self.line = Some(y);
+            self.pen = x;
+        }
+        // Where this glyph lands, which differs from `x` only by the rounding of the move.
+        let shift = rounded((self.pen - x) * 1000.0 / self.size);
+        if shift != 0.0 {
+            self.pieces.push(Piece::Move(shift));
+        }
+        let placed = self.pen - shift * self.size / 1000.0;
+        let cid = self.font.cid(glyph.id);
+        match self.pieces.last_mut() {
+            Some(Piece::Codes(codes)) => codes.extend(cid.to_be_bytes()),
+            _ => self.pieces.push(Piece::Codes(cid.to_be_bytes().to_vec())),
+        }
+        self.pen = placed + self.font.width(cid) * self.size / 1000.0;
+    }
+
+    /// Ends the `TJ` array being built, if it has anything.
+    fn flush(&mut self) {
+        if !self.pieces.is_empty() {
+            self.operations
+                .push(Operation::Show(std::mem::take(&mut self.pieces)));
+        }
+    }
 }
 
 /// Writes `font` as a Type 0 font with its CID font, descriptor, program and `ToUnicode` map,
@@ -465,8 +595,10 @@ fn write_font(chunk: &mut Chunk, refs: &mut Refs, font: &Embedded) -> Ref {
     stream.finish();
 
     let mut cmap = UnicodeCmap::new(Name(b"Adobe-Identity-UCS"), UCS);
-    for (cid, text) in &font.texts {
-        cmap.pair_with_multiple(*cid, text.chars());
+    for (cid, text) in (0_u16..).zip(&font.texts) {
+        if !text.is_empty() {
+            cmap.pair_with_multiple(cid, text.chars());
+        }
     }
     let cmap = compress(&cmap.finish());
     let mut stream = chunk.cmap(to_unicode, &cmap);
@@ -494,9 +626,12 @@ mod tests {
 
     /// `text` in Inter at 12 pt, as a scene item.
     fn item(text: &str) -> TextItem {
-        let fonts = FontLibrary::global()
-            .with_figure_fonts(&[Font::INTER])
-            .unwrap();
+        item_in(Font::INTER, text)
+    }
+
+    /// `text` in `font` at 12 pt, as a scene item.
+    fn item_in(font: Font, text: &str) -> TextItem {
+        let fonts = FontLibrary::global().with_figure_fonts(&[font]).unwrap();
         let style = TextStyle {
             face: FaceId::new(0),
             weight: Weight::Regular,
@@ -513,7 +648,7 @@ mod tests {
         }
     }
 
-    fn embed(items: &[TextItem]) -> Fonts<'_> {
+    fn embed(items: &[TextItem]) -> Fonts {
         let mut set = FontSet::default();
         for item in items {
             set.collect(item);
@@ -522,26 +657,32 @@ mod tests {
     }
 
     #[test]
-    fn lines_put_every_glyph_where_the_shaper_did() {
+    fn operations_put_every_glyph_where_the_shaper_did() {
         for text in ["AVATAR Wolf", "Tokyo 1,234.5", "office ffi"] {
             let items = [item(text)];
             let fonts = embed(&items);
             for run in items[0].glyphs.runs() {
                 let (_, font) = fonts.get(run).unwrap();
                 let mut placed = Vec::new();
-                for line in lines(font, run.glyphs(), 12.0) {
-                    let mut pen = line.x;
-                    for piece in &line.pieces {
-                        match piece {
-                            Piece::Codes(codes) => {
-                                for pair in codes.chunks(2) {
-                                    let cid = u16::from_be_bytes([pair[0], pair[1]]);
-                                    placed.push((pen, line.y, cid));
-                                    pen += font.width(cid) * 12.0 / 1000.0;
+                let (mut pen, mut line_y) = (0.0_f32, 0.0_f32);
+                for operation in operations(font, run, 12.0) {
+                    match operation {
+                        Operation::Line { x, y } => (pen, line_y) = (x, y),
+                        Operation::Show(pieces) => {
+                            for piece in pieces {
+                                match piece {
+                                    Piece::Codes(codes) => {
+                                        for pair in codes.chunks(2) {
+                                            let cid = u16::from_be_bytes([pair[0], pair[1]]);
+                                            placed.push((pen, line_y, cid));
+                                            pen += font.width(cid) * 12.0 / 1000.0;
+                                        }
+                                    }
+                                    Piece::Move(amount) => pen -= amount * 12.0 / 1000.0,
                                 }
                             }
-                            Piece::Move(amount) => pen -= amount * 12.0 / 1000.0,
                         }
+                        Operation::BeginText(_) | Operation::EndText => {}
                     }
                 }
                 assert_eq!(placed.len(), run.glyphs().len(), "{text}");
@@ -560,15 +701,42 @@ mod tests {
         let fonts = embed(&items);
         let run = &items[0].glyphs.runs()[0];
         let (_, font) = fonts.get(run).unwrap();
-        let lines = lines(font, run.glyphs(), 12.0);
-        assert_eq!(lines.len(), 1);
+        let operations = operations(font, run, 12.0);
+        let [Operation::Line { .. }, Operation::Show(pieces)] = operations.as_slice() else {
+            panic!("{operations:?}");
+        };
         assert!(
-            lines[0]
-                .pieces
+            pieces
                 .iter()
                 .any(|p| matches!(p, Piece::Move(m) if *m > 0.0)),
-            "{:?}",
-            lines[0].pieces
+            "{pieces:?}"
+        );
+    }
+
+    #[test]
+    fn only_clusters_the_map_misreads_are_marked() {
+        // The first `x` maps x; the later ones stand for x with marks.
+        let items = [item_in(Font::SOURCE_SERIF_4, "x x\u{301} x")];
+        let fonts = embed(&items);
+        let run = &items[0].glyphs.runs()[0];
+        let (_, font) = fonts.get(run).unwrap();
+        let marked: Vec<String> = operations(font, run, 12.0)
+            .into_iter()
+            .filter_map(|operation| match operation {
+                Operation::BeginText(text) => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(marked, ["x\u{301}"]);
+        // Plain text needs no marks.
+        let items = [item("plain text")];
+        let fonts = embed(&items);
+        let run = &items[0].glyphs.runs()[0];
+        let (_, font) = fonts.get(run).unwrap();
+        assert!(
+            !operations(font, run, 12.0)
+                .iter()
+                .any(|operation| matches!(operation, Operation::BeginText(_)))
         );
     }
 
@@ -582,7 +750,7 @@ mod tests {
         let cids: Vec<u16> = run.glyphs().iter().map(|g| font.cid(g.id)).collect();
         assert_eq!(cids, [1, 2, 2, 1]);
         assert_eq!(font.widths.len(), 3, ".notdef, b and a");
-        assert_eq!(font.texts, [(1, "b".to_owned()), (2, "a".to_owned())]);
+        assert_eq!(font.texts, ["", "b", "a"]);
         assert_eq!(font.outlines, Outlines::TrueType);
         let (tag, name) = font.base_font.split_once('+').unwrap();
         assert_eq!(tag.len(), 6);
@@ -603,9 +771,9 @@ mod tests {
     fn text_in_a_font_that_was_not_embedded_cannot_be_shown() {
         let items = [item("Signal")];
         let mut fonts = embed(&items);
-        assert!(fonts.can_show(&items[0]));
+        assert!(fonts.shows_any(&items[0]));
         fonts.fonts[0] = None;
-        assert!(!fonts.can_show(&items[0]));
+        assert!(!fonts.shows_any(&items[0]));
         let mut chunk = Chunk::new();
         assert!(fonts.write(&mut chunk, &mut Refs::new()).is_empty());
     }

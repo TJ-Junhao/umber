@@ -70,7 +70,9 @@ impl Figure {
     /// padding or mark geometry. A hidden baseline leaves its coincident gridline visible.
     /// A non-empty figure header follows as one unclipped group: the figure title,
     /// subtitle and merged legend. Without axes it holds the background and any figure
-    /// title or subtitle. The same figure always gives the same scene.
+    /// title or subtitle. The same figure always gives the same scene. The scene holds the
+    /// fonts its text was shaped with, system fonts included (see
+    /// [`TextGlyphs`](crate::TextGlyphs)), so it renders the same after font files change.
     ///
     /// Heatmaps, 2-D histograms and meshes draw their cells, as their options'
     /// [`Render`] says, either as one [`Item::Fill`](crate::Item::Fill) per
@@ -167,7 +169,9 @@ impl Figure {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn to_scene(&self, library: &FontLibrary) -> Result<Scene> {
-        self.scene(library, "Figure.to_scene()")
+        let mut scene = self.scene(library, "Figure.to_scene()")?;
+        scene.capture_fonts();
+        Ok(scene)
     }
 
     /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`].
@@ -247,7 +251,8 @@ impl Figure {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn to_pdf(&self) -> Result<Vec<u8>> {
-        let scene = self.scene(FontLibrary::global(), "Figure.to_pdf()")?;
+        let mut scene = self.scene(FontLibrary::global(), "Figure.to_pdf()")?;
+        scene.capture_fonts();
         render_pdf(&scene)
     }
 }

@@ -59,10 +59,12 @@ const MIN_PAGE_SIDE: f32 = 0.001;
 ///
 /// The page is the scene's size in points, painted with the scene background, then with every
 /// item in order. Text items are written as text in subsets of the fonts their glyphs were
-/// shaped with; a text item without glyphs (built by hand), or one whose font cannot be read
-/// again or embedded, is filled from its outline instead, as PNG draws it. Content of groups
-/// nested deeper than [`MAX_GROUP_DEPTH`] is omitted. The same scene always gives the same
-/// bytes.
+/// shaped with, and extract as their source text. A text item without glyphs (built by hand)
+/// is filled from its outline instead, as PNG draws it; so are the glyphs of a run whose font
+/// cannot be read or embedded, while the item's other runs stay text. Text smaller than
+/// 0.001 pt, which no rasterizer draws, is left out. Content of groups nested deeper than
+/// [`MAX_GROUP_DEPTH`] is omitted. The same scene always gives the same bytes: the fonts come
+/// from the scene's text items, which hold them (see [`TextGlyphs`](crate::TextGlyphs)).
 ///
 /// # Errors
 ///
@@ -121,7 +123,7 @@ pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>> {
 }
 
 /// The fonts of the text that `scene` draws on a page of `size`, subset to the glyphs drawn.
-fn fonts_of(scene: &Scene, (width, height): (f32, f32)) -> Fonts<'_> {
+fn fonts_of(scene: &Scene, (width, height): (f32, f32)) -> Fonts {
     let mut fonts = FontSet::default();
     walk_page(scene, (width, height), &mut |item, _| {
         if let Item::Text(text) = item {
@@ -135,7 +137,7 @@ fn fonts_of(scene: &Scene, (width, height): (f32, f32)) -> Fonts<'_> {
 /// resources it uses.
 fn page_content<'s>(
     scene: &'s Scene,
-    fonts: &Fonts<'s>,
+    fonts: &Fonts,
     (width, height): (f32, f32),
 ) -> (Vec<u8>, Resources<'s>) {
     let mut page = Page::new(width, height, fonts);
@@ -569,6 +571,34 @@ mod tests {
             1,
             "only the background"
         );
+    }
+
+    #[test]
+    fn only_runs_whose_font_was_not_embedded_become_outlines() {
+        let library = FontLibrary::with_fallbacks(vec![
+            include_bytes!("../../../tests/fixtures/outline-cff.otf").to_vec(),
+        ]);
+        let fonts = library.with_figure_fonts(&[Font::INTER]).unwrap();
+        let mut scene = Scene::new(100.0, 30.0, WHITE);
+        let style = TextStyle {
+            face: FaceId::new(0),
+            weight: Weight::Regular,
+            size: 12.0,
+            tabular_figures: false,
+        };
+        scene
+            .push_text(&fonts, "Ab\u{E001}", style, p(5.0, 20.0), RED)
+            .unwrap();
+        let size = page_size(&scene).unwrap();
+        // Inter is font 0 and the fallback font 1.
+        let fonts = fonts_of(&scene, size).without(1);
+        let (content, _) = page_content(&scene, &fonts, size);
+        let text = String::from_utf8(content).unwrap();
+        let ops = operators(&text);
+        assert!(ops.contains(&"TJ"), "Inter stays text: {text}");
+        assert!(!text.contains("/F1"), "{text}");
+        // The background, then the outline of the fallback run alone.
+        assert_eq!(ops.iter().filter(|op| **op == "f").count(), 2, "{text}");
     }
 
     #[test]

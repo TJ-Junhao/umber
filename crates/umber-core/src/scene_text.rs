@@ -9,7 +9,7 @@ use crate::color::Rgba;
 use crate::fonts::Font;
 use crate::geometry::Point;
 use crate::scene::{Item, Scene, TextItem};
-use crate::text::{FaceId, SceneFonts, TextLayout, TextStyle};
+use crate::text::{FaceId, FontCapture, SceneFonts, TextLayout, TextStyle};
 
 impl TextItem {
     /// The record for `text`, already shaped as `layout` with `style`, drawn at `origin`.
@@ -42,7 +42,9 @@ impl Scene {
     /// `origin` is the left end of the baseline. `style.face` names a font of `fonts`; the
     /// item names the same font by its index in this scene's [`fonts`](Scene::fonts), which
     /// gains the font when it does not hold it yet. Empty text still pushes an item, with an
-    /// empty outline and zero width.
+    /// empty outline and zero width. A system font the text falls back to is copied into the
+    /// item's [`glyphs`](TextItem::glyphs), sharing the copy other text items of the scene
+    /// already hold, so later changes to the font file do not change the scene.
     ///
     /// # Errors
     ///
@@ -77,14 +79,30 @@ impl Scene {
             face: self.face_of(checked.font()),
             ..style
         };
-        self.items.push(Item::Text(TextItem::from_layout(
-            text.to_owned(),
-            style,
-            origin,
-            color,
-            &layout,
-        )));
+        let mut item = TextItem::from_layout(text.to_owned(), style, origin, color, &layout);
+        let mut capture = FontCapture::default();
+        for_each_text(&self.items, &mut |known| capture.learn(&known.glyphs));
+        capture.capture(&mut item.glyphs);
+        self.items.push(Item::Text(item));
         Ok(())
+    }
+
+    /// Copies the system fonts the scene's text was shaped with into its text items, one copy
+    /// per font program shared by every item that uses it (see [`Scene::push_text`]), so the
+    /// scene no longer depends on the font files.
+    pub(crate) fn capture_fonts(&mut self) {
+        let mut capture = FontCapture::default();
+        let mut stack: Vec<&mut Item> = self.items.iter_mut().collect();
+        while let Some(item) = stack.pop() {
+            match item {
+                Item::Text(text) => capture.capture(&mut text.glyphs),
+                Item::Group { items, .. } => stack.extend(items.iter_mut()),
+                Item::Fill { .. }
+                | Item::Stroke { .. }
+                | Item::Markers { .. }
+                | Item::Image { .. } => {}
+            }
+        }
     }
 
     /// The face of `font` in this scene, adding the font to [`fonts`](Scene::fonts) when the
@@ -98,6 +116,19 @@ impl Scene {
             }
         };
         FaceId::new(index)
+    }
+}
+
+/// Calls `f` on every text item of `items`, through groups.
+fn for_each_text(items: &[Item], f: &mut impl FnMut(&TextItem)) {
+    let mut stack: Vec<&Item> = items.iter().collect();
+    while let Some(item) = stack.pop() {
+        match item {
+            Item::Text(text) => f(text),
+            Item::Group { items, .. } => stack.extend(items.iter()),
+            Item::Fill { .. } | Item::Stroke { .. } | Item::Markers { .. } | Item::Image { .. } => {
+            }
+        }
     }
 }
 
@@ -318,8 +349,9 @@ mod tests {
         let glyphs = fonts.layout(&text, &s).unwrap().glyphs();
         let runs = glyphs.runs();
         assert_eq!(runs.len(), 3);
-        assert_eq!(runs[0].run_font(), runs[2].run_font());
-        assert_ne!(runs[0].run_font(), runs[1].run_font());
+        let program = |i: usize| runs[i].run_font().program().unwrap();
+        assert_eq!(program(0), program(2));
+        assert_ne!(program(0), program(1));
         assert_eq!(
             runs[1].glyph_texts(),
             [crate::fonts::FALLBACK_TEST_CODEPOINT.to_string()]

@@ -1,16 +1,17 @@
-"""Build the outline-format test fixtures of umber-core: a CFF font and a variable font.
+"""Build the outline-format test fixtures of umber-core: CFF, CFF2 and variable fonts.
 
 Run from the repository root:
 
     uv run --with fonttools==4.66.1 python scripts/fonts/build_outline_fixtures.py
 
-Both fonts are drawn here from simple polygons, so they carry no third-party design. Each maps
+The fonts are drawn here from simple polygons, so they carry no third-party design. Each maps
 three private-use code points that no bundled font maps, so text using them is drawn by these
 fonts when they are given as fallback fonts:
 
 - ``outline-cff.otf``: CFF outlines (an OpenType ``CFF `` table), U+E001 to U+E003.
 - ``outline-variable.ttf``: TrueType outlines with a ``wght`` axis (100 to 900, default 400)
   whose ``gvar`` deltas widen every glyph at the heavy end, U+E004 to U+E006.
+- ``outline-cff2.otf``: CFF2 outlines (an OpenType ``CFF2`` table), U+E007 to U+E009.
 
 The output is reproducible: fonttools is pinned and the timestamps are fixed, so two runs
 produce byte-identical files.
@@ -117,6 +118,20 @@ def cff_font() -> bytes:
     return finish(fb)
 
 
+def cff2_font() -> bytes:
+    """Three glyphs drawn with CFF2 outlines."""
+    glyphs = ["square", "triangle", "frame"]
+    fb = builder(glyphs, {0xE007: "square", 0xE008: "triangle", 0xE009: "frame"}, cff=True)
+    charstrings = {}
+    for name, polygons in outlines(glyphs):
+        pen = T2CharStringPen(None, None, CFF2=True)
+        draw(pen, polygons)
+        charstrings[name] = pen.getCharString()
+    fb.setupCFF2(charstrings)
+    name_table(fb, "Umber Test CFF2")
+    return finish(fb)
+
+
 def variable_font() -> bytes:
     """Three glyphs drawn with TrueType outlines, widened by a weight axis."""
     glyphs = ["bar", "wedge", "frame"]
@@ -141,9 +156,13 @@ def variable_font() -> bytes:
 
 
 def main() -> None:
-    """Write both fixtures."""
+    """Write every fixture."""
     FIXTURES.mkdir(parents=True, exist_ok=True)
-    for file, data in [("outline-cff.otf", cff_font()), ("outline-variable.ttf", variable_font())]:
+    for file, data in [
+        ("outline-cff.otf", cff_font()),
+        ("outline-variable.ttf", variable_font()),
+        ("outline-cff2.otf", cff2_font()),
+    ]:
         (FIXTURES / file).write_bytes(data)
         print(f"{file}: {len(data):,} bytes")
 

@@ -19,7 +19,7 @@ use super::super::normalize::{
 };
 use super::Clip;
 use super::image::{side, write_image};
-use super::text::Fonts;
+use super::text::{Fonts, written};
 use super::write::{Refs, rounded, unit};
 use crate::color::Rgba;
 use crate::geometry::{Path, Point};
@@ -36,12 +36,12 @@ pub(super) struct Page<'f, 's> {
     /// The clip whose `q` is open, if any.
     clip: Option<Clip>,
     resources: Resources<'s>,
-    fonts: &'f Fonts<'s>,
+    fonts: &'f Fonts,
 }
 
 impl<'f, 's> Page<'f, 's> {
     /// An empty page of `width × height` points whose text is set in `fonts`.
-    pub(super) fn new(width: f32, height: f32, fonts: &'f Fonts<'s>) -> Page<'f, 's> {
+    pub(super) fn new(width: f32, height: f32, fonts: &'f Fonts) -> Page<'f, 's> {
         let mut content = Content::new();
         content.transform([1.0, 0.0, 0.0, -1.0, 0.0, height]);
         content.set_miter_limit(MITER_LIMIT);
@@ -291,12 +291,22 @@ impl<'f, 's> Page<'f, 's> {
         self.content.restore_state();
     }
 
-    /// Writes `item` as text when its fonts were embedded, and otherwise fills its outline.
+    /// Writes `item` as text in the fonts that were embedded, and fills the outlines of runs
+    /// whose font could not be embedded. A text record without glyphs (built by hand) is
+    /// filled from its outline; text smaller than
+    /// [`MIN_TEXT_SIZE`](super::text::MIN_TEXT_SIZE) is not drawn.
     fn text(&mut self, item: &TextItem) {
         if !text_is_visible(item.color, item.origin) {
             return;
         }
-        if self.fonts.can_show(item) {
+        if item.glyphs.is_empty() {
+            self.fill_text_outline(&item.outline, item.color);
+            return;
+        }
+        if !written(item) {
+            return;
+        }
+        if self.fonts.shows_any(item) {
             self.content.save_state();
             self.opacity(item.color.a, 255);
             fill_color(&mut self.content, item.color);
@@ -309,16 +319,27 @@ impl<'f, 's> Page<'f, 's> {
                 rounded(item.origin.x),
                 rounded(item.origin.y),
             ]);
-            self.fonts.show(&mut self.content, &item.glyphs);
-            self.content.restore_state();
-        } else if let Some(normalized) = normalize_path(&item.outline) {
-            self.content.save_state();
-            self.opacity(item.color.a, 255);
-            fill_color(&mut self.content, item.color);
-            write_path(&mut self.content, &normalized);
-            self.content.fill_nonzero();
+            self.fonts.show(&mut self.content, item);
             self.content.restore_state();
         }
+        for run in item.glyphs.runs() {
+            if self.fonts.get(run).is_none() {
+                self.fill_text_outline(&run.outline(item.origin), item.color);
+            }
+        }
+    }
+
+    /// Fills glyph outlines in the color of their text.
+    fn fill_text_outline(&mut self, outline: &Path, color: Rgba) {
+        let Some(normalized) = normalize_path(outline) else {
+            return;
+        };
+        self.content.save_state();
+        self.opacity(color.a, 255);
+        fill_color(&mut self.content, color);
+        write_path(&mut self.content, &normalized);
+        self.content.fill_nonzero();
+        self.content.restore_state();
     }
 
     fn image(&mut self, rect: &Rect, (width, height): (u32, u32), pixels: &'s [Rgba]) {
@@ -551,7 +572,7 @@ impl<'s> Resources<'s> {
 
     /// Writes every resource and the page's `fonts` into `chunk`, numbering objects with
     /// `refs`, and returns the names the content uses for them.
-    pub(super) fn write(&self, chunk: &mut Chunk, refs: &mut Refs, fonts: &Fonts<'_>) -> Names {
+    pub(super) fn write(&self, chunk: &mut Chunk, refs: &mut Refs, fonts: &Fonts) -> Names {
         let states = self
             .states
             .iter()

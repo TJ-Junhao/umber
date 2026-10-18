@@ -61,7 +61,7 @@ mod system;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use layout::{GlyphRun, PlacedGlyph, RunFont};
+pub(crate) use layout::{FontCapture, GlyphRun, PlacedGlyph, ProgramId, RunFont};
 pub use layout::{TextGlyphs, TextLayout};
 pub(crate) use library::CheckedStyle;
 pub use library::{FontLibrary, SceneFonts};
