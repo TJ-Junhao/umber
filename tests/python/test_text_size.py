@@ -368,6 +368,27 @@ def test_large_text_room_errors(case: str, message: str, hint: str) -> None:
     assert details(caught.value) == (None, hint)
 
 
+@pytest.mark.parametrize("xlabel_order", ["auto", "before-title", "after-title"])
+def test_figure_title_room_error_is_independent_of_xlabel_size(xlabel_order: str) -> None:
+    fig = ub.Figure(6, 0.6)
+    ax = fig.add_axes().xlabel("x")
+    if xlabel_order == "before-title":
+        ax.xlabel("x", size=ub.Size.pt(8.5))
+    fig.title("Title", size=ub.Size.pt(72))
+    if xlabel_order == "after-title":
+        ax.xlabel("x", size=ub.Size.pt(8.5))
+
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    assert str(caught.value) == (
+        "Figure.to_svg(): the figure header needs 98 pt vertically; only 0 pt is available."
+    )
+    assert details(caught.value) == (
+        None,
+        "make the figure taller, or use a smaller text size.",
+    )
+
+
 @pytest.mark.parametrize(
     "method",
     [

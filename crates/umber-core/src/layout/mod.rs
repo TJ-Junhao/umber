@@ -258,9 +258,8 @@ pub(crate) fn text_size(spec: SizeSpec, role_size: f32, font_scale: f32) -> f32 
 }
 
 /// The theme role whose size an override resolves against.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 enum TextRole {
-    #[default]
     Title,
     FigureTitle,
     Body,
@@ -284,7 +283,6 @@ struct StyleSizes {
     title: SizeSpec,
     body: SizeSpec,
     tick: SizeSpec,
-    title_role: TextRole,
 }
 
 /// The text styles of one figure.
@@ -295,7 +293,7 @@ struct Styles {
 }
 
 impl Styles {
-    fn new(theme: &Theme, sizes: StyleSizes) -> Styles {
+    fn new(theme: &Theme, title_role: TextRole, sizes: StyleSizes) -> Styles {
         let body = TextStyle {
             font: theme.body_font(),
             weight: Weight::Regular,
@@ -306,7 +304,7 @@ impl Styles {
             title: TextStyle {
                 font: theme.title_font(),
                 weight: Weight::SemiBold,
-                size: sizes.title_role.size(theme, sizes.title),
+                size: title_role.size(theme, sizes.title),
                 tabular_figures: false,
             },
             body,
@@ -488,7 +486,7 @@ pub(crate) fn centered_tick_label(
     text: &str,
     (x, y): (f64, f64),
 ) -> Label {
-    let style = Styles::new(theme, StyleSizes::default()).tick;
+    let style = Styles::new(theme, TextRole::Title, StyleSizes::default()).tick;
     let mut label = measure(lib, text, style);
     label.x = x - label.width() / 2.0;
     label.y = y + Y_LABEL_CENTER * f64::from(style.size);
@@ -599,7 +597,7 @@ pub(crate) fn tick_rooms<'a>(
     spacing: TickSpacing,
 ) -> (TickRoom<'a>, TickRoom<'a>) {
     let (x_target, y_target) = tick_targets(plot);
-    let style = Styles::new(theme, StyleSizes::default()).tick;
+    let style = Styles::new(theme, TextRole::Title, StyleSizes::default()).tick;
     let (ascent, descent) = metrics(lib, &style);
     let digit = measure(lib, "0", style).width();
     let room = |target, length, extent| TickRoom {
@@ -779,6 +777,8 @@ pub(crate) fn initial_plot_size(width: f64, height: f64) -> PlotSize {
 pub(crate) struct LayoutInput<'a> {
     /// The theme.
     pub theme: &'a Theme,
+    /// The figure title size, for attributing vertical room errors.
+    pub figure_title_size: SizeSpec,
     /// The axes, for their texts and cells.
     pub axes: &'a Axes,
     /// The legend, measured by [`MeasuredLegend::measure`].
@@ -1023,6 +1023,7 @@ fn solve_single(
             ));
         }
         if [
+            input.figure_title_size,
             input.axes.title_size(),
             input.axes.subtitle_size(),
             input.axes.xlabel_size(),
@@ -2496,7 +2497,7 @@ mod tests {
         let label = measure(
             &lib,
             "WWWW",
-            Styles::new(&Theme::pigment(), StyleSizes::default()).body,
+            Styles::new(&Theme::pigment(), TextRole::Title, StyleSizes::default()).body,
         );
         let width = label.width().ceil();
         for container in ["figure", "panel"] {

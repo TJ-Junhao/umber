@@ -162,6 +162,7 @@ impl MeasuredRow {
         }
         let style = Styles::new(
             theme,
+            super::TextRole::Title,
             super::StyleSizes {
                 body: size,
                 ..Default::default()
@@ -479,6 +480,7 @@ impl<'a> DirectLabels<'a> {
             weight: Weight::SemiBold,
             ..Styles::new(
                 theme,
+                super::TextRole::Title,
                 super::StyleSizes {
                     body: size,
                     ..Default::default()

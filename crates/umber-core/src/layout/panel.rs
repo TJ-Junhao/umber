@@ -276,9 +276,9 @@ impl FigureHeader {
         let theme = figure.theme();
         let styles = Styles::new(
             theme,
+            TextRole::FigureTitle,
             StyleSizes {
                 title: figure.title_size(),
-                title_role: TextRole::FigureTitle,
                 body: figure.subtitle_size(),
                 ..StyleSizes::default()
             },
@@ -395,7 +395,7 @@ impl PanelBands {
     pub(super) fn largest_vertical_text(&self) -> (&'static str, &str, f64) {
         let title = self.heading.title.as_ref();
         let subtitle = self.heading.subtitle.as_ref();
-        [
+        let [first, rest @ ..] = [
             (
                 "title",
                 title.map_or("", |t| t.label.text.as_str()),
@@ -423,10 +423,10 @@ impl PanelBands {
                 "",
                 self.heading.row.unwrap_or(0.0).max(self.bottom_legend),
             ),
-        ]
-        .into_iter()
-        .max_by(|a, b| a.2.total_cmp(&b.2))
-        .unwrap_or(("text", "", 0.0))
+        ];
+        rest.into_iter().fold(first, |largest, candidate| {
+            std::cmp::max_by(largest, candidate, |a, b| a.2.total_cmp(&b.2))
+        })
     }
 
     /// The widest horizontal colorbar tick.
@@ -521,11 +521,11 @@ pub(crate) fn measure_panel(
     } = *input;
     let styles = Styles::new(
         theme,
+        TextRole::Title,
         StyleSizes {
             title: axes.title_size(),
             body: axes.subtitle_size(),
             tick: axes.xtick_size(),
-            ..StyleSizes::default()
         },
     );
     let ytick = styles.sized(theme, TextRole::Tick, axes.ytick_size());

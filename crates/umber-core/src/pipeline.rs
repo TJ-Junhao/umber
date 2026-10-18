@@ -479,6 +479,7 @@ fn plan(
         .iter()
         .map(|panel| LayoutInput {
             theme,
+            figure_title_size: figure.title_size(),
             axes: panel.axes,
             legend: &panel.legend,
             lib,
@@ -1482,6 +1483,7 @@ pub(crate) fn with_layout_input<R>(
         .iter()
         .map(|panel| LayoutInput {
             theme: figure.theme(),
+            figure_title_size: figure.title_size(),
             axes: panel.axes,
             legend: &panel.legend,
             lib,
@@ -2252,6 +2254,7 @@ mod tests {
             .iter()
             .map(|panel| LayoutInput {
                 theme,
+                figure_title_size: figure.title_size(),
                 axes: panel.axes,
                 legend: &panel.legend,
                 lib,

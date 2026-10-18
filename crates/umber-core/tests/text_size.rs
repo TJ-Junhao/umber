@@ -150,6 +150,7 @@ fn merged_legend_size_conflict_rejected_without_mutating_figure() {
 #[derive(Debug)]
 struct TextBox {
     name: String,
+    size: Option<f32>,
     bounds: (f32, f32, f32, f32),
 }
 
@@ -161,6 +162,7 @@ fn scene_boxes(scene: &Scene) -> Vec<TextBox> {
                     let metrics = FontLibrary::global().layout(&text.text, &text.style);
                     boxes.push(TextBox {
                         name: text.text.clone(),
+                        size: Some(text.style.size),
                         bounds: (
                             text.origin.x,
                             text.origin.y - metrics.ascent(),
@@ -177,6 +179,7 @@ fn scene_boxes(scene: &Scene) -> Vec<TextBox> {
                     let (lo, hi) = path.bounds().unwrap();
                     boxes.push(TextBox {
                         name: "colorbar rectangle".into(),
+                        size: None,
                         bounds: (lo.x, lo.y, hi.x, hi.y),
                     });
                 }
@@ -203,17 +206,14 @@ fn assert_text_separation(figure: &Figure, auto: &Figure) {
             if !overlap(a, b) {
                 continue;
             }
-            // AUTO at the equivalent font scale already has corner contact between the
-            // bottom y tick and the first x tick, and between a y label and its top tick.
-            // In a shared-colorbar grid, a row's last x tick can also touch the bar beside it
-            // or its end tick label. Large title and subtitle fonts can also exceed their
-            // line boxes and touch across the fixed gap between them. A bottom direct label
-            // can touch the last x tick label beside it.
+            // AUTO at the equivalent font scale already has contact between a y label and
+            // its top tick when their sizes are equal. In a shared-colorbar grid, a row's
+            // last x tick can also touch the bar beside it or its end tick label. Large title
+            // and subtitle fonts can exceed their line boxes and touch across the fixed gap.
             // Only these pairs are exempt, and only when that same pair actually overlaps.
-            let exempt = (a.name.starts_with("Y tick") && b.name.starts_with("X tick"))
-                || (b.name.starts_with("Y tick") && a.name.starts_with("X tick"))
-                || (a.name.starts_with("Vertical") && b.name.starts_with("Y tick"))
-                || (b.name.starts_with("Vertical") && a.name.starts_with("Y tick"))
+            let exempt = (a.size == b.size
+                && ((a.name.starts_with("Vertical") && b.name.starts_with("Y tick"))
+                    || (b.name.starts_with("Vertical") && a.name.starts_with("Y tick"))))
                 || (a.name.starts_with("X tick") && b.name == "colorbar rectangle")
                 || (b.name.starts_with("X tick") && a.name == "colorbar rectangle")
                 || (a.name.starts_with("X tick") && b.name.parse::<f64>().is_ok())
@@ -221,9 +221,7 @@ fn assert_text_separation(figure: &Figure, auto: &Figure) {
                 || (a.name.starts_with("Panel") && b.name.starts_with("Subtitle"))
                 || (b.name.starts_with("Panel") && a.name.starts_with("Subtitle"))
                 || (a.name == "Figure" && b.name == "Figure subtitle")
-                || (b.name == "Figure" && a.name == "Figure subtitle")
-                || (a.name.starts_with("X tick") && b.name.starts_with("Second"))
-                || (b.name.starts_with("X tick") && a.name.starts_with("Second"));
+                || (b.name == "Figure" && a.name == "Figure subtitle");
             assert!(
                 exempt
                     && baseline.iter().filter(|t| t.name == a.name).any(|x| {
@@ -302,6 +300,8 @@ fn large_text_figure(
                 vec![format!("Y tick {row}{col}a"), format!("Y tick {row}{col}b")],
             )
             .unwrap();
+            // Keep the top tick on the plot edge to exercise its gap to the y label.
+            axes.ylim(0.0, 3.0).unwrap();
             if sized_ticks {
                 axes.xtick_labels(size).unwrap().ytick_labels(size).unwrap();
             }

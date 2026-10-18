@@ -134,6 +134,7 @@ impl MeasuredColorbar {
     ) -> Self {
         let styles = Styles::new(
             theme,
+            super::TextRole::Title,
             super::StyleSizes {
                 body: options.size,
                 ..Default::default()
