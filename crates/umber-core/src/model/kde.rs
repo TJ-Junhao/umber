@@ -188,11 +188,15 @@ impl KdeMark {
         let bandwidth = match options.bandwidth {
             Bandwidth::Fixed(h) => h,
             Bandwidth::Scott => scott_bandwidth(values).ok_or_else(|| {
-                Error::data(
+                Error::at_input(
                     context,
-                    format!(
-                        "{name} has 1 distinct finite value; the Scott bandwidth needs at least 2."
-                    ),
+                    name,
+                    "",
+                    [(
+                        None,
+                        " has 1 distinct finite value; the Scott bandwidth needs at least 2."
+                            .into(),
+                    )],
                 )
                 .with_parameter("values")
                 .with_hint("pass bandwidth= in data units.")

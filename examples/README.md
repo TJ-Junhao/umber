@@ -15,6 +15,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `stem.py`: a damped impulse response drawn as stems, with positive and negative samples.
 - `error_bars.py`: group means with intervals on a category axis, and measurements with uncertainty in x and y.
 - `bars.py`: a bar chart, a grouped bar chart and a stacked bar chart.
+- `by.py`: long-form columns grouped with `by=` into lines, side-by-side bars, ECDFs and a stacked histogram.
 - `box.py`: plain and grouped box plots, with Tukey whiskers and outliers.
 - `violin.py`: plain and grouped violin plots comparing sample distributions across regions.
 - `horizontal.py`: horizontal grouped bars, horizontal box plots and a dot plot on a category y axis.

@@ -237,7 +237,7 @@ mod tests {
                 let Error::Style { message, .. } = &e else {
                     unreachable!()
                 };
-                (message.clone(), e.parameter(), e.hint())
+                (message.to_string(), e.parameter(), e.hint())
             }
             other => panic!("expected a Style error, got {other:?}"),
         }

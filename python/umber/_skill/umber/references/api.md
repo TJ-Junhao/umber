@@ -128,7 +128,7 @@ True
 ### `umber.Axes.area`
 
 ```text
-Axes.area(self: SY, x: Values[X], y: Values[Y], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> SY
+Axes.area(self: SY, x: Values[X], y: Values[Y], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> SY
 ```
 
 Add a line through the points ``(x[i], y[i])``, in order, and fill the region below it.
@@ -145,17 +145,23 @@ Args:
     color: The area color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
+    by: One group name per data row, in first-appearance order; ``AUTO`` draws
+        one series. Names supply legend labels and palette colors; do not pass
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, or names and numbers do not match the x
         axis.
     StyleError: If ``label`` is too long.
-    UsageError: If the y axis is a category axis.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        the y axis is a category axis.
 
 Example:
 
@@ -163,6 +169,8 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes()
 >>> ax = ax.area([0, 1, 2, 3], [1.0, 3.0, 2.0, 4.0], label="Visitors")
+>>> grouped = ub.Figure().add_axes()
+>>> grouped = grouped.area([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```
 
 ### `umber.Axes.band`
@@ -212,7 +220,7 @@ Example:
 ### `umber.Axes.bar`
 
 ```text
-Axes.bar(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], heights: Values[float], *, label: str='', color: Color=Color.AUTO) -> 'Axes[X, Y]'
+Axes.bar(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], heights: Values[float], *, label: str='', color: Color=Color.AUTO, by: Values[str] | Auto=AUTO) -> 'Axes[X, Y]'
 ```
 
 Add one bar per category, from the baseline to its height, along the category axis.
@@ -225,21 +233,29 @@ drawn at zero on the value axis, or at its lower edge when zero is out of range,
 even alongside other marks.
 
 Args:
-    categories: The category names, each at most once.
+    categories: The category names, each at most once per group.
     heights: The bar heights, one per category.
     label: The name shown in the legend; an empty string leaves the bars out of it.
     color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+    by: One group name per data row, in first-appearance order; ``AUTO`` draws
+        one series. Names supply legend labels and palette colors; do not pass
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
+        Categories may repeat across groups, but a (category, group) pair may
+        not repeat. Missing pairs draw no bar.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If the data cannot be plotted: lengths differ, a category repeats, a
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        the data cannot be plotted: lengths differ, a category repeats, a
         height is infinite or not positive on a log axis, or neither axis is a
         category axis.
     StyleError: If ``label`` or a category name is too long.
-    UsageError: If both axes are category axes.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        both axes are category axes.
 
 Example:
 
@@ -249,6 +265,7 @@ Example:
 >>> ax = ax.bar(["North", "South", "East"], [3, 5, 2], label="2025")
 >>> rows = ub.Figure().add_axes(y=ub.Scale.category())
 >>> rows = rows.bar(["North", "South", "East"], [3, 5, 2])
+>>> grouped = ub.bar(["Q1", "Q1", "Q2"], [3, 4, 5], by=["North", "South", "North"])
 ```
 
 ### `umber.Axes.baseline`
@@ -565,7 +582,7 @@ Example:
 ### `umber.Axes.ecdf`
 
 ```text
-Axes.ecdf(self: SXF, values: Values[X], *, complementary: bool=False, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> SXF
+Axes.ecdf(self: SXF, values: Values[X], *, complementary: bool=False, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> SXF
 ```
 
 Add the empirical cumulative distribution (ECDF) of ``values``, as a step line.
@@ -584,16 +601,22 @@ Args:
     color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
+    by: One group name per data row, in first-appearance order; ``AUTO`` draws
+        one series. Names supply legend labels and palette colors; do not pass
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If no value is finite, a value is infinite or not positive on a log
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        no value is finite, a value is infinite or not positive on a log
         axis, or the values do not suit the x axis.
     StyleError: If ``label`` is too long.
-    UsageError: If the y axis is not linear.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        the y axis is not linear.
 
 Example:
 
@@ -605,6 +628,7 @@ Example:
 >>> import datetime as dt
 >>> days = ub.Figure().add_axes(x=ub.Scale.time())
 >>> days = days.ecdf([dt.date(2026, 1, 3), dt.date(2026, 1, 1), dt.date(2026, 1, 9)])
+>>> grouped = ub.Figure().add_axes().ecdf([1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```
 
 ### `umber.Axes.events`
@@ -882,7 +906,7 @@ Example:
 ### `umber.Axes.hist`
 
 ```text
-Axes.hist(self: 'Axes[float, float]', values: Values[float], *, bins: int | Values[float]=30, style: Hist=Hist.BARS, cumulative: bool=False, stat: Stat=Stat.COUNT, label: str='', color: Color=Color.AUTO) -> 'Axes[float, float]'
+Axes.hist(self: 'Axes[float, float]', values: Values[float], *, bins: int | Values[float]=30, style: Hist=Hist.BARS, cumulative: bool=False, stat: Stat=Stat.COUNT, label: str='', color: Color=Color.AUTO, by: Values[str] | Auto=AUTO) -> 'Axes[float, float]'
 ```
 
 Add a histogram: the values counted in bins, one bar per bin.
@@ -908,17 +932,25 @@ Args:
     label: The name shown in the legend; an empty string leaves the histogram out of
         it.
     color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+    by: One group name per data row, in first-appearance order; ``AUTO`` draws
+        one series. Names supply legend labels and palette colors; do not pass
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
+        Groups share the bins. ``Hist.STEP`` normalizes each group separately;
+        ``Hist.STACKED`` normalizes their total. ``Hist.BARS`` is refused.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If a value is infinite, the edges are fewer than two, not finite or not
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        a value is infinite, the edges are fewer than two, not finite or not
         increasing, finite values lie outside the edges, or the x axis is a category
         axis.
     StyleError: If the number of bins is out of range, or ``label`` is too long.
-    UsageError: If the x axis is a log axis, or ``cumulative=True`` comes with
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        the x axis is a log axis, or ``cumulative=True`` comes with
         ``Stat.DENSITY``, whose densities do not add up.
 
 Example:
@@ -932,6 +964,7 @@ Example:
 >>> runs = ub.Figure().add_axes()
 >>> runs = runs.hist([3.0, 1.0, 2.0], cumulative=True, stat=ub.Stat.FRACTION)
 >>> outline = ub.Figure().add_axes().hist([1.0, 2.0, 2.0], style=ub.Hist.STEP)
+>>> grouped = ub.hist([1, 2, 3, 4], by=["B", "A", "B", "A"], style=ub.Hist.STEP)
 ```
 
 ### `umber.Axes.hist2d`
@@ -1055,7 +1088,7 @@ Example:
 ### `umber.Axes.kde`
 
 ```text
-Axes.kde(self: 'Axes[float, float]', values: Values[float], *, bandwidth: float | Auto=AUTO, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> 'Axes[float, float]'
+Axes.kde(self: 'Axes[float, float]', values: Values[float], *, bandwidth: float | Auto=AUTO, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> 'Axes[float, float]'
 ```
 
 Add the Gaussian kernel density estimate (KDE) of ``values``, as a line.
@@ -1076,18 +1109,25 @@ Args:
     color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
+    by: One group name per data row, in first-appearance order; ``AUTO`` draws
+        one series. Names supply legend labels and palette colors; do not pass
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
+        Each group has its own density with area 1.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If no value is finite, a value is infinite, ``AUTO`` finds fewer than
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        no value is finite, a value is infinite, ``AUTO`` finds fewer than
         two distinct values, the line would reach beyond 1e300, the density would
         exceed 1e300, or the x axis is a category axis.
     StyleError: If ``bandwidth`` is not a finite number greater than 0, is so narrow
         that the line would need more than 16,384 points, or ``label`` is too long.
-    UsageError: If the x axis is a log or time axis, or the y axis is not linear.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        the x axis is a log or time axis, or the y axis is not linear.
 
 Example:
 
@@ -1096,6 +1136,7 @@ Example:
 >>> ax = ub.Figure().add_axes()
 >>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], label="Sizes")
 >>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bandwidth=0.3, dash=ub.Dash.DOTTED)
+>>> grouped = ub.Figure().add_axes().kde([1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```
 
 ### `umber.Axes.legend`
@@ -1150,7 +1191,7 @@ Example:
 ### `umber.Axes.line`
 
 ```text
-Axes.line(self: SY, x: Values[X], y: Values[Y], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> SY
+Axes.line(self: SY, x: Values[X], y: Values[Y], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> SY
 ```
 
 Add a line through the points ``(x[i], y[i])``, in order.
@@ -1164,17 +1205,23 @@ Args:
     color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
+    by: One group name per data row, in first-appearance order; ``AUTO`` draws
+        one series. Names supply legend labels and palette colors; do not pass
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, or names and numbers do not match the x
         axis.
     StyleError: If ``label`` is too long.
-    UsageError: If the y axis is a category axis.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        the y axis is a category axis.
 
 Example:
 
@@ -1182,6 +1229,8 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes()
 >>> ax = ax.line([0, 1, 2, 3], [1.0, 3.0, float("nan"), 2.0], label="North")
+>>> grouped = ub.Figure().add_axes()
+>>> grouped = grouped.line([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```
 
 ### `umber.Axes.mesh`
@@ -1253,7 +1302,7 @@ Example:
 ### `umber.Axes.scatter`
 
 ```text
-Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO) -> Self
+Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> Self
 ```
 
 Add a marker at each point ``(x[i], y[i])``.
@@ -1272,18 +1321,24 @@ Args:
         ``scale`` and ``center`` must match the other color-mapped marks of these axes.
     marker: The marker shape.
     size: The marker size. ``Size.AUTO`` is the marker size of the theme.
+    by: One group name per data row, in first-appearance order; ``AUTO`` draws
+        one series. Names supply legend labels and palette colors; do not pass
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the
         axes, or a ``ColorBy`` does not have one value per point.
     StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
         range set by ``clim()``.
-    UsageError: If both axes are category axes (type checkers accept such axes, so
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        both axes are category axes (type checkers accept such axes, so
         this is raised when the call runs), a ``ColorBy`` comes with a label, or its
         ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
         marks of these axes.
@@ -1297,6 +1352,7 @@ Example:
 >>> ax = ax.scatter([1, 2, 3], [3.0, 2.5, 1.0], color=ub.ColorBy([0.2, 0.5, 0.9]))
 >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
 >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
+>>> grouped = ub.scatter([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```
 
 ### `umber.Axes.stacked_area`
@@ -1430,7 +1486,7 @@ Example:
 ### `umber.Axes.step`
 
 ```text
-Axes.step(self: SY, x: Values[X], y: Values[Y], *, where: Step=Step.POST, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> SY
+Axes.step(self: SY, x: Values[X], y: Values[Y], *, where: Step=Step.POST, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> SY
 ```
 
 Add a step line through the points ``(x[i], y[i])``, in order.
@@ -1452,17 +1508,23 @@ Args:
     color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
+    by: One group name per data row, in first-appearance order; ``AUTO`` draws
+        one series. Names supply legend labels and palette colors; do not pass
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the x
         axis, or x is not in non-decreasing order.
     StyleError: If ``label`` is too long.
-    UsageError: If the y axis is a category axis.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        the y axis is a category axis.
 
 Example:
 
@@ -1470,6 +1532,8 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes()
 >>> ax = ax.step([0, 1, 3, 4], [1.0, 2.0, float("nan"), 0.5], where=ub.Step.MID)
+>>> grouped = ub.Figure().add_axes()
+>>> grouped = grouped.step([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```
 
 ### `umber.Axes.strip`
@@ -5402,7 +5466,7 @@ The installed package version.
 ## `umber.bar`
 
 ```text
-bar(categories: Values[str], heights: Values[float], *, label: str='', color: Color=Color.AUTO, theme: Theme=Theme.PIGMENT) -> Axes[str, float]
+bar(categories: Values[str], heights: Values[float], *, label: str='', color: Color=Color.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO) -> Axes[str, float]
 ```
 
 Plot one bar per category on a new figure and return its axes.
@@ -5412,20 +5476,28 @@ The same as ``Figure(theme=theme).add_axes(x=Scale.category()).bar(categories, h
 without a bar.
 
 Args:
-    categories: The category names, each at most once.
+    categories: The category names, each at most once per group. Missing category/group
+        pairs draw no bar; aggregate repeated pairs before plotting.
     heights: The bar heights, one per category.
     label: The name shown in the legend; an empty string leaves the bars out of it.
     color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
     theme: The theme of the new figure.
+    by: One group name per data row; ``AUTO`` draws one series. Groups follow first
+        appearance, supplying their labels and palette colors. Do not pass an explicit
+        color or a non-empty label. Missing or empty names and an empty grouping column
+        are refused.
 
 Returns:
     The axes of the new figure, with a category x axis.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If the data cannot be plotted: lengths differ, a category repeats, or a
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        the data cannot be plotted: lengths differ, a category repeats, or a
         height is infinite.
     StyleError: If ``label`` or a category name is too long.
+
+    UsageError: If ``by`` comes with an explicit color or a non-empty label.
 
 Example:
 
@@ -5433,12 +5505,13 @@ Example:
 >>> import umber as ub
 >>> ax = ub.bar(["North", "South", "East"], [3, 5, 2], theme=ub.Theme.GRAPHITE)
 >>> ax.figure.save_svg("regions.svg")
+>>> grouped = ub.bar(["Q1", "Q1", "Q2"], [3, 4, 5], by=["North", "South", "North"])
 ```
 
 ## `umber.hist`
 
 ```text
-hist(values: Values[float], *, bins: int | Values[float]=30, style: Hist=Hist.BARS, cumulative: bool=False, stat: Stat=Stat.COUNT, label: str='', color: Color=Color.AUTO, theme: Theme=Theme.PIGMENT) -> Axes[float, float]
+hist(values: Values[float], *, bins: int | Values[float]=30, style: Hist=Hist.BARS, cumulative: bool=False, stat: Stat=Stat.COUNT, label: str='', color: Color=Color.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO) -> Axes[float, float]
 ```
 
 Plot a histogram of ``values`` on a new figure and return its axes.
@@ -5452,21 +5525,29 @@ Args:
         least two, increasing, holding every finite value.
     style: How the bins are drawn: ``Hist.BARS``, ``Hist.STEP`` (the outline only) or
         ``Hist.STACKED``, which draws the same bars as ``Hist.BARS`` for one set of values.
+        With ``by``, ``STEP`` normalizes each group separately and ``STACKED`` their total;
+        groups share the bins. ``BARS`` with ``by`` is refused.
     cumulative: Whether each bar adds up every bin up to its own, from the left.
     stat: What each bar shows: ``Stat.COUNT``, ``Stat.FRACTION`` or ``Stat.DENSITY``.
     label: The name shown in the legend; an empty string leaves the histogram out of it.
     color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
     theme: The theme of the new figure.
+    by: One group name per data row; ``AUTO`` draws one series. Groups follow first
+        appearance, supplying their labels and palette colors. Do not pass an explicit
+        color or a non-empty label. Missing or empty names and an empty grouping column
+        are refused.
 
 Returns:
     The axes of the new figure.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If a value is infinite, the edges are not valid, or finite values lie
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        a value is infinite, the edges are not valid, or finite values lie
         outside them.
     StyleError: If the number of bins is out of range, or ``label`` is too long.
-    UsageError: If ``cumulative=True`` comes with ``Stat.DENSITY``.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        ``cumulative=True`` comes with ``Stat.DENSITY``.
 
 Example:
 
@@ -5475,12 +5556,13 @@ Example:
 >>> ax = ub.hist([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bins=4)
 >>> ax.figure.save_png("sizes.png", dpi=100)
 >>> share = ub.hist([1.2, 2.5, 2.7, 3.1], bins=[1, 2, 3, 4], stat=ub.Stat.FRACTION)
+>>> grouped = ub.hist([1, 2, 3, 4], by=["B", "A", "B", "A"], style=ub.Hist.STEP)
 ```
 
 ## `umber.line`
 
 ```text
-line(x: Values[float], y: Values[float], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, theme: Theme=Theme.PIGMENT) -> Axes[float, float]
+line(x: Values[float], y: Values[float], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO) -> Axes[float, float]
 ```
 
 Plot a line on a new figure and return its axes.
@@ -5496,27 +5578,35 @@ Args:
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
     theme: The theme of the new figure.
+    by: One group name per data row; ``AUTO`` draws one series. Groups follow first
+        appearance, supplying their labels and palette colors. Do not pass an explicit
+        color or a non-empty label. Missing or empty names and an empty grouping column
+        are refused.
 
 Returns:
     The axes of the new figure.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If the data cannot be plotted: lengths differ, a value is infinite, or
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        the data cannot be plotted: lengths differ, a value is infinite, or
         ``x`` holds names.
     StyleError: If ``label`` is too long.
+
+    UsageError: If ``by`` comes with an explicit color or a non-empty label.
 
 Example:
 
 ```python
 >>> import umber as ub
 >>> ub.line([0, 1, 2], [1.0, 3.0, 2.0]).title("Signal").figure.save_svg("signal.svg")
+>>> grouped = ub.line([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```
 
 ## `umber.scatter`
 
 ```text
-scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT) -> Axes[float, float]
+scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO) -> Axes[float, float]
 ```
 
 Plot a marker at each point on a new figure and return its axes.
@@ -5534,16 +5624,22 @@ Args:
     marker: The marker shape.
     size: The marker size. ``Size.AUTO`` is the marker size of the theme.
     theme: The theme of the new figure.
+    by: One group name per data row; ``AUTO`` draws one series. Groups follow first
+        appearance, supplying their labels and palette colors. Do not pass an explicit
+        color or a non-empty label. Missing or empty names and an empty grouping column
+        are refused.
 
 Returns:
     The axes of the new figure.
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If the data cannot be plotted: lengths differ, a value is infinite,
+    DataError: If ``by`` has invalid names or differs in length from the data; or if
+        the data cannot be plotted: lengths differ, a value is infinite,
         ``x`` holds names, or a ``ColorBy`` does not have one value per point.
     StyleError: If ``label`` is too long.
-    UsageError: If a ``ColorBy`` comes with a label.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+        a ``ColorBy`` comes with a label.
 
 Example:
 
@@ -5552,4 +5648,5 @@ Example:
 >>> ax = ub.scatter([1, 2, 3], [2.0, 1.0, 3.0], marker=ub.Marker.SQUARE)
 >>> ax.figure.save_png("points.png", dpi=100)
 >>> ax = ub.scatter([1, 2, 3], [2.0, 1.0, 3.0], color=ub.ColorBy([5.0, 1.0, 3.0]))
+>>> grouped = ub.scatter([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```

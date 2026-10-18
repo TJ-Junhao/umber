@@ -148,7 +148,7 @@ jobs:
           PY
 
   # Free-threaded CPython: cp314t on 3.14t, abi3t on 3.15t. polars-runtime-32 has only
-  # abi3 wheels, so polars and its two test modules are excluded on both interpreters.
+  # abi3 wheels, so polars and its three test modules are excluded on both interpreters.
   # psutil has no 3.15t wheels: exclude it, IPython (which requires it), and test_jupyter.py
   # on 3.15t only. --no-sync and --skip-install keep later steps from reinstalling them.
   python-free-threaded:
@@ -172,7 +172,7 @@ jobs:
       # uv sync installed umber as an editable package; this builds its extension in place.
       - run: uv run --no-sync maturin develop --skip-install
       - run: uv run --no-sync python -m mypy.stubtest umber._umber
-      - run: uv run --no-sync pytest -q --ignore=tests/python/test_values.py --ignore=tests/python/test_time_polars.py ${{ matrix.skip-tests }}
+      - run: uv run --no-sync pytest -q --ignore=tests/python/test_values.py --ignore=tests/python/test_time_polars.py --ignore=tests/python/test_by_polars.py ${{ matrix.skip-tests }}
       # As in the python job: the test binary must load this interpreter's shared library.
       - name: Test the binding crate
         shell: bash
