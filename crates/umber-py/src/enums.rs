@@ -8,8 +8,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
-    Align, ColorbarPosition, Dash, FillStyle, GridLines, LegendMode, LegendPosition, LegendStyle,
-    Marker, Render, Share, Step, SvgText,
+    Align, ColorbarPosition, ContourStyle, Dash, FillStyle, GridLines, LegendMode, LegendPosition,
+    LegendStyle, Marker, Render, Share, Step, SvgText,
 };
 use umber_core::{HistStat, HistStyle};
 
@@ -156,6 +156,12 @@ int_enum!("Stat", HistStat {
     "DENSITY" => HistStat::Density = 2,
 });
 
+int_enum!("Contour", ContourStyle {
+    "LINES" => ContourStyle::Lines = 0,
+    "FILLED" => ContourStyle::Filled = 1,
+    "BOTH" => ContourStyle::Both = 2,
+});
+
 /// The core [`Render`] of a Python `Render` value, `None` standing for `AUTO`.
 pub(crate) fn render_choice(value: Option<i64>) -> PyResult<Render> {
     Ok(match value.map(enum_value::<RenderChoice>).transpose()? {
@@ -173,7 +179,7 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 15] = [
+const TABLES: [(&str, &[(&str, i64)]); 16] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (LegendStyle::PY_NAME, LegendStyle::MEMBERS),
@@ -189,6 +195,7 @@ const TABLES: [(&str, &[(&str, i64)]); 15] = [
     (RenderChoice::PY_NAME, RenderChoice::MEMBERS),
     (HistStyle::PY_NAME, HistStyle::MEMBERS),
     (HistStat::PY_NAME, HistStat::MEMBERS),
+    (ContourStyle::PY_NAME, ContourStyle::MEMBERS),
 ];
 
 /// The member tables of every bound enum, keyed by the Python enum name.
@@ -240,6 +247,7 @@ mod tests {
         round_trips::<RenderChoice>();
         round_trips::<HistStyle>();
         round_trips::<HistStat>();
+        round_trips::<ContourStyle>();
     }
 
     #[test]
@@ -269,7 +277,8 @@ mod tests {
                 "ColorbarPosition",
                 "Render",
                 "Hist",
-                "Stat"
+                "Stat",
+                "Contour"
             ]
         );
     }

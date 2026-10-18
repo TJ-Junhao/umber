@@ -375,3 +375,29 @@ class Stat(Enum):
     DENSITY = 2
     """The share of the finite values in the bin over the bin's width: the bars have an area
     of 1."""
+
+
+@unique
+class Contour(Enum):
+    """How a contour is drawn: lines along its levels, filled bands between them, or both.
+
+    Example:
+        >>> import umber as ub
+        >>> ax = ub.Figure().add_axes()
+        >>> z = [[0.0, 1.0, 2.0], [1.0, 2.0, 3.0]]
+        >>> ax = ax.contour([0, 1, 2], [0, 1], z, style=ub.Contour.FILLED)
+    """
+
+    __slots__ = ()
+
+    LINES = 0
+    """A line along each level, colored by its level from the colormap, or all in one color.
+    The colorbar is a smooth bar with a tick at each level."""
+
+    FILLED = 1
+    """The bands between the levels, each filled with the color of its middle; the regions
+    below the first level and above the last take the colors at the ends of the color range.
+    The colorbar shows the bands."""
+
+    BOTH = 2
+    """The filled bands, then thin lines along the levels in the theme's text color."""

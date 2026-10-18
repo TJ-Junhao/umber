@@ -40,6 +40,7 @@ use umber_core::{
 use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };
+use umber_core::{ContourLevels, ContourOptions, ContourStyle};
 
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::{enum_value, render_choice};
@@ -1253,6 +1254,54 @@ impl Figure {
         let (x, y) = (names(x_categories)?, names(y_categories)?);
         self.axes(row, col)?
             .heatmap_shared(x, y, shared_floats(values)?, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a contour of the row-major values `z`, one row per y coordinate, on the grid of the
+    /// coordinates `x` and `y`. `levels` is `None` for `AUTO`, an `int` for a count of round
+    /// levels, or a float64 buffer of the levels; `style` is a `Contour` value; the colormap,
+    /// the scale argument `(scale, base)` and the center are converted as those of `heatmap`,
+    /// `color` as a color argument, and `format` as that of `heatmap` (`None` for the automatic
+    /// level labels).
+    #[pyo3(signature = (row, col, x, y, z, levels, style, cmap, scale, base, center, color, annotate, format))]
+    fn contour(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+        levels: Option<&Bound<'_, PyAny>>,
+        style: i64,
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+        center: Option<f64>,
+        color: ColorArg,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+    ) -> PyResult<()> {
+        let levels = match levels {
+            None => ContourLevels::Auto,
+            Some(count) if count.is_instance_of::<PyInt>() => {
+                ContourLevels::Count(count.extract::<usize>()?)
+            }
+            Some(values) => ContourLevels::Values(floats(values)?),
+        };
+        let options = ContourOptions {
+            levels,
+            style: enum_value::<ContourStyle>(style)?,
+            cmap: cmap_choice(cmap),
+            scale: color_transform(scale, base)?,
+            center,
+            color: color_spec(color)?,
+            annotate,
+            format: format.map(tick_format).transpose()?,
+        };
+        let (x, y, z) = (floats(x)?, floats(y)?, floats(z)?);
+        self.axes(row, col)?
+            .contour(&x, &y, &z, options)
             .map(drop)
             .map_err(core_error)
     }

@@ -7,7 +7,6 @@ from typing import Any, cast
 
 import numpy as np
 import pandas as pd
-import polars as pl
 import pytest
 
 import umber as ub
@@ -64,20 +63,18 @@ def test_by_splits_in_first_appearance_order(method: str) -> None:
 
 
 @pytest.mark.parametrize("method", METHODS)
-def test_by_with_pandas_and_polars_columns(method: str) -> None:
+def test_by_with_pandas_columns(method: str) -> None:
     expected = _axes(method)
     _call(expected, method, by=GROUPS)
-    for column in (pd.Series(GROUPS, name="Not a label"), pl.Series("Not a label", GROUPS)):
-        ax = _axes(method)
-        _call(ax, method, by=column)
-        assert _svg(ax) == _svg(expected)
+    ax = _axes(method)
+    _call(ax, method, by=pd.Series(GROUPS, name="Not a label"))
+    assert _svg(ax) == _svg(expected)
 
 
-@pytest.mark.parametrize("factory", [pd.Series, pl.Series])
-def test_data_columns_keep_values_without_reading_series_names(factory: Any) -> None:
+def test_data_columns_keep_values_without_reading_series_names() -> None:
     actual = ub.Figure(6, 4).add_axes()
     expected = ub.Figure(6, 4).add_axes()
-    actual.line(factory(X), factory(Y), by=factory(GROUPS))
+    actual.line(pd.Series(X), pd.Series(Y), by=pd.Series(GROUPS))
     expected.line(X, Y, by=GROUPS)
     assert _svg(actual) == _svg(expected)
 
@@ -598,7 +595,7 @@ def test_by_group_names_checked_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == ["by"]
 
 
-@pytest.mark.parametrize("kind", ["list", "object", "pandas", "categorical", "polars"])
+@pytest.mark.parametrize("kind", ["list", "object", "pandas", "categorical"])
 def test_by_string_columns_validate_names_per_group(
     kind: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -610,7 +607,6 @@ def test_by_string_columns_validate_names_per_group(
         "object": lambda items: np.asarray(items, dtype=object),
         "pandas": pd.Series,
         "categorical": lambda items: pd.Series(pd.Categorical(items)),
-        "polars": pl.Series,
     }
     calls: list[int] = []
     original = cast(Callable[[str, int, object], str], getattr(_group, "_name", None))
@@ -674,15 +670,6 @@ def test_dataframe_string_subclasses_are_normalized_before_factorizing() -> None
     assert groups[0][1][0].tolist() == [1, 3]
 
 
-def test_polars_object_names_use_the_same_errors_as_lists() -> None:
-    from umber._group import split_by
-
-    by: Any
-    for by in (["B", 3, "A"], pl.Series(["B", 3, "A"], dtype=pl.Object)):
-        with pytest.raises(ub.DataError, match=r"by\[1\] is 3, not a string"):
-            split_by("Axes.line()", by, [1, 2, 3])
-
-
 @pytest.mark.parametrize("size", [3, 4])
 def test_object_group_names_check_length_before_unicode_conversion(size: int) -> None:
     from umber._group import split_by
@@ -704,7 +691,6 @@ def test_trailing_nul_group_names_keep_conversion_and_error_order(size: int) -> 
         lambda values: np.array(values, dtype=object),
         pd.Series,
         lambda values: pd.Series(pd.Categorical(values)),
-        pl.Series,
     ]
     for factory in factories:
         with pytest.raises(ub.DataError) as caught:

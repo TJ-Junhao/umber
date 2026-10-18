@@ -45,6 +45,7 @@ import numpy.typing
 
 __all__ = [
     "MAX_BINS",
+    "MAX_LEVELS",
     "Cmap",
     "ColorBy",
     "Figure",
@@ -73,6 +74,7 @@ __all__ = [
 
 __version__: str
 MAX_BINS: int
+MAX_LEVELS: int
 
 # A color argument: (kind, payload, alpha). Kind 0 is Color.AUTO (payload unused, 0), 1 is
 # Color.palette() (payload: the index), 2 is a fixed color (payload: 0xRRGGBBAA; alpha unused,
@@ -732,4 +734,21 @@ class Figure:
         complementary: bool,
         dash: int,
         width: _SizeArg,
+    ) -> None: ...
+    def contour(
+        self,
+        row: int,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        z: _FloatArray,
+        levels: int | _FloatArray | None,
+        style: int,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
+        color: _ColorArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
     ) -> None: ...

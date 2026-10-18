@@ -20,6 +20,7 @@ EXPECTED = [
     "Color",
     "ColorBy",
     "ColorbarPosition",
+    "Contour",
     "DataError",
     "Dash",
     "Distribution",
@@ -105,6 +106,7 @@ def test_enums_are_exported_as_enums() -> None:
         "ColorbarPosition",
         "Hist",
         "Stat",
+        "Contour",
     }
 
 

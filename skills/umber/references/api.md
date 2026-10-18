@@ -491,6 +491,94 @@ Example:
 >>> ax = ax.colorbar("Intensity", position=ub.ColorbarPosition.BOTTOM)
 ```
 
+### `umber.Axes.contour`
+
+```text
+Axes.contour(self: 'Axes[float, float]', x: Values[float], y: Values[float], z: object, *, levels: int | Values[float] | Auto=AUTO, style: Contour=Contour.LINES, cmap: Cmap | Auto=AUTO, scale: Scale[float]=Scale.linear(), center: float | Auto=AUTO, color: Color=Color.AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO) -> 'Axes[float, float]'
+```
+
+Add a contour of a field sampled on a rectangular grid: lines, filled bands, or both.
+
+``z`` holds the field at the grid points, one row per y coordinate. Each cell of the
+grid lies between four neighbouring points; along its sides the field is linear, and the
+lines run straight across it between the points where the level crosses its sides. A
+cell whose corners alternate above and below a level joins its high corners when the
+mean of its four values is at or above the level, and separates them otherwise. A NaN
+value leaves the four cells around it out of every line and band, as a hole.
+
+Lines are colored by their level from the colormap, unless ``color`` gives them one
+color. Bands take the color of the middle of their range, and the regions below the
+first level and above the last the colors at the ends of the color range, as values
+beyond ``clim()`` do. The colors come from the color scale of these axes, which every
+color-mapped mark shares; the colorbar shows the levels, as bands for filled contours
+and as ticks on a smooth bar for lines. Automatic limits are the outer coordinates,
+without padding. By default a contour alone draws no baseline.
+
+A field that changes from cell to cell, such as noise or a checkerboard, makes many short
+lines and many small bands, so vector output grows very large and slow to write and to
+draw. Use fewer levels, or ``Contour.FILLED`` instead of ``Contour.BOTH``; smooth or
+aggregate the data first; or use ``mesh()`` or ``heatmap()`` when the cells themselves
+are what matters. Contours never thin the data on their own.
+
+Args:
+    x: The x coordinates of the grid's columns, strictly increasing, at least two.
+    y: The y coordinates of the grid's rows, strictly increasing, at least two.
+    z: The field as a two-dimensional array or a list of rows, shaped
+        ``(len(y), len(x))``: one row per y coordinate.
+    levels: ``AUTO`` for the round values strictly inside the range of the finite
+        values that a search for seven round ticks over the range finds (log ticks on a
+        log ``scale``); an int from 1 to 64 for about that many round values strictly
+        inside the range, and at least one, the middle of the range, on a field that is
+        not constant; or the levels themselves, strictly increasing. Levels outside the
+        range of the values draw no line. Contours that share a colorbar, on one axes
+        or through ``share_color``, need the same levels.
+    style: ``Contour.LINES``, ``Contour.FILLED`` or ``Contour.BOTH``.
+    cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center``
+        is given and its sequential colormap otherwise.
+    scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
+    center: The value at the middle of a diverging colormap, as for ``ColorBy``;
+        ``AUTO`` for a sequential mapping.
+    color: ``Color.AUTO`` colors each line by its level. Any other color draws every
+        line of ``Contour.LINES`` in it; the contour is then not color-mapped and draws
+        no colorbar.
+    annotate: Whether each line at least three times as long as its label carries its
+        level's value at its middle, along the line and upright, in the tick font, with
+        the line broken under it.
+    format: The format of the values that ``annotate`` writes. ``AUTO`` writes them as
+        the colorbar writes its ticks (its own format, else the y tick format), so a
+        level reads the same on its line and on the bar.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type, or ``scale`` is not linear or log.
+    DataError: If ``z`` is not shaped ``(len(y), len(x))``, a coordinate is not finite,
+        not strictly increasing or not positive on a log axis, there are fewer than two
+        along an axis, or a value is infinite, beyond 1e300 in magnitude, or not
+        positive on a log scale.
+    StyleError: If a count of levels is not from 1 to 64, given levels are not finite
+        and strictly increasing, ``center`` is not finite or comes with a log scale,
+        ``format`` is ``TickFormat.iso()``, or the color range set by ``clim()`` does
+        not suit ``scale`` or ``center``.
+    UsageError: If an axis is not linear or log (type checkers refuse such axes),
+        ``color`` is given with filled bands or with ``cmap`` or ``center``,
+        ``annotate`` is ``True`` with ``Contour.FILLED``, ``format`` is given without
+        ``annotate``, or ``cmap``, ``scale`` or ``center`` differs from those of the
+        other color-mapped marks of these axes.
+
+Example:
+
+```python
+>>> import numpy as np
+>>> import umber as ub
+>>> x, y = np.linspace(-2, 2, 41), np.linspace(-1.5, 1.5, 31)
+>>> z = np.exp(-(x[None, :] ** 2) - y[:, None] ** 2)
+>>> ax = ub.Figure().add_axes().contour(x, y, z, annotate=True)
+>>> filled = ub.Figure().add_axes().contour(x, y, z, style=ub.Contour.BOTH)
+>>> few = ub.Figure().add_axes().contour(x, y, z, levels=[0.25, 0.5, 0.75])
+```
+
 ### `umber.Axes.ecdf`
 
 ```text
@@ -2882,6 +2970,50 @@ ColorbarPosition.RIGHT
 ```
 
 Right of the plot, spanning its height.
+
+## `umber.Contour`
+
+```text
+class Contour(Enum)
+```
+
+How a contour is drawn: lines along its levels, filled bands between them, or both.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes()
+>>> z = [[0.0, 1.0, 2.0], [1.0, 2.0, 3.0]]
+>>> ax = ax.contour([0, 1, 2], [0, 1], z, style=ub.Contour.FILLED)
+```
+
+### `umber.Contour.BOTH`
+
+```text
+Contour.BOTH
+```
+
+The filled bands, then thin lines along the levels in the theme's text color.
+
+### `umber.Contour.FILLED`
+
+```text
+Contour.FILLED
+```
+
+The bands between the levels, each filled with the color of its middle; the regions
+below the first level and above the last take the colors at the ends of the color range.
+The colorbar shows the bands.
+
+### `umber.Contour.LINES`
+
+```text
+Contour.LINES
+```
+
+A line along each level, colored by its level from the colormap, or all in one color.
+The colorbar is a smooth bar with a tick at each level.
 
 ## `umber.DataError`
 
