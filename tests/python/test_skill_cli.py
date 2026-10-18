@@ -1,4 +1,7 @@
+import doctest
+import errno
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -6,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import umber
+from umber import _skill_cli
 
 SKILL = Path(umber.__file__).resolve().parent / "_skill" / "umber"
 AGENTS = ("claude-code", "codex", "cursor", "pi")
@@ -104,7 +108,10 @@ def test_uninstall_removes_only_installed(tmp_path: Path) -> None:
     assert config.read_text(encoding="utf-8") == "{}"
     result = _run(tmp_path, tmp_path / "home", "skill", "uninstall", *arguments)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [str(tmp_path / ".claude/skills/umber")]
+    assert result.stdout.splitlines() == [
+        str(tmp_path / ".claude/skills/umber"),
+        f"nothing to remove at {tmp_path / '.agents/skills/umber'}",
+    ]
 
 
 def test_uninstall_user_leaves_project_copy(tmp_path: Path) -> None:
@@ -128,7 +135,9 @@ def test_missing_uninstall_is_harmless_and_help_writes_nothing(
     assert "--agent" in result.stdout and "--user" in result.stdout
     result = _run(tmp_path, tmp_path / "home", "skill", "uninstall", "--agent", "pi")
     assert result.returncode == 0, result.stderr
-    assert result.stdout == ""
+    assert result.stdout.splitlines() == [
+        f"nothing to remove at {tmp_path / '.agents/skills/umber'}"
+    ]
     assert list(tmp_path.iterdir()) == []
 
 
@@ -155,20 +164,126 @@ def test_non_directory_target_fails_before_writing(tmp_path: Path, command: str)
 
 @pytest.mark.skipif(os.name == "nt", reason="Directory symlinks need elevated privileges.")
 @pytest.mark.parametrize("command", ("install", "uninstall"))
-@pytest.mark.parametrize("relative", (".agents", ".agents/skills", ".agents/skills/umber"))
+@pytest.mark.parametrize("agent, folder", (("claude-code", ".claude"), ("pi", ".agents")))
+@pytest.mark.parametrize("user", (False, True))
+@pytest.mark.parametrize("dangling", (False, True))
 def test_symbolic_link_targets_are_not_followed(
-    tmp_path: Path, command: str, relative: str
+    tmp_path: Path, command: str, agent: str, folder: str, user: bool, dangling: bool
 ) -> None:
     external = tmp_path / "external"
-    external.mkdir()
-    marker = external / "keep.txt"
-    marker.write_text("Keep this file", encoding="utf-8")
-    link = tmp_path / relative
-    link.parent.mkdir(parents=True, exist_ok=True)
+    if not dangling:
+        external.mkdir()
+        (external / "keep.txt").write_text("Keep this file", encoding="utf-8")
+    home = tmp_path / "home"
+    base = home if user else tmp_path
+    link = base / folder / "skills/umber"
+    link.parent.mkdir(parents=True)
     link.symlink_to(external, target_is_directory=True)
-    result = _run(tmp_path, tmp_path / "home", "skill", command, "--agent", "pi")
+    scope = ["--user"] if user else []
+    result = _run(tmp_path, home, "skill", command, "--agent", agent, *scope)
     assert result.returncode == 1
-    assert str(link) in result.stderr
+    assert f"umber skill {command}: {link}: symbolic links are not supported;" in result.stderr
     assert "hint:" in result.stderr and "Traceback" not in result.stderr
     assert link.is_symlink()
-    assert _files(external) == {"keep.txt": b"Keep this file"}
+    assert _files(external) == ({} if dangling else {"keep.txt": b"Keep this file"})
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Directory symlinks need elevated privileges.")
+@pytest.mark.parametrize("agent, folder", (("claude-code", ".claude"), ("pi", ".agents")))
+@pytest.mark.parametrize("user", (False, True))
+@pytest.mark.parametrize("skills_link", (False, True))
+def test_symbolic_link_ancestors_are_followed(
+    tmp_path: Path, agent: str, folder: str, user: bool, skills_link: bool
+) -> None:
+    home = tmp_path / "home"
+    base = home if user else tmp_path
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "keep.txt").write_text("Keep this file", encoding="utf-8")
+    link = base / folder
+    if skills_link:
+        link /= "skills"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(external, target_is_directory=True)
+    target = base / folder / "skills/umber"
+    scope = ["--user"] if user else []
+    for command in ("install", "uninstall"):
+        result = _run(tmp_path, home, "skill", command, "--agent", agent, *scope)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [str(target)]
+        assert link.is_symlink()
+        if command == "install":
+            assert _files(target) == _files(SKILL)
+        else:
+            assert not target.exists()
+        assert (external / "keep.txt").read_text(encoding="utf-8") == "Keep this file"
+
+
+def test_cli_examples_leave_existing_skills_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    for base in (tmp_path, home):
+        for folder in (".claude", ".agents"):
+            path = base / folder / "skills/umber/SKILL.md"
+            path.parent.mkdir(parents=True)
+            path.write_text("Keep this skill", encoding="utf-8")
+    before = _files(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    result = doctest.testmod(_skill_cli)
+    assert _files(tmp_path) == before
+    assert result.failed == 0 and result.attempted > 0
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not enforce POSIX directory modes.")
+@pytest.mark.parametrize("command", ("install", "uninstall"))
+@pytest.mark.parametrize("user", (False, True))
+def test_permission_error_names_target_directory(tmp_path: Path, command: str, user: bool) -> None:
+    home = tmp_path / "home"
+    base = home if user else tmp_path
+    blocked = base / ".agents/skills"
+    target = blocked / "umber"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("Keep this skill", encoding="utf-8")
+    blocked.chmod(0o555)
+    try:
+        if os.access(blocked, os.W_OK):
+            pytest.skip("This process can write to read-only directories.")
+        scope = ["--user"] if user else []
+        result = _run(
+            tmp_path, home, "skill", command, "--agent", "claude-code", "--agent", "pi", *scope
+        )
+        assert result.returncode == 1
+        hint = f"{command} without --user." if user else "use --user."
+        assert result.stderr.splitlines() == [
+            f"umber skill {command}: {blocked} is not writable; "
+            "the skill directory must be writable.",
+            f"hint: check the directory's permissions, or {hint}",
+        ]
+        assert _files(target) == {"SKILL.md": b"Keep this skill"}
+        assert list(blocked.iterdir()) == [target]
+        assert not (base / ".claude").exists()
+    finally:
+        blocked.chmod(0o755)
+
+
+def test_other_filesystem_error_names_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / ".agents/skills/umber"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("Keep this skill", encoding="utf-8")
+
+    def fail_copy(source: object, destination: Path) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device", str(destination))
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(shutil, "copytree", fail_copy)
+    assert _skill_cli.main(["skill", "install", "--agent", "pi"]) == 1
+    error = capsys.readouterr().err
+    assert f"umber skill install: {target}" in error
+    assert "No space left on device" in error
+    assert ".umber-" not in error and "Traceback" not in error
+    assert _files(target) == {"SKILL.md": b"Keep this skill"}

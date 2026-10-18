@@ -1,10 +1,13 @@
+import ast
 import doctest
-import inspect
 import re
+import runpy
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -89,16 +92,14 @@ def test_every_public_name_documented() -> None:
     text = (SKILL / "references/api.md").read_text(encoding="utf-8")
     headings = set(re.findall(r"^#{2,3} `([^`]+)`$", text, re.MULTILINE))
     expected = {f"umber.{name}" for name in umber.__all__}
-    for name in ("Axes", "PieAxes", "Figure", "Theme"):
-        if name not in umber.__all__:
-            continue
-        cls = getattr(umber, name)
-        expected.update(
-            f"umber.{name}.{attr}"
-            for attr, member in inspect.getmembers(cls)
-            if not attr.startswith("_") and (callable(member) or isinstance(member, property))
-        )
-    assert not expected - headings, sorted(expected - headings)
+    members = cast(
+        Callable[[Path, str], list[tuple[str, ast.stmt, str]]],
+        runpy.run_path(str(ROOT / "scripts/gen_skill.py"))["_public_members"],
+    )
+    for name in umber.__all__:
+        if isinstance(getattr(umber, name), type):
+            expected.update(f"umber.{name}.{attr}" for attr, _, _ in members(PACKAGE, name))
+    assert headings == expected, sorted(headings ^ expected)
     assert "Axes.line(" in text and "Values[X]" in text
     assert "Theme.PIGMENT" in text and "Theme.with_palette(" in text
     assert ">>> import umber as ub" in text
@@ -112,14 +113,23 @@ def test_frontmatter_version_matches() -> None:
         frontmatter, content = text[4:].split("\n---\n", 1)
         assert re.search(r"^name: umber$", frontmatter, re.MULTILINE)
         description = re.search(r"^description: (.+)$", frontmatter, re.MULTILINE)
-        assert description is not None and 0 < len(description[1]) <= 1024
+        assert description is not None
+        assert description[1] == (
+            '"Plot data in Python with umber: line, scatter, bar, histogram, box, violin, '
+            "heatmap and other charts, saved as PNG or SVG. Use when writing or changing "
+            "code that makes charts with umber, or when turning matplotlib code into "
+            'umber code."'
+        )
         assert re.search(
             rf"^metadata:\n  umber-version: ['\"]?{re.escape(umber.__version__)}['\"]?$",
             frontmatter,
             re.MULTILINE,
         )
         first = content.strip().split("\n\n")[0]
-        assert "umber.__version__" in first
+        assert first.startswith(
+            "Before using this skill, compare `metadata.umber-version` above with "
+            "`umber.__version__` in the project's Python environment."
+        )
         assert "python -m umber skill install" in first
         assert "--agent" in first
         assert "references/api.md" in content
@@ -151,11 +161,16 @@ def test_check_prints_diff_without_writing(tmp_path: Path) -> None:
     _copy_sources(tmp_path)
     reference = tmp_path / "python/umber/_skill/umber/references/api.md"
     reference.write_text("Stale reference\n", encoding="utf-8")
+    (tmp_path / "skills/umber/z-obsolete.md").write_text("Obsolete", encoding="utf-8")
     before = _files(tmp_path)
     result = _generate(tmp_path, "--check")
     assert result.returncode == 1
     assert "--- " in result.stdout and "+++ " in result.stdout
     assert "-Stale reference" in result.stdout and "+# umber API" in result.stdout
+    assert result.stdout.splitlines()[-1] == (
+        'The skill reference is out of date; run "uv run python scripts/gen_skill.py" '
+        "and commit python/umber/_skill and skills/umber."
+    )
     assert _files(tmp_path) == before
     assert _generate(tmp_path).returncode == 0
     assert _generate(tmp_path, "--check").returncode == 0
@@ -187,6 +202,67 @@ def test_source_signature_changes_make_reference_stale(tmp_path: Path) -> None:
     result = _generate(tmp_path, "--check")
     assert result.returncode == 1
     assert "connected_line" in result.stdout
+
+
+def test_public_members_include_inherited_members_in_sorted_order(tmp_path: Path) -> None:
+    _copy_sources(tmp_path)
+    source = tmp_path / "python/umber/_theme.py"
+    source.write_text(
+        "class _Base:\n"
+        "    def zebra(self):\n"
+        '        """Base method."""\n'
+        "    def shared(self):\n"
+        '        """Root method."""\n'
+        "    @property\n"
+        "    def alpha(self):\n"
+        '        """Inherited property."""\n'
+        "    DEFAULT = 1\n"
+        '    """Inherited constant."""\n'
+        "class _Left(_Base):\n"
+        "    pass\n"
+        "class _Right(_Base):\n"
+        "    def shared(self):\n"
+        '        """Right method."""\n'
+        "class Theme(_Left, _Right):\n"
+        '    """A theme."""\n'
+        "    def middle(self):\n"
+        '        """Own method."""\n'
+        "    def zebra(self):\n"
+        '        """Overridden method."""\n',
+        encoding="utf-8",
+    )
+    result = _generate(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = (tmp_path / "skills/umber/references/api.md").read_text(encoding="utf-8")
+    assert re.findall(r"^### `umber.Theme.([^`]+)`$", text, re.MULTILINE) == [
+        "DEFAULT",
+        "alpha",
+        "middle",
+        "shared",
+        "zebra",
+    ]
+    assert "Inherited property." in text and "Inherited constant." in text
+    assert "Overridden method." in text and "Base method." not in text
+    assert "Right method." in text and "Root method." not in text
+    assert _generate(tmp_path, "--check").returncode == 0
+
+
+@pytest.mark.parametrize("inherited", (False, True))
+@pytest.mark.parametrize("member", ("def missing(self): pass", "missing = 1"))
+def test_public_members_without_docstrings_fail(
+    tmp_path: Path, inherited: bool, member: str
+) -> None:
+    _copy_sources(tmp_path)
+    source = tmp_path / "python/umber/_theme.py"
+    text = f'class Theme:\n    """A theme."""\n    {member}\n'
+    if inherited:
+        text = f'class _Base:\n    {member}\nclass Theme(_Base):\n    """A theme."""\n'
+    source.write_text(text, encoding="utf-8")
+    before = _files(tmp_path)
+    result = _generate(tmp_path)
+    assert result.returncode == 1
+    assert "Theme.missing has no docstring; every public member needs one." in result.stderr
+    assert _files(tmp_path) == before
 
 
 @pytest.mark.parametrize("language", ("python", "py", "pycon"))

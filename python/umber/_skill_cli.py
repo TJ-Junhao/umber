@@ -48,7 +48,7 @@ def _check_targets(base: Path, targets: list[Path]) -> None:
         path = base
         for part in target.relative_to(base).parts:
             path /= part
-            if path.is_symlink():
+            if path == target and path.is_symlink():
                 raise OSError(f"{path}: symbolic links are not supported; use a real directory.")
             if path.exists() and not path.is_dir():
                 raise OSError(f"{path}: not a directory; a directory is required.")
@@ -67,10 +67,12 @@ def _apply(targets: list[Path], *, install: bool) -> list[Path]:
     changed: list[Path] = []
     created: list[Path] = []
     saved: list[tuple[Path, Path]] = []
+    destination: Path | None = None
     try:
         with ExitStack() as stack:
             staged: list[tuple[Path, Path]] = []
             for target in targets:
+                destination = target
                 if not install and not target.exists():
                     continue
                 _make_parents(target.parent, created)
@@ -85,6 +87,7 @@ def _apply(targets: list[Path], *, install: bool) -> list[Path]:
                 staged.append((target, directory))
             try:
                 for target, directory in staged:
+                    destination = target
                     if target.exists():
                         previous = directory / "previous"
                         target.rename(previous)
@@ -99,9 +102,14 @@ def _apply(targets: list[Path], *, install: bool) -> list[Path]:
                 for target, previous in reversed(saved):
                     previous.rename(target)
                 raise
-    except OSError:
+    except OSError as error:
         for path in reversed(created):
             path.rmdir()
+        if destination is not None:
+            error.filename = str(
+                destination.parent if isinstance(error, PermissionError) else destination
+            )
+            error.filename2 = None
         raise
     return changed
 
@@ -116,9 +124,10 @@ def main(arguments: list[str]) -> int:
         Zero on success, or one for a file-system error. Argument errors exit with two.
 
     Example:
-        >>> from umber._skill_cli import main
-        >>> main(["skill", "uninstall", "--agent", "pi"])
-        0
+        >>> from umber._skill_cli import _parser
+        >>> options = _parser().parse_args(["skill", "uninstall", "--agent", "pi"])
+        >>> (options.action, options.agent, options.user)
+        ('uninstall', ['pi'], False)
     """
     options = _parser().parse_args(arguments)
     action = cast(str, options.action)
@@ -128,13 +137,20 @@ def main(arguments: list[str]) -> int:
         targets = _targets(base, agents)
         _check_targets(base, targets)
         paths = _apply(targets, install=action == "install")
-    except OSError as error:
-        print(f"umber skill {action}: {error}", file=sys.stderr)
+    except PermissionError as error:
         print(
-            "hint: use writable directories without symbolic links, then try again.",
+            f"umber skill {action}: {error.filename} is not writable; "
+            "the skill directory must be writable.",
             file=sys.stderr,
         )
+        alternative = f"{action} without --user." if options.user else "use --user."
+        print(f"hint: check the directory's permissions, or {alternative}", file=sys.stderr)
         return 1
-    for path in paths:
-        print(path)
+    except OSError as error:
+        message = f"{error.filename}: {error.strerror}" if error.filename else str(error)
+        print(f"umber skill {action}: {message}", file=sys.stderr)
+        print("hint: check the target directory, then try again.", file=sys.stderr)
+        return 1
+    for path in targets:
+        print(path if path in paths else f"nothing to remove at {path}")
     return 0

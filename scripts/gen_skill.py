@@ -7,6 +7,7 @@ Run with ``--check`` to print differences without changing either directory.
 
 import argparse
 import ast
+import builtins
 import copy
 import difflib
 import doctest
@@ -47,7 +48,7 @@ def _doc(body: list[ast.stmt], index: int) -> str:
 
 def _definition(
     package: Path, module: str, name: str, visited: tuple[tuple[str, str], ...] = ()
-) -> tuple[ast.stmt, str]:
+) -> tuple[str, ast.stmt, str]:
     key = (module, name)
     if key in visited:
         raise ValueError(f"Cyclic import for {module}.{name}")
@@ -57,7 +58,7 @@ def _definition(
     for index in range(len(body) - 1, -1, -1):
         node = body[index]
         if _name(node) == name:
-            return node, _doc(body, index)
+            return module, node, _doc(body, index)
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if (alias.asname or alias.name) != name:
@@ -65,9 +66,70 @@ def _definition(
                 origin = node.module or ""
                 if node.level:
                     origin = ".".join(module.split(".")[: -node.level] + [origin])
-                if origin.startswith("umber."):
+                if origin == "umber" or origin.startswith("umber."):
                     return _definition(package, origin, alias.name, (*visited, key))
+                return origin, node, ""
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if (alias.asname or alias.name.split(".")[0]) == name:
+                    return alias.name if alias.asname else name, node, ""
     raise ValueError(f"Cannot find the source definition of {module}.{name}")
+
+
+def _public_members(package: Path, name: str) -> list[tuple[str, ast.stmt, str]]:
+    """List source-defined public members, including inherited ones, in name order."""
+    classes: dict[tuple[str, str], ast.ClassDef] = {}
+
+    def lineage(module: str, class_name: str) -> list[tuple[str, str]]:
+        module, node, _ = _definition(package, module, class_name)
+        if not isinstance(node, ast.ClassDef):
+            return []
+        key = (module, node.name)
+        classes[key] = node
+        parents: list[list[tuple[str, str]]] = []
+        for base in node.bases:
+            if isinstance(base, ast.Subscript):
+                base = base.value
+            if isinstance(base, ast.Name):
+                if base.id in vars(builtins):
+                    continue
+                parents.append(lineage(module, base.id))
+            elif isinstance(base, ast.Attribute):
+                parts = ast.unparse(base).split(".")
+                origin, _, _ = _definition(package, module, parts[0])
+                if origin == "umber" or origin.startswith("umber."):
+                    parents.append(lineage(".".join([origin, *parts[1:-1]]), parts[-1]))
+        # C3 order keeps overrides correct even when two parents share a base.
+        pending = [parent[:] for parent in parents if parent]
+        pending.append([parent[0] for parent in parents if parent])
+        result = [key]
+        while pending := [order for order in pending if order]:
+            for order in pending:
+                candidate = order[0]
+                if not any(candidate in other[1:] for other in pending):
+                    break
+            else:
+                raise ValueError(f"Cannot resolve the inheritance order of {name}")
+            result.append(candidate)
+            for order in pending:
+                if order[0] == candidate:
+                    order.pop(0)
+        return result
+
+    members: dict[str, tuple[ast.stmt, str]] = {}
+    for key in lineage("umber", name):
+        for index, member in enumerate(classes[key].body):
+            member_name = _name(member)
+            if member_name and not member_name.startswith("_"):
+                members.setdefault(member_name, (member, _doc(classes[key].body, index)))
+    result: list[tuple[str, ast.stmt, str]] = []
+    for member_name, (member, doc) in sorted(members.items()):
+        if not doc.strip():
+            raise ValueError(
+                f"{name}.{member_name} has no docstring; every public member needs one."
+            )
+        result.append((member_name, member, doc))
+    return result
 
 
 def _signature(name: str, node: ast.stmt) -> str:
@@ -137,16 +199,11 @@ def _reference(package: Path) -> str:
                 f"{umber.__version__!r}\n```\n"
             )
             continue
-        node, doc = _definition(package, "umber", name)
+        _, node, doc = _definition(package, "umber", name)
         sections.append(_section(name, node, doc, level=2))
         if isinstance(node, ast.ClassDef):
-            for index, member in enumerate(node.body):
-                member_name = _name(member)
-                if not member_name or member_name.startswith("_"):
-                    continue
-                member_doc = _doc(node.body, index)
-                if member_doc:
-                    sections.append(_section(f"{name}.{member_name}", member, member_doc, level=3))
+            for member_name, member, member_doc in _public_members(package, name):
+                sections.append(_section(f"{name}.{member_name}", member, member_doc, level=3))
     return "\n".join(sections)
 
 
@@ -165,12 +222,10 @@ def _difference(path: Path, actual: bytes, expected: bytes) -> None:
     except UnicodeDecodeError:
         print(f"Binary content differs: {path}")
         return
-    print(
-        "".join(
-            difflib.unified_diff(before, after, fromfile=str(path), tofile=f"{path} (generated)")
-        ),
-        end="",
+    difference = "".join(
+        difflib.unified_diff(before, after, fromfile=str(path), tofile=f"{path} (generated)")
     )
+    print(difference, end="" if difference.endswith("\n") else "\n")
 
 
 def _generate(root: Path, *, check: bool) -> int:
@@ -201,6 +256,11 @@ def _generate(root: Path, *, check: bool) -> int:
                 path.write_bytes(after[relative])
             else:
                 path.unlink()
+    if check and stale:
+        print(
+            'The skill reference is out of date; run "uv run python scripts/gen_skill.py" '
+            "and commit python/umber/_skill and skills/umber."
+        )
     return int(check and stale)
 
 
