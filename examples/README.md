@@ -19,6 +19,9 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `violin.py`: plain and grouped violin plots comparing sample distributions across regions.
 - `horizontal.py`: horizontal grouped bars, horizontal box plots and a dot plot on a category y axis.
 - `histogram.py`: a histogram with a chosen number of bins.
+- `hist_variants.py`: a histogram with uneven bin edges and densities, and cumulative fractions as bars and as an outline.
+- `ecdf.py`: empirical cumulative distributions of response times, and the complementary share on a log axis.
+- `kde.py`: kernel density lines with Scott's bandwidth and a narrower one, over a density histogram.
 - `density.py`: rectangular and hexagonal density counts with log colors, and a numeric mesh centered on zero.
 - `heatmap.py`: an annotated correlation matrix on a diverging colormap centered at zero, and visits by day and hour with an empty cell.
 - `themes.py`: the same chart in the Pigment, Graphite and Midnight themes.

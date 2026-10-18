@@ -2904,7 +2904,8 @@ impl<'a> AxesMut<'a> {
     /// area under the line is 1. [`Bandwidth::Scott`](crate::Bandwidth) is the bandwidth
     /// [`AxesMut::violin`] uses, so a violin and a density line of the same values agree. The
     /// line runs from three bandwidths below the smallest finite value to three above the
-    /// largest, through 256 evenly spaced points, and is drawn, listed and labelled as a line of
+    /// largest, through evenly spaced points at most a quarter bandwidth apart (at least 256, at
+    /// most 16,384), and is drawn, listed and labelled as a line of
     /// [`AxesMut::line`] is. NaN is left out. On a linear y axis the y domain includes 0, as for
     /// bars, though no baseline is drawn for the line.
     ///
@@ -2914,8 +2915,11 @@ impl<'a> AxesMut<'a> {
     /// `Error::Style` for a fixed bandwidth that is not finite, not above 0, or beyond
     /// [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE); `Error::Data` for a value that is infinite or
     /// beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE), and when no value is finite;
-    /// `Error::Data` for Scott's rule with fewer than two distinct finite values; and
-    /// `Error::Data` naming `bandwidth` for a density beyond the supported magnitudes.
+    /// `Error::Data` for Scott's rule with fewer than two distinct finite values; `Error::Data`
+    /// naming `values` for a line that would reach beyond
+    /// [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE); `Error::Style` naming `bandwidth` for a
+    /// bandwidth so narrow that the line would need more than 16,384 points; and `Error::Data`
+    /// naming `bandwidth` for a density beyond the supported magnitudes.
     ///
     /// # Examples
     ///

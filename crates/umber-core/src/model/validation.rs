@@ -11,7 +11,7 @@ use super::bar::{Arrangement, Series};
 use super::box_plot::Distribution;
 use super::hist::{Bins, GroupedHistOptions, HistOptions, HistStat, HistStyle};
 use super::share::SharedAxis;
-use crate::binning::{BinCount, BinSpec, HistBinning, MAX_BINS};
+use crate::binning::{BinCount, BinSpec, HistBinning, HistBins, MAX_BINS};
 use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE, too_narrow};
 use crate::stacking::Totals;
@@ -1141,7 +1141,8 @@ const LINEAR_Y_HINT: &str = "pass y=Scale.linear() to Figure.add_axes().";
 /// 2. the x axis, by [`check_hist_x`];
 /// 3. every value is finite (NaN is allowed and ignored) and within the supported magnitudes
 ///    (`Error::Data`);
-/// 4. explicit edges hold every finite value (`Error::Data`, naming how many fall outside).
+/// 4. explicit edges hold every finite value (`Error::Data`, naming how many fall outside);
+/// 5. every bar height is finite and within the supported magnitudes, by [`check_heights`].
 pub(super) fn check_hist(
     context: &'static str,
     x_kind: ScaleKind,
@@ -1164,6 +1165,7 @@ pub(super) fn check_hist(
         HIST_GAP_HINT,
     )?;
     check_inside_edges(context, "values", values, binning.bins())?;
+    check_heights(context, &binning, &[values])?;
     Ok(binning)
 }
 
@@ -1177,7 +1179,9 @@ pub(super) fn check_hist(
 ///    (`Error::Usage`);
 /// 4. the x axis, by [`check_hist_x`];
 /// 5. the values of each series, in series order, as for a histogram;
-/// 6. explicit edges hold every finite value of each series, in series order.
+/// 6. explicit edges hold every finite value of each series, in series order;
+/// 7. every bar and stack height is finite and within the supported magnitudes, by
+///    [`check_heights`].
 pub(super) fn check_grouped_hist(
     context: &'static str,
     x_kind: ScaleKind,
@@ -1223,6 +1227,8 @@ pub(super) fn check_grouped_hist(
             binning.bins(),
         )?;
     }
+    let values: Vec<&[f64]> = series.iter().map(|s| s.values.as_slice()).collect();
+    check_heights(context, &binning, &values)?;
     Ok(binning)
 }
 
@@ -1372,6 +1378,48 @@ fn check_inside_edges(
     .with_hint("widen the edges or filter the values first."))
 }
 
+/// Checks that the bars of a histogram of `groups` binned by `binning` can be drawn: in bin
+/// order, every bar's height, and with several stacked groups every stack's height, is finite
+/// and at most [`MAX_MAGNITUDE`], or `Error::Data` naming `bins` and the bin. Only densities can
+/// fail: dividing by a very narrow bin's width can overflow, while counts and fractions stay
+/// small.
+fn check_heights(context: &'static str, binning: &HistBinning, groups: &[&[f64]]) -> Result<()> {
+    if binning.stat() != HistStat::Density {
+        return Ok(());
+    }
+    let Some(bins) = HistBins::new(binning, groups) else {
+        return Ok(());
+    };
+    let stacked = binning.style() == HistStyle::Stacked && bins.groups() > 1;
+    let refused = |i: usize, what: &str, height: f64| {
+        Error::data(
+            context,
+            format!(
+                "bin {i}, from {lo} to {hi}, has a {what} of {h}; bar heights must be finite and \
+                 at most {MAX_MAGNITUDE:e}.",
+                lo = number(bins.edge(i)),
+                hi = number(bins.edge(i + 1)),
+                h = number(height),
+            ),
+        )
+        .with_parameter("bins")
+        .with_hint("widen the narrow bins, or use Stat.COUNT or Stat.FRACTION.")
+    };
+    let drawable = |height: f64| height.is_finite() && height <= MAX_MAGNITUDE;
+    for (i, top) in bins.tops().enumerate() {
+        for g in 0..bins.groups() {
+            let height = bins.heights(g)[i];
+            if !drawable(height) {
+                return Err(refused(i, "height", height));
+            }
+        }
+        if stacked && !drawable(top) {
+            return Err(refused(i, "stack height", top));
+        }
+    }
+    Ok(())
+}
+
 /// Checks that the x axis, of scale kind `x_kind`, is the linear axis a histogram needs: a
 /// category x axis is `Error::Data`, a log x axis, which histograms do not support, is
 /// `Error::Usage`, and a time x axis is refused as [`check_no_time_x`] refuses it.
@@ -1519,7 +1567,7 @@ pub(super) fn check_time_limits(
 const MAX_TEXT_CHARS: usize = 1000;
 
 /// `n` with a comma between groups of three digits, as `1,000`.
-fn grouped(n: usize) -> String {
+pub(super) fn grouped(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
@@ -1851,8 +1899,8 @@ const NO_FINITE_HINT: &str = "pass at least one value that is not NaN.";
 /// Checks the axes of an ECDF, with an x axis of scale kind `x_kind` and a y axis of scale kind
 /// `y_kind`, and its `values`, before it is stored, in this order, under `context`:
 ///
-/// 1. the y axis is numeric ([`check_numeric_y`]) and linear: an ECDF runs from 0 to 1, which a
-///    log axis cannot hold (`Error::Usage` naming `y`);
+/// 1. the y axis is linear ([`check_linear_y`]): an ECDF runs from 0 to 1, which a log axis
+///    cannot hold (`Error::Usage` naming `y`);
 /// 2. the values suit the x axis: numbers on a linear or log axis, checked by [`check_numbers`]
 ///    (NaN is allowed and ignored), times on a time axis (`Error::Data`);
 /// 3. at least one value is finite, or a time (`Error::Data`).
@@ -1863,14 +1911,7 @@ pub(super) fn check_ecdf<'a>(
     (x_kind, y_kind): (ScaleKind, ScaleKind),
     values: &'a AxisData,
 ) -> Result<Samples<'a>> {
-    if check_numeric_y(context, y_kind)? != Transform::Linear {
-        return Err(Error::usage(
-            context,
-            "the y axis is a log axis; an ECDF runs from 0 to 1 and needs a linear y axis.",
-        )
-        .with_parameter("y")
-        .with_hint(LINEAR_Y_HINT));
-    }
+    check_linear_y(context, y_kind, "an ECDF runs from 0 to 1")?;
     let wrong_axis = |message: &str, hint: &'static str| {
         Error::data(context, message.to_owned())
             .with_parameter("values")
@@ -1936,6 +1977,23 @@ pub(super) enum Samples<'a> {
     Times(&'a [Option<Instant>]),
 }
 
+/// Checks that the y axis, of scale kind `y_kind`, is the linear axis that the mark method
+/// `context` needs, since `why` (such as "an ECDF runs from 0 to 1"): `Error::Usage` naming `y`
+/// otherwise, with the one hint that leads to a linear axis.
+fn check_linear_y(context: &'static str, y_kind: ScaleKind, why: &str) -> Result<()> {
+    let message = match y_kind {
+        ScaleKind::Linear => return Ok(()),
+        ScaleKind::Log { .. } => {
+            format!("the y axis is a log axis; {why} and needs a linear y axis.")
+        }
+        ScaleKind::Category => format!("y is a category scale; {context} needs a linear y axis."),
+        ScaleKind::Time => format!("y is a time scale; {context} needs a linear y axis."),
+    };
+    Err(Error::usage(context, message)
+        .with_parameter("y")
+        .with_hint(LINEAR_Y_HINT))
+}
+
 /// Checks the numbers of an ECDF on an axis of `transform` with [`check_numbers`], and says
 /// whether one of them is finite.
 fn check_ecdf_numbers(
@@ -1956,22 +2014,15 @@ fn check_ecdf_numbers(
 /// Checks the axes of a density curve, with an x axis of scale kind `x_kind` and a y axis of
 /// scale kind `y_kind`, in this order, under `context`:
 ///
-/// 1. the y axis is numeric ([`check_numeric_y`]) and linear: the curve runs down to 0, which a
-///    log axis cannot hold (`Error::Usage` naming `y`);
+/// 1. the y axis is linear ([`check_linear_y`]): the curve runs down to 0, which a log axis
+///    cannot hold (`Error::Usage` naming `y`);
 /// 2. the x axis is linear: a category x axis is `Error::Data`, and a log or time x axis, which
 ///    density curves do not support, is `Error::Usage`.
 pub(super) fn check_kde_axes(
     context: &'static str,
     (x_kind, y_kind): (ScaleKind, ScaleKind),
 ) -> Result<()> {
-    if check_numeric_y(context, y_kind)? != Transform::Linear {
-        return Err(Error::usage(
-            context,
-            "the y axis is a log axis; a density curve runs down to 0 and needs a linear y axis.",
-        )
-        .with_parameter("y")
-        .with_hint(LINEAR_Y_HINT));
-    }
+    check_linear_y(context, y_kind, "a density curve runs down to 0")?;
     let unsupported = match x_kind {
         ScaleKind::Linear => return Ok(()),
         ScaleKind::Category => {

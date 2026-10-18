@@ -5,7 +5,8 @@
 //!
 //! Covered: density lines with Scott's bandwidth and with a fixed one, over a density
 //! histogram, in the three built-in themes; one line per group; a single value with a fixed
-//! bandwidth; values at the largest magnitudes, whose lines are kept within them; direct labels
+//! bandwidth; large values, and values spanning far less than the bandwidth; a narrow bandwidth
+//! drawn through many points; direct labels
 //! and explicit limits that cut the lines; and every error branch of `Axes::kde` and
 //! `Axes::grouped_kde`, in the order the checks run, with the state a failed call leaves.
 
@@ -115,12 +116,30 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .unwrap();
     emit_scene("fig-kde-one-value", &f.to_scene(lib).unwrap(), sink);
 
-    // Values at the largest magnitudes: the line is kept within them.
+    // Large values, whose line stays within the supported magnitudes.
     let mut f = figure(6.0, 4.0, Theme::graphite(), linear(), linear());
     axes(&mut f)
-        .kde(&[-1e300, 0.0, 1e300], KdeOptions::default())
+        .kde(&[-1e100, 0.0, 1e100], KdeOptions::default())
         .unwrap();
-    emit_scene("fig-kde-extreme-values", &f.to_scene(lib).unwrap(), sink);
+    emit_scene("fig-kde-large-values", &f.to_scene(lib).unwrap(), sink);
+
+    // Values spanning far less than the bandwidth: one Gaussian.
+    let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
+    axes(&mut f)
+        .kde(
+            &[0.0, 1e-310, 1e-308],
+            kde("Tiny span", Bandwidth::Fixed(1.0)),
+        )
+        .unwrap();
+    emit_scene("fig-kde-tiny-span", &f.to_scene(lib).unwrap(), sink);
+
+    // A narrow bandwidth: the line takes as many points as its kernels need.
+    let mut f = figure(6.0, 4.0, Theme::pigment(), linear(), linear());
+    labelled(&mut f, "Narrow kernels");
+    axes(&mut f)
+        .kde(&[0.0, 0.5, 1.0], kde("Narrow", Bandwidth::Fixed(1e-3)))
+        .unwrap();
+    emit_scene("fig-kde-narrow", &f.to_scene(lib).unwrap(), sink);
 
     // Direct labels, and limits that cut the lines on both sides.
     let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
@@ -183,6 +202,21 @@ fn errors() -> String {
     });
     rec.on_axes(&mut f, "kde density beyond the magnitudes", |a| {
         a.kde(&[0.0], fixed(1e-305)).map(drop)
+    });
+    rec.on_axes(&mut f, "kde bandwidth too narrow to draw", |a| {
+        a.kde(&[0.0, 0.5, 1.0], fixed(1e-4)).map(drop)
+    });
+    rec.on_axes(&mut f, "kde bandwidth narrow at the most points", |a| {
+        a.kde(&[0.0, 1.0], fixed(4.0 / 16_000.0)).map(drop)
+    });
+    rec.on_axes(&mut f, "kde curve below the magnitude limit", |a| {
+        a.kde(&[-1e300, 0.0], fixed(1e299)).map(drop)
+    });
+    rec.on_axes(&mut f, "kde curve above the magnitude limit", |a| {
+        a.kde(&[1e300], fixed(1e290)).map(drop)
+    });
+    rec.on_axes(&mut f, "kde span far below the bandwidth", |a| {
+        a.kde(&[0.0, 1e-310], fixed(1.0)).map(drop)
     });
 
     rec.section("Axes.grouped_kde, linear/linear");

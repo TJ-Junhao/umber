@@ -448,3 +448,161 @@ fn grouped_kde_adds_one_line_per_series_or_none() {
         Some("pass bandwidth= in data units."),
     );
 }
+
+#[test]
+fn kde_refuses_a_bandwidth_too_narrow_to_draw() {
+    let narrow = KdeOptions {
+        bandwidth: Bandwidth::Fixed(1e-4),
+        ..KdeOptions::default()
+    };
+    let err = refused((LIN, LIN), |f| {
+        axes(f).kde(&[0.0, 0.5, 1.0], narrow).map(drop)
+    });
+    assert!(matches!(err, Error::Style { .. }), "{err:?}");
+    assert_error(
+        &err,
+        "Axes.kde(): bandwidth is 0.0001, which needs 40,025 samples over the drawn range; at \
+         most 16,384 are drawn.",
+        Some("bandwidth"),
+        Some("use a wider bandwidth."),
+    );
+}
+
+/// Checks that `err` reads `start`, then a number, then `end`, with `parameter` and `hint`.
+#[track_caller]
+fn assert_error_around(err: &Error, (start, end): (&str, &str), parameter: &str, hint: &str) {
+    let display = err.to_string();
+    assert!(
+        display.starts_with(start) && display.ends_with(end),
+        "{display}"
+    );
+    assert_eq!(err.parameter(), Some(parameter));
+    assert_eq!(err.hint(), Some(hint));
+}
+
+#[test]
+fn kde_refuses_a_curve_beyond_the_supported_magnitudes() {
+    for (values, bandwidth) in [(vec![1e300], 1e290), (vec![-1e300, 0.0], 1e299)] {
+        let err = refused((LIN, LIN), |f| {
+            axes(f)
+                .kde(
+                    &values,
+                    KdeOptions {
+                        bandwidth: Bandwidth::Fixed(bandwidth),
+                        ..KdeOptions::default()
+                    },
+                )
+                .map(drop)
+        });
+        assert!(matches!(err, Error::Data { .. }), "{err:?}");
+        assert_error_around(
+            &err,
+            (
+                "Axes.kde(): the curve reaches ",
+                ", three bandwidths past the values; magnitudes must not exceed 1e300.",
+            ),
+            "values",
+            "rescale the values first.",
+        );
+    }
+}
+
+#[test]
+fn a_tiny_span_gives_a_drawable_density() {
+    for tiny in [1e-308, 1e-310] {
+        let mut f = figure(LIN, LIN);
+        axes(&mut f)
+            .kde(
+                &[0.0, tiny],
+                KdeOptions {
+                    bandwidth: Bandwidth::Fixed(1.0),
+                    ..KdeOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(panel(&f).marks().len(), 1);
+    }
+}
+
+#[test]
+fn hist_heights_beyond_the_supported_magnitudes_are_refused() {
+    const HINT: &str = "widen the narrow bins, or use Stat.COUNT or Stat.FRACTION.";
+    const END: &str = "; bar heights must be finite and at most 1e300.";
+    let density = |edges: &[f64]| HistOptions {
+        bins: Bins::Edges(edges.to_vec()),
+        stat: HistStat::Density,
+        ..HistOptions::default()
+    };
+    // An infinite density, and a finite one above 1e300.
+    for (values, edges, start) in [
+        (
+            vec![0.0],
+            vec![-1.0, 0.0, 1e-310, 1.0],
+            "Axes.hist(): bin 1, from 0 to 1e-310, has a height of inf",
+        ),
+        (
+            vec![0.0, 0.5],
+            vec![0.0, 1e-301, 1.0],
+            "Axes.hist(): bin 0, from 0 to 1e-301, has a height of ",
+        ),
+    ] {
+        let err = refused((LIN, LIN), |f| {
+            axes(f).hist(&values, density(&edges)).map(drop)
+        });
+        assert!(matches!(err, Error::Data { .. }), "{err:?}");
+        assert_error_around(&err, (start, END), "bins", HINT);
+    }
+    // Two stacked densities, each within the limit, whose stack is not.
+    let stacked = GroupedHistOptions {
+        bins: Bins::Edges(vec![0.0, 8e-301, 1.0]),
+        style: HistStyle::Stacked,
+        stat: HistStat::Density,
+        ..GroupedHistOptions::default()
+    };
+    let err = refused((LIN, LIN), |f| {
+        axes(f)
+            .grouped_hist(
+                vec![series("a", &[0.0; 7]), series("b", &[0.0; 7])],
+                stacked,
+            )
+            .map(drop)
+    });
+    assert_error_around(
+        &err,
+        (
+            "Axes.hist(): bin 0, from 0 to 8e-301, has a stack height of ",
+            END,
+        ),
+        "bins",
+        HINT,
+    );
+    // Counts and fractions never exceed it, whatever the widths.
+    let count = HistOptions {
+        stat: HistStat::Fraction,
+        ..density(&[-1.0, 0.0, 1e-310, 1.0])
+    };
+    let mut f = figure(LIN, LIN);
+    axes(&mut f).hist(&[0.0], count).unwrap();
+}
+
+#[test]
+fn linear_only_marks_give_a_linear_only_hint() {
+    for y in [ScaleKind::Category, ScaleKind::Time, LOG] {
+        let ecdf = refused((LIN, y), |f| {
+            axes(f)
+                .ecdf(AxisData::Numbers(vec![1.0]), EcdfOptions::default())
+                .map(drop)
+        });
+        let kde = refused((LIN, y), |f| {
+            axes(f).kde(&[1.0, 2.0], KdeOptions::default()).map(drop)
+        });
+        for err in [ecdf, kde] {
+            assert!(matches!(err, Error::Usage { .. }), "{err:?}");
+            assert_eq!(err.parameter(), Some("y"));
+            assert_eq!(
+                err.hint(),
+                Some("pass y=Scale.linear() to Figure.add_axes().")
+            );
+        }
+    }
+}

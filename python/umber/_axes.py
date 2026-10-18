@@ -2475,8 +2475,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         The line is the mean of Gaussian kernels placed at the values, in data units, so the
         area under it is 1. It runs from three bandwidths below the smallest value to three
-        above the largest. NaN values are left out. The x axis must be linear, and so must the
-        y axis, which includes zero. A labelled density is listed and labelled as a line is.
+        above the largest, through evenly spaced points at most a quarter bandwidth apart (at
+        least 256, at most 16,384). NaN values are left out. The x axis must be linear, and so
+        must the y axis, which includes zero. A labelled density is listed and labelled as a
+        line is.
 
         Args:
             values: The values.
@@ -2494,10 +2496,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If no value is finite, a value is infinite, ``AUTO`` finds fewer than
-                two distinct values, the density would exceed 1e300, or the x axis is a
-                category axis.
-            StyleError: If ``bandwidth`` is not a finite number greater than 0, or ``label``
-                is too long.
+                two distinct values, the line would reach beyond 1e300, the density would
+                exceed 1e300, or the x axis is a category axis.
+            StyleError: If ``bandwidth`` is not a finite number greater than 0, is so narrow
+                that the line would need more than 16,384 points, or ``label`` is too long.
             UsageError: If the x axis is a log or time axis, or the y axis is not linear.
 
         Example:

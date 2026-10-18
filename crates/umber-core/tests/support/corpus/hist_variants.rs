@@ -236,6 +236,30 @@ fn errors() -> String {
         .map(drop)
     });
 
+    let density = |edges: Vec<f64>| HistOptions {
+        bins: Bins::Edges(edges),
+        stat: HistStat::Density,
+        ..HistOptions::default()
+    };
+    rec.on_axes(&mut f, "hist infinite density", |a| {
+        a.hist(&[0.0], density(vec![-1.0, 0.0, 1e-310, 1.0]))
+            .map(drop)
+    });
+    rec.on_axes(&mut f, "hist density above the magnitude limit", |a| {
+        a.hist(&[0.0, 0.5], density(vec![0.0, 1e-301, 1.0]))
+            .map(drop)
+    });
+    rec.on_axes(&mut f, "hist fraction of a very narrow bin", |a| {
+        a.hist(
+            &[0.0],
+            HistOptions {
+                stat: HistStat::Fraction,
+                ..density(vec![-1.0, 0.0, 1e-310, 1.0])
+            },
+        )
+        .map(drop)
+    });
+
     rec.section("Axes.grouped_hist, linear/linear");
     rec.on_axes(&mut f, "grouped_hist ok", |a| {
         a.grouped_hist(
@@ -273,6 +297,23 @@ fn errors() -> String {
                 vec![series("a", vec![1.0]), series("b", vec![2.0, 9.0])],
                 GroupedHistOptions {
                     bins: Bins::Edges(vec![0.0, 5.0]),
+                    ..GroupedHistOptions::default()
+                },
+            )
+            .map(drop)
+        },
+    );
+
+    rec.on_axes(
+        &mut f,
+        "grouped_hist stacked densities above the limit",
+        |a| {
+            a.grouped_hist(
+                vec![series("a", vec![0.0; 7]), series("b", vec![0.0; 7])],
+                GroupedHistOptions {
+                    bins: Bins::Edges(vec![0.0, 8e-301, 1.0]),
+                    style: HistStyle::Stacked,
+                    stat: HistStat::Density,
                     ..GroupedHistOptions::default()
                 },
             )

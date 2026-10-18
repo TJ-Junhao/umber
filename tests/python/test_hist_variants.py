@@ -289,3 +289,32 @@ def test_enum_members() -> None:
         ("FRACTION", 1),
         ("DENSITY", 2),
     ]
+
+
+@pytest.mark.parametrize(
+    ("values", "edges", "start"),
+    [
+        (
+            [0.0],
+            [-1.0, 0.0, 1e-310, 1.0],
+            "Axes.hist(): bin 1, from 0 to 1e-310, has a height of inf",
+        ),
+        ([0.0, 0.5], [0.0, 1e-301, 1.0], "Axes.hist(): bin 0, from 0 to 1e-301, has a height of "),
+    ],
+    ids=["infinite", "finite but too large"],
+)
+def test_densities_beyond_the_supported_magnitudes_are_refused(
+    values: list[float], edges: list[float], start: str
+) -> None:
+    ax = _axes().hist([0.5], label="Kept")
+    before = _svg(ax)
+    with pytest.raises(ub.DataError) as caught:
+        ax.hist(values, bins=edges, stat=ub.Stat.DENSITY, style=ub.Hist.STEP)
+    message = str(caught.value)
+    assert message.startswith(start), message
+    assert message.endswith("; bar heights must be finite and at most 1e300."), message
+    assert details(caught.value) == (
+        "bins",
+        "widen the narrow bins, or use Stat.COUNT or Stat.FRACTION.",
+    )
+    assert _svg(ax) == before

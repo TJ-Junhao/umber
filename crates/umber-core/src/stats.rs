@@ -85,7 +85,7 @@ fn scott_factor(scaled: &[f64]) -> f64 {
 }
 
 /// The sum of the Gaussian kernels of bandwidth `h` around the `scaled` samples, at `fraction`,
-/// all in the same units; not yet divided by the kernels' normalizer.
+/// all in the same units (data units serve too); not yet divided by the kernels' normalizer.
 fn kernel_sum(scaled: &[f64], fraction: f64, h: f64) -> f64 {
     scaled
         .iter()
@@ -156,28 +156,28 @@ pub(crate) fn scott_bandwidth(values: &[f64]) -> Option<f64> {
 /// to `to`, both ends exactly, each with its density. `None` without a finite value or with
 /// fewer than two grid points.
 ///
-/// The values are measured from their minimum in units of their span (or of the bandwidth when
-/// they are all equal), as [`kde_scott`] measures them, so the kernels stay finite for very
-/// large or small values; the density is converted back to data units at the end.
+/// Each kernel is evaluated at its distance from the position in bandwidths, and the sum of the
+/// kernels is divided by the number of values and `sqrt(2π)` before the bandwidth, so no
+/// intermediate grows past the density itself, however the span of the values compares with
+/// the bandwidth. Distances between supported values (at most 1e300 in magnitude) stay finite.
 pub(crate) fn kde_curve(
     values: &[f64],
     bandwidth: f64,
     (from, to): (f64, f64),
     grid: usize,
 ) -> Option<Vec<(f64, f64)>> {
-    let (samples, low, high) = finite_samples(values)?;
+    let (samples, _, _) = finite_samples(values)?;
     if grid < 2 {
         return None;
     }
-    let scale = if high > low { high - low } else { bandwidth };
-    let scaled: Vec<f64> = samples.iter().map(|v| (v - low) / scale).collect();
-    let h = bandwidth / scale;
-    let normalizer = scaled.len() as f64 * h * (2.0 * std::f64::consts::PI).sqrt();
+    let normalizer = samples.len() as f64 * (2.0 * std::f64::consts::PI).sqrt();
     Some(
         grid_positions(from, to, grid)
             .map(|at| {
-                let fraction = (at - low) / scale;
-                (at, kernel_sum(&scaled, fraction, h) / normalizer / scale)
+                (
+                    at,
+                    kernel_sum(&samples, at, bandwidth) / normalizer / bandwidth,
+                )
             })
             .collect(),
     )

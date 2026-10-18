@@ -148,6 +148,35 @@ ERRORS: list[tuple[str, Callable[[], Any], Callable[[Any], object], type, str, A
         LINEAR_Y_HINT,
     ),
     (
+        "category y",
+        lambda: ub.Figure().add_axes(y=ub.Scale.category()),
+        lambda ax: ax.kde(SAMPLES),
+        ub.UsageError,
+        "Axes.kde(): y is a category scale; Axes.kde() needs a linear y axis.",
+        "y",
+        LINEAR_Y_HINT,
+    ),
+    (
+        "bandwidth too narrow to draw",
+        _axes,
+        lambda ax: ax.kde([0.0, 0.5, 1.0], bandwidth=1e-4),
+        ub.StyleError,
+        "Axes.kde(): bandwidth is 0.0001, which needs 40,025 samples over the drawn range; at "
+        "most 16,384 are drawn.",
+        "bandwidth",
+        "use a wider bandwidth.",
+    ),
+    (
+        "curve past the magnitude limit",
+        _axes,
+        lambda ax: ax.kde([-1e300, 0.0], bandwidth=1e299),
+        ub.DataError,
+        "Axes.kde(): the curve reaches -1.3e300, three bandwidths past the values; magnitudes "
+        "must not exceed 1e300.",
+        "values",
+        "rescale the values first.",
+    ),
+    (
         "one distinct value",
         _axes,
         lambda ax: ax.kde([2.0, 2.0, float("nan")]),
@@ -246,3 +275,14 @@ def test_a_density_beyond_the_supported_magnitudes_is_refused() -> None:
     assert message.endswith("; densities must not exceed 1e300."), message
     assert details(caught.value) == ("bandwidth", "use a wider bandwidth.")
     assert _svg(ax) == before
+
+
+@pytest.mark.parametrize("tiny", [1e-308, 1e-310])
+def test_a_span_far_below_the_bandwidth_keeps_its_gaussian(tiny: float) -> None:
+    values = np.array([0.0, tiny])
+    curve = _umber.kde_curve(values, 1.0, -3.0, 3.0, 257)
+    assert curve is not None
+    peak = max(density for _, density in curve)
+    assert peak == pytest.approx(1 / np.sqrt(2 * np.pi), rel=1e-12)
+    drawn = _axes().kde(values, bandwidth=1.0)
+    assert _svg(drawn) == _svg(_axes().kde([0.0, 0.0], bandwidth=1.0))

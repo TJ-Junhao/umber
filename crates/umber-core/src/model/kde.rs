@@ -6,14 +6,23 @@ use std::sync::Arc;
 
 use super::axis_data::{AxisData, XySeries};
 use super::mark::{LineMark, LineOptions};
-use super::validation::{LINE_GAP_HINT, check_bandwidth, check_kde_axes, check_kde_values};
+use super::validation::{
+    LINE_GAP_HINT, check_bandwidth, check_kde_axes, check_kde_values, grouped,
+};
 use crate::error::number;
 use crate::scale::MAX_MAGNITUDE;
 use crate::stats::{kde_curve, scott_bandwidth};
 use crate::{ColorSpec, Dash, Error, Result, ScaleKind, SizeSpec};
 
-/// The number of points a density line is evaluated at, evenly spaced along its x range.
-const KDE_POINTS: usize = 256;
+/// The fewest points a density line is evaluated at, evenly spaced along its x range.
+const KDE_MIN_POINTS: usize = 256;
+
+/// The most points a density line is evaluated at; a bandwidth that needs more is refused.
+const KDE_MAX_POINTS: usize = 16_384;
+
+/// The widest spacing of a density line's points, in bandwidths: close enough that the line
+/// follows every kernel and its trapezoid area is the density's mass on the drawn range.
+const KDE_SPACING: f64 = 0.25;
 
 /// How far a density line reaches past the smallest and the largest value, in bandwidths.
 const KDE_REACH: f64 = 3.0;
@@ -114,8 +123,8 @@ impl Default for GroupedKdeOptions {
 /// [`KdeOptions`].
 ///
 /// The density is in data units, so the area under the line is 1. The line runs from three
-/// bandwidths below the smallest finite value to three above the largest, through 256 evenly
-/// spaced points. NaN is left out. The values are validated and stored as given, and the line is
+/// bandwidths below the smallest finite value to three above the largest, through evenly spaced
+/// points at most a quarter bandwidth apart: at least 256, at most 16,384. NaN is left out. The values are validated and stored as given, and the line is
 /// computed once, when the mark is added; neither changes, and clones share both.
 ///
 /// # Examples
@@ -164,7 +173,7 @@ impl KdeMark {
     /// 2. a fixed bandwidth, by [`check_bandwidth`];
     /// 3. the values, by [`check_kde_values`];
     /// 4. for [`Bandwidth::Scott`], at least two distinct finite values (`Error::Data`);
-    /// 5. the density stays within the supported magnitudes (`Error::Data` naming `bandwidth`).
+    /// 5. the line, its points and its density, by [`density_line`].
     pub(super) fn new(
         context: &'static str,
         kinds: (ScaleKind, ScaleKind),
@@ -279,9 +288,13 @@ impl fmt::Debug for KdeMark {
 }
 
 /// The line of the density of the finite `values` with `bandwidth`, on an x axis of scale kind
-/// `x_kind`, drawn with `options`: [`KDE_POINTS`] points from [`KDE_REACH`] bandwidths below the
-/// smallest finite value to as far above the largest, kept within the supported magnitudes.
-/// `Error::Data` naming `bandwidth` when the density exceeds the supported magnitudes.
+/// `x_kind`, drawn with `options`: from [`KDE_REACH`] bandwidths below the smallest finite value
+/// to as far above the largest, through evenly spaced points at most [`KDE_SPACING`] bandwidths
+/// apart, at least [`KDE_MIN_POINTS`] of them. The checks run in this order, under `context`:
+///
+/// 1. the line stays within the supported magnitudes (`Error::Data` naming `values`);
+/// 2. it needs at most [`KDE_MAX_POINTS`] points (`Error::Style` naming `bandwidth`);
+/// 3. the density stays within the supported magnitudes (`Error::Data` naming `bandwidth`).
 fn density_line(
     context: &'static str,
     x_kind: ScaleKind,
@@ -293,10 +306,22 @@ fn density_line(
     let low = finite.clone().fold(f64::INFINITY, f64::min);
     let high = finite.fold(f64::NEG_INFINITY, f64::max);
     let reach = KDE_REACH * bandwidth;
-    let from = (low - reach).max(-MAX_MAGNITUDE);
-    let to = (high + reach).min(MAX_MAGNITUDE);
+    let (from, to) = (low - reach, high + reach);
+    if let Some(end) = [from, to].into_iter().find(|end| end.abs() > MAX_MAGNITUDE) {
+        return Err(Error::data(
+            context,
+            format!(
+                "the curve reaches {end}, three bandwidths past the values; magnitudes must not \
+                 exceed {MAX_MAGNITUDE:e}.",
+                end = number(end)
+            ),
+        )
+        .with_parameter("values")
+        .with_hint("rescale the values first."));
+    }
+    let points = line_points(context, (from, to), bandwidth)?;
     // The values hold a finite one, as checked, so the curve has all its points.
-    let curve = kde_curve(values, bandwidth, (from, to), KDE_POINTS).unwrap_or_default();
+    let curve = kde_curve(values, bandwidth, (from, to), points).unwrap_or_default();
     // The largest density; NaN, from a bandwidth too narrow to divide by, wins.
     let peak = curve
         .iter()
@@ -336,4 +361,104 @@ fn density_line(
             width: options.width,
         },
     ))
+}
+
+/// The number of points of a density line from `from` to `to` with `bandwidth`: enough for
+/// points at most [`KDE_SPACING`] bandwidths apart, and at least [`KDE_MIN_POINTS`].
+/// `Error::Style` naming `bandwidth` under `context` when that takes more than
+/// [`KDE_MAX_POINTS`].
+fn line_points(context: &'static str, (from, to): (f64, f64), bandwidth: f64) -> Result<usize> {
+    let needed = ((to - from) / (KDE_SPACING * bandwidth)).ceil() + 1.0;
+    if needed <= KDE_MAX_POINTS as f64 {
+        // At most `KDE_MAX_POINTS`, and at least 1: the cast is exact.
+        return Ok((needed as usize).max(KDE_MIN_POINTS));
+    }
+    let shown = if needed < 1e15 {
+        grouped(needed as usize)
+    } else {
+        number(needed).to_string()
+    };
+    Err(Error::style(
+        context,
+        format!(
+            "bandwidth is {h}, which needs {shown} samples over the drawn range; at most {max} \
+             are drawn.",
+            h = number(bandwidth),
+            max = grouped(KDE_MAX_POINTS),
+        ),
+    )
+    .with_parameter("bandwidth")
+    .with_hint("use a wider bandwidth."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Theme;
+    use crate::model::{Figure, Mark};
+
+    /// The drawn line of a density of `values` with `bandwidth`, as x and y.
+    fn drawn(values: &[f64], bandwidth: Bandwidth) -> (Vec<f64>, Vec<f64>) {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        let options = KdeOptions {
+            bandwidth,
+            ..KdeOptions::default()
+        };
+        f.single_axes_mut().kde(values, options).unwrap();
+        let [Mark::Kde(mark)] = f.single_axes().marks() else {
+            panic!("expected one density line");
+        };
+        let line = mark.line();
+        (line.x().numbers().to_vec(), line.y().numbers().to_vec())
+    }
+
+    /// The trapezoid area under the polyline `(x, y)`.
+    fn area(x: &[f64], y: &[f64]) -> f64 {
+        x.windows(2)
+            .zip(y.windows(2))
+            .map(|(x, y)| (x[1] - x[0]) * (y[0] + y[1]) / 2.0)
+            .sum()
+    }
+
+    /// Φ(3): the share of a Gaussian below three standard deviations above its mean.
+    const PHI_3: f64 = 0.998_650_101_968_369_9;
+
+    #[test]
+    fn the_drawn_line_resolves_narrow_bandwidths() {
+        // The line reaches three bandwidths past the outer values, so each outer value loses
+        // its tail beyond them and the middle one loses nothing: the mass on the drawn range.
+        let mass = (2.0 * PHI_3 + 1.0) / 3.0;
+        for h in [1e-3, 2e-3, 0.01, 0.05, 0.2] {
+            let (x, y) = drawn(&[0.0, 0.5, 1.0], Bandwidth::Fixed(h));
+            assert!(
+                x.len() >= KDE_MIN_POINTS && x.len() <= KDE_MAX_POINTS,
+                "{}",
+                x.len()
+            );
+            let spacing = (x[x.len() - 1] - x[0]) / (x.len() - 1) as f64;
+            assert!(spacing <= h / 4.0 * (1.0 + 1e-12), "{spacing} for {h}");
+            let drawn = area(&x, &y);
+            assert!(
+                (drawn - mass).abs() < 1e-3,
+                "area {drawn} for {h}, expected {mass}"
+            );
+        }
+        // A wide bandwidth keeps the smallest grid.
+        let (x, _) = drawn(&[0.0, 0.5, 1.0], Bandwidth::Fixed(1.0));
+        assert_eq!(x.len(), KDE_MIN_POINTS);
+    }
+
+    #[test]
+    fn a_span_far_below_the_bandwidth_keeps_the_gaussian() {
+        // Data spans of 1e-308 and 1e-310 are far below the bandwidth: the density is one
+        // Gaussian of peak 1 / sqrt(2π), not zeros or NaN from huge intermediates.
+        let peak = 1.0 / (2.0 * std::f64::consts::PI).sqrt();
+        for tiny in [1e-308, 1e-310] {
+            let (x, y) = drawn(&[0.0, tiny], Bandwidth::Fixed(1.0));
+            let top = y.iter().copied().fold(0.0, f64::max);
+            assert!((top / peak - 1.0).abs() < 1e-4, "{top} for {tiny}");
+            assert!((area(&x, &y) - PHI_3 * 2.0 + 1.0).abs() < 1e-3);
+        }
+    }
 }
