@@ -79,6 +79,12 @@ impl FontValue {
     }
 }
 
+/// Checks file-font options before Python reads either file.
+#[pyfunction]
+pub(crate) fn check_file_bold_fallback(has_bold: bool, bold_fallback: bool) -> PyResult<()> {
+    umber_core::fonts::check_file_bold_fallback(has_bold, bold_fallback).map_err(core_error)
+}
+
 /// Parses bytes at construction, before a font is assigned to a theme.
 #[pyfunction]
 pub(crate) fn font_from_files(
@@ -89,9 +95,11 @@ pub(crate) fn font_from_files(
     bold_path: Option<String>,
     bold_fallback: bool,
 ) -> PyResult<FontValue> {
+    check_file_bold_fallback(bold.is_some(), bold_fallback)?;
     Font::from_files(regular.to_vec(), bold.map(<[u8]>::to_vec), name)
+        .and_then(|inner| inner.with_bold_fallback(bold_fallback))
         .map(|inner| FontValue {
-            inner: inner.with_bold_fallback(bold_fallback),
+            inner,
             paths: Some(FilePaths {
                 regular: regular_path,
                 bold: bold_path,
@@ -104,10 +112,8 @@ pub(crate) fn font_from_files(
 #[pyfunction]
 pub(crate) fn font_system(family: &str, bold_fallback: bool) -> PyResult<FontValue> {
     Font::system(family)
-        .map(|inner| FontValue {
-            inner: inner.with_bold_fallback(bold_fallback),
-            paths: None,
-        })
+        .and_then(|inner| inner.with_bold_fallback(bold_fallback))
+        .map(|inner| FontValue { inner, paths: None })
         .map_err(core_error)
 }
 

@@ -8,6 +8,9 @@ use std::hash::{Hash, Hasher};
 use umber_core::fonts::font_bytes;
 use umber_core::{BundledFont, Error, FaceId, Font, FontLibrary, TextStyle, Weight};
 
+#[path = "fixtures/font_file.rs"]
+mod font_fixture;
+
 fn file_font(bold: bool, name: &str) -> Font {
     Font::from_files(
         font_bytes(BundledFont::Inter, Weight::Regular).to_vec(),
@@ -37,9 +40,24 @@ fn from_file_regular_and_bold() {
 }
 
 #[test]
+fn explicit_bold_with_fallback_is_a_usage_error() {
+    let font = file_font(true, "Inter");
+    let error = font.clone().with_bold_fallback(true).unwrap_err();
+    assert!(matches!(error, Error::Usage { .. }));
+    assert_eq!(
+        error.to_string(),
+        "Font.from_file(): bold_fallback is True with bold given; \
+         the fallback applies only to a font without a bold face."
+    );
+    assert_eq!(error.parameter(), Some("bold_fallback"));
+    assert_eq!(error.hint(), Some("drop bold_fallback, or drop bold."));
+    assert_eq!(font.clone().with_bold_fallback(false).unwrap(), font);
+}
+
+#[test]
 fn bold_fallback_changes_identity_without_inventing_a_face() {
     let plain = file_font(false, "Inter");
-    let fallback = plain.clone().with_bold_fallback(true);
+    let fallback = plain.clone().with_bold_fallback(true).unwrap();
     assert!(!plain.bold_fallback());
     assert!(fallback.bold_fallback());
     assert!(!fallback.has_face(Weight::SemiBold));
@@ -54,12 +72,14 @@ fn bold_fallback_changes_identity_without_inventing_a_face() {
         hasher.finish()
     };
     assert_ne!(hash(&plain), hash(&fallback));
-    assert_eq!(fallback.clone().with_bold_fallback(false), plain);
+    assert_eq!(fallback.clone().with_bold_fallback(false).unwrap(), plain);
     assert_eq!(
         fallback,
-        file_font(false, "renamed").with_bold_fallback(true)
+        file_font(false, "renamed")
+            .with_bold_fallback(true)
+            .unwrap()
     );
-    assert_eq!(Font::INTER.with_bold_fallback(true), Font::INTER);
+    assert_eq!(Font::INTER.with_bold_fallback(true).unwrap(), Font::INTER);
 }
 
 #[test]
@@ -70,7 +90,7 @@ fn bold_fallback_title_matches_regular_at_the_title_size() {
 
     let lib = FontLibrary::with_fallbacks(vec![]);
     let fonts = lib
-        .with_figure_fonts(&[file_font(false, "Inter").with_bold_fallback(true)])
+        .with_figure_fonts(&[file_font(false, "Inter").with_bold_fallback(true).unwrap()])
         .unwrap();
     let white = Rgba {
         r: 255,
@@ -231,18 +251,20 @@ fn missing_bold_fails_when_bold_text_is_drawn() {
 
 #[test]
 fn source_serif_uses_panose_when_family_class_is_zero() {
-    for bytes in [
-        include_bytes!("../../../tests/fonts/SourceSerif4-Regular.otf").as_slice(),
-        include_bytes!("../../../tests/fonts/SourceSerif4Variable-Roman.ttf").as_slice(),
-    ] {
-        let font = Font::from_files(bytes.to_vec(), None, "Source Serif 4".into()).unwrap();
+    for name in ["SourceSerif4-Regular.otf", "SourceSerif4Variable-Roman.ttf"] {
+        let Some(bytes) = font_fixture::read(name) else {
+            continue;
+        };
+        let font = Font::from_files(bytes, None, "Source Serif 4".into()).unwrap();
         assert_eq!(font.generic_family(), "serif");
     }
 }
 
 #[test]
 fn variable_font_renders_its_default_instance() {
-    let bytes = include_bytes!("../../../tests/fonts/SourceSerif4Variable-Roman.ttf");
+    let Some(bytes) = font_fixture::read("SourceSerif4Variable-Roman.ttf") else {
+        return;
+    };
     // Removing variation tables leaves the base outlines and metrics of the default instance.
     let mut static_bytes = bytes.to_vec();
     let count = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;

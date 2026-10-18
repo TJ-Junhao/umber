@@ -328,9 +328,19 @@ def test_bold_fallback_type_checked_before_io(
     assert any("^" in note for note in getattr(caught.value, "__notes__", []))
 
 
-def test_explicit_bold_with_fallback_is_a_usage_error_before_io() -> None:
+@pytest.mark.parametrize(
+    ("regular", "bold"),
+    [(Path("missing.ttf"), Path("missing-bold.ttf")), (REGULAR, BOLD), (REGULAR, REGULAR)],
+)
+def test_explicit_bold_with_fallback_is_a_usage_error_before_io(
+    monkeypatch: pytest.MonkeyPatch, regular: Path, bold: Path
+) -> None:
+    def unexpected(*args: object) -> bytes:
+        pytest.fail("bold option validation must precede file I/O")
+
+    monkeypatch.setattr(Path, "read_bytes", unexpected)
     with pytest.raises(ub.UsageError) as caught:
-        ub.Font.from_file("missing.ttf", bold="missing-bold.ttf", bold_fallback=True)
+        ub.Font.from_file(regular, bold=bold, bold_fallback=True)
     assert str(caught.value) == (
         "Font.from_file(): bold_fallback is True with bold given; "
         "the fallback applies only to a font without a bold face."

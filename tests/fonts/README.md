@@ -3,6 +3,12 @@
 These files are for tests only. `tests/fonts/**` is excluded from both wheels and source
 distributions. No font has been modified or subset here.
 
+Core tests and the output corpus read these fixtures at run time from this repository
+path. When `tests/fonts/` is absent outside a repository checkout (for example, in an
+unpacked sdist or `cargo package` tarball), cases requiring these files are skipped with
+an explicit message. A missing directory in a checkout, or a missing or unreadable file
+in an existing fixture directory, is an error. Tests using the bundled fonts still run.
+
 Regular and bold tests use `../../crates/umber-core/fonts/Inter-Regular.ttf` and
 `../../crates/umber-core/fonts/Inter-SemiBold.ttf`. Their source, version and hashes are in
 `../../crates/umber-core/fonts/MANIFEST.md`, and their SIL Open Font License 1.1 is in

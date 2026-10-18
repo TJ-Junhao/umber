@@ -4,6 +4,9 @@ use super::*;
 use crate::fonts::{BundledFont, Font, font_bytes};
 use std::sync::Arc;
 
+#[path = "../../../tests/fixtures/font_file.rs"]
+mod font_fixture;
+
 fn insert(
     db: &mut fontdb::Database,
     family: &str,
@@ -228,6 +231,30 @@ fn system_family_matches_legacy_names_not_kept_by_fontdb() {
 }
 
 #[test]
+fn system_family_prefers_typographic_matches_over_legacy_aliases() {
+    let mut db = fontdb::Database::new();
+    insert(
+        &mut db,
+        "Typographic Family",
+        BundledFont::Inter,
+        400,
+        fontdb::Style::Normal,
+    );
+    insert(
+        &mut db,
+        "Inter",
+        BundledFont::Geist,
+        450,
+        fontdb::Style::Normal,
+    );
+    let font = resolve(&db, "iNtEr");
+    assert_eq!(
+        chosen(&font, Weight::Regular),
+        font_bytes(BundledFont::Geist, Weight::Regular)
+    );
+}
+
+#[test]
 fn system_closest_names_favour_shared_words_and_prefixes_case_insensitively() {
     let mut db = fontdb::Database::new();
     for family in ["Ubuntu", "Noto Serif", "Noto Sans", "Inter"] {
@@ -251,9 +278,10 @@ fn system_closest_names_favour_shared_words_and_prefixes_case_insensitively() {
 #[test]
 fn system_variable_only_family_explains_missing_bold() {
     let mut db = fontdb::Database::new();
-    db.load_font_data(
-        include_bytes!("../../../../../tests/fonts/SourceSerif4Variable-Roman.ttf").to_vec(),
-    );
+    let Some(bytes) = font_fixture::read("SourceSerif4Variable-Roman.ttf") else {
+        return;
+    };
+    db.load_font_data(bytes);
     let family = db.faces().next().unwrap().families[0].0.clone();
     let font = resolve(&db, &family);
     assert!(!font.has_face(Weight::SemiBold));
@@ -316,7 +344,7 @@ fn system_bold_fallback_uses_regular_only_without_a_bold_face() {
             );
         }
         let plain = resolve(&db, "Example");
-        let fallback = plain.clone().with_bold_fallback(true);
+        let fallback = plain.clone().with_bold_fallback(true).unwrap();
         assert_ne!(plain, fallback);
         assert_eq!(fallback.has_face(Weight::SemiBold), has_bold);
         let hash = |font: &Font| {
@@ -325,7 +353,7 @@ fn system_bold_fallback_uses_regular_only_without_a_bold_face() {
             hasher.finish()
         };
         assert_ne!(hash(&plain), hash(&fallback));
-        assert_eq!(fallback.clone().with_bold_fallback(false), plain);
+        assert_eq!(fallback.clone().with_bold_fallback(false).unwrap(), plain);
         let fonts = lib.with_figure_fonts(&[fallback, plain]).unwrap();
         let actual = fonts.layout("Heading 123", &style).unwrap();
         let expected = fonts
@@ -354,11 +382,13 @@ fn system_bold_fallback_uses_regular_only_without_a_bold_face() {
 fn system_variable_only_bold_fallback_renders_every_bold_role() {
     use crate::{AxisData, Figure, FontLibrary, LegendStyle, LineOptions, ScaleKind, Theme};
     let mut db = fontdb::Database::new();
-    let bytes = include_bytes!("../../../../../tests/fonts/SourceSerif4Variable-Roman.ttf");
+    let Some(bytes) = font_fixture::read("SourceSerif4Variable-Roman.ttf") else {
+        return;
+    };
     db.load_font_data(bytes.to_vec());
     let family = db.faces().next().unwrap().families[0].0.clone();
     let plain = resolve(&db, &family);
-    let fallback = plain.clone().with_bold_fallback(true);
+    let fallback = plain.clone().with_bold_fallback(true).unwrap();
     assert!(!fallback.has_face(Weight::SemiBold));
     let reference = Font::from_files(bytes.to_vec(), Some(bytes.to_vec()), family).unwrap();
     let lib = FontLibrary::with_fallbacks(vec![]);

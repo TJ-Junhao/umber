@@ -370,8 +370,9 @@ impl Font {
 
     /// Finds an installed family and keeps its selected faces in memory.
     ///
-    /// Every call scans the installed fonts; there is no cache. Family matching includes
-    /// typographic and legacy names and is case-insensitive. The regular face prefers upright,
+    /// Every call scans the installed fonts; there is no cache. Family matching is
+    /// case-insensitive; legacy names are tried only when typographic names do not match.
+    /// The regular face prefers upright,
     /// normal-width faces, then the closest weight to 400. Bold requires a separate upright
     /// static face at least weight 600, preferring normal width, then the closest weight to 600.
     /// Variable fonts use their default instance, not a bold variation. Families installed only
@@ -397,9 +398,13 @@ impl Font {
 
     /// Sets whether a custom font without bold draws bold text in its regular face.
     ///
-    /// No synthetic bold is made. An existing bold face is always used; bundled fonts are
-    /// unchanged. This setting is part of a custom font's equality and hash, but does not
+    /// No synthetic bold is made. An existing system bold face is always used; bundled fonts
+    /// are unchanged. This setting is part of a custom font's equality and hash, but does not
     /// change [`Font::has_face`].
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` if `value` is true and a file font has an explicit bold face.
     ///
     /// # Examples
     ///
@@ -407,19 +412,21 @@ impl Font {
     /// use umber_core::{BundledFont, Font, Weight};
     /// use umber_core::fonts::font_bytes;
     /// let font = Font::from_files(font_bytes(BundledFont::Inter, Weight::Regular).to_vec(), None, "Inter".into())?
-    ///     .with_bold_fallback(true);
+    ///     .with_bold_fallback(true)?;
     /// assert!(font.bold_fallback());
     /// assert!(!font.has_face(Weight::SemiBold));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    #[must_use]
-    pub fn with_bold_fallback(mut self, value: bool) -> Font {
+    pub fn with_bold_fallback(mut self, value: bool) -> Result<Font> {
         match &mut self {
             Font::Bundled(_) => {}
-            Font::File(font) => Arc::make_mut(font).bold_fallback = value,
+            Font::File(font) => {
+                check_file_bold_fallback(font.bold.is_some(), value)?;
+                Arc::make_mut(font).bold_fallback = value;
+            }
             Font::System(font) => Arc::make_mut(font).bold_fallback = value,
         }
-        self
+        Ok(self)
     }
 
     /// Whether a custom font may draw bold text in its regular face when bold is absent.
@@ -521,6 +528,32 @@ impl Font {
             Font::System(font) => font.regular.generic,
         }
     }
+}
+
+/// Checks a file font's bold options before its files are read or parsed.
+///
+/// # Errors
+///
+/// `Error::Usage` if both an explicit bold face and regular-face fallback are requested.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::fonts::check_file_bold_fallback;
+/// assert!(check_file_bold_fallback(true, true).is_err());
+/// assert!(check_file_bold_fallback(false, true).is_ok());
+/// ```
+pub fn check_file_bold_fallback(has_bold: bool, bold_fallback: bool) -> Result<()> {
+    if has_bold && bold_fallback {
+        return Err(Error::usage(
+            "Font.from_file()",
+            "bold_fallback is True with bold given; \
+             the fallback applies only to a font without a bold face.",
+        )
+        .with_parameter("bold_fallback")
+        .with_hint("drop bold_fallback, or drop bold."));
+    }
+    Ok(())
 }
 
 fn parse_file(bytes: Vec<u8>, parameter: &'static str, name: &str) -> Result<OwnedFace> {

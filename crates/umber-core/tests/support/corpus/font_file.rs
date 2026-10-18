@@ -5,6 +5,9 @@ use umber_core::{AxisData, BundledFont, Font, FontLibrary, LegendStyle, LineOpti
 
 use super::super::{Output, axes, emit_scene, figure, labelled, linear, themes};
 
+#[path = "../../fixtures/font_file.rs"]
+mod font_fixture;
+
 pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     let font = Font::from_files(
         font_bytes(BundledFont::Inter, Weight::Regular).to_vec(),
@@ -19,24 +22,17 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         "Inter".into(),
     )
     .unwrap()
-    .with_bold_fallback(true);
+    .with_bold_fallback(true)
+    .unwrap();
     font_cases("font-file-bold-fallback", fallback, lib, sink);
-    for (name, bytes) in [
-        (
-            "font-file-cff",
-            include_bytes!("../../../../../tests/fonts/SourceSerif4-Regular.otf").as_slice(),
-        ),
-        (
-            "font-file-variable",
-            include_bytes!("../../../../../tests/fonts/SourceSerif4Variable-Roman.ttf").as_slice(),
-        ),
+    for (name, file) in [
+        ("font-file-cff", "SourceSerif4-Regular.otf"),
+        ("font-file-variable", "SourceSerif4Variable-Roman.ttf"),
     ] {
-        let font = Font::from_files(
-            bytes.to_vec(),
-            Some(bytes.to_vec()),
-            "Source Serif 4".into(),
-        )
-        .unwrap();
+        let Some(bytes) = font_fixture::read(file) else {
+            continue;
+        };
+        let font = Font::from_files(bytes.clone(), Some(bytes), "Source Serif 4".into()).unwrap();
         font_cases(name, font, lib, sink);
     }
 }

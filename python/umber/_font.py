@@ -166,15 +166,7 @@ class Font:
             if not isinstance(bold, Auto):
                 _args.require_path(context, "bold", bold)
             _args.boolean(context, "bold_fallback", bold_fallback)
-            if bold_fallback and not isinstance(bold, Auto):
-                raise new_error(
-                    UsageError,
-                    context,
-                    "bold_fallback is True with bold given; "
-                    "the fallback applies only to a font without a bold face.",
-                    parameter="bold_fallback",
-                    hint="drop bold_fallback, or drop bold.",
-                )
+            _umber.check_file_bold_fallback(not isinstance(bold, Auto), bold_fallback)
             regular_path = _args.path(context, "regular", regular)
             bold_path = None if isinstance(bold, Auto) else _args.path(context, "bold", bold)
             regular_bytes = _read(regular_path, "regular")

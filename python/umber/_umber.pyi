@@ -51,6 +51,7 @@ __all__ = [
     "FontValue",
     "font_from_files",
     "font_system",
+    "check_file_bold_fallback",
     "Theme",
     "__version__",
     "box_stats",
@@ -111,6 +112,7 @@ def font_from_files(
     bold_fallback: bool,
 ) -> FontValue: ...
 def font_system(family: str, bold_fallback: bool) -> FontValue: ...
+def check_file_bold_fallback(has_bold: bool, bold_fallback: bool) -> None: ...
 
 # Bundled fonts as (constant name, index), in the order SOURCE_SERIF_4, IBM_PLEX_SANS, GEIST,
 # INTER, JETBRAINS_MONO.

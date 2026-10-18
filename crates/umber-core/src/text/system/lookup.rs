@@ -154,7 +154,7 @@ fn check_family(family: &str) -> crate::Result<()> {
     Ok(())
 }
 
-/// Faces from one source are inspected together, so a collection is copied only once.
+/// Faces from one source are inspected together, so a collection is mapped only once.
 #[derive(Hash, PartialEq, Eq)]
 enum SourceKey<'a> {
     File(&'a Path),
@@ -191,7 +191,16 @@ struct FamilyFace<'a> {
     variable: bool,
 }
 
-impl FamilyFace<'_> {
+impl<'a> FamilyFace<'a> {
+    fn new(info: &'a fontdb::FaceInfo, name: String) -> FamilyFace<'a> {
+        FamilyFace {
+            info,
+            name,
+            bytes: None,
+            variable: false,
+        }
+    }
+
     fn parse(&self, family: &str) -> crate::Result<crate::text::OwnedFace> {
         let parsed = self.bytes.as_ref().and_then(|bytes| {
             crate::text::OwnedFace::parse(Arc::clone(bytes), self.info.index, &self.name)
@@ -216,44 +225,61 @@ fn family_faces<'a>(db: &'a fontdb::Database, family: &str) -> (Vec<FamilyFace<'
     let normalized = family.to_lowercase();
     let mut matches = Vec::new();
     let mut installed_names = Vec::new();
-    for group in source_groups(db) {
-        let Some(first) = group.first() else { continue };
-        let bytes = match &first.source {
-            fontdb::Source::File(path) => std::fs::read(path).ok(),
-            fontdb::Source::Binary(bytes) | fontdb::Source::SharedFile(_, bytes) => {
-                Some(bytes.as_ref().as_ref().to_vec())
-            }
+    for info in db.faces() {
+        if let Some((name, _)) = info
+            .families
+            .iter()
+            .find(|(name, _)| name.to_lowercase() == normalized)
+        {
+            matches.push(FamilyFace::new(info, name.clone()));
         }
-        .map(Arc::new);
-        for info in group {
-            let mut names: Vec<String> =
-                info.families.iter().map(|(name, _)| name.clone()).collect();
-            let mut variable = false;
-            if let Some(font) = bytes
-                .as_ref()
-                .and_then(|bytes| FontRef::from_index(bytes, info.index).ok())
-            {
-                // fontdb prefers name ID 16 and may omit the legacy family (name ID 1).
-                names.extend(
-                    font.localized_strings(read_fonts::types::NameId::new(1))
-                        .map(|name| name.to_string())
-                        .filter(|name| !name.is_empty()),
-                );
-                variable = font.fvar().is_ok();
-            }
-            if let Some(name) = names.iter().find(|name| name.to_lowercase() == normalized) {
-                matches.push(FamilyFace {
-                    info,
-                    name: name.clone(),
-                    bytes: bytes.clone(),
-                    variable,
-                });
-            }
-            installed_names.extend(names);
-        }
-        // Only matching families retain their bytes; other sources are released here.
+        installed_names.extend(info.families.iter().map(|(name, _)| name.clone()));
+    }
+    // fontdb prefers name ID 16 and may omit the legacy family (name ID 1).
+    // Consult those aliases only when the database's family names did not match.
+    if matches.is_empty() {
+        matches = legacy_family_faces(db, &normalized, &mut installed_names);
+    }
+    let mut sources = HashMap::new();
+    for face in &mut matches {
+        db.with_face_data(face.info.id, |data, index| {
+            face.variable = FontRef::from_index(data, index).is_ok_and(|font| font.fvar().is_ok());
+            // Only matched sources are copied, once even when a collection has several faces.
+            let bytes = sources
+                .entry(source_key(&face.info.source))
+                .or_insert_with(|| Arc::new(data.to_vec()));
+            face.bytes = Some(Arc::clone(bytes));
+        });
     }
     (matches, installed_names)
+}
+
+fn legacy_family_faces<'a>(
+    db: &'a fontdb::Database,
+    normalized: &str,
+    installed_names: &mut Vec<String>,
+) -> Vec<FamilyFace<'a>> {
+    let mut matches = Vec::new();
+    for group in source_groups(db) {
+        let Some(first) = group.first() else { continue };
+        db.with_face_data(first.id, |data, _| {
+            for info in group {
+                let Ok(font) = FontRef::from_index(data, info.index) else {
+                    continue;
+                };
+                let names: Vec<_> = font
+                    .localized_strings(read_fonts::types::NameId::new(1))
+                    .map(|name| name.to_string())
+                    .filter(|name| !name.is_empty())
+                    .collect();
+                if let Some(name) = names.iter().find(|name| name.to_lowercase() == normalized) {
+                    matches.push(FamilyFace::new(info, name.clone()));
+                }
+                installed_names.extend(names);
+            }
+        });
+    }
+    matches
 }
 
 fn family_in(db: &fontdb::Database, family: &str) -> crate::Result<crate::fonts::SystemFamily> {
