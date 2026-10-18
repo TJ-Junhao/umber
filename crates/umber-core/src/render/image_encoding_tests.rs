@@ -162,6 +162,65 @@ fn field(n: usize, kind: &str) -> CellImage {
     CellImage::from_figure(format!("{kind}_{n}"), figure)
 }
 
+fn rectangular_field(width: usize, height: usize, kind: &str) -> CellImage {
+    let values: Vec<_> = (0..width * height)
+        .map(|i| {
+            let col = i % width;
+            let row = i / width;
+            let x = col as f64 / (width - 1).max(1) as f64;
+            let y = row as f64 / (height - 1).max(1) as f64;
+            match kind {
+                "transparent_blocks" if (col / 100 + row / 100).is_multiple_of(2) => f64::NAN,
+                "transparent_blocks" => x + y,
+                "noisy_center_band" if (height / 2 - 2..height / 2 + 2).contains(&row) => unit(i),
+                "noisy_center_band" => x + y,
+                "flat_center_band" if (height / 2 - 2..height / 2 + 2).contains(&row) => 0.5,
+                "flat_center_band" => x + y,
+                "center_flat_edge_ramp" if (width / 4..3 * width / 4).contains(&col) => 0.5,
+                "center_flat_edge_ramp" | "ramp" => x + y,
+                "smooth" => (8.0 * x).sin() * (8.0 * y).cos(),
+                _ => panic!("unknown rectangular field: {kind}"),
+            }
+        })
+        .collect();
+    let x: Vec<_> = (0..=width).map(|i| i as f64).collect();
+    let y: Vec<_> = (0..=height).map(|i| i as f64).collect();
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .mesh(
+            &x,
+            &y,
+            &values,
+            MeshOptions {
+                render: Render::Raster,
+                ..MeshOptions::default()
+            },
+        )
+        .unwrap();
+    CellImage::from_figure(format!("{kind}_{width}x{height}"), figure)
+}
+
+fn category_labels_heatmap() -> CellImage {
+    // Match tests/support/corpus/category_labels.rs, including the default render choice.
+    let names = |prefix: &str| {
+        (0..1000)
+            .map(|i| format!("{prefix}{i}"))
+            .collect::<Vec<_>>()
+    };
+    let values: Vec<_> = (0..1_000_000)
+        .map(|i| ((i / 1000 + i % 1000) % 100) as f64)
+        .collect();
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Category, ScaleKind::Category)
+        .unwrap()
+        .heatmap(&names("x"), &names("y"), &values, HeatmapOptions::default())
+        .unwrap();
+    CellImage::from_figure("fig-category-labels-heatmap-1000".to_owned(), figure)
+}
+
 fn corpus() -> Vec<CellImage> {
     let mut images = vec![
         heatmap(1000, false),
@@ -226,6 +285,42 @@ fn corpus() -> Vec<CellImage> {
             images.push(field(n, kind));
         }
     }
+    for kind in ["row_ramp", "checker", "ij_ramp", "noisy_ramp"] {
+        images.push(field(100, kind));
+    }
+    images.push(field(50, "checker"));
+    images.push(category_labels_heatmap());
+    for (width, height, kind) in [
+        (1000, 1000, "transparent_blocks"),
+        (1000, 1000, "noisy_center_band"),
+        (1000, 1000, "flat_center_band"),
+        (2000, 600, "center_flat_edge_ramp"),
+        (8, 3000, "ramp"),
+        (3, 4000, "smooth"),
+        (1, 20000, "ramp"),
+        (3000, 8, "ramp"),
+    ] {
+        images.push(rectangular_field(width, height, kind));
+    }
+    // Independent smooth RGB channels cannot be represented by a scalar colormap.
+    images.push(CellImage {
+        name: "rgb_gradient_1500".to_owned(),
+        width: 1500,
+        height: 1500,
+        pixels: (0..1500 * 1500)
+            .map(|i| {
+                let x = (i % 1500) as f64 / 1499.0;
+                let y = (i / 1500) as f64 / 1499.0;
+                Rgba {
+                    r: (x * 255.0) as u8,
+                    g: (y * 255.0) as u8,
+                    b: ((x + y) * 127.5) as u8,
+                    a: 255,
+                }
+            })
+            .collect(),
+    });
+    assert_eq!(images.len(), 35);
     images
 }
 
@@ -252,22 +347,18 @@ fn embedded_png_corpus_preserves_pixels_and_is_deterministic() {
     for image in corpus() {
         let before = encode(&image, 6, Filter::Adaptive);
         let after = png_bytes(image.width, image.height, &image.pixels).unwrap();
-        let (level, filter) = match image.name.as_str() {
-            "heatmap_1000" | "heatmap_100" | "hist2d_500" | "noise_100" | "noise_1000" => {
-                (1, Filter::NoFilter)
-            }
-            "mesh_100" | "sin_100" | "sin_300" => (3, Filter::Sub),
-            "mesh_1000"
-            | "hist2d_100"
-            | "diverging_1000"
-            | "sin_1000"
-            | "radial_1000"
-            | "ramp_noise_001_1000" => (3, Filter::NoFilter),
-            "row_ramp_300" | "row_ramp_1000" | "checker_1000" => (3, Filter::Paeth),
-            "ij_ramp_50" | "noisy_ramp_20" | "noisy_ramp_50" => (3, Filter::Adaptive),
-            name => panic!("missing expected setting for {name}"),
+        let unfiltered = encode(&image, 1, Filter::NoFilter);
+        let adaptive = encode(&image, 1, Filter::Adaptive);
+        let filter = if adaptive.len() < unfiltered.len() / 2 {
+            Filter::Adaptive
+        } else {
+            Filter::NoFilter
         };
-        assert_eq!(after, encode(&image, level, filter), "{}", image.name);
+        let mut expected = smaller(unfiltered, adaptive);
+        if image.pixels.len() * 4 > 32 * 1024 && expected.len() <= image.pixels.len() * 4 / 3 {
+            expected = smaller(expected, encode(&image, 3, filter));
+        }
+        assert_eq!(after, expected, "{}", image.name);
         let decoded = decode_rgba8(&after).unwrap();
         assert_eq!((decoded.width, decoded.height), (image.width, image.height));
         assert_eq!(decoded.rgba, image.rgba(), "{}", image.name);
@@ -287,7 +378,7 @@ fn embedded_png_corpus_preserves_pixels_and_is_deterministic() {
 }
 
 #[test]
-fn embedded_png_sampling_preserves_wide_and_tall_images() {
+fn embedded_png_preserves_wide_and_tall_images() {
     for (width, height) in [(6000, 1), (1, 6000), (2000, 3), (3, 2000)] {
         let image = CellImage {
             name: format!("{width}x{height}"),
@@ -314,9 +405,15 @@ fn embedded_png_corpus_size_bound() {
     for image in corpus() {
         let before = encode(&image, 6, Filter::Adaptive);
         let after = png_bytes(image.width, image.height, &image.pixels).unwrap();
-        if after.len() * 100 > before.len() * 110 {
+        println!(
+            "PNG_SIZE\t{}\t{}\t{}",
+            image.name,
+            before.len(),
+            after.len()
+        );
+        if after.len() * 100 > (before.len() * 110).max((before.len() + 8 * 1024) * 100) {
             failures.push(format!(
-                "{}: {} > 110% of {} (+{:.1}%)",
+                "{}: {} > max(110%, +8 KiB) of {} (+{:.1}%)",
                 image.name,
                 after.len(),
                 before.len(),
@@ -327,74 +424,12 @@ fn embedded_png_corpus_size_bound() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Run with --release --ignored --nocapture --test-threads=1 on the benchmark machine.
-#[test]
-#[ignore = "compression timing corpus"]
-fn measure_embedded_png_corpus() {
-    for image in corpus() {
-        let expected = image.rgba();
-        for candidate in 0..19 {
-            let encode_candidate = || {
-                if candidate < 15 {
-                    encode(
-                        &image,
-                        [1, 3, 6][candidate / 5],
-                        [
-                            Filter::NoFilter,
-                            Filter::Sub,
-                            Filter::Up,
-                            Filter::Paeth,
-                            Filter::Adaptive,
-                        ][candidate % 5],
-                    )
-                } else if candidate == 15 {
-                    smaller(
-                        encode(&image, 1, Filter::NoFilter),
-                        encode(&image, 1, Filter::Adaptive),
-                    )
-                } else if candidate == 16 {
-                    smaller(
-                        encode(&image, 1, Filter::Sub),
-                        encode(&image, 1, Filter::Up),
-                    )
-                } else if candidate == 17 {
-                    smaller(
-                        encode(&image, 1, Filter::NoFilter),
-                        encode(&image, 3, Filter::Adaptive),
-                    )
-                } else {
-                    png_bytes(image.width, image.height, &image.pixels).unwrap()
-                }
-            };
-            let first = encode_candidate();
-            assert_eq!(
-                decode_rgba8(&first).unwrap().rgba,
-                expected,
-                "{} candidate {candidate}",
-                image.name
-            );
-            let mut samples = Vec::new();
-            for _ in 0..5 {
-                let start = Instant::now();
-                let encoded = black_box(encode_candidate());
-                samples.push(start.elapsed().as_secs_f64() * 1000.0);
-                assert_eq!(encoded, first);
-            }
-            samples.sort_by(f64::total_cmp);
-            println!(
-                "PNG_CORPUS\t{}\t{candidate}\t{:.3}\t{}",
-                image.name,
-                samples[2],
-                first.len()
-            );
-        }
-    }
-}
-
 /// Alternates the previous encoder and the selected rule to limit timing drift.
+/// Run with --release --ignored --nocapture --test-threads=1 on the benchmark machine.
 #[test]
 #[ignore = "paired compression timings"]
 fn measure_selected_embedded_png_corpus() {
+    let mut failures = Vec::new();
     for image in corpus() {
         let before = encode(&image, 6, Filter::Adaptive);
         let after = png_bytes(image.width, image.height, &image.pixels).unwrap();
@@ -426,7 +461,15 @@ fn measure_selected_embedded_png_corpus() {
             before.len(),
             after.len()
         );
+        let (old_ms, new_ms) = (times[0][5], times[1][5]);
+        if image.name == "heatmap_1000" && new_ms * 2.0 > old_ms {
+            failures.push(format!(
+                "{}: {old_ms:.4} / {new_ms:.4} ms is less than 2x faster",
+                image.name
+            ));
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]

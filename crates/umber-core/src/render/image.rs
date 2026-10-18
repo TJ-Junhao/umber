@@ -209,47 +209,25 @@ pub(super) fn png_bytes(width: u32, height: u32, pixels: &[Rgba]) -> Option<Vec<
     }
     let data: Vec<u8> = pixels.iter().flat_map(|c| [c.r, c.g, c.b, c.a]).collect();
     let full = |level, filter| encode(width, height, &data, level, filter);
-    // On small images, trying several encodings costs more than the search saves.
-    if data.len() <= 16 * 1024 {
-        return full(3, Filter::Adaptive);
-    }
-    // A central rectangle of at most 1024 columns by 4 rows bounds the cost of choosing
-    // settings. Keep consecutive rows and columns so both repetition and prediction survive.
-    let (columns, rows) = (width.min(1024), height.min(4));
-    let left = ((width - columns) / 2) as usize * 4;
-    let top = ((height - rows) / 2) as usize;
-    let sample: Vec<u8> = data
-        .chunks_exact(width as usize * 4)
-        .skip(top)
-        .take(rows as usize)
-        .flat_map(|row| row[left..left + columns as usize * 4].iter().copied())
-        .collect();
-    let probe =
-        |level, filter| encode(columns, rows, &sample, level, filter).map(|bytes| bytes.len());
-    let none1 = probe(1, Filter::NoFilter)?;
-    // Very repetitive images need stronger compression, but not a second full pass.
-    // Paeth also handles constant rows, where Sub leaves each row's first pixel unpredicted.
-    if none1 <= sample.len() / 25 {
-        return full(3, Filter::Paeth);
-    }
-    if none1 >= sample.len() {
-        return full(1, Filter::NoFilter);
-    }
-    let sub1 = probe(1, Filter::Sub)?;
-    let none3 = probe(3, Filter::NoFilter)?;
-    let sub3 = probe(3, Filter::Sub)?;
-    let (level, none, sub) = if none1.min(sub1) * 100 <= none3.min(sub3) * 105 {
-        (1, none1, sub1)
+    let unfiltered = full(1, Filter::NoFilter)?;
+    let adaptive = full(1, Filter::Adaptive)?;
+    // Full-image lengths decide whether stronger compression is worth trying. Prediction
+    // must halve the unfiltered size to select Adaptive; otherwise repeated colors favor
+    // NoFilter. At most one extra encoding uses the same RGBA buffer.
+    let stronger_filter = if adaptive.len() < unfiltered.len() / 2 {
+        Filter::Adaptive
     } else {
-        (3, none3, sub3)
+        Filter::NoFilter
     };
-    let mut best = full(level, Filter::NoFilter)?;
-    // Unless prediction is clearly worse in the sample, try it on the whole image too:
-    // long repeated runs can make the sample's preferred filter lose on the full image.
-    if sub * 4 < none * 5 {
-        let filtered = full(level, Filter::Sub)?;
-        if filtered.len() < best.len() {
-            best = filtered;
+    let mut best = if unfiltered.len() <= adaptive.len() {
+        unfiltered
+    } else {
+        adaptive
+    };
+    if data.len() > 32 * 1024 && best.len() <= data.len() / 3 {
+        let stronger = full(3, stronger_filter)?;
+        if stronger.len() < best.len() {
+            best = stronger;
         }
     }
     Some(best)
