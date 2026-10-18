@@ -91,8 +91,9 @@
 //!   [`StrokeStyle`] and the rest of [`scene`]), [`Path`], [`PathVerb`] and [`Point`];
 //! - rendering a scene: [`render_png`](render::render_png) and
 //!   [`render_svg`](render::render_svg), and [`Figure::to_scene`] to get a figure's scene;
-//! - text: [`FontLibrary`], [`TextStyle`], [`TextLayout`] and [`Weight`];
-//! - the bundled fonts: [`fonts::font_bytes`] and [`fonts::license_text`];
+//! - text: [`FontLibrary`], the [`SceneFonts`] of one scene with its [`FaceId`], [`TextStyle`],
+//!   [`TextLayout`] and [`Weight`];
+//! - the bundled fonts: [`BundledFont`], [`fonts::font_bytes`] and [`fonts::license_text`];
 //! - scale and tick algorithms: [`ContinuousScale`], [`CategoryScale`], [`Transform`],
 //!   [`Tick`], the numeric limits [`MAX_MAGNITUDE`] and [`MIN_LOG_VALUE`], and the M4
 //!   downsampling of [`m4_indices`].
@@ -180,7 +181,7 @@ pub use figure::{
 };
 pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
-pub use fonts::{Font, Weight};
+pub use fonts::{BundledFont, Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use model::{BaselineVisibility, ColorbarOptions};
 pub use render::SvgText;
@@ -192,7 +193,7 @@ pub use scene::{
     StrokeStyle, TextItem,
 };
 pub use size::{Factor, Points, SizeSpec};
-pub use text::{FontLibrary, TextLayout, TextStyle};
+pub use text::{FaceId, FontLibrary, SceneFonts, TextLayout, TextStyle};
 pub use theme::ColorbarPosition;
 pub use theme::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, Marker, Theme};
 pub use tick_format::{Decimals, NumberStyle, TickFormat};

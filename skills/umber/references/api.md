@@ -3201,58 +3201,102 @@ True
 ## `umber.Font`
 
 ```text
-class Font(Enum)
+class Font
 ```
 
-A font family bundled with umber.
+An immutable font family for a theme's titles or body text.
+
+The families bundled with umber are constants of this class. A font compares equal to
+another that names the same family.
 
 Example:
 
 ```python
 >>> import umber as ub
->>> ub.Font.INTER.name
-'INTER'
+>>> theme = ub.Theme.PIGMENT.with_title_font(ub.Font.INTER)
+>>> ub.Font.INTER == ub.Font.GEIST
+False
 ```
 
 ### `umber.Font.GEIST`
 
 ```text
-Font.GEIST
+Font.GEIST: ClassVar['Font']
 ```
 
-Geist, a sans-serif face.
+Geist, a bundled sans-serif face.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.Font.GEIST
+Font.GEIST
+```
 
 ### `umber.Font.IBM_PLEX_SANS`
 
 ```text
-Font.IBM_PLEX_SANS
+Font.IBM_PLEX_SANS: ClassVar['Font']
 ```
 
-IBM Plex Sans, a sans-serif face.
+IBM Plex Sans, a bundled sans-serif face.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.Font.IBM_PLEX_SANS
+Font.IBM_PLEX_SANS
+```
 
 ### `umber.Font.INTER`
 
 ```text
-Font.INTER
+Font.INTER: ClassVar['Font']
 ```
 
-Inter, a sans-serif face.
+Inter, a bundled sans-serif face.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.Font.INTER
+Font.INTER
+```
 
 ### `umber.Font.JETBRAINS_MONO`
 
 ```text
-Font.JETBRAINS_MONO
+Font.JETBRAINS_MONO: ClassVar['Font']
 ```
 
-JetBrains Mono, a monospaced face.
+JetBrains Mono, a bundled monospaced face.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.Font.JETBRAINS_MONO
+Font.JETBRAINS_MONO
+```
 
 ### `umber.Font.SOURCE_SERIF_4`
 
 ```text
-Font.SOURCE_SERIF_4
+Font.SOURCE_SERIF_4: ClassVar['Font']
 ```
 
-Source Serif 4, a serif face.
+Source Serif 4, a bundled serif face.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.Font.SOURCE_SERIF_4
+Font.SOURCE_SERIF_4
+```
 
 ## `umber.GridLines`
 

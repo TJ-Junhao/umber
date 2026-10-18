@@ -45,18 +45,20 @@ impl GlyphRun {
 
 /// Shaped and measured text, ready to be outlined.
 ///
-/// Produced by [`FontLibrary::layout`](crate::text::FontLibrary::layout). A layout holds shared
+/// Produced by [`SceneFonts::layout`](crate::text::SceneFonts::layout). A layout holds shared
 /// handles to the fonts it was shaped with, so it can be outlined with [`TextLayout::outline`]
 /// on any thread, even after the library that made it is gone.
 ///
 /// # Examples
 ///
 /// ```
-/// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+/// use umber_core::{FaceId, Font, FontLibrary, TextStyle, Weight};
 ///
-/// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 12.0, tabular_figures: false };
-/// let layout = FontLibrary::global().layout("Hg", &style);
+/// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
+/// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 12.0, tabular_figures: false };
+/// let layout = fonts.layout("Hg", &style)?;
 /// assert!(layout.width() > 0.0 && layout.ascent() > 0.0 && layout.descent() > 0.0);
+/// # Ok::<(), umber_core::Error>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct TextLayout {
@@ -120,11 +122,12 @@ impl TextLayout {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    /// use umber_core::{FaceId, Font, FontLibrary, TextStyle, Weight};
     ///
-    /// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// let lib = FontLibrary::global();
-    /// assert!(lib.layout("wide text", &style).width() > lib.layout("w", &style).width());
+    /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
+    /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// assert!(fonts.layout("wide text", &style)?.width() > fonts.layout("w", &style)?.width());
+    /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
     pub fn width(&self) -> f32 {
@@ -136,11 +139,13 @@ impl TextLayout {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    /// use umber_core::{FaceId, Font, FontLibrary, TextStyle, Weight};
     ///
-    /// let style = TextStyle { font: Font::SourceSerif4, weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// let ascent = FontLibrary::global().layout("", &style).ascent();
+    /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::SOURCE_SERIF_4])?;
+    /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// let ascent = fonts.layout("", &style)?.ascent();
     /// assert!(ascent > 5.0 && ascent < 15.0);
+    /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
     pub fn ascent(&self) -> f32 {
@@ -152,11 +157,13 @@ impl TextLayout {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    /// use umber_core::{FaceId, Font, FontLibrary, TextStyle, Weight};
     ///
-    /// let style = TextStyle { font: Font::IbmPlexSans, weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// let descent = FontLibrary::global().layout("g", &style).descent();
+    /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::IBM_PLEX_SANS])?;
+    /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// let descent = fonts.layout("g", &style)?.descent();
     /// assert!(descent > 0.0 && descent < 5.0);
+    /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
     pub fn descent(&self) -> f32 {
@@ -168,11 +175,13 @@ impl TextLayout {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Font, FontLibrary, TextStyle, Weight};
+    /// use umber_core::{FaceId, Font, FontLibrary, TextStyle, Weight};
     ///
-    /// let style = TextStyle { font: Font::Geist, weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// assert!(FontLibrary::global().layout("", &style).is_empty());
-    /// assert!(!FontLibrary::global().layout("x", &style).is_empty());
+    /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::GEIST])?;
+    /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
+    /// assert!(fonts.layout("", &style)?.is_empty());
+    /// assert!(!fonts.layout("x", &style)?.is_empty());
+    /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -189,13 +198,15 @@ impl TextLayout {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Font, FontLibrary, Point, TextStyle, Weight};
+    /// use umber_core::{FaceId, Font, FontLibrary, Point, TextStyle, Weight};
     ///
-    /// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 12.0, tabular_figures: false };
-    /// let layout = FontLibrary::global().layout("H", &style);
+    /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
+    /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 12.0, tabular_figures: false };
+    /// let layout = fonts.layout("H", &style)?;
     /// let (min, max) = layout.outline(Point { x: 10.0, y: 30.0 }).bounds().unwrap();
     /// assert!(min.x >= 10.0 && max.x <= 10.0 + layout.width());
     /// assert!(min.y < 30.0 && max.y <= 30.0 + 0.01);
+    /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
     pub fn outline(&self, origin: Point) -> Path {

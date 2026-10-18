@@ -2,10 +2,10 @@
 //! read from `cmap` tables, the reasons a face is left out, and the bounds on one index build.
 
 use super::fixtures::{
-    assert_no_bundled_font_has, fixture_font, font_with_cmap, format12_cmap, style,
+    LayoutBundled, assert_no_bundled_font_has, fixture_font, font_with_cmap, format12_cmap, style,
 };
 use super::system_fallback::{indexed_names, system_picks};
-use crate::fonts::{Font, Weight};
+use crate::fonts::{BundledFont, Weight};
 use crate::text::FontLibrary;
 use crate::text::font::{Face, FontKey};
 use crate::text::system::{self, FaceCoverage, Limits, SkipReason};
@@ -187,7 +187,7 @@ fn format_2_cmaps_are_indexed() {
     let font = font_with_cmap("Format Two", 400, false, cmap);
     let face = Face::parse(&font, 0).unwrap();
     assert!(face.draws('\u{E000}'));
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout("\u{E000}", &s);
     assert_eq!(extra.runs()[0].font(), FontKey::Extra(0));
     let lib = FontLibrary::with_test_system_fonts(vec![font]);

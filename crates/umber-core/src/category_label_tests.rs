@@ -47,8 +47,10 @@ fn all_ticks(resolved: &Resolved, side: Side) -> Vec<AxisTick> {
 
 /// Checks the smallest fitting 1/2/5 step on this plot, including category zero and band centers.
 fn assert_step(figure: &Figure, resolved: &Resolved, layout: &Layout, side: Side) -> usize {
-    let lib = FontLibrary::bundled();
-    let room = side.room(layout.plot.size(), figure.theme(), &lib);
+    let room = side.room(
+        layout.plot.size(),
+        crate::test_support::tick_font(figure.theme()),
+    );
     let all = all_ticks(resolved, side);
     for power in 0..10 {
         for factor in [1, 2, 5] {
@@ -154,8 +156,11 @@ fn category_labels_keep_explicit_numeric_labels_unchanged() {
             labels.iter().collect::<Vec<_>>()
         );
         assert!(
-            side.room(layout.plot.size(), figure.theme(), &lib)
-                .slack(side.ticks(&resolved))
+            side.room(
+                layout.plot.size(),
+                crate::test_support::tick_font(figure.theme())
+            )
+            .slack(side.ticks(&resolved))
                 < 0.0
         );
     }
@@ -245,11 +250,15 @@ fn smallest_self_fitting_step(
                     &candidate,
                     grid.span(input.axes.cells()),
                     [true, true],
-                    &layout::LabelCache::new(lib),
-                );
+                    &layout::LabelCache::new(input.lib),
+                )
+                .unwrap();
                 if let Ok(solution) = layout::solve_grid(grid, &[bands])
                     && Side::X
-                        .room(solution.panels[0].plot.size(), figure.theme(), lib)
+                        .room(
+                            solution.panels[0].plot.size(),
+                            crate::test_support::tick_font(figure.theme()),
+                        )
                         .slack(&candidate.x.ticks)
                         >= 0.0
                 {
@@ -274,7 +283,10 @@ fn category_labels_converge_with_wide_end_labels() {
         let figure = bars_with_wide_last_label(n, width, letters);
         let (resolved, layout) = try_plan_figure(&figure, (0, 0), &lib).unwrap();
         let slack = Side::X
-            .room(layout.plot.size(), figure.theme(), &lib)
+            .room(
+                layout.plot.size(),
+                crate::test_support::tick_font(figure.theme()),
+            )
             .slack(&resolved.x.ticks);
         let (k, expected) = smallest_self_fitting_step(&figure, &resolved, &lib);
         assert_eq!(k, expected_k);
@@ -313,7 +325,10 @@ fn category_labels_wide_end_sweep_fits_and_is_minimal() {
                 figure.to_scene(&lib).unwrap();
                 rendered += 1;
                 let slack = Side::X
-                    .room(layout.plot.size(), figure.theme(), &lib)
+                    .room(
+                        layout.plot.size(),
+                        crate::test_support::tick_font(figure.theme()),
+                    )
                     .slack(&resolved.x.ticks);
                 if slack < 0.0 {
                     overlaps.push((n, width, letters, slack));

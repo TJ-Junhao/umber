@@ -15,3 +15,38 @@ pub(crate) fn named_height(err: &crate::Error) -> Option<f64> {
         .parse()
         .ok()
 }
+
+/// The fonts of a figure with `theme`, laid out through the global library, as `Figure::to_scene`
+/// lays the figure out with [`crate::FontLibrary::global`].
+pub(crate) fn figure_fonts(theme: &crate::Theme) -> crate::text::SceneFonts<'static> {
+    crate::layout::figure_fonts(crate::FontLibrary::global(), theme).expect("bundled fonts resolve")
+}
+
+/// Every bundled font, laid out through `library`: face `i` is `BundledFont::ALL[i]`.
+pub(crate) fn bundled_fonts(library: &crate::FontLibrary) -> crate::text::SceneFonts<'_> {
+    let fonts: Vec<crate::Font> = crate::BundledFont::ALL
+        .into_iter()
+        .map(crate::Font::Bundled)
+        .collect();
+    library
+        .with_figure_fonts(&fonts)
+        .expect("bundled fonts resolve")
+}
+
+/// The face of `font` in [`bundled_fonts`].
+pub(crate) fn bundled_face(font: crate::BundledFont) -> crate::FaceId {
+    let index = crate::BundledFont::ALL
+        .iter()
+        .position(|&bundled| bundled == font)
+        .expect("every bundled font is listed");
+    crate::FaceId::new(index)
+}
+
+/// The tick labels of a figure with `theme`, as [`figure_fonts`] sets them. Leaked, so that tick
+/// rooms borrowing them can outlive the call.
+pub(crate) fn tick_font(theme: &crate::Theme) -> &'static crate::layout::TickFont<'static> {
+    let fonts: &'static crate::text::SceneFonts<'static> = Box::leak(Box::new(figure_fonts(theme)));
+    Box::leak(Box::new(
+        crate::layout::TickFont::new(fonts, theme).expect("the tick labels lay out"),
+    ))
+}

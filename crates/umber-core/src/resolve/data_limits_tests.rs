@@ -146,8 +146,7 @@ fn single_tick_labels_describe_their_own_value() {
             width: 1.0,
             height: 100.0,
         },
-        &theme,
-        FontLibrary::global(),
+        crate::test_support::tick_font(&theme),
         TickSpacing::LabelsApart,
     );
     let judge = DrawnTicks {
@@ -170,8 +169,7 @@ fn fixed_decimals_choose_exactly_representable_steps() {
             width: 800.0,
             height: 200.0,
         },
-        &theme,
-        FontLibrary::global(),
+        crate::test_support::tick_font(&theme),
         TickSpacing::LabelsApart,
     );
     for (factor, format) in [
@@ -219,7 +217,7 @@ proptest! {
         };
         let theme = Theme::pigment();
         for spacing in [TickSpacing::Target, TickSpacing::LabelsApart] {
-            let (x, y) = tick_rooms(PlotSize { width: length, height: length }, &theme, FontLibrary::global(), spacing);
+            let (x, y) = tick_rooms(PlotSize { width: length, height: length }, crate::test_support::tick_font(&theme), spacing);
             for room in [&x, &y] {
                 let judge = DrawnTicks { format: &TickFormat::AUTO, room };
                 let (scale, _, ticks) = automatic(Transform::Linear, None, data, AutoLimits::Padded(Padding::BothSides), room.target, &judge);

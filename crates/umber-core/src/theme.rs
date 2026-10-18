@@ -464,8 +464,8 @@ impl Theme {
             grid_width: 0.75,
             baseline_color: rgb(0x2B211B),
             baseline_width: 1.3,
-            title_font: Font::SourceSerif4,
-            body_font: Font::IbmPlexSans,
+            title_font: Font::SOURCE_SERIF_4,
+            body_font: Font::IBM_PLEX_SANS,
             title_size: 15.0,
             body_size: 8.5,
             font_scale: 1.0,
@@ -517,8 +517,8 @@ impl Theme {
             grid_width: 0.75,
             baseline_color: rgb(0x111111),
             baseline_width: 1.0,
-            title_font: Font::Geist,
-            body_font: Font::Geist,
+            title_font: Font::GEIST,
+            body_font: Font::GEIST,
             title_size: 15.0,
             body_size: 8.5,
             font_scale: 1.0,
@@ -570,8 +570,8 @@ impl Theme {
             grid_width: 0.75,
             baseline_color: rgb(0x3C4250),
             baseline_width: 1.0,
-            title_font: Font::Inter,
-            body_font: Font::JetBrainsMono,
+            title_font: Font::INTER,
+            body_font: Font::JETBRAINS_MONO,
             title_size: 14.5,
             body_size: 8.5,
             font_scale: 1.0,
@@ -785,11 +785,11 @@ impl Theme {
     /// ```
     /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
-    /// assert_eq!(Theme::pigment().title_font(), Font::SourceSerif4);
+    /// assert_eq!(Theme::pigment().title_font(), &Font::SOURCE_SERIF_4);
     /// ```
     #[must_use]
-    pub fn title_font(&self) -> Font {
-        self.title_font
+    pub fn title_font(&self) -> &Font {
+        &self.title_font
     }
 
     /// The font of tick labels, axis labels and other body text.
@@ -799,11 +799,11 @@ impl Theme {
     /// ```
     /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme};
     ///
-    /// assert_eq!(Theme::midnight().body_font(), Font::JetBrainsMono);
+    /// assert_eq!(Theme::midnight().body_font(), &Font::JETBRAINS_MONO);
     /// ```
     #[must_use]
-    pub fn body_font(&self) -> Font {
-        self.body_font
+    pub fn body_font(&self) -> &Font {
+        &self.body_font
     }
 
     /// The title size in points, before `font_scale` is applied.
@@ -1341,7 +1341,7 @@ impl Theme {
         })
     }
 
-    /// Replace the title font.
+    /// Replace the title font with any [`Font`].
     ///
     /// Returns a new theme; `self` is unchanged.
     ///
@@ -1350,8 +1350,8 @@ impl Theme {
     /// ```
     /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
-    /// let theme = Theme::pigment().with_title_font(Font::Inter)?;
-    /// # let _ = theme;
+    /// let theme = Theme::pigment().with_title_font(Font::INTER)?;
+    /// assert_eq!(theme.title_font(), &Font::INTER);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn with_title_font(&self, value: Font) -> Result<Theme> {
@@ -1361,7 +1361,7 @@ impl Theme {
         })
     }
 
-    /// Replace the body font.
+    /// Replace the body font with any [`Font`].
     ///
     /// Returns a new theme; `self` is unchanged.
     ///
@@ -1370,8 +1370,8 @@ impl Theme {
     /// ```
     /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
-    /// let theme = Theme::pigment().with_body_font(Font::Inter)?;
-    /// # let _ = theme;
+    /// let theme = Theme::pigment().with_body_font(Font::INTER)?;
+    /// assert_eq!(theme.body_font(), &Font::INTER);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn with_body_font(&self, value: Font) -> Result<Theme> {
@@ -1643,6 +1643,7 @@ impl Default for Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BundledFont;
 
     fn hexes(theme: &Theme) -> Vec<String> {
         theme.palette().iter().map(|c| c.to_hex()).collect()
@@ -1673,7 +1674,7 @@ mod tests {
         assert_eq!(p.baseline_width(), 1.3);
         assert_eq!(
             (p.title_font(), p.body_font()),
-            (Font::SourceSerif4, Font::IbmPlexSans)
+            (&Font::SOURCE_SERIF_4, &Font::IBM_PLEX_SANS)
         );
         assert_eq!(
             (p.title_size(), p.body_size(), p.font_scale()),
@@ -1706,7 +1707,10 @@ mod tests {
         assert_eq!(g.grid_width(), 0.75);
         assert_eq!(g.baseline_color().to_hex(), "#111111");
         assert_eq!(g.baseline_width(), 1.0);
-        assert_eq!((g.title_font(), g.body_font()), (Font::Geist, Font::Geist));
+        assert_eq!(
+            (g.title_font(), g.body_font()),
+            (&Font::GEIST, &Font::GEIST)
+        );
         assert_eq!(
             (g.title_size(), g.body_size(), g.font_scale()),
             (15.0, 8.5, 1.0)
@@ -1740,7 +1744,7 @@ mod tests {
         assert_eq!(m.baseline_width(), 1.0);
         assert_eq!(
             (m.title_font(), m.body_font()),
-            (Font::Inter, Font::JetBrainsMono)
+            (&Font::INTER, &Font::JETBRAINS_MONO)
         );
         assert_eq!(
             (m.title_size(), m.body_size(), m.font_scale()),
@@ -1762,6 +1766,23 @@ mod tests {
         );
 
         assert_eq!(Theme::default(), Theme::pigment());
+    }
+
+    #[test]
+    fn font_setters_take_any_font() {
+        for bundled in BundledFont::ALL {
+            let font = Font::Bundled(bundled);
+            let titled = Theme::graphite().with_title_font(font.clone()).unwrap();
+            assert_eq!(
+                (titled.title_font(), titled.body_font()),
+                (&font, &Font::GEIST)
+            );
+            let bodied = Theme::graphite().with_body_font(font.clone()).unwrap();
+            assert_eq!(
+                (bodied.title_font(), bodied.body_font()),
+                (&Font::GEIST, &font)
+            );
+        }
     }
 
     #[test]
@@ -1799,12 +1820,12 @@ mod tests {
             Dash::Solid
         );
         assert_eq!(
-            t.with_title_font(Font::Inter).unwrap().title_font(),
-            Font::Inter
+            t.with_title_font(Font::INTER).unwrap().title_font(),
+            &Font::INTER
         );
         assert_eq!(
-            t.with_body_font(Font::Inter).unwrap().body_font(),
-            Font::Inter
+            t.with_body_font(Font::INTER).unwrap().body_font(),
+            &Font::INTER
         );
         assert_eq!(
             t.with_legend_style(LegendStyle::Chips)

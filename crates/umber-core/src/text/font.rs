@@ -19,12 +19,12 @@ use skrifa::outline::{OutlineGlyphCollection, OutlineGlyphFormat};
 
 use super::cmap::{secondary_subtables, subtable_glyph};
 use super::outline::{draws_segments, unhinted};
-use crate::fonts::{Font, Weight, font_bytes};
+use crate::fonts::{BundledFont, Weight, font_bytes};
 
 /// Which font a run of text is drawn with, within one [`FontLibrary`](super::FontLibrary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum FontKey {
-    Bundled(Font, Weight),
+    Bundled(BundledFont, Weight),
     /// Index into the library's fallback fonts, in the caller's order.
     Extra(usize),
     /// Index into the system font index.
@@ -52,7 +52,7 @@ pub(super) struct FontHandle {
 
 impl FontHandle {
     /// A bundled font, face 0 of its file.
-    pub(super) fn bundled(font: Font, weight: Weight) -> FontHandle {
+    pub(super) fn bundled(font: BundledFont, weight: Weight) -> FontHandle {
         FontHandle {
             data: FontData::Bundled(font_bytes(font, weight)),
             index: 0,
