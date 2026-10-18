@@ -611,10 +611,15 @@ def axis_values(context: str, name: str, values: object) -> FloatArray | list[st
     return _floats(context, name, data, mixed=True)
 
 
-_ROWS_HINT: Final = "pass one row per y category."
-
-
-def matrix(context: str, name: str, values: object, shape: tuple[int, int]) -> FloatArray:
+def matrix(
+    context: str,
+    name: str,
+    values: object,
+    shape: tuple[int, int],
+    *,
+    lengths: str,
+    hint: str,
+) -> FloatArray:
     """Convert two-dimensional numeric data, such as heatmap values, to a flat ``float64`` array.
 
     A two-dimensional NumPy array or an object with ``__array__``, such as a pandas
@@ -627,6 +632,9 @@ def matrix(context: str, name: str, values: object, shape: tuple[int, int]) -> F
         name: The parameter name.
         values: The data passed.
         shape: The required number of rows and of values in each row.
+        lengths: How a message writes ``shape``, such as ``"(len(y), len(x))"``.
+        hint: The hint of a value that is not shaped so, such as ``"pass one row per y
+            category."``.
 
     Returns:
         A one-dimensional ``float64`` array of the values, row by row.
@@ -639,23 +647,26 @@ def matrix(context: str, name: str, values: object, shape: tuple[int, int]) -> F
 
     Example:
         >>> from umber._values import matrix
-        >>> matrix("Axes.heatmap()", "values", [[1, 2, 3], [4, 5, 6]], (2, 3))
+        >>> lengths = "(len(y_categories), len(x_categories))"
+        >>> hint = "pass one row per y category."
+        >>> values = [[1, 2, 3], [4, 5, 6]]
+        >>> matrix("Axes.heatmap()", "values", values, (2, 3), lengths=lengths, hint=hint)
         array([1., 2., 3., 4., 5., 6.])
     """
-    _check_container(context, name, values, str_hint=_ROWS_HINT, masked_hint=_MASKED_HINT)
+    _check_container(context, name, values, str_hint=hint, masked_hint=_MASKED_HINT)
     if hasattr(values, "__array__"):
         array = np.asarray(values)
     else:
-        array = _rows_array(context, name, cast(Sequence[object], values), shape[1])
+        array = _rows_array(context, name, cast(Sequence[object], values), shape[1], hint)
     if array.ndim != 2:
         dimensions = "dimension" if array.ndim == 1 else "dimensions"
         message = f"{name} has {array.ndim} {dimensions}; values must be two-dimensional."
-        raise _data_error(context, name, message, _ROWS_HINT)
+        raise _data_error(context, name, message, hint)
     if array.shape != shape:
         given = f"({array.shape[0]}, {array.shape[1]})"
-        required = f"(len(y_categories), len(x_categories)) = ({shape[0]}, {shape[1]})"
+        required = f"{lengths} = ({shape[0]}, {shape[1]})"
         message = f"{name} has shape {given}; it must be {required}."
-        raise _data_error(context, name, message, _ROWS_HINT)
+        raise _data_error(context, name, message, hint)
     flat = array.reshape(-1)
     if _is_float64_or_narrower(array.dtype):
         return _native(flat)
@@ -681,39 +692,42 @@ def _checked_objects(array: npt.NDArray[Any]) -> FloatArray:
         return np.fromiter(converted, dtype=np.float64, count=len(array))
 
 
-def _rows_array(context: str, name: str, rows: Sequence[object], width: int) -> npt.NDArray[Any]:
+def _rows_array(
+    context: str, name: str, rows: Sequence[object], width: int, hint: str
+) -> npt.NDArray[Any]:
     """Check and convert a sequence of rows of numbers to a two-dimensional ``float64`` array.
 
     Each row must be a sequence or an array, and is checked and converted on its own
     (``_row_floats``), so every error names its row and column; a row of another length than
     the first is reported by its index. An empty sequence is no rows of ``width`` values.
+    Errors about the shape carry ``hint``.
     """
     if len(rows) == 0:
         return np.empty((0, width), dtype=np.float64)
     converted: list[FloatArray] = []
     for index, row in enumerate(rows):
-        array = _row_floats(context, name, index, row)
+        array = _row_floats(context, name, index, row, hint)
         if converted and len(array) != len(converted[0]):
             message = (
                 f"{name}[{index}] has {len(array)} values but {name}[0] has "
                 f"{len(converted[0])}; every row must have the same length."
             )
-            raise _data_error(context, name, message, _ROWS_HINT)
+            raise _data_error(context, name, message, hint)
         converted.append(array)
     return np.stack(converted)
 
 
-def _row_floats(context: str, name: str, index: int, row: object) -> FloatArray:
+def _row_floats(context: str, name: str, index: int, row: object, hint: str) -> FloatArray:
     """Check the row ``index`` of the numeric data ``name`` and convert it to ``float64``.
 
     A sequence has its elements checked before NumPy sees them; an array has its dtype checked,
     and an object or text array each of its elements. Errors name the row, as ``values[1]``, or
-    the element, as ``values[1][2]``.
+    the element, as ``values[1][2]``. Errors about the shape carry ``hint``.
     """
     label = f"{name}[{index}]"
     if not _is_nested(row):
         message = f"{label} is {short_repr(_scalar(row))}; each row must be a sequence."
-        raise _data_error(context, name, message, _ROWS_HINT)
+        raise _data_error(context, name, message, hint)
     if isinstance(row, np.ndarray):
         array = cast(npt.NDArray[Any], row)
     else:
@@ -724,7 +738,7 @@ def _row_floats(context: str, name: str, index: int, row: object) -> FloatArray:
         array = np.asarray(items)
     if array.ndim != 1:
         message = f"{label} has {array.ndim} dimensions; each row must be one-dimensional."
-        raise _data_error(context, name, message, _ROWS_HINT)
+        raise _data_error(context, name, message, hint)
     if _is_float64_or_narrower(array.dtype):
         return _native(array)
     if array.dtype.kind not in "OSUT":

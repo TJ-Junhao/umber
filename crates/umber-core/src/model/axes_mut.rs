@@ -10,6 +10,7 @@ use super::band::{BandMark, BandOptions};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
 use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
 use super::color_by::{check_point_color, check_scatter_label};
+use super::contour::{ContourMark, ContourOptions};
 use super::ecdf::{EcdfMark, EcdfOptions};
 use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
@@ -3238,6 +3239,86 @@ impl<'a> AxesMut<'a> {
             })
             .collect::<Result<Vec<_>>>()?;
         axes.marks.extend(marks.into_iter().map(Mark::Kde));
+        Ok(self)
+    }
+
+    /// Adds a contour of the field `z`, sampled on the rectilinear grid of the strictly
+    /// increasing coordinates `x` and `y`: `z` holds one row per y coordinate, each with one
+    /// value per x coordinate. Both axes must be linear or log axes. The grid is a lattice of
+    /// cells, each between four neighbouring points; a NaN value leaves the four cells around
+    /// it out of every line and band, as a hole. Along each side of a cell the field is linear,
+    /// and inside a cell the lines run straight between the crossings of its sides; a cell whose
+    /// corners alternate above and below a level joins the high corners when the mean of its
+    /// four values is at or above the level, and separates them otherwise.
+    ///
+    /// `options.style` draws a line along each level
+    /// ([`ContourStyle::Lines`](crate::ContourStyle::Lines)), the bands between the levels
+    /// ([`ContourStyle::Filled`](crate::ContourStyle::Filled)), or the bands with thin lines
+    /// over them ([`ContourStyle::Both`](crate::ContourStyle::Both)). Lines are colored by
+    /// their level on the axes' color scale, which every color-mapped mark shares, unless
+    /// `options.color` gives them one color; the bands take the color of the middle of their
+    /// range on the color scale, and the regions below the first level and above the last the
+    /// colors at the ends of the color range. The colorbar shows the levels: bands for filled
+    /// contours, a smooth bar with a tick at each level for lines; every color-mapped contour
+    /// that shares the bar, on these axes or through shared colors, needs the same levels, and
+    /// rendering refuses different ones (`Error::Style`). With `options.annotate`, every line at
+    /// least three times as long as its label carries its level's value at its middle, along
+    /// the line and upright, in the colorbar's format unless it has its own, the line broken
+    /// under it. Points between grid coordinates are interpolated in the data, then placed on
+    /// the axes, so on a log axis too a line crosses a cell side where the data does. Automatic
+    /// limits are the
+    /// outer coordinates, without padding, as for [`AxesMut::mesh`]; by default a contour
+    /// alone draws no baseline.
+    ///
+    /// A field that changes from cell to cell, such as noise or a checkerboard, makes many
+    /// short lines and many small bands: vector output then grows very large and slow to write
+    /// and to draw. Ask for fewer levels or [`ContourStyle::Filled`](crate::ContourStyle::Filled)
+    /// instead of [`ContourStyle::Both`](crate::ContourStyle::Both), smooth or aggregate the
+    /// data first, or draw it with [`AxesMut::mesh`] or [`AxesMut::heatmap`] when the cells
+    /// themselves are what matters. Contours never thin the data on their own.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged; the checks run in the order of
+    /// [`crate::ContourMark`]'s rules: `Error::Usage` unless both axes are linear
+    /// or log axes; `Error::Data` for coordinates that are too few, not finite, not positive on
+    /// a log axis or not strictly increasing, for `z` of a length other than
+    /// `y.len() * x.len()`, and for a value that is infinite, beyond 1e300 in magnitude, or not
+    /// positive on a log color scale, named by row and column; `Error::Style` for a level count
+    /// outside `1..=MAX_LEVELS` or levels that are not finite and strictly increasing;
+    /// `Error::Usage` for one color with filled bands, a colormap or a center, for `annotate`
+    /// with [`ContourStyle::Filled`](crate::ContourStyle::Filled) and for a format without
+    /// `annotate`; `Error::Style` for [`TickFormat::iso`] and for an invalid center; and `Error::Usage` or `Error::Style` when
+    /// a color-mapped contour disagrees with the axes' color scale or its color limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ContourOptions, ContourStyle, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let (x, y) = ([0.0, 1.0, 2.0], [0.0, 1.0]);
+    /// let z = [0.0, 1.0, 2.0, 1.0, 2.0, 3.0];
+    /// axes.contour(&x, &y, &z, ContourOptions { style: ContourStyle::Filled, ..ContourOptions::default() })?;
+    /// assert_eq!(axes.marks().len(), 1);
+    ///
+    /// // Level labels need lines.
+    /// let labelled = ContourOptions { style: ContourStyle::Filled, annotate: true, ..ContourOptions::default() };
+    /// let err = axes.contour(&x, &y, &z, labelled).unwrap_err();
+    /// assert_eq!(err.parameter(), Some("annotate"));
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn contour(
+        &mut self,
+        x: &[f64],
+        y: &[f64],
+        z: &[f64],
+        options: ContourOptions,
+    ) -> Result<&mut Self> {
+        let mark = ContourMark::new(self.figure, self.index, (x, y, z), options)?;
+        self.axes_mut().marks.push(Mark::Contour(mark));
         Ok(self)
     }
 }

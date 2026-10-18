@@ -115,7 +115,15 @@ fn best_avoids_bubble_area_when_its_center_is_outside() {
         .unwrap();
     let (resolved, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
     let marks = resolve_marks(f.single_axes().marks(), f.theme());
-    let item = crate::draw::marks(f.theme(), &resolved, &layout, &marks[1..]).unwrap();
+    let item = crate::draw::marks(
+        f.theme(),
+        &crate::test_support::figure_fonts(f.theme()),
+        &resolved,
+        &layout,
+        &marks[1..],
+    )
+    .unwrap()
+    .unwrap();
     let geometry = crate::coverage::Geometry::of(&item);
     let candidate = crate::layout::Frame {
         x: first.x,
