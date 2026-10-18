@@ -93,19 +93,31 @@ fn spreading_minimizes_squared_movement() {
         .collect();
     outside.sort_by(|a, b| a.leader[1].y.total_cmp(&b.leader[1].y));
     assert_eq!(outside.len(), 2);
-    let desired_mean = outside
-        .iter()
-        .map(|l| f64::from(l.leader[1].y))
-        .sum::<f64>()
-        / 2.0;
-    let actual_mean = outside
+    let desired: Vec<_> = outside.iter().map(|l| f64::from(l.leader[1].y)).collect();
+    let actual: Vec<_> = outside
         .iter()
         .map(|l| f64::from(l.leader.last().unwrap().y))
-        .sum::<f64>()
-        / 2.0;
+        .collect();
+    let theme = Theme::pigment();
+    let line = BODY_LINE
+        * f64::from(
+            Styles::new(&theme, TextRole::Title, StyleSizes::default())
+                .body
+                .size,
+        );
     assert!(
-        (desired_mean - actual_mean).abs() < 0.001,
-        "unbounded cluster should spread symmetrically"
+        (actual[1] - desired[1]).abs() < 0.001,
+        "the lower label stays at its knee"
+    );
+    assert!(
+        (actual[1] - actual[0] - line).abs() < 0.001,
+        "the upper label moves only far enough to leave one line of separation"
+    );
+    assert!(
+        actual
+            .iter()
+            .zip(&desired)
+            .all(|(y, knee)| y <= &(knee + 0.001))
     );
 }
 
@@ -122,6 +134,129 @@ fn outside_labels_cannot_reduce_radius_below_half() {
     assert!(matches!(error, Error::Style { .. }));
     assert!(error.to_string().contains("A long outside label"));
     assert!(!error.to_string().contains("\"A\""));
+}
+
+#[test]
+fn small_slices_above_and_below_the_circle_fit() {
+    let cases: &[(&[&str], &[f64], crate::SizeSpec)] = &[
+        (
+            &["Web", "App", "Shop", "API", "Ads", "Labs", "Tools", "Misc"],
+            &[50.0, 20.0, 12.0, 8.0, 4.0, 3.0, 2.0, 1.0],
+            crate::SizeSpec::Auto,
+        ),
+        (
+            &["Everything", "a", "b"],
+            &[1e6, 1.0, 1.0],
+            crate::SizeSpec::Auto,
+        ),
+        (
+            &["A", "B", "C", "D"],
+            &[93.3, 2.3, 2.2, 2.2],
+            crate::SizeSpec::Auto,
+        ),
+        (
+            &["Item 0", "Item 1", "Item 2", "Item 3", "Item 4", "Item 5"],
+            &[0.5, 0.5, 0.5, 0.5, 0.5, 97.5],
+            crate::SizeSpec::Auto,
+        ),
+        (
+            &["Item 0", "Item 1", "Item 2", "Item 3", "Item 4", "Item 5"],
+            &[48.0, 0.5, 0.5, 0.5, 0.5, 50.0],
+            crate::SizeSpec::Auto,
+        ),
+        (
+            &["Web", "App", "Shop", "Other"],
+            &[80.0, 15.0, 3.0, 2.0],
+            crate::SizeSpec::pt(11.0).unwrap(),
+        ),
+    ];
+    let library = FontLibrary::bundled();
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        let fonts = super::super::figure_fonts(&library, &theme).unwrap();
+        for hole in [0.0, 0.5] {
+            for &(names, values, size) in cases {
+                let total: f64 = values.iter().sum();
+                let shares: Vec<_> = values.iter().map(|v| v / total).collect();
+                let mut pie = pie(names, &shares, hole, true);
+                pie.options.size = size;
+                let area = area(408.0, 264.0);
+                let result = place(&pie, LegendStyle::Direct, area, &theme, &fonts)
+                    .unwrap_or_else(|error| panic!("{names:?} hole={hole}: {error}"));
+                super::property_tests::assert_disjoint(&result, area);
+            }
+        }
+    }
+}
+
+#[test]
+fn collision_rejects_leaders_through_the_disc_and_ring() {
+    for hole in [0.0, 0.5] {
+        let mut result = layout(
+            &pie(&["A", "B"], &[0.99, 0.01], hole, false),
+            area(408.0, 264.0),
+        )
+        .unwrap();
+        result.labels.retain(|label| label.fill.is_none());
+        assert_eq!(result.labels.len(), 1);
+        let circle = result.circle;
+        let y = circle.y - circle.radius - 0.25;
+        for leader in [
+            vec![
+                circle.point(0.0, circle.radius + 2.0),
+                circle.point(PI, circle.radius + 2.0),
+            ],
+            vec![
+                Point {
+                    x: (circle.x - 10.0) as f32,
+                    y: y as f32,
+                },
+                Point {
+                    x: (circle.x + 10.0) as f32,
+                    y: y as f32,
+                },
+            ],
+        ] {
+            result.labels[0].leader = leader;
+            assert!(
+                !collision::fits(&result.labels, circle, area(408.0, 264.0)),
+                "leader must clear the disc/ring, including stroke width"
+            );
+        }
+    }
+}
+
+#[test]
+fn neighbouring_leaders_may_be_close_but_must_not_cross_or_coincide() {
+    let area = area(408.0, 264.0);
+    let mut result = layout(
+        &pie(
+            &["Web", "App", "Shop", "Other"],
+            &[0.8, 0.15, 0.03, 0.02],
+            0.0,
+            true,
+        ),
+        area,
+    )
+    .unwrap();
+    result.labels.retain(|label| label.fill.is_none());
+    assert_eq!(result.labels.len(), 2);
+    result.labels[0].leader = vec![Point { x: 20.0, y: 100.0 }, Point { x: 20.0, y: 200.0 }];
+    result.labels[1].leader = vec![Point { x: 20.01, y: 100.0 }, Point { x: 20.01, y: 200.0 }];
+    assert!(collision::fits(&result.labels, result.circle, area));
+    for leader in [
+        vec![Point { x: 15.0, y: 150.0 }, Point { x: 25.0, y: 150.0 }],
+        vec![Point { x: 20.0, y: 150.0 }, Point { x: 20.0, y: 210.0 }],
+        vec![Point { x: 20.01, y: 100.0 }, Point { x: 19.9, y: 200.0 }],
+        vec![Point { x: 20.0, y: 100.01 }, Point { x: 20.0, y: 210.0 }],
+        vec![
+            Point { x: 22.0, y: 100.0 },
+            Point { x: 20.1, y: 150.0 },
+            Point { x: 20.1, y: 200.0 },
+        ],
+    ] {
+        result.labels[1].leader = leader;
+        assert!(!collision::fits(&result.labels, result.circle, area));
+    }
 }
 
 #[test]

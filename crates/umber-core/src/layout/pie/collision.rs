@@ -3,7 +3,7 @@
 use super::{Area, Circle, Point, SliceLabel};
 
 const EPSILON: f64 = 1e-4;
-const LEADER_HALF_WIDTH: f64 = 0.375;
+pub(super) const LEADER_HALF_WIDTH: f64 = 0.375;
 
 fn bounds(label: &SliceLabel) -> Area {
     let text = &label.text;
@@ -102,6 +102,16 @@ pub(super) fn fits(labels: &[SliceLabel], circle: Circle, area: Area) -> bool {
                 return false;
             }
         }
+        // Leaders attach outside the outer rim, so the full disc is excluded for donuts too.
+        let center = Point {
+            x: circle.x as f32,
+            y: circle.y as f32,
+        };
+        if label.leader.windows(2).any(|segment| {
+            distance(center, segment[0], segment[1]) < circle.radius + LEADER_HALF_WIDTH - EPSILON
+        }) {
+            return false;
+        }
         for (j, other) in labels.iter().enumerate() {
             if i == j {
                 continue;
@@ -109,6 +119,20 @@ pub(super) fn fits(labels: &[SliceLabel], circle: Circle, area: Area) -> bool {
             if overlap(rect, boxes[j]) {
                 return false;
             }
+            // Only near-coincident slice attachments unavoidably share stroke area.
+            // Their centrelines must still be disjoint; other routes keep full clearance.
+            let near_rims = label
+                .leader
+                .first()
+                .zip(other.leader.first())
+                .is_some_and(|(a, b)| {
+                    f64::from(a.x - b.x).hypot(f64::from(a.y - b.y)) < 2.0 * LEADER_HALF_WIDTH
+                });
+            let gap = if near_rims {
+                2.0 * EPSILON
+            } else {
+                2.0 * LEADER_HALF_WIDTH
+            };
             for a in label.leader.windows(2) {
                 if hits(a[0], a[1], boxes[j]) {
                     return false;
@@ -117,7 +141,7 @@ pub(super) fn fits(labels: &[SliceLabel], circle: Circle, area: Area) -> bool {
                     && other
                         .leader
                         .windows(2)
-                        .any(|b| close(a[0], a[1], b[0], b[1], 2.0 * LEADER_HALF_WIDTH))
+                        .any(|b| close(a[0], a[1], b[0], b[1], gap))
                 {
                     return false;
                 }

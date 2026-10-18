@@ -2239,6 +2239,30 @@ Example:
 0
 ```
 
+## `umber.Series`
+
+```text
+Series(label: str, values: Values[float], *, color: Color=Color.AUTO)
+```
+
+An immutable series of values for grouped bars, stacked bars and stacked areas.
+
+Pass series to ``Axes.grouped_bar()``, ``Axes.stacked_bar()`` or ``Axes.stacked_area()``.
+Values are copied when the series is made, so changing the original data has no effect.
+Their type, shape and dtype are checked here; whether they are finite, and positive on a
+log axis, is checked by the chart the series is added to, which reports a bad value
+as ``series[i].values[j]``. A copy of a series is the series itself, and series pickle
+by value.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> north = ub.Series("North", [3, 5, 2], color=ub.Color.BLUE)
+>>> north
+<umber.Series 'North' (3 values)>
+```
+
 ## `umber.Cmap`
 
 ```text
@@ -2795,6 +2819,30 @@ ColorbarPosition.RIGHT
 
 Right of the plot, spanning its height.
 
+## `umber.DataError`
+
+```text
+class DataError(UmberError, ValueError)
+```
+
+The data passed to a call cannot be plotted.
+
+Raised at the call site when arrays differ in length, are not one-dimensional, contain
+infinities, have an unsupported dtype, or hold non-positive values on a log axis. It is
+also a ``ValueError``, so existing ``except ValueError`` blocks keep working.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> try:
+...     raise ub.DataError("Axes.line(): x has 3 values but y has 2; "
+...                        "x and y must have the same length.")
+... except ValueError as err:
+...     print(err)
+Axes.line(): x has 3 values but y has 2; x and y must have the same length.
+```
+
 ## `umber.Dash`
 
 ```text
@@ -2835,30 +2883,6 @@ Dash.SOLID
 
 A continuous line.
 
-## `umber.DataError`
-
-```text
-class DataError(UmberError, ValueError)
-```
-
-The data passed to a call cannot be plotted.
-
-Raised at the call site when arrays differ in length, are not one-dimensional, contain
-infinities, have an unsupported dtype, or hold non-positive values on a log axis. It is
-also a ``ValueError``, so existing ``except ValueError`` blocks keep working.
-
-Example:
-
-```python
->>> import umber as ub
->>> try:
-...     raise ub.DataError("Axes.line(): x has 3 values but y has 2; "
-...                        "x and y must have the same length.")
-... except ValueError as err:
-...     print(err)
-Axes.line(): x has 3 values but y has 2; x and y must have the same length.
-```
-
 ## `umber.Distribution`
 
 ```text
@@ -2880,6 +2904,38 @@ Example:
 >>> ub.Distribution("North", [[1, 2, 3], [2, 4]])
 <umber.Distribution 'North' (2 groups)>
 ```
+
+## `umber.FillStyle`
+
+```text
+class FillStyle(Enum)
+```
+
+How areas and histogram bins are filled.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.FillStyle.GRADIENT.name
+'GRADIENT'
+```
+
+### `umber.FillStyle.GRADIENT`
+
+```text
+FillStyle.GRADIENT
+```
+
+A fill that fades out toward the baseline.
+
+### `umber.FillStyle.SOLID`
+
+```text
+FillStyle.SOLID
+```
+
+A flat translucent fill.
 
 ## `umber.Figure`
 
@@ -3288,38 +3344,6 @@ Example:
 >>> svg.startswith("<svg")
 True
 ```
-
-## `umber.FillStyle`
-
-```text
-class FillStyle(Enum)
-```
-
-How areas and histogram bins are filled.
-
-Example:
-
-```python
->>> import umber as ub
->>> ub.FillStyle.GRADIENT.name
-'GRADIENT'
-```
-
-### `umber.FillStyle.GRADIENT`
-
-```text
-FillStyle.GRADIENT
-```
-
-A fill that fades out toward the baseline.
-
-### `umber.FillStyle.SOLID`
-
-```text
-FillStyle.SOLID
-```
-
-A flat translucent fill.
 
 ## `umber.Font`
 
@@ -4015,30 +4039,6 @@ Example:
 >>> import umber as ub
 >>> ub.Scale.time()
 Scale.time()
-```
-
-## `umber.Series`
-
-```text
-Series(label: str, values: Values[float], *, color: Color=Color.AUTO)
-```
-
-An immutable series of values for grouped bars, stacked bars and stacked areas.
-
-Pass series to ``Axes.grouped_bar()``, ``Axes.stacked_bar()`` or ``Axes.stacked_area()``.
-Values are copied when the series is made, so changing the original data has no effect.
-Their type, shape and dtype are checked here; whether they are finite, and positive on a
-log axis, is checked by the chart the series is added to, which reports a bad value
-as ``series[i].values[j]``. A copy of a series is the series itself, and series pickle
-by value.
-
-Example:
-
-```python
->>> import umber as ub
->>> north = ub.Series("North", [3, 5, 2], color=ub.Color.BLUE)
->>> north
-<umber.Series 'North' (3 values)>
 ```
 
 ## `umber.Share`

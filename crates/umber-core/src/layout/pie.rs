@@ -81,6 +81,40 @@ impl MeasuredSlice {
         usize::from(self.angle().sin() >= 0.0)
     }
 
+    /// Limit motion towards the disc at both the vertical leader and the nearest text edge.
+    fn outside_target(&self, circle: Circle, ink: f64) -> spread::Target {
+        let radius = circle.radius + RIM_GAP + RADIAL;
+        let x = (self.angle().sin() * radius).abs();
+        let clearance = |radius: f64, x: f64| (radius * radius - x * x).max(0.0).sqrt();
+        let leader_radius = circle.radius + collision::LEADER_HALF_WIDTH;
+        let mut away = if x < leader_radius {
+            clearance(leader_radius, x)
+        } else {
+            0.0
+        };
+        let text_x = x + ELBOW + LABEL_GAP;
+        if text_x < circle.radius {
+            away = away.max(clearance(circle.radius, text_x) + ink / 2.0);
+        }
+        let desired = circle.y - self.angle().cos() * radius;
+        if away > 0.0 {
+            away = away.max((desired - circle.y).abs());
+        }
+        spread::Target {
+            desired,
+            lower: if away > 0.0 && desired >= circle.y {
+                circle.y + away
+            } else {
+                f64::NEG_INFINITY
+            },
+            upper: if away > 0.0 && desired < circle.y {
+                circle.y - away
+            } else {
+                f64::INFINITY
+            },
+        }
+    }
+
     fn label_radius(&self, circle: Circle, hole: f64) -> f64 {
         if hole == 0.0 && self.end - self.start >= TAU - 1e-12 {
             0.0
@@ -283,16 +317,16 @@ pub(crate) fn place(
         if !indices.is_empty() && (indices.len() - 1) as f64 * line + ink > area.height {
             return Err(outside_error(&slices, &outside));
         }
-        let desired: Vec<_> = indices
+        let targets: Vec<_> = indices
             .iter()
-            .map(|&i| circle.y - slices[i].angle().cos() * (circle.radius + RIM_GAP + RADIAL))
+            .map(|&i| {
+                let mut target = slices[i].outside_target(circle, ink);
+                target.lower = target.lower.max(area.y + ink / 2.0);
+                target.upper = target.upper.min(area.bottom() - ink / 2.0);
+                target
+            })
             .collect();
-        let ys = spread::centres(
-            &desired,
-            line,
-            area.y + ink / 2.0,
-            area.bottom() - ink / 2.0,
-        );
+        let ys = spread::centres(&targets, line).ok_or_else(|| outside_error(&slices, &outside))?;
         for (i, y) in indices.into_iter().zip(ys) {
             let slice = &slices[i];
             let Some(mut text) = slice.outside.clone() else {
@@ -364,14 +398,22 @@ fn vertical_extents(
     let mut bottom = radius;
     for side in 0..2 {
         let indices = side_indices(slices, outside, side);
-        let desired: Vec<_> = indices
+        let circle = Circle {
+            x: 0.0,
+            y: 0.0,
+            radius,
+        };
+        let targets: Vec<_> = indices
             .iter()
-            .map(|&i| -slices[i].angle().cos() * (radius + RIM_GAP + RADIAL))
+            .map(|&i| slices[i].outside_target(circle, ink))
             .collect();
-        let ys = spread::centres(&desired, line, f64::NEG_INFINITY, f64::INFINITY);
-        for (&original, &y) in desired.iter().zip(&ys) {
-            top = top.max(-original).max(-y + ink / 2.0);
-            bottom = bottom.max(original).max(y + ink / 2.0);
+        let Some(ys) = spread::centres(&targets, line) else {
+            return (f64::INFINITY, f64::INFINITY);
+        };
+        for (target, &y) in targets.iter().zip(&ys) {
+            // Leave room for rounding when these relative bounds become panel coordinates.
+            top = top.max(-target.desired).max(-y + ink / 2.0 + 1e-4);
+            bottom = bottom.max(target.desired).max(y + ink / 2.0 + 1e-4);
         }
     }
     (top, bottom)
@@ -392,6 +434,6 @@ fn room_error<'a>(names: impl Iterator<Item = &'a str>) -> Error {
         .map(crate::error::quoted)
         .collect::<Vec<_>>()
         .join(", ");
-    Error::style("PieAxes.pie()", format!("labels for slices {names} do not fit in the panel; labels must stay inside its bounds without overlap."))
+    Error::style("PieAxes.pie()", format!("labels for slices {names} cannot be placed outside the circle without overlap; labels and leaders must clear the circle and stay inside the panel."))
         .with_parameter("categories").with_hint(ROOM_HINT)
 }

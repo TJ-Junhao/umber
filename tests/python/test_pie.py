@@ -100,11 +100,42 @@ def test_outside_labels_do_not_overlap(theme: ub.Theme) -> None:
             assert all(b - a >= 10 for a, b in zip(ys, ys[1:], strict=False))
 
 
+@pytest.mark.parametrize("theme", [ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT])
+@pytest.mark.parametrize("hole", [0.0, 0.5])
+@pytest.mark.parametrize(
+    ("names", "values", "size"),
+    [
+        (
+            ["Web", "App", "Shop", "API", "Ads", "Labs", "Tools", "Misc"],
+            [50, 20, 12, 8, 4, 3, 2, 1],
+            ub.Size.AUTO,
+        ),
+        (["Everything", "a", "b"], [1e6, 1, 1], ub.Size.AUTO),
+        (["A", "B", "C", "D"], [93.3, 2.3, 2.2, 2.2], ub.Size.AUTO),
+        ([f"Item {i}" for i in range(6)], [0.5] * 5 + [97.5], ub.Size.AUTO),
+        ([f"Item {i}" for i in range(6)], [48, 0.5, 0.5, 0.5, 0.5, 50], ub.Size.AUTO),
+        (["Web", "App", "Shop", "Other"], [80, 15, 3, 2], ub.Size.pt(11)),
+    ],
+)
+def test_small_slices_at_top_and_bottom_render(
+    theme: ub.Theme, hole: float, names: list[str], values: list[float], size: ub.Size
+) -> None:
+    fig = ub.Figure(6, 4, theme=theme)
+    fig.add_pie_axes().pie(names, values, annotate=True, hole=hole, size=size)
+    labels = {t.text for t in texts(fig)}
+    assert all(
+        any(text is not None and (text == name or text.startswith(name + " ")) for text in labels)
+        for name in names
+    )
+    assert fig.to_png(dpi=60).startswith(b"\x89PNG")
+
+
 def test_unplaceable_labels_name_slices() -> None:
     ax = ub.Figure(1, 1).add_pie_axes().pie(["An impossibly wide slice name", "B"], [99, 1])
     with pytest.raises(ub.StyleError, match="An impossibly wide slice name") as caught:
         ax.figure.to_svg()
     assert details(caught.value) is not None
+    assert "cannot be placed outside the circle" in str(caught.value)
     assert "legend" in str(details(caught.value))
     ax.legend(ub.LegendStyle.NONE)
     assert ax.figure.to_svg()
