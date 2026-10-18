@@ -43,8 +43,15 @@ def _targets(base: Path, agents: list[str]) -> list[Path]:
     return list(dict.fromkeys(base / _AGENT_DIRS[agent] / "skills/umber" for agent in agents))
 
 
-def _check_targets(base: Path, targets: list[Path]) -> None:
+def _check_targets(base: Path, targets: list[Path], *, contained: bool) -> None:
+    # A project directory may come from someone else's repository, so links there must not lead
+    # outside it; the home directory is the user's own and may link agent folders elsewhere.
     for target in targets:
+        if contained and not target.parent.resolve().is_relative_to(base.resolve()):
+            raise OSError(
+                f"{target.parent}: a symbolic link leads outside the current directory; "
+                "a project skill directory must be inside it."
+            )
         path = base
         for part in target.relative_to(base).parts:
             path /= part
@@ -135,7 +142,7 @@ def main(arguments: list[str]) -> int:
     base = Path.home() if options.user else Path.cwd()
     try:
         targets = _targets(base, agents)
-        _check_targets(base, targets)
+        _check_targets(base, targets, contained=not options.user)
         paths = _apply(targets, install=action == "install")
     except PermissionError as error:
         print(

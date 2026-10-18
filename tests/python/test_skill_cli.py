@@ -219,6 +219,27 @@ def test_symbolic_link_ancestors_are_followed(
         assert (external / "keep.txt").read_text(encoding="utf-8") == "Keep this file"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Directory symlinks need elevated privileges.")
+@pytest.mark.parametrize("command", ("install", "uninstall"))
+@pytest.mark.parametrize("agent, folder", (("claude-code", ".claude"), ("pi", ".agents")))
+def test_project_links_must_stay_inside_the_project(
+    tmp_path: Path, command: str, agent: str, folder: str
+) -> None:
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    (outside / "skills/umber").mkdir(parents=True)
+    (outside / "skills/umber/keep.txt").write_text("Keep this file", encoding="utf-8")
+    project.mkdir()
+    (project / folder).symlink_to(outside, target_is_directory=True)
+    result = _run(project, tmp_path / "home", "skill", command, "--agent", agent)
+    assert result.returncode == 1
+    assert (
+        f"umber skill {command}: {project / folder / 'skills'}: a symbolic link leads outside "
+        "the current directory; a project skill directory must be inside it."
+    ) in result.stderr
+    assert _files(outside / "skills/umber") == {"keep.txt": b"Keep this file"}
+
+
 def test_cli_examples_leave_existing_skills_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
