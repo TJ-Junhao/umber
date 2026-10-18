@@ -1341,7 +1341,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         values: object,
         *,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
         render: Render | Auto = AUTO,
     ) -> SXY:
@@ -1436,7 +1436,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         bins: int | tuple[int, int] = 30,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         render: Render | Auto = AUTO,
     ) -> "Axes[float, float]":
         """Count paired points in equal-width rectangular bins over their data ranges.
@@ -1492,7 +1492,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         gridsize: int = 30,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
     ) -> "Axes[float, float]":
         """Count paired points in pointy-top hexagons, regular in screen coordinates.
 
@@ -2298,7 +2298,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         values: object,
         *,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
         annotate: bool = False,
         format: TickFormat | Auto = AUTO,

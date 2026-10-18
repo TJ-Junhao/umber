@@ -67,8 +67,8 @@ class Cell:
     def add_axes(
         self,
         *,
-        x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+        x: Scale[X] = Scale.linear(),  # type: ignore[assignment]
+        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]
     ) -> Axes[X, Y]:
         """Add axes at this cell of its figure and return them.
 

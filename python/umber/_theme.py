@@ -664,8 +664,6 @@ class Theme:
             return NotImplemented
         return self._native == other._native
 
-    __hash__ = None  # type: ignore[assignment]  # pyright: ignore[reportAssignmentType]
-
     def __repr__(self) -> str:
         for name in ("PIGMENT", "GRAPHITE", "MIDNIGHT"):
             if self == getattr(Theme, name):

@@ -157,7 +157,7 @@ pub(crate) struct Layout {
     pub plot: Area,
     /// Where the header ends, gap included, as an absolute canvas y; the header's top when the
     /// header is empty.
-    #[allow(dead_code, reason = "read by tests")]
+    #[cfg(test)]
     pub header_bottom: f64,
     /// The title, if not empty.
     pub title: Option<Label>,

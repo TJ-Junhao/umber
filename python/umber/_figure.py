@@ -273,8 +273,8 @@ class Figure:
         col_span: int = 1,
         # mypy rejects ``Scale[float]`` as the default of ``Scale[X]`` and ``Scale[Y]``; pyright
         # accepts it.
-        x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+        x: Scale[X] = Scale.linear(),  # type: ignore[assignment]
+        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]
     ) -> Axes[X, Y]:
         """Add axes at a grid position and return them.
 
@@ -327,8 +327,8 @@ class Figure:
         *,
         row: int | Auto = AUTO,
         col: int | Auto = AUTO,
-        x: Scale[X] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
-        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]  # noqa: B008
+        x: Scale[X] = Scale.linear(),  # type: ignore[assignment]
+        y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]
     ) -> Axes[X, Y]:
         """Return existing axes with the given position and scales, including those of a copy.
 

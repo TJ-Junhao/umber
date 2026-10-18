@@ -740,6 +740,7 @@ pub(crate) fn place_panel(
 
     Layout {
         plot,
+        #[cfg(test)]
         header_bottom: header.bottom,
         title: header.title,
         subtitle: header.subtitle,
