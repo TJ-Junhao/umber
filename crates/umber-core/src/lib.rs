@@ -82,6 +82,7 @@
 //! - output: [`SvgText`];
 //! - event rows: [`EventsMark`] and [`EventsOptions`]; category points: [`StripMark`],
 //!   [`StripOptions`], [`SwarmMark`] and [`SwarmOptions`];
+//! - circular panels: [`PieAxesMut`] and [`PieOptions`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
 //!
 //! **Advanced Rust API.** Lower-level building blocks for direct Rust use. They are public and
@@ -179,6 +180,7 @@ pub use figure::{HeatmapMark, HeatmapOptions};
 pub use figure::{
     HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
 };
+pub use figure::{PieAxesMut, PieOptions};
 pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{BundledFont, Font, Weight};

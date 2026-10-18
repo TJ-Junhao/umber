@@ -27,4 +27,5 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `themes.py`: the same chart in the Pigment, Graphite and Midnight themes.
 - `ticks.py`: custom x tick labels and a percent y tick format.
 - `time_series.py`: a week of hourly demand on a time axis, with its range, a window and an event.
+- `pie.py`: pies and donuts with share annotations, outside labels and a separate panel legend.
 - `quick.py`: the one-call functions `ub.line()` and `ub.hist()`.

@@ -5,12 +5,13 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Final, Never, Self, final
 
-from umber import _args, _axes, _cell, _scale, _size, _theme, _ticks, _umber
+from umber import _args, _axes, _cell, _pie, _scale, _size, _theme, _ticks, _umber
 from umber._args import instance, integer, real
 from umber._axes import Axes, X, Y
 from umber._cell import Cell
 from umber._enums import AUTO, Auto, ColorbarPosition, Legend, Share, SvgText
 from umber._errors import new_error
+from umber._pie import PieAxes
 from umber._report import api_call
 from umber._scale import Scale
 from umber._size import TEXT_SIZE_HINT as _SIZE_HINT
@@ -75,7 +76,8 @@ class Figure:
     """
 
     # Python state is stored only after the native call succeeds.
-    __slots__ = ("_axes", "_cols", "_native", "_rows")
+    __slots__ = ("_axes", "_cols", "_native", "_pies", "_rows")
+    _pies: dict[tuple[int, int], PieAxes]
     _native: _umber.Figure
     _axes: dict[tuple[int, int], Axes[Any, Any]]
     _rows: int
@@ -146,6 +148,7 @@ class Figure:
             self._rows = row_count
             self._cols = col_count
             self._axes = {}
+            self._pies = {}
 
     def colorbar(
         self,
@@ -344,6 +347,47 @@ class Figure:
             self._axes[top, left] = axes
             return axes
 
+    def add_pie_axes(
+        self,
+        *,
+        row: int | Auto = AUTO,
+        col: int | Auto = AUTO,
+        row_span: int = 1,
+        col_span: int = 1,
+    ) -> PieAxes:
+        """Add a circular panel without x or y axes.
+
+        Pie panels occupy grid cells but never join shared axes or merged legends.
+
+        Args:
+            row: Zero-based top row; AUTO means 0 only on a one-row figure.
+            col: Zero-based left column; AUTO means 0 only on a one-column figure.
+            row_span: Number of rows occupied, at least 1.
+            col_span: Number of columns occupied, at least 1.
+
+        Returns:
+            The new pie panel, with pie, title and legend methods.
+
+        Raises:
+            TypeError: If an index or span has the wrong type.
+            UsageError: If a position is missing, out of range or occupied, or a span is invalid.
+
+        Example:
+            >>> import umber as ub
+            >>> fig = ub.Figure(cols=2)
+            >>> ax = fig.add_pie_axes(col=1).pie(["A", "B"], [1, 2])
+        """
+        with api_call():
+            context = "Figure.add_pie_axes()"
+            row_index = _index(context, "row", row)
+            col_index = _index(context, "col", col)
+            rows = integer(context, "row_span", row_span)
+            cols = integer(context, "col_span", col_span)
+            top, left = self._native.add_pie_axes(*row_index, *col_index, rows, cols)
+            axes = _pie.attach(self, self._native, top, left)
+            self._pies[top, left] = axes
+            return axes
+
     def axes_at(
         self,
         *,
@@ -535,6 +579,9 @@ class Figure:
         clone._rows = self._rows
         clone._cols = self._cols
         clone._axes = {}
+        clone._pies = {
+            position: _pie.attach(clone, clone._native, *position) for position in self._pies
+        }
         for (row, col), axes in self._axes.items():
             x, y = _axes.scales(axes)
             clone._axes[row, col] = _axes.attach(clone, clone._native, x, y, row, col)

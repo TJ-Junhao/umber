@@ -109,6 +109,7 @@ mod corpus {
     pub mod legend;
     pub mod legend_position;
     pub mod mesh;
+    pub mod pie;
     pub mod plot_height;
     pub mod rules;
     pub mod share;
@@ -200,6 +201,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::hist_variants::cases(&lib, &mut sink);
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);
+    corpus::pie::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

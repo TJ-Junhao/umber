@@ -47,6 +47,7 @@ pub use crate::model::{HeatmapMark, HeatmapOptions};
 pub use crate::model::{
     HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
 };
+pub use crate::model::{PieAxesMut, PieOptions};
 pub use crate::model::{StemMark, StemOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
 

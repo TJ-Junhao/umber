@@ -3003,6 +3003,37 @@ Example:
 >>> rows = ub.Figure().add_axes(y=ub.Scale.category()).bar(["A", "B"], [3, 5])
 ```
 
+### `umber.Figure.add_pie_axes`
+
+```text
+Figure.add_pie_axes(self, *, row: int | Auto=AUTO, col: int | Auto=AUTO, row_span: int=1, col_span: int=1) -> PieAxes
+```
+
+Add a circular panel without x or y axes.
+
+Pie panels occupy grid cells but never join shared axes or merged legends.
+
+Args:
+    row: Zero-based top row; AUTO means 0 only on a one-row figure.
+    col: Zero-based left column; AUTO means 0 only on a one-column figure.
+    row_span: Number of rows occupied, at least 1.
+    col_span: Number of columns occupied, at least 1.
+
+Returns:
+    The new pie panel, with pie, title and legend methods.
+
+Raises:
+    TypeError: If an index or span has the wrong type.
+    UsageError: If a position is missing, out of range or occupied, or a span is invalid.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> fig = ub.Figure(cols=2)
+>>> ax = fig.add_pie_axes(col=1).pie(["A", "B"], [1, 2])
+```
+
 ### `umber.Figure.axes_at`
 
 ```text
@@ -3671,6 +3702,142 @@ Marker.TRIANGLE
 ```
 
 A filled triangle pointing up.
+
+## `umber.PieAxes`
+
+```text
+class PieAxes
+```
+
+A circular panel with ``pie``, ``title`` and ``legend`` methods only.
+
+Create it with ``Figure.add_pie_axes()`` or ``ub.pie()``. The panel belongs to its
+``figure``, which renders and saves it. A panel holds at most one pie. Failed calls
+leave it unchanged. Cartesian methods are unavailable.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_pie_axes().pie(["North", "South"], [3, 1])
+>>> ax.title("Orders").figure.save_svg("orders.svg")
+```
+
+### `umber.PieAxes.figure`
+
+```text
+PieAxes.figure(self) -> 'umber.Figure'
+```
+
+The figure that renders and saves this panel.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> fig = ub.Figure()
+>>> fig.add_pie_axes().figure is fig
+True
+```
+
+### `umber.PieAxes.legend`
+
+```text
+PieAxes.legend(self, style: LegendStyle, *, position: LegendPosition | Auto=AUTO, size: Size=Size.AUTO) -> Self
+```
+
+Set the panel's legend, which never joins a merged figure legend.
+
+Args:
+    style: ``DIRECT`` labels slices; ``HEADER`` and ``CHIPS`` replace direct names
+        with a legend including zero values; ``NONE`` hides names.
+    position: ``AUTO`` follows the theme. An explicit position requires a style
+        other than ``DIRECT``.
+    size: Legend text size, independent of other panels' legend sizes.
+
+Returns:
+    This pie panel.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    UsageError: If ``DIRECT`` is given an explicit position.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.pie(["A", "B"], [1, 2]).legend(ub.LegendStyle.CHIPS)
+```
+
+### `umber.PieAxes.pie`
+
+```text
+PieAxes.pie(self, categories: Values[str], values: Values[float], *, hole: float=0.0, annotate: bool=False, format: TickFormat | Auto=AUTO, colors: Sequence[Color] | Auto=AUTO, size: Size=Size.AUTO) -> Self
+```
+
+Draw this panel's pie, or a donut when ``hole`` is positive.
+
+Slices start at twelve o'clock, clockwise in input order. Names fit inside their
+slices or move outside with leader lines. Outside labels keep their vertical order.
+The default legend style is ``DIRECT``, regardless of the theme. ``HEADER`` and
+``CHIPS`` replace direct names with a panel legend; ``NONE`` hides names.
+
+Args:
+    categories: Unique slice names, one per value.
+    values: Finite nonnegative values, with at least one positive value. Zero
+        values draw no slice; their names appear only in a legend.
+    hole: Inner radius as a fraction of outer radius, from 0 inclusive to 1 exclusive.
+    annotate: Write each share under its name inside, or alongside it outside.
+        Shares remain visible when a legend replaces the names.
+    format: Share format; ``AUTO`` uses percent with no decimal places.
+    colors: One Color per slice. ``AUTO`` uses the theme palette without cycling;
+        more slices than palette colors need explicit colors.
+    size: Direct label size: ``Size.AUTO`` follows the body's theme size,
+        ``Size.times(k)`` scales it and ``Size.pt(p)`` uses points.
+
+Returns:
+    This pie panel.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: If names repeat, lengths differ, or values are invalid or all zero.
+    StyleError: If the hole or colors are invalid, or labels cannot fit at render.
+    UsageError: If this panel already holds a pie.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_pie_axes()
+>>> ax = ax.pie(["Web", "App", "Other"], [50, 35, 15], hole=0.5, annotate=True)
+```
+
+### `umber.PieAxes.title`
+
+```text
+PieAxes.title(self, text: str, *, size: Size=Size.AUTO) -> Self
+```
+
+Set the title above this pie panel.
+
+Args:
+    text: Title text, at most 1,000 characters; empty removes it.
+    size: ``Size.AUTO`` follows the theme, ``Size.times(k)`` multiplies the scaled
+        title size and ``Size.pt(p)`` uses points without font scaling.
+
+Returns:
+    This pie panel.
+
+Raises:
+    TypeError: If text or size has the wrong type.
+    StyleError: If text is too long or cannot be displayed.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.pie(["A", "B"], [1, 2]).title("Parts")
+```
 
 ## `umber.Render`
 
@@ -5265,6 +5432,43 @@ Example:
 ```python
 >>> import umber as ub
 >>> ub.line([0, 1, 2], [1.0, 3.0, 2.0]).title("Signal").figure.save_svg("signal.svg")
+```
+
+## `umber.pie`
+
+```text
+pie(categories: Values[str], values: Values[float], *, hole: float=0.0, annotate: bool=False, format: TickFormat | Auto=AUTO, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT) -> PieAxes
+```
+
+Draw a pie or donut on a new figure and return its circular panel.
+
+The same as ``Figure(theme=theme).add_pie_axes().pie(categories, values, ...)``.
+Slices run clockwise from twelve o'clock in input order.
+
+Args:
+    categories: Unique slice names, one per value.
+    values: Finite nonnegative values with a positive total.
+    hole: Inner radius divided by outer radius; 0 for a pie, or a fraction below 1.
+    annotate: Write each slice's share with its name.
+    format: Share format; AUTO uses whole percentages.
+    size: Direct label size, as Size.AUTO, Size.times(k) or Size.pt(p).
+    theme: The theme of the new figure.
+
+Returns:
+    The new pie panel; its figure renders and saves the chart.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: If names or values are invalid.
+    StyleError: If the hole is invalid, the palette has too few colors, or labels
+        cannot fit at render.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.pie(["Web", "App", "Other"], [50, 35, 15], hole=0.5, annotate=True)
+>>> ax.figure.save_svg("orders.svg")
 ```
 
 ## `umber.scatter`

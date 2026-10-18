@@ -290,7 +290,9 @@ pub(super) fn check_add(
         let key = group_key(grid, mode, cells.row(), cells.col());
         if let Some(other) = figure.panels().find(|axes| {
             let c = axes.cells();
-            group_key(grid, mode, c.row(), c.col()) == key && axis.kind(axes) != given
+            axes.pie_panel.is_none()
+                && group_key(grid, mode, c.row(), c.col()) == key
+                && axis.kind(axes) != given
         }) {
             return Err(Error::usage(
                 "Figure.add_axes()",
@@ -372,6 +374,9 @@ impl ShareGroups {
                 .panels()
                 .enumerate()
                 .map(|(i, axes)| {
+                    if axes.pie_panel.is_some() {
+                        return i;
+                    }
                     let c = axes.cells();
                     let key = match axis {
                         SharedAxis::X => figure.x_group_of(c.row(), c.col()),
@@ -451,14 +456,14 @@ impl ShareGroups {
 /// exactly the same rows. Matching columns/rows also put the panels in the same shared group.
 pub(crate) fn label_visibility(figure: &Figure, cells: CellRange) -> [bool; 2] {
     let show_x = !matches!(figure.grid().share_x(), Share::Col | Share::All)
-        || !figure.panels().any(|a| {
+        || !figure.panels().filter(|a| a.pie_panel.is_none()).any(|a| {
             let c = a.cells();
             c.col() == cells.col()
                 && c.col_span() == cells.col_span()
                 && c.row() >= cells.row() + cells.row_span()
         });
     let show_y = !matches!(figure.grid().share_y(), Share::Row | Share::All)
-        || !figure.panels().any(|a| {
+        || !figure.panels().filter(|a| a.pie_panel.is_none()).any(|a| {
             let c = a.cells();
             c.row() == cells.row()
                 && c.row_span() == cells.row_span()

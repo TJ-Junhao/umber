@@ -27,6 +27,7 @@ mod inset;
 mod legend;
 mod nudge;
 mod panel;
+pub(crate) mod pie;
 pub(crate) mod placement;
 mod program;
 

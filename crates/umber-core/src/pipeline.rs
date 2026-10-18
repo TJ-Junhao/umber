@@ -50,7 +50,19 @@ fn panels<'a>(
         .panels()
         .zip(resolve::resolve_figure_marks(figure))
         .map(|(axes, marks)| {
-            let legend = if figure.has_merged_legend() {
+            let legend = if let Some(panel) = &axes.pie_panel {
+                let style = axes.legend_style().unwrap_or(crate::LegendStyle::Direct);
+                let mut measured = MeasuredLegend::measure(
+                    theme,
+                    &Legend::pie(style, panel.pie.as_ref()),
+                    lib,
+                    axes.legend_size(),
+                )?;
+                if style != crate::LegendStyle::Direct {
+                    measured.position = axes.legend_position().unwrap_or(theme.legend_position());
+                }
+                measured
+            } else if figure.has_merged_legend() {
                 let style = axes.legend_style().unwrap_or(theme.legend_style());
                 MeasuredLegend::measure(
                     theme,
@@ -1541,6 +1553,22 @@ fn scene_with_labels(
     }
     let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
+        if let Some(pie_panel) = &panel.axes.pie_panel {
+            scene.push(draw::chrome(theme, layout));
+            if let Some(pie) = &pie_panel.pie {
+                let style = panel
+                    .axes
+                    .legend_style()
+                    .unwrap_or(crate::LegendStyle::Direct);
+                let placed = layout::pie::place(pie, style, layout.plot, theme, fonts)
+                    .map_err(|err| in_cell(figure, panel.axes, err))?;
+                scene.push(draw::pie::draw(theme, &placed));
+            }
+            if let Some(legend) = draw::legend::legend(theme, layout) {
+                scene.push(legend);
+            }
+            continue;
+        }
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
         draw::check_points(resolved, layout, &panel.marks, context)

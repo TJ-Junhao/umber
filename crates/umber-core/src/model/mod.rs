@@ -26,6 +26,8 @@ mod hist;
 mod kde;
 mod mark;
 mod mesh;
+pub(crate) mod pie;
+pub use pie::{PieAxesMut, PieOptions};
 mod render;
 mod rule;
 mod share;

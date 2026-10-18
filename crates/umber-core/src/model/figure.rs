@@ -327,6 +327,16 @@ impl Figure {
         x: ScaleKind,
         y: ScaleKind,
     ) -> Result<AxesMut<'_>> {
+        let index = self.insert_axes(at, Some((x, y)))?;
+        Ok(AxesMut::new(self, index))
+    }
+
+    /// Inserts an empty panel, sharing Cartesian settings only for Cartesian axes.
+    fn insert_axes(
+        &mut self,
+        at: Placement,
+        scales: Option<(ScaleKind, ScaleKind)>,
+    ) -> Result<usize> {
         let cells = self.placement_cells(at)?;
         let (row, col) = (cells.row(), cells.col());
         let taken = cells.iter().find_map(|cell| {
@@ -349,11 +359,21 @@ impl Figure {
             .with_parameter("row")
             .with_hint("each cell holds one axes; pick an empty cell."));
         }
-        share::check_add(self, cells, x, y)?;
-        let x_key = self.x_group_of(row, col);
-        let y_key = self.y_group_of(row, col);
-        let x_settings = Arc::clone(&self.x_groups.entry(x_key).or_default().settings);
-        let y_settings = Arc::clone(&self.y_groups.entry(y_key).or_default().settings);
+        let (x, y) = scales.unwrap_or((ScaleKind::Category, ScaleKind::Category));
+        let (x_settings, y_settings) = if scales.is_some() {
+            share::check_add(self, cells, x, y)?;
+            let x_key = self.x_group_of(row, col);
+            let y_key = self.y_group_of(row, col);
+            (
+                Arc::clone(&self.x_groups.entry(x_key).or_default().settings),
+                Arc::clone(&self.y_groups.entry(y_key).or_default().settings),
+            )
+        } else {
+            (
+                Arc::new(AxisSettings::default()),
+                Arc::new(AxisSettings::default()),
+            )
+        };
         // Panels stay in row-major order of their top-left cells, which no two share.
         let index = self
             .panels
@@ -363,8 +383,73 @@ impl Figure {
             .color_groups
             .get(&self.color_group_of(row, col))
             .and_then(|group| group.limits);
+        if scales.is_none() {
+            axes.pie_panel = Some(super::pie::PiePanel::default());
+            axes.legend = Some(crate::LegendStyle::Direct);
+        }
         self.panels.insert(index, axes);
-        Ok(AxesMut::new(self, index))
+        Ok(index)
+    }
+
+    /// Adds a pie panel to a single-cell figure.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_pie_axes()?.title("Parts");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn add_pie_axes(&mut self) -> Result<super::PieAxesMut<'_>> {
+        self.add_pie_axes_at(Placement::default())
+    }
+
+    /// Adds a pie panel at a grid position. Pie panels occupy cells but do not share axes.
+    /// Position and occupancy errors follow [`Figure::add_axes_at`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Grid, GridIndex, Placement, Theme};
+    /// let mut f = Figure::with_grid(12.0, 4.0, Theme::pigment(), Grid::new(1, 2)?)?;
+    /// f.add_pie_axes_at(Placement { col: GridIndex::At(1), ..Default::default() })?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn add_pie_axes_at(&mut self, at: Placement) -> Result<super::PieAxesMut<'_>> {
+        let index = self
+            .insert_axes(at, None)
+            .map_err(|err| err.with_context("Figure.add_pie_axes()"))?;
+        Ok(super::PieAxesMut::new(self, index))
+    }
+
+    /// Returns an existing pie panel's restricted handle.
+    /// `Error::Usage` if the cell does not start a pie panel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, GridIndex, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_pie_axes()?;
+    /// f.pie_axes_at_mut(GridIndex::Auto, GridIndex::Auto)?.title("Parts");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn pie_axes_at_mut(
+        &mut self,
+        row: GridIndex,
+        col: GridIndex,
+    ) -> Result<super::PieAxesMut<'_>> {
+        let index = self.index_at(row, col)?;
+        if self.panel(index).pie_panel.is_none() {
+            return Err(Error::usage(
+                "Figure.pie_axes_at()",
+                "this panel is Cartesian; a pie needs PieAxes.",
+            )
+            .with_parameter("row")
+            .with_hint("create a pie panel with Figure.add_pie_axes()."));
+        }
+        Ok(super::PieAxesMut::new(self, index))
     }
 
     /// The cells that an axes added at `at` would cover on this figure's grid, checked as
@@ -441,6 +526,7 @@ impl Figure {
     /// ```
     pub fn axes_at(&self, row: GridIndex, col: GridIndex) -> Result<&Axes> {
         let index = self.index_at(row, col)?;
+        self.check_cartesian(index)?;
         Ok(self.panel(index))
     }
 
@@ -460,6 +546,7 @@ impl Figure {
     /// ```
     pub fn axes_at_mut(&mut self, row: GridIndex, col: GridIndex) -> Result<AxesMut<'_>> {
         let index = self.index_at(row, col)?;
+        self.check_cartesian(index)?;
         Ok(AxesMut::new(self, index))
     }
 
@@ -687,12 +774,23 @@ impl Figure {
         let settings = Arc::clone(&group.settings);
         for axes in &mut self.panels {
             let c = axes.cells();
-            if share::group_key(&self.grid, mode, c.row(), c.col()) == key {
+            if axes.pie_panel.is_none()
+                && share::group_key(&self.grid, mode, c.row(), c.col()) == key
+            {
                 match axis {
                     SharedAxis::X => axes.x_settings = Arc::clone(&settings),
                     SharedAxis::Y => axes.y_settings = Arc::clone(&settings),
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Keeps Cartesian mutable handles away from circular panels.
+    fn check_cartesian(&self, index: usize) -> Result<()> {
+        if self.panel(index).pie_panel.is_some() {
+            return Err(Error::usage(AXES_AT, "this panel is PieAxes; Cartesian methods need Cartesian axes.")
+                .with_parameter("row").with_hint("use Figure.add_axes() for Cartesian marks, or the pie panel's pie, title and legend methods."));
         }
         Ok(())
     }
@@ -783,7 +881,9 @@ impl Figure {
     /// Panels with a visible legend and an explicit size; AUTO contributes no setting.
     fn sized_legends(&self) -> impl Iterator<Item = (usize, &Axes)> {
         self.panels.iter().enumerate().filter(|(_, axes)| {
-            axes.legend_size != SizeSpec::Auto && axes.legend != Some(crate::LegendStyle::None)
+            axes.pie_panel.is_none()
+                && axes.legend_size != SizeSpec::Auto
+                && axes.legend != Some(crate::LegendStyle::None)
         })
     }
 

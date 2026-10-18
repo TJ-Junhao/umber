@@ -13,15 +13,64 @@ from umber._args import instance
 from umber._axes import Axes
 from umber._color import Color
 from umber._color_by import ColorBy
-from umber._enums import Dash, Hist, Marker, Stat
+from umber._enums import AUTO, Auto, Dash, Hist, Marker, Stat
 from umber._figure import Figure
+from umber._pie import PieAxes
 from umber._report import api_call
 from umber._scale import Scale
 from umber._size import Size
 from umber._theme import Theme
+from umber._ticks import TickFormat
 from umber._types import Values
 
 _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
+
+
+def pie(
+    categories: Values[str],
+    values: Values[float],
+    *,
+    hole: float = 0.0,
+    annotate: bool = False,
+    format: TickFormat | Auto = AUTO,
+    size: Size = Size.AUTO,
+    theme: Theme = Theme.PIGMENT,
+) -> PieAxes:
+    """Draw a pie or donut on a new figure and return its circular panel.
+
+    The same as ``Figure(theme=theme).add_pie_axes().pie(categories, values, ...)``.
+    Slices run clockwise from twelve o'clock in input order.
+
+    Args:
+        categories: Unique slice names, one per value.
+        values: Finite nonnegative values with a positive total.
+        hole: Inner radius divided by outer radius; 0 for a pie, or a fraction below 1.
+        annotate: Write each slice's share with its name.
+        format: Share format; AUTO uses whole percentages.
+        size: Direct label size, as Size.AUTO, Size.times(k) or Size.pt(p).
+        theme: The theme of the new figure.
+
+    Returns:
+        The new pie panel; its figure renders and saves the chart.
+
+    Raises:
+        TypeError: If an argument has the wrong type.
+        DataError: If names or values are invalid.
+        StyleError: If the hole is invalid, the palette has too few colors, or labels
+            cannot fit at render.
+
+    Example:
+        >>> import umber as ub
+        >>> ax = ub.pie(["Web", "App", "Other"], [50, 35, 15], hole=0.5, annotate=True)
+        >>> ax.figure.save_svg("orders.svg")
+    """
+    with api_call():
+        instance("pie()", "theme", theme, Theme, _THEME_HINT)
+        return (
+            Figure(theme=theme)
+            .add_pie_axes()
+            .pie(categories, values, hole=hole, annotate=annotate, format=format, size=size)
+        )
 
 
 def line(

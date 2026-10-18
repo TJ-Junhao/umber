@@ -305,6 +305,93 @@ impl Figure {
         Ok((axes.cells().row(), axes.cells().col()))
     }
 
+    /// Adds a circular panel without Cartesian axes.
+    fn add_pie_axes(
+        &mut self,
+        row_kind: i64,
+        row: i64,
+        col_kind: i64,
+        col: i64,
+        row_span: i64,
+        col_span: i64,
+    ) -> PyResult<(usize, usize)> {
+        let at = Placement {
+            row: grid_index(row_kind, row)?,
+            col: grid_index(col_kind, col)?,
+            row_span,
+            col_span,
+        };
+        let axes = self.0.add_pie_axes_at(at).map_err(core_error)?;
+        Ok((axes.cells().row(), axes.cells().col()))
+    }
+
+    /// Adds the circular panel's single pie from copied data.
+    fn pie(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        values: &Bound<'_, PyAny>,
+        hole: f64,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+        colors: Option<Vec<ColorArg>>,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let values = floats(values)?;
+        let options = umber_core::PieOptions {
+            hole,
+            annotate,
+            format: format.map(tick_format).transpose()?,
+            colors: colors
+                .map(|colors| {
+                    colors
+                        .into_iter()
+                        .map(color_spec)
+                        .collect::<PyResult<Vec<_>>>()
+                })
+                .transpose()?,
+            size: size_spec(size)?,
+        };
+        self.0
+            .pie_axes_at_mut(GridIndex::At(row), GridIndex::At(col))
+            .map_err(core_error)?
+            .pie(categories, &values, options)
+            .map_err(core_error)?;
+        Ok(())
+    }
+
+    /// Sets a circular panel's title.
+    fn pie_title(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.0
+            .pie_axes_at_mut(GridIndex::At(row), GridIndex::At(col))
+            .map_err(core_error)?
+            .title_sized(text, size);
+        Ok(())
+    }
+
+    /// Sets a circular panel's own legend.
+    fn pie_legend(
+        &mut self,
+        row: i64,
+        col: i64,
+        style: i64,
+        position: Option<i64>,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let style = enum_value::<LegendStyle>(style)?;
+        let position = position.map(enum_value::<LegendPosition>).transpose()?;
+        let size = size_spec(size)?;
+        self.0
+            .pie_axes_at_mut(GridIndex::At(row), GridIndex::At(col))
+            .map_err(core_error)?
+            .legend(style, position, size)
+            .map_err(core_error)?;
+        Ok(())
+    }
+
     /// Sets the figure title above every panel.
     fn figure_title(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
         self.0.title_sized(text, size_spec(size)?);
