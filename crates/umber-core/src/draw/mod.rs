@@ -41,6 +41,7 @@ mod cells;
 mod chrome;
 mod clip;
 pub(crate) mod colorbar;
+mod contour;
 mod ecdf;
 mod error_bars;
 pub(crate) mod fill;
@@ -75,6 +76,7 @@ use crate::Theme;
 use crate::layout::{Area, Layout};
 use crate::resolve::{Baseline, Orientation, Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
+use crate::text::SceneFonts;
 use mapping::{AxisMaps, axis_values};
 
 /// What every mark implementation draws with: the theme, the axis maps and the plot geometry.
@@ -111,13 +113,19 @@ impl MarkContext<'_> {
 }
 
 /// The `marks` as one group clipped to [`marks_clip`], in the given order, each in its resolved
-/// color. `None` when nothing is visible.
+/// color, with the text they carry (the level labels of contours) shaped with the scene's
+/// `fonts`. `Ok(None)` when nothing is visible.
+///
+/// # Errors
+///
+/// A level label that cannot be laid out fails as `fonts` reports it.
 pub(crate) fn marks(
     theme: &Theme,
+    fonts: &SceneFonts<'_>,
     resolved: &Resolved,
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
-) -> Option<Item> {
+) -> crate::Result<Option<Item>> {
     let plot = layout.plot;
     let context = MarkContext {
         theme,
@@ -355,6 +363,23 @@ pub(crate) fn marks(
             } => {
                 heatmap::heatmap_items(&context, resolved, heatmap_mark, &mut items);
             }
+            ResolvedMark::Contour {
+                mark,
+                ref mapped,
+                color,
+                ref labels,
+                ref shapes,
+                ..
+            } => {
+                let contour = contour::Contour {
+                    mark,
+                    mapped: mapped.is_some(),
+                    color,
+                    labels,
+                    shapes,
+                };
+                contour::contour_items(&context, fonts, resolved, contour, &mut items)?;
+            }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
@@ -403,12 +428,12 @@ pub(crate) fn marks(
     }
     rule::rule_layer(&context, resolved, marks, layer_clip, &mut items);
     if items.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some(Item::Group {
+    Ok(Some(Item::Group {
         clip: Some(clip),
         items,
-    })
+    }))
 }
 
 /// Checks that every mark of `marks` that draws something and whose options draw its cells as

@@ -273,6 +273,36 @@ def test_grid_placement_and_sharing() -> None:
         fig.add_axes(col=0, row=1)
 
 
+@pytest.mark.parametrize("pie_col", [0, 1, 2])
+@pytest.mark.parametrize("share_color", [ub.Share.NONE, ub.Share.ALL])
+def test_pies_do_not_join_contour_colorbars(pie_col: int, share_color: ub.Share) -> None:
+    fig = ub.Figure(12, 4, cols=3, share_color=share_color)
+    fig.add_pie_axes(col=pie_col).pie(["Pie slice"], [1])
+    for col in range(3):
+        if col != pie_col:
+            fig.add_axes(col=col).contour([0, 1], [0, 1], [[0, 1], [1, 2]], levels=[0.5, 1.5])
+    svg = fig.to_svg(text=ub.SvgText.EDITABLE)
+    root = ET.fromstring(svg)
+    gradients = list(root.iter("{http://www.w3.org/2000/svg}linearGradient"))
+    assert len(gradients) == (1 if share_color == ub.Share.ALL else 2)
+    assert "Pie slice" in {t.text for t in texts(fig)}
+    assert fig.to_png(dpi=60).startswith(b"\x89PNG")
+
+
+@pytest.mark.parametrize("pie_col", [0, 1, 2])
+def test_contour_level_errors_keep_panel_indices_beside_pies(pie_col: int) -> None:
+    fig = ub.Figure(12, 4, cols=3, share_color=ub.Share.ALL)
+    fig.add_pie_axes(col=pie_col).pie(["Pie slice"], [1])
+    columns = [col for col in range(3) if col != pie_col]
+    for col, levels in zip(columns, ([0.5, 1.5], [0.25, 1.75]), strict=True):
+        fig.add_axes(col=col).contour([0, 1], [0, 1], [[0, 1], [1, 2]], levels=levels)
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    assert f"row 0, col {columns[0]} and row 0, col {columns[1]} have different levels" in str(
+        caught.value
+    )
+
+
 @pytest.mark.parametrize("option", ["hole", "annotate", "format", "colors", "size"])
 def test_wrong_option_types(option: str) -> None:
     ax = ub.Figure().add_pie_axes()

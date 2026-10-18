@@ -65,7 +65,7 @@ class ColorBy:
         values: Values[float],
         cmap: Cmap | Auto = AUTO,
         *,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
     ) -> None:
         with api_call():

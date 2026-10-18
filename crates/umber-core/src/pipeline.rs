@@ -86,16 +86,21 @@ fn panels<'a>(
             })
         })
         .collect::<Result<_>>()?;
-    resolve_colors(&mut panels, groups, theme);
+    resolve_colors(figure, &mut panels, groups);
     Ok(panels)
 }
 
-/// Resolves each color group's scale from its members' current mapped values.
-fn resolve_colors(panels: &mut [Panel<'_>], groups: &ShareGroups, theme: &Theme) {
+/// Resolves each color group's scale from its members' current mapped values, with the
+/// contour level labels in the format of the group's colorbar ticks.
+fn resolve_colors(figure: &Figure, panels: &mut [Panel<'_>], groups: &ShareGroups) {
     for i in 0..panels.len() {
         if groups.color[i] != Some(i) {
             continue;
         }
+        let Some((format, _)) = color_tick_format(figure, &panels[i]) else {
+            continue;
+        };
+        let format = format.clone();
         let marks = panels
             .iter()
             .enumerate()
@@ -104,7 +109,7 @@ fn resolve_colors(panels: &mut [Panel<'_>], groups: &ShareGroups, theme: &Theme)
         let color = ResolvedColorScale::resolve(
             marks,
             panels[i].axes.cartesian().and_then(Axes::color_limits),
-            theme,
+            (figure.theme(), &format),
         );
         for (j, panel) in panels.iter_mut().enumerate() {
             if groups.color[j] == Some(i) {
@@ -112,6 +117,104 @@ fn resolve_colors(panels: &mut [Panel<'_>], groups: &ShareGroups, theme: &Theme)
             }
         }
     }
+}
+
+/// Checks that the color-mapped contours of each color group, which share one colorbar, all
+/// have the same levels, so the bar explains every one of them: `Error::Style` under `context`
+/// naming the panels of the first two whose levels differ. It reads the levels the model
+/// resolved, before any contour geometry is built.
+fn check_contour_levels(
+    figure: &Figure,
+    groups: &ShareGroups,
+    context: &'static str,
+) -> Result<()> {
+    const HINT: &str = "pass the same levels to every contour that shares a colorbar.";
+    let panels: Vec<_> = figure.panels().collect();
+    for source in 0..panels.len() {
+        if groups.color.get(source) != Some(&Some(source)) {
+            continue;
+        }
+        let mut first: Option<(usize, Vec<f64>)> = None;
+        let members = panels
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| groups.color.get(*i) == Some(&Some(source)));
+        for (i, panel) in members {
+            let Some(axes) = panel.cartesian() else {
+                continue;
+            };
+            let contours = axes.marks().iter().filter_map(|mark| {
+                use crate::model::Mark;
+                match mark {
+                    Mark::Contour(contour) => contour.color_scale().map(|_| contour),
+                    Mark::Line(_)
+                    | Mark::Scatter(_)
+                    | Mark::Bubbles(_)
+                    | Mark::Stem(_)
+                    | Mark::Heatmap(_)
+                    | Mark::Area(_)
+                    | Mark::Bar(_)
+                    | Mark::Violin(_)
+                    | Mark::GroupedViolin(_)
+                    | Mark::Box(_)
+                    | Mark::GroupedBox(_)
+                    | Mark::GroupedBar(_)
+                    | Mark::StackedBar(_)
+                    | Mark::StackedArea(_)
+                    | Mark::Mesh(_)
+                    | Mark::Hist2d(_)
+                    | Mark::Hexbin(_)
+                    | Mark::Hist(_)
+                    | Mark::Step(_)
+                    | Mark::HLine(_)
+                    | Mark::VLine(_)
+                    | Mark::HSpan(_)
+                    | Mark::VSpan(_)
+                    | Mark::Band(_)
+                    | Mark::ErrorBars(_)
+                    | Mark::Events(_)
+                    | Mark::Strip(_)
+                    | Mark::Swarm(_)
+                    | Mark::GroupedHist(_)
+                    | Mark::Ecdf(_)
+                    | Mark::Kde(_) => None,
+                }
+            });
+            for contour in contours {
+                let values = contour.levels();
+                let Some((j, known)) = &first else {
+                    first = Some((i, values));
+                    continue;
+                };
+                if *known == values {
+                    continue;
+                }
+                let required = "contours that share a colorbar need the same levels.";
+                if *j == i {
+                    let error = Error::style(
+                        context,
+                        format!("two contours of these axes have different levels; {required}"),
+                    )
+                    .with_hint(HINT);
+                    return Err(in_cell(figure, axes, error));
+                }
+                let (a, b) = (panels[*j].cells(), axes.cells());
+                return Err(Error::style(
+                    context,
+                    format!(
+                        "the contours of row {}, col {} and row {}, col {} have different \
+                         levels; {required}",
+                        a.row(),
+                        a.col(),
+                        b.row(),
+                        b.col()
+                    ),
+                )
+                .with_hint(HINT));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The legend of `axes` with its resolved `marks`, its row entries and its direct labels,
@@ -1124,7 +1227,7 @@ fn plan(
         }
     }
 
-    let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = inputs
+    let planned: Vec<(Resolved, Layout)> = inputs
         .iter()
         .zip(resolved)
         .zip(bands)
@@ -1136,21 +1239,23 @@ fn plan(
                 && !layout.legend.is_empty()
                 && layout::placement::best_fits(input.legend, &layout.plot)
             {
-                let marks: Vec<_> = panel
+                let marks = panel
                     .marks
                     .iter()
                     .map(|mark| {
-                        let geometry =
-                            draw::marks(theme, &resolved, &layout, std::slice::from_ref(mark))
-                                .map(|item| crate::coverage::Geometry::of(&item));
-                        mark.for_coverage(geometry)
+                        let item =
+                            draw::marks(theme, lib, &resolved, &layout, std::slice::from_ref(mark))
+                                .map_err(|err| in_cell(figure, panel.axes, err))?;
+                        let geometry = item.map(|item| crate::coverage::Geometry::of(&item));
+                        Ok(mark.for_coverage(geometry))
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
                 layout.legend = layout::placement::best(input.legend, &layout.plot, &marks);
             }
-            (resolved, layout)
+            Ok((resolved, layout))
         })
-        .unzip();
+        .collect::<Result<_>>()?;
+    let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = planned.into_iter().unzip();
     layout::check_panel_contents(&grid, &layouts)?;
     header.check(figure, context)?;
     Ok(FigurePlan {
@@ -1327,7 +1432,7 @@ fn plan_cells(
                 counting_aspects[i] = aspects[i];
             }
         }
-        resolve_colors(panels, groups, figure.theme());
+        resolve_colors(figure, panels, groups);
         planned = plan(figure, panels, groups, lib, context, labels)?;
         if planned
             .panels
@@ -1571,6 +1676,7 @@ fn scene_with_labels(
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
     scene.fonts = fonts.fonts().to_vec();
     let groups = ShareGroups::new(figure);
+    check_contour_levels(figure, &groups, context)?;
     let mut panels = panels(figure, &groups, fonts)?;
     if panels.is_empty() {
         let header = figure_header(figure, &panels, fonts)?;
@@ -1603,7 +1709,9 @@ fn scene_with_labels(
         draw::check_points(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
         scene.push(draw::chrome(theme, layout));
-        if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
+        let marks = draw::marks(theme, fonts, resolved, layout, &panel.marks)
+            .map_err(|err| in_cell(figure, panel.axes, err))?;
+        if let Some(marks) = marks {
             scene.push(marks);
         }
         let notes = draw::heatmap_annotations(

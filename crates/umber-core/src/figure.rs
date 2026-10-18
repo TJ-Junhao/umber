@@ -43,6 +43,7 @@ pub use crate::model::{BaselineVisibility, StackedAreaMark};
 pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use crate::model::{BubbleMark, BubbleOptions};
 pub use crate::model::{CmapChoice, ColorBy, PointColor};
+pub use crate::model::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
 pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use crate::model::{
     EventsMark, EventsOptions, StripMark, StripOptions, SwarmMark, SwarmOptions,

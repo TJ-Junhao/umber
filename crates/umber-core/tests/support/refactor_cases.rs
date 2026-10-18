@@ -91,10 +91,12 @@ mod corpus {
     pub mod baseline;
     pub mod r#box;
     pub mod bubbles;
+    pub mod by;
     pub mod category_labels;
     pub mod cmap;
     pub mod color_by;
     pub mod colorbar;
+    pub mod contour;
     pub mod ecdf;
     pub mod error_bars;
     pub mod events;
@@ -202,6 +204,8 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);
     corpus::pie::cases(&lib, &mut sink);
+    corpus::by::cases(&lib, &mut sink);
+    corpus::contour::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -2191,6 +2195,10 @@ mod record {
                     self.path(shape);
                 }
                 Item::Text(t) => self.text_item(t),
+                Item::RotatedText { text, angle } => {
+                    self.line(&format!("rotated angle={}", f32(*angle)));
+                    self.text_item(text);
+                }
                 Item::Image {
                     rect: at,
                     width,

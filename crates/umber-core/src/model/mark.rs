@@ -127,8 +127,9 @@ impl Default for ScatterOptions {
 /// [`AxesMut::band`](super::AxesMut::band), [`AxesMut::y_error_bars`](super::AxesMut::y_error_bars)
 /// [`AxesMut::x_error_bars`](super::AxesMut::x_error_bars),
 /// [`AxesMut::box_plot`](super::AxesMut::box_plot),
-/// [`AxesMut::grouped_box_plot`](super::AxesMut::grouped_box_plot) and
-/// [`AxesMut::heatmap`](super::AxesMut::heatmap),
+/// [`AxesMut::grouped_box_plot`](super::AxesMut::grouped_box_plot),
+/// [`AxesMut::heatmap`](super::AxesMut::heatmap) and
+/// [`AxesMut::contour`](super::AxesMut::contour),
 /// which validate the data. Each variant holds a payload ([`LineMark`], [`ScatterMark`], [`AreaMark`],
 /// [`BarMark`], [`BarGroupMark`], [`HistMark`], [`StepMark`], [`HLineMark`], [`VLineMark`],
 /// [`SpanMark`], [`BandMark`], [`StackedAreaMark`], [`ErrorBarMark`], [`BoxMark`], [`BoxGroupMark`],
@@ -246,6 +247,9 @@ pub enum Mark {
     Hist2d(super::mesh::Hist2dMark),
     /// Paired numeric coordinates counted in regular pointy-top hexagons.
     Hexbin(super::mesh::HexbinMark),
+    /// A field on a rectilinear grid, drawn as lines along levels, filled bands between them,
+    /// or both; NaN cuts the cells around it out.
+    Contour(super::contour::ContourMark),
     /// Short vertical event ticks in category rows.
     Events(super::EventsMark),
     /// Circular samples jittered within their category bands.
@@ -309,6 +313,7 @@ impl Mark {
             | Mark::ErrorBars(_)
             | Mark::Stem(_) => return None,
             Mark::Heatmap(mark) => return Some(mark.color_scale()),
+            Mark::Contour(mark) => return mark.color_scale(),
             Mark::Events(_) | Mark::Strip(_) | Mark::Swarm(_) => return None,
             Mark::GroupedHist(_) | Mark::Ecdf(_) | Mark::Kde(_) => return None,
         };
