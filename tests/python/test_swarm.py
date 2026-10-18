@@ -14,11 +14,15 @@ def test_swarm_overflow_names_category() -> None:
     ax.swarm(["A", "B"], [[1], [2] * 812], size=ub.Size.pt(6))
     with pytest.raises(ub.StyleError) as caught:
         ax.figure.to_svg()
-    assert re.fullmatch(
-        r"Figure.to_svg\(\): the swarm of category 'B' needs 4879 pt across; "
-        r"its band is \d+ pt\.",
+    match = re.fullmatch(
+        r"Figure.to_svg\(\): only (\d+) of 812 points of the swarm of category 'B' "
+        r"fit in its band of (\d+) pt\.",
         str(caught.value),
     )
+    assert match is not None
+    fitted, room = map(int, match.groups())
+    assert 0 < fitted < 812
+    assert fitted * 6 <= room < (fitted + 2) * 6
     assert details(caught.value) == (None, "use strip() or violin() for many points.")
 
 
@@ -45,8 +49,10 @@ def test_swarm_overflow_uses_render_context_and_panel(
         else:
             getattr(fig, render)()
     panel = "row 0, col 1: " if grid else ""
-    assert str(caught.value).startswith(
-        f"Figure.{render}(): {panel}the swarm of category 'B' needs 4879 pt across; "
+    assert re.fullmatch(
+        re.escape(f"Figure.{render}(): {panel}")
+        + r"only \d+ of 812 points of the swarm of category 'B' fit in its band of \d+ pt\.",
+        str(caught.value),
     )
     assert details(caught.value) == (None, "use strip() or violin() for many points.")
     assert not list(tmp_path.iterdir())
@@ -59,7 +65,7 @@ def test_swarm_packs_only_visible_samples() -> None:
 
 
 @pytest.mark.parametrize("horizontal", [False, True])
-def test_swarm_required_width_ignores_hidden_samples(horizontal: bool) -> None:
+def test_swarm_overflow_count_ignores_hidden_samples(horizontal: bool) -> None:
     errors: list[str] = []
     for hidden in [[], [100.0] * 812]:
         fig = ub.Figure(4, 3)
@@ -73,4 +79,8 @@ def test_swarm_required_width_ignores_hidden_samples(horizontal: bool) -> None:
             fig.to_svg()
         errors.append(str(caught.value))
     assert errors[0] == errors[1]
-    assert "needs 487 pt across" in errors[0]
+    assert re.fullmatch(
+        r"Figure.to_svg\(\): only \d+ of 80 points of the swarm of category 'B' "
+        r"fit in its band of \d+ pt\.",
+        errors[0],
+    )

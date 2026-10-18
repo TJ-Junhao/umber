@@ -29,10 +29,11 @@ impl Jitter {
     }
 }
 
-/// The first category that cannot fit, with its required and available widths in points.
+/// The first category that cannot fit, with its packed count and available width in points.
 struct Overflow {
     index: usize,
-    needed: f64,
+    fitted: usize,
+    total: usize,
     room: f64,
 }
 
@@ -93,16 +94,10 @@ fn coordinates(
                 let room = maps.x.points(end - start);
                 let packing = pack(&physical, f64::from(size), room / 2.0);
                 if !packing.complete && points.overflow.is_none() {
-                    let full = pack(&physical, f64::from(size), f64::INFINITY);
-                    let radius = full
-                        .offsets
-                        .iter()
-                        .copied()
-                        .map(f64::abs)
-                        .fold(0.0, f64::max);
                     points.overflow = Some(Overflow {
                         index: i,
-                        needed: 2.0 * radius + f64::from(size),
+                        fitted: packing.offsets.len(),
+                        total: physical.len(),
                         room,
                     });
                 }
@@ -145,16 +140,17 @@ pub(crate) fn check(
             );
             if let Some(Overflow {
                 index,
-                needed,
+                fitted,
+                total,
                 room,
             }) = points.overflow
             {
-                let (needed, room) = crate::layout::widths(needed, room);
+                let room = crate::error::number(room.floor());
                 return Err(Error::style(
                     context,
                     format!(
-                        "the swarm of category '{}' needs {needed} pt across; \
-                         its band is {room} pt.",
+                        "only {fitted} of {total} points of the swarm of category '{}' \
+                         fit in its band of {room} pt.",
                         categories[index]
                     ),
                 )

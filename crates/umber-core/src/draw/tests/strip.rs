@@ -90,6 +90,33 @@ fn swarm_scene_points_never_overlap() {
 }
 
 #[test]
+#[cfg_attr(debug_assertions, ignore = "timing bound requires release mode")]
+fn large_tied_swarm_overflow_is_fast() {
+    let mut f = figure(false);
+    f.single_axes_mut()
+        .swarm(
+            vec!["A".into()],
+            vec![vec![1.0; 30_000]],
+            SwarmOptions {
+                size: SizeSpec::pt(6.0).unwrap(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let fonts = FontLibrary::global();
+    let start = std::time::Instant::now();
+    let error = f.to_scene(fonts).unwrap_err();
+    let elapsed = start.elapsed();
+    println!("30000 tied swarm points rejected in {elapsed:?}");
+    assert!(matches!(error, crate::Error::Style { .. }));
+    assert_eq!(
+        error.hint(),
+        Some("use strip() or violin() for many points.")
+    );
+    assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+}
+
+#[test]
 fn unrelated_marks_do_not_change_strip_jitter() {
     for horizontal in [false, true] {
         let mut offsets = Vec::new();

@@ -1,6 +1,6 @@
 """Event rows, time coordinates, validation and atomic calls."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any, cast
 
@@ -8,7 +8,9 @@ import numpy as np
 import pytest
 
 import umber as ub
-from umber._errors import details
+from umber import _series
+from umber._errors import details, new_error
+from umber._values import FloatArray
 
 
 def test_events_one_row_per_category() -> None:
@@ -136,6 +138,25 @@ def test_events_auto_length_matches_explicit_default() -> None:
     implicit = ub.Figure().add_axes(y=ub.Scale.category()).events(["A"], [[1, 2]])
     explicit = ub.Figure().add_axes(y=ub.Scale.category()).events(["A"], [[1, 2]], length=0.8)
     assert implicit.figure.to_svg() == explicit.figure.to_svg()
+
+
+def test_events_numeric_conversion_preserves_group_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    ax = ub.Figure().add_axes(y=ub.Scale.category())
+    error = new_error(
+        ub.DataError,
+        "Axes.events()",
+        "positions[0] has invalid data.",
+        parameter="positions",
+        hint="pass numeric groups.",
+    )
+
+    def convert(context: str, value: Sequence[object], *, name: str = "groups") -> list[FloatArray]:
+        raise error
+
+    monkeypatch.setattr(_series, "group_values", convert)
+    with pytest.raises(ub.DataError) as caught:
+        ax.events(["A"], [[1]])
+    assert caught.value is error
 
 
 def test_events_time_conversion_errors_highlight_positions() -> None:

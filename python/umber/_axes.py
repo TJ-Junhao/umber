@@ -2395,22 +2395,20 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             context = "Axes.events()"
             check_names_type(context, "rows", rows)
-            _series.check_groups_type(
-                context, positions, name="positions", kind="time" if self._x == _TIME else "numeric"
-            )
+            _series.check_groups_type(context, positions, name="positions", time=self._x == _TIME)
             extent = None if length is AUTO else real(context, "length", length)
             stroke = _size_argument(context, "width", width)
             paint = _color_argument(context, color)
             row_names = names(context, "rows", rows)
-            try:
-                converted: list[FloatArray | MicrosArray] = []
-                if self._x == _TIME:
+            converted: list[FloatArray | MicrosArray] = []
+            if self._x == _TIME:
+                try:
                     for i, group in enumerate(positions):
                         converted.append(_time.micros(context, f"positions[{i}]", group))
-                else:
-                    converted.extend(_series.group_values(context, positions, name="positions"))
-            except (TypeError, UmberError) as error:
-                raise _event_error(context, error) from None
+                except (TypeError, UmberError) as error:
+                    raise _event_error(context, error) from None
+            else:
+                converted.extend(_series.group_values(context, positions, name="positions"))
             self._native.events(self._row, self._col, row_names, converted, extent, stroke, paint)
             return cast("Axes[X, Y]", self)
 

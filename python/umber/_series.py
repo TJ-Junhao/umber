@@ -257,7 +257,7 @@ def _group_error(context: str, error: Exception, parameter: str = "groups") -> E
 
 
 def check_groups_type(
-    context: str, value: object, *, name: str = "groups", kind: str = "numeric"
+    context: str, value: object, *, name: str = "groups", time: bool = False
 ) -> None:
     """Check the groups container and every group's type without conversion.
 
@@ -265,7 +265,7 @@ def check_groups_type(
         context: The API call receiving the groups.
         value: The groups argument.
         name: The enclosing parameter name used in messages and highlights.
-        kind: The type description, such as numeric or time, for the groups.
+        time: Whether the groups contain times rather than numbers.
 
     Raises:
         TypeError: If the container or any group has the wrong type.
@@ -275,6 +275,7 @@ def check_groups_type(
         >>> check_groups_type("Axes.box()", [[1, 2], []])
     """
     if is_text_or_buffer(value) or not isinstance(value, Sequence):
+        kind = "time" if time else "numeric"
         raise new_error(
             TypeError,
             context,
@@ -282,7 +283,7 @@ def check_groups_type(
             parameter=name,
             hint=(
                 "pass a list of groups of dates or times."
-                if kind == "time"
+                if time
                 else "pass a list of groups, e.g. [[1, 2], [3, 4]]."
             ),
         )
