@@ -11,6 +11,7 @@ use umber_core::{
     Align, ColorbarPosition, Dash, FillStyle, Font, GridLines, LegendMode, LegendPosition,
     LegendStyle, Marker, Render, Share, Step, SvgText,
 };
+use umber_core::{HistStat, HistStyle};
 
 use crate::errors::internal_value;
 
@@ -153,6 +154,18 @@ int_enum!("Render", RenderChoice {
     "RASTER" => RenderChoice::Raster = 1,
 });
 
+int_enum!("Hist", HistStyle {
+    "BARS" => HistStyle::Bars = 0,
+    "STEP" => HistStyle::Step = 1,
+    "STACKED" => HistStyle::Stacked = 2,
+});
+
+int_enum!("Stat", HistStat {
+    "COUNT" => HistStat::Count = 0,
+    "FRACTION" => HistStat::Fraction = 1,
+    "DENSITY" => HistStat::Density = 2,
+});
+
 /// The core [`Render`] of a Python `Render` value, `None` standing for `AUTO`.
 pub(crate) fn render_choice(value: Option<i64>) -> PyResult<Render> {
     Ok(match value.map(enum_value::<RenderChoice>).transpose()? {
@@ -170,7 +183,7 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 14] = [
+const TABLES: [(&str, &[(&str, i64)]); 16] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (Font::PY_NAME, Font::MEMBERS),
@@ -185,6 +198,8 @@ const TABLES: [(&str, &[(&str, i64)]); 14] = [
     (Step::PY_NAME, Step::MEMBERS),
     (ColorbarPosition::PY_NAME, ColorbarPosition::MEMBERS),
     (RenderChoice::PY_NAME, RenderChoice::MEMBERS),
+    (HistStyle::PY_NAME, HistStyle::MEMBERS),
+    (HistStat::PY_NAME, HistStat::MEMBERS),
 ];
 
 /// The member tables of every bound enum, keyed by the Python enum name.
@@ -235,6 +250,8 @@ mod tests {
         round_trips::<Step>();
         round_trips::<ColorbarPosition>();
         round_trips::<RenderChoice>();
+        round_trips::<HistStyle>();
+        round_trips::<HistStat>();
     }
 
     #[test]
@@ -263,7 +280,9 @@ mod tests {
                 "Align",
                 "Step",
                 "ColorbarPosition",
-                "Render"
+                "Render",
+                "Hist",
+                "Stat"
             ]
         );
     }

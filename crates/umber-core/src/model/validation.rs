@@ -1,6 +1,7 @@
-//! Input validation of the model: series, bar and histogram data against their axes' scales,
-//! stacked bar totals, histogram bin counts, explicit limits, explicit ticks, text and figure
-//! sizes. Every check runs before anything is stored, so a failed call changes nothing.
+//! Input validation of the model: series, bar, histogram, ECDF and density data against their
+//! axes' scales, stacked bar totals, histogram bins and statistics, density bandwidths, explicit
+//! limits, explicit ticks, text and figure sizes. Every check runs before anything is stored, so
+//! a failed call changes nothing.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,10 +9,11 @@ use std::sync::Arc;
 use super::axis_data::{AxisData, SharedValues};
 use super::bar::{Arrangement, Series};
 use super::box_plot::Distribution;
+use super::hist::{Bins, GroupedHistOptions, HistOptions, HistStat, HistStyle};
 use super::share::SharedAxis;
-use crate::binning::{BinCount, MAX_BINS};
+use crate::binning::{BinCount, BinSpec, HistBinning, HistBins, MAX_BINS};
 use crate::error::number;
-use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE};
+use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE, too_narrow};
 use crate::stacking::Totals;
 use crate::{ContinuousScale, Error, Instant, Result, ScaleKind, Transform};
 
@@ -1118,60 +1120,324 @@ pub(super) fn check_distributions(
     Ok(())
 }
 
-/// Validates the values and bin count of a histogram for axes with an x axis of scale kind
-/// `x_kind`, before it is stored, so a failed call changes nothing, and returns the bin count.
-/// The y axis, linear or log, takes any count. The checks run in a fixed order and the first
+/// The hint for an infinite histogram value.
+const HIST_GAP_HINT: &str = "a histogram ignores NaN, so use it to leave a value out.";
+
+/// The hint for bin edges that are too few or not finite.
+const EDGES_HINT: &str = "pass at least two increasing edges, or a number of bins.";
+
+/// The hint for a linear x axis that a mark needs.
+const LINEAR_X_HINT: &str = "pass x=Scale.linear() to Figure.add_axes().";
+
+/// The hint for a linear y axis that a mark needs.
+const LINEAR_Y_HINT: &str = "pass y=Scale.linear() to Figure.add_axes().";
+
+/// Validates the options and values of a histogram for axes with an x axis of scale kind
+/// `x_kind`, before it is stored, so a failed call changes nothing, and returns its binning.
+/// The y axis, linear or log, takes any height. The checks run in a fixed order and the first
 /// failure is the error, under `context`:
 ///
-/// 1. `bins` is within `1..=MAX_BINS` (`Error::Style`);
-/// 2. the x axis is a linear axis: a category x axis is `Error::Data`, and a log x axis, which
-///    histograms do not support, is `Error::Usage`;
+/// 1. the bins and the statistic, by [`check_binning`];
+/// 2. the x axis, by [`check_hist_x`];
 /// 3. every value is finite (NaN is allowed and ignored) and within the supported magnitudes
-///    (`Error::Data`).
+///    (`Error::Data`);
+/// 4. explicit edges hold every finite value (`Error::Data`, naming how many fall outside);
+/// 5. every bar height is finite and within the supported magnitudes, by [`check_heights`].
 pub(super) fn check_hist(
     context: &'static str,
     x_kind: ScaleKind,
     values: &[f64],
-    bins: i64,
-) -> Result<BinCount> {
-    let Some(count) = BinCount::new(bins) else {
-        let error = Error::style(
-            context,
-            format!("bins is {bins}; bins must be between 1 and {MAX_BINS}."),
-        )
-        .with_parameter("bins");
-        return Err(if bins < 1 {
-            error.with_hint("use at least one bin.")
-        } else {
-            error
-        });
-    };
-    match x_kind {
-        ScaleKind::Linear => {}
-        ScaleKind::Category => {
-            return Err(Error::data(
-                context,
-                "values holds numbers but the x axis is a category axis; use a linear x axis.",
-            )
-            .with_hint("pass x=Scale.linear() to Figure.add_axes()."));
-        }
-        ScaleKind::Log { .. } => {
-            return Err(Error::usage(
-                context,
-                "the x axis is a log axis, which histograms do not support; use a linear x axis.",
-            )
-            .with_hint("pass x=Scale.linear() to Figure.add_axes()."));
-        }
-        ScaleKind::Time => check_no_time_x(context, x_kind, "a linear x axis")?,
-    }
+    options: &HistOptions,
+) -> Result<HistBinning> {
+    let binning = check_binning(
+        context,
+        &options.bins,
+        options.style,
+        options.cumulative,
+        options.stat,
+    )?;
+    check_hist_x(context, x_kind)?;
     check_numbers(
         context,
         ("values", "values"),
         values,
         Transform::Linear,
-        "a histogram ignores NaN, so use it to leave a value out.",
+        HIST_GAP_HINT,
     )?;
-    Ok(count)
+    check_inside_edges(context, "values", values, binning.bins())?;
+    check_heights(context, &binning, &[values])?;
+    Ok(binning)
+}
+
+/// Validates the options and series of a grouped histogram for axes with an x axis of scale
+/// kind `x_kind`, before it is stored, and returns its binning. The checks run in a fixed order
+/// and the first failure is the error, under `context`:
+///
+/// 1. there is at least one series (`Error::Data`);
+/// 2. the bins and the statistic, by [`check_binning`];
+/// 3. the style is not [`HistStyle::Bars`], whose bars of several series would hide each other
+///    (`Error::Usage`);
+/// 4. the x axis, by [`check_hist_x`];
+/// 5. the values of each series, in series order, as for a histogram;
+/// 6. explicit edges hold every finite value of each series, in series order;
+/// 7. every bar and stack height is finite and within the supported magnitudes, by
+///    [`check_heights`].
+pub(super) fn check_grouped_hist(
+    context: &'static str,
+    x_kind: ScaleKind,
+    series: &[Series],
+    options: &GroupedHistOptions,
+) -> Result<HistBinning> {
+    if series.is_empty() {
+        return Err(
+            Error::data(context, "series is empty; pass at least one series.")
+                .with_parameter("series"),
+        );
+    }
+    let binning = check_binning(
+        context,
+        &options.bins,
+        options.style,
+        options.cumulative,
+        options.stat,
+    )?;
+    if options.style == HistStyle::Bars {
+        return Err(Error::usage(
+            context,
+            "style is Hist.BARS with groups; bars of several groups would hide each other.",
+        )
+        .with_parameter("style")
+        .with_hint("use Hist.STACKED or Hist.STEP."));
+    }
+    check_hist_x(context, x_kind)?;
+    for (i, s) in series.iter().enumerate() {
+        check_numbers(
+            context,
+            (&format!("series[{i}].values"), "values"),
+            &s.values,
+            Transform::Linear,
+            HIST_GAP_HINT,
+        )?;
+    }
+    for (i, s) in series.iter().enumerate() {
+        check_inside_edges(
+            context,
+            &format!("series[{i}].values"),
+            &s.values,
+            binning.bins(),
+        )?;
+    }
+    let values: Vec<&[f64]> = series.iter().map(|s| s.values.as_slice()).collect();
+    check_heights(context, &binning, &values)?;
+    Ok(binning)
+}
+
+/// Validates the bins, style, accumulation and statistic of a histogram and returns them as
+/// its binning, in this order, under `context`:
+///
+/// 1. a bin count is within `1..=MAX_BINS` (`Error::Style`); edges are checked by
+///    [`check_edges`] (`Error::Data`);
+/// 2. a cumulative histogram does not show densities, which do not add up (`Error::Usage`).
+fn check_binning(
+    context: &'static str,
+    bins: &Bins,
+    style: HistStyle,
+    cumulative: bool,
+    stat: HistStat,
+) -> Result<HistBinning> {
+    let spec = match bins {
+        &Bins::Count(n) => BinSpec::Count(check_bin_count(context, n)?),
+        Bins::Edges(edges) => {
+            check_edges(context, edges)?;
+            BinSpec::Edges(Arc::from(edges.as_slice()))
+        }
+    };
+    if cumulative && stat == HistStat::Density {
+        return Err(Error::usage(
+            context,
+            "cumulative is True with Stat.DENSITY; a cumulative histogram shows counts or \
+             fractions.",
+        )
+        .with_parameter("cumulative")
+        .with_hint("use Stat.FRACTION, or ecdf()."));
+    }
+    Ok(HistBinning::new(spec, style, cumulative, stat))
+}
+
+/// The bin count `bins`, within `1..=MAX_BINS`; `Error::Style` naming `bins` otherwise.
+fn check_bin_count(context: &'static str, bins: i64) -> Result<BinCount> {
+    BinCount::new(bins).ok_or_else(|| {
+        let error = Error::style(
+            context,
+            format!("bins is {bins}; bins must be between 1 and {MAX_BINS}."),
+        )
+        .with_parameter("bins");
+        if bins < 1 {
+            error.with_hint("use at least one bin.")
+        } else {
+            error
+        }
+    })
+}
+
+/// Checks explicit bin `edges`, in this order, each failure an `Error::Data` naming `bins`:
+/// there are at least two; each, in order, is finite and within the supported magnitudes; each
+/// is above the one before it; and together they span enough for a linear axis to show.
+fn check_edges(context: &'static str, edges: &[f64]) -> Result<()> {
+    if edges.len() < 2 {
+        let count = edges.len();
+        let noun = if count == 1 { "edge" } else { "edges" };
+        return Err(Error::data(
+            context,
+            format!("bins has {count} {noun}; bin edges must number at least 2."),
+        )
+        .with_parameter("bins")
+        .with_hint(EDGES_HINT));
+    }
+    for (i, &v) in edges.iter().enumerate() {
+        if !v.is_finite() {
+            return Err(Error::data(
+                context,
+                format!("bins[{i}] is {v}; bin edges must be finite.", v = number(v)),
+            )
+            .with_parameter("bins")
+            .with_hint(EDGES_HINT));
+        }
+        if v.abs() > MAX_MAGNITUDE {
+            return Err(Error::data(
+                context,
+                format!(
+                    "bins[{i}] is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
+                    v = number(v)
+                ),
+            )
+            .with_parameter("bins"));
+        }
+    }
+    if let Some(i) = (1..edges.len()).find(|&i| edges[i] <= edges[i - 1]) {
+        return Err(Error::data(
+            context,
+            format!(
+                "bins[{i}] is {v}, not above bins[{before}], {p}; bin edges must be strictly \
+                 increasing.",
+                v = number(edges[i]),
+                before = i - 1,
+                p = number(edges[i - 1]),
+            ),
+        )
+        .with_parameter("bins")
+        .with_hint("sort the edges and remove repeated ones."));
+    }
+    let (lo, hi) = (edges[0], edges[edges.len() - 1]);
+    if too_narrow(lo, hi) {
+        return Err(Error::data(
+            context,
+            format!(
+                "bins span {lo} to {hi}, which is narrower than a linear axis can show; bin \
+                 edges must span more.",
+                lo = number(lo),
+                hi = number(hi),
+            ),
+        )
+        .with_parameter("bins")
+        .with_hint("widen the edges."));
+    }
+    Ok(())
+}
+
+/// Checks that explicit bin edges `spec` hold every finite value of `values`, shown as `name`:
+/// `Error::Data` naming `values` and how many fall outside. Equal-width bins hold every value.
+fn check_inside_edges(
+    context: &'static str,
+    name: &str,
+    values: &[f64],
+    spec: &BinSpec,
+) -> Result<()> {
+    let BinSpec::Edges(edges) = spec else {
+        return Ok(());
+    };
+    let (lo, hi) = (edges[0], edges[edges.len() - 1]);
+    let outside = values
+        .iter()
+        .filter(|v| v.is_finite() && !(lo <= **v && **v <= hi))
+        .count();
+    if outside == 0 {
+        return Ok(());
+    }
+    let noun = if outside == 1 { "value" } else { "values" };
+    Err(Error::data(
+        context,
+        format!(
+            "{name} has {outside} finite {noun} outside the bin edges, which span {lo} to {hi}; \
+             every finite value must lie within the edges.",
+            lo = number(lo),
+            hi = number(hi),
+        ),
+    )
+    .with_parameter("values")
+    .with_hint("widen the edges or filter the values first."))
+}
+
+/// Checks that the bars of a histogram of `groups` binned by `binning` can be drawn: in bin
+/// order, every bar's height, and with several stacked groups every stack's height, is finite
+/// and at most [`MAX_MAGNITUDE`], or `Error::Data` naming `bins` and the bin. Only densities can
+/// fail: dividing by a very narrow bin's width can overflow, while counts and fractions stay
+/// small.
+fn check_heights(context: &'static str, binning: &HistBinning, groups: &[&[f64]]) -> Result<()> {
+    if binning.stat() != HistStat::Density {
+        return Ok(());
+    }
+    let Some(bins) = HistBins::new(binning, groups) else {
+        return Ok(());
+    };
+    let stacked = binning.style() == HistStyle::Stacked && bins.groups() > 1;
+    let refused = |i: usize, what: &str, height: f64| {
+        Error::data(
+            context,
+            format!(
+                "bin {i}, from {lo} to {hi}, has a {what} of {h}; bar heights must be finite and \
+                 at most {MAX_MAGNITUDE:e}.",
+                lo = number(bins.edge(i)),
+                hi = number(bins.edge(i + 1)),
+                h = number(height),
+            ),
+        )
+        .with_parameter("bins")
+        .with_hint("widen the narrow bins, or use Stat.COUNT or Stat.FRACTION.")
+    };
+    let drawable = |height: f64| height.is_finite() && height <= MAX_MAGNITUDE;
+    for (i, top) in bins.tops().enumerate() {
+        for g in 0..bins.groups() {
+            let height = bins.heights(g)[i];
+            if !drawable(height) {
+                return Err(refused(i, "height", height));
+            }
+        }
+        if stacked && !drawable(top) {
+            return Err(refused(i, "stack height", top));
+        }
+    }
+    Ok(())
+}
+
+/// Checks that the x axis, of scale kind `x_kind`, is the linear axis a histogram needs: a
+/// category x axis is `Error::Data`, a log x axis, which histograms do not support, is
+/// `Error::Usage`, and a time x axis is refused as [`check_no_time_x`] refuses it.
+fn check_hist_x(context: &'static str, x_kind: ScaleKind) -> Result<()> {
+    match x_kind {
+        ScaleKind::Linear => Ok(()),
+        ScaleKind::Category => Err(Error::data(
+            context,
+            "values holds numbers but the x axis is a category axis; use a linear x axis.",
+        )
+        .with_hint(LINEAR_X_HINT)),
+        ScaleKind::Log { .. } => Err(Error::usage(
+            context,
+            "the x axis is a log axis, which histograms do not support; use a linear x axis.",
+        )
+        .with_hint(LINEAR_X_HINT)),
+        ScaleKind::Time => check_no_time_x(context, x_kind, "a linear x axis"),
+    }
 }
 
 /// Checks the categories of a bar mark: the x axis is a category axis, and no category appears
@@ -1301,7 +1567,7 @@ pub(super) fn check_time_limits(
 const MAX_TEXT_CHARS: usize = 1000;
 
 /// `n` with a comma between groups of three digits, as `1,000`.
-fn grouped(n: usize) -> String {
+pub(super) fn grouped(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
@@ -1623,6 +1889,199 @@ pub(super) fn check_figure_size(width_in: f64, height_in: f64) -> Result<()> {
             )
             .with_parameter(name));
         }
+    }
+    Ok(())
+}
+
+/// The hint for values without a finite one.
+const NO_FINITE_HINT: &str = "pass at least one value that is not NaN.";
+
+/// Checks the axes of an ECDF, with an x axis of scale kind `x_kind` and a y axis of scale kind
+/// `y_kind`, and its `values`, before it is stored, in this order, under `context`:
+///
+/// 1. the y axis is linear ([`check_linear_y`]): an ECDF runs from 0 to 1, which a log axis
+///    cannot hold (`Error::Usage` naming `y`);
+/// 2. the values suit the x axis: numbers on a linear or log axis, checked by [`check_numbers`]
+///    (NaN is allowed and ignored), times on a time axis (`Error::Data`);
+/// 3. at least one value is finite, or a time (`Error::Data`).
+///
+/// Returns the values as the samples they are: numbers or times.
+pub(super) fn check_ecdf<'a>(
+    context: &'static str,
+    (x_kind, y_kind): (ScaleKind, ScaleKind),
+    values: &'a AxisData,
+) -> Result<Samples<'a>> {
+    check_linear_y(context, y_kind, "an ECDF runs from 0 to 1")?;
+    let wrong_axis = |message: &str, hint: &'static str| {
+        Error::data(context, message.to_owned())
+            .with_parameter("values")
+            .with_hint(hint)
+    };
+    let (samples, present) = match (values, x_kind) {
+        (AxisData::Numbers(_), ScaleKind::Category) => {
+            return Err(Error::data(
+                context,
+                "values holds numbers but the x axis is a category axis; an ECDF needs a \
+                 linear, log or time x axis.",
+            )
+            .with_hint("use a linear, log or time x axis."));
+        }
+        (AxisData::Numbers(_), ScaleKind::Time) => {
+            return Err(wrong_axis(
+                "values holds numbers but the x axis is a time axis; pass times.",
+                X_SCALE_HINT,
+            ));
+        }
+        (AxisData::Numbers(numbers), ScaleKind::Linear) => (
+            Samples::Numbers(numbers),
+            check_ecdf_numbers(context, numbers, Transform::Linear)?,
+        ),
+        (AxisData::Numbers(numbers), ScaleKind::Log { base }) => (
+            Samples::Numbers(numbers),
+            check_ecdf_numbers(context, numbers, Transform::Log(base))?,
+        ),
+        (AxisData::Times(times), ScaleKind::Time) => {
+            (Samples::Times(times), times.iter().any(Option::is_some))
+        }
+        (AxisData::Times(_), _) => {
+            return Err(wrong_axis(
+                "values holds times but the x axis is not a time axis; pass numbers.",
+                SharedAxis::X.time_scale_hint(),
+            ));
+        }
+        (AxisData::Categories(_), _) => {
+            return Err(wrong_axis(
+                "values holds category names; an ECDF needs numbers or times.",
+                "pass numbers, or times on a time x axis.",
+            ));
+        }
+    };
+    if !present {
+        return Err(Error::data(
+            context,
+            "values has no finite value; an ECDF needs at least one.",
+        )
+        .with_parameter("values")
+        .with_hint(NO_FINITE_HINT));
+    }
+    Ok(samples)
+}
+
+/// The validated values of a distribution along a numeric or time axis: numbers, NaN for a
+/// gap, or times, `None` for a gap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Samples<'a> {
+    /// Numbers on a linear or log axis.
+    Numbers(&'a [f64]),
+    /// Times on a time axis.
+    Times(&'a [Option<Instant>]),
+}
+
+/// Checks that the y axis, of scale kind `y_kind`, is the linear axis that the mark method
+/// `context` needs, since `why` (such as "an ECDF runs from 0 to 1"): `Error::Usage` naming `y`
+/// otherwise, with the one hint that leads to a linear axis.
+fn check_linear_y(context: &'static str, y_kind: ScaleKind, why: &str) -> Result<()> {
+    let message = match y_kind {
+        ScaleKind::Linear => return Ok(()),
+        ScaleKind::Log { .. } => {
+            format!("the y axis is a log axis; {why} and needs a linear y axis.")
+        }
+        ScaleKind::Category => format!("y is a category scale; {context} needs a linear y axis."),
+        ScaleKind::Time => format!("y is a time scale; {context} needs a linear y axis."),
+    };
+    Err(Error::usage(context, message)
+        .with_parameter("y")
+        .with_hint(LINEAR_Y_HINT))
+}
+
+/// Checks the numbers of an ECDF on an axis of `transform` with [`check_numbers`], and says
+/// whether one of them is finite.
+fn check_ecdf_numbers(
+    context: &'static str,
+    numbers: &[f64],
+    transform: Transform,
+) -> Result<bool> {
+    check_numbers(
+        context,
+        ("values", "values"),
+        numbers,
+        transform,
+        "an ECDF ignores NaN, so use it to leave a value out.",
+    )?;
+    Ok(numbers.iter().any(|v| v.is_finite()))
+}
+
+/// Checks the axes of a density curve, with an x axis of scale kind `x_kind` and a y axis of
+/// scale kind `y_kind`, in this order, under `context`:
+///
+/// 1. the y axis is linear ([`check_linear_y`]): the curve runs down to 0, which a log axis
+///    cannot hold (`Error::Usage` naming `y`);
+/// 2. the x axis is linear: a category x axis is `Error::Data`, and a log or time x axis, which
+///    density curves do not support, is `Error::Usage`.
+pub(super) fn check_kde_axes(
+    context: &'static str,
+    (x_kind, y_kind): (ScaleKind, ScaleKind),
+) -> Result<()> {
+    check_linear_y(context, y_kind, "a density curve runs down to 0")?;
+    let unsupported = match x_kind {
+        ScaleKind::Linear => return Ok(()),
+        ScaleKind::Category => {
+            return Err(Error::data(
+                context,
+                "values holds numbers but the x axis is a category axis; use a linear x axis.",
+            )
+            .with_hint(LINEAR_X_HINT));
+        }
+        ScaleKind::Log { .. } => "log",
+        ScaleKind::Time => "time",
+    };
+    Err(Error::usage(
+        context,
+        format!(
+            "the x axis is a {unsupported} axis, which density curves do not support; use a \
+             linear x axis."
+        ),
+    )
+    .with_hint(LINEAR_X_HINT))
+}
+
+/// Checks a bandwidth given in data units under `context`: finite, greater than 0 and within
+/// the supported magnitudes (`Error::Style` naming `bandwidth`).
+pub(super) fn check_bandwidth(context: &'static str, bandwidth: f64) -> Result<()> {
+    const HINT: &str = "pass a bandwidth in data units greater than 0, or ub.AUTO.";
+    let required = if !(bandwidth.is_finite() && bandwidth > 0.0) {
+        "bandwidth must be a finite number greater than 0".to_owned()
+    } else if bandwidth > MAX_MAGNITUDE {
+        format!("magnitudes must not exceed {MAX_MAGNITUDE:e}")
+    } else {
+        return Ok(());
+    };
+    Err(Error::style(
+        context,
+        format!("bandwidth is {v}; {required}.", v = number(bandwidth)),
+    )
+    .with_parameter("bandwidth")
+    .with_hint(HINT))
+}
+
+/// Checks the `values` of a density curve, shown as `name`, under `context`: each is finite
+/// (NaN is allowed and ignored) and within the supported magnitudes, as [`check_numbers`]
+/// checks them, and at least one is finite (`Error::Data` naming `values`).
+pub(super) fn check_kde_values(context: &'static str, name: &str, values: &[f64]) -> Result<()> {
+    check_numbers(
+        context,
+        (name, "values"),
+        values,
+        Transform::Linear,
+        "a density curve ignores NaN, so use it to leave a value out.",
+    )?;
+    if values.iter().all(|v| v.is_nan()) {
+        return Err(Error::data(
+            context,
+            format!("{name} has no finite value; a density curve needs at least one."),
+        )
+        .with_parameter("values")
+        .with_hint(NO_FINITE_HINT));
     }
     Ok(())
 }

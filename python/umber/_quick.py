@@ -13,7 +13,7 @@ from umber._args import instance
 from umber._axes import Axes
 from umber._color import Color
 from umber._color_by import ColorBy
-from umber._enums import Dash, Marker
+from umber._enums import Dash, Hist, Marker, Stat
 from umber._figure import Figure
 from umber._report import api_call
 from umber._scale import Scale
@@ -159,7 +159,10 @@ def bar(
 def hist(
     values: Values[float],
     *,
-    bins: int = 30,
+    bins: int | Values[float] = 30,
+    style: Hist = Hist.BARS,
+    cumulative: bool = False,
+    stat: Stat = Stat.COUNT,
     label: str = "",
     color: Color = Color.AUTO,
     theme: Theme = Theme.PIGMENT,
@@ -171,7 +174,12 @@ def hist(
 
     Args:
         values: The values to count.
-        bins: The number of equal-width bins, from 1 to ``MAX_BINS``.
+        bins: The number of equal-width bins, from 1 to ``MAX_BINS``, or the bin edges: at
+            least two, increasing, holding every finite value.
+        style: How the bins are drawn: ``Hist.BARS``, ``Hist.STEP`` (the outline only) or
+            ``Hist.STACKED``, which draws the same bars as ``Hist.BARS`` for one set of values.
+        cumulative: Whether each bar adds up every bin up to its own, from the left.
+        stat: What each bar shows: ``Stat.COUNT``, ``Stat.FRACTION`` or ``Stat.DENSITY``.
         label: The name shown in the legend; an empty string leaves the histogram out of it.
         color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
         theme: The theme of the new figure.
@@ -181,15 +189,26 @@ def hist(
 
     Raises:
         TypeError: If an argument has the wrong type.
-        DataError: If a value is infinite.
-        StyleError: If ``bins`` is out of range, or ``label`` is too long.
+        DataError: If a value is infinite, the edges are not valid, or finite values lie
+            outside them.
+        StyleError: If the number of bins is out of range, or ``label`` is too long.
+        UsageError: If ``cumulative=True`` comes with ``Stat.DENSITY``.
 
     Example:
         >>> import umber as ub
         >>> ax = ub.hist([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bins=4)
         >>> ax.figure.save_png("sizes.png", dpi=100)
+        >>> share = ub.hist([1.2, 2.5, 2.7, 3.1], bins=[1, 2, 3, 4], stat=ub.Stat.FRACTION)
     """
     with api_call():
         instance("hist()", "theme", theme, Theme, _THEME_HINT)
         axes = Figure(theme=theme).add_axes()
-        return axes.hist(values, bins=bins, label=label, color=color)
+        return axes.hist(
+            values,
+            bins=bins,
+            style=style,
+            cumulative=cumulative,
+            stat=stat,
+            label=label,
+            color=color,
+        )
