@@ -5,13 +5,14 @@ use super::*;
 #[test]
 fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
     let lib = FontLibrary::bundled();
-    let cache = LabelCache::new(&lib);
+    let fonts = figure_fonts(&lib, &Theme::pigment()).unwrap();
+    let cache = LabelCache::new(&fonts);
     let text = "a\u{301} ffi 012日";
     let regular = Styles::new(&Theme::pigment()).tick;
     let styles = [
         regular,
         TextStyle {
-            font: crate::Font::Inter,
+            face: TITLE_FACE,
             ..regular
         },
         TextStyle {
@@ -28,19 +29,19 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
         },
     ];
     for style in styles {
-        let expected = measure(&lib, text, style);
+        let expected = measure(&fonts, text, style).unwrap();
         assert_eq!(
-            cache.width(text, style).to_bits(),
+            cache.width(text, style).unwrap().to_bits(),
             expected.width().to_bits()
         );
         assert_eq!(
-            cache.width(text, style).to_bits(),
+            cache.width(text, style).unwrap().to_bits(),
             expected.width().to_bits()
         );
-        let mut first = cache.measure(text, style);
+        let mut first = cache.measure(text, style).unwrap();
         first.x = 123.0;
         first.y = 456.0;
-        let again = cache.measure(text, style);
+        let again = cache.measure(text, style).unwrap();
         assert_eq!(again.text, expected.text);
         assert_eq!(again.style, expected.style);
         assert_eq!(
@@ -62,12 +63,12 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
     );
     let long = "W".repeat(5000);
     for text in ["", "ffi", &long] {
-        let expected = measure(&lib, text, regular);
+        let expected = measure(&fonts, text, regular).unwrap();
         assert_eq!(
-            cache.width(text, regular).to_bits(),
+            cache.width(text, regular).unwrap().to_bits(),
             expected.width().to_bits()
         );
-        let label = cache.measure(text, regular);
+        let label = cache.measure(text, regular).unwrap();
         assert_eq!(label.text, expected.text);
         assert_eq!(
             format!("{:?}", label.layout),
@@ -83,5 +84,5 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
             .sum::<usize>(),
         styles.len() + 3
     );
-    assert!(LabelCache::new(&lib).labels.borrow().is_empty());
+    assert!(LabelCache::new(&fonts).labels.borrow().is_empty());
 }

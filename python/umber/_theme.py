@@ -5,7 +5,7 @@ from enum import Enum
 from operator import attrgetter
 from typing import ClassVar, Final, Never, Self, cast, final
 
-from umber import _cmap, _color, _umber
+from umber import _cmap, _color, _font, _umber
 from umber._args import instance, real
 from umber._cmap import CMAP_HINT, Cmap
 from umber._color import COLOR_HINT, Color
@@ -14,12 +14,12 @@ from umber._enums import (
     ColorbarPosition,
     Dash,
     FillStyle,
-    Font,
     GridLines,
     LegendPosition,
     LegendStyle,
 )
 from umber._errors import new_error
+from umber._font import FONT_HINT, Font
 from umber._report import api_call
 
 
@@ -297,8 +297,8 @@ class Theme:
             False
         """
         with api_call():
-            code = _member("Theme.with_title_font()", value, Font)
-            return _wrap(self._native.with_title_font(code))
+            font = instance("Theme.with_title_font()", "value", value, Font, FONT_HINT)
+            return _wrap(self._native.with_title_font(_font.native(font)))
 
     def with_title_align(self, value: Align) -> "Theme":
         """Return this theme with figure and panel title alignment set to ``value``.
@@ -344,8 +344,8 @@ class Theme:
             False
         """
         with api_call():
-            code = _member("Theme.with_body_font()", value, Font)
-            return _wrap(self._native.with_body_font(code))
+            font = instance("Theme.with_body_font()", "value", value, Font, FONT_HINT)
+            return _wrap(self._native.with_body_font(_font.native(font)))
 
     def with_legend_style(self, value: LegendStyle) -> "Theme":
         """Return this theme with the legend style set to ``value``.

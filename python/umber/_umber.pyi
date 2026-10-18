@@ -51,6 +51,7 @@ __all__ = [
     "Theme",
     "__version__",
     "box_stats",
+    "bundled_fonts",
     "kde_scott",
     "scott_bandwidth",
     "kde_curve",
@@ -85,6 +86,14 @@ def grid_cells(rows: int, cols: int, count: int) -> list[tuple[int, int]]: ...
 # Named colors as (name, 0xRRGGBBAA), in the order BLACK, WHITE, GRAY, RED, ORANGE, YELLOW,
 # GREEN, TEAL, BLUE, PURPLE, PINK, BROWN.
 def named_colors() -> list[tuple[str, int]]: ...
+
+# A font argument: (kind, payload). Kind 0 is a bundled font (payload: its index in
+# bundled_fonts()).
+type _FontArg = tuple[int, int]
+
+# Bundled fonts as (constant name, index), in the order SOURCE_SERIF_4, IBM_PLEX_SANS, GEIST,
+# INTER, JETBRAINS_MONO.
+def bundled_fonts() -> list[tuple[str, int]]: ...
 
 # Concrete colors are returned as 0xRRGGBBAA.
 def color_hex(code: str) -> int: ...
@@ -199,9 +208,9 @@ class Theme:
     def with_baseline_color(self, value: _ColorArg) -> Theme: ...
     def with_grid_lines(self, value: int) -> Theme: ...
     def with_grid_dash(self, value: int) -> Theme: ...
-    def with_title_font(self, value: int) -> Theme: ...
+    def with_title_font(self, value: _FontArg) -> Theme: ...
     def with_title_align(self, value: int) -> Theme: ...
-    def with_body_font(self, value: int) -> Theme: ...
+    def with_body_font(self, value: _FontArg) -> Theme: ...
     def with_legend_style(self, value: int) -> Theme: ...
     def with_legend_position(self, value: int) -> Theme: ...
     def with_fill_style(self, value: int) -> Theme: ...
@@ -586,6 +595,37 @@ class Figure:
         annotate: bool,
         format: _TickFormatArg | None,
         render: int | None,
+    ) -> None: ...
+    def events(
+        self,
+        row: int,
+        col: int,
+        rows: list[str],
+        positions: list[_FloatArray | _TimeArray],
+        length: float | None,
+        width: _SizeArg,
+        color: _ColorArg,
+    ) -> None: ...
+    def strip(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+        size: _SizeArg,
+        jitter: float | None,
+    ) -> None: ...
+    def swarm(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+        size: _SizeArg,
     ) -> None: ...
     def grouped_hist(
         self,

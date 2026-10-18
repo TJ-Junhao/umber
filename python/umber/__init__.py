@@ -22,7 +22,6 @@ from umber._enums import (
     ColorbarPosition,
     Dash,
     FillStyle,
-    Font,
     GridLines,
     Hist,
     Legend,
@@ -37,6 +36,7 @@ from umber._enums import (
 )
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
+from umber._font import Font
 from umber._quick import bar, hist, line, scatter
 from umber._scale import Scale
 from umber._series import Distribution, Series
