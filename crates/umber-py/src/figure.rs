@@ -306,36 +306,42 @@ impl Figure {
     }
 
     /// Sets the figure title above every panel.
-    fn figure_title(&mut self, text: &str) {
-        self.0.title(text);
+    fn figure_title(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
+        self.0.title_sized(text, size_spec(size)?);
+        Ok(())
     }
 
     /// Sets the figure subtitle below its title.
-    fn figure_subtitle(&mut self, text: &str) {
-        self.0.subtitle(text);
+    fn figure_subtitle(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
+        self.0.subtitle_sized(text, size_spec(size)?);
+        Ok(())
     }
 
     /// Sets the title.
-    fn title(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.title(text);
+    fn title(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.title_sized(text, size);
         Ok(())
     }
 
     /// Sets the subtitle.
-    fn subtitle(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.subtitle(text);
+    fn subtitle(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.subtitle_sized(text, size);
         Ok(())
     }
 
     /// Sets the x axis label.
-    fn xlabel(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.xlabel(text);
+    fn xlabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.xlabel_sized(text, size);
         Ok(())
     }
 
     /// Sets the y axis label.
-    fn ylabel(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.ylabel(text);
+    fn ylabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.ylabel_sized(text, size);
         Ok(())
     }
 
@@ -436,18 +442,29 @@ impl Figure {
     }
 
     /// Sets the legend style (a `LegendStyle` value).
-    fn legend(&mut self, row: i64, col: i64, style: i64) -> PyResult<()> {
+    fn legend(&mut self, row: i64, col: i64, style: i64, size: SizeArg) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
-        self.axes(row, col)?.legend(style);
-        Ok(())
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .legend(style, size)
+            .map(drop)
+            .map_err(core_error)
     }
 
     /// Sets the legend style and position (`LegendStyle` and `LegendPosition` values).
-    fn legend_at(&mut self, row: i64, col: i64, style: i64, position: i64) -> PyResult<()> {
+    fn legend_at(
+        &mut self,
+        row: i64,
+        col: i64,
+        style: i64,
+        position: i64,
+        size: SizeArg,
+    ) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
         let position = enum_value::<LegendPosition>(position)?;
+        let size = size_spec(size)?;
         self.axes(row, col)?
-            .legend_at(style, position)
+            .legend_at(style, position, size)
             .map(drop)
             .map_err(core_error)
     }
@@ -1124,7 +1141,7 @@ impl Figure {
     }
 
     /// Replaces the axes' colorbar label and optional overrides.
-    #[pyo3(signature = (row, col, label, position, format))]
+    #[pyo3(signature = (row, col, label, position, format, size))]
     fn colorbar(
         &mut self,
         row: i64,
@@ -1132,6 +1149,7 @@ impl Figure {
         label: String,
         position: Option<i64>,
         format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let options = umber_core::ColorbarOptions {
             label,
@@ -1139,6 +1157,7 @@ impl Figure {
                 .map(enum_value::<umber_core::ColorbarPosition>)
                 .transpose()?,
             format: format.map(tick_format).transpose()?,
+            size: size_spec(size)?,
         };
         self.axes(row, col)?
             .colorbar(options)
@@ -1147,12 +1166,13 @@ impl Figure {
     }
 
     /// Replaces the shared colorbars' label and optional overrides.
-    #[pyo3(signature = (label, position, format))]
+    #[pyo3(signature = (label, position, format, size))]
     fn figure_colorbar(
         &mut self,
         label: String,
         position: Option<i64>,
         format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let options = umber_core::ColorbarOptions {
             label,
@@ -1160,6 +1180,7 @@ impl Figure {
                 .map(enum_value::<umber_core::ColorbarPosition>)
                 .transpose()?,
             format: format.map(tick_format).transpose()?,
+            size: size_spec(size)?,
         };
         self.0.colorbar(options).map(drop).map_err(core_error)
     }
@@ -1413,6 +1434,23 @@ impl Figure {
             .map(drop)
             .map_err(core_error)
     }
+    /// Sets the x tick label size.
+    fn xtick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .xtick_labels(size)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Sets the y tick label size.
+    fn ytick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .ytick_labels(size)
+            .map(drop)
+            .map_err(core_error)
+    }
 
     /// Adds event positions grouped into category rows.
     #[pyo3(signature = (row, col, rows, positions, length, width, color))]
@@ -1499,6 +1537,7 @@ impl Figure {
             .map(drop)
             .map_err(core_error)
     }
+
     /// Adds a histogram of several series sharing their `bins`, drawn in `style` (a `Hist`
     /// value) with the statistic `stat` (a `Stat` value).
     fn grouped_hist(

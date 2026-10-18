@@ -84,8 +84,8 @@ def test_all_modes_render_with_only_outer_tick_labels(share_x: int, share_y: int
         add(fig, row, col)
         fig.xticks_labeled(row, col, np.array([0.0, 10.0]), ["LOWX", "HIGHX"])
         fig.yticks_labeled(row, col, np.array([1.0, 3.0]), ["LOWY", "HIGHY"])
-        fig.xlabel(row, col, "Time")
-        fig.ylabel(row, col, "Level")
+        fig.xlabel(row, col, "Time", NO_SIZE)
+        fig.ylabel(row, col, "Level", NO_SIZE)
     root = ElementTree.fromstring(fig.to_svg(EDITABLE))
     texts = ["".join(node.itertext()) for node in root.iter("{http://www.w3.org/2000/svg}text")]
     assert texts.count("LOWX") == (2 if share_x in (COL, ALL) else 4)

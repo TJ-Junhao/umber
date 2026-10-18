@@ -35,6 +35,7 @@ from umber._errors import DataError, StyleError, UmberError, UsageError, details
 from umber._report import api_call
 from umber._scale import Scale
 from umber._series import Distribution, Series
+from umber._size import TEXT_SIZE_HINT as _SIZE_HINT
 from umber._size import Size
 from umber._ticks import TickFormat
 from umber._time import MicrosArray
@@ -91,7 +92,7 @@ _STEP_HINT: Final = _members_hint(Step)
 _HIST_HINT: Final = _members_hint(Hist)
 _STAT_HINT: Final = _members_hint(Stat)
 _BANDWIDTH_HINT: Final = "pass a bandwidth in data units greater than 0, or ub.AUTO."
-_SIZE_HINT: Final = (
+_MARK_SIZE_HINT: Final = (
     "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
 )
 _LEGEND_HINT: Final = _members_hint(LegendStyle)
@@ -161,17 +162,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         return self._figure
 
-    def title(self, text: str) -> Self:
+    def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the title, shown above the plot.
 
         Args:
             text: The title, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long.
 
         Example:
@@ -179,20 +182,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().title("Revenue")
         """
         with api_call():
-            self._native.title(self._row, self._col, _args.text("Axes.title()", "text", text))
+            context = "Axes.title()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.title(
+                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+            )
             return self
 
-    def subtitle(self, text: str) -> Self:
+    def subtitle(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the subtitle, shown under the title.
 
         Args:
             text: The subtitle, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long.
 
         Example:
@@ -200,20 +210,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().title("Revenue").subtitle("Per quarter")
         """
         with api_call():
-            self._native.subtitle(self._row, self._col, _args.text("Axes.subtitle()", "text", text))
+            context = "Axes.subtitle()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.subtitle(
+                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+            )
             return self
 
-    def xlabel(self, text: str) -> Self:
+    def xlabel(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the x axis label, shown under the x tick labels.
 
         Args:
             text: The label, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long.
 
         Example:
@@ -221,20 +238,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().xlabel("Year")
         """
         with api_call():
-            self._native.xlabel(self._row, self._col, _args.text("Axes.xlabel()", "text", text))
+            context = "Axes.xlabel()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.xlabel(
+                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+            )
             return self
 
-    def ylabel(self, text: str) -> Self:
+    def ylabel(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the y axis label, shown left of the y tick labels.
 
         Args:
             text: The label, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long.
 
         Example:
@@ -242,7 +266,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().ylabel("Revenue")
         """
         with api_call():
-            self._native.ylabel(self._row, self._col, _args.text("Axes.ylabel()", "text", text))
+            context = "Axes.ylabel()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.ylabel(
+                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+            )
             return self
 
     def xlim(self: SX, low: X, high: X) -> SX:
@@ -594,7 +623,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.baseline(self._row, self._col, flag)
             return self
 
-    def legend(self, style: LegendStyle, *, position: LegendPosition | Auto = AUTO) -> Self:
+    def legend(
+        self, style: LegendStyle, *, position: LegendPosition | Auto = AUTO, size: Size = Size.AUTO
+    ) -> Self:
         """Set the legend style and position, overriding the theme's.
 
         The legend lists marks with a non-empty ``label``; ``LegendStyle.NONE`` hides it.
@@ -614,13 +645,20 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 clears any previous override. ``LegendPosition.BEST`` instead chooses the
                 position inside the plot that covers the least data.
 
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. In a merged legend, only these explicit
+                sizes must agree. ``Size.AUTO`` clears this panel's size setting and inherits
+                the agreed explicit size, or the theme's size when none is set. Panels with
+                ``LegendStyle.NONE`` do not take part in the agreement.
+
         Returns:
             These axes.
 
         Raises:
             TypeError: If ``style`` is not a ``LegendStyle``, or ``position`` is neither a
-                ``LegendPosition`` nor ``AUTO``.
-            UsageError: If ``style`` is ``DIRECT`` and a ``LegendPosition`` is supplied.
+                ``LegendPosition`` nor ``AUTO``, or ``size`` is not a ``Size``.
+            UsageError: If ``style`` is ``DIRECT`` and a ``LegendPosition`` is supplied,
+                or another panel has set a different size for the merged legend.
 
         Example:
             >>> import umber as ub
@@ -630,13 +668,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             member = instance("Axes.legend()", "style", style, LegendStyle, _LEGEND_HINT)
-            if position is AUTO:
-                self._native.legend(self._row, self._col, member.value)
-            else:
-                placement = instance(
+            if position is not AUTO:
+                instance(
                     "Axes.legend()", "position", position, LegendPosition, _LEGEND_POSITION_HINT
                 )
-                self._native.legend_at(self._row, self._col, member.value, placement.value)
+            instance("Axes.legend()", "size", size, Size, _SIZE_HINT)
+            if isinstance(position, LegendPosition):
+                self._native.legend_at(
+                    self._row, self._col, member.value, position.value, _size.native(size)
+                )
+            else:
+                self._native.legend(self._row, self._col, member.value, _size.native(size))
             return self
 
     def line(
@@ -2231,6 +2273,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         position: ColorbarPosition | Auto = AUTO,
         format: TickFormat | Auto = AUTO,
+        size: Size = Size.AUTO,
     ) -> Self:
         """Set the colorbar label, position and tick format.
 
@@ -2244,6 +2287,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 clears a previous override.
             format: The tick format. ``AUTO`` follows the y tick format and clears a
                 previous override.
+
+            size: The label size only; colorbar ticks keep the theme's size. ``Size.AUTO``
+                follows the theme, ``Size.times(k)`` multiplies its scaled size, and
+                ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
@@ -2283,6 +2330,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     _FORMAT_HINT,
                 )
             )
+            instance(context, "size", size, Size, _SIZE_HINT)
             name = _args.text(context, "label", label)
             self._native.colorbar(
                 self._row,
@@ -2290,6 +2338,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 name,
                 placement,
                 None if checked is None else _ticks.native(checked),
+                _size.native(size),
             )
             return self
 
@@ -2402,6 +2451,58 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 checked,
                 drawn,
             )
+            return self
+
+    def xtick_labels(self, *, size: Size = Size.AUTO) -> Self:
+        """Set the x tick label size without changing ticks or their format.
+
+        Args:
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. Only these explicit sizes must agree in
+                the shared axis group. ``Size.AUTO`` clears this panel's size setting and
+                inherits the group's agreed explicit size, or the theme's size when none
+                is set. Ticks and their format are unchanged.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``size`` is not a ``Size``.
+            UsageError: If another panel sharing this axis set a different size.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().xtick_labels(size=ub.Size.pt(10))
+        """
+        with api_call():
+            instance("Axes.xtick_labels()", "size", size, Size, _SIZE_HINT)
+            self._native.xtick_labels(self._row, self._col, _size.native(size))
+            return self
+
+    def ytick_labels(self, *, size: Size = Size.AUTO) -> Self:
+        """Set the y tick label size without changing ticks or their format.
+
+        Args:
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. Only these explicit sizes must agree in
+                the shared axis group. ``Size.AUTO`` clears this panel's size setting and
+                inherits the group's agreed explicit size, or the theme's size when none
+                is set. Ticks and their format are unchanged.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``size`` is not a ``Size``.
+            UsageError: If another panel sharing this axis set a different size.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().ytick_labels(size=ub.Size.pt(10))
+        """
+        with api_call():
+            instance("Axes.ytick_labels()", "size", size, Size, _SIZE_HINT)
+            self._native.ytick_labels(self._row, self._col, _size.native(size))
             return self
 
     def events(
@@ -2726,7 +2827,7 @@ def _color_argument(context: str, value: object) -> tuple[int, int, float]:
 
 def _size_argument(context: str, name: str, value: object) -> tuple[int, float]:
     """Check a ``width`` or ``size`` argument and return its native form."""
-    return _size.native(instance(context, name, value, Size, _SIZE_HINT))
+    return _size.native(instance(context, name, value, Size, _MARK_SIZE_HINT))
 
 
 def _holds_edges(bins: object) -> bool:

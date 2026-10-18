@@ -118,6 +118,7 @@ mod corpus {
     pub mod stem;
     pub mod step;
     pub mod strip;
+    pub mod text_size;
     pub mod ticks;
     pub mod time;
     pub mod violin;
@@ -193,6 +194,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::mesh::cases(&lib, &mut sink);
     corpus::heatmap::cases(&lib, &mut sink);
     corpus::mesh::raster_cases(&lib, &mut sink);
+    corpus::text_size::cases(&lib, &mut sink);
     corpus::events::cases(&lib, &mut sink);
     corpus::strip::cases(&lib, &mut sink);
     corpus::hist_variants::cases(&lib, &mut sink);

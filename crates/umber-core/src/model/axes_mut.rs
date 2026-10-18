@@ -33,7 +33,7 @@ use super::validation::{
 };
 use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
-use crate::{Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat};
+use crate::{Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec, TickFormat};
 
 /// Whether an axes draws its baseline, independently of any shared axis settings.
 /// This changes drawing only, not the baseline position or the marks that grow from it.
@@ -77,6 +77,17 @@ pub struct ColorbarOptions {
     pub position: Option<crate::ColorbarPosition>,
     /// Overrides the y tick format when set.
     pub format: Option<TickFormat>,
+    /// The title's size; tick labels keep the theme's size.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ColorbarOptions, SizeSpec};
+    /// let options = ColorbarOptions { size: SizeSpec::pt(12.0)?, ..Default::default() };
+    /// assert_eq!(options.size, SizeSpec::pt(12.0)?);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub size: SizeSpec,
 }
 
 /// One axes of a figure, held for changing: the setters of its texts, limits, ticks and legend
@@ -162,9 +173,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn title(&mut self, text: &str) -> &mut Self {
-        let axes = self.axes_mut();
-        axes.title = text.to_owned();
-        self
+        self.title_sized(text, SizeSpec::Auto)
     }
 
     /// Sets the subtitle.
@@ -181,9 +190,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn subtitle(&mut self, text: &str) -> &mut Self {
-        let axes = self.axes_mut();
-        axes.subtitle = text.to_owned();
-        self
+        self.subtitle_sized(text, SizeSpec::Auto)
     }
 
     /// Sets the x axis label.
@@ -200,9 +207,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xlabel(&mut self, text: &str) -> &mut Self {
-        let axes = self.axes_mut();
-        axes.xlabel = text.to_owned();
-        self
+        self.xlabel_sized(text, SizeSpec::Auto)
     }
 
     /// Sets the y axis label.
@@ -219,9 +224,7 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn ylabel(&mut self, text: &str) -> &mut Self {
-        let axes = self.axes_mut();
-        axes.ylabel = text.to_owned();
-        self
+        self.ylabel_sized(text, SizeSpec::Auto)
     }
 
     /// Sets the x limits. `Error::Usage` on a category axis; `Error::Style` unless
@@ -557,6 +560,15 @@ impl<'a> AxesMut<'a> {
     /// and bubble swatches show the marker fill at the theme's marker alpha. Lines, steps,
     /// reference lines and error bars keep the series color, as do direct labels and the
     /// outlines of box and violin swatches. Panel and merged figure legends use the same rule.
+    /// `size` resolves against the scaled body size; points ignore font scaling. Only
+    /// explicit sizes take part in a merged legend's agreement. [`SizeSpec::Auto`] clears
+    /// this panel's setting and inherits the agreed size, or the theme size when none is set.
+    /// Panels with [`LegendStyle::None`] do not take part in the agreement.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` if another panel explicitly set a different merged legend size.
+    /// A failed call changes neither the style, position nor size.
     ///
     /// # Examples
     ///
@@ -565,22 +577,25 @@ impl<'a> AxesMut<'a> {
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// axes.legend(LegendStyle::Chips).legend(LegendStyle::None);
+    /// axes.legend(LegendStyle::Chips, umber_core::SizeSpec::Auto)?.legend(LegendStyle::None, umber_core::SizeSpec::Auto)?;
     /// assert_eq!(axes.legend_style(), Some(LegendStyle::None));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn legend(&mut self, style: LegendStyle) -> &mut Self {
+    pub fn legend(&mut self, style: LegendStyle, size: SizeSpec) -> Result<&mut Self> {
+        self.figure.check_legend_size(self.index, style, size)?;
         let axes = self.axes_mut();
         axes.legend = Some(style);
         axes.legend_position = None;
-        self
+        axes.legend_size = size;
+        Ok(self)
     }
 
     /// Sets the legend style and position of these axes, overriding the theme.
     ///
     /// `Error::Usage` for [`LegendStyle::Direct`]: direct labels sit at their line ends and
     /// take no position. A failed call changes nothing. [`AxesMut::legend`] resets the
-    /// position to the theme's default.
+    /// position to the theme's default. The size has the same meaning and merged-legend
+    /// agreement rule as [`AxesMut::legend`].
     ///
     /// # Examples
     ///
@@ -588,20 +603,27 @@ impl<'a> AxesMut<'a> {
     /// use umber_core::{Figure, LegendPosition, LegendStyle, ScaleKind, Theme};
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// axes.legend_at(LegendStyle::Header, LegendPosition::Bottom)?;
+    /// axes.legend_at(LegendStyle::Header, LegendPosition::Bottom, umber_core::SizeSpec::Auto)?;
     /// assert_eq!(axes.legend_position(), Some(LegendPosition::Bottom));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn legend_at(&mut self, style: LegendStyle, position: LegendPosition) -> Result<&mut Self> {
+    pub fn legend_at(
+        &mut self,
+        style: LegendStyle,
+        position: LegendPosition,
+        size: SizeSpec,
+    ) -> Result<&mut Self> {
         if style == LegendStyle::Direct {
             return Err(Error::usage(
                 "Axes.legend()",
                 format!("position is {}; direct labels sit at the ends of their lines and take no position.", position.display()),
             ).with_parameter("position").with_hint("drop position=, or use another legend style."));
         }
+        self.figure.check_legend_size(self.index, style, size)?;
         let axes = self.axes_mut();
         axes.legend = Some(style);
         axes.legend_position = Some(position);
+        axes.legend_size = size;
         Ok(self)
     }
 
@@ -2803,6 +2825,134 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
+    /// Sets the title and its size. Points ignore font scale; multiples follow it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.title_sized("Revenue", SizeSpec::pt(18.0)?);
+    /// assert_eq!(axes.title_text(), "Revenue");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn title_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.title = text.to_owned();
+        axes.title_size = size;
+        self
+    }
+
+    /// Sets the subtitle and its size, relative to the theme's body size or in points.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.subtitle_sized("Per quarter", SizeSpec::times(1.2)?);
+    /// assert_eq!(axes.subtitle_text(), "Per quarter");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn subtitle_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.subtitle = text.to_owned();
+        axes.subtitle_size = size;
+        self
+    }
+
+    /// Sets the x axis label and its size, relative to the theme's body size or in points.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.xlabel_sized("Year", SizeSpec::pt(12.0)?);
+    /// assert_eq!(axes.xlabel_text(), "Year");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xlabel_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.xlabel = text.to_owned();
+        axes.xlabel_size = size;
+        self
+    }
+
+    /// Sets the y axis label and its size, relative to the theme's body size or in points.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.ylabel_sized("USD", SizeSpec::pt(12.0)?);
+    /// assert_eq!(axes.ylabel_text(), "USD");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ylabel_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
+        let axes = self.axes_mut();
+        axes.ylabel = text.to_owned();
+        axes.ylabel_size = size;
+        self
+    }
+
+    /// Sets the x tick label size for the shared x group. A conflicting explicit call on
+    /// another member is `Error::Usage` and changes nothing. [`SizeSpec::Auto`] removes this
+    /// member's setting: it inherits the remaining agreed explicit size, or the theme size
+    /// when none is set. Ticks and their format are unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?
+    ///     .xtick_labels(SizeSpec::pt(9.0)?)?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xtick_labels(&mut self, size: SizeSpec) -> Result<&mut Self> {
+        let mut settings = (*self.x_settings).clone();
+        settings.tick_size = size;
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::TickSize,
+            settings,
+            "Axes.xtick_labels()",
+        )?;
+        Ok(self)
+    }
+
+    /// Sets the y tick label size for the shared y group. Same conflict rule as
+    /// [`AxesMut::xtick_labels`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?
+    ///     .ytick_labels(SizeSpec::times(1.2)?)?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ytick_labels(&mut self, size: SizeSpec) -> Result<&mut Self> {
+        let mut settings = (*self.y_settings).clone();
+        settings.tick_size = size;
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::TickSize,
+            settings,
+            "Axes.ytick_labels()",
+        )?;
+        Ok(self)
+    }
+
     /// Adds one row of short vertical ticks per category on a numeric or time x axis.
     /// NaN and missing times leave events out; empty rows still get a category band.
     /// Invalid axes, duplicate rows, mismatched groups and invalid lengths change nothing.
@@ -2885,6 +3035,7 @@ impl<'a> AxesMut<'a> {
         axes.marks.push(Mark::Swarm(mark));
         Ok(self)
     }
+
     /// Adds a grouped histogram: the finite values of each of `series` counted in bins they
     /// share, each series in its own color and with its own legend entry, as
     /// [`AxesMut::hist`] counts one series.

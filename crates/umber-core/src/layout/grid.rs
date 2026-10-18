@@ -244,7 +244,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                     xlabel_baseline: plot.bottom()
                         + bands.x_band
                         + AXIS_LABEL_GAP
-                        + bands.body_ascent,
+                        + bands.xlabel_ascent,
                     frame: canvas,
                 })
             })
@@ -300,7 +300,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                     top: rows.row_top[cells.row()],
                 },
                 xlabel_baseline: bottom + (rows.below[last_row] - rows.legends[last_row])
-                    - bands.body_descent,
+                    - bands.xlabel_descent,
                 frame: Frame {
                     x: frame_left,
                     y: frame_top,
@@ -1409,9 +1409,9 @@ fn grid_too_narrow(context: &'static str, width: f64, needed: f64, cols: usize) 
         ),
     )
     .with_hint(if cols == 1 {
-        "widen the figure."
+        "widen the figure, use smaller text, or remove titles or legends."
     } else {
-        "widen the figure, or use fewer columns."
+        "widen the figure, use fewer columns, use smaller text, or remove titles or legends."
     })
 }
 
@@ -1427,9 +1427,9 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
         ),
     )
     .with_hint(if rows == 1 {
-        "make the figure taller, or remove titles or legends."
+        "make the figure taller, use smaller text, or remove titles or legends."
     } else {
-        "make the figure taller, use fewer rows, or remove titles or legends."
+        "make the figure taller, use fewer rows, use smaller text, or remove titles or legends."
     })
 }
 
@@ -1709,7 +1709,7 @@ mod tests {
                     LegendStyle::Direct,
                     LegendStyle::None,
                 ][rng.below(4)];
-                axes.legend(style);
+                axes.legend(style, crate::SizeSpec::Auto).unwrap();
                 if category {
                     let names: Vec<String> = (0..1 + rng.below(4))
                         .map(|i| format!("{i}{}", rng.text(1)))
@@ -1935,7 +1935,12 @@ mod tests {
             "Figure.to_scene(): the figure is 74 pt wide; at least 75 pt is needed for 3 \
              columns of plots."
         );
-        assert_eq!(err.hint(), Some("widen the figure, or use fewer columns."));
+        assert_eq!(
+            err.hint(),
+            Some(
+                "widen the figure, use fewer columns, use smaller text, or remove titles or legends."
+            )
+        );
         assert_eq!(named_width(&err), Some(75.0));
         assert!(columns(75.0).to_scene(lib()).is_ok());
 
@@ -2034,7 +2039,9 @@ mod tests {
         );
         assert_eq!(
             err.hint(),
-            Some("make the figure taller, use fewer rows, or remove titles or legends.")
+            Some(
+                "make the figure taller, use fewer rows, use smaller text, or remove titles or legends."
+            )
         );
         assert_eq!(named_height(&err), Some(50.0));
         assert!(two_rows(50.0).to_scene(lib()).is_ok());
@@ -2796,7 +2803,11 @@ mod tests {
                 .unwrap()
                 .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
                 .unwrap()
-                .legend_at(LegendStyle::Header, crate::LegendPosition::Bottom)
+                .legend_at(
+                    LegendStyle::Header,
+                    crate::LegendPosition::Bottom,
+                    crate::SizeSpec::Auto,
+                )
                 .unwrap()
                 .line(
                     AxisData::Numbers(vec![0.0, 1.0]),

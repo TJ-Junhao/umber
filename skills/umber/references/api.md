@@ -438,7 +438,7 @@ Example:
 ### `umber.Axes.colorbar`
 
 ```text
-Axes.colorbar(self, label: str='', *, position: ColorbarPosition | Auto=AUTO, format: TickFormat | Auto=AUTO) -> Self
+Axes.colorbar(self, label: str='', *, position: ColorbarPosition | Auto=AUTO, format: TickFormat | Auto=AUTO, size: Size=Size.AUTO) -> Self
 ```
 
 Set the colorbar label, position and tick format.
@@ -453,6 +453,10 @@ Args:
         clears a previous override.
     format: The tick format. ``AUTO`` follows the y tick format and clears a
         previous override.
+
+    size: The label size only; colorbar ticks keep the theme's size. ``Size.AUTO``
+        follows the theme, ``Size.times(k)`` multiplies its scaled size, and
+        ``Size.pt(p)`` uses points without font scaling.
 
 Returns:
     These axes.
@@ -1009,7 +1013,7 @@ Example:
 ### `umber.Axes.legend`
 
 ```text
-Axes.legend(self, style: LegendStyle, *, position: LegendPosition | Auto=AUTO) -> Self
+Axes.legend(self, style: LegendStyle, *, position: LegendPosition | Auto=AUTO, size: Size=Size.AUTO) -> Self
 ```
 
 Set the legend style and position, overriding the theme's.
@@ -1031,13 +1035,20 @@ Args:
         clears any previous override. ``LegendPosition.BEST`` instead chooses the
         position inside the plot that covers the least data.
 
+    size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+        uses points without font scaling. In a merged legend, only these explicit
+        sizes must agree. ``Size.AUTO`` clears this panel's size setting and inherits
+        the agreed explicit size, or the theme's size when none is set. Panels with
+        ``LegendStyle.NONE`` do not take part in the agreement.
+
 Returns:
     These axes.
 
 Raises:
     TypeError: If ``style`` is not a ``LegendStyle``, or ``position`` is neither a
-        ``LegendPosition`` nor ``AUTO``.
-    UsageError: If ``style`` is ``DIRECT`` and a ``LegendPosition`` is supplied.
+        ``LegendPosition`` nor ``AUTO``, or ``size`` is not a ``Size``.
+    UsageError: If ``style`` is ``DIRECT`` and a ``LegendPosition`` is supplied,
+        or another panel has set a different size for the merged legend.
 
 Example:
 
@@ -1418,19 +1429,21 @@ Example:
 ### `umber.Axes.subtitle`
 
 ```text
-Axes.subtitle(self, text: str) -> Self
+Axes.subtitle(self, text: str, *, size: Size=Size.AUTO) -> Self
 ```
 
 Set the subtitle, shown under the title.
 
 Args:
     text: The subtitle, at most 1,000 characters. An empty string removes it.
+    size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If ``text`` is not a ``str``.
+    TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long.
 
 Example:
@@ -1484,19 +1497,21 @@ Example:
 ### `umber.Axes.title`
 
 ```text
-Axes.title(self, text: str) -> Self
+Axes.title(self, text: str, *, size: Size=Size.AUTO) -> Self
 ```
 
 Set the title, shown above the plot.
 
 Args:
     text: The title, at most 1,000 characters. An empty string removes it.
+    size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If ``text`` is not a ``str``.
+    TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long.
 
 Example:
@@ -1691,19 +1706,21 @@ Example:
 ### `umber.Axes.xlabel`
 
 ```text
-Axes.xlabel(self, text: str) -> Self
+Axes.xlabel(self, text: str, *, size: Size=Size.AUTO) -> Self
 ```
 
 Set the x axis label, shown under the x tick labels.
 
 Args:
     text: The label, at most 1,000 characters. An empty string removes it.
+    size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If ``text`` is not a ``str``.
+    TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long.
 
 Example:
@@ -1778,6 +1795,35 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 1], [0.1, 0.4])
 >>> ax = ax.xtick_format(ub.TickFormat.percent())
+```
+
+### `umber.Axes.xtick_labels`
+
+```text
+Axes.xtick_labels(self, *, size: Size=Size.AUTO) -> Self
+```
+
+Set the x tick label size without changing ticks or their format.
+
+Args:
+    size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+        uses points without font scaling. Only these explicit sizes must agree in
+        the shared axis group. ``Size.AUTO`` clears this panel's size setting and
+        inherits the group's agreed explicit size, or the theme's size when none
+        is set. Ticks and their format are unchanged.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If ``size`` is not a ``Size``.
+    UsageError: If another panel sharing this axis set a different size.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes().xtick_labels(size=ub.Size.pt(10))
 ```
 
 ### `umber.Axes.xticks`
@@ -1912,19 +1958,21 @@ Example:
 ### `umber.Axes.ylabel`
 
 ```text
-Axes.ylabel(self, text: str) -> Self
+Axes.ylabel(self, text: str, *, size: Size=Size.AUTO) -> Self
 ```
 
 Set the y axis label, shown left of the y tick labels.
 
 Args:
     text: The label, at most 1,000 characters. An empty string removes it.
+    size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If ``text`` is not a ``str``.
+    TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long.
 
 Example:
@@ -1998,6 +2046,35 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 1], [0.1, 0.4])
 >>> ax = ax.ytick_format(ub.TickFormat.percent())
+```
+
+### `umber.Axes.ytick_labels`
+
+```text
+Axes.ytick_labels(self, *, size: Size=Size.AUTO) -> Self
+```
+
+Set the y tick label size without changing ticks or their format.
+
+Args:
+    size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+        uses points without font scaling. Only these explicit sizes must agree in
+        the shared axis group. ``Size.AUTO`` clears this panel's size setting and
+        inherits the group's agreed explicit size, or the theme's size when none
+        is set. Ticks and their format are unchanged.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If ``size`` is not a ``Size``.
+    UsageError: If another panel sharing this axis set a different size.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes().ytick_labels(size=ub.Size.pt(10))
 ```
 
 ### `umber.Axes.yticks`
@@ -2996,7 +3073,7 @@ Example:
 ### `umber.Figure.colorbar`
 
 ```text
-Figure.colorbar(self, label: str='', *, position: ColorbarPosition | Auto=AUTO, format: TickFormat | Auto=AUTO) -> Self
+Figure.colorbar(self, label: str='', *, position: ColorbarPosition | Auto=AUTO, format: TickFormat | Auto=AUTO, size: Size=Size.AUTO) -> Self
 ```
 
 Set the label, position and tick format of every shared colorbar.
@@ -3014,6 +3091,10 @@ Args:
         overrides the theme; only ``ALL`` accepts ``NONE`` to hide the bar.
     format: The tick format. ``AUTO`` follows the first color-mapped panel's y
         tick format in each group's row-major order.
+
+    size: The label size only; colorbar ticks keep the theme's size. ``Size.AUTO``
+        follows the theme, ``Size.times(k)`` multiplies its scaled size, and
+        ``Size.pt(p)`` uses points without font scaling.
 
 Returns:
     This figure.
@@ -3086,7 +3167,7 @@ Example:
 ### `umber.Figure.subtitle`
 
 ```text
-Figure.subtitle(self, text: str) -> Self
+Figure.subtitle(self, text: str, *, size: Size=Size.AUTO) -> Self
 ```
 
 Set the figure subtitle, shown under its title and above every panel.
@@ -3095,12 +3176,14 @@ Its alignment follows the figure title, as set by ``Theme.with_title_align()``.
 
 Args:
     text: The subtitle, at most 1,000 characters. An empty string removes it.
+    size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
 Returns:
     This figure.
 
 Raises:
-    TypeError: If ``text`` is not a ``str``.
+    TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long or holds a lone surrogate.
 
 Example:
@@ -3115,22 +3198,25 @@ True
 ### `umber.Figure.title`
 
 ```text
-Figure.title(self, text: str) -> Self
+Figure.title(self, text: str, *, size: Size=Size.AUTO) -> Self
 ```
 
 Set the figure title, shown above every panel and the merged legend.
 
-The figure title is 1.5 times the panel title size. Its alignment follows the
+The default figure title is 1.5 times the panel title size. ``Size.times(k)``
+follows that ratio; ``Size.pt(p)`` uses exactly p points. Alignment follows the
 theme's ``with_title_align()`` setting.
 
 Args:
     text: The title, at most 1,000 characters. An empty string removes it.
+    size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
 Returns:
     This figure.
 
 Raises:
-    TypeError: If ``text`` is not a ``str``.
+    TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long or holds a lone surrogate.
 
 Example:
@@ -3810,12 +3896,13 @@ Panels in the same row share a scale.
 class Size
 ```
 
-An immutable size for a line width or a marker size.
+An immutable size for a line width, marker or text.
 
 ``Size.AUTO`` is the size of the theme. ``Size.times()`` is a multiple of it, so an
 emphasized series stays emphasized under any theme. ``Size.pt()`` is a fixed size in
 points that ignores the theme. Sizes compare equal when they are the same kind with the
-same value.
+same value. Text sizes resolve against the role's size after font scaling; fixed
+points ignore font scaling.
 
 Example:
 
@@ -3833,7 +3920,7 @@ Size.pt(0.75)
 Size.AUTO: ClassVar['Size']
 ```
 
-The size of the theme: its line width or its marker size.
+The size of the theme: its line width, marker size or scaled text role size.
 
 Example:
 

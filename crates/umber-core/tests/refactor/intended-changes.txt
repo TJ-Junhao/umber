@@ -1,1 +1,4 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# The grid room errors' hints now also suggest smaller text.
+errors/grid-room
+errors/grid

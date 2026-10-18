@@ -367,7 +367,9 @@ fn figures() -> Vec<(String, Figure)> {
         // Direct labels already reserve room on the right; the last tick label stays inside.
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
         let mut a = axes(&mut f);
-        a.title("Next to direct labels").legend(LegendStyle::Direct);
+        a.title("Next to direct labels")
+            .legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
+            .unwrap();
         day(&mut a, "Station load");
         out.push((format!("fig-x-end-label-direct-{theme_name}"), f));
     }

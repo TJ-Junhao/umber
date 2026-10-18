@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Final, Never, Self, final
 
-from umber import _args, _axes, _cell, _scale, _theme, _ticks, _umber
+from umber import _args, _axes, _cell, _scale, _size, _theme, _ticks, _umber
 from umber._args import instance, integer, real
 from umber._axes import Axes, X, Y
 from umber._cell import Cell
@@ -13,6 +13,8 @@ from umber._enums import AUTO, Auto, ColorbarPosition, Legend, Share, SvgText
 from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
+from umber._size import TEXT_SIZE_HINT as _SIZE_HINT
+from umber._size import Size
 from umber._theme import Theme
 from umber._ticks import TickFormat
 
@@ -151,6 +153,7 @@ class Figure:
         *,
         position: ColorbarPosition | Auto = AUTO,
         format: TickFormat | Auto = AUTO,
+        size: Size = Size.AUTO,
     ) -> Self:
         """Set the label, position and tick format of every shared colorbar.
 
@@ -167,6 +170,10 @@ class Figure:
                 overrides the theme; only ``ALL`` accepts ``NONE`` to hide the bar.
             format: The tick format. ``AUTO`` follows the first color-mapped panel's y
                 tick format in each group's row-major order.
+
+            size: The label size only; colorbar ticks keep the theme's size. ``Size.AUTO``
+                follows the theme, ``Size.times(k)`` multiplies its scaled size, and
+                ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             This figure.
@@ -208,26 +215,33 @@ class Figure:
                     "use a TickFormat, or ub.AUTO for the y tick format.",
                 )
             )
+            instance(context, "size", size, Size, _SIZE_HINT)
             name = _args.text(context, "label", label)
             self._native.figure_colorbar(
-                name, placement, None if checked is None else _ticks.native(checked)
+                name,
+                placement,
+                None if checked is None else _ticks.native(checked),
+                _size.native(size),
             )
             return self
 
-    def title(self, text: str) -> Self:
+    def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the figure title, shown above every panel and the merged legend.
 
-        The figure title is 1.5 times the panel title size. Its alignment follows the
+        The default figure title is 1.5 times the panel title size. ``Size.times(k)``
+        follows that ratio; ``Size.pt(p)`` uses exactly p points. Alignment follows the
         theme's ``with_title_align()`` setting.
 
         Args:
             text: The title, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             This figure.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long or holds a lone surrogate.
 
         Example:
@@ -236,22 +250,27 @@ class Figure:
             >>> ax = fig.add_axes(col=0).title("North")
         """
         with api_call():
-            self._native.figure_title(_args.text("Figure.title()", "text", text))
+            context = "Figure.title()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.figure_title(_args.text(context, "text", text), _size.native(size))
             return self
 
-    def subtitle(self, text: str) -> Self:
+    def subtitle(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the figure subtitle, shown under its title and above every panel.
 
         Its alignment follows the figure title, as set by ``Theme.with_title_align()``.
 
         Args:
             text: The subtitle, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             This figure.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long or holds a lone surrogate.
 
         Example:
@@ -261,7 +280,10 @@ class Figure:
             True
         """
         with api_call():
-            self._native.figure_subtitle(_args.text("Figure.subtitle()", "text", text))
+            context = "Figure.subtitle()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.figure_subtitle(_args.text(context, "text", text), _size.native(size))
             return self
 
     def add_axes(
