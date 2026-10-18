@@ -1,11 +1,15 @@
-//! Automatic limits that fit whole bubble markers, outlines included, on the final plot.
+//! Automatic limits that fit whole bubble markers, outlines included, and the value labels at
+//! bar ends on the final plot.
 //!
-//! A bubble's extent is in points while an axis domain is in data units, and the plot size is
-//! known only once the layout is solved, so the final layout loop asks the fits again after
-//! every solve ([`BubbleFits::update`]). A fit starts from the axis's raw extent, the extent of
-//! the data and of any explicit tick positions as resolve sees it, and widens it to the smallest
-//! extent in which every bubble reaches no further than the plot edge at its share of the plot
-//! length. Resolve then pads that extent once (rounding it first on log axes), as it does any data extent.
+//! A bubble's extent, like a label's, is in points while an axis domain is in data units, and
+//! the plot size is known only once the layout is solved, so the final layout loop asks the fits
+//! again after every solve ([`BubbleFits::update`]). A bubble reaches as far on both sides of
+//! its centre; a bar's label reaches past the bar's end on one side only ([`EndReach`]), and is
+//! fitted as a bubble is, with no reach on the other side. A fit starts from the axis's raw
+//! extent, the extent of the data and of any explicit tick positions as resolve sees it, and
+//! widens it to the smallest extent in which every bubble reaches no further than the plot edge
+//! at its share of the plot length. Resolve then pads that extent once (rounding it first on log
+//! axes), as it does any data extent.
 //!
 //! Log-axis rounding, padding or a smaller plot after the solve can still leave a bubble past the plot
 //! edge. The fit is then made again from the same raw extent, never from the padded domain, so
@@ -21,7 +25,8 @@
 //! When the bubbles cannot all fit on an axis (a bubble reaches at least half the plot length,
 //! the fit leaves the supported numeric range, the layout cannot hold the fitted limits, or no
 //! fit settles within [`MAX_REFITS`] attempts), the axis keeps the limits of the data positions
-//! alone, as it would without bubble extents, and the plot clips the bubbles that overflow.
+//! alone, as it would without bubble extents, and the plot clips the bubbles that overflow. Bar
+//! labels that then do not fit fail the render ([`crate::draw::bar_labels`]).
 
 use crate::draw::marker_reach;
 use crate::layout::PlotSize;
@@ -95,16 +100,32 @@ impl Axis {
     }
 }
 
-/// One drawn bubble, as one axis sees it.
+/// How far a bar's value label reaches past the bar's value on the bar's value axis: the input
+/// of the fits for one label, which [`crate::draw::bar_labels`] measures.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EndReach {
+    /// The value axis.
+    pub axis: ValueAxis,
+    /// The bar's value.
+    pub value: f64,
+    /// How far the label reaches towards the axis's low end, in points; 0 for none.
+    pub low: f64,
+    /// How far the label reaches towards the axis's high end, in points; 0 for none.
+    pub high: f64,
+}
+
+/// One drawn bubble or bar label, as one axis sees it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Bubble {
-    /// The bubble's coordinate on this axis.
+    /// The bubble's coordinate on this axis, or the bar's value.
     value: f64,
-    /// How far the marker reaches from its centre along this axis, outline included, in points
-    /// (see [`marker_reach`]).
-    reach: f64,
-    /// The bubble's panel, in the order of [`Figure::panels`](crate::Figure::panels), whose plot
-    /// length it is measured against.
+    /// How far the marker reaches from its centre towards the low end of this axis, outline
+    /// included (see [`marker_reach`]), or the label past the bar's value, in points.
+    low: f64,
+    /// See `low`, towards the high end of this axis.
+    high: f64,
+    /// The panel, in the order of [`Figure::panels`](crate::Figure::panels), whose plot length
+    /// it is measured against.
     panel: usize,
 }
 
@@ -139,7 +160,7 @@ struct BubbleFit {
     /// The raw extent of the axis as a scale: the data and explicit tick positions, before
     /// rounding and padding, with a single value widened as resolve widens it.
     seed: ContinuousScale,
-    /// Every drawn bubble of the group.
+    /// Every drawn bubble and bar label of the group.
     bubbles: Vec<Bubble>,
     /// Where the fit stands.
     state: State,
@@ -147,19 +168,29 @@ struct BubbleFit {
 
 impl BubbleFit {
     /// The fit of `axis` with `limits`, whose group's members are `members`, each its panel
-    /// index and resolved marks. `None` when the axis has no drawn bubble or its raw extent has
-    /// no scale (a non-positive value on a log axis); such an axis has the limits of its data
-    /// positions.
+    /// index, resolved marks and bar label reaches. `None` when the axis has no drawn bubble nor
+    /// bar label or its raw extent has no scale (a non-positive value on a log axis); such an
+    /// axis has the limits of its data positions.
     fn new<'a, 'm: 'a>(
         axis: Axis,
         limits: &ContinuousLimits<'_>,
-        members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>])> + Clone,
+        members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>], &'a [EndReach])> + Clone,
     ) -> Option<BubbleFit> {
-        let bubbles = Self::drawn(axis, None, members.clone());
+        let mut bubbles = Self::drawn(axis, None, members.clone().map(|(i, marks, _)| (i, marks)));
+        bubbles.extend(members.clone().flat_map(|(panel, _, ends)| {
+            ends.iter()
+                .filter(move |end| end.axis == axis.which())
+                .map(move |end| Bubble {
+                    value: end.value,
+                    low: end.low,
+                    high: end.high,
+                    panel,
+                })
+        }));
         if bubbles.is_empty() {
             return None;
         }
-        let marks = members.flat_map(|(_, marks)| marks.iter());
+        let marks = members.flat_map(|(_, marks, _)| marks.iter());
         let data = resolve::axis_extent(marks, axis.which(), limits.transform);
         let raw = resolve::unrounded_extent(limits, data);
         let seed = ContinuousScale::from_extent(limits.transform, raw, CONTEXT).ok()?;
@@ -242,8 +273,8 @@ impl BubbleFit {
     fn contains(&self, scale: ContinuousScale, lengths: &[f64]) -> bool {
         self.bubbles.iter().all(|bubble| {
             let position = scale.normalize(bubble.value);
-            let share = bubble.reach / lengths[bubble.panel];
-            position >= share && position <= 1.0 - share
+            let length = lengths[bubble.panel];
+            position >= bubble.low / length && position <= 1.0 - bubble.high / length
         })
     }
 
@@ -298,13 +329,15 @@ impl BubbleFit {
     }
 
     /// The smallest extent holding the raw extent and every bubble, on plots of `lengths`, with
-    /// each reach measured against the larger of the extent's own span and `span`. `None` when a
-    /// bubble reaches at least half its plot length, so no extent holds it, or the extent leaves
-    /// the supported numeric range.
+    /// each reach measured against the larger of the extent's own span and `span`. `None` when
+    /// the furthest reach towards the low end and the furthest towards the high end together
+    /// take at least the plot length (for bubbles: a bubble reaches at least half its plot
+    /// length), so no extent holds them, or the extent leaves the supported numeric range.
     ///
     /// In the raw extent's normalized axis space (log space on a log axis), a bubble at `v`
-    /// whose reach is the share `a` of its plot length needs `lo <= v - a d` and `hi >= v + a d`,
-    /// where `d` is the larger of `hi - lo` and `span`. Against the extent's own span,
+    /// whose reaches are the shares `a` and `b` of its plot length needs `lo <= v - a d` and
+    /// `hi >= v + b d`, where `d` is the larger of `hi - lo` and `span`; a reach of 0 adds no
+    /// bound. Against the extent's own span,
     /// `d = max(v + a d) + max(-v + a d)`: both maxima are upper envelopes of lines in `d`, and
     /// sweeping their breakpoints finds the active pair in O(n log n), the raw extent's ends
     /// being the lines of slope 0. When that span is less than `span`, the bounds against `span`
@@ -320,21 +353,27 @@ impl BubbleFit {
             slope: 0.0,
             intercept: 0.0,
         }];
+        let slope = |reach: f64, panel: usize| (reach + PATH_ALLOWANCE) / lengths[panel];
         for bubble in &self.bubbles {
-            let slope = (bubble.reach + PATH_ALLOWANCE) / lengths[bubble.panel];
-            // A plot of no length gives a NaN slope.
-            if slope.is_nan() || 2.0 * slope >= 1.0 {
-                return None;
-            }
             let value = scale.normalize(bubble.value);
-            upper.push(Line {
-                slope,
-                intercept: value,
-            });
-            lower.push(Line {
-                slope,
-                intercept: -value,
-            });
+            if bubble.high > 0.0 {
+                upper.push(Line {
+                    slope: slope(bubble.high, bubble.panel),
+                    intercept: value,
+                });
+            }
+            if bubble.low > 0.0 {
+                lower.push(Line {
+                    slope: slope(bubble.low, bubble.panel),
+                    intercept: -value,
+                });
+            }
+        }
+        let steepest = |lines: &[Line]| lines.iter().map(|line| line.slope).fold(0.0, f64::max);
+        // A plot of no length gives a NaN slope, which `f64::max` would skip.
+        let any_nan = upper.iter().chain(&lower).any(|line| line.slope.is_nan());
+        if any_nan || steepest(&upper) + steepest(&lower) >= 1.0 {
+            return None;
         }
         let at = |lines: &[Line], d: f64| {
             lines
@@ -399,7 +438,8 @@ fn bubbles<'a>(
                 };
                 Some(Bubble {
                     value,
-                    reach,
+                    low: reach,
+                    high: reach,
                     panel,
                 })
             })
@@ -437,10 +477,16 @@ pub(crate) struct BubbleFits {
 }
 
 impl BubbleFits {
-    /// The fits of the panels whose resolved marks are `marks`, with the axis limits `limits`
-    /// and the share groups `groups`. No fit is made yet: every axis has the limits of its data
-    /// positions until the first [`update`](Self::update).
-    pub fn new(marks: &[&[ResolvedMark<'_>]], limits: &[Limits<'_>], groups: &ShareGroups) -> Self {
+    /// The fits of the panels whose resolved marks are `marks` and whose bar labels reach as
+    /// `ends` says, with the axis limits `limits` and the share groups `groups`. No fit is made
+    /// yet: every axis has the limits of its data positions until the first
+    /// [`update`](Self::update).
+    pub fn new(
+        marks: &[&[ResolvedMark<'_>]],
+        ends: &[Vec<EndReach>],
+        limits: &[Limits<'_>],
+        groups: &ShareGroups,
+    ) -> Self {
         let fits = (0..marks.len())
             .map(|i| {
                 Axis::BOTH.map(|axis| {
@@ -450,13 +496,13 @@ impl BubbleFits {
                     }
                     let members = (0..marks.len())
                         .filter(|j| keys[*j] == i)
-                        .map(|j| (j, marks[j]));
+                        .map(|j| (j, marks[j], ends[j].as_slice()));
                     match limits[i].axis(axis.which()) {
                         AxisLimits::Continuous(limits) if limits.explicit.is_none() => {
                             BubbleFit::new(axis, &limits, members)
                         }
                         AxisLimits::Time(limits) if limits.explicit.is_none() => {
-                            BubbleFit::time(axis, &limits, members)
+                            BubbleFit::time(axis, &limits, members.map(|(j, marks, _)| (j, marks)))
                         }
                         _ => None,
                     }
@@ -612,7 +658,8 @@ mod tests {
     fn bubble(value: f64, reach: f64) -> Bubble {
         Bubble {
             value,
-            reach,
+            low: reach,
+            high: reach,
             panel: 0,
         }
     }
@@ -675,7 +722,7 @@ mod tests {
         points.extend(
             fit.bubbles
                 .iter()
-                .map(|b| (b.value, (b.reach + PATH_ALLOWANCE) / 100.0)),
+                .map(|b| (b.value, (b.high + PATH_ALLOWANCE) / 100.0)),
         );
         let mut expected: f64 = 1.0;
         for &(a, ra) in &points {
@@ -757,6 +804,46 @@ mod tests {
         let expected = (-share(10.0, 80.0) * d, 10.0 + share(20.0, 80.0) * d);
         assert_close(f.extent().unwrap(), expected);
         assert!(expected.1 - expected.0 < d);
+    }
+
+    #[test]
+    fn a_one_sided_reach_widens_one_end_only() {
+        // A label 20 pt past the end of a bar at 10, over the raw extent 0 to 10: only the high
+        // end moves, to `10 + b d` with `d = hi`, so `hi = 10 / (1 - b)`.
+        let label = Bubble {
+            value: 10.0,
+            low: 0.0,
+            high: 20.0,
+            panel: 0,
+        };
+        let f = fit(Transform::Linear, (0.0, 10.0), vec![label]);
+        let (lo, hi) = f.solve(0.0, &[100.0]).unwrap();
+        assert_eq!(lo, 0.0);
+        assert!(
+            (hi - 10.0 / (1.0 - share(20.0, 100.0))).abs() < 1e-9,
+            "{hi}"
+        );
+        assert!(f.contains(linear(lo, hi), &[100.0]));
+        // Two one-sided reaches that together take the whole plot cannot fit.
+        let low = Bubble {
+            value: 0.0,
+            low: 50.0,
+            high: 0.0,
+            panel: 0,
+        };
+        let both = fit(
+            Transform::Linear,
+            (0.0, 10.0),
+            vec![
+                label,
+                Bubble {
+                    high: 50.0,
+                    ..label
+                },
+                low,
+            ],
+        );
+        assert_eq!(both.solve(0.0, &[100.0]), None);
     }
 
     #[test]

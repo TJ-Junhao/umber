@@ -156,8 +156,16 @@ fn filled(name: &str, theme: &Theme, color: Rgba) -> (Figure, Fill) {
             Fill::Histogram
         }
         "bar" => {
-            a.bar(vec!["A".into()], &[1.0], BarOptions { label, color: spec })
-                .unwrap();
+            a.bar(
+                vec!["A".into()],
+                &[1.0],
+                BarOptions {
+                    label,
+                    color: spec,
+                    ..BarOptions::default()
+                },
+            )
+            .unwrap();
             Fill::Solid
         }
         "box" => {

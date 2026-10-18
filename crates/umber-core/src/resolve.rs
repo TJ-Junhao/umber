@@ -5082,6 +5082,7 @@ mod tests {
         let color = |color: ColorSpec, label: &str| BarOptions {
             label: label.to_owned(),
             color,
+            ..BarOptions::default()
         };
         axes(&mut f)
             .line(cats(&["a"]), &[1.0], LineOptions::default())

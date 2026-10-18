@@ -11,7 +11,7 @@ use crate::geometry::Path;
 use crate::model::{BarGroupMark, BarMark, SeriesView};
 use crate::resolve::{AxisScale, ResolvedAxis};
 use crate::scene::{FillRule, Item, Paint};
-use crate::stacking::Stacks;
+use crate::stacking::{Segment, Stacks};
 use crate::{CategoryScale, Rgba, Theme};
 
 /// The share of its category band that a plain bar, a stack or a group of bars takes, centered
@@ -36,7 +36,7 @@ fn corner_radius(theme: &Theme) -> f64 {
 /// The range `(left, right)` across the bar, stack or group of category `index`, along the
 /// category axis in axis space: [`BAR_SHARE`] of the category's band, centered in it. On a
 /// category y axis `left` is the top.
-fn bar_span(categories: &CategoryScale, index: usize) -> (f64, f64) {
+pub(super) fn bar_span(categories: &CategoryScale, index: usize) -> (f64, f64) {
     let (start, end) = categories.band(index);
     let (center, half) = ((start + end) / 2.0, (end - start) * BAR_SHARE / 2.0);
     (center - half, center + half)
@@ -71,7 +71,7 @@ pub(super) fn group_slots(group: f64, count: usize, gap: f64) -> (f64, f64) {
 
 /// The [`BarFrame`] of bars `width` category axis units wide, rounded by the theme's corner
 /// radius, whose value axis is `values`.
-fn frame(context: &MarkContext<'_>, values: &ResolvedAxis, width: f64) -> BarFrame {
+pub(super) fn frame(context: &MarkContext<'_>, values: &ResolvedAxis, width: f64) -> BarFrame {
     let radius = corner_radius(context.theme);
     BarFrame::new(
         context.maps,
@@ -142,21 +142,46 @@ pub(super) fn grouped_items(
     let AxisScale::Category(categories) = &along.scale else {
         return;
     };
-    let (start, end) = bar_span(categories, 0);
-    let gap = context.maps.x.length(GROUP_GAP);
-    let (width, gap) = group_slots(end - start, series.len(), gap);
-    let bars = frame(context, values, width);
+    let slots = GroupSlots::new(context, categories, series.len());
+    let bars = frame(context, values, slots.width);
     for (index, i) in in_axis_order(categories, mark.categories()) {
-        let (group_left, _) = bar_span(categories, index);
         for (j, (view, color)) in series.iter().enumerate() {
             let Some(&height) = view.values().get(i) else {
                 continue;
             };
-            let left = group_left + j as f64 * (width + gap);
             let end = axis_value(values, height);
-            let outline = bars.outline((left, left + width), bars.base(), end, true);
+            let outline = bars.outline(slots.span(categories, index, j), bars.base(), end, true);
             push_bar(outline, *color, items);
         }
+    }
+}
+
+/// The bars of one group of grouped bars: their width and the gap between them, in category
+/// axis units (see [`group_slots`]).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GroupSlots {
+    /// The width of each bar.
+    pub(super) width: f64,
+    /// The gap between neighbouring bars.
+    gap: f64,
+}
+
+impl GroupSlots {
+    /// The slots of `count` bars in the span of a plain bar ([`BAR_SHARE`] of a band of
+    /// `categories`), [`GROUP_GAP`] apart in the frame of `context`.
+    pub(super) fn new(context: &MarkContext<'_>, categories: &CategoryScale, count: usize) -> Self {
+        let (start, end) = bar_span(categories, 0);
+        let gap = context.maps.x.length(GROUP_GAP);
+        let (width, gap) = group_slots(end - start, count, gap);
+        GroupSlots { width, gap }
+    }
+
+    /// The range `(left, right)` across bar `j` of the group of category `index`, in category
+    /// axis space; on a category y axis `left` is the top.
+    pub(super) fn span(self, categories: &CategoryScale, index: usize, j: usize) -> (f64, f64) {
+        let (group_left, _) = bar_span(categories, index);
+        let left = group_left + j as f64 * (self.width + self.gap);
+        (left, left + self.width)
     }
 }
 
@@ -184,27 +209,44 @@ pub(super) fn stacked_items(
     };
     let (left, right) = bar_span(categories, 0);
     let bars = frame(context, values, right - left);
-    let half_gap = context.maps.y.length(STACK_GAP / 2.0);
+    let half_gap = stack_half_gap(context);
     for (index, i) in in_axis_order(categories, mark.categories()) {
         let span = bar_span(categories, index);
         for (j, (_, color)) in series.iter().enumerate() {
             let Some(segment) = stacks.segment(i, j) else {
                 continue;
             };
-            let from = if segment.bottom == 0.0 {
-                bars.base()
-            } else {
-                axis_value(values, segment.bottom)
-            };
-            let to = axis_value(values, segment.top);
-            let inner = (segment.bottom != 0.0, !segment.outermost);
-            let Some((from, to)) = inset_segment(from, to, inner, half_gap) else {
+            let Some((from, to)) = segment_ends(&bars, values, segment, half_gap) else {
                 continue;
             };
             let outline = bars.outline(span, from, to, segment.outermost);
             push_bar(outline, *color, items);
         }
     }
+}
+
+/// Half of [`STACK_GAP`] in value axis units of the frame of `context`.
+pub(super) fn stack_half_gap(context: &MarkContext<'_>) -> f64 {
+    context.maps.y.length(STACK_GAP / 2.0)
+}
+
+/// The ends of the drawn stacked `segment` in value axis space (`values`), from its bottom to
+/// its top: a segment that starts at 0 starts at the base of `bars`, and each inner end is moved
+/// in by `half_gap` (see [`inset_segment`]). `None` when no height is left.
+pub(super) fn segment_ends(
+    bars: &BarFrame,
+    values: &ResolvedAxis,
+    segment: Segment,
+    half_gap: f64,
+) -> Option<(f64, f64)> {
+    let from = if segment.bottom == 0.0 {
+        bars.base()
+    } else {
+        axis_value(values, segment.bottom)
+    };
+    let to = axis_value(values, segment.top);
+    let inner = (segment.bottom != 0.0, !segment.outermost);
+    inset_segment(from, to, inner, half_gap)
 }
 
 /// The segment from `from` to `to` (value axis space) with each inner end, one shared with a

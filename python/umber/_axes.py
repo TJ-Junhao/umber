@@ -20,6 +20,7 @@ from umber._color import Color
 from umber._color_by import ColorBy, native_color_scale, native_point_color
 from umber._enums import (
     AUTO,
+    Align,
     Auto,
     ColorbarPosition,
     Dash,
@@ -105,6 +106,9 @@ _RENDER_HINT: Final = (
 _FORMAT_HINT: Final = (
     "use TickFormat.fixed(2), TickFormat.percent(), TickFormat.scientific() or TickFormat.AUTO."
 )
+_ALIGN_HINT: Final = _members_hint(Align)
+_AT_HINT: Final = "pass a tuple (x, y) of values of the axes, such as (2.0, 7.5)."
+_OFFSET_HINT: Final = "pass a tuple (dx, dy) of points, such as (0.0, 12.0)."
 
 
 @final
@@ -1002,6 +1006,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         label: str = "",
         color: Color = Color.AUTO,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+        size: Size = Size.AUTO,
     ) -> "Axes[X, Y]":
         """Add one bar per category, from the baseline to its height, along the category axis.
 
@@ -1017,6 +1024,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             heights: The bar heights, one per category.
             label: The name shown in the legend; an empty string leaves the bars out of it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+            annotate: Whether each bar shows its value just beyond its end, 3 pt away, in
+                the theme's text color at the tick label size. With automatic limits the
+                value axis grows so that every label fits inside the plot.
+            format: The format of the values shown by ``annotate``. ``AUTO`` follows the tick
+                format of the value axis; its automatic format writes every value with the
+                decimals the most precise of them needs.
+            size: The size of the values shown by ``annotate``. ``Size.AUTO`` is the tick
+                label size, ``Size.times(k)`` multiplies it after font scaling, and
+                ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
@@ -1026,15 +1042,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If the data cannot be plotted: lengths differ, a category repeats, a
                 height is infinite or not positive on a log axis, or neither axis is a
                 category axis.
-            StyleError: If ``label`` or a category name is too long.
-            UsageError: If both axes are category axes.
+            StyleError: If ``label`` or a category name is too long, or ``format`` is
+                ``TickFormat.iso()``. Rendering raises it when a value label does not fit
+                inside the plot: under explicit limits, or on a plot too small for it.
+            UsageError: If both axes are category axes, or ``format`` or ``size`` is given
+                without ``annotate``.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
             >>> ax = ax.bar(["North", "South", "East"], [3, 5, 2], label="2025")
             >>> rows = ub.Figure().add_axes(y=ub.Scale.category())
-            >>> rows = rows.bar(["North", "South", "East"], [3, 5, 2])
+            >>> rows = rows.bar(["North", "South", "East"], [3.5, 5.0, 2.25], annotate=True)
         """
         with api_call():
             context = "Axes.bar()"
@@ -1042,10 +1061,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "heights", heights)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
+            labels = _value_labels(context, annotate, format, size)
             category_names = names(context, "categories", categories)
             values = floats(context, "heights", heights)
             name = _args.text(context, "label", label)
-            self._native.bar(self._row, self._col, category_names, values, name, spec)
+            self._native.bar(self._row, self._col, category_names, values, name, spec, *labels)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -1153,6 +1173,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         self: "Axes[str, float] | Axes[float, str]",
         categories: Values[str],
         series: Sequence[Series],
+        *,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+        size: Size = Size.AUTO,
     ) -> "Axes[X, Y]":
         """Add grouped bars: in each category, one bar per series, side by side.
 
@@ -1164,18 +1188,24 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             categories: The category names, each at most once.
             series: One or more ``Series``, each with one value per category. The series
                 take their places in the group in this order.
+            annotate: Whether each bar shows its value just beyond its end, as in ``bar()``.
+            format: The format of the values shown by ``annotate``, as in ``bar()``.
+            size: The size of the values shown by ``annotate``, as in ``bar()``.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``series`` is not a sequence of ``Series``, or ``categories`` has
+            TypeError: If ``series`` is not a sequence of ``Series``, or another argument has
                 the wrong type.
             DataError: If the data cannot be plotted: ``series`` is empty, a series has a
                 different length, a category repeats, a height is infinite or not positive on
                 a log axis, or neither axis is a category axis.
-            StyleError: If a category name is too long.
-            UsageError: If both axes are category axes.
+            StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
+                Rendering raises it when a value label does not fit inside the plot, as in
+                ``bar()``.
+            UsageError: If both axes are category axes, or ``format`` or ``size`` is given
+                without ``annotate``.
 
         Example:
             >>> import umber as ub
@@ -1188,9 +1218,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             context = "Axes.grouped_bar()"
             check_names_type(context, "categories", categories)
+            labels = _value_labels(context, annotate, format, size)
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
-            self._native.grouped_bar(self._row, self._col, category_names, arguments)
+            self._native.grouped_bar(self._row, self._col, category_names, arguments, *labels)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -1198,6 +1229,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         self: "Axes[str, float] | Axes[float, str]",
         categories: Values[str],
         series: Sequence[Series],
+        *,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+        size: Size = Size.AUTO,
     ) -> "Axes[X, Y]":
         """Add stacked bars: in each category, the series stacked on one another.
 
@@ -1209,19 +1244,26 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             categories: The category names, each at most once.
             series: One or more ``Series``, each with one value per category. The first
                 series sits on the baseline.
+            annotate: Whether each segment shows its value, centred inside it, in black or
+                white, whichever contrasts more with the segment, at the tick label size.
+            format: The format of the values shown by ``annotate``, as in ``bar()``.
+            size: The size of the values shown by ``annotate``, as in ``bar()``.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``series`` is not a sequence of ``Series``, or ``categories`` has
+            TypeError: If ``series`` is not a sequence of ``Series``, or another argument has
                 the wrong type.
             DataError: If the data cannot be plotted: ``series`` is empty, a series has a
                 different length, a category repeats, a height is infinite or not positive on
                 a log axis, a stack exceeds the supported magnitude, or neither axis is a
                 category axis.
-            StyleError: If a category name is too long.
-            UsageError: If both axes are category axes.
+            StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
+                Rendering raises it when a value label does not fit inside its segment with
+                2 pt to spare on every side.
+            UsageError: If both axes are category axes, or ``format`` or ``size`` is given
+                without ``annotate``.
 
         Example:
             >>> import umber as ub
@@ -1234,9 +1276,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             context = "Axes.stacked_bar()"
             check_names_type(context, "categories", categories)
+            labels = _value_labels(context, annotate, format, size)
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
-            self._native.stacked_bar(self._row, self._col, category_names, arguments)
+            self._native.stacked_bar(self._row, self._col, category_names, arguments, *labels)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -2802,6 +2845,141 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.kde(self._row, self._col, data, width_of, name, spec, style.value, extent)
             return self
 
+    def text(
+        self,
+        text: str,
+        at: tuple[X, Y],
+        *,
+        align: Align = Align.LEFT,
+        size: Size = Size.AUTO,
+        color: Color = Color.AUTO,
+    ) -> Self:
+        """Write text at a data position.
+
+        The aligned edge of the text, or its centre, is at the point, and so is the vertical
+        centre of the text. The text is drawn over the marks and changes neither the limits nor
+        the layout; overlap with other elements is not checked.
+
+        Args:
+            text: The text, at least one and at most 1,000 characters.
+            at: The point ``(x, y)``, each in the values of its axis: a number on a linear or
+                log axis, a category name (the category's centre) on a category axis, a time
+                on a time axis.
+            align: Which edge of the text, or its centre, is at the point.
+            size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
+            color: The text color. ``Color.AUTO`` is the theme's text color.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, including ``at`` when it is not a
+                pair or a coordinate does not suit its axis.
+            DataError: If a coordinate is not finite, beyond 1e300 in magnitude or not
+                positive on a log axis. Rendering raises it when no mark of these axes has the
+                category of the point.
+            StyleError: If ``text`` is too long. Rendering raises it when the point lies
+                outside the limits or the text reaches past the figure.
+            UsageError: If ``text`` is empty.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().xlim(0, 10).ylim(0, 10)
+            >>> ax = ax.text("Target", (5, 5), align=ub.Align.CENTER)
+            >>> bars = ub.Figure().add_axes(x=ub.Scale.category()).bar(["Q1", "Q2"], [3, 5])
+            >>> bars = bars.text("Best", ("Q2", 5.5))
+        """
+        with api_call():
+            context = "Axes.text()"
+            _args.require_text(context, "text", text)
+            point = self._point(context, at)
+            style = instance(context, "align", align, Align, _ALIGN_HINT)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            spec = _color_argument(context, color)
+            content = _args.text(context, "text", text)
+            self._native.text(
+                self._row, self._col, content, point, style.value, _size.native(size), spec
+            )
+            return self
+
+    def annotate(
+        self,
+        text: str,
+        at: tuple[X, Y],
+        *,
+        offset: tuple[float, float] = (0.0, 12.0),
+        arrow: bool = True,
+        size: Size = Size.AUTO,
+        color: Color = Color.AUTO,
+    ) -> Self:
+        """Write text a fixed distance from a data position, with an arrow to it.
+
+        The text sits ``offset`` points from the point, so it looks the same at any data range
+        or figure size. The direction of the offset, in eight sectors of 45°, decides which
+        part of the text is at the offset point: going round from above, the bottom centre,
+        bottom left, middle left, top left, top centre, top right, middle right and bottom
+        right, so the text stays on that side and never covers the point. The arrow runs from
+        2 pt beyond the text to 3 pt short of the point, with a filled head, in the color of
+        the text. The annotation changes neither the limits nor the layout.
+
+        Args:
+            text: The text, at least one and at most 1,000 characters.
+            at: The point ``(x, y)``, given as for ``text()``.
+            offset: Where the text is from the point, in points: x to the right, y upwards.
+                It must not be ``(0, 0)``.
+            arrow: Whether an arrow runs from the text to the point; it needs at least 10 pt
+                between them.
+            size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
+            color: The color of the text and the arrow. ``Color.AUTO`` is the theme's text
+                color.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, as for ``text()``, or ``offset`` is
+                not a pair of numbers.
+            DataError: As for ``text()``.
+            StyleError: If ``text`` is too long, or ``offset`` is not finite or is zero.
+                Rendering raises it as for ``text()``, and when less than 10 pt lie between
+                the text and the point for an arrow.
+            UsageError: If ``text`` is empty.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().line([0, 1, 2, 3], [2, 5, 3, 4])
+            >>> ax = ax.annotate("Peak", (1, 5), offset=(24, 12))
+            >>> ax = ax.annotate("Dip", (2, 3), offset=(18, -22), arrow=False)
+        """
+        with api_call():
+            context = "Axes.annotate()"
+            _args.require_text(context, "text", text)
+            point = self._point(context, at)
+            shift = _offset_argument(context, offset)
+            drawn = _args.boolean(context, "arrow", arrow)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            spec = _color_argument(context, color)
+            content = _args.text(context, "text", text)
+            self._native.annotate(
+                self._row, self._col, content, point, shift, drawn, _size.native(size), spec
+            )
+            return self
+
+    def _point(self, context: str, at: object) -> tuple[float | str | int, float | str | int]:
+        """Check an ``at`` argument and return its coordinates in the native form of their axes.
+
+        A coordinate is a ``float`` on a numeric axis, a name on a category axis and a time in
+        microseconds on a time axis.
+        """
+        pair = _pair(at)
+        if pair is None:
+            message = f"at is {_shown_pair(at)}; at must be a pair (x, y)."
+            raise new_error(TypeError, context, message, parameter="at", hint=_AT_HINT)
+        x, y = pair
+        return _coordinate(context, self._x, x), _coordinate(context, self._y, y)
+
 
 def _render_argument(context: str, value: object) -> int | None:
     """Check a ``render`` argument and return its native form: ``None`` for ``AUTO``."""
@@ -2826,6 +3004,62 @@ def _color_argument(context: str, value: object) -> tuple[int, int, float]:
 def _size_argument(context: str, name: str, value: object) -> tuple[int, float]:
     """Check a ``width`` or ``size`` argument and return its native form."""
     return _size.native(instance(context, name, value, Size, _MARK_SIZE_HINT))
+
+
+def _value_labels(
+    context: str, annotate: object, format: object, size: object
+) -> tuple[bool, tuple[int, int, str, str] | None, tuple[int, float]]:
+    """Check the value label arguments of a bar method and return their native form.
+
+    A ``format`` of ``AUTO`` is ``None``: the tick format of the value axis.
+    """
+    shows = _args.boolean(context, "annotate", annotate)
+    checked = (
+        None
+        if format is AUTO
+        else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
+    )
+    return shows, checked, _size.native(instance(context, "size", size, Size, _SIZE_HINT))
+
+
+def _coordinate(context: str, scale: Scale[Any], value: object) -> float | str | int:
+    """Check one coordinate of ``at`` for an axis of ``scale`` and return its native form.
+
+    The form is a category name, a time in microseconds, or a ``float``.
+    """
+    if scale == _CATEGORY:
+        _args.require_text(context, "at", value)
+        return _args.checked_text(context, "at", "at", cast(str, value), DataError)
+    if scale == _TIME:
+        return _time.instant(context, "at", value)
+    return real(context, "at", value)
+
+
+def _offset_argument(context: str, value: object) -> tuple[float, float]:
+    """Check an ``offset`` argument, a pair of numbers, and return it as two floats."""
+    pair = _pair(value)
+    if pair is None:
+        message = f"offset is {_shown_pair(value)}; offset must be a pair (dx, dy) of points."
+        raise new_error(TypeError, context, message, parameter="offset", hint=_OFFSET_HINT)
+    dx, dy = pair
+    return real(context, "offset", dx), real(context, "offset", dy)
+
+
+def _pair(value: object) -> tuple[object, object] | None:
+    """Return ``value`` when it is a tuple of two items, else ``None``."""
+    if not isinstance(value, tuple):
+        return None
+    items = cast(tuple[object, ...], value)
+    if len(items) != 2:
+        return None
+    return items[0], items[1]
+
+
+def _shown_pair(value: object) -> str:
+    """Name a value that is not a pair in an error message: its type, or a tuple's length."""
+    if isinstance(value, tuple):
+        return f"a tuple of {len(cast(tuple[object, ...], value))} values"
+    return type_name(value)
 
 
 def _holds_edges(bins: object) -> bool:

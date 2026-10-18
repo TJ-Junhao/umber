@@ -4,7 +4,76 @@
 use std::sync::Arc;
 
 use super::validation::{check_bar_group, check_bars};
-use crate::{ColorSpec, Result, ScaleKind, Transform};
+use crate::{ColorSpec, Error, NumberStyle, Result, ScaleKind, SizeSpec, TickFormat, Transform};
+
+/// The values written on bars: whether each bar shows its value, and in which format and size.
+///
+/// A plain or grouped bar shows its value just beyond its end; a stacked segment shows its
+/// value inside, centred. Only bars with `annotate` take a format or a size.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{SizeSpec, TickFormat, ValueLabels};
+///
+/// let labels = ValueLabels::default();
+/// assert!(!labels.annotate);
+/// assert_eq!((labels.format, labels.size), (None, SizeSpec::Auto));
+/// let shown = ValueLabels { annotate: true, format: Some(TickFormat::fixed(1)?), ..labels };
+/// assert!(shown.annotate);
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ValueLabels {
+    /// Whether each bar shows its value.
+    pub annotate: bool,
+    /// The format of the values; `None` for the tick format of the value axis, which in turn
+    /// writes every value of the mark with the decimals the most precise of them needs.
+    pub format: Option<TickFormat>,
+    /// The text size; [`SizeSpec::Auto`] for the theme's tick label size.
+    pub size: SizeSpec,
+}
+
+impl ValueLabels {
+    /// Checks the labels under `context`: a format or a size without `annotate` would be dropped
+    /// (`Error::Usage`, parameter `format` or `size`), and the values are numbers, which
+    /// [`TickFormat::iso`] does not write (`Error::Style`, parameter `format`).
+    pub(super) fn check(&self, context: &'static str) -> Result<()> {
+        if !self.annotate {
+            let given = if self.format.is_some() {
+                Some("format")
+            } else if self.size != SizeSpec::Auto {
+                Some("size")
+            } else {
+                None
+            };
+            if let Some(parameter) = given {
+                return Err(Error::usage(
+                    context,
+                    format!(
+                        "{parameter} is given but annotate is false; only annotated bars show \
+                         their values."
+                    ),
+                )
+                .with_parameter(parameter)
+                .with_hint("pass annotate=True, or leave the label options out."));
+            }
+        }
+        if self
+            .format
+            .as_ref()
+            .is_some_and(|format| format.style() == NumberStyle::Iso)
+        {
+            return Err(Error::style(
+                context,
+                "format is TickFormat.iso(), which writes times; bar values are numbers.",
+            )
+            .with_parameter("format")
+            .with_hint("use TickFormat.AUTO or a number format such as TickFormat.fixed(1)."));
+        }
+        Ok(())
+    }
+}
 
 /// Options of a bar mark.
 ///
@@ -17,6 +86,7 @@ use crate::{ColorSpec, Result, ScaleKind, Transform};
 /// let options = BarOptions::default();
 /// assert_eq!(options.color, ColorSpec::AUTO);
 /// assert!(options.label.is_empty());
+/// assert!(!options.annotation.annotate);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct BarOptions {
@@ -24,6 +94,8 @@ pub struct BarOptions {
     pub label: String,
     /// The bar color.
     pub color: ColorSpec,
+    /// The values written on the bars; none by default.
+    pub annotation: ValueLabels,
 }
 
 impl Default for BarOptions {
@@ -31,6 +103,7 @@ impl Default for BarOptions {
         BarOptions {
             label: String::new(),
             color: ColorSpec::AUTO,
+            annotation: ValueLabels::default(),
         }
     }
 }
@@ -92,7 +165,8 @@ pub struct BarMark {
 
 impl BarMark {
     /// Validates `categories` and `heights` for axes with an x axis of scale kind `x_kind` and
-    /// a y axis of transform `y` (see [`check_bars`] for the checks and their order), then stores both unchanged, every
+    /// a y axis of transform `y` (see [`check_bars`] for the checks and their order), then the
+    /// value labels of `options` ([`ValueLabels::check`]), then stores both unchanged, every
     /// bit of the heights included; the stored heights share the allocation of `heights`. The
     /// first failure is the error, under `context`.
     pub(super) fn new(
@@ -104,6 +178,7 @@ impl BarMark {
         options: BarOptions,
     ) -> Result<BarMark> {
         check_bars(context, x_kind, y, &categories, &heights)?;
+        options.annotation.check(context)?;
         Ok(BarMark {
             categories: Arc::from(categories),
             heights,
@@ -280,19 +355,21 @@ struct StoredSeries {
 /// let mark = Mark::StackedBar(BarGroupMark {
 ///     categories: unreachable!(),
 ///     series: unreachable!(),
+///     annotation: unreachable!(),
 /// });
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct BarGroupMark {
     categories: Arc<[String]>,
     series: Arc<[StoredSeries]>,
+    annotation: ValueLabels,
 }
 
 impl BarGroupMark {
     /// Validates `categories` and `series` for axes with an x axis of scale kind `x_kind` and a
     /// y axis of transform `y`, arranged as `arrangement` (see [`check_bar_group`] for the checks and their order), then
-    /// stores them unchanged, every bit of the values included. The first failure is the
-    /// error, under `context`.
+    /// the value labels `annotation` ([`ValueLabels::check`]), then stores them unchanged, every
+    /// bit of the values included. The first failure is the error, under `context`.
     pub(super) fn new(
         context: &'static str,
         arrangement: Arrangement,
@@ -300,8 +377,10 @@ impl BarGroupMark {
         y: Transform,
         categories: Vec<String>,
         series: Vec<Series>,
+        annotation: ValueLabels,
     ) -> Result<BarGroupMark> {
         check_bar_group(context, arrangement, x_kind, y, &categories, &series)?;
+        annotation.check(context)?;
         let series: Vec<StoredSeries> = series
             .into_iter()
             .map(|s| StoredSeries {
@@ -313,7 +392,30 @@ impl BarGroupMark {
         Ok(BarGroupMark {
             categories: Arc::from(categories),
             series: Arc::from(series),
+            annotation,
         })
+    }
+
+    /// The values written on the bars.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{Mark, Series};
+    /// use umber_core::{Figure, ScaleKind, Theme, ValueLabels};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let series = Series { values: vec![2.0], ..Series::default() };
+    /// let labels = ValueLabels { annotate: true, ..ValueLabels::default() };
+    /// axes.stacked_bar_annotated(vec!["north".into()], vec![series], labels.clone())?;
+    /// let Some(Mark::StackedBar(stack)) = axes.marks().first() else { unreachable!() };
+    /// assert_eq!(stack.annotation(), &labels);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn annotation(&self) -> &ValueLabels {
+        &self.annotation
     }
 
     /// The categories, each appearing once.

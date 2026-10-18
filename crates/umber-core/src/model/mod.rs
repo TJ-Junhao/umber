@@ -8,6 +8,7 @@
 //! [`ColorSpec`](crate::ColorSpec)s; resolving them and drawing are later stages that read the
 //! model.
 
+mod annotation;
 mod axes;
 mod axes_mut;
 mod axis_data;
@@ -41,12 +42,13 @@ pub use violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 #[cfg(test)]
 mod share_tests;
 
+pub use annotation::{AnnotateOptions, Annotation, AnnotationPlacement, TextOptions};
 pub use axes::Axes;
 pub use axes_mut::{AxesMut, BaselineVisibility, ColorbarOptions};
 pub use axis_data::AxisData;
 pub(crate) use axis_data::SharedValues;
 pub use band::{BandMark, BandOptions};
-pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};
+pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView, ValueLabels};
 pub use box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use bubbles::{BubbleMark, BubbleOptions};
 pub use color_by::{CmapChoice, ColorBy, PointColor};
@@ -886,6 +888,7 @@ mod tests {
                 index: 2,
                 alpha: crate::Alpha::OPAQUE,
             },
+            ..BarOptions::default()
         };
         // Empty bars are allowed, and so is an empty category name.
         a.bar(Vec::new(), &[], BarOptions::default())

@@ -343,8 +343,8 @@ fn check_fit(context: &'static str, placed: &[(Label, &Cell)]) -> Result<()> {
 }
 
 /// Black or white, whichever has the higher WCAG 2 contrast ratio with the opaque `fill`;
-/// black on a tie.
-fn text_color_on(fill: Rgba) -> Rgba {
+/// black on a tie. Heatmap cells and stacked bar segments write their values in it.
+pub(super) fn text_color_on(fill: Rgba) -> Rgba {
     let luminance = relative_luminance(fill);
     if (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) {
         DARK_TEXT

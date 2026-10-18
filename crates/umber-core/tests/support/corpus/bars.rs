@@ -547,6 +547,7 @@ fn bar_errors() -> String {
             BarOptions {
                 label: "kept".into(),
                 color: ColorSpec::Fixed(umber_core::Rgba::opaque(1, 2, 3)),
+                ..BarOptions::default()
             },
         )
         .map(drop)

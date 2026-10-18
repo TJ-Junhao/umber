@@ -82,6 +82,9 @@
 //! - output: [`SvgText`];
 //! - event rows: [`EventsMark`] and [`EventsOptions`]; category points: [`StripMark`],
 //!   [`StripOptions`], [`SwarmMark`] and [`SwarmOptions`];
+//! - text at data positions: [`TextOptions`], [`AnnotateOptions`], the read-only
+//!   [`Annotation`] with its [`AnnotationPlacement`] that [`Axes::annotations`] returns, and the
+//!   [`ValueLabels`] written on bars;
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
 //!
 //! **Advanced Rust API.** Lower-level building blocks for direct Rust use. They are public and
@@ -158,6 +161,7 @@ pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, Result};
 pub use figure::StackedAreaMark;
+pub use figure::{AnnotateOptions, Annotation, AnnotationPlacement, TextOptions, ValueLabels};
 pub use figure::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
