@@ -48,7 +48,8 @@ fn font_cases(prefix: &str, font: Font, lib: &FontLibrary, sink: &mut impl FnMut
         labelled(&mut f, "Revenue and costs");
         f.title("Annual report");
         axes(&mut f)
-            .legend(LegendStyle::Direct)
+            .legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
+            .unwrap()
             .line(
                 AxisData::Numbers(vec![0.0, 1.0, 2.0]),
                 &[-1.0, 2.0, 4.0],

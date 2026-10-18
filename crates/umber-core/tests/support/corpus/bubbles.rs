@@ -67,7 +67,9 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             } else {
                 LegendStyle::Header
             };
-            axes(&mut f).legend_at(style, position).unwrap();
+            axes(&mut f)
+                .legend_at(style, position, umber_core::SizeSpec::Auto)
+                .unwrap();
             emit_scene(
                 &format!("bubbles-{position_name}-{name}"),
                 &f.to_scene(lib).unwrap(),

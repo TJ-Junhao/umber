@@ -50,12 +50,13 @@ fn panels<'a>(
         .panels()
         .zip(resolve::resolve_figure_marks(figure))
         .map(|(axes, marks)| {
-            let legend = if has_merged_legend(figure) {
+            let legend = if figure.has_merged_legend() {
                 let style = axes.legend_style().unwrap_or(theme.legend_style());
                 MeasuredLegend::measure(
                     theme,
                     &Legend::panel(style, &marks, &Limits::of(axes), true),
                     lib,
+                    figure.legend_size(),
                 )?
             } else {
                 measure_legend(theme, axes, &marks, lib)?
@@ -102,17 +103,11 @@ fn measure_legend<'a>(
 ) -> Result<MeasuredLegend<'a>> {
     let style = axes.legend_style().unwrap_or(theme.legend_style());
     let legend = Legend::new(style, marks, &Limits::of(axes));
-    let mut measured = MeasuredLegend::measure(theme, &legend, lib)?;
+    let mut measured = MeasuredLegend::measure(theme, &legend, lib, axes.legend_size())?;
     if style != crate::LegendStyle::Direct {
         measured.position = axes.legend_position().unwrap_or(theme.legend_position());
     }
     Ok(measured)
-}
-
-/// Whether row legends belong to the figure rather than its individual panels.
-fn has_merged_legend(figure: &Figure) -> bool {
-    let grid = figure.grid();
-    grid.rows() * grid.cols() > 1 && grid.legend() == crate::LegendMode::Merged
 }
 
 /// Measures the figure title, subtitle and merged legend once, before the grid solve.
@@ -125,9 +120,9 @@ fn figure_header(
     panels: &[Panel<'_>],
     lib: &SceneFonts<'_>,
 ) -> Result<FigureHeader> {
-    let legend = if has_merged_legend(figure) {
+    let legend = if figure.has_merged_legend() {
         let merged = Legend::merged(figure, panels.iter().map(|panel| panel.marks.as_slice()));
-        MeasuredLegend::measure(figure.theme(), &merged, lib)?
+        MeasuredLegend::measure(figure.theme(), &merged, lib, figure.legend_size())?
     } else {
         MeasuredLegend::default()
     };
@@ -225,6 +220,15 @@ impl Side {
             Side::X => x,
             Side::Y => y,
         }
+    }
+
+    /// Tick room for axis labels, distinct from the theme-sized colorbar labels.
+    fn axis_room<'a>(
+        self,
+        plot: PlotSize,
+        ticks: &'a [layout::TickFont<'a>; 2],
+    ) -> layout::TickRoom<'a> {
+        self.room(plot, &ticks[self.index()])
     }
 }
 
@@ -443,10 +447,20 @@ fn plan(
     let theme = figure.theme();
     let header = figure_header(figure, panels, lib)?;
     let tick = layout::TickFont::new(lib, theme)?;
+    let axis_ticks: Vec<_> = panels
+        .iter()
+        .map(|panel| {
+            Ok([
+                layout::TickFont::sized(lib, theme, panel.axes.xtick_size())?,
+                layout::TickFont::sized(lib, theme, panel.axes.ytick_size())?,
+            ])
+        })
+        .collect::<Result<_>>()?;
     let inputs: Vec<LayoutInput<'_>> = panels
         .iter()
         .map(|panel| LayoutInput {
             theme,
+            figure_title_size: figure.title_size(),
             axes: panel.axes,
             legend: &panel.legend,
             lib,
@@ -636,7 +650,7 @@ fn plan(
                         .collect();
                     if categories.iter().all(|(i, side, _)| {
                         let plot = side.group_plot(groups, *i, &plots, &show_labels);
-                        side.room(plot, &tick)
+                        side.axis_room(plot, &axis_ticks[*i])
                             .with_labels(labels)
                             .slack(side.ticks(&tried[*i]))
                             >= 0.0
@@ -662,8 +676,8 @@ fn plan(
             .map(|i| {
                 let x = Side::X.group_plot(groups, i, plots, &show_labels);
                 let y = Side::Y.group_plot(groups, i, plots, &show_labels);
-                let (x, _) = layout::tick_rooms(x, &tick, spacing);
-                let (_, y) = layout::tick_rooms(y, &tick, spacing);
+                let (x, _) = layout::tick_rooms(x, &axis_ticks[i][0], spacing);
+                let (_, y) = layout::tick_rooms(y, &axis_ticks[i][1], spacing);
                 [x.with_labels(labels), y.with_labels(labels)]
             })
             .collect::<Vec<_>>()
@@ -726,10 +740,11 @@ fn plan(
     let resolve_choices = |choices: &[[TickChoice; 3]], fits: &BubbleFits| {
         let rooms: Vec<_> = choices
             .iter()
-            .map(|c| {
+            .zip(&axis_ticks)
+            .map(|(c, ticks)| {
                 [
-                    c[0].room(Side::X, &tick).with_labels(labels),
-                    c[1].room(Side::Y, &tick).with_labels(labels),
+                    c[0].room(Side::X, &ticks[0]).with_labels(labels),
+                    c[1].room(Side::Y, &ticks[1]).with_labels(labels),
                 ]
             })
             .collect();
@@ -772,7 +787,7 @@ fn plan(
                     !show_labels[i][side.index()]
                         || !side.is_automatic(&limits[i])
                         || side
-                            .room(slot.plot.size(), &tick)
+                            .axis_room(slot.plot.size(), &axis_ticks[i])
                             .slack(side.ticks(&resolved[i]))
                             >= 0.0
                 })
@@ -828,7 +843,9 @@ fn plan(
                 if axis.is_category() {
                     continue;
                 }
-                if !side.is_automatic(&limits[i]) || side.room(plot, &tick).slack(ticks) >= 0.0 {
+                if !side.is_automatic(&limits[i])
+                    || side.axis_room(plot, &axis_ticks[i]).slack(ticks) >= 0.0
+                {
                     continue;
                 }
                 let choice = &mut next[i][side.index()];
@@ -873,7 +890,7 @@ fn plan(
             // A choice that crowds even on the plot it was made for is the fallback.
             let choice = &mut next[i][side.index()];
             if choice
-                .room(side, &tick)
+                .room(side, &axis_ticks[i][side.index()])
                 .slack(side.ticks(&tried_resolved[i]))
                 < 0.0
             {
@@ -933,7 +950,7 @@ fn plan(
                     .collect();
                 let plot = side.group_plot(groups, i, &plots, &show_labels);
                 let ticks = side.ticks(&resolved[i]);
-                if ticks.len() != 1 && side.room(plot, &tick).slack(ticks) >= 0.0 {
+                if ticks.len() != 1 && side.axis_room(plot, &axis_ticks[i]).slack(ticks) >= 0.0 {
                     continue;
                 }
                 let resolve::AxisLimits::Continuous(axis) = limits[i].axis(side.axis()) else {
@@ -1003,7 +1020,7 @@ fn plan(
                             !show_labels[j][side.index()]
                                 || !side.is_automatic(&limits[j])
                                 || side
-                                    .room(slot.plot.size(), &tick)
+                                    .axis_room(slot.plot.size(), &axis_ticks[j])
                                     .slack(side.ticks(&tried[j]))
                                     >= 0.0
                         })
@@ -1448,6 +1465,7 @@ pub(crate) fn with_layout_input<R>(
         .iter()
         .map(|panel| LayoutInput {
             theme: figure.theme(),
+            figure_title_size: figure.title_size(),
             axes: panel.axes,
             legend: &panel.legend,
             lib,
@@ -1524,6 +1542,8 @@ fn scene_with_labels(
     let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         draw::check_images(resolved, layout, &panel.marks, context)
+            .map_err(|err| in_cell(figure, panel.axes, err))?;
+        draw::check_points(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
         scene.push(draw::chrome(theme, layout));
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
@@ -1690,7 +1710,9 @@ mod tests {
     #[test]
     fn axes_none_hides_the_legend_under_a_header_theme() {
         let mut f = labelled_figure(Theme::pigment());
-        f.single_axes_mut().legend(LegendStyle::None);
+        f.single_axes_mut()
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap();
         assert_eq!(legend_and_groups(&f), (0, 2));
         // Without a legend the figure draws as if its marks were unlabelled.
         let mut unlabelled = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
@@ -1717,7 +1739,9 @@ mod tests {
             .with_legend_style(LegendStyle::None)
             .unwrap();
         let mut f = labelled_figure(none);
-        f.single_axes_mut().legend(LegendStyle::Header);
+        f.single_axes_mut()
+            .legend(LegendStyle::Header, crate::SizeSpec::Auto)
+            .unwrap();
         assert_eq!(legend_and_groups(&f), (2, 3));
         // The same scene as under a theme whose own style is the header row.
         let scene_of = |f: &Figure| scene(f, FontLibrary::global(), "Figure.to_scene()").unwrap();
@@ -1733,11 +1757,15 @@ mod tests {
         assert_eq!(legend_and_groups(&f), (0, 3));
         assert_eq!(direct(&f), 2);
         // The axes ask for the header row.
-        f.single_axes_mut().legend(LegendStyle::Header);
+        f.single_axes_mut()
+            .legend(LegendStyle::Header, crate::SizeSpec::Auto)
+            .unwrap();
         assert_eq!(legend_and_groups(&f), (2, 3));
         assert_eq!(direct(&f), 0);
         // Calling it again replaces the style.
-        f.single_axes_mut().legend(LegendStyle::None);
+        f.single_axes_mut()
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap();
         assert_eq!(legend_and_groups(&f), (0, 2));
         assert_eq!(direct(&f), 0);
     }
@@ -2235,6 +2263,7 @@ mod tests {
             .iter()
             .map(|panel| LayoutInput {
                 theme,
+                figure_title_size: figure.title_size(),
                 axes: panel.axes,
                 legend: &panel.legend,
                 lib,

@@ -97,6 +97,7 @@ mod corpus {
     pub mod colorbar;
     pub mod ecdf;
     pub mod error_bars;
+    pub mod events;
     pub mod font_file;
     pub mod grid;
     pub mod header;
@@ -117,6 +118,8 @@ mod corpus {
     pub mod stacked_area;
     pub mod stem;
     pub mod step;
+    pub mod strip;
+    pub mod text_size;
     pub mod ticks;
     pub mod time;
     pub mod violin;
@@ -192,6 +195,9 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::mesh::cases(&lib, &mut sink);
     corpus::heatmap::cases(&lib, &mut sink);
     corpus::mesh::raster_cases(&lib, &mut sink);
+    corpus::text_size::cases(&lib, &mut sink);
+    corpus::events::cases(&lib, &mut sink);
+    corpus::strip::cases(&lib, &mut sink);
     corpus::hist_variants::cases(&lib, &mut sink);
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);

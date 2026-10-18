@@ -79,7 +79,6 @@ baseline_file="${UMBER_REFACTOR_BASELINE:-$root/$baseline}"
 intended="crates/umber-core/tests/refactor/intended-changes.txt"
 driver_files=(
   crates/umber-core/examples/refactor_outputs.rs
-  crates/umber-core/tests/support/refactor_cases.rs
   crates/umber-core/tests/support/corpus/area.rs
   crates/umber-core/tests/support/corpus/band.rs
   crates/umber-core/tests/support/corpus/bars.rs
@@ -92,6 +91,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/colorbar.rs
   crates/umber-core/tests/support/corpus/ecdf.rs
   crates/umber-core/tests/support/corpus/error_bars.rs
+  crates/umber-core/tests/support/corpus/events.rs
   crates/umber-core/tests/support/corpus/font_file.rs
   crates/umber-core/tests/support/corpus/grid.rs
   crates/umber-core/tests/support/corpus/header.rs
@@ -112,10 +112,13 @@ driver_files=(
   crates/umber-core/tests/support/corpus/stacked_area.rs
   crates/umber-core/tests/support/corpus/stem.rs
   crates/umber-core/tests/support/corpus/step.rs
+  crates/umber-core/tests/support/corpus/strip.rs
+  crates/umber-core/tests/support/corpus/text_size.rs
   crates/umber-core/tests/support/corpus/ticks.rs
   crates/umber-core/tests/support/corpus/time.rs
   crates/umber-core/tests/support/corpus/violin.rs
   crates/umber-core/tests/support/corpus/x_end_label.rs
+  crates/umber-core/tests/support/refactor_cases.rs
 )
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/umber-refactor-gate.XXXXXX")"

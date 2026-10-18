@@ -406,11 +406,15 @@ fn system_variable_only_bold_fallback_renders_every_bold_role() {
         if role == 0 {
             axes.title("Heading");
         }
-        axes.legend(if role == 2 {
-            LegendStyle::Direct
-        } else {
-            LegendStyle::None
-        });
+        axes.legend(
+            if role == 2 {
+                LegendStyle::Direct
+            } else {
+                LegendStyle::None
+            },
+            crate::SizeSpec::Auto,
+        )
+        .unwrap();
         axes.line(
             AxisData::Numbers(vec![0.0, 1.0]),
             &[0.0, 1.0],

@@ -145,7 +145,8 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
     labelled(&mut f, "Cut lines");
     axes(&mut f)
-        .legend(LegendStyle::Direct)
+        .legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
+        .unwrap()
         .kde(&values, kde("Scott", Bandwidth::Scott))
         .unwrap()
         .kde(&values, kde("Wide", Bandwidth::Fixed(8.0)))

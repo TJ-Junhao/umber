@@ -2,7 +2,7 @@
 
 import datetime
 from collections.abc import Sequence
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -54,7 +54,7 @@ Example:
 """
 
 
-Time: TypeAlias = datetime.datetime | datetime.date | np.datetime64  # noqa: UP040
+type Time = datetime.datetime | datetime.date | np.datetime64
 """A time on a time axis: a ``datetime``, a ``date`` (midnight of that day) or a
 ``numpy.datetime64``. ``Values[Time]`` also takes NumPy ``datetime64`` arrays of any unit and
 naive pandas and polars datetime columns. Times carry no time zone.

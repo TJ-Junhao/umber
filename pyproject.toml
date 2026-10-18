@@ -77,6 +77,9 @@ src = ["python", "tests/python", "examples"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "D"]
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["umber._scale.Scale.linear"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
