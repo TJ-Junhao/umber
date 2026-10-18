@@ -48,6 +48,8 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
         "Step": [("POST", 0), ("PRE", 1), ("MID", 2)],
         "ColorbarPosition": [("RIGHT", 0), ("BOTTOM", 1), ("NONE", 2)],
         "Render": [("VECTOR", 0), ("RASTER", 1)],
+        "Hist": [("BARS", 0), ("STEP", 1), ("STACKED", 2)],
+        "Stat": [("COUNT", 0), ("FRACTION", 1), ("DENSITY", 2)],
     }
 
 
@@ -67,6 +69,8 @@ def test_enum_members_keys_are_the_bound_enum_names() -> None:
         "Step",
         "ColorbarPosition",
         "Render",
+        "Hist",
+        "Stat",
     }
 
 

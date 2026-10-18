@@ -33,7 +33,7 @@ fn input_errors() -> String {
             a.hist(
                 &[1.0, 2.0],
                 HistOptions {
-                    bins,
+                    bins: umber_core::Bins::Count(bins),
                     ..HistOptions::default()
                 },
             )
@@ -44,7 +44,7 @@ fn input_errors() -> String {
         a.hist(
             &[f64::INFINITY],
             HistOptions {
-                bins: -1,
+                bins: umber_core::Bins::Count(-1),
                 ..HistOptions::default()
             },
         )
@@ -55,7 +55,7 @@ fn input_errors() -> String {
         a.hist(
             &[1.0],
             HistOptions {
-                bins: -1,
+                bins: umber_core::Bins::Count(-1),
                 ..HistOptions::default()
             },
         )

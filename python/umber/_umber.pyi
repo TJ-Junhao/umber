@@ -52,6 +52,9 @@ __all__ = [
     "__version__",
     "box_stats",
     "kde_scott",
+    "scott_bandwidth",
+    "kde_curve",
+    "ecdf_steps",
     "check_alpha",
     "check_log_base",
     "check_palette_index",
@@ -129,6 +132,18 @@ def box_stats(
 
 # Test hook: 128 (position, density) pairs, or None below two distinct finite samples.
 def kde_scott(values: _FloatArray) -> list[tuple[float, float]] | None: ...
+
+# Test hook: Scott's bandwidth in data units, or None below two distinct finite samples.
+def scott_bandwidth(values: _FloatArray) -> float | None: ...
+
+# Test hook: `points` (position, density) pairs from `start` to `end`, the density in data units,
+# or None without a finite sample or below two points.
+def kde_curve(
+    values: _FloatArray, bandwidth: float, start: float, end: float, points: int
+) -> list[tuple[float, float]] | None: ...
+
+# Test hook: the x and y of the ECDF's post step line, NaN left out.
+def ecdf_steps(values: _FloatArray, complementary: bool) -> tuple[list[float], list[float]]: ...
 
 @final
 class Cmap:
@@ -377,7 +392,16 @@ class Figure:
         self, row: int, col: int, x: _FloatArray, series: list[_SeriesArg]
     ) -> None: ...
     def hist(
-        self, row: int, col: int, values: _FloatArray, bins: int, label: str, color: _ColorArg
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray,
+        bins: int | _FloatArray,
+        style: int,
+        cumulative: bool,
+        stat: int,
+        label: str,
+        color: _ColorArg,
     ) -> None: ...
     def mesh(
         self,
@@ -595,4 +619,45 @@ class Figure:
         label: str,
         color: _ColorArg,
         size: _SizeArg,
+    ) -> None: ...
+    def grouped_hist(
+        self,
+        row: int,
+        col: int,
+        series: list[_SeriesArg],
+        bins: int | _FloatArray,
+        style: int,
+        cumulative: bool,
+        stat: int,
+    ) -> None: ...
+    def ecdf(
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray | _TimeArray,
+        complementary: bool,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def kde(
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray,
+        bandwidth: float | None,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_kde(
+        self,
+        row: int,
+        col: int,
+        series: list[_SeriesArg],
+        bandwidth: float | None,
+        dash: int,
+        width: _SizeArg,
     ) -> None: ...

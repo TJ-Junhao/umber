@@ -16,12 +16,14 @@ mod bar;
 mod box_plot;
 mod bubbles;
 mod color_by;
+mod ecdf;
 mod error_bars;
 mod events;
 mod figure;
 mod grid;
 mod heatmap;
 mod hist;
+mod kde;
 mod mark;
 mod mesh;
 mod render;
@@ -48,12 +50,16 @@ pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView};
 pub use box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use bubbles::{BubbleMark, BubbleOptions};
 pub use color_by::{CmapChoice, ColorBy, PointColor};
+pub use ecdf::{EcdfMark, EcdfOptions};
 pub use error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use events::{EventsMark, EventsOptions};
 pub use figure::Figure;
 pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement, Share};
 pub use heatmap::{HeatmapMark, HeatmapOptions};
-pub use hist::{HistMark, HistOptions};
+pub use hist::{
+    Bins, GroupedHistOptions, HistGroupMark, HistMark, HistOptions, HistStat, HistStyle,
+};
+pub use kde::{Bandwidth, GroupedKdeOptions, KdeMark, KdeOptions};
 pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
 pub(crate) use mesh::Edges;
 pub use mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
@@ -1121,7 +1127,7 @@ mod tests {
 
     fn hist(a: &mut AxesMut<'_>, values: &[f64], bins: i64) -> Result<()> {
         let options = HistOptions {
-            bins,
+            bins: crate::Bins::Count(bins),
             ..HistOptions::default()
         };
         a.hist(values, options).map(|_| ())
@@ -1236,9 +1242,10 @@ mod tests {
         let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         let values = [-0.0, f64::from_bits(0x7ff8_0000_0000_0001), 2.5, 1e300];
         let options = HistOptions {
-            bins: 7,
+            bins: crate::Bins::Count(7),
             label: "latency".to_owned(),
             color: crate::ColorSpec::Fixed(crate::Rgba::opaque(1, 2, 3)),
+            ..HistOptions::default()
         };
         // Empty and all-NaN values are allowed.
         a.hist(&[], HistOptions::default())

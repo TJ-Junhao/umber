@@ -25,7 +25,7 @@
 
 use crate::cmap::Cmap;
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyInt};
 use umber_core::HeatmapOptions;
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
@@ -33,6 +33,10 @@ use umber_core::{
     RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
 use umber_core::{AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
+use umber_core::{
+    Bandwidth, Bins, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistStat, HistStyle,
+    KdeOptions,
+};
 use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };
@@ -90,6 +94,19 @@ fn cell_colors(
         }),
         transform,
     ))
+}
+
+/// The bins of a histogram: an int is a bin count, a float64 buffer the edges.
+fn bins_arg(bins: &Bound<'_, PyAny>) -> PyResult<Bins> {
+    if bins.is_instance_of::<PyInt>() {
+        return Ok(Bins::Count(bins.extract()?));
+    }
+    Ok(Bins::Edges(floats(bins)?))
+}
+
+/// The bandwidth of a kernel density: `None` is the Python facade's `AUTO`, Scott's rule.
+fn bandwidth_arg(bandwidth: Option<f64>) -> Bandwidth {
+    bandwidth.map_or(Bandwidth::Scott, Bandwidth::Fixed)
 }
 
 /// The grid of `rows × cols` cells.
@@ -743,19 +760,26 @@ impl Figure {
             .map_err(core_error)
     }
 
-    /// Adds a histogram of `values` in `bins` bins.
+    /// Adds a histogram of `values` in `bins`, an int bin count or a float64 buffer of edges,
+    /// drawn in `style` (a `Hist` value) with the statistic `stat` (a `Stat` value).
     fn hist(
         &mut self,
         row: i64,
         col: i64,
         values: &Bound<'_, PyAny>,
-        bins: i64,
+        bins: &Bound<'_, PyAny>,
+        style: i64,
+        cumulative: bool,
+        stat: i64,
         label: String,
         color: ColorArg,
     ) -> PyResult<()> {
         let values = shared_floats(values)?;
         let options = HistOptions {
-            bins,
+            bins: bins_arg(bins)?,
+            style: enum_value::<HistStyle>(style)?,
+            cumulative,
+            stat: enum_value::<HistStat>(stat)?,
             label,
             color: color_spec(color)?,
             ..Default::default()
@@ -1472,6 +1496,108 @@ impl Figure {
         };
         self.axes(row, col)?
             .swarm(categories, groups, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+    /// Adds a histogram of several series sharing their `bins`, drawn in `style` (a `Hist`
+    /// value) with the statistic `stat` (a `Stat` value).
+    fn grouped_hist(
+        &mut self,
+        row: i64,
+        col: i64,
+        series: SeriesArgs<'_>,
+        bins: &Bound<'_, PyAny>,
+        style: i64,
+        cumulative: bool,
+        stat: i64,
+    ) -> PyResult<()> {
+        let options = GroupedHistOptions {
+            bins: bins_arg(bins)?,
+            style: enum_value::<HistStyle>(style)?,
+            cumulative,
+            stat: enum_value::<HistStat>(stat)?,
+            ..Default::default()
+        };
+        let series = Self::series(series)?;
+        self.axes(row, col)?
+            .grouped_hist(series, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds the ECDF of `values`: a float64 buffer of numbers, or an int64 buffer of times.
+    fn ecdf(
+        &mut self,
+        row: i64,
+        col: i64,
+        values: &Bound<'_, PyAny>,
+        complementary: bool,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let values = series_data("Axes.ecdf()", "values", values)?;
+        let options = EcdfOptions {
+            complementary,
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .ecdf(values, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds the kernel density line of `values`; a `bandwidth` of `None` is Scott's rule.
+    fn kde(
+        &mut self,
+        row: i64,
+        col: i64,
+        values: &Bound<'_, PyAny>,
+        bandwidth: Option<f64>,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let values = floats(values)?;
+        let options = KdeOptions {
+            bandwidth: bandwidth_arg(bandwidth),
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .kde(&values, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds one kernel density line per series; a `bandwidth` of `None` is Scott's rule.
+    fn grouped_kde(
+        &mut self,
+        row: i64,
+        col: i64,
+        series: SeriesArgs<'_>,
+        bandwidth: Option<f64>,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let options = GroupedKdeOptions {
+            bandwidth: bandwidth_arg(bandwidth),
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+            ..Default::default()
+        };
+        let series = Self::series(series)?;
+        self.axes(row, col)?
+            .grouped_kde(series, options)
             .map(drop)
             .map_err(core_error)
     }

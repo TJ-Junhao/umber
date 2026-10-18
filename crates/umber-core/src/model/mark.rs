@@ -252,12 +252,20 @@ pub enum Mark {
     Strip(super::StripMark),
     /// Circular samples packed without overlap within their category bands.
     Swarm(super::SwarmMark),
+    /// Several series of values counted in shared bins, drawn as outlines or stacked bars;
+    /// NaN is ignored.
+    GroupedHist(super::hist::HistGroupMark),
+    /// The empirical cumulative distribution of the values, as a step line from 0 to 1 (or from
+    /// 1 to 0); NaN is left out.
+    Ecdf(super::ecdf::EcdfMark),
+    /// The Gaussian kernel density of the values, as a line with area 1; NaN is left out.
+    Kde(super::kde::KdeMark),
 }
 
 impl Mark {
     /// A line through a validated series.
     pub(super) fn line(series: XySeries, options: LineOptions) -> Mark {
-        Mark::Line(LineMark { series, options })
+        Mark::Line(LineMark::new(series, options))
     }
 
     /// Markers at the points of a validated series.
@@ -302,6 +310,7 @@ impl Mark {
             | Mark::Stem(_) => return None,
             Mark::Heatmap(mark) => return Some(mark.color_scale()),
             Mark::Events(_) | Mark::Strip(_) | Mark::Swarm(_) => return None,
+            Mark::GroupedHist(_) | Mark::Ecdf(_) | Mark::Kde(_) => return None,
         };
         match color {
             PointColor::Uniform(_) => None,
@@ -352,6 +361,11 @@ pub struct LineMark {
 }
 
 impl LineMark {
+    /// A line mark over a validated series.
+    pub(super) fn new(series: XySeries, options: LineOptions) -> LineMark {
+        LineMark { series, options }
+    }
+
     /// The x values.
     #[must_use]
     pub fn x(&self) -> &AxisData {

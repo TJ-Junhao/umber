@@ -40,6 +40,42 @@ pub(crate) fn kde_scott(values: &Bound<'_, PyAny>) -> PyResult<Option<DensityGri
     Ok(stats::kde_scott(&crate::values::floats(values)?, 128))
 }
 
+/// Computes Scott's bandwidth in data units from a float64 buffer for tests, not the public
+/// Python API: `None` for fewer than two distinct finite values.
+#[pyfunction]
+pub(crate) fn scott_bandwidth(values: &Bound<'_, PyAny>) -> PyResult<Option<f64>> {
+    Ok(stats::scott_bandwidth(&crate::values::floats(values)?))
+}
+
+/// Computes the kernel density in data units of a float64 buffer with `bandwidth`, at `points`
+/// positions from `start` to `end`, for tests, not the public Python API.
+#[pyfunction]
+pub(crate) fn kde_curve(
+    values: &Bound<'_, PyAny>,
+    bandwidth: f64,
+    start: f64,
+    end: f64,
+    points: usize,
+) -> PyResult<Option<DensityGrid>> {
+    let values = crate::values::floats(values)?;
+    Ok(stats::kde_curve(&values, bandwidth, (start, end), points))
+}
+
+/// The ECDF steps of the values of a float64 buffer, NaN left out, for tests, not the public
+/// Python API: the x and y of a step line that holds each level up to the next point.
+#[pyfunction]
+pub(crate) fn ecdf_steps(
+    values: &Bound<'_, PyAny>,
+    complementary: bool,
+) -> PyResult<(Vec<f64>, Vec<f64>)> {
+    let mut sorted: Vec<f64> = crate::values::floats(values)?
+        .into_iter()
+        .filter(|v| !v.is_nan())
+        .collect();
+    sorted.sort_unstable_by(f64::total_cmp);
+    Ok(stats::ecdf_steps(&sorted, complementary))
+}
+
 /// Runs `f` with the embedded interpreter attached, one test at a time, so tests that change
 /// module state cannot interleave.
 ///

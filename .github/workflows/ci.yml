@@ -108,6 +108,9 @@ jobs:
       - run: uv run mypy
       - run: uv run python -m mypy.stubtest umber._umber
       - run: uv run pytest -q
+      - name: Check generated reference and repository copy
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: uv run python scripts/gen_skill.py --check
       # The binding's unit tests embed this job's interpreter and import the package built above.
       # The test binary links the interpreter's shared library, so the loader must find this
       # interpreter's copy first: LD_LIBRARY_PATH on Linux, PATH on Windows.
@@ -122,7 +125,27 @@ jobs:
           uv run cargo test -p umber-py --locked
       - name: Build release dists without local paths
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
-        run: scripts/release/build-dists.sh
+        run: |
+          scripts/release/build-dists.sh
+          uv run python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          source = Path("python/umber/_skill/umber")
+          expected = {path.relative_to(Path("python")).as_posix(): path.read_bytes()
+                      for path in source.rglob("*") if path.is_file()}
+          assert "umber/_skill/umber/SKILL.md" in expected
+          assert "umber/_skill/umber/references/api.md" in expected
+          wheels = sorted(Path("dist").glob("*.whl"))
+          assert wheels, "No wheel was built."
+          for wheel in wheels:
+              with ZipFile(wheel) as archive:
+                  actual = {name: archive.read(name) for name in archive.namelist()
+                            if name.startswith("umber/_skill/umber/") and not name.endswith("/")}
+                  assert actual == expected, wheel
+                  for name in sorted(actual):
+                      print(f"{wheel.name}: {name}")
+          PY
 
   # Free-threaded CPython: cp314t on 3.14t, abi3t on 3.15t. polars-runtime-32 has only
   # abi3 wheels, so polars and its two test modules are excluded on both interpreters.

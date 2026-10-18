@@ -56,12 +56,15 @@
 //!   position, [`StemOptions`], [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of
 //!   a vertical line, [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
 //!   [`BoxOptions`], [`ViolinOptions`] and [`Distribution`], [`BarOptions`], [`Series`],
-//!   [`HistOptions`] with its bin limit [`MAX_BINS`] and [`HeatmapOptions`], and the
+//!   [`HistOptions`] with its [`Bins`], bin limit [`MAX_BINS`], [`HistStyle`] and [`HistStat`],
+//!   [`GroupedHistOptions`], [`EcdfOptions`], [`KdeOptions`] and [`GroupedKdeOptions`] with
+//!   their [`Bandwidth`], and [`HeatmapOptions`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`BubbleMark`], [`AreaMark`],
 //!   [`StackedAreaMark`], [`StepMark`], [`StemMark`], [`HLineMark`], [`VLineMark`], [`SpanMark`],
 //!   [`BarMark`], [`BarGroupMark`], [`SeriesView`], [`BoxMark`], [`BoxGroupMark`],
 //!   [`ViolinMark`], [`ViolinGroupMark`], [`DistributionView`], [`BandMark`], [`ErrorBarMark`],
-//!   [`HistMark`] and [`HeatmapMark`] that [`Axes::marks`] returns;
+//!   [`HistMark`], [`HistGroupMark`], [`EcdfMark`], [`KdeMark`] and [`HeatmapMark`] that
+//!   [`Axes::marks`] returns;
 //! - numeric cells: [`MeshOptions`], [`Hist2dOptions`] and [`HexbinOptions`], with the
 //!   read-only [`MeshMark`], [`Hist2dMark`] and [`HexbinMark`] payloads of [`Mark`], and
 //!   [`Render`], which draws the cells of heatmaps, 2-D histograms and meshes as vector shapes
@@ -162,6 +165,10 @@ pub use figure::{
 };
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};
+pub use figure::{
+    Bandwidth, Bins, EcdfMark, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistGroupMark,
+    HistStat, HistStyle, KdeMark, KdeOptions,
+};
 pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{CmapChoice, ColorBy, PointColor};

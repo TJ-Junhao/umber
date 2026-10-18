@@ -31,6 +31,10 @@ pub use crate::model::{
 };
 pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use crate::model::{BandMark, BandOptions};
+pub use crate::model::{
+    Bandwidth, Bins, EcdfMark, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistGroupMark,
+    HistStat, HistStyle, KdeMark, KdeOptions,
+};
 pub use crate::model::{BaselineVisibility, StackedAreaMark};
 pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use crate::model::{BubbleMark, BubbleOptions};

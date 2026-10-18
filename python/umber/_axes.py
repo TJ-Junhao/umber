@@ -1,5 +1,6 @@
 """``Axes``: the plot area of a figure, with its marks, texts, limits and legend."""
 
+import numbers
 from collections.abc import Sequence
 from enum import Enum
 from operator import attrgetter
@@ -22,10 +23,12 @@ from umber._enums import (
     Auto,
     ColorbarPosition,
     Dash,
+    Hist,
     LegendPosition,
     LegendStyle,
     Marker,
     Render,
+    Stat,
     Step,
 )
 from umber._errors import DataError, StyleError, UmberError, UsageError, details, new_error
@@ -85,6 +88,9 @@ def _members_hint(cls: type[Enum]) -> str:
 _DASH_HINT: Final = _members_hint(Dash)
 _MARKER_HINT: Final = _members_hint(Marker)
 _STEP_HINT: Final = _members_hint(Step)
+_HIST_HINT: Final = _members_hint(Hist)
+_STAT_HINT: Final = _members_hint(Stat)
+_BANDWIDTH_HINT: Final = "pass a bandwidth in data units greater than 0, or ub.AUTO."
 _SIZE_HINT: Final = (
     "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
 )
@@ -1245,19 +1251,33 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         self: "Axes[float, float]",
         values: Values[float],
         *,
-        bins: int = 30,
+        bins: int | Values[float] = 30,
+        style: Hist = Hist.BARS,
+        cumulative: bool = False,
+        stat: Stat = Stat.COUNT,
         label: str = "",
         color: Color = Color.AUTO,
     ) -> "Axes[float, float]":
-        """Add a histogram: the count of ``values`` in equal-width bins over their range.
+        """Add a histogram: the values counted in bins, one bar per bin.
 
-        NaN values are left out of the counts. The x axis must be linear. The baseline is
-        drawn at zero, or at the lower edge when zero is out of range, even alongside other
-        marks.
+        ``bins`` is a number of equal-width bins over the range of the values, or the bin
+        edges. Bins include their low edge; the last also includes its high edge. NaN values
+        are left out of the counts. ``stat`` sets what each bar shows: the count of its bin,
+        the fraction of all values (the bars sum to 1), or the density (the fraction over the
+        bin's width, so the bars have an area of 1). With ``cumulative=True`` each bar adds up
+        the bins up to its own, so the last shows the total, or 1 for fractions. The x axis must
+        be linear. The baseline is drawn at zero, or at the lower edge when zero is out of
+        range, even alongside other marks.
 
         Args:
             values: The values to count.
-            bins: The number of bins, from 1 to ``MAX_BINS``.
+            bins: The number of equal-width bins, from 1 to ``MAX_BINS``, or the bin edges: at
+                least two, increasing, holding every finite value.
+            style: How the bins are drawn: ``Hist.BARS`` fills one bar per bin, ``Hist.STEP``
+                draws only their outline, as one line. ``Hist.STACKED`` stacks the bars of
+                groups; for one set of values it draws the same bars as ``Hist.BARS``.
+            cumulative: Whether each bar adds up every bin up to its own, from the left.
+            stat: What each bar shows: ``Stat.COUNT``, ``Stat.FRACTION`` or ``Stat.DENSITY``.
             label: The name shown in the legend; an empty string leaves the histogram out of
                 it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
@@ -1267,24 +1287,51 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If a value is infinite, or the x axis is a category axis.
-            StyleError: If ``bins`` is out of range, or ``label`` is too long.
-            UsageError: If the x axis is a log axis.
+            DataError: If a value is infinite, the edges are fewer than two, not finite or not
+                increasing, finite values lie outside the edges, or the x axis is a category
+                axis.
+            StyleError: If the number of bins is out of range, or ``label`` is too long.
+            UsageError: If the x axis is a log axis, or ``cumulative=True`` comes with
+                ``Stat.DENSITY``, whose densities do not add up.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.hist([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bins=4, label="Sizes")
+            >>> edges = ub.Figure().add_axes()
+            >>> edges = edges.hist([0.2, 1.5, 1.7, 4.0], bins=[0, 1, 2, 5], stat=ub.Stat.DENSITY)
+            >>> runs = ub.Figure().add_axes()
+            >>> runs = runs.hist([3.0, 1.0, 2.0], cumulative=True, stat=ub.Stat.FRACTION)
+            >>> outline = ub.Figure().add_axes().hist([1.0, 2.0, 2.0], style=ub.Hist.STEP)
         """
         with api_call():
             context = "Axes.hist()"
             check_floats_type(context, "values", values)
-            count = integer(context, "bins", bins)
+            edges = _holds_edges(bins)
+            count = 0
+            if edges:
+                check_floats_type(context, "bins", bins)
+            else:
+                count = integer(context, "bins", bins)
+            drawn = instance(context, "style", style, Hist, _HIST_HINT)
+            running = _args.boolean(context, "cumulative", cumulative)
+            shown = instance(context, "stat", stat, Stat, _STAT_HINT)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             data = floats(context, "values", values)
+            native_bins = floats(context, "bins", bins) if edges else count
             name = _args.text(context, "label", label)
-            self._native.hist(self._row, self._col, data, count, name, spec)
+            self._native.hist(
+                self._row,
+                self._col,
+                data,
+                native_bins,
+                drawn.value,
+                running,
+                shown.value,
+                name,
+                spec,
+            )
             return self
 
     def mesh(
@@ -2525,6 +2572,135 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.swarm(self._row, self._col, category_names, values, name, paint, extent)
             return cast("Axes[X, Y]", self)
 
+    def ecdf(
+        self: SXF,
+        values: Values[X],
+        *,
+        complementary: bool = False,
+        label: str = "",
+        color: Color = Color.AUTO,
+        dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
+    ) -> SXF:
+        """Add the empirical cumulative distribution (ECDF) of ``values``, as a step line.
+
+        At each distinct value, from the smallest, the line steps up to the fraction of the
+        values at or below it: from 0 at the smallest value to 1 at the largest. With
+        ``complementary=True`` it steps down to the fraction above each value instead, from 1
+        to 0. NaN values and missing times (``NaT``) are left out. The y axis must be linear;
+        when it holds only ECDFs, it runs exactly from 0 to 1. A labelled ECDF is listed and
+        labelled as a step line is; a direct label goes to its end.
+
+        Args:
+            values: The values: numbers on a linear or log x axis, times on a time x axis.
+            complementary: Whether to draw the fraction above each value, from 1 down to 0.
+            label: The name shown in the legend; an empty string leaves the line out of it.
+            color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+            dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If no value is finite, a value is infinite or not positive on a log
+                axis, or the values do not suit the x axis.
+            StyleError: If ``label`` is too long.
+            UsageError: If the y axis is not linear.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.ecdf([12.0, 9.5, 30.1, 12.0, 14.2], label="Latency")
+            >>> ax = ax.ecdf([10.0, 11.0, 25.0], complementary=True, dash=ub.Dash.DASHED)
+            >>> import datetime as dt
+            >>> days = ub.Figure().add_axes(x=ub.Scale.time())
+            >>> days = days.ecdf([dt.date(2026, 1, 3), dt.date(2026, 1, 1), dt.date(2026, 1, 9)])
+        """
+        with api_call():
+            context = "Axes.ecdf()"
+            _check_coordinates_type(context, "values", values, self._x)
+            flag = _args.boolean(context, "complementary", complementary)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
+            data = _limit_values(context, "values", values, self._x)
+            name = _args.text(context, "label", label)
+            self._native.ecdf(self._row, self._col, data, flag, name, spec, style.value, extent)
+            return self
+
+    def kde(
+        self: "Axes[float, float]",
+        values: Values[float],
+        *,
+        bandwidth: float | Auto = AUTO,
+        label: str = "",
+        color: Color = Color.AUTO,
+        dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
+    ) -> "Axes[float, float]":
+        """Add the Gaussian kernel density estimate (KDE) of ``values``, as a line.
+
+        The line is the mean of Gaussian kernels placed at the values, in data units, so the
+        area under it is 1. It runs from three bandwidths below the smallest value to three
+        above the largest, through evenly spaced points at most a quarter bandwidth apart (at
+        least 256, at most 16,384). NaN values are left out. The x axis must be linear, and so
+        must the y axis, which includes zero. A labelled density is listed and labelled as a
+        line is.
+
+        Args:
+            values: The values.
+            bandwidth: The standard deviation of the kernels, in data units, greater than 0.
+                ``AUTO`` uses Scott's rule, as ``violin()`` does, so a violin and a density
+                line of the same values agree; it needs at least two distinct values.
+            label: The name shown in the legend; an empty string leaves the line out of it.
+            color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+            dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If no value is finite, a value is infinite, ``AUTO`` finds fewer than
+                two distinct values, the line would reach beyond 1e300, the density would
+                exceed 1e300, or the x axis is a category axis.
+            StyleError: If ``bandwidth`` is not a finite number greater than 0, is so narrow
+                that the line would need more than 16,384 points, or ``label`` is too long.
+            UsageError: If the x axis is a log or time axis, or the y axis is not linear.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], label="Sizes")
+            >>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bandwidth=0.3, dash=ub.Dash.DOTTED)
+        """
+        with api_call():
+            context = "Axes.kde()"
+            check_floats_type(context, "values", values)
+            width_of = (
+                None
+                if bandwidth is AUTO
+                else real(
+                    context,
+                    "bandwidth",
+                    bandwidth,
+                    expected="a float or ub.AUTO",
+                    hint=_BANDWIDTH_HINT,
+                )
+            )
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
+            data = floats(context, "values", values)
+            name = _args.text(context, "label", label)
+            self._native.kde(self._row, self._col, data, width_of, name, spec, style.value, extent)
+            return self
+
 
 def _render_argument(context: str, value: object) -> int | None:
     """Check a ``render`` argument and return its native form: ``None`` for ``AUTO``."""
@@ -2549,6 +2725,17 @@ def _color_argument(context: str, value: object) -> tuple[int, int, float]:
 def _size_argument(context: str, name: str, value: object) -> tuple[int, float]:
     """Check a ``width`` or ``size`` argument and return its native form."""
     return _size.native(instance(context, name, value, Size, _SIZE_HINT))
+
+
+def _holds_edges(bins: object) -> bool:
+    """Whether a ``bins`` argument is a sequence or an array of edges, not a bin count.
+
+    Text and single numbers, ``bool`` and NumPy scalars included, are not: they go to the
+    whole-number check, which names the accepted type.
+    """
+    if is_text_or_buffer(bins) or isinstance(bins, numbers.Number | np.generic):
+        return False
+    return hasattr(bins, "__array__") or isinstance(bins, Sequence)
 
 
 def _series_arguments(

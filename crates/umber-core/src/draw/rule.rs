@@ -192,7 +192,9 @@ pub(super) fn span_layer(
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Heatmap { .. }
             | ResolvedMark::Events { .. }
-            | ResolvedMark::Points { .. } => {}
+            | ResolvedMark::Points { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => {}
         }
     }
     push_layer(items, clip, layer);
@@ -247,7 +249,9 @@ pub(super) fn rule_layer(
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Heatmap { .. }
             | ResolvedMark::Events { .. }
-            | ResolvedMark::Points { .. } => {}
+            | ResolvedMark::Points { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => {}
         }
     }
     push_layer(items, clip, layer);
