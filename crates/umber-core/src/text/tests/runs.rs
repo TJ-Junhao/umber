@@ -1,8 +1,8 @@
 //! Splitting text into runs: marks and invisible characters, repeated fallbacks, and grouping
 //! by font in linear time.
 
-use super::fixtures::{assert_no_bundled_font_has, fixture_font, omega_lib, style};
-use crate::fonts::{Font, Weight};
+use super::fixtures::{LayoutBundled, assert_no_bundled_font_has, fixture_font, omega_lib, style};
+use crate::fonts::{BundledFont, Weight};
 use crate::geometry::Point;
 use crate::text::FontLibrary;
 use crate::text::font::FontKey;
@@ -13,7 +13,7 @@ use crate::text::runs::{group_by_font, is_mark};
 fn marks_and_invisible_characters_stay_in_the_previous_run() {
     let lib = omega_lib();
     let fallback = crate::fonts::FALLBACK_TEST_CODEPOINT;
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     for text in [
         format!("{fallback}\u{301}"),
         format!("{fallback}\u{FE0F}"),
@@ -32,9 +32,9 @@ fn marks_and_invisible_characters_stay_in_the_previous_run() {
 fn repeated_fallback_characters_form_one_run() {
     let fallback = crate::fonts::FALLBACK_TEST_CODEPOINT;
     let text = format!("ab{fallback}{fallback}{fallback}cd");
-    let layout = omega_lib().layout(&text, &style(Font::Geist, 10.0));
+    let layout = omega_lib().layout(&text, &style(BundledFont::Geist, 10.0));
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
-    let primary = FontKey::Bundled(Font::Geist, Weight::Regular);
+    let primary = FontKey::Bundled(BundledFont::Geist, Weight::Regular);
     assert_eq!(fonts, [primary, FontKey::Extra(0), primary]);
 }
 
@@ -58,7 +58,10 @@ fn marks_outside_the_latin_blocks_stay_with_their_base() {
     let fallback = crate::fonts::FALLBACK_TEST_CODEPOINT;
     let lib = omega_lib();
     for mark in ['\u{0591}', '\u{A67C}', '\u{0F18}'] {
-        let layout = lib.layout(&format!("{fallback}{mark}"), &style(Font::Inter, 10.0));
+        let layout = lib.layout(
+            &format!("{fallback}{mark}"),
+            &style(BundledFont::Inter, 10.0),
+        );
         let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
         assert_eq!(fonts, [FontKey::Extra(0)], "U+{:04X}", u32::from(mark));
     }
@@ -98,7 +101,7 @@ fn many_runs_and_fallback_fonts_lay_out_in_linear_time() {
         .flat_map(|i| ['a', char::from_u32(0xF1000 + i % FONTS).unwrap()])
         .collect();
     assert_no_bundled_font_has(&text.replace('a', ""));
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let start = std::time::Instant::now();
     let layout = lib.layout(&text, &s);
     let laid_out = start.elapsed();

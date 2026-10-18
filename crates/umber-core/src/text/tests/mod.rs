@@ -8,6 +8,7 @@ mod layout;
 mod malformed;
 mod outline;
 mod runs;
+mod scene_fonts;
 mod shaping;
 mod system_fallback;
 mod system_index;

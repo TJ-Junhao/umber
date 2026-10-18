@@ -2,9 +2,9 @@
 //! whose outline confirmations are budgeted per layout and cached.
 
 use super::fixtures::{
-    assert_no_bundled_font_has, fixture_font, omega_lib, style, without_outlines,
+    LayoutBundled, assert_no_bundled_font_has, fixture_font, omega_lib, style, without_outlines,
 };
-use crate::fonts::{Font, Weight, font_bytes};
+use crate::fonts::{BundledFont, Weight, font_bytes};
 use crate::geometry::Point;
 use crate::text::FontLibrary;
 use crate::text::font::FontKey;
@@ -18,28 +18,31 @@ fn extra_confirmations(lib: &FontLibrary) -> usize {
 #[test]
 fn missing_glyph_uses_fallback_font() {
     let text = format!("A{}", crate::fonts::FALLBACK_TEST_CODEPOINT);
-    let with = omega_lib().layout(&text, &style(Font::Inter, 10.0));
-    let a_only = omega_lib().layout("A", &style(Font::Inter, 10.0)).width();
+    let with = omega_lib().layout(&text, &style(BundledFont::Inter, 10.0));
+    let a_only = omega_lib()
+        .layout("A", &style(BundledFont::Inter, 10.0))
+        .width();
     assert!(with.width() > a_only);
     // The fallback glyph is an outlined Ω, so the outline must extend past the "A".
     let path = with.outline(Point { x: 0.0, y: 0.0 });
     assert!(path.bounds().expect("outline").1.x > a_only);
     // Without the fallback the code point is drawn as .notdef: width still positive, no panic.
-    let without = FontLibrary::with_fallbacks(vec![]).layout(&text, &style(Font::Inter, 10.0));
+    let without =
+        FontLibrary::with_fallbacks(vec![]).layout(&text, &style(BundledFont::Inter, 10.0));
     assert!(without.width() > a_only);
 }
 
 #[test]
 fn corrupt_fallback_bytes_are_ignored() {
     let lib = FontLibrary::with_fallbacks(vec![vec![0, 1, 2, 3], Vec::new()]);
-    assert!(lib.layout("AB", &style(Font::Inter, 10.0)).width() > 0.0);
+    assert!(lib.layout("AB", &style(BundledFont::Inter, 10.0)).width() > 0.0);
 }
 
 #[test]
 fn missing_characters_fall_back_to_other_bundled_families_first() {
     let lib = FontLibrary::with_fallbacks(vec![]);
     let mut checked = 0;
-    for font in Font::ALL {
+    for font in BundledFont::ALL {
         let face = lib
             .bundled_parsed(font, Weight::Regular)
             .expect("bundled font parses");
@@ -77,12 +80,15 @@ fn fallback_confirmations_per_layout_are_capped() {
             .map(|k| without_outlines(fixture_font(&format!("Claim {k}"), 400, false, &codepoints)))
             .collect(),
     );
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let layout = lib.layout(&text, &s);
     // 3,000 characters would need 6,000 confirmations.
     assert_eq!(extra_confirmations(&lib), EXTRA_CONFIRMATIONS_PER_LAYOUT);
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
-    assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
+    assert_eq!(
+        fonts,
+        [FontKey::Bundled(BundledFont::Inter, Weight::Regular)]
+    );
     // Results are cached across layouts; the next call confirms only the rest.
     let _ = lib.layout(&text, &s);
     assert_eq!(extra_confirmations(&lib), 6_000);
@@ -102,7 +108,7 @@ fn fallback_confirmation_cache_is_bounded() {
         false,
         &codepoints,
     ))]);
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     for chunk in chars.chunks(EXTRA_CONFIRMATIONS_PER_LAYOUT) {
         let text: String = chunk.iter().collect();
         let _ = lib.layout(&text, &s);
@@ -122,12 +128,15 @@ fn fallback_without_outlines_is_skipped() {
     let fixture = include_bytes!("../../../tests/fixtures/fallback-only.ttf");
     let truncated = fixture[..516].to_vec();
     let text = crate::fonts::FALLBACK_TEST_CODEPOINT.to_string();
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let lib = FontLibrary::with_fallbacks(vec![truncated]);
     assert_eq!(lib.extra_count(), 1, "the truncated font still parses");
     let layout = lib.layout(&text, &s);
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
-    assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
+    assert_eq!(
+        fonts,
+        [FontKey::Bundled(BundledFont::Inter, Weight::Regular)]
+    );
     let path = layout.outline(Point { x: 0.0, y: 0.0 });
     let notdef = FontLibrary::with_fallbacks(vec![])
         .layout(&text, &s)
@@ -140,17 +149,19 @@ fn fallback_without_outlines_is_skipped() {
 fn bundled_families_take_precedence_over_explicit_fallbacks() {
     let c = '\u{0114}';
     let geist = FontLibrary::with_fallbacks(vec![]);
-    let geist_face = geist.bundled_parsed(Font::Geist, Weight::Regular).unwrap();
+    let geist_face = geist
+        .bundled_parsed(BundledFont::Geist, Weight::Regular)
+        .unwrap();
     let serif_face = geist
-        .bundled_parsed(Font::SourceSerif4, Weight::Regular)
+        .bundled_parsed(BundledFont::SourceSerif4, Weight::Regular)
         .unwrap();
     assert!(geist_face.glyph(c).is_none() && serif_face.glyph(c).is_some());
-    let serif = font_bytes(Font::SourceSerif4, Weight::Regular).to_vec();
+    let serif = font_bytes(BundledFont::SourceSerif4, Weight::Regular).to_vec();
     let lib = FontLibrary::with_fallbacks(vec![serif]);
-    let layout = lib.layout(&c.to_string(), &style(Font::Geist, 10.0));
+    let layout = lib.layout(&c.to_string(), &style(BundledFont::Geist, 10.0));
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
     assert_eq!(
         fonts,
-        [FontKey::Bundled(Font::SourceSerif4, Weight::Regular)]
+        [FontKey::Bundled(BundledFont::SourceSerif4, Weight::Regular)]
     );
 }

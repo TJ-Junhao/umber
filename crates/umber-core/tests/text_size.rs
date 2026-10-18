@@ -6,7 +6,7 @@ use umber_core::scene::{Item, Scene, TextItem};
 use umber_core::{
     AxisData, ColorBy, ColorbarOptions, ColorbarPosition, Figure, FontLibrary, Grid, GridIndex,
     LegendMode, LegendPosition, LegendStyle, LineOptions, Paint, Placement, PointColor, ScaleKind,
-    ScatterOptions, Share, SizeSpec, Theme,
+    ScatterOptions, SceneFonts, Share, SizeSpec, Theme,
 };
 
 fn texts(scene: &Scene) -> Vec<&TextItem> {
@@ -74,7 +74,10 @@ fn automatic_tick_spacing_uses_each_axis_size() {
             if axis == 0 {
                 assert!(pair[1].origin.x >= pair[0].origin.x + pair[0].width + 18.0 - 1e-3);
             } else {
-                let metrics = FontLibrary::global().layout("", &pair[0].style);
+                let fonts = FontLibrary::global()
+                    .with_figure_fonts(&scene.fonts)
+                    .unwrap();
+                let metrics = fonts.layout("", &pair[0].style).unwrap();
                 let height = metrics.ascent() + metrics.descent();
                 assert!(pair[1].origin.y >= pair[0].origin.y + height + 18.0 - 1e-3);
             }
@@ -155,11 +158,11 @@ struct TextBox {
 }
 
 fn scene_boxes(scene: &Scene) -> Vec<TextBox> {
-    fn collect(items: &[Item], boxes: &mut Vec<TextBox>) {
+    fn collect(items: &[Item], fonts: &SceneFonts<'_>, boxes: &mut Vec<TextBox>) {
         for item in items {
             match item {
                 Item::Text(text) => {
-                    let metrics = FontLibrary::global().layout(&text.text, &text.style);
+                    let metrics = fonts.layout(&text.text, &text.style).unwrap();
                     boxes.push(TextBox {
                         name: text.text.clone(),
                         size: Some(text.style.size),
@@ -183,13 +186,16 @@ fn scene_boxes(scene: &Scene) -> Vec<TextBox> {
                         bounds: (lo.x, lo.y, hi.x, hi.y),
                     });
                 }
-                Item::Group { items, .. } => collect(items, boxes),
+                Item::Group { items, .. } => collect(items, fonts, boxes),
                 _ => {}
             }
         }
     }
     let mut boxes = Vec::new();
-    collect(&scene.items, &mut boxes);
+    let fonts = FontLibrary::global()
+        .with_figure_fonts(&scene.fonts)
+        .unwrap();
+    collect(&scene.items, &fonts, &mut boxes);
     boxes
 }
 

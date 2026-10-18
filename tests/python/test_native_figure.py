@@ -126,9 +126,9 @@ SETTERS: list[tuple[str, object, object]] = [
     ("with_baseline_color", RED, BLUE),
     ("with_grid_lines", 0, 3),
     ("with_grid_dash", 0, 2),
-    ("with_title_font", 0, 4),
+    ("with_title_font", (0, 0), (0, 4)),
     ("with_title_align", 0, 2),
-    ("with_body_font", 1, 3),
+    ("with_body_font", (0, 1), (0, 3)),
     ("with_legend_style", 0, 2),
     ("with_legend_position", 0, 4),
     ("with_fill_style", 0, 1),
@@ -248,8 +248,6 @@ def test_numeric_theme_values_are_validated(
     [
         ("with_grid_lines", 4, "GridLines"),
         ("with_grid_dash", 3, "Dash"),
-        ("with_title_font", 5, "Font"),
-        ("with_body_font", -1, "Font"),
         ("with_legend_style", 4, "LegendStyle"),
         ("with_title_align", 3, "Align"),
         ("with_legend_position", 5, "LegendPosition"),
@@ -260,6 +258,15 @@ def test_unknown_enum_values_are_internal_errors(name: str, value: int, enum: st
     assert_internal(
         lambda: getattr(theme, name)(value), ValueError, f"{value} is not a value of {enum}"
     )
+
+
+@pytest.mark.parametrize("name", ["with_title_font", "with_body_font"])
+def test_unknown_fonts_are_internal_errors(name: str) -> None:
+    theme = _umber.Theme.pigment()
+    setter = getattr(theme, name)
+    assert_internal(lambda: setter((0, 5)), ValueError, "5 is not a bundled font")
+    assert_internal(lambda: setter((0, -1)), ValueError, "-1 is not a bundled font")
+    assert_internal(lambda: setter((1, 0)), ValueError, "1 is not a font kind")
 
 
 def test_unknown_color_kinds_are_internal_errors() -> None:
@@ -357,7 +364,7 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "grouped_bar": lambda f, r, c: f.grouped_bar(r, c, ["a"], [("s", floats(1), AUTO)]),
     "stacked_bar": lambda f, r, c: f.stacked_bar(r, c, ["a"], [("s", floats(1), AUTO)]),
     "stacked_area": lambda f, r, c: f.stacked_area(r, c, floats(1), [("s", floats(1), AUTO)]),
-    "hist": lambda f, r, c: f.hist(r, c, floats(1), 3, "", AUTO),
+    "hist": lambda f, r, c: f.hist(r, c, floats(1), 3, 0, False, 0, "", AUTO),
     "step": lambda f, r, c: f.step(r, c, floats(1), floats(1), 0, "", AUTO, 0, NO_SIZE),
     "hline": lambda f, r, c: f.hline(r, c, 1.0, "", AUTO, 0, NO_SIZE),
     "vline": lambda f, r, c: f.vline(r, c, 1.0, "", AUTO, 0, NO_SIZE),
@@ -376,6 +383,10 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "violin": lambda f, r, c: f.violin(r, c, ["a"], [floats(1)], "", AUTO),
     "grouped_violin": lambda f, r, c: f.grouped_violin(r, c, ["a"], [("s", [floats(1)], AUTO)]),
     "clim": lambda f, r, c: f.clim(r, c, 0.0, 1.0),
+    "grouped_hist": lambda f, r, c: f.grouped_hist(r, c, [("s", floats(1), AUTO)], 3, 1, False, 0),
+    "ecdf": lambda f, r, c: f.ecdf(r, c, floats(1), False, "", AUTO, 0, NO_SIZE),
+    "kde": lambda f, r, c: f.kde(r, c, floats(1), 1.0, "", AUTO, 0, NO_SIZE),
+    "grouped_kde": lambda f, r, c: f.grouped_kde(r, c, [("s", floats(1), AUTO)], 1.0, 0, NO_SIZE),
 }
 
 
@@ -756,7 +767,7 @@ def test_marks_draw() -> None:
     categories.scatter(0, 0, ["b", "c"], floats(1, 2), "", AUTO, 0, NO_SIZE)
 
     hist = figure()
-    hist.hist(0, 0, floats(1.2, 3.4, 2.2, np.nan, 2.9), 3, "h", AUTO)
+    hist.hist(0, 0, floats(1.2, 3.4, 2.2, np.nan, 2.9), 3, 0, False, 0, "h", AUTO)
     assert hist.to_svg(OUTLINES) != empty
 
 
@@ -1013,7 +1024,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist no bins",
         figure,
-        lambda f: f.hist(0, 0, floats(1), 0, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1), 0, 0, False, 0, "", AUTO),
         ub.StyleError,
         "Axes.hist(): bins is 0; bins must be between 1 and 10000.",
         "bins",
@@ -1022,7 +1033,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist too many bins",
         figure,
-        lambda f: f.hist(0, 0, floats(1), _umber.MAX_BINS + 1, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1), _umber.MAX_BINS + 1, 0, False, 0, "", AUTO),
         ub.StyleError,
         "Axes.hist(): bins is 10001; bins must be between 1 and 10000.",
         "bins",
@@ -1031,7 +1042,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist category x",
         lambda: figure(x=CATEGORY),
-        lambda f: f.hist(0, 0, floats(1), 3, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1), 3, 0, False, 0, "", AUTO),
         ub.DataError,
         "Axes.hist(): values holds numbers but the x axis is a category axis; use a linear x axis.",
         None,
@@ -1040,7 +1051,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist log x",
         lambda: figure(x=LOG),
-        lambda f: f.hist(0, 0, floats(1), 3, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1), 3, 0, False, 0, "", AUTO),
         ub.UsageError,
         "Axes.hist(): the x axis is a log axis, which histograms do not support; "
         "use a linear x axis.",
@@ -1050,7 +1061,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "hist infinite",
         figure,
-        lambda f: f.hist(0, 0, floats(1, np.inf), 3, "", AUTO),
+        lambda f: f.hist(0, 0, floats(1, np.inf), 3, 0, False, 0, "", AUTO),
         ub.DataError,
         f"Axes.hist(): values[1] is inf; {FINITE}",
         "values",
@@ -1100,7 +1111,7 @@ INTERNAL_MARK_ERRORS: list[
     ),
     (
         "color kind",
-        lambda f: f.hist(0, 0, floats(1), 3, "", (4, 0, 1.0)),
+        lambda f: f.hist(0, 0, floats(1), 3, 0, False, 0, "", (4, 0, 1.0)),
         ValueError,
         "4 is not a color kind",
     ),

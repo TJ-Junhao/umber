@@ -10,10 +10,12 @@ use super::band::{BandMark, BandOptions};
 use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
 use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
 use super::color_by::{check_point_color, check_scatter_label};
+use super::ecdf::{EcdfMark, EcdfOptions};
 use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
 use super::heatmap::{HeatmapMark, HeatmapOptions};
-use super::hist::{HistMark, HistOptions};
+use super::hist::{GroupedHistOptions, HistGroupMark, HistMark, HistOptions};
+use super::kde::{GroupedKdeOptions, KdeMark, KdeOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
 use super::rule::{
@@ -1426,26 +1428,42 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
-    /// Adds a histogram: the finite `values` counted in `options.bins` equal-width bins from
-    /// their smallest to their largest value, drawn as one bar per non-empty bin from the
-    /// baseline to its count. Bins are half-open, `[low, high)`, except the last, which also
-    /// holds the largest value. NaN is ignored. Values that are all the same, or that span less
-    /// than a linear axis can show, are binned over `v ± max(0.5, |v| × 1e-9)` around their
-    /// midpoint `v`. The values are stored as given and binned when the figure is rendered.
+    /// Adds a histogram: the finite `values` counted in the bins of `options.bins`, drawn as
+    /// `options.style` says, each bar showing `options.stat` of its bin, accumulated from the left
+    /// when `options.cumulative` is set.
     ///
-    /// Neighbouring bars are the theme's [`hist_gap`](crate::Theme::hist_gap) apart, at most
-    /// half a bin, and have square corners. With [`FillStyle::Gradient`](crate::FillStyle), all
-    /// bars share one vertical gradient from the top of the tallest bar to the baseline, and
-    /// each bar gets a solid top edge. On a linear y axis the bars grow from 0; on a log y axis
-    /// they grow from the baseline, at the lowest y tick (or the explicit lower limit). Auto
-    /// limits put that tick below the smallest count, so every non-empty bin has a height.
+    /// [`Bins::Count`](crate::Bins::Count) bins are equal-width, from the smallest to the
+    /// largest value; [`Bins::Edges`](crate::Bins::Edges) gives the edges, which must hold every
+    /// finite value. Bins are half-open, `[low, high)`, except the last, which also holds its
+    /// high edge. NaN is ignored. Values that are all the same, or that span less than a linear
+    /// axis can show, are binned in equal-width bins over `v ± max(0.5, |v| × 1e-9)` around their
+    /// midpoint `v`. The values are stored as given and binned when the figure is rendered.
+    /// A count is the number of values in a bin, a fraction that count over the number of finite
+    /// values, and a density the fraction over the bin's width, so the bars have an area of 1.
+    /// Cumulative bars add up the counts from the left before dividing, so a cumulative fraction
+    /// ends at 1.
+    ///
+    /// [`HistStyle::Bars`](crate::HistStyle::Bars) and
+    /// [`HistStyle::Stacked`](crate::HistStyle::Stacked), which is the same for one series, draw
+    /// one bar per bin with a height: neighbouring bars are the theme's
+    /// [`hist_gap`](crate::Theme::hist_gap) apart, at most half a bin, and have square corners.
+    /// With [`FillStyle::Gradient`](crate::FillStyle), all bars share one vertical gradient from
+    /// the top of the tallest bar to the baseline, and each bar gets a solid top edge.
+    /// [`HistStyle::Step`](crate::HistStyle::Step) draws the outline of the bars instead, as one
+    /// stepped line in the theme's line width. On a linear y axis the bars grow from 0; on a log
+    /// y axis they grow from the baseline, at the lowest y tick (or the explicit lower limit).
+    /// Auto limits put that tick below the smallest height, so every non-empty bin has a height.
     /// The baseline is drawn at zero, or at the lower edge when zero is out of range, even
     /// alongside other marks.
     ///
-    /// Errors leave the axes unchanged. They are checked in this order: `Error::Style` for
-    /// `options.bins` outside `1..=`[`MAX_BINS`]; `Error::Data` for a category x axis, and
-    /// `Error::Usage` for a log x axis, which histograms do not support; `Error::Data` for a
-    /// value that is infinite or beyond [`MAX_MAGNITUDE`].
+    /// Errors leave the axes unchanged. They are checked in this order: `Error::Usage` for a
+    /// category or time y axis; `Error::Usage` for a time x axis; `Error::Style` for a bin count
+    /// outside `1..=`[`MAX_BINS`]; `Error::Data` for edges that are fewer than two, not finite,
+    /// beyond [`MAX_MAGNITUDE`], not strictly increasing, or narrower than a linear axis can show;
+    /// `Error::Usage` for `cumulative` with [`HistStat::Density`](crate::HistStat::Density);
+    /// `Error::Data` for a category x axis, and `Error::Usage` for a log x axis, which histograms
+    /// do not support; `Error::Data` for a value that is infinite or beyond [`MAX_MAGNITUDE`];
+    /// and `Error::Data` for finite values outside explicit edges, naming how many.
     ///
     /// The mark stores its own copy of `values`, made once. To store values already held in an
     /// `Arc<[f64]>` without copying them, use [`AxesMut::hist_shared`].
@@ -1454,15 +1472,24 @@ impl<'a> AxesMut<'a> {
     ///
     /// ```
     /// use umber_core::figure::HistOptions;
-    /// use umber_core::{Figure, ScaleKind, Theme};
+    /// use umber_core::{Bins, Figure, HistStat, HistStyle, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// axes.hist(&[1.2, 3.4, 2.2, f64::NAN, 2.9], HistOptions { bins: 3, ..HistOptions::default() })?;
-    /// assert_eq!(axes.marks().len(), 1);
-    /// // No bins is an error, and the axes keep their one mark.
-    /// assert!(axes.hist(&[1.0], HistOptions { bins: 0, ..HistOptions::default() }).is_err());
-    /// assert_eq!(axes.marks().len(), 1);
+    /// let three = HistOptions { bins: Bins::Count(3), ..HistOptions::default() };
+    /// axes.hist(&[1.2, 3.4, 2.2, f64::NAN, 2.9], three)?;
+    /// let outline = HistOptions {
+    ///     bins: Bins::Edges(vec![0.0, 2.0, 2.5, 4.0]),
+    ///     style: HistStyle::Step,
+    ///     stat: HistStat::Density,
+    ///     ..HistOptions::default()
+    /// };
+    /// axes.hist(&[1.2, 3.4, 2.2], outline)?;
+    /// assert_eq!(axes.marks().len(), 2);
+    /// // No bins is an error, and the axes keep their marks.
+    /// let none = HistOptions { bins: Bins::Count(0), ..HistOptions::default() };
+    /// assert!(axes.hist(&[1.0], none).is_err());
+    /// assert_eq!(axes.marks().len(), 2);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     ///
@@ -2923,6 +2950,210 @@ impl<'a> AxesMut<'a> {
             settings,
             "Axes.ytick_labels()",
         )?;
+        Ok(self)
+    }
+    /// Adds a grouped histogram: the finite values of each of `series` counted in bins they
+    /// share, each series in its own color and with its own legend entry, as
+    /// [`AxesMut::hist`] counts one series.
+    ///
+    /// Equal-width bins span the values of every series. [`HistStyle::Step`](crate::HistStyle)
+    /// draws one outline per series, in series order, each normalized on its own: each series'
+    /// fractions sum to 1, and each density has an area of 1.
+    /// [`HistStyle::Stacked`](crate::HistStyle) stacks the bars of the series in each bin, in
+    /// series order, normalized together: the stacks' fractions sum to 1. The bars of
+    /// [`HistStyle::Bars`](crate::HistStyle) would hide each other, so it is refused. Colors
+    /// and labels work as in [`AxesMut::grouped_bar`]. A series without a finite value draws
+    /// nothing.
+    ///
+    /// Errors leave the axes unchanged. They are checked in this order: a category or time y
+    /// axis and a time x axis, as for [`AxesMut::hist`]; `Error::Data` when `series` is empty; the bins and statistic, as
+    /// for [`AxesMut::hist`]; `Error::Usage` for [`HistStyle::Bars`](crate::HistStyle); the x
+    /// axis, as for [`AxesMut::hist`]; then the values of each series in series order, and
+    /// whether explicit edges hold them, in series order. A value is named
+    /// `series[i].values[j]`, and each error names the parameter `values`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::Series;
+    /// use umber_core::{Figure, GroupedHistOptions, HistStyle, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let series = |label: &str, values: &[f64]| Series {
+    ///     label: label.into(),
+    ///     values: values.to_vec(),
+    ///     ..Series::default()
+    /// };
+    /// let groups = vec![series("north", &[1.0, 2.0, 2.5]), series("south", &[2.0, 4.0])];
+    /// let stacked = GroupedHistOptions { style: HistStyle::Stacked, ..GroupedHistOptions::default() };
+    /// axes.grouped_hist(groups.clone(), stacked)?;
+    /// // Overlapping bars are refused, and the axes keep their one mark.
+    /// let bars = GroupedHistOptions { style: HistStyle::Bars, ..GroupedHistOptions::default() };
+    /// assert!(axes.grouped_hist(groups, bars).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_hist(
+        &mut self,
+        series: Vec<Series>,
+        options: GroupedHistOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.hist()";
+        let axes = self.axes_mut();
+        check_numeric_y(CONTEXT, axes.y)?;
+        check_no_time_x(CONTEXT, axes.x, "a linear x axis")?;
+        let mark = HistGroupMark::new(CONTEXT, axes.x, series, options)?;
+        axes.marks.push(Mark::GroupedHist(mark));
+        Ok(self)
+    }
+
+    /// Adds the empirical cumulative distribution (ECDF) of `values`, as a step line: at each
+    /// distinct value, from the smallest, the line steps up to the share of the values at or
+    /// below it, from 0 at the smallest value to 1 at the largest. With
+    /// `options.complementary` it steps down to the share above each value instead, from 1 to
+    /// 0. NaN and missing times are left out. The line is drawn, listed and labelled as a step
+    /// line of [`AxesMut::step`] is, and a direct label goes to its end.
+    ///
+    /// `values` are numbers on a linear or log x axis and times on a time x axis. The y axis
+    /// must be linear; when it holds nothing but ECDFs (and reference lines and spans), its
+    /// automatic limits are exactly 0 and 1.
+    ///
+    /// Errors leave the axes unchanged. They are checked in this order: `Error::Usage` naming
+    /// `y` for a y axis that is not linear; `Error::Data` for values that do not suit the x
+    /// axis (names, numbers on a category or time axis, times on another axis); `Error::Data`
+    /// for a number that is infinite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE), or not
+    /// positive on a log axis; and `Error::Data` when no value is finite.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::AxisData;
+    /// use umber_core::{EcdfOptions, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let latency = AxisData::Numbers(vec![12.0, 9.5, f64::NAN, 30.1, 12.0]);
+    /// axes.ecdf(latency, EcdfOptions { label: "Latency".into(), ..EcdfOptions::default() })?;
+    /// // Nothing to count is an error, and the axes keep their one mark.
+    /// assert!(axes.ecdf(AxisData::Numbers(vec![f64::NAN]), EcdfOptions::default()).is_err());
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ecdf(&mut self, values: AxisData, options: EcdfOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.ecdf()";
+        let axes = self.axes_mut();
+        let mark = EcdfMark::new(CONTEXT, (axes.x, axes.y), values, options)?;
+        axes.marks.push(Mark::Ecdf(mark));
+        Ok(self)
+    }
+
+    /// Adds the Gaussian kernel density of `values` as a line: at each point, the mean of the
+    /// Gaussian kernels of `options.bandwidth` placed at the finite values, in data units, so the
+    /// area under the line is 1. [`Bandwidth::Scott`](crate::Bandwidth) is the bandwidth
+    /// [`AxesMut::violin`] uses, so a violin and a density line of the same values agree. The
+    /// line runs from three bandwidths below the smallest finite value to three above the
+    /// largest, through evenly spaced points at most a quarter bandwidth apart (at least 256, at
+    /// most 16,384), and is drawn, listed and labelled as a line of
+    /// [`AxesMut::line`] is. NaN is left out. On a linear y axis the y domain includes 0, as for
+    /// bars, though no baseline is drawn for the line.
+    ///
+    /// Errors leave the axes unchanged. They are checked in this order: `Error::Usage` naming
+    /// `y` for a y axis that is not linear; `Error::Data` for a category x axis, and
+    /// `Error::Usage` for a log or time x axis, which density lines do not support;
+    /// `Error::Style` for a fixed bandwidth that is not finite, not above 0, or beyond
+    /// [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE); `Error::Data` for a value that is infinite or
+    /// beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE), and when no value is finite;
+    /// `Error::Data` for Scott's rule with fewer than two distinct finite values; `Error::Data`
+    /// naming `values` for a line that would reach beyond
+    /// [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE); `Error::Style` naming `bandwidth` for a
+    /// bandwidth so narrow that the line would need more than 16,384 points; and `Error::Data`
+    /// naming `bandwidth` for a density beyond the supported magnitudes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Bandwidth, Figure, KdeOptions, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.kde(&[1.2, 2.5, 2.7, 3.1, 4.8], KdeOptions::default())?;
+    /// let narrow = KdeOptions { bandwidth: Bandwidth::Fixed(0.2), ..KdeOptions::default() };
+    /// axes.kde(&[1.2, 2.5, 2.7, 3.1, 4.8], narrow)?;
+    /// // Scott's rule needs a spread, and the axes keep their two marks.
+    /// assert!(axes.kde(&[2.0, 2.0], KdeOptions::default()).is_err());
+    /// assert_eq!(axes.marks().len(), 2);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn kde(&mut self, values: &[f64], options: KdeOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.kde()";
+        let axes = self.axes_mut();
+        let mark = KdeMark::new(CONTEXT, (axes.x, axes.y), ("values", values), options)?;
+        axes.marks.push(Mark::Kde(mark));
+        Ok(self)
+    }
+
+    /// Adds one density line per series of `series`, in series order, as [`AxesMut::kde`] adds
+    /// one: each series has its own color and legend entry, as in [`AxesMut::grouped_bar`], and
+    /// its own density, with an area of 1. [`Bandwidth::Scott`](crate::Bandwidth) takes each
+    /// series' own bandwidth; a fixed bandwidth is shared.
+    ///
+    /// Errors leave the axes unchanged: `Error::Data` when `series` is empty, then the errors of
+    /// [`AxesMut::kde`] for each series in series order, its values named `series[i].values`.
+    /// No line is added unless every series has one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::Series;
+    /// use umber_core::{Figure, GroupedKdeOptions, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let series = |label: &str, values: &[f64]| Series {
+    ///     label: label.into(),
+    ///     values: values.to_vec(),
+    ///     ..Series::default()
+    /// };
+    /// let groups = vec![series("north", &[1.0, 2.0, 2.5]), series("south", &[2.0, 4.0])];
+    /// axes.grouped_kde(groups, GroupedKdeOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 2);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_kde(
+        &mut self,
+        series: Vec<Series>,
+        options: GroupedKdeOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.kde()";
+        if series.is_empty() {
+            return Err(
+                Error::data(CONTEXT, "series is empty; pass at least one series.")
+                    .with_parameter("series"),
+            );
+        }
+        let axes = self.axes_mut();
+        let marks = series
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let options = KdeOptions {
+                    bandwidth: options.bandwidth,
+                    label: s.label,
+                    color: s.color,
+                    dash: options.dash,
+                    width: options.width,
+                };
+                let name = format!("series[{i}].values");
+                KdeMark::new(
+                    CONTEXT,
+                    (axes.x, axes.y),
+                    (name.as_str(), &s.values),
+                    options,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        axes.marks.extend(marks.into_iter().map(Mark::Kde));
         Ok(self)
     }
 }

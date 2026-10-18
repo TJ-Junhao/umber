@@ -1,4 +1,8 @@
+# pyright: reportPrivateUsage=false
 import enum
+import re
+from collections.abc import Iterable
+from typing import cast
 
 import pytest
 
@@ -8,7 +12,6 @@ from umber import _umber
 ENUMS = [
     ub.Dash,
     ub.Marker,
-    ub.Font,
     ub.LegendStyle,
     ub.FillStyle,
     ub.GridLines,
@@ -19,6 +22,8 @@ ENUMS = [
     ub.Align,
     ub.Step,
     ub.Render,
+    ub.Hist,
+    ub.Stat,
 ]
 
 
@@ -65,7 +70,6 @@ def test_members_are_identified_by_name_and_value() -> None:
     assert ub.Dash["DOTTED"] is ub.Dash.DOTTED
     assert ub.Dash(1) is ub.Dash.DASHED
     assert ub.Marker.CROSS.value == 4
-    assert ub.Font.JETBRAINS_MONO.name == "JETBRAINS_MONO"
     assert {m.value for m in ub.SvgText} == {0, 1}
 
 
@@ -77,3 +81,35 @@ def test_fill_style_members() -> None:
 def test_step_members() -> None:
     assert [(m.name, m.value) for m in ub.Step] == [("POST", 0), ("PRE", 1), ("MID", 2)]
     assert ub.Step(2) is ub.Step.MID
+
+
+BUNDLED_FAMILIES = {
+    "SOURCE_SERIF_4": "'Source Serif 4', serif",
+    "IBM_PLEX_SANS": "'IBM Plex Sans', sans-serif",
+    "GEIST": "'Geist', sans-serif",
+    "INTER": "'Inter', sans-serif",
+    "JETBRAINS_MONO": "'JetBrains Mono', monospace",
+}
+
+
+def test_font_is_not_an_enum() -> None:
+    assert not isinstance(ub.Font.INTER, enum.Enum)
+    assert not issubclass(ub.Font, enum.Enum)
+    assert "Font" not in _umber.enum_members()
+    with pytest.raises(TypeError):
+        iter(cast(Iterable[object], ub.Font))
+
+
+def test_bundled_constants_round_trip() -> None:
+    table = _umber.bundled_fonts()
+    assert [name for name, _ in table] == list(BUNDLED_FAMILIES)
+    for name, index in table:
+        font = getattr(ub.Font, name)
+        assert isinstance(font, ub.Font)
+        assert font._native == (0, index)
+        assert repr(font) == f"Font.{name}"
+        figure = ub.line([0.0, 1.0], [0.0, 1.0], theme=ub.Theme.PIGMENT.with_title_font(font))
+        svg = figure.title("Revenue").figure.to_svg(text=ub.SvgText.EDITABLE)
+        title = re.search(r'<text [^>]*font-family="([^"]*)"[^>]*>Revenue</text>', svg)
+        assert title is not None
+        assert title.group(1) == BUNDLED_FAMILIES[name]

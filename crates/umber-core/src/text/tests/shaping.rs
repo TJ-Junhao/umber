@@ -7,8 +7,8 @@ use harfrust::{FontFuncs, GlyphExtents, ShaperFont};
 use read_fonts::types::GlyphId;
 use skrifa::outline::OutlineGlyphFormat;
 
-use super::fixtures::{be16, cff_mark_font, fixture_font, style};
-use crate::fonts::Font;
+use super::fixtures::{LayoutBundled, be16, cff_mark_font, fixture_font, style};
+use crate::fonts::BundledFont;
 use crate::geometry::Point;
 use crate::text::font::{Face, FontKey, ShapingFont};
 use crate::text::shaping::{EXTENTS_PER_LAYOUT, Funcs};
@@ -26,7 +26,7 @@ fn system_fonts_position_marks_without_gpos() {
         }
     }
     let text = "\u{F0010}\u{301}";
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout(text, &s);
     let system = FontLibrary::with_test_system_fonts(vec![font]).layout(text, &s);
     assert_eq!(extra.runs().len(), 1);
@@ -77,7 +77,7 @@ fn empty_cff_glyphs_have_empty_extents() {
 
     // A base, an empty mark and a visible mark, stacked by the shaper from the bounds.
     let text = "\u{F0010}\u{300}\u{301}";
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let extra = FontLibrary::with_fallbacks(vec![font.clone()]).layout(text, &s);
     let system = FontLibrary::with_test_system_fonts(vec![font]).layout(text, &s);
     assert_eq!(extra.runs()[0].font(), FontKey::Extra(0));

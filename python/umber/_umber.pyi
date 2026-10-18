@@ -51,7 +51,11 @@ __all__ = [
     "Theme",
     "__version__",
     "box_stats",
+    "bundled_fonts",
     "kde_scott",
+    "scott_bandwidth",
+    "kde_curve",
+    "ecdf_steps",
     "check_alpha",
     "check_log_base",
     "check_palette_index",
@@ -82,6 +86,14 @@ def grid_cells(rows: int, cols: int, count: int) -> list[tuple[int, int]]: ...
 # Named colors as (name, 0xRRGGBBAA), in the order BLACK, WHITE, GRAY, RED, ORANGE, YELLOW,
 # GREEN, TEAL, BLUE, PURPLE, PINK, BROWN.
 def named_colors() -> list[tuple[str, int]]: ...
+
+# A font argument: (kind, payload). Kind 0 is a bundled font (payload: its index in
+# bundled_fonts()).
+type _FontArg = tuple[int, int]
+
+# Bundled fonts as (constant name, index), in the order SOURCE_SERIF_4, IBM_PLEX_SANS, GEIST,
+# INTER, JETBRAINS_MONO.
+def bundled_fonts() -> list[tuple[str, int]]: ...
 
 # Concrete colors are returned as 0xRRGGBBAA.
 def color_hex(code: str) -> int: ...
@@ -129,6 +141,18 @@ def box_stats(
 
 # Test hook: 128 (position, density) pairs, or None below two distinct finite samples.
 def kde_scott(values: _FloatArray) -> list[tuple[float, float]] | None: ...
+
+# Test hook: Scott's bandwidth in data units, or None below two distinct finite samples.
+def scott_bandwidth(values: _FloatArray) -> float | None: ...
+
+# Test hook: `points` (position, density) pairs from `start` to `end`, the density in data units,
+# or None without a finite sample or below two points.
+def kde_curve(
+    values: _FloatArray, bandwidth: float, start: float, end: float, points: int
+) -> list[tuple[float, float]] | None: ...
+
+# Test hook: the x and y of the ECDF's post step line, NaN left out.
+def ecdf_steps(values: _FloatArray, complementary: bool) -> tuple[list[float], list[float]]: ...
 
 @final
 class Cmap:
@@ -186,9 +210,9 @@ class Theme:
     def with_baseline_color(self, value: _ColorArg) -> Theme: ...
     def with_grid_lines(self, value: int) -> Theme: ...
     def with_grid_dash(self, value: int) -> Theme: ...
-    def with_title_font(self, value: int) -> Theme: ...
+    def with_title_font(self, value: _FontArg) -> Theme: ...
     def with_title_align(self, value: int) -> Theme: ...
-    def with_body_font(self, value: int) -> Theme: ...
+    def with_body_font(self, value: _FontArg) -> Theme: ...
     def with_legend_style(self, value: int) -> Theme: ...
     def with_legend_position(self, value: int) -> Theme: ...
     def with_fill_style(self, value: int) -> Theme: ...
@@ -377,7 +401,16 @@ class Figure:
         self, row: int, col: int, x: _FloatArray, series: list[_SeriesArg]
     ) -> None: ...
     def hist(
-        self, row: int, col: int, values: _FloatArray, bins: int, label: str, color: _ColorArg
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray,
+        bins: int | _FloatArray,
+        style: int,
+        cumulative: bool,
+        stat: int,
+        label: str,
+        color: _ColorArg,
     ) -> None: ...
     def mesh(
         self,
@@ -577,3 +610,44 @@ class Figure:
     ) -> None: ...
     def xtick_labels(self, row: int, col: int, size: _SizeArg) -> None: ...
     def ytick_labels(self, row: int, col: int, size: _SizeArg) -> None: ...
+    def grouped_hist(
+        self,
+        row: int,
+        col: int,
+        series: list[_SeriesArg],
+        bins: int | _FloatArray,
+        style: int,
+        cumulative: bool,
+        stat: int,
+    ) -> None: ...
+    def ecdf(
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray | _TimeArray,
+        complementary: bool,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def kde(
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray,
+        bandwidth: float | None,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_kde(
+        self,
+        row: int,
+        col: int,
+        series: list[_SeriesArg],
+        bandwidth: float | None,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
