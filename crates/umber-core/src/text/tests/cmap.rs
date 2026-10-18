@@ -5,8 +5,10 @@ use read_fonts::tables::cmap::Cmap;
 use read_fonts::types::GlyphId;
 use read_fonts::{FontData, FontRead};
 
-use super::fixtures::{assert_no_bundled_font_has, cmap_of, font_with_cmap, format12, style};
-use crate::fonts::{Font, Weight};
+use super::fixtures::{
+    LayoutBundled, assert_no_bundled_font_has, cmap_of, font_with_cmap, format12, style,
+};
+use crate::fonts::{BundledFont, Weight};
 use crate::text::FontLibrary;
 use crate::text::cmap::{SECONDARY_SUBTABLES, subtable_glyph};
 use crate::text::font::{Face, FontKey};
@@ -37,7 +39,7 @@ fn assert_fast(elapsed: std::time::Duration) {
 /// Lays `text` out with `font` as a fallback font and as a system font, and returns the
 /// glyph ids of each layout's single run.
 fn glyphs_as_extra_and_system(font: &[u8], text: &str) -> [Vec<u16>; 2] {
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let extra = FontLibrary::with_fallbacks(vec![font.to_vec()]).layout(text, &s);
     let system = FontLibrary::with_test_system_fonts(vec![font.to_vec()]).layout(text, &s);
     assert_eq!(extra.runs().len(), 1);
@@ -70,7 +72,7 @@ fn secondary_subtables_are_read_once_each() {
     assert_no_bundled_font_has(&text[..4 * 4_096]);
     let lib = FontLibrary::with_fallbacks(vec![font]);
     let start = std::time::Instant::now();
-    let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+    let layout = lib.layout(&text, &style(BundledFont::Inter, 10.0));
     let elapsed = start.elapsed();
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
     assert_eq!(fonts, [FontKey::Extra(0)]);
@@ -98,10 +100,13 @@ fn secondary_subtables_are_capped() {
     let text = many_secondary_characters();
     let lib = FontLibrary::with_fallbacks(vec![font]);
     let start = std::time::Instant::now();
-    let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+    let layout = lib.layout(&text, &style(BundledFont::Inter, 10.0));
     let elapsed = start.elapsed();
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
-    assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
+    assert_eq!(
+        fonts,
+        [FontKey::Bundled(BundledFont::Inter, Weight::Regular)]
+    );
     assert_fast(elapsed);
 }
 

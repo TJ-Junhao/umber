@@ -8,8 +8,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
-    Align, ColorbarPosition, Dash, FillStyle, Font, GridLines, LegendMode, LegendPosition,
-    LegendStyle, Marker, Render, Share, Step, SvgText,
+    Align, ColorbarPosition, Dash, FillStyle, GridLines, LegendMode, LegendPosition, LegendStyle,
+    Marker, Render, Share, Step, SvgText,
 };
 
 use crate::errors::internal_value;
@@ -66,14 +66,6 @@ int_enum!("Marker", Marker {
     "TRIANGLE" => Marker::Triangle = 2,
     "DIAMOND" => Marker::Diamond = 3,
     "CROSS" => Marker::Cross = 4,
-});
-
-int_enum!("Font", Font {
-    "SOURCE_SERIF_4" => Font::SourceSerif4 = 0,
-    "IBM_PLEX_SANS" => Font::IbmPlexSans = 1,
-    "GEIST" => Font::Geist = 2,
-    "INTER" => Font::Inter = 3,
-    "JETBRAINS_MONO" => Font::JetBrainsMono = 4,
 });
 
 int_enum!("LegendStyle", LegendStyle {
@@ -170,10 +162,9 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 14] = [
+const TABLES: [(&str, &[(&str, i64)]); 13] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
-    (Font::PY_NAME, Font::MEMBERS),
     (LegendStyle::PY_NAME, LegendStyle::MEMBERS),
     (FillStyle::PY_NAME, FillStyle::MEMBERS),
     (GridLines::PY_NAME, GridLines::MEMBERS),
@@ -223,7 +214,6 @@ mod tests {
     fn every_table_round_trips_with_values_in_declaration_order() {
         round_trips::<Dash>();
         round_trips::<Marker>();
-        round_trips::<Font>();
         round_trips::<LegendStyle>();
         round_trips::<FillStyle>();
         round_trips::<GridLines>();
@@ -252,7 +242,6 @@ mod tests {
             [
                 "Dash",
                 "Marker",
-                "Font",
                 "LegendStyle",
                 "FillStyle",
                 "GridLines",

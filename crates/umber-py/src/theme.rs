@@ -2,16 +2,18 @@
 //!
 //! Each `with_*` method returns a new theme and leaves the original unchanged. Color values
 //! arrive as color arguments (see the `color` module) and must be concrete: `Color.AUTO` and
-//! `Color.palette()` refer to a theme's palette, so a theme cannot use them. Enum values arrive
-//! as the integers of the `enums` module, and numbers are validated by the core.
+//! `Color.palette()` refer to a theme's palette, so a theme cannot use them. Fonts arrive as font
+//! arguments (see the `font` module), enum values as the integers of the `enums` module, and
+//! numbers are validated by the core.
 
 use pyo3::prelude::*;
-use umber_core::{Align, Dash, FillStyle, Font, GridLines, LegendPosition, LegendStyle, Rgba};
+use umber_core::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, Rgba};
 
 use crate::cmap::Cmap;
 use crate::color::{ColorArg, color_spec, concrete, concrete_list};
 use crate::enums::{IntEnum, enum_value};
 use crate::errors::core_error;
+use crate::font::{FontArg, font};
 
 /// A `with_*` method of the core theme.
 type With<T> = fn(&umber_core::Theme, T) -> umber_core::Result<umber_core::Theme>;
@@ -118,9 +120,9 @@ impl Theme {
         self.with_enum::<Dash>(value, umber_core::Theme::with_grid_dash)
     }
 
-    /// This theme with the title font `value` (a `Font` value).
-    fn with_title_font(&self, value: i64) -> PyResult<Theme> {
-        self.with_enum::<Font>(value, umber_core::Theme::with_title_font)
+    /// This theme with the title font `value` (a font argument).
+    fn with_title_font(&self, value: FontArg) -> PyResult<Theme> {
+        self.with(umber_core::Theme::with_title_font, font(value)?)
     }
 
     /// This theme with the title alignment `value` (an `Align` value).
@@ -128,9 +130,9 @@ impl Theme {
         self.with_enum::<Align>(value, umber_core::Theme::with_title_align)
     }
 
-    /// This theme with the body font `value` (a `Font` value).
-    fn with_body_font(&self, value: i64) -> PyResult<Theme> {
-        self.with_enum::<Font>(value, umber_core::Theme::with_body_font)
+    /// This theme with the body font `value` (a font argument).
+    fn with_body_font(&self, value: FontArg) -> PyResult<Theme> {
+        self.with(umber_core::Theme::with_body_font, font(value)?)
     }
 
     /// This theme with the legend style `value` (a `LegendStyle` value).

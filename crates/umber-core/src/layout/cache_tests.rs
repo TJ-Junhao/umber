@@ -5,13 +5,14 @@ use super::*;
 #[test]
 fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
     let lib = FontLibrary::bundled();
-    let cache = LabelCache::new(&lib);
+    let fonts = figure_fonts(&lib, &Theme::pigment()).unwrap();
+    let cache = LabelCache::new(&fonts);
     let text = "a\u{301} ffi 012日";
     let regular = Styles::new(&Theme::pigment()).tick;
     let styles = [
         regular,
         TextStyle {
-            font: crate::Font::Inter,
+            face: TITLE_FACE,
             ..regular
         },
         TextStyle {
@@ -28,7 +29,7 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
         },
     ];
     for style in styles {
-        let expected = measure(&lib, text, style);
+        let expected = measure(&fonts, text, style);
         assert_eq!(
             cache.width(text, style).to_bits(),
             expected.width().to_bits()
@@ -62,7 +63,7 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
     );
     let long = "W".repeat(5000);
     for text in ["", "ffi", &long] {
-        let expected = measure(&lib, text, regular);
+        let expected = measure(&fonts, text, regular);
         assert_eq!(
             cache.width(text, regular).to_bits(),
             expected.width().to_bits()
@@ -83,5 +84,5 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
             .sum::<usize>(),
         styles.len() + 3
     );
-    assert!(LabelCache::new(&lib).labels.borrow().is_empty());
+    assert!(LabelCache::new(&fonts).labels.borrow().is_empty());
 }

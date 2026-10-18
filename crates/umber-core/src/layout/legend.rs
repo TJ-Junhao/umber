@@ -24,7 +24,8 @@ use super::{
 };
 use crate::legend::{Legend, RowStyle, Swatch};
 use crate::resolve::{Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis};
-use crate::{Align, FontLibrary, Result, Rgba, SizeSpec, TextStyle, Theme, Weight};
+use crate::text::SceneFonts;
+use crate::{Align, Result, Rgba, SizeSpec, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
 const SWATCH_GAP: f64 = 4.0;
@@ -151,7 +152,7 @@ impl MeasuredRow {
     /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
     /// Bubble references have no pill or horizontal padding and retain their true circle size,
     /// including the outline. Both row styles grow to contain the tallest reference circle.
-    pub fn measure(theme: &Theme, legend: &Legend, lib: &FontLibrary) -> Option<MeasuredRow> {
+    pub fn measure(theme: &Theme, legend: &Legend, lib: &SceneFonts<'_>) -> Option<MeasuredRow> {
         if legend.row().is_empty() {
             return None;
         }
@@ -367,7 +368,7 @@ pub(crate) struct MeasuredLegend<'a> {
 impl<'a> MeasuredLegend<'a> {
     /// The row entries and the direct labels of `legend`, measured; see
     /// [`MeasuredRow::measure`] and [`DirectLabels::measure`].
-    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &FontLibrary) -> MeasuredLegend<'a> {
+    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &SceneFonts<'_>) -> MeasuredLegend<'a> {
         if legend.is_empty() {
             return MeasuredLegend::default();
         }
@@ -449,7 +450,7 @@ impl<'a> DirectLabels<'a> {
     /// The direct labels of `legend`, measured in the body font at `SemiBold` weight and the
     /// body size, with end dots of the theme's drawn marker diameter, whatever the size of the
     /// line's own markers or width: an end dot marks where a line ends, alike for every line.
-    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &FontLibrary) -> DirectLabels<'a> {
+    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &SceneFonts<'_>) -> DirectLabels<'a> {
         if legend.direct().is_empty() {
             return DirectLabels::default();
         }
@@ -745,7 +746,7 @@ mod tests {
     use crate::scene::Item;
     use crate::test_support::named_height;
     use crate::test_support::scene::assert_scene_bounded;
-    use crate::{ScaleKind, Theme};
+    use crate::{FontLibrary, ScaleKind, Theme};
 
     /// A `w` by `h` in figure in `theme` with a title, a subtitle and a y label, and one line
     /// per label.
@@ -1581,7 +1582,8 @@ mod tests {
             let marks = crate::resolve::resolve_marks(axes.marks(), f.theme());
             let limits = crate::resolve::Limits::of(axes);
             let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits);
-            DirectLabels::measure(f.theme(), &legend, FontLibrary::global()).reserve(cap)
+            let fonts = crate::test_support::figure_fonts(f.theme());
+            DirectLabels::measure(f.theme(), &legend, &fonts).reserve(cap)
         };
         let short = measured(&["Short"]);
         assert!(short > DIRECT_GAP && short < cap);

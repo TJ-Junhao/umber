@@ -6,7 +6,8 @@ use super::{
 use crate::color_scale::ResolvedColorScale;
 use crate::model::Axes;
 use crate::resolve::NormalizedPos;
-use crate::{ColorbarPosition, Error, FontLibrary, Result, Theme};
+use crate::text::SceneFonts;
+use crate::{ColorbarPosition, Error, Result, Theme};
 
 /// The gap from a tick's end to its label, in points.
 const TICK_GAP: f64 = 3.0;
@@ -118,7 +119,7 @@ impl MeasuredColorbar {
         axes: &Axes,
         color: Option<&ResolvedColorScale>,
         theme: &Theme,
-        lib: &FontLibrary,
+        lib: &SceneFonts<'_>,
     ) -> Option<Self> {
         let color = color?;
         let options = axes.colorbar_options();
@@ -132,7 +133,7 @@ impl MeasuredColorbar {
         color: &ResolvedColorScale,
         position: ColorbarSide,
         theme: &Theme,
-        lib: &FontLibrary,
+        lib: &SceneFonts<'_>,
     ) -> Self {
         let styles = Styles::new(theme);
         let ticks = measure_ticks(lib, &color.ticks, styles.tick);
@@ -308,7 +309,7 @@ impl PlacedColorbar {
         context: &'static str,
         frame: Frame,
         outer_edges: [bool; 2],
-        lib: &FontLibrary,
+        lib: &SceneFonts<'_>,
     ) -> Result<()> {
         let left = frame.x
             + if outer_edges[0] {
@@ -497,13 +498,14 @@ mod tests {
         for position in [ColorbarPosition::Right, ColorbarPosition::Bottom] {
             let f = figure(position, Some(0.3));
             let (resolved, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+            let fonts = crate::test_support::figure_fonts(f.theme());
             let (x, y) = crate::layout::tick_rooms(
                 crate::layout::PlotSize {
                     width: layout.plot.width,
                     height: layout.plot.height,
                 },
                 f.theme(),
-                FontLibrary::global(),
+                &fonts,
                 crate::layout::TickSpacing::LabelsApart,
             );
             let room = if position == ColorbarPosition::Bottom {
@@ -709,6 +711,7 @@ mod tests {
     fn colorbar_canvas_edges_use_grid_topology() {
         let f = figure(ColorbarPosition::Bottom, None);
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+        let fonts = crate::test_support::figure_fonts(f.theme());
         let mut bar = layout.colorbar.unwrap();
         let label = bar.label.as_mut().unwrap();
         label.x = 1.0;
@@ -720,22 +723,12 @@ mod tests {
             height: 288.0,
         };
         assert!(
-            bar.check(
-                "Figure.to_scene()",
-                frame,
-                [false, false],
-                FontLibrary::global()
-            )
-            .is_ok()
+            bar.check("Figure.to_scene()", frame, [false, false], &fonts)
+                .is_ok()
         );
         assert!(
-            bar.check(
-                "Figure.to_scene()",
-                frame,
-                [true, false],
-                FontLibrary::global()
-            )
-            .is_err()
+            bar.check("Figure.to_scene()", frame, [true, false], &fonts)
+                .is_err()
         );
         let label = bar.label.as_mut().unwrap();
         label.x = frame.right() - label.width() - 1.0;
@@ -744,22 +737,12 @@ mod tests {
             ..frame
         };
         assert!(
-            bar.check(
-                "Figure.to_scene()",
-                frame,
-                [false, false],
-                FontLibrary::global()
-            )
-            .is_ok()
+            bar.check("Figure.to_scene()", frame, [false, false], &fonts)
+                .is_ok()
         );
         assert!(
-            bar.check(
-                "Figure.to_scene()",
-                frame,
-                [false, true],
-                FontLibrary::global()
-            )
-            .is_err()
+            bar.check("Figure.to_scene()", frame, [false, true], &fonts)
+                .is_err()
         );
     }
 

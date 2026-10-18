@@ -3,8 +3,9 @@
 //! A [`Scene`] is plain data: a list of drawing primitives in points (1/72 inch), with the y
 //! axis pointing down and the origin at the top-left corner of the figure. Text enters a scene
 //! already shaped and outlined, and keeps its source string and style so that the SVG backend
-//! can also write it as editable text. No validation happens when a scene is built; the
-//! renderers skip values they cannot draw.
+//! can also write it as editable text; the style names its font by its index in the scene's font
+//! list. No validation happens when a scene is built; the renderers skip values they cannot
+//! draw.
 //!
 //! # Examples
 //!
@@ -25,8 +26,9 @@
 //! ```
 
 use crate::color::Rgba;
+use crate::fonts::Font;
 use crate::geometry::{Path, Point};
-use crate::text::TextStyle;
+use crate::text::{FaceId, TextStyle};
 
 /// The deepest group nesting the renderers draw. Content of groups nested deeper than this is
 /// omitted, which bounds the renderers' recursion.
@@ -250,20 +252,24 @@ pub enum Paint {
 ///
 /// ```
 /// use umber_core::scene::{Item, Scene};
-/// use umber_core::{Font, FontLibrary, Point, Rgba, TextStyle, Weight};
+/// use umber_core::{FaceId, Font, FontLibrary, Point, Rgba, TextStyle, Weight};
 ///
 /// let white = Rgba { r: 255, g: 255, b: 255, a: 255 };
-/// let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 12.0, tabular_figures: false };
+/// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
+/// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 12.0, tabular_figures: false };
 /// let mut scene = Scene::new(100.0, 40.0, white);
-/// scene.push_text(FontLibrary::global(), "Hi", style, Point { x: 5.0, y: 20.0 }, white);
+/// scene.push_text(&fonts, "Hi", style, Point { x: 5.0, y: 20.0 }, white);
 /// let Some(Item::Text(item)) = scene.items.first() else { unreachable!() };
 /// assert_eq!(item.text, "Hi");
+/// assert_eq!(scene.font(item.style.face), Some(&Font::INTER));
+/// # Ok::<(), umber_core::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextItem {
     /// The source string.
     pub text: String,
-    /// The style the text was laid out with.
+    /// The style the text was laid out with. Its face indexes the scene's
+    /// [`fonts`](Scene::fonts).
     pub style: TextStyle,
     /// Left end of the baseline.
     pub origin: Point,
@@ -368,6 +374,9 @@ pub struct Scene {
     pub background: Rgba,
     /// Top-level items, drawn in order.
     pub items: Vec<Item>,
+    /// The fonts that text items name: the face of a [`TextItem`]'s style is an index into
+    /// this list.
+    pub fonts: Vec<Font>,
 }
 
 impl Drop for Scene {
@@ -383,7 +392,7 @@ impl Drop for Scene {
 }
 
 impl Scene {
-    /// Creates an empty scene.
+    /// Creates an empty scene, with no items and no fonts.
     ///
     /// # Examples
     ///
@@ -401,7 +410,27 @@ impl Scene {
             height,
             background,
             items: Vec::new(),
+            fonts: Vec::new(),
         }
+    }
+
+    /// The font of `face`: the entry of [`fonts`](Scene::fonts) at its index, or `None` when
+    /// the scene has no such font.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::scene::Scene;
+    /// use umber_core::{FaceId, Font, Rgba};
+    ///
+    /// let mut scene = Scene::new(10.0, 10.0, Rgba { r: 0, g: 0, b: 0, a: 0 });
+    /// scene.fonts.push(Font::GEIST);
+    /// assert_eq!(scene.font(FaceId::new(0)), Some(&Font::GEIST));
+    /// assert_eq!(scene.font(FaceId::new(1)), None);
+    /// ```
+    #[must_use]
+    pub fn font(&self, face: FaceId) -> Option<&Font> {
+        self.fonts.get(face.index())
     }
 
     /// Appends an item.

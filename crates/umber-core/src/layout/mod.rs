@@ -41,6 +41,7 @@ use std::collections::HashMap;
 use crate::error::{number, quoted};
 use crate::model::Axes;
 use crate::resolve::{AxisTick, Baseline, NormalizedPos, ValueAxis};
+use crate::text::{FaceId, SceneFonts};
 use crate::{Error, FontLibrary, Result, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
@@ -251,6 +252,17 @@ fn scaled(size: f32, scale: f32) -> f32 {
     }
 }
 
+/// The face of the title font in the fonts of a figure (see [`figure_fonts`]).
+const TITLE_FACE: FaceId = FaceId::new(0);
+/// The face of the body font in the fonts of a figure (see [`figure_fonts`]).
+const BODY_FACE: FaceId = FaceId::new(1);
+
+/// The fonts of a figure with `theme`, laid out through `library`: the title font as
+/// [`TITLE_FACE`] and the body font as [`BODY_FACE`], the faces [`Styles`] name.
+pub(crate) fn figure_fonts<'a>(library: &'a FontLibrary, theme: &Theme) -> Result<SceneFonts<'a>> {
+    library.with_figure_fonts(&[theme.title_font().clone(), theme.body_font().clone()])
+}
+
 /// The text styles of one figure.
 struct Styles {
     title: TextStyle,
@@ -262,14 +274,14 @@ impl Styles {
     fn new(theme: &Theme) -> Styles {
         let scale = theme.font_scale();
         let body = TextStyle {
-            font: theme.body_font(),
+            face: BODY_FACE,
             weight: Weight::Regular,
             size: scaled(theme.body_size(), scale),
             tabular_figures: false,
         };
         Styles {
             title: TextStyle {
-                font: theme.title_font(),
+                face: TITLE_FACE,
                 weight: Weight::SemiBold,
                 size: scaled(theme.title_size(), scale),
                 tabular_figures: false,
@@ -284,7 +296,7 @@ impl Styles {
 }
 
 /// Ascent and descent of `style`'s primary font.
-fn metrics(lib: &FontLibrary, style: &TextStyle) -> (f64, f64) {
+fn metrics(lib: &SceneFonts<'_>, style: &TextStyle) -> (f64, f64) {
     let layout = lib.layout("", style);
     (f64::from(layout.ascent()), f64::from(layout.descent()))
 }
@@ -296,7 +308,7 @@ fn fits(layout: &TextLayout) -> bool {
 
 /// Shapes `text`, cutting it to the longest prefix (on a character boundary) whose width is at
 /// most [`MAX_TEXT_WIDTH`].
-fn measure(lib: &FontLibrary, text: &str, style: TextStyle) -> Label {
+fn measure(lib: &SceneFonts<'_>, text: &str, style: TextStyle) -> Label {
     let full = lib.layout(text, &style);
     let (text, layout) = if fits(&full) {
         (text.to_owned(), full)
@@ -331,11 +343,11 @@ fn measure(lib: &FontLibrary, text: &str, style: TextStyle) -> Label {
     }
 }
 
-/// Measurements reused within one scene construction. The library is fixed for this cache;
+/// Measurements reused within one scene construction. The fonts are fixed for this cache;
 /// every style field, including the exact size bits, and the uncut text identify a label.
 /// Placing a returned label never changes the unplaced copy kept here.
 pub(crate) struct LabelCache<'a> {
-    lib: &'a FontLibrary,
+    lib: &'a SceneFonts<'a>,
     labels: RefCell<HashMap<LabelStyle, HashMap<String, Label>>>,
     #[cfg(test)]
     enabled: bool,
@@ -343,14 +355,14 @@ pub(crate) struct LabelCache<'a> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct LabelStyle {
-    font: crate::Font,
+    face: FaceId,
     weight: Weight,
     size: u32,
     tabular_figures: bool,
 }
 
 impl<'a> LabelCache<'a> {
-    pub(crate) fn new(lib: &'a FontLibrary) -> Self {
+    pub(crate) fn new(lib: &'a SceneFonts<'a>) -> Self {
         Self {
             lib,
             labels: RefCell::new(HashMap::new()),
@@ -360,7 +372,7 @@ impl<'a> LabelCache<'a> {
     }
 
     #[cfg(test)]
-    pub(crate) fn uncached(lib: &'a FontLibrary) -> Self {
+    pub(crate) fn uncached(lib: &'a SceneFonts<'a>) -> Self {
         Self {
             enabled: false,
             ..Self::new(lib)
@@ -378,7 +390,7 @@ impl<'a> LabelCache<'a> {
             return use_label(&measure(self.lib, text, style));
         }
         let key = LabelStyle {
-            font: style.font,
+            face: style.face,
             weight: style.weight,
             size: style.size.to_bits(),
             tabular_figures: style.tabular_figures,
@@ -413,7 +425,7 @@ impl<'a> LabelCache<'a> {
 
 /// Measures the label of every tick, keeping each tick's position.
 fn measure_ticks(
-    lib: &FontLibrary,
+    lib: &SceneFonts<'_>,
     ticks: &[AxisTick],
     style: TextStyle,
 ) -> Vec<(NormalizedPos, Label)> {
@@ -427,7 +439,7 @@ fn measure_ticks(
 /// horizontally on `x`, and vertically as a y tick label is centered on its tick. For labels
 /// drawn inside the plot area, such as the values written on heatmap cells.
 pub(crate) fn centered_tick_label(
-    lib: &FontLibrary,
+    lib: &SceneFonts<'_>,
     theme: &Theme,
     text: &str,
     (x, y): (f64, f64),
@@ -522,7 +534,7 @@ pub(crate) struct TickRoom<'a> {
     /// How the labels take room along the axis.
     extent: LabelExtent,
     /// The fonts.
-    lib: &'a FontLibrary,
+    lib: &'a SceneFonts<'a>,
     /// The tick label style.
     style: TextStyle,
     /// The widths of the labels measured so far: tick searches judge the same labels often.
@@ -539,7 +551,7 @@ pub(crate) struct TickRoom<'a> {
 pub(crate) fn tick_rooms<'a>(
     plot: PlotSize,
     theme: &Theme,
-    lib: &'a FontLibrary,
+    lib: &'a SceneFonts<'a>,
     spacing: TickSpacing,
 ) -> (TickRoom<'a>, TickRoom<'a>) {
     let (x_target, y_target) = tick_targets(plot);
@@ -665,11 +677,12 @@ impl<'a> TickRoom<'a> {
 
 #[cfg(test)]
 impl<'a> TickRoom<'a> {
-    /// Tick rooms for ticks chosen for about `x_target` and `y_target` alone.
+    /// Tick rooms for ticks chosen for about `x_target` and `y_target` alone, with tick labels
+    /// in the style of [`Theme::pigment`] and `lib` the fonts of a pigment figure.
     pub(crate) fn unlimited(
         x_target: usize,
         y_target: usize,
-        lib: &'a FontLibrary,
+        lib: &'a SceneFonts<'a>,
     ) -> (TickRoom<'a>, TickRoom<'a>) {
         let size = PlotSize {
             width: 400.0,
@@ -709,7 +722,7 @@ pub(crate) struct LayoutInput<'a> {
     /// The legend, measured by [`MeasuredLegend::measure`].
     pub legend: &'a MeasuredLegend<'a>,
     /// The fonts.
-    pub lib: &'a FontLibrary,
+    pub lib: &'a SceneFonts<'a>,
     /// The API call that renders, which layout errors are reported in, e.g. `"Figure.to_png()"`.
     pub context: &'static str,
 }
@@ -2080,10 +2093,11 @@ mod tests {
     fn bottom_legend_starts_below_the_lowest_y_tick_label() {
         let f = bottom_without_x_labels(4.0);
         let layout = plan_of(&f).1;
+        let fonts = crate::test_support::figure_fonts(f.theme());
         let label = &layout.y_tick_labels[0];
-        let bottom = label.y + metrics(lib(), &label.style).1;
+        let bottom = label.y + metrics(&fonts, &label.style).1;
         let entry = &layout.legend.entries()[0];
-        let top = entry.label.y - metrics(lib(), &entry.label.style).0;
+        let top = entry.label.y - metrics(&fonts, &entry.label.style).0;
         assert!(
             top >= bottom + placement::BOTTOM_GAP,
             "legend top {top}, y label bottom {bottom}"
@@ -2095,7 +2109,8 @@ mod tests {
         let f = bottom_without_x_labels(4.0);
         let layout = plan_of(&f).1;
         let label = &layout.y_tick_labels[0];
-        let bottom = label.y + metrics(lib(), &label.style).1;
+        let bottom =
+            label.y + metrics(&crate::test_support::figure_fonts(f.theme()), &label.style).1;
         let required = bottom + placement::BOTTOM_GAP + layout.legend.height() + PADDING;
         assert!(
             required <= f.height_in() * 72.0 + 1e-9,
@@ -2354,7 +2369,8 @@ mod tests {
             assert_eq!(format!("{w} {p}"), format!("{width} {shown}"));
         }
         let lib = FontLibrary::with_fallbacks(Vec::new());
-        let label = measure(&lib, "WWWW", Styles::new(&Theme::pigment()).body);
+        let fonts = figure_fonts(&lib, &Theme::pigment()).unwrap();
+        let label = measure(&fonts, "WWWW", Styles::new(&Theme::pigment()).body);
         let width = label.width().ceil();
         for container in ["figure", "panel"] {
             for (room, shown) in [(width - 0.6, width - 1.0), (-0.1, -1.0)] {

@@ -1,30 +1,33 @@
-//! The font files bundled with the crate.
+//! Fonts: the families text is set in, and the font files bundled with the crate.
 //!
-//! Five OFL-licensed families are embedded with `include_bytes!`, each in two weights: Source
-//! Serif 4, IBM Plex Sans, Geist, Inter and JetBrains Mono. Families that declare a Reserved
-//! Font Name are shipped unmodified; the others are subset. Each family's license text ships
-//! with its fonts, and `fonts/MANIFEST.md` records where every file came from.
+//! A [`Font`] is a value naming the family a theme sets its titles or body text in. Five
+//! OFL-licensed families are bundled ([`BundledFont`]), embedded with `include_bytes!`, each in
+//! two weights: Source Serif 4, IBM Plex Sans, Geist, Inter and JetBrains Mono. Families that
+//! declare a Reserved Font Name are shipped unmodified; the others are subset. Each family's
+//! license text ships with its fonts, and `fonts/MANIFEST.md` records where every file came
+//! from.
 //!
 //! # Examples
 //!
 //! ```
-//! use umber_core::fonts::{Font, Weight, font_bytes};
+//! use umber_core::fonts::{BundledFont, Font, Weight, font_bytes};
 //!
-//! assert!(!font_bytes(Font::Inter, Weight::Regular).is_empty());
+//! assert_eq!(Font::INTER, Font::Bundled(BundledFont::Inter));
+//! assert!(!font_bytes(BundledFont::Inter, Weight::Regular).is_empty());
 //! ```
 
-/// A bundled font family.
+/// A font family bundled with the crate.
 ///
 /// # Examples
 ///
 /// ```
-/// use umber_core::Font;
+/// use umber_core::BundledFont;
 ///
-/// assert_eq!(Font::ALL.len(), 5);
-/// assert_eq!(Font::ALL[3], Font::Inter);
+/// assert_eq!(BundledFont::ALL.len(), 5);
+/// assert_eq!(BundledFont::ALL[3], BundledFont::Inter);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Font {
+pub enum BundledFont {
     /// Source Serif 4.
     SourceSerif4,
     /// IBM Plex Sans.
@@ -37,22 +40,22 @@ pub enum Font {
     JetBrainsMono,
 }
 
-impl Font {
+impl BundledFont {
     /// Every bundled family.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::Font;
+    /// use umber_core::BundledFont;
     ///
-    /// assert!(Font::ALL.contains(&Font::Geist));
+    /// assert!(BundledFont::ALL.contains(&BundledFont::Geist));
     /// ```
-    pub const ALL: [Font; 5] = [
-        Font::SourceSerif4,
-        Font::IbmPlexSans,
-        Font::Geist,
-        Font::Inter,
-        Font::JetBrainsMono,
+    pub const ALL: [BundledFont; 5] = [
+        BundledFont::SourceSerif4,
+        BundledFont::IbmPlexSans,
+        BundledFont::Geist,
+        BundledFont::Inter,
+        BundledFont::JetBrainsMono,
     ];
 
     /// The family name used in SVG `font-family`.
@@ -60,18 +63,18 @@ impl Font {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::Font;
+    /// use umber_core::BundledFont;
     ///
-    /// assert_eq!(Font::SourceSerif4.family_name(), "Source Serif 4");
+    /// assert_eq!(BundledFont::SourceSerif4.family_name(), "Source Serif 4");
     /// ```
     #[must_use]
     pub fn family_name(self) -> &'static str {
         match self {
-            Font::SourceSerif4 => "Source Serif 4",
-            Font::IbmPlexSans => "IBM Plex Sans",
-            Font::Geist => "Geist",
-            Font::Inter => "Inter",
-            Font::JetBrainsMono => "JetBrains Mono",
+            BundledFont::SourceSerif4 => "Source Serif 4",
+            BundledFont::IbmPlexSans => "IBM Plex Sans",
+            BundledFont::Geist => "Geist",
+            BundledFont::Inter => "Inter",
+            BundledFont::JetBrainsMono => "JetBrains Mono",
         }
     }
 
@@ -81,16 +84,126 @@ impl Font {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::Font;
+    /// use umber_core::BundledFont;
     ///
-    /// assert_eq!(Font::JetBrainsMono.generic_family(), "monospace");
+    /// assert_eq!(BundledFont::JetBrainsMono.generic_family(), "monospace");
     /// ```
     #[must_use]
     pub fn generic_family(self) -> &'static str {
         match self {
-            Font::SourceSerif4 => "serif",
-            Font::JetBrainsMono => "monospace",
-            Font::IbmPlexSans | Font::Geist | Font::Inter => "sans-serif",
+            BundledFont::SourceSerif4 => "serif",
+            BundledFont::JetBrainsMono => "monospace",
+            BundledFont::IbmPlexSans | BundledFont::Geist | BundledFont::Inter => "sans-serif",
+        }
+    }
+}
+
+/// A font family that text is set in, such as a theme's title or body font.
+///
+/// Fonts are values: two fonts are equal when they name the same family. The bundled families
+/// have one constant each.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{BundledFont, Font, Theme};
+///
+/// let theme = Theme::pigment().with_title_font(Font::INTER)?;
+/// assert_eq!(theme.title_font(), &Font::Bundled(BundledFont::Inter));
+/// assert_eq!(theme.title_font().family_name(), "Inter");
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Font {
+    /// A family bundled with the crate.
+    Bundled(BundledFont),
+}
+
+impl Font {
+    /// Source Serif 4, a bundled serif face.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::SOURCE_SERIF_4.family_name(), "Source Serif 4");
+    /// ```
+    pub const SOURCE_SERIF_4: Font = Font::Bundled(BundledFont::SourceSerif4);
+
+    /// IBM Plex Sans, a bundled sans-serif face.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::IBM_PLEX_SANS.family_name(), "IBM Plex Sans");
+    /// ```
+    pub const IBM_PLEX_SANS: Font = Font::Bundled(BundledFont::IbmPlexSans);
+
+    /// Geist, a bundled sans-serif face.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::GEIST.family_name(), "Geist");
+    /// ```
+    pub const GEIST: Font = Font::Bundled(BundledFont::Geist);
+
+    /// Inter, a bundled sans-serif face.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::INTER.family_name(), "Inter");
+    /// ```
+    pub const INTER: Font = Font::Bundled(BundledFont::Inter);
+
+    /// JetBrains Mono, a bundled monospaced face.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::JETBRAINS_MONO.family_name(), "JetBrains Mono");
+    /// ```
+    pub const JETBRAINS_MONO: Font = Font::Bundled(BundledFont::JetBrainsMono);
+
+    /// The family name, as SVG `font-family` writes it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::IBM_PLEX_SANS.family_name(), "IBM Plex Sans");
+    /// ```
+    #[must_use]
+    pub fn family_name(&self) -> &str {
+        match self {
+            Font::Bundled(font) => font.family_name(),
+        }
+    }
+
+    /// The CSS generic family that SVG `font-family` falls back to.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    ///
+    /// assert_eq!(Font::SOURCE_SERIF_4.generic_family(), "serif");
+    /// ```
+    #[must_use]
+    pub fn generic_family(&self) -> &'static str {
+        match self {
+            Font::Bundled(font) => font.generic_family(),
         }
     }
 }
@@ -198,32 +311,34 @@ pub(crate) const FALLBACK_TEST_CODEPOINT: char = '\u{E000}';
 ///
 /// ```
 /// use umber_core::fonts::font_bytes;
-/// use umber_core::{Font, Weight};
+/// use umber_core::{BundledFont, Weight};
 ///
-/// let bytes = font_bytes(Font::Geist, Weight::SemiBold);
+/// let bytes = font_bytes(BundledFont::Geist, Weight::SemiBold);
 /// assert!(bytes.len() > 1000);
 /// ```
 #[must_use]
-pub fn font_bytes(font: Font, weight: Weight) -> &'static [u8] {
+pub fn font_bytes(font: BundledFont, weight: Weight) -> &'static [u8] {
     match (font, weight) {
-        (Font::SourceSerif4, Weight::Regular) => {
+        (BundledFont::SourceSerif4, Weight::Regular) => {
             include_bytes!("../fonts/SourceSerif4-Regular.ttf")
         }
-        (Font::SourceSerif4, Weight::SemiBold) => {
+        (BundledFont::SourceSerif4, Weight::SemiBold) => {
             include_bytes!("../fonts/SourceSerif4-SemiBold.ttf")
         }
-        (Font::IbmPlexSans, Weight::Regular) => include_bytes!("../fonts/IBMPlexSans-Regular.ttf"),
-        (Font::IbmPlexSans, Weight::SemiBold) => {
+        (BundledFont::IbmPlexSans, Weight::Regular) => {
+            include_bytes!("../fonts/IBMPlexSans-Regular.ttf")
+        }
+        (BundledFont::IbmPlexSans, Weight::SemiBold) => {
             include_bytes!("../fonts/IBMPlexSans-SemiBold.ttf")
         }
-        (Font::Geist, Weight::Regular) => include_bytes!("../fonts/Geist-Regular.ttf"),
-        (Font::Geist, Weight::SemiBold) => include_bytes!("../fonts/Geist-SemiBold.ttf"),
-        (Font::Inter, Weight::Regular) => include_bytes!("../fonts/Inter-Regular.ttf"),
-        (Font::Inter, Weight::SemiBold) => include_bytes!("../fonts/Inter-SemiBold.ttf"),
-        (Font::JetBrainsMono, Weight::Regular) => {
+        (BundledFont::Geist, Weight::Regular) => include_bytes!("../fonts/Geist-Regular.ttf"),
+        (BundledFont::Geist, Weight::SemiBold) => include_bytes!("../fonts/Geist-SemiBold.ttf"),
+        (BundledFont::Inter, Weight::Regular) => include_bytes!("../fonts/Inter-Regular.ttf"),
+        (BundledFont::Inter, Weight::SemiBold) => include_bytes!("../fonts/Inter-SemiBold.ttf"),
+        (BundledFont::JetBrainsMono, Weight::Regular) => {
             include_bytes!("../fonts/JetBrainsMono-Regular.ttf")
         }
-        (Font::JetBrainsMono, Weight::SemiBold) => {
+        (BundledFont::JetBrainsMono, Weight::SemiBold) => {
             include_bytes!("../fonts/JetBrainsMono-SemiBold.ttf")
         }
     }
@@ -235,18 +350,18 @@ pub fn font_bytes(font: Font, weight: Weight) -> &'static [u8] {
 ///
 /// ```
 /// use umber_core::fonts::license_text;
-/// use umber_core::Font;
+/// use umber_core::BundledFont;
 ///
-/// assert!(license_text(Font::Inter).contains("SIL OPEN FONT LICENSE"));
+/// assert!(license_text(BundledFont::Inter).contains("SIL OPEN FONT LICENSE"));
 /// ```
 #[must_use]
-pub fn license_text(font: Font) -> &'static str {
+pub fn license_text(font: BundledFont) -> &'static str {
     match font {
-        Font::SourceSerif4 => include_str!("../fonts/LICENSES/SourceSerif4-OFL.txt"),
-        Font::IbmPlexSans => include_str!("../fonts/LICENSES/IBMPlexSans-OFL.txt"),
-        Font::Geist => include_str!("../fonts/LICENSES/Geist-OFL.txt"),
-        Font::Inter => include_str!("../fonts/LICENSES/Inter-OFL.txt"),
-        Font::JetBrainsMono => include_str!("../fonts/LICENSES/JetBrainsMono-OFL.txt"),
+        BundledFont::SourceSerif4 => include_str!("../fonts/LICENSES/SourceSerif4-OFL.txt"),
+        BundledFont::IbmPlexSans => include_str!("../fonts/LICENSES/IBMPlexSans-OFL.txt"),
+        BundledFont::Geist => include_str!("../fonts/LICENSES/Geist-OFL.txt"),
+        BundledFont::Inter => include_str!("../fonts/LICENSES/Inter-OFL.txt"),
+        BundledFont::JetBrainsMono => include_str!("../fonts/LICENSES/JetBrainsMono-OFL.txt"),
     }
 }
 
@@ -262,7 +377,7 @@ mod tests {
 
     #[test]
     fn every_font_parses_and_covers_required_codepoints() {
-        for font in Font::ALL {
+        for font in BundledFont::ALL {
             for weight in Weight::ALL {
                 let face = FontRef::new(font_bytes(font, weight))
                     .unwrap_or_else(|e| panic!("{font:?} {weight:?}: {e}"));
@@ -283,7 +398,7 @@ mod tests {
 
     #[test]
     fn extended_codepoints_are_covered_by_some_bundled_font() {
-        let charmaps: Vec<_> = Font::ALL
+        let charmaps: Vec<_> = BundledFont::ALL
             .iter()
             .flat_map(|&f| Weight::ALL.iter().map(move |&w| (f, w)))
             .map(|(f, w)| {
@@ -305,7 +420,7 @@ mod tests {
 
     #[test]
     fn fallback_codepoint_is_in_no_bundled_font_but_in_the_fixture() {
-        for font in Font::ALL {
+        for font in BundledFont::ALL {
             for weight in Weight::ALL {
                 let face = FontRef::new(font_bytes(font, weight))
                     .unwrap_or_else(|e| panic!("{font:?} {weight:?}: {e}"));
@@ -333,7 +448,7 @@ mod tests {
     #[test]
     fn every_font_and_weight_maps_to_its_slot_and_numeric_weight() {
         let mut seen = 0;
-        for font in Font::ALL {
+        for font in BundledFont::ALL {
             for (index, weight) in Weight::ALL.into_iter().enumerate() {
                 let (slot, numeric) = match weight {
                     Weight::Regular => (0, 400),
@@ -357,13 +472,13 @@ mod tests {
     #[test]
     fn family_names_are_the_published_names() {
         let expected = [
-            (Font::SourceSerif4, "Source Serif 4", "serif"),
-            (Font::IbmPlexSans, "IBM Plex Sans", "sans-serif"),
-            (Font::Geist, "Geist", "sans-serif"),
-            (Font::Inter, "Inter", "sans-serif"),
-            (Font::JetBrainsMono, "JetBrains Mono", "monospace"),
+            (BundledFont::SourceSerif4, "Source Serif 4", "serif"),
+            (BundledFont::IbmPlexSans, "IBM Plex Sans", "sans-serif"),
+            (BundledFont::Geist, "Geist", "sans-serif"),
+            (BundledFont::Inter, "Inter", "sans-serif"),
+            (BundledFont::JetBrainsMono, "JetBrains Mono", "monospace"),
         ];
-        assert_eq!(expected.len(), Font::ALL.len());
+        assert_eq!(expected.len(), BundledFont::ALL.len());
         for (font, name, generic) in expected {
             assert_eq!(font.family_name(), name);
             assert_eq!(font.generic_family(), generic);
@@ -371,8 +486,30 @@ mod tests {
     }
 
     #[test]
+    fn bundled_constants_are_the_bundled_families() {
+        let constants = [
+            Font::SOURCE_SERIF_4,
+            Font::IBM_PLEX_SANS,
+            Font::GEIST,
+            Font::INTER,
+            Font::JETBRAINS_MONO,
+        ];
+        assert_eq!(constants.len(), BundledFont::ALL.len());
+        for (constant, bundled) in constants.iter().zip(BundledFont::ALL) {
+            assert_eq!(*constant, Font::Bundled(bundled));
+            assert_eq!(constant.family_name(), bundled.family_name());
+            assert_eq!(constant.generic_family(), bundled.generic_family());
+        }
+        for (i, a) in constants.iter().enumerate() {
+            for (j, b) in constants.iter().enumerate() {
+                assert_eq!(a == b, i == j, "{a:?} {b:?}");
+            }
+        }
+    }
+
+    #[test]
     fn weights_are_distinct_files() {
-        for font in Font::ALL {
+        for font in BundledFont::ALL {
             assert_ne!(
                 font_bytes(font, Weight::Regular),
                 font_bytes(font, Weight::SemiBold)
@@ -382,7 +519,7 @@ mod tests {
 
     #[test]
     fn every_family_ships_its_license() {
-        for font in Font::ALL {
+        for font in BundledFont::ALL {
             let text = license_text(font);
             assert!(text.contains("SIL OPEN FONT LICENSE"), "{font:?}");
         }
@@ -390,7 +527,7 @@ mod tests {
 
     #[test]
     fn total_font_size_is_within_budget() {
-        let total: usize = Font::ALL
+        let total: usize = BundledFont::ALL
             .iter()
             .flat_map(|f| Weight::ALL.iter().map(move |w| font_bytes(*f, *w).len()))
             .sum();

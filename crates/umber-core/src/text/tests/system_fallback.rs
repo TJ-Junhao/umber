@@ -7,9 +7,9 @@ use std::sync::Arc;
 use read_fonts::TableProvider;
 
 use super::fixtures::{
-    assert_no_bundled_font_has, fixture_font, style, with_table, without_outlines,
+    LayoutBundled, assert_no_bundled_font_has, fixture_font, style, with_table, without_outlines,
 };
-use crate::fonts::{Font, Weight};
+use crate::fonts::{BundledFont, Weight};
 use crate::geometry::Point;
 use crate::text::font::FontKey;
 use crate::text::system::{self, Limits};
@@ -19,7 +19,7 @@ use crate::text::{FontLibrary, TextStyle};
 pub(super) fn system_picks(lib: &FontLibrary, text: &str, weight: Weight) -> Vec<String> {
     let s = TextStyle {
         weight,
-        ..style(Font::Inter, 10.0)
+        ..style(BundledFont::Inter, 10.0)
     };
     let system = lib.system().unwrap();
     lib.layout(text, &s)
@@ -144,7 +144,7 @@ fn system_lookups_per_layout_are_capped() {
     assert_no_bundled_font_has(&text);
     let lib =
         FontLibrary::with_test_system_fonts(vec![fixture_font("Cover", 400, false, &codepoints)]);
-    let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+    let layout = lib.layout(&text, &style(BundledFont::Inter, 10.0));
     assert_eq!(lookups(&lib), system::LOOKUPS_PER_LAYOUT);
     // The first 1,024 characters use the system font, the rest the primary font's .notdef.
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
@@ -153,7 +153,7 @@ fn system_lookups_per_layout_are_capped() {
             fonts.as_slice(),
             [
                 FontKey::System(_),
-                FontKey::Bundled(Font::Inter, Weight::Regular)
+                FontKey::Bundled(BundledFont::Inter, Weight::Regular)
             ]
         ),
         "{fonts:?}"
@@ -161,7 +161,7 @@ fn system_lookups_per_layout_are_capped() {
     assert_eq!(layout.runs()[0].glyphs().len(), 1_024);
     assert_eq!(layout.runs()[1].glyphs().len(), 76);
     // The next call looks up only the 76 characters that were not cached.
-    let again = lib.layout(&text, &style(Font::Inter, 10.0));
+    let again = lib.layout(&text, &style(BundledFont::Inter, 10.0));
     assert_eq!(lookups(&lib), 1_100);
     assert_eq!(again.runs().len(), 1);
 }
@@ -179,7 +179,7 @@ fn system_lookups_are_cached_across_layouts() {
     let covered: Vec<u32> = (0xF0200..0xF0200 + 500).collect();
     let lib =
         FontLibrary::with_test_system_fonts(vec![fixture_font("Cover", 400, false, &covered)]);
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let layout = lib.layout(&text, &s);
     assert_eq!(lookups(&lib), 800);
     let fonts: Vec<(FontKey, usize)> = layout
@@ -214,7 +214,7 @@ fn system_lookups_are_cached_across_layouts() {
 fn system_lookup_cache_is_bounded() {
     let lib = FontLibrary::with_test_system_fonts(vec![]);
     let system = lib.system().unwrap();
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let total = system::CACHE_LIMIT + 4_000;
     let chars: Vec<char> = (0xF0000..).filter_map(char::from_u32).take(total).collect();
     for chunk in chars.chunks(system::LOOKUPS_PER_LAYOUT) {
@@ -248,7 +248,7 @@ fn system_shaping_tables_are_kept_within_bounds() {
             .collect(),
     );
     let system = lib.system().unwrap();
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let first = lib.layout(&text, &s);
     // Every character is drawn with its own system face.
     assert_eq!(first.runs().len(), codepoints.len());
@@ -277,7 +277,7 @@ fn kept_shaping_fonts_charge_later_table_copies() {
     assert_no_bundled_font_has(text);
     let font = fixture_font("Lazy Tables", 400, false, &[0xF9100]);
     let font = with_table(&font, *b"kern", vec![0; 4_000]);
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let probe = FontLibrary::with_test_system_fonts(vec![font.clone()]);
     let _ = probe.layout(text, &s);
     let (_, all) = probe.system().unwrap().shaping_cache();
@@ -334,7 +334,7 @@ fn confirmations_per_lookup_are_capped() {
     assert_no_bundled_font_has(&text);
     let lib = outline_free_candidates(&codepoints);
     let system = lib.system().unwrap();
-    let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+    let layout = lib.layout(&text, &style(BundledFont::Inter, 10.0));
     assert_eq!(system.lookups(), 64);
     assert_eq!(
         system.confirmations(),
@@ -342,9 +342,12 @@ fn confirmations_per_lookup_are_capped() {
     );
     assert!(system.confirmations() <= system::CONFIRMATIONS_PER_LAYOUT);
     let fonts: Vec<FontKey> = layout.runs().iter().map(|run| run.font()).collect();
-    assert_eq!(fonts, [FontKey::Bundled(Font::Inter, Weight::Regular)]);
+    assert_eq!(
+        fonts,
+        [FontKey::Bundled(BundledFont::Inter, Weight::Regular)]
+    );
     // A lookup that used up its own confirmations is cached.
-    let _ = lib.layout(&text, &style(Font::Inter, 10.0));
+    let _ = lib.layout(&text, &style(BundledFont::Inter, 10.0));
     assert_eq!(system.lookups(), 64);
 }
 
@@ -358,13 +361,13 @@ fn confirmations_per_layout_are_capped() {
     assert_no_bundled_font_has(&text);
     let lib = outline_free_candidates(&codepoints);
     let system = lib.system().unwrap();
-    let layout = lib.layout(&text, &style(Font::Inter, 10.0));
+    let layout = lib.layout(&text, &style(BundledFont::Inter, 10.0));
     // 300 characters would need 300 * 16 = 4,800 confirmations.
     assert_eq!(system.confirmations(), system::CONFIRMATIONS_PER_LAYOUT);
     assert_eq!(system.lookups(), system::CONFIRMATIONS_PER_LAYOUT / 16);
     assert!(layout.width() > 0.0);
     // Characters cut off by the layout budget are not cached; the next call continues.
-    let _ = lib.layout(&text, &style(Font::Inter, 10.0));
+    let _ = lib.layout(&text, &style(BundledFont::Inter, 10.0));
     assert_eq!(system.lookups(), 300);
     assert_eq!(system.confirmations(), 300 * 16);
 }
@@ -396,7 +399,7 @@ fn system_fallback_draws_cjk() {
         start.elapsed(),
         rss_kib().saturating_sub(before)
     );
-    let s = style(Font::Inter, 10.0);
+    let s = style(BundledFont::Inter, 10.0);
     let name = |key: FontKey| match key {
         FontKey::System(face) => system.face(face).map_or_else(String::new, |f| {
             format!("{} (weight {})", f.post_script_name(), f.weight())

@@ -171,7 +171,8 @@ fn single_values_keep_padding_and_whole_step_ticks() {
         explicit: None,
         ticks: &settings,
     };
-    let (_, room) = TickRoom::unlimited(5, 5, FontLibrary::global());
+    let fonts = crate::test_support::figure_fonts(&crate::Theme::pigment());
+    let (_, room) = TickRoom::unlimited(5, 5, &fonts);
     for value in [-1e295, -3.0, -1e-295, 0.0, 1e-295, 1e-290, 3.0, 1e295] {
         for auto in [AutoLimits::Exact, AutoLimits::Padded(Padding::BothSides)] {
             let axis = continuous(limits, Some((value, value)), auto, &room);
@@ -205,8 +206,9 @@ proptest! {
         let settings = AxisTicks::default();
         let limits = ContinuousLimits { transform: Transform::Linear, explicit: None, ticks: &settings };
         let theme = Theme::pigment();
+        let fonts = crate::test_support::figure_fonts(&theme);
         for spacing in [TickSpacing::Target, TickSpacing::Deferred, TickSpacing::LabelsApart] {
-            let (x, y) = tick_rooms(PlotSize { width: length, height: length }, &theme, FontLibrary::global(), spacing);
+            let (x, y) = tick_rooms(PlotSize { width: length, height: length }, &theme, &fonts, spacing);
             for room in [&x, &y] {
                 for auto in [AutoLimits::Exact, AutoLimits::Padded(Padding::BothSides)] {
                     let axis = continuous(limits, Some((low, high)), auto, room);

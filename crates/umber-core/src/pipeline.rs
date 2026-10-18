@@ -17,6 +17,7 @@ use crate::resolve::{
     self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
 };
 use crate::scene::Scene;
+use crate::text::SceneFonts;
 use crate::tick_format::AutomaticTickTarget;
 use crate::{Error, FontLibrary, Result, Theme, draw};
 
@@ -35,7 +36,7 @@ struct Panel<'a> {
 
 /// The records of every panel of `figure`, in the order of [`Figure::panels`]. The legend uses
 /// the style set on the axes, else the theme's.
-fn panels<'a>(figure: &'a Figure, groups: &ShareGroups, lib: &FontLibrary) -> Vec<Panel<'a>> {
+fn panels<'a>(figure: &'a Figure, groups: &ShareGroups, lib: &SceneFonts<'_>) -> Vec<Panel<'a>> {
     let theme = figure.theme();
     let mut panels: Vec<_> = figure
         .panels()
@@ -89,7 +90,7 @@ fn measure_legend<'a>(
     theme: &Theme,
     axes: &Axes,
     marks: &[ResolvedMark<'a>],
-    lib: &FontLibrary,
+    lib: &SceneFonts<'_>,
 ) -> MeasuredLegend<'a> {
     let style = axes.legend_style().unwrap_or(theme.legend_style());
     let legend = Legend::new(style, marks, &Limits::of(axes));
@@ -107,7 +108,7 @@ fn has_merged_legend(figure: &Figure) -> bool {
 }
 
 /// Measures the figure title, subtitle and merged legend once, before the grid solve.
-fn figure_header(figure: &Figure, panels: &[Panel<'_>], lib: &FontLibrary) -> FigureHeader {
+fn figure_header(figure: &Figure, panels: &[Panel<'_>], lib: &SceneFonts<'_>) -> FigureHeader {
     let legend = if has_merged_legend(figure) {
         let merged = Legend::merged(figure, panels.iter().map(|panel| panel.marks.as_slice()));
         MeasuredLegend::measure(figure.theme(), &merged, lib)
@@ -202,7 +203,12 @@ impl Side {
     }
 
     /// The tick room of this side of a plot area of `plot`.
-    fn room<'a>(self, plot: PlotSize, theme: &Theme, lib: &'a FontLibrary) -> layout::TickRoom<'a> {
+    fn room<'a>(
+        self,
+        plot: PlotSize,
+        theme: &Theme,
+        lib: &'a SceneFonts<'a>,
+    ) -> layout::TickRoom<'a> {
         let (x, y) = layout::tick_rooms(plot, theme, lib, TickSpacing::LabelsApart);
         match self {
             Side::X => x,
@@ -246,7 +252,7 @@ impl TickChoice {
     }
 
     /// The tick room of `side`.
-    fn room<'a>(&self, side: Side, theme: &Theme, lib: &'a FontLibrary) -> layout::TickRoom<'a> {
+    fn room<'a>(&self, side: Side, theme: &Theme, lib: &'a SceneFonts<'a>) -> layout::TickRoom<'a> {
         let room = side.room(self.plot, theme, lib);
         match self.most {
             Some(most) => room.at_most(most),
@@ -419,7 +425,7 @@ fn plan(
     figure: &Figure,
     panels: &[Panel<'_>],
     groups: &ShareGroups,
-    lib: &FontLibrary,
+    lib: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
@@ -1113,7 +1119,7 @@ fn plan_cells(
     figure: &Figure,
     panels: &mut [Panel<'_>],
     groups: &ShareGroups,
-    lib: &FontLibrary,
+    lib: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
@@ -1322,9 +1328,11 @@ pub(crate) fn plan_figure(
 pub(crate) fn try_plan_figure(
     figure: &Figure,
     cell: (usize, usize),
-    lib: &FontLibrary,
+    library: &FontLibrary,
 ) -> Result<(Resolved, Layout)> {
     let index = panel_index(figure, cell);
+    let fonts = layout::figure_fonts(library, figure.theme())?;
+    let lib = &fonts;
     let groups = ShareGroups::new(figure);
     let mut panels = panels(figure, &groups, lib);
     let labels = layout::LabelCache::new(lib);
@@ -1345,8 +1353,10 @@ pub(crate) fn try_plan_figure(
 #[cfg(test)]
 pub(crate) fn plan_panel_marks<'a>(
     figure: &'a Figure,
-    lib: &FontLibrary,
+    library: &FontLibrary,
 ) -> Vec<(Resolved, Layout, Vec<ResolvedMark<'a>>)> {
+    let fonts = layout::figure_fonts(library, figure.theme()).expect("the fonts resolve");
+    let lib = &fonts;
     let groups = ShareGroups::new(figure);
     let mut panels = panels(figure, &groups, lib);
     let labels = layout::LabelCache::new(lib);
@@ -1372,8 +1382,10 @@ pub(crate) fn plan_panel_marks<'a>(
 #[cfg(test)]
 pub(crate) fn try_plan_panels(
     figure: &Figure,
-    lib: &FontLibrary,
+    library: &FontLibrary,
 ) -> Result<Vec<(Resolved, Layout)>> {
+    let fonts = layout::figure_fonts(library, figure.theme())?;
+    let lib = &fonts;
     let groups = ShareGroups::new(figure);
     plan_cells(
         figure,
@@ -1404,10 +1416,12 @@ fn panel_index(figure: &Figure, (row, col): (usize, usize)) -> usize {
 pub(crate) fn with_layout_input<R>(
     figure: &Figure,
     cell: (usize, usize),
-    lib: &FontLibrary,
+    library: &FontLibrary,
     f: impl FnOnce(&LayoutInput<'_>, &GridInput<'_>) -> R,
 ) -> R {
     let index = panel_index(figure, cell);
+    let fonts = layout::figure_fonts(library, figure.theme()).expect("the fonts resolve");
+    let lib = &fonts;
     let groups = ShareGroups::new(figure);
     let panels = panels(figure, &groups, lib);
     let header = figure_header(figure, &panels, lib);
@@ -1445,6 +1459,9 @@ pub(crate) fn with_layout_input<R>(
 /// - the baseline, as an unclipped group of its own, when the axes hold a mark that grows
 ///   from zero, unless overridden by `AxesMut::baseline` (see [`Resolved::draws_baseline`]).
 ///
+/// The scene's fonts are the figure's ([`layout::figure_fonts`]): the theme's title font, then
+/// its body font.
+///
 /// Every axes is laid out by one solve of the grid ([`plan`]); a figure of one axes has the
 /// canvas as its frame. The figure header follows the panels as its own unclipped group when
 /// non-empty; without axes the scene holds the background and that header. Each axes' marks are
@@ -1459,30 +1476,33 @@ pub(crate) fn scene(
     library: &FontLibrary,
     context: &'static str,
 ) -> Result<Scene> {
-    scene_with_labels(figure, library, context, &layout::LabelCache::new(library))
+    let fonts = layout::figure_fonts(library, figure.theme())?;
+    scene_with_labels(figure, &fonts, context, &layout::LabelCache::new(&fonts))
 }
 
 /// Draws with a cache owned by this scene call, shared by all its panels and layout passes.
+/// The scene's fonts are `fonts`, so the faces of its text items index them.
 fn scene_with_labels(
     figure: &Figure,
-    library: &FontLibrary,
+    fonts: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
 ) -> Result<Scene> {
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
+    scene.fonts = fonts.fonts().to_vec();
     let groups = ShareGroups::new(figure);
-    let mut panels = panels(figure, &groups, library);
+    let mut panels = panels(figure, &groups, fonts);
     if panels.is_empty() {
-        let header = figure_header(figure, &panels, library);
+        let header = figure_header(figure, &panels, fonts);
         header.check(figure, context)?;
         if let Some(header) = draw::figure_header(theme, &header) {
             scene.push(header);
         }
         return Ok(scene);
     }
-    let planned = plan_cells(figure, &mut panels, &groups, library, context, labels)?;
+    let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
@@ -1492,7 +1512,7 @@ fn scene_with_labels(
         }
         let notes = draw::heatmap_annotations(
             theme,
-            library,
+            fonts,
             resolved,
             layout,
             &panel.marks,
@@ -1792,7 +1812,8 @@ mod tests {
                 (Transform::Log(LogBase::TEN), None),
             ] {
                 let figure = color_grid(share, scale, center);
-                let panels = panels(&figure, &ShareGroups::new(&figure), FontLibrary::global());
+                let fonts = crate::test_support::figure_fonts(figure.theme());
+                let panels = panels(&figure, &ShareGroups::new(&figure), &fonts);
                 for (i, panel) in panels.iter().enumerate() {
                     let (row, col) = ((i / 2) as f64, (i % 2) as f64);
                     let (low, high) = match share {
@@ -1847,16 +1868,17 @@ mod tests {
                 axes.hexbin(&x, &y, HexbinOptions::default()).unwrap();
             }
             let lib = FontLibrary::global();
+            let fonts = crate::test_support::figure_fonts(figure.theme());
             let groups = ShareGroups::new(&figure);
-            let mut panels = panels(&figure, &groups, lib);
+            let mut panels = panels(&figure, &groups, &fonts);
             crate::bin2d::COUNT_CALLS.with(|calls| calls.set(0));
             let planned = plan_cells(
                 &figure,
                 &mut panels,
                 &groups,
-                lib,
+                &fonts,
                 "Figure.to_scene()",
-                &layout::LabelCache::new(lib),
+                &layout::LabelCache::new(&fonts),
             )
             .unwrap();
             let calls = crate::bin2d::COUNT_CALLS.with(|calls| calls.get());
@@ -1923,16 +1945,16 @@ mod tests {
 
         for share in [Share::Row, Share::Col, Share::All] {
             let figure = color_grid(share, Transform::Linear, None);
-            let lib = FontLibrary::global();
+            let fonts = crate::test_support::figure_fonts(figure.theme());
             let groups = ShareGroups::new(&figure);
-            let panels = panels(&figure, &groups, lib);
+            let panels = panels(&figure, &groups, &fonts);
             let planned = plan(
                 &figure,
                 &panels,
                 &groups,
-                lib,
+                &fonts,
                 "Figure.to_scene()",
-                &layout::LabelCache::new(lib),
+                &layout::LabelCache::new(&fonts),
             )
             .unwrap();
             assert_eq!(
@@ -2092,7 +2114,7 @@ mod tests {
         figure: &Figure,
         size: PlotSize,
         spacing: TickSpacing,
-        lib: &'a FontLibrary,
+        lib: &'a SceneFonts<'a>,
     ) -> Vec<(Resolved, layout::TickRoom<'a>, layout::TickRoom<'a>)> {
         panels(figure, &ShareGroups::new(figure), lib)
             .iter()
@@ -2114,14 +2136,14 @@ mod tests {
             .unwrap()
             .line(AxisData::Numbers(x), &y, LineOptions::default())
             .unwrap();
-        let lib = FontLibrary::global();
+        let fonts = crate::test_support::figure_fonts(f.theme());
         let size = PlotSize {
             width: 126.0,
             height: 60.0,
         };
-        let (old, _, _) = resolved_at(&f, size, TickSpacing::Target, lib).remove(0);
+        let (old, _, _) = resolved_at(&f, size, TickSpacing::Target, &fonts).remove(0);
         assert_eq!(tick_labels(&old.y.ticks), ["0.0", "2.5", "5.0"]);
-        let (new, _, room) = resolved_at(&f, size, TickSpacing::LabelsApart, lib).remove(0);
+        let (new, _, room) = resolved_at(&f, size, TickSpacing::LabelsApart, &fonts).remove(0);
         assert!(room.slack(&old.y.ticks) >= 0.0);
         assert!(room.slack(&new.y.ticks) >= 0.0);
         // The label-constrained pass keeps an already fitting grid.
@@ -2135,9 +2157,14 @@ mod tests {
         let f = sensors();
         let lib = FontLibrary::global();
         let planned = try_plan_panels(&f, lib).unwrap();
+        let fonts = layout::figure_fonts(lib, f.theme()).unwrap();
         for (resolved, layout) in &planned {
-            let (x, y) =
-                layout::tick_rooms(layout.plot.size(), f.theme(), lib, TickSpacing::LabelsApart);
+            let (x, y) = layout::tick_rooms(
+                layout.plot.size(),
+                f.theme(),
+                &fonts,
+                TickSpacing::LabelsApart,
+            );
             assert!(y.slack(&resolved.y.ticks) >= 0.0, "{:?}", layout.plot);
             assert!(x.slack(&resolved.x.ticks) >= 0.0, "{:?}", layout.plot);
             // The drawn labels: baselines a line and the gap apart.
@@ -2161,7 +2188,11 @@ mod tests {
         let (resolved, layout) = try_plan_panels(figure, lib).unwrap().remove(0);
         let ticks = side.ticks(&resolved);
         let slack = side
-            .room(layout.plot.size(), figure.theme(), lib)
+            .room(
+                layout.plot.size(),
+                figure.theme(),
+                &layout::figure_fonts(lib, figure.theme()).unwrap(),
+            )
             .slack(ticks);
         let labels = ticks.iter().map(|tick| tick.label.clone()).collect();
         (labels, slack)
@@ -2169,7 +2200,9 @@ mod tests {
 
     /// The previous two-pass layout: target-only ticks on guessed sizes, then the constrained
     /// search (including target retries) on the first solve's sizes, with no repair pass.
-    fn previous_plan(figure: &Figure, lib: &FontLibrary) -> Result<Vec<(Resolved, Layout)>> {
+    fn previous_plan(figure: &Figure, library: &FontLibrary) -> Result<Vec<(Resolved, Layout)>> {
+        let fonts = layout::figure_fonts(library, figure.theme())?;
+        let lib = &fonts;
         let groups = ShareGroups::new(figure);
         let panels = panels(figure, &groups, lib);
         let theme = figure.theme();
@@ -2259,7 +2292,11 @@ mod tests {
         assert_eq!(resolved, previous);
         assert_eq!(format!("{layout:?}"), format!("{previous_layout:?}"));
         let slack = Side::X
-            .room(layout.plot.size(), f.theme(), lib)
+            .room(
+                layout.plot.size(),
+                f.theme(),
+                &layout::figure_fonts(lib, f.theme()).unwrap(),
+            )
             .slack(&resolved.x.ticks);
         // No whole-step pair fits this width; one grid label keeps the solved layout and
         // never crowds another label. A fitting pair must not be replaced by this fallback.
@@ -2340,7 +2377,11 @@ mod tests {
         let (resolved, layout) = try_plan_figure(&f, (0, 0), FontLibrary::global()).unwrap();
         assert!(
             Side::X
-                .room(layout.plot.size(), f.theme(), FontLibrary::global())
+                .room(
+                    layout.plot.size(),
+                    f.theme(),
+                    &crate::test_support::figure_fonts(f.theme())
+                )
                 .slack(&resolved.x.ticks)
                 >= 0.0
         );
@@ -2441,7 +2482,11 @@ mod tests {
                                 .unwrap();
                                 if let Ok((tr, layout)) = try_plan_figure(&trial, (0, 0), lib) {
                                     let slack = side
-                                        .room(layout.plot.size(), trial.theme(), lib)
+                                        .room(
+                                            layout.plot.size(),
+                                            trial.theme(),
+                                            &layout::figure_fonts(lib, trial.theme()).unwrap(),
+                                        )
                                         .slack(side.ticks(&tr));
                                     assert!(
                                         slack < 0.0,
@@ -2484,9 +2529,9 @@ mod tests {
         let log = ScaleKind::Log {
             base: crate::LogBase::TEN,
         };
-        let lib = FontLibrary::global();
         let y_ticks = |f: &Figure, size: PlotSize, spacing| {
-            let (resolved, _, room) = resolved_at(f, size, spacing, lib).remove(0);
+            let fonts = crate::test_support::figure_fonts(f.theme());
+            let (resolved, _, room) = resolved_at(f, size, spacing, &fonts).remove(0);
             let slack = room.slack(&resolved.y.ticks);
             (resolved.y.ticks, slack)
         };
@@ -2672,7 +2717,11 @@ mod tests {
                     }
                     let ticks = side.ticks(resolved);
                     let slack = side
-                        .room(layout.plot.size(), figure.theme(), lib)
+                        .room(
+                            layout.plot.size(),
+                            figure.theme(),
+                            &layout::figure_fonts(lib, figure.theme()).unwrap(),
+                        )
                         .slack(ticks);
                     prop_assert!(
                         slack >= 0.0 || ticks.len() <= 3,
@@ -2696,8 +2745,12 @@ mod tests {
             };
             if previous.iter().any(|(resolved, layout)| {
                 Side::BOTH.into_iter().any(|side| {
-                    side.room(layout.plot.size(), figure.theme(), lib)
-                        .slack(side.ticks(resolved))
+                    side.room(
+                        layout.plot.size(),
+                        figure.theme(),
+                        &layout::figure_fonts(lib, figure.theme()).unwrap(),
+                    )
+                    .slack(side.ticks(resolved))
                         < 0.0
                 })
             }) {
@@ -2719,8 +2772,12 @@ mod tests {
                     if old.ticks.len() == 1 && new.ticks.len() == 2 {
                         prop_assert!(is_round(new.continuous().unwrap(), &new.ticks));
                         prop_assert!(
-                            side.room(layout.plot.size(), figure.theme(), lib)
-                                .slack(&new.ticks)
+                            side.room(
+                                layout.plot.size(),
+                                figure.theme(),
+                                &layout::figure_fonts(lib, figure.theme()).unwrap()
+                            )
+                            .slack(&new.ticks)
                                 >= 0.0
                         );
                     } else {
@@ -2815,7 +2872,13 @@ mod tests {
             assert_eq!(resolved.y.continuous().unwrap().domain(), spec.ranges.1);
             for side in Side::BOTH {
                 let ticks = side.ticks(&resolved);
-                let slack = side.room(layout.plot.size(), f.theme(), lib).slack(ticks);
+                let slack = side
+                    .room(
+                        layout.plot.size(),
+                        f.theme(),
+                        &layout::figure_fonts(lib, f.theme()).unwrap(),
+                    )
+                    .slack(ticks);
                 assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
             }
             assert_eq!(tick_labels(&resolved.y.ticks), ["6768.552", "6768.554"]);
@@ -2849,7 +2912,13 @@ mod tests {
             assert_eq!(resolved.y.continuous().unwrap().domain(), spec.ranges.1);
             for side in Side::BOTH {
                 let ticks = side.ticks(&resolved);
-                let slack = side.room(layout.plot.size(), f.theme(), lib).slack(ticks);
+                let slack = side
+                    .room(
+                        layout.plot.size(),
+                        f.theme(),
+                        &layout::figure_fonts(lib, f.theme()).unwrap(),
+                    )
+                    .slack(ticks);
                 assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
             }
             assert_eq!(tick_labels(&resolved.y.ticks), ["6356.586"]);
@@ -2873,13 +2942,20 @@ mod tests {
             let f = figure(theme, (1.04728763133498, 1.767157525467884), &spec);
             let lib = FontLibrary::global();
             let (resolved, layout) = try_plan_panels(&f, lib).unwrap().remove(0);
+            let fonts = layout::figure_fonts(lib, f.theme()).unwrap();
             let (target, _, _) =
-                resolved_at(&f, layout.plot.size(), TickSpacing::Target, lib).remove(0);
+                resolved_at(&f, layout.plot.size(), TickSpacing::Target, &fonts).remove(0);
             assert_eq!(resolved.y.scale, target.y.scale);
             assert_eq!(tick_labels(&target.y.ticks), ["0.01", "0.1", "1", "10"]);
             for side in Side::BOTH {
                 let ticks = side.ticks(&resolved);
-                let slack = side.room(layout.plot.size(), f.theme(), lib).slack(ticks);
+                let slack = side
+                    .room(
+                        layout.plot.size(),
+                        f.theme(),
+                        &layout::figure_fonts(lib, f.theme()).unwrap(),
+                    )
+                    .slack(ticks);
                 assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
             }
             assert_eq!(tick_labels(&resolved.y.ticks), ["0.01", "10"]);
@@ -2901,11 +2977,11 @@ mod tests {
                     .with_font_scale(font_scale)
                     .unwrap();
                 let f = figure(theme, (6.0, 4.0), &spec);
-                let lib = FontLibrary::global();
+                let fonts = crate::test_support::figure_fonts(f.theme());
                 let size = PlotSize { width, height };
-                let (old, _, _) = resolved_at(&f, size, TickSpacing::Target, lib).remove(0);
+                let (old, _, _) = resolved_at(&f, size, TickSpacing::Target, &fonts).remove(0);
                 let (new, x_room, y_room) =
-                    resolved_at(&f, size, TickSpacing::LabelsApart, lib).remove(0);
+                    resolved_at(&f, size, TickSpacing::LabelsApart, &fonts).remove(0);
                 let x_axis = |r: &Resolved| (r.x.continuous().copied(), r.x.ticks.clone());
                 let y_axis = |r: &Resolved| (r.y.continuous().copied(), r.y.ticks.clone());
                 for (name, room, new, old) in [

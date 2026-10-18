@@ -16,7 +16,7 @@ use umber_core::scene::{
     FillRule, GradientStop, Item, LineCap, LineJoin, LinearGradient, Paint, Rect, Scene,
     StrokeStyle,
 };
-use umber_core::{Font, FontLibrary, Path, Point, Rgba, TextStyle, Weight};
+use umber_core::{FaceId, Font, FontLibrary, Path, Point, Rgba, TextStyle, Weight};
 
 const fn rgb(r: u8, g: u8, b: u8) -> Rgba {
     Rgba { r, g, b, a: 255 }
@@ -162,13 +162,15 @@ fn primitives_scene(dx: f32) -> Scene {
         }],
     });
 
-    let library = FontLibrary::global();
+    let fonts = FontLibrary::global()
+        .with_figure_fonts(&[Font::INTER, Font::SOURCE_SERIF_4])
+        .unwrap();
     let black = rgb(20, 20, 20);
     scene.push_text(
-        library,
+        &fonts,
         "Revenue \u{2212}12.5%",
         TextStyle {
-            font: Font::Inter,
+            face: FaceId::new(0),
             weight: Weight::SemiBold,
             size: 13.0,
             tabular_figures: false,
@@ -180,10 +182,10 @@ fn primitives_scene(dx: f32) -> Scene {
         black,
     );
     scene.push_text(
-        library,
+        &fonts,
         "Q1 Q2 Q3",
         TextStyle {
-            font: Font::SourceSerif4,
+            face: FaceId::new(1),
             weight: Weight::Regular,
             size: 10.0,
             tabular_figures: false,

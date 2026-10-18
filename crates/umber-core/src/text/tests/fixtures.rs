@@ -3,16 +3,31 @@
 //! Test fonts are built from `fallback-only.ttf`, a font with one outlined glyph, by replacing
 //! its tables: a new name, weight and style, a chosen `cmap`, or a CFF outline table.
 
-use crate::fonts::{Font, Weight, font_bytes};
+use crate::fonts::{BundledFont, Weight, font_bytes};
+use crate::test_support::{bundled_face, bundled_fonts};
 use crate::text::font::Face;
-use crate::text::{FontLibrary, TextStyle};
+use crate::text::{FontLibrary, TextLayout, TextStyle};
 
-pub(super) fn style(font: Font, size: f32) -> TextStyle {
+/// A regular style in the bundled font `font`, as a face of [`bundled_fonts`].
+pub(super) fn style(font: BundledFont, size: f32) -> TextStyle {
     TextStyle {
-        font,
+        face: bundled_face(font),
         weight: Weight::Regular,
         size,
         tabular_figures: false,
+    }
+}
+
+/// Layout through a library with every bundled font as the fonts of the scene
+/// ([`bundled_fonts`]), so that a style from [`style`] names its bundled font.
+pub(super) trait LayoutBundled {
+    /// Shapes `text` with `style` and measures it.
+    fn layout(&self, text: &str, style: &TextStyle) -> TextLayout;
+}
+
+impl LayoutBundled for FontLibrary {
+    fn layout(&self, text: &str, style: &TextStyle) -> TextLayout {
+        bundled_fonts(self).layout(text, style)
     }
 }
 
@@ -356,7 +371,7 @@ pub(super) fn bit_flipped_inter() -> Vec<u8> {
         (25908, 26),
         (28908, 225),
     ];
-    let mut bytes = font_bytes(Font::Inter, Weight::Regular).to_vec();
+    let mut bytes = font_bytes(BundledFont::Inter, Weight::Regular).to_vec();
     for (offset, value) in CHANGES {
         bytes[offset] = value;
     }

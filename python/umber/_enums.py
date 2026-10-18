@@ -177,32 +177,6 @@ class Marker(Enum):
 
 
 @unique
-class Font(Enum):
-    """A font family bundled with umber.
-
-    Example:
-        >>> import umber as ub
-        >>> ub.Font.INTER.name
-        'INTER'
-    """
-
-    SOURCE_SERIF_4 = 0
-    """Source Serif 4, a serif face."""
-
-    IBM_PLEX_SANS = 1
-    """IBM Plex Sans, a sans-serif face."""
-
-    GEIST = 2
-    """Geist, a sans-serif face."""
-
-    INTER = 3
-    """Inter, a sans-serif face."""
-
-    JETBRAINS_MONO = 4
-    """JetBrains Mono, a monospaced face."""
-
-
-@unique
 class LegendStyle(Enum):
     """How a legend is laid out.
 

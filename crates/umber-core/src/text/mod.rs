@@ -1,8 +1,9 @@
 //! Text shaping, measurement and outlines.
 //!
 //! A [`FontLibrary`] shapes a string with one of the bundled fonts, applying kerning, standard
-//! ligatures and, on request, tabular figures. Characters the requested font lacks are drawn with
-//! another bundled family, then with fallback fonts: the system fonts for
+//! ligatures and, on request, tabular figures. Text is laid out through the [`SceneFonts`] of one
+//! scene, the fonts a [`TextStyle`] names by [`FaceId`]. Characters the requested font lacks are
+//! drawn with another bundled family, then with fallback fonts: the system fonts for
 //! [`FontLibrary::bundled`], or explicit font files for [`FontLibrary::with_fallbacks`].
 //! Characters that no font covers are drawn as the primary font's `.notdef` glyph.
 //!
@@ -23,14 +24,16 @@
 //! # Examples
 //!
 //! ```
-//! use umber_core::text::{FontLibrary, TextStyle};
+//! use umber_core::text::{FaceId, FontLibrary, TextStyle};
 //! use umber_core::{Font, Point, Weight};
 //!
-//! let style = TextStyle { font: Font::Inter, weight: Weight::Regular, size: 10.0, tabular_figures: false };
-//! let layout = FontLibrary::global().layout("Revenue", &style);
+//! let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
+//! let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
+//! let layout = fonts.layout("Revenue", &style);
 //! assert!(layout.width() > 0.0);
 //! let path = layout.outline(Point { x: 0.0, y: 0.0 });
 //! assert!(!path.is_empty());
+//! # Ok::<(), umber_core::Error>(())
 //! ```
 
 // Module layering, lowest first; each module uses only the ones listed before it:
@@ -42,7 +45,7 @@
 //   `guard`);
 // - `system` owns system font discovery, lookup and shaping tables (uses `font`, `cmap`,
 //   `guard`);
-// - `library` coordinates one layout call over all of them.
+// - `library` coordinates one layout call over all of them, and resolves the fonts of a scene.
 mod cmap;
 mod font;
 mod guard;
@@ -59,5 +62,5 @@ mod system;
 mod tests;
 
 pub use layout::TextLayout;
-pub use library::FontLibrary;
-pub use style::TextStyle;
+pub use library::{FontLibrary, SceneFonts};
+pub use style::{FaceId, TextStyle};

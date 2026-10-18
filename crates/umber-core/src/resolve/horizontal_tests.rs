@@ -3,8 +3,8 @@
 use super::{Limits, Resolved, ValueAxis, resolve, resolve_axes_marks};
 use crate::layout::{PlotSize, TickRoom, TickSpacing, tick_rooms};
 use crate::{
-    AxisData, BarOptions, BoxOptions, Distribution, ErrorBarOptions, Figure, FontLibrary, LogBase,
-    ScaleKind, ScatterOptions, Series, Theme, ViolinOptions,
+    AxisData, BarOptions, BoxOptions, Distribution, ErrorBarOptions, Figure, LogBase, ScaleKind,
+    ScatterOptions, Series, Theme, ViolinOptions,
 };
 use std::sync::Arc;
 
@@ -126,9 +126,11 @@ fn resolved(f: &Figure, horizontal: bool, spacing: Option<TickSpacing>) -> Resol
             height: 240.0,
         }
     };
+    let fonts = crate::test_support::figure_fonts(f.theme());
+    let pigment = crate::test_support::figure_fonts(&crate::Theme::pigment());
     let (mut x, mut y) = match spacing {
-        Some(spacing) => tick_rooms(plot, f.theme(), FontLibrary::global(), spacing),
-        None => TickRoom::unlimited(6, 6, FontLibrary::global()),
+        Some(spacing) => tick_rooms(plot, f.theme(), &fonts, spacing),
+        None => TickRoom::unlimited(6, 6, &pigment),
     };
     // Compare the same target without changing the screen-direction density policy.
     x.target = 6;
@@ -270,7 +272,8 @@ fn distribution_value_axes_mirror_in_a_four_panel_layout() {
     let panel = |col| {
         let axes = f.axes_at(GridIndex::At(0), GridIndex::At(col)).unwrap();
         let marks = resolve_axes_marks(axes, f.theme());
-        let (x, y) = TickRoom::unlimited(6, 6, FontLibrary::global());
+        let fonts = crate::test_support::figure_fonts(&crate::Theme::pigment());
+        let (x, y) = TickRoom::unlimited(6, 6, &fonts);
         resolve(&marks, &Limits::of(axes), &x, &y)
     };
     for col in [0, 2] {
