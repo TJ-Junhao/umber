@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: c6d2cbf650aaaba1d1858ae0ec40a32083866bf8
+# revision: a6ed28e8e981477dde70fa7e3bcac54ee44cd53c
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 af10b9e8d0c96cc7d716f99ca46cde4e34a86ef0adaf415e43c55ff3a0fb1800  api/cmaps.txt
@@ -833,6 +833,12 @@ eaa387c99feb1ce15851d4bc0bbae88663ec7e0f7c4104f4bd99d36bc1dc960d  png/fig-xlabel
 6e21f3ad0f02332ab1c83f31a68d20eb6a7c2509f29b8d4c2756d105e893380a  png/fig-xlabel-only.dpi72.png
 3ec8c6117ace625cd78c44ae9ba011fd47ac2a14b83d3ac723b72ad0c1809474  png/fig-ylabel-only.dpi200.png
 041508b9526b66b558aee69b8d958a5060063d39c9e06524f48e46d58a2b8b80  png/fig-ylabel-only.dpi72.png
+fdab81e2733a230f26edd503be4f3ef2b8927a3af7da7e216dd2821554bdf739  png/font-file-bold-fallback-graphite.dpi200.png
+54987830ea231441c4df96f5b740c0414a5443cf19274634af3cdc3d3b62f319  png/font-file-bold-fallback-graphite.dpi72.png
+4c890b474b54c2511cbfea063301f2d2884be9e2e50e062123a5683ca9bd3468  png/font-file-bold-fallback-midnight.dpi200.png
+75d6238ca1a24c5938b3b738626636d7e47c93ac872139cbc051048a71e9e9eb  png/font-file-bold-fallback-midnight.dpi72.png
+eac2e016aff5ea0ed90bec578064a784746bf6212ee2123a3958babed0ad3a55  png/font-file-bold-fallback-pigment.dpi200.png
+6690fc5cbd55c57cc125d668c922ecd416e73e39560140dc07d5bf7e8b73c605  png/font-file-bold-fallback-pigment.dpi72.png
 d9049afb01dd8fda74fd8133aa054233d64121d082b0b0c0660db5b8887fa1fa  png/font-file-cff-graphite.dpi200.png
 e1dc335ebdfabc65de589d71af2cfd867a85724ddc21d2727472ff66a6680c61  png/font-file-cff-graphite.dpi72.png
 1ba4f85fd6dbd3eab8be79abe40ea2217ce4e0a193591b10ed9bc2673659a9dc  png/font-file-cff-midnight.dpi200.png
@@ -1831,6 +1837,9 @@ bcd7be072a61e931e207b30a2b1e8fe094e044f34cf32844f946bd8bd81d949c  scene/fig-x-en
 3fc0ff31a641338a471874b386ff1d99ee2d7648681b0142ef52f5eb8a74c474  scene/fig-x-end-label-near-cap.txt
 f6e8b7562dd50fba7daf8963ac4527c2b2d120e49662a4d160453098f71e7c34  scene/fig-xlabel-only.txt
 f1f94be757a63bde135c03fe2b1f14a53da8cb5b7e4d6e02556d365e9851a2bb  scene/fig-ylabel-only.txt
+4ddb5c79311305ac9877efe755d717a74ea9fc55ca9d2e3888481fa28ce518aa  scene/font-file-bold-fallback-graphite.txt
+1fcceb456226e4d08ba934cf86d54df2cc0d3c047ce50c138c00c02cc18d9839  scene/font-file-bold-fallback-midnight.txt
+b847694b251732784669ae97b4e74720dd734d40562274a3448260783e128649  scene/font-file-bold-fallback-pigment.txt
 f4492dabe62138e030391a664420e96d48495a5689f0411a641038e0e408602b  scene/font-file-cff-graphite.txt
 2bfc462bb225fc4ffbf469e89ca586023a4daed59812fd824206ecc8cbec5438  scene/font-file-cff-midnight.txt
 04e8083edee47802da1544409d49f6ed358db2999769d59e2f3fa487847f562c  scene/font-file-cff-pigment.txt
@@ -2918,6 +2927,12 @@ e9f14416ed6f55d37bacef8b45b9e6f5c0c0b114c7eb2f9d8215a6d2cae9b204  svg/fig-x-end-
 f91fe8e553968e49df0dd68e41f88802e46e4171de922d05cd71ddb92ae853bf  svg/fig-xlabel-only.outlines.svg
 e54e9b4263bb6007d88ddb77ff06a39bb365affec065d572ca994bf48135bdcd  svg/fig-ylabel-only.editable.svg
 cc480af592f6d3697c994d04178fa2d028a564c8630a2dc8fdd3252e1dad5578  svg/fig-ylabel-only.outlines.svg
+fd6483ca580f51a832e4bf328f84e018ef56f7196f604e9add3e6ae5d27ae8aa  svg/font-file-bold-fallback-graphite.editable.svg
+9994714ab945240deb8b9544f8a03a23dc518a9852deb8dd03e7a7ed4a720c49  svg/font-file-bold-fallback-graphite.outlines.svg
+10efcbed0534b6a04f42027377f97e3530610c29bbce7a7975cad2fc75441182  svg/font-file-bold-fallback-midnight.editable.svg
+434610594f1887951d7351f220ff947129f4f5e7443fdfd4c56f7cbc4a501baa  svg/font-file-bold-fallback-midnight.outlines.svg
+fbb19b2050b2733aea255a1e9c3daa5c8d4baa9cb8caa6abffd4ccfb95b8141a  svg/font-file-bold-fallback-pigment.editable.svg
+0097a19644c2155aa001f34524f222ade32480d61e777fc239402ba903c3b2fc  svg/font-file-bold-fallback-pigment.outlines.svg
 346067543933987e4247f69f3c6c535e0f965bc190a277642001a1ad1dc3a5a7  svg/font-file-cff-graphite.editable.svg
 70c26d91a63ed66cbbf56889d8456eb30d4b9ba37ef2271f0ddf49b38d5fa02b  svg/font-file-cff-graphite.outlines.svg
 e7bc852e0f867ba8d41e2046aa34cf3ab0c06631eccac4d7e38f20be92e5f1c1  svg/font-file-cff-midnight.editable.svg

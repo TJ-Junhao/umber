@@ -13,6 +13,14 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     )
     .unwrap();
     font_cases("font-file", font, lib, sink);
+    let fallback = Font::from_files(
+        font_bytes(BundledFont::Inter, Weight::Regular).to_vec(),
+        None,
+        "Inter".into(),
+    )
+    .unwrap()
+    .with_bold_fallback(true);
+    font_cases("font-file-bold-fallback", fallback, lib, sink);
     for (name, bytes) in [
         (
             "font-file-cff",

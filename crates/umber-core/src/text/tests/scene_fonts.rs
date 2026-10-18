@@ -121,7 +121,9 @@ fn a_font_without_a_face_for_the_weight_names_the_text_and_the_font() {
     );
     assert_eq!(
         err.hint(),
-        Some("pass bold= to Font.from_file, or choose a family with a bold face.")
+        Some(
+            "pass bold= to Font.from_file, choose a family with a bold face, or pass bold_fallback=True."
+        )
     );
     // The same font still sets regular text, and the other font bold text.
     assert!(fonts.layout("Quarterly revenue", &style(1)).is_ok());

@@ -586,7 +586,7 @@ const UNKNOWN_FACE_HINT: &str = "name a face by the index of a font given to wit
 
 /// The hint of the error for a font without a face for the weight of the text.
 const MISSING_WEIGHT_HINT: &str =
-    "pass bold= to Font.from_file, or choose a family with a bold face.";
+    "pass bold= to Font.from_file, choose a family with a bold face, or pass bold_fallback=True.";
 
 /// Why a style cannot be laid out with a scene's fonts.
 enum Unavailable<'a> {
@@ -689,8 +689,8 @@ impl SceneFonts<'_> {
     /// # Errors
     ///
     /// `Error::Usage` when `style.face` names none of these fonts, and `Error::Style`, naming
-    /// `text` and the font, when the font has no face for `style.weight`. The bundled fonts
-    /// have a face for every weight.
+    /// `text` and the font, when the font has no face for `style.weight` and bold fallback is
+    /// disabled. The bundled fonts have a face for every weight.
     ///
     /// # Examples
     ///
@@ -716,13 +716,8 @@ impl SceneFonts<'_> {
     ///
     /// As [`SceneFonts::layout`]: the error of a missing weight names `text`.
     pub(crate) fn check(&self, text: &str, style: &TextStyle) -> Result<CheckedStyle> {
-        let font = self
-            .primary(style)
-            .map_err(|unavailable| self.error(unavailable, Some(text)))?;
-        Ok(CheckedStyle {
-            style: *style,
-            font: font.clone(),
-        })
+        self.primary(style)
+            .map_err(|unavailable| self.error(unavailable, Some(text)))
     }
 
     /// Shapes `text` with the checked style `style` and measures it, as
@@ -742,25 +737,25 @@ impl SceneFonts<'_> {
         let primary = self
             .primary(style)
             .map_err(|unavailable| self.error(unavailable, None))?;
-        let empty = self.library.layout_font("", primary, style);
+        let empty = self.layout_checked("", &primary);
         Ok((empty.ascent(), empty.descent()))
     }
 
     /// The primary font of `style`, checked for the requested weight.
     ///
-    /// This is the one place where a style is resolved to a face. A font without a face for
-    /// the style's weight ([`Font::has_face`]) is detected here as [`Unavailable::Weight`].
-    /// Every bundled font has a face for every weight; unit tests also treat the faces and
-    /// weights given to `without_weight` as missing.
-    fn primary(&self, style: &TextStyle) -> std::result::Result<&Font, Unavailable<'_>> {
+    /// The font resolves the actual weight, including its bold fallback setting. A missing
+    /// weight with no fallback is detected here as [`Unavailable::Weight`]. Unit tests also
+    /// treat the faces and weights given to `without_weight` as missing.
+    fn primary(&self, style: &TextStyle) -> std::result::Result<CheckedStyle, Unavailable<'_>> {
         let font = self.font(style.face).ok_or(Unavailable::Face(style.face))?;
-        let has_face = font.has_face(style.weight);
+        let weight = font.resolved_weight(style.weight);
         #[cfg(test)]
-        let has_face = has_face && !self.missing_weights.contains(&(style.face, style.weight));
-        if !has_face {
-            return Err(Unavailable::Weight(font, style.weight));
-        }
-        Ok(font)
+        let weight = weight.filter(|_| !self.missing_weights.contains(&(style.face, style.weight)));
+        let weight = weight.ok_or(Unavailable::Weight(font, style.weight))?;
+        Ok(CheckedStyle {
+            style: TextStyle { weight, ..*style },
+            font: font.clone(),
+        })
     }
 
     /// The error for a style that cannot be laid out, naming `text` when there is text to set.

@@ -278,8 +278,141 @@ fn system_variable_only_family_explains_missing_bold() {
     );
     assert_eq!(
         error.hint(),
-        Some("pass bold= to Font.from_file, or choose a family with a bold face.")
+        Some(
+            "pass bold= to Font.from_file, choose a family with a bold face, or pass bold_fallback=True."
+        )
     );
+}
+
+#[test]
+fn system_bold_fallback_uses_regular_only_without_a_bold_face() {
+    use crate::{FaceId, FontLibrary, Point, TextStyle};
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut db = fontdb::Database::new();
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Inter,
+        400,
+        fontdb::Style::Normal,
+    );
+    let lib = FontLibrary::with_fallbacks(vec![]);
+    let style = TextStyle {
+        face: FaceId::new(0),
+        weight: Weight::SemiBold,
+        size: 15.0,
+        tabular_figures: false,
+    };
+    for has_bold in [false, true] {
+        if has_bold {
+            insert(
+                &mut db,
+                "Example",
+                BundledFont::Geist,
+                600,
+                fontdb::Style::Normal,
+            );
+        }
+        let plain = resolve(&db, "Example");
+        let fallback = plain.clone().with_bold_fallback(true);
+        assert_ne!(plain, fallback);
+        assert_eq!(fallback.has_face(Weight::SemiBold), has_bold);
+        let hash = |font: &Font| {
+            let mut hasher = DefaultHasher::new();
+            font.hash(&mut hasher);
+            hasher.finish()
+        };
+        assert_ne!(hash(&plain), hash(&fallback));
+        assert_eq!(fallback.clone().with_bold_fallback(false), plain);
+        let fonts = lib.with_figure_fonts(&[fallback, plain]).unwrap();
+        let actual = fonts.layout("Heading 123", &style).unwrap();
+        let expected = fonts
+            .layout(
+                "Heading 123",
+                &TextStyle {
+                    face: FaceId::new(1),
+                    weight: if has_bold {
+                        Weight::SemiBold
+                    } else {
+                        Weight::Regular
+                    },
+                    ..style
+                },
+            )
+            .unwrap();
+        assert_eq!(actual.width(), expected.width());
+        assert_eq!(
+            actual.outline(Point::default()),
+            expected.outline(Point::default())
+        );
+    }
+}
+
+#[test]
+fn system_variable_only_bold_fallback_renders_every_bold_role() {
+    use crate::{AxisData, Figure, FontLibrary, LegendStyle, LineOptions, ScaleKind, Theme};
+    let mut db = fontdb::Database::new();
+    let bytes = include_bytes!("../../../../../tests/fonts/SourceSerif4Variable-Roman.ttf");
+    db.load_font_data(bytes.to_vec());
+    let family = db.faces().next().unwrap().families[0].0.clone();
+    let plain = resolve(&db, &family);
+    let fallback = plain.clone().with_bold_fallback(true);
+    assert!(!fallback.has_face(Weight::SemiBold));
+    let reference = Font::from_files(bytes.to_vec(), Some(bytes.to_vec()), family).unwrap();
+    let lib = FontLibrary::with_fallbacks(vec![]);
+    let figure = |font: Font, role| {
+        let theme = Theme::pigment()
+            .with_title_font(font.clone())
+            .unwrap()
+            .with_body_font(font)
+            .unwrap();
+        let mut fig = Figure::new(6.0, 4.0, theme).unwrap();
+        if role == 1 {
+            fig.title("Heading");
+        }
+        let mut axes = fig.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        if role == 0 {
+            axes.title("Heading");
+        }
+        axes.legend(if role == 2 {
+            LegendStyle::Direct
+        } else {
+            LegendStyle::None
+        });
+        axes.line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: "Series".into(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+        fig
+    };
+    for role in 0..3 {
+        let err = figure(plain.clone(), role).to_scene(&lib).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("The family's installed files are variable fonts")
+        );
+        let actual = figure(fallback.clone(), role).to_scene(&lib).unwrap();
+        let expected = figure(reference.clone(), role).to_scene(&lib).unwrap();
+        assert_eq!(
+            crate::render::render_png(&actual, 96).unwrap(),
+            crate::render::render_png(&expected, 96).unwrap()
+        );
+        assert_eq!(
+            crate::render::render_svg(&actual, crate::render::SvgText::Outlines),
+            crate::render::render_svg(&expected, crate::render::SvgText::Outlines)
+        );
+        assert!(
+            !crate::render::render_svg(&actual, crate::render::SvgText::Editable)
+                .contains("font-weight=\"600\"")
+        );
+    }
 }
 
 #[test]

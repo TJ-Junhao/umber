@@ -132,8 +132,9 @@ pub enum Font {
 
 /// The immutable files of a font made with [`Font::from_files`].
 ///
-/// Equality uses the regular and optional bold bytes and the resolved family name. Paths do
-/// not affect equality, except for the fallback name used when the regular file has no name.
+/// Equality uses the regular and optional bold bytes, the resolved family name and the bold
+/// fallback setting. Paths do not affect equality, except for the fallback name used when the
+/// regular file has no name.
 ///
 /// # Examples
 ///
@@ -144,11 +145,12 @@ pub enum Font {
 /// assert!(matches!(font, Font::File(_)));
 /// # Ok::<(), umber_core::Error>(())
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FontFiles {
     regular: OwnedFace,
     bold: Option<OwnedFace>,
     fingerprint: (u64, Option<u64>),
+    bold_fallback: bool,
 }
 
 fn same_bytes(left: &Arc<Vec<u8>>, right: &Arc<Vec<u8>>) -> bool {
@@ -163,7 +165,8 @@ fn fingerprint(bytes: &[u8]) -> u64 {
 
 impl PartialEq for FontFiles {
     fn eq(&self, other: &Self) -> bool {
-        self.regular.family == other.regular.family
+        self.bold_fallback == other.bold_fallback
+            && self.regular.family == other.regular.family
             && same_bytes(&self.regular.bytes, &other.regular.bytes)
             && match (&self.bold, &other.bold) {
                 (Some(left), Some(right)) => same_bytes(&left.bytes, &right.bytes),
@@ -179,6 +182,7 @@ impl Hash for FontFiles {
         self.regular.bytes.len().hash(state);
         self.bold.as_ref().map(|face| face.bytes.len()).hash(state);
         self.fingerprint.hash(state);
+        self.bold_fallback.hash(state);
     }
 }
 
@@ -209,7 +213,8 @@ impl FontFiles {
 
 /// An installed family and immutable copies of its selected regular and bold faces.
 ///
-/// Equality uses the canonical family name, independently of the spelling used to find it.
+/// Equality uses the canonical family name and the bold fallback setting, independently of
+/// the spelling used to find the family.
 ///
 /// # Examples
 ///
@@ -219,12 +224,13 @@ impl FontFiles {
 ///     assert!(matches!(font, Font::System(_)));
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SystemFamily {
     name: String,
     regular: OwnedFace,
     bold: Option<OwnedFace>,
     variable_only: bool,
+    bold_fallback: bool,
 }
 
 impl SystemFamily {
@@ -239,18 +245,20 @@ impl SystemFamily {
             regular,
             bold,
             variable_only,
+            bold_fallback: false,
         }
     }
 }
 impl PartialEq for SystemFamily {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
+        self.name == other.name && self.bold_fallback == other.bold_fallback
     }
 }
 impl Eq for SystemFamily {}
 impl Hash for SystemFamily {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.name.hash(state);
+        self.bold_fallback.hash(state);
     }
 }
 
@@ -320,7 +328,7 @@ impl Font {
     ///
     /// `Error::Data` if either file is damaged, is not a TrueType or OpenType font, or is a
     /// collection (`.ttc`). A missing bold face is allowed here and fails only when laying out
-    /// bold text.
+    /// bold text, unless [`Font::with_bold_fallback`] allows the regular face instead.
     ///
     /// # Examples
     ///
@@ -356,6 +364,7 @@ impl Font {
             regular,
             bold,
             fingerprint: (regular_hash, bold_hash),
+            bold_fallback: false,
         })))
     }
 
@@ -366,7 +375,8 @@ impl Font {
     /// normal-width faces, then the closest weight to 400. Bold requires a separate upright
     /// static face at least weight 600, preferring normal width, then the closest weight to 600.
     /// Variable fonts use their default instance, not a bold variation. Families installed only
-    /// as variable fonts have no bold face here. Font licensing is the caller's responsibility.
+    /// as variable fonts have no bold face here. [`Font::with_bold_fallback`] allows them to
+    /// draw bold text in the regular face. Font licensing is the caller's responsibility.
     ///
     /// # Errors
     ///
@@ -383,6 +393,61 @@ impl Font {
     /// ```
     pub fn system(family: &str) -> Result<Font> {
         crate::text::find_family(family).map(|family| Font::System(Arc::new(family)))
+    }
+
+    /// Sets whether a custom font without bold draws bold text in its regular face.
+    ///
+    /// No synthetic bold is made. An existing bold face is always used; bundled fonts are
+    /// unchanged. This setting is part of a custom font's equality and hash, but does not
+    /// change [`Font::has_face`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BundledFont, Font, Weight};
+    /// use umber_core::fonts::font_bytes;
+    /// let font = Font::from_files(font_bytes(BundledFont::Inter, Weight::Regular).to_vec(), None, "Inter".into())?
+    ///     .with_bold_fallback(true);
+    /// assert!(font.bold_fallback());
+    /// assert!(!font.has_face(Weight::SemiBold));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn with_bold_fallback(mut self, value: bool) -> Font {
+        match &mut self {
+            Font::Bundled(_) => {}
+            Font::File(font) => Arc::make_mut(font).bold_fallback = value,
+            Font::System(font) => Arc::make_mut(font).bold_fallback = value,
+        }
+        self
+    }
+
+    /// Whether a custom font may draw bold text in its regular face when bold is absent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    /// assert!(!Font::INTER.bold_fallback());
+    /// ```
+    #[must_use]
+    pub fn bold_fallback(&self) -> bool {
+        match self {
+            Font::Bundled(_) => false,
+            Font::File(font) => font.bold_fallback,
+            Font::System(font) => font.bold_fallback,
+        }
+    }
+
+    /// The actual weight for shaping and editable output, without inventing a bold face.
+    pub(crate) fn resolved_weight(&self, weight: Weight) -> Option<Weight> {
+        if self.has_face(weight) {
+            Some(weight)
+        } else if weight == Weight::SemiBold && self.bold_fallback() {
+            Some(Weight::Regular)
+        } else {
+            None
+        }
     }
 
     /// Whether a missing bold face comes from an installed family containing only variable files.

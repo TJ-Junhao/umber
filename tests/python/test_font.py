@@ -5,6 +5,7 @@ import pickle
 from pathlib import Path
 from typing import cast
 
+import numpy as np
 import pytest
 
 import umber as ub
@@ -15,7 +16,9 @@ BUNDLED = ROOT / "crates/umber-core/fonts"
 REGULAR = BUNDLED / "Inter-Regular.ttf"
 BOLD = BUNDLED / "Inter-SemiBold.ttf"
 FONTS = ROOT / "tests/fonts"
-MISSING_BOLD_HINT = "pass bold= to Font.from_file, or choose a family with a bold face."
+MISSING_BOLD_HINT = (
+    "pass bold= to Font.from_file, choose a family with a bold face, or pass bold_fallback=True."
+)
 
 
 def _figure(font: ub.Font, *, title: str = "Revenue 2026") -> ub.Figure:
@@ -144,18 +147,22 @@ def test_system_family_found_or_skipped() -> None:
     assert family in _figure(font).to_svg(text=ub.SvgText.EDITABLE)
 
 
-def test_system_pickle_looks_up_the_family_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    family, font = _installed()
+@pytest.mark.parametrize("bold_fallback", [False, True])
+def test_system_pickle_looks_up_the_family_again(
+    monkeypatch: pytest.MonkeyPatch, bold_fallback: bool
+) -> None:
+    family, _ = _installed()
+    font = ub.Font.system(family, bold_fallback=bold_fallback)
     saved = pickle.dumps(font)
-    queries: list[str] = []
+    queries: list[tuple[str, bool]] = []
 
-    def lookup(name: str) -> ub.Font:
-        queries.append(name)
+    def lookup(name: str, *, bold_fallback: bool = False) -> ub.Font:
+        queries.append((name, bold_fallback))
         return ub.Font.INTER
 
     monkeypatch.setattr(ub.Font, "system", lookup)
     assert pickle.loads(saved) is ub.Font.INTER
-    assert queries == [family]
+    assert queries == [(family, bold_fallback)]
 
 
 def test_system_unknown_lists_closest() -> None:
@@ -297,6 +304,121 @@ def test_file_bytes_live_only_in_native_value(monkeypatch: pytest.MonkeyPatch) -
     restored = pickle.loads(pickle.dumps(font))
     assert reads == [REGULAR]
     assert restored == font
+
+
+@pytest.mark.parametrize("constructor", ["from_file", "system"])
+@pytest.mark.parametrize("value", [None, 0, 1, 1.0, "True", ub.AUTO, np.bool_(True)])
+def test_bold_fallback_type_checked_before_io(
+    monkeypatch: pytest.MonkeyPatch, constructor: str, value: object
+) -> None:
+    from umber import _umber
+
+    def unexpected(*args: object) -> None:
+        pytest.fail("type validation must precede file I/O and system lookup")
+
+    monkeypatch.setattr(Path, "read_bytes", unexpected)
+    monkeypatch.setattr(_umber, "font_system", unexpected)
+    with pytest.raises(TypeError) as caught:
+        if constructor == "from_file":
+            ub.Font.from_file("missing.ttf", bold_fallback=cast(bool, value))
+        else:
+            ub.Font.system("Missing family", bold_fallback=cast(bool, value))
+    detail = details(caught.value)
+    assert detail is not None and detail[0] == "bold_fallback"
+    assert any("^" in note for note in getattr(caught.value, "__notes__", []))
+
+
+def test_explicit_bold_with_fallback_is_a_usage_error_before_io() -> None:
+    with pytest.raises(ub.UsageError) as caught:
+        ub.Font.from_file("missing.ttf", bold="missing-bold.ttf", bold_fallback=True)
+    assert str(caught.value) == (
+        "Font.from_file(): bold_fallback is True with bold given; "
+        "the fallback applies only to a font without a bold face."
+    )
+    assert details(caught.value) == ("bold_fallback", "drop bold_fallback, or drop bold.")
+    assert any("^" in note for note in getattr(caught.value, "__notes__", []))
+
+
+def _bold_role(font: ub.Font, role: str) -> ub.Figure:
+    theme = ub.Theme.PIGMENT.with_title_font(font).with_body_font(font)
+    axes = ub.line([0, 1, 2], [1, 3, 2], theme=theme, label="Series")
+    axes.legend(ub.LegendStyle.DIRECT if role == "direct" else ub.LegendStyle.NONE)
+    if role == "axes":
+        axes.title("Heading")
+    elif role == "figure":
+        axes.figure.title("Heading")
+    return axes.figure
+
+
+@pytest.mark.parametrize("role", ["axes", "figure", "direct"])
+@pytest.mark.parametrize("output", ["png", "svg", "editable"])
+@pytest.mark.parametrize("bold_fallback", [False, True])
+def test_bold_roles_use_regular_only_when_fallback_is_enabled(
+    role: str, output: str, bold_fallback: bool
+) -> None:
+    def render(figure: ub.Figure) -> bytes | str:
+        if output == "png":
+            return figure.to_png()
+        return figure.to_svg(
+            text=ub.SvgText.EDITABLE if output == "editable" else ub.SvgText.OUTLINES
+        )
+
+    figure = _bold_role(ub.Font.from_file(REGULAR, bold_fallback=bold_fallback), role)
+    if not bold_fallback:
+        with pytest.raises(ub.StyleError) as caught:
+            render(figure)
+        assert ("Series" if role == "direct" else "Heading") in str(caught.value)
+        assert details(caught.value) == (None, MISSING_BOLD_HINT)
+        return
+    actual = render(figure)
+    if output == "editable":
+        assert isinstance(actual, str)
+        assert 'font-weight="600"' not in actual
+        assert 'font-weight="400"' in actual
+    else:
+        # The same role and size, with regular outlines explicitly supplied as the bold face.
+        expected = _bold_role(ub.Font.from_file(REGULAR, bold=REGULAR), role)
+        assert actual == render(expected)
+
+
+def test_file_bold_fallback_is_part_of_value_and_pickle(tmp_path: Path) -> None:
+    path = tmp_path / "字体-Regular.ttf"
+    path.write_bytes(REGULAR.read_bytes())
+    plain = ub.Font.from_file(path)
+    font = ub.Font.from_file(path, bold_fallback=True)
+    equal = ub.Font.from_file(REGULAR, bold=ub.AUTO, bold_fallback=True)
+    assert plain == ub.Font.from_file(path, bold_fallback=False)
+    assert font != plain and hash(font) != hash(plain)
+    assert font == equal and hash(font) == hash(equal)
+    assert len({plain, font, equal}) == 2
+    assert repr(plain) == f"Font.from_file({str(path)!r})"
+    assert repr(font) == f"Font.from_file({str(path)!r}, bold_fallback=True)"
+    assert copy.copy(font) is font and copy.deepcopy(font) is font
+    saved = pickle.dumps(font)
+    path.unlink()
+    restored = pickle.loads(saved)
+    assert restored == font and hash(restored) == hash(font)
+    assert repr(restored) == repr(font)
+    assert _figure(restored).to_png() == _figure(font).to_png()
+
+
+def test_system_bold_fallback_keeps_existing_bold_and_value_identity() -> None:
+    family, plain = _installed()
+    font = ub.Font.system(family, bold_fallback=True)
+    equal = ub.Font.system(family.lower(), bold_fallback=True)
+    assert plain == ub.Font.system(family, bold_fallback=False)
+    assert font != plain and hash(font) != hash(plain)
+    assert font == equal and hash(font) == hash(equal)
+    assert "bold_fallback" not in repr(plain)
+    assert repr(font) == f"Font.system({family!r}, bold_fallback=True)"
+    restored = pickle.loads(pickle.dumps(font))
+    assert restored == font and hash(restored) == hash(font)
+    assert repr(restored) == repr(font)
+    for role in ("axes", "figure", "direct"):
+        expected, actual = _bold_role(plain, role), _bold_role(font, role)
+        assert actual.to_png() == expected.to_png()
+        assert actual.to_svg() == expected.to_svg()
+        assert actual.to_svg(text=ub.SvgText.EDITABLE) == expected.to_svg(text=ub.SvgText.EDITABLE)
 
 
 def test_system_empty_family_has_specific_error() -> None:

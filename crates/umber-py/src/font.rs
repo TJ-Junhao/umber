@@ -41,6 +41,10 @@ impl FontValue {
         self.inner.family_name()
     }
 
+    fn bold_fallback(&self) -> bool {
+        self.inner.bold_fallback()
+    }
+
     fn file_paths(&self) -> Option<(String, Option<String>)> {
         self.paths
             .as_ref()
@@ -83,10 +87,11 @@ pub(crate) fn font_from_files(
     name: String,
     regular_path: String,
     bold_path: Option<String>,
+    bold_fallback: bool,
 ) -> PyResult<FontValue> {
     Font::from_files(regular.to_vec(), bold.map(<[u8]>::to_vec), name)
         .map(|inner| FontValue {
-            inner,
+            inner: inner.with_bold_fallback(bold_fallback),
             paths: Some(FilePaths {
                 regular: regular_path,
                 bold: bold_path,
@@ -97,9 +102,12 @@ pub(crate) fn font_from_files(
 
 /// Resolves an installed family at construction.
 #[pyfunction]
-pub(crate) fn font_system(family: &str) -> PyResult<FontValue> {
+pub(crate) fn font_system(family: &str, bold_fallback: bool) -> PyResult<FontValue> {
     Font::system(family)
-        .map(|inner| FontValue { inner, paths: None })
+        .map(|inner| FontValue {
+            inner: inner.with_bold_fallback(bold_fallback),
+            paths: None,
+        })
         .map_err(core_error)
 }
 

@@ -3088,17 +3088,21 @@ An immutable font family for a theme's titles or body text.
 
 The bundled families are constants. ``from_file()`` reads regular and optional bold
 files; ``system()`` finds an installed family. Fonts compare equal by bundled constant,
-the same file bytes and resolved family name, or installed family. A file's path matters
-only when its stem supplies a missing family name.
+the same file bytes and resolved family name, or installed family, and the same
+``bold_fallback`` setting. A file's path matters only when its stem supplies a missing
+family name.
 
 Variable fonts use their default instance. Families installed only as variable fonts
-(for example Ubuntu or Cantarell) have no bold face here: titles need ``bold=`` via
-``Font.from_file()``, or another family. A font without bold is allowed until bold text is
-drawn; no synthetic bold is made. Font licensing is your responsibility. Editable SVG
-viewers need the font installed; outlined SVG and PNG do not.
+(for example Ubuntu or Cantarell) have no bold face here. By default, a font without bold
+raises ``StyleError`` when drawing bold text: axes titles, figure titles and direct legend
+labels. Pass ``bold_fallback=True`` to either constructor to draw that text in the regular
+face at the same size instead. An existing bold face is still used; no synthetic bold is
+made. Font licensing is your responsibility. Editable SVG viewers need the font installed;
+outlined SVG and PNG do not.
 
 A pickled file font carries its bytes and original paths; unpickling does not read the
-files. A pickled system font looks the family up again when unpickled.
+files. A pickled system font looks the family up again when unpickled. Both keep the
+``bold_fallback`` setting.
 
 Example:
 
@@ -3107,6 +3111,11 @@ Example:
 >>> theme = ub.Theme.PIGMENT.with_title_font(ub.Font.INTER)
 >>> ub.Font.INTER == ub.Font.GEIST
 False
+>>> try:
+...     font = ub.Font.system("DejaVu Sans", bold_fallback=True)
+... except ub.UsageError:
+...     font = ub.Font.INTER
+>>> theme = theme.with_title_font(font).with_body_font(font)
 ```
 
 ### `umber.Font.GEIST`
@@ -3192,7 +3201,7 @@ Font.SOURCE_SERIF_4
 ### `umber.Font.from_file`
 
 ```text
-Font.from_file(regular: str | os.PathLike[str], *, bold: str | os.PathLike[str] | Auto=AUTO) -> 'Font'
+Font.from_file(regular: str | os.PathLike[str], *, bold: str | os.PathLike[str] | Auto=AUTO, bold_fallback: bool=False) -> 'Font'
 ```
 
 Read a TrueType or OpenType regular file and an optional bold file.
@@ -3201,18 +3210,24 @@ Bytes are kept in memory, so changing or removing the files does not change the 
 The family name comes from the regular file, or its path's stem if no name is stored.
 Collections (``.ttc``) are not accepted; use ``Font.system()`` to choose a family from
 an installed collection. Pickling carries the bytes and original paths; unpickling
-does not reopen the files.
+does not reopen the files and keeps ``bold_fallback``.
+
+Without a bold file, drawing an axes title, figure title or direct legend label raises
+``StyleError`` by default. With ``bold_fallback=True``, these use the regular face at
+the same size; no synthetic bold is made. Do not combine this switch with ``bold=``.
 
 Args:
     regular: Path to the regular ``.ttf`` or ``.otf`` file.
     bold: Path to the bold face, used for SemiBold text, or ``AUTO`` for no bold face.
+    bold_fallback: Draw bold text in the regular face when ``bold`` is ``AUTO``.
 
 Returns:
     An immutable font for ``Theme.with_title_font()`` or ``Theme.with_body_font()``.
 
 Raises:
-    TypeError: If a path is not a string or string-valued path-like object.
-    UsageError: If a file cannot be read.
+    TypeError: If a path is not a string or string-valued path-like object, or
+        ``bold_fallback`` is not a bool.
+    UsageError: If a file cannot be read, or ``bold`` is given with ``bold_fallback=True``.
     DataError: If either file is damaged, is not a font, or is a collection.
 
 Example:
@@ -3225,12 +3240,16 @@ Example:
 >>> if regular.is_file() and bold.is_file():
 ...     font = ub.Font.from_file(regular, bold=bold)
 ...     theme = ub.Theme.PIGMENT.with_title_font(font)
+>>> if regular.is_file():
+...     font = ub.Font.from_file(regular, bold_fallback=True)
+...     theme = ub.Theme.PIGMENT.with_title_font(font)
+...     svg = ub.Figure(theme=theme).title("Annual report").to_svg()
 ```
 
 ### `umber.Font.system`
 
 ```text
-Font.system(family: str) -> 'Font'
+Font.system(family: str, *, bold_fallback: bool=False) -> 'Font'
 ```
 
 Find an installed font family, matching its name case-insensitively.
@@ -3241,19 +3260,23 @@ weight to 400. Bold requires a separate upright static face of at least weight 6
 preferring normal width, then the closest weight to 600. Selected bytes stay in memory.
 
 Variable fonts use their default instance, not a bold variation. Families installed
-only as variable fonts (for example Ubuntu or Cantarell) have no bold face here:
-titles need ``bold=`` via ``Font.from_file()``, or another family. A family without
-bold fails only when bold text is drawn. A pickled system font looks the family up
-again when unpickled.
+only as variable fonts (for example Ubuntu or Cantarell) have no bold face here.
+A family without bold raises ``StyleError`` when drawing an axes title, figure title
+or direct legend label, unless ``bold_fallback=True`` draws that text in the regular
+face at the same size. No synthetic bold is made. If the family has a bold face, it is
+used regardless of this switch; installed faces may differ between machines.
+A pickled system font keeps ``bold_fallback`` and looks the family up again when
+unpickled.
 
 Args:
     family: An installed family name, not a font file path.
+    bold_fallback: Use the regular face for bold text only when bold is absent.
 
 Returns:
     An immutable font for a theme.
 
 Raises:
-    TypeError: If ``family`` is not a string.
+    TypeError: If ``family`` is not a string or ``bold_fallback`` is not a bool.
     UsageError: If the name is empty, the family is not installed, or its selected files
         cannot be read. An unknown family reports the closest installed names.
 
@@ -3262,7 +3285,7 @@ Example:
 ```python
 >>> import umber as ub
 >>> try:
-...     font = ub.Font.system("DejaVu Sans")
+...     font = ub.Font.system("DejaVu Sans", bold_fallback=True)
 ... except ub.UsageError:
 ...     font = ub.Font.INTER
 >>> isinstance(font, ub.Font)

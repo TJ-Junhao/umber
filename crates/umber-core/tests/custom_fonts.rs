@@ -37,6 +37,85 @@ fn from_file_regular_and_bold() {
 }
 
 #[test]
+fn bold_fallback_changes_identity_without_inventing_a_face() {
+    let plain = file_font(false, "Inter");
+    let fallback = plain.clone().with_bold_fallback(true);
+    assert!(!plain.bold_fallback());
+    assert!(fallback.bold_fallback());
+    assert!(!fallback.has_face(Weight::SemiBold));
+    let Font::File(files) = &fallback else {
+        unreachable!()
+    };
+    assert!(files.bytes(Weight::SemiBold).is_none());
+    assert_ne!(plain, fallback);
+    let hash = |font: &Font| {
+        let mut hasher = DefaultHasher::new();
+        font.hash(&mut hasher);
+        hasher.finish()
+    };
+    assert_ne!(hash(&plain), hash(&fallback));
+    assert_eq!(fallback.clone().with_bold_fallback(false), plain);
+    assert_eq!(
+        fallback,
+        file_font(false, "renamed").with_bold_fallback(true)
+    );
+    assert_eq!(Font::INTER.with_bold_fallback(true), Font::INTER);
+}
+
+#[test]
+fn bold_fallback_title_matches_regular_at_the_title_size() {
+    use umber_core::render::{SvgText, render_png, render_svg};
+    use umber_core::scene::Scene;
+    use umber_core::{Point, Rgba, Theme};
+
+    let lib = FontLibrary::with_fallbacks(vec![]);
+    let fonts = lib
+        .with_figure_fonts(&[file_font(false, "Inter").with_bold_fallback(true)])
+        .unwrap();
+    let white = Rgba {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    let black = Rgba {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        let scene = |weight| {
+            let mut scene = Scene::new(300.0, 50.0, white);
+            scene
+                .push_text(
+                    &fonts,
+                    "Quarterly revenue",
+                    TextStyle {
+                        face: FaceId::new(0),
+                        weight,
+                        size: theme.title_size(),
+                        tabular_figures: false,
+                    },
+                    Point { x: 10.0, y: 30.0 },
+                    black,
+                )
+                .unwrap();
+            scene
+        };
+        let bold = scene(Weight::SemiBold);
+        let regular = scene(Weight::Regular);
+        assert_eq!(
+            render_png(&bold, 96).unwrap(),
+            render_png(&regular, 96).unwrap()
+        );
+        for mode in [SvgText::Outlines, SvgText::Editable] {
+            assert_eq!(render_svg(&bold, mode), render_svg(&regular, mode));
+        }
+    }
+}
+
+#[test]
 fn from_file_errors_exact() {
     for bad in [
         vec![],
@@ -131,7 +210,9 @@ fn missing_bold_fails_when_bold_text_is_drawn() {
     assert!(err.to_string().contains("Inter"));
     assert_eq!(
         err.hint(),
-        Some("pass bold= to Font.from_file, or choose a family with a bold face.")
+        Some(
+            "pass bold= to Font.from_file, choose a family with a bold face, or pass bold_fallback=True."
+        )
     );
     assert!(
         fonts
