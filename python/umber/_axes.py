@@ -2822,7 +2822,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         levels: int | Values[float] | Auto = AUTO,
         style: Contour = Contour.LINES,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
         color: Color = Color.AUTO,
         annotate: bool = False,
