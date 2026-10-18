@@ -1,7 +1,7 @@
 """Pie panels: circular parts of a whole, without Cartesian axes."""
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Never, Self
+from typing import TYPE_CHECKING, Never, Self, final
 
 import umber
 from umber import _args, _color, _size, _ticks, _umber, _values
@@ -15,6 +15,7 @@ from umber._ticks import TickFormat
 from umber._types import Values
 
 
+@final
 class PieAxes:
     """A circular panel with ``pie``, ``title`` and ``legend`` methods only.
 
@@ -97,7 +98,8 @@ class PieAxes:
             hole: Inner radius as a fraction of outer radius, from 0 inclusive to 1 exclusive.
             annotate: Write each share under its name inside, or alongside it outside.
                 Shares remain visible when a legend replaces the names.
-            format: Share format; ``AUTO`` uses percent with no decimal places.
+            format: Share format; ``AUTO`` uses percent with no decimal places, so shares
+                below 0.5 % print as "0%".
             colors: One Color per slice. ``AUTO`` uses the theme palette without cycling;
                 more slices than palette colors need explicit colors.
             size: Direct label size: ``Size.AUTO`` follows the body's theme size,

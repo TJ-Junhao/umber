@@ -45,10 +45,76 @@ pub(crate) struct Pie {
     pub options: PieOptions,
 }
 
-/// The presence of this value distinguishes a pie panel from Cartesian axes, even empty.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct PiePanel {
-    pub pie: Option<Pie>,
+/// A circular panel's cells, title, legend and optional pie, without Cartesian axis state.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Figure, Panel, Theme};
+/// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+/// f.add_pie_axes()?.title("Parts");
+/// if let Some(Panel::Pie(pie)) = f.panels().next() {
+///     assert_eq!(pie.title_text(), "Parts");
+/// }
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct PiePanel {
+    pub(crate) cells: CellRange,
+    pub(crate) title: String,
+    pub(crate) title_size: SizeSpec,
+    pub(crate) legend: LegendStyle,
+    pub(crate) legend_position: Option<LegendPosition>,
+    pub(crate) legend_size: SizeSpec,
+    pub(crate) pie: Option<Pie>,
+}
+
+impl PiePanel {
+    pub(super) fn new(cells: CellRange) -> Self {
+        Self {
+            cells,
+            title: String::new(),
+            title_size: SizeSpec::Auto,
+            legend: LegendStyle::Direct,
+            legend_position: None,
+            legend_size: SizeSpec::Auto,
+            pie: None,
+        }
+    }
+
+    /// The cells occupied by this circular panel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Panel, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_pie_axes()?;
+    /// if let Some(Panel::Pie(pie)) = f.panels().next() {
+    ///     assert_eq!(pie.cells().row(), 0);
+    /// }
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn cells(&self) -> CellRange {
+        self.cells
+    }
+
+    /// The title, or an empty string when unset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Panel, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_pie_axes()?.title("Parts");
+    /// if let Some(Panel::Pie(pie)) = f.panels().next() {
+    ///     assert_eq!(pie.title_text(), "Parts");
+    /// }
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn title_text(&self) -> &str {
+        &self.title
+    }
 }
 
 /// A pie panel's mutable handle. It has no Cartesian marks or axis settings.
@@ -83,7 +149,7 @@ impl<'a> PieAxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn cells(&self) -> CellRange {
-        self.figure.panel(self.index).cells()
+        self.figure.pie_panel(self.index).cells()
     }
 
     /// Adds the panel's only pie. Invalid data or options leave the panel unchanged.
@@ -107,22 +173,15 @@ impl<'a> PieAxesMut<'a> {
         values: &[f64],
         options: PieOptions,
     ) -> Result<&mut Self> {
-        if self
-            .figure
-            .panel(self.index)
-            .pie_panel
-            .as_ref()
-            .is_some_and(|panel| panel.pie.is_some())
-        {
+        if self.figure.pie_panel(self.index).pie.is_some() {
             return Err(Error::usage(
                 CONTEXT,
                 "this panel already holds a pie; each pie needs its own panel.",
             )
-            .with_parameter("values")
             .with_hint("add a new panel with Figure.add_pie_axes()."));
         }
         let pie = Pie::new(categories, values, options, self.figure.theme().palette())?;
-        self.figure.panel_mut(self.index).pie_panel = Some(PiePanel { pie: Some(pie) });
+        self.figure.pie_panel_mut(self.index).pie = Some(pie);
         Ok(self)
     }
 
@@ -151,7 +210,7 @@ impl<'a> PieAxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn title_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
-        let axes = self.figure.panel_mut(self.index);
+        let axes = self.figure.pie_panel_mut(self.index);
         axes.title = text.into();
         axes.title_size = size;
         self
@@ -182,8 +241,8 @@ impl<'a> PieAxesMut<'a> {
             .with_parameter("position")
             .with_hint("use AUTO with DIRECT, or use HEADER or CHIPS for a positioned legend."));
         }
-        let axes = self.figure.panel_mut(self.index);
-        axes.legend = Some(style);
+        let axes = self.figure.pie_panel_mut(self.index);
+        axes.legend = style;
         axes.legend_position = position;
         axes.legend_size = size;
         Ok(self)
@@ -214,6 +273,14 @@ impl Pie {
         }
         let mut seen = std::collections::HashSet::new();
         for (i, name) in categories.iter().enumerate() {
+            if name.is_empty() {
+                return Err(Error::data(
+                    CONTEXT,
+                    format!("categories[{i}] is empty; every slice needs a non-empty name."),
+                )
+                .with_parameter("categories")
+                .with_hint("give every slice a non-empty name."));
+            }
             super::check_text(CONTEXT, "categories", "category", name)?;
             if !seen.insert(name) {
                 return Err(Error::data(

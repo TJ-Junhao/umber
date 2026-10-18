@@ -317,9 +317,10 @@ impl<'a> Legend<'a> {
         let mut seen_bubbles = false;
         let mut row = Vec::new();
         for (axes, marks) in figure.panels().zip(marks) {
-            if axes.pie_panel.is_some() {
-                continue;
-            }
+            let axes = match axes {
+                crate::Panel::Cartesian(axes) => axes,
+                crate::Panel::Pie(_) => continue,
+            };
             let style = axes.legend_style().unwrap_or(figure.theme().legend_style());
             if style == LegendStyle::None {
                 continue;

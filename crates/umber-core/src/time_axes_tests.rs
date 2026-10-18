@@ -1749,7 +1749,11 @@ fn time_meshes_share_one_color_scale_across_panels() {
         let grid = Grid::new(1, 2).unwrap().with_share_color(Share::All);
         let mut f = Figure::with_grid(8.0, 3.0, Theme::pigment(), grid).unwrap();
         shared_mesh(&mut f, (0, 0), first, crate::Cmap::viridis(), 1).unwrap();
-        let marks = |f: &Figure| f.panels().map(|a| a.marks().len()).collect::<Vec<_>>();
+        let marks = |f: &Figure| {
+            f.cartesian_panels()
+                .map(|a| a.marks().len())
+                .collect::<Vec<_>>()
+        };
         let err = shared_mesh(&mut f, (0, 1), second, crate::Cmap::magma(), 1).unwrap_err();
         assert!(matches!(err, Error::Usage { .. }), "{err}");
         assert_eq!(err.parameter(), Some("cmap"));
@@ -1778,11 +1782,11 @@ fn a_time_mesh_spanning_rows_that_share_colors_by_row_is_refused() {
         assert_eq!(err.parameter(), Some("cmap"));
         assert!(err.to_string().contains("spans rows"), "{err}");
         assert_eq!(
-            f.panels().count(),
+            f.cartesian_panels().count(),
             1,
             "the axes stay; only the mark is refused"
         );
-        assert!(f.panels().all(|a| a.marks().is_empty()));
+        assert!(f.cartesian_panels().all(|a| a.marks().is_empty()));
     }
 }
 
@@ -1818,6 +1822,9 @@ fn a_time_bubble_color_mapping_is_checked_across_a_shared_group() {
         .unwrap_err();
     assert_eq!(err.parameter(), Some("color"));
     assert!(ax.marks().is_empty());
-    assert_eq!(f.panels().map(|a| a.marks().len()).sum::<usize>(), 1);
+    assert_eq!(
+        f.cartesian_panels().map(|a| a.marks().len()).sum::<usize>(),
+        1
+    );
     let _ = before;
 }

@@ -49,7 +49,7 @@ use crate::error::quoted;
 use crate::layout::TickRoom;
 use crate::legend::{LegendEntry, Swatch, SwatchFill};
 use crate::model::{
-    AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, LineMark, Mark,
+    AreaMark, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, LineMark, Mark,
     ScatterMark, SeriesView, SharedValues, StepMark,
 };
 use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
@@ -264,7 +264,7 @@ impl AxisRole {
     }
 }
 
-/// Both axes of an [`Axes`], resolved, and the baseline on the value axis.
+/// Both axes of an [`crate::Axes`], resolved, and the baseline on the value axis.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Resolved {
     /// The x axis.
@@ -445,7 +445,7 @@ impl<'a> AxisLimits<'a> {
     }
 }
 
-/// The limits and tick settings of both axes of an [`Axes`].
+/// The limits and tick settings of both axes of an [`crate::Axes`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Limits<'a> {
     /// The x axis.
@@ -456,7 +456,16 @@ pub(crate) struct Limits<'a> {
 
 impl<'a> Limits<'a> {
     /// The scales, explicit limits and tick settings of `axes`.
-    pub fn of(axes: &'a Axes) -> Limits<'a> {
+    pub fn of(panel: impl Into<crate::Panel<'a>>) -> Limits<'a> {
+        let axes = match panel.into() {
+            crate::Panel::Cartesian(axes) => axes,
+            crate::Panel::Pie(_) => {
+                return Limits {
+                    x: AxisLimits::Category,
+                    y: AxisLimits::Category,
+                };
+            }
+        };
         Limits {
             x: AxisLimits::new(
                 axes.x_scale(),
@@ -875,7 +884,7 @@ fn categories<'a, 'm: 'a>(
 /// no `x`. On a grid of more than one cell the message starts with the axes' top-left cell, as
 /// the layout errors of [`pipeline::scene`](crate::pipeline) do.
 pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result<()> {
-    for axes in figure.panels() {
+    for axes in figure.cartesian_panels() {
         if axes.x_scale() != ScaleKind::Category {
             continue;
         }
@@ -894,7 +903,7 @@ pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result
         let key = figure.x_group_of(cells.row(), cells.col());
         let scale = CategoryScale::from_first_appearance(
             figure
-                .panels()
+                .cartesian_panels()
                 .filter(|member| {
                     let c = member.cells();
                     figure.x_group_of(c.row(), c.col()) == key
@@ -3737,7 +3746,10 @@ pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<Resolve
 
 /// Resolves the marks of `axes` as [`resolve_marks`] does, in the orientation of the axes.
 #[cfg(test)]
-pub(crate) fn resolve_axes_marks<'a>(axes: &'a Axes, theme: &Theme) -> Vec<ResolvedMark<'a>> {
+pub(crate) fn resolve_axes_marks<'a>(
+    axes: &'a crate::Axes,
+    theme: &Theme,
+) -> Vec<ResolvedMark<'a>> {
     let slots = label_slots(axes.marks().iter());
     resolve_panel_marks(axes.marks(), Limits::of(axes).orientation(), theme, &slots)
 }
@@ -3747,12 +3759,17 @@ pub(crate) fn resolve_axes_marks<'a>(axes: &'a Axes, theme: &Theme) -> Vec<Resol
 /// from the number of label slots. Explicit palette and fixed colors never register a label
 /// or consume a slot.
 pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>> {
-    let slots = label_slots(figure.panels().flat_map(|axes| axes.marks()));
+    let slots = label_slots(figure.cartesian_panels().flat_map(|axes| axes.marks()));
     figure
         .panels()
-        .map(|axes| {
-            let orientation = Limits::of(axes).orientation();
-            resolve_panel_marks(axes.marks(), orientation, figure.theme(), &slots)
+        .map(|panel| match panel {
+            crate::Panel::Cartesian(axes) => resolve_panel_marks(
+                axes.marks(),
+                Limits::of(axes).orientation(),
+                figure.theme(),
+                &slots,
+            ),
+            crate::Panel::Pie(_) => Vec::new(),
         })
         .collect()
 }
@@ -4181,7 +4198,7 @@ mod tests {
     }
 
     /// Both axes of `axes`, resolved from its marks.
-    fn resolve_axes(axes: &Axes, x_target: usize, y_target: usize) -> Resolved {
+    fn resolve_axes(axes: &crate::Axes, x_target: usize, y_target: usize) -> Resolved {
         let marks = resolve_axes_marks(axes, &Theme::pigment());
         let tick = crate::test_support::tick_font(&Theme::pigment());
         let (x, y) = TickRoom::unlimited(x_target, y_target, tick);

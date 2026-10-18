@@ -85,11 +85,16 @@ pub(crate) fn draw(theme: &Theme, pie: &PieLayout) -> Item {
             rule: FillRule::NonZero,
         });
     }
-    for path in paths {
-        items.push(Item::Stroke {
-            path,
-            style: stroke(theme.background(), 1.0),
-        });
+    if pie.wedges.len() > 1 {
+        for wedge in &pie.wedges {
+            let mut path = Path::new();
+            path.move_to(pie.circle.point(wedge.start, pie.circle.radius * pie.hole));
+            path.line_to(pie.circle.point(wedge.start, pie.circle.radius));
+            items.push(Item::Stroke {
+                path,
+                style: stroke(theme.background(), 1.0),
+            });
+        }
     }
     for label in &pie.labels {
         if let Some((&first, rest)) = label.leader.split_first() {

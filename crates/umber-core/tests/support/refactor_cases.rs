@@ -2104,7 +2104,12 @@ mod record {
                     c.col_span()
                 );
             }
-            out.push_str(&axes(a));
+            match a {
+                umber_core::Panel::Cartesian(a) => out.push_str(&axes(a)),
+                umber_core::Panel::Pie(pie) => {
+                    let _ = writeln!(out, "  pie title={}", text(pie.title_text()));
+                }
+            }
         }
         out
     }

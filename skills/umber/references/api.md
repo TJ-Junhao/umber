@@ -2239,30 +2239,6 @@ Example:
 0
 ```
 
-## `umber.Series`
-
-```text
-Series(label: str, values: Values[float], *, color: Color=Color.AUTO)
-```
-
-An immutable series of values for grouped bars, stacked bars and stacked areas.
-
-Pass series to ``Axes.grouped_bar()``, ``Axes.stacked_bar()`` or ``Axes.stacked_area()``.
-Values are copied when the series is made, so changing the original data has no effect.
-Their type, shape and dtype are checked here; whether they are finite, and positive on a
-log axis, is checked by the chart the series is added to, which reports a bad value
-as ``series[i].values[j]``. A copy of a series is the series itself, and series pickle
-by value.
-
-Example:
-
-```python
->>> import umber as ub
->>> north = ub.Series("North", [3, 5, 2], color=ub.Color.BLUE)
->>> north
-<umber.Series 'North' (3 values)>
-```
-
 ## `umber.Cmap`
 
 ```text
@@ -2819,30 +2795,6 @@ ColorbarPosition.RIGHT
 
 Right of the plot, spanning its height.
 
-## `umber.DataError`
-
-```text
-class DataError(UmberError, ValueError)
-```
-
-The data passed to a call cannot be plotted.
-
-Raised at the call site when arrays differ in length, are not one-dimensional, contain
-infinities, have an unsupported dtype, or hold non-positive values on a log axis. It is
-also a ``ValueError``, so existing ``except ValueError`` blocks keep working.
-
-Example:
-
-```python
->>> import umber as ub
->>> try:
-...     raise ub.DataError("Axes.line(): x has 3 values but y has 2; "
-...                        "x and y must have the same length.")
-... except ValueError as err:
-...     print(err)
-Axes.line(): x has 3 values but y has 2; x and y must have the same length.
-```
-
 ## `umber.Dash`
 
 ```text
@@ -2883,6 +2835,30 @@ Dash.SOLID
 
 A continuous line.
 
+## `umber.DataError`
+
+```text
+class DataError(UmberError, ValueError)
+```
+
+The data passed to a call cannot be plotted.
+
+Raised at the call site when arrays differ in length, are not one-dimensional, contain
+infinities, have an unsupported dtype, or hold non-positive values on a log axis. It is
+also a ``ValueError``, so existing ``except ValueError`` blocks keep working.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> try:
+...     raise ub.DataError("Axes.line(): x has 3 values but y has 2; "
+...                        "x and y must have the same length.")
+... except ValueError as err:
+...     print(err)
+Axes.line(): x has 3 values but y has 2; x and y must have the same length.
+```
+
 ## `umber.Distribution`
 
 ```text
@@ -2904,38 +2880,6 @@ Example:
 >>> ub.Distribution("North", [[1, 2, 3], [2, 4]])
 <umber.Distribution 'North' (2 groups)>
 ```
-
-## `umber.FillStyle`
-
-```text
-class FillStyle(Enum)
-```
-
-How areas and histogram bins are filled.
-
-Example:
-
-```python
->>> import umber as ub
->>> ub.FillStyle.GRADIENT.name
-'GRADIENT'
-```
-
-### `umber.FillStyle.GRADIENT`
-
-```text
-FillStyle.GRADIENT
-```
-
-A fill that fades out toward the baseline.
-
-### `umber.FillStyle.SOLID`
-
-```text
-FillStyle.SOLID
-```
-
-A flat translucent fill.
 
 ## `umber.Figure`
 
@@ -3144,6 +3088,36 @@ Example:
 >>> ax = fig.add_axes(col=0).scatter([1, 2], [2, 3], color=ub.ColorBy([4, 8]))
 ```
 
+### `umber.Figure.pie_axes_at`
+
+```text
+Figure.pie_axes_at(self, *, row: int | Auto=AUTO, col: int | Auto=AUTO) -> PieAxes
+```
+
+Return an existing pie panel, including one in a copied figure.
+
+Args:
+    row: Zero-based top row; AUTO means 0 only on a one-row figure.
+    col: Zero-based left column; AUTO means 0 only on a one-column figure.
+
+Returns:
+    The pie panel at this top-left cell. Other cells covered by a span do not match.
+
+Raises:
+    TypeError: If an index has the wrong type.
+    UsageError: If a position is missing, out of range or not a pie panel's top-left cell.
+
+Example:
+
+```python
+>>> import copy
+>>> import umber as ub
+>>> fig = ub.pie(["A", "B"], [1, 2]).figure
+>>> twin = copy.copy(fig)
+>>> twin.pie_axes_at().title("Variant").figure is twin
+True
+```
+
 ### `umber.Figure.save_png`
 
 ```text
@@ -3314,6 +3288,38 @@ Example:
 >>> svg.startswith("<svg")
 True
 ```
+
+## `umber.FillStyle`
+
+```text
+class FillStyle(Enum)
+```
+
+How areas and histogram bins are filled.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.FillStyle.GRADIENT.name
+'GRADIENT'
+```
+
+### `umber.FillStyle.GRADIENT`
+
+```text
+FillStyle.GRADIENT
+```
+
+A fill that fades out toward the baseline.
+
+### `umber.FillStyle.SOLID`
+
+```text
+FillStyle.SOLID
+```
+
+A flat translucent fill.
 
 ## `umber.Font`
 
@@ -3789,7 +3795,8 @@ Args:
     hole: Inner radius as a fraction of outer radius, from 0 inclusive to 1 exclusive.
     annotate: Write each share under its name inside, or alongside it outside.
         Shares remain visible when a legend replaces the names.
-    format: Share format; ``AUTO`` uses percent with no decimal places.
+    format: Share format; ``AUTO`` uses percent with no decimal places, so shares
+        below 0.5 % print as "0%".
     colors: One Color per slice. ``AUTO`` uses the theme palette without cycling;
         more slices than palette colors need explicit colors.
     size: Direct label size: ``Size.AUTO`` follows the body's theme size,
@@ -4008,6 +4015,30 @@ Example:
 >>> import umber as ub
 >>> ub.Scale.time()
 Scale.time()
+```
+
+## `umber.Series`
+
+```text
+Series(label: str, values: Values[float], *, color: Color=Color.AUTO)
+```
+
+An immutable series of values for grouped bars, stacked bars and stacked areas.
+
+Pass series to ``Axes.grouped_bar()``, ``Axes.stacked_bar()`` or ``Axes.stacked_area()``.
+Values are copied when the series is made, so changing the original data has no effect.
+Their type, shape and dtype are checked here; whether they are finite, and positive on a
+log axis, is checked by the chart the series is added to, which reports a bad value
+as ``series[i].values[j]``. A copy of a series is the series itself, and series pickle
+by value.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> north = ub.Series("North", [3, 5, 2], color=ub.Color.BLUE)
+>>> north
+<umber.Series 'North' (3 values)>
 ```
 
 ## `umber.Share`
@@ -5437,7 +5468,7 @@ Example:
 ## `umber.pie`
 
 ```text
-pie(categories: Values[str], values: Values[float], *, hole: float=0.0, annotate: bool=False, format: TickFormat | Auto=AUTO, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT) -> PieAxes
+pie(categories: Values[str], values: Values[float], *, hole: float=0.0, annotate: bool=False, format: TickFormat | Auto=AUTO, colors: Sequence[Color] | Auto=AUTO, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT) -> PieAxes
 ```
 
 Draw a pie or donut on a new figure and return its circular panel.
@@ -5450,7 +5481,8 @@ Args:
     values: Finite nonnegative values with a positive total.
     hole: Inner radius divided by outer radius; 0 for a pie, or a fraction below 1.
     annotate: Write each slice's share with its name.
-    format: Share format; AUTO uses whole percentages.
+    format: Share format; AUTO uses whole percentages; shares below 0.5 % print as "0%".
+    colors: One Color per slice; AUTO uses the theme palette without cycling.
     size: Direct label size, as Size.AUTO, Size.times(k) or Size.pt(p).
     theme: The theme of the new figure.
 

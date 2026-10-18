@@ -19,7 +19,11 @@
 //!     .add_axes(ScaleKind::Linear, ScaleKind::Linear)?
 //!     .title("Growth")
 //!     .line(AxisData::Numbers(vec![0.0, 1.0, 2.0]), &[1.0, 3.0, 2.0], LineOptions::default())?;
-//! assert_eq!(figure.panels().map(|a| a.marks().len()).sum::<usize>(), 1);
+//! let marks = figure.panels().map(|panel| match panel {
+//!     umber_core::Panel::Cartesian(axes) => axes.marks().len(),
+//!     umber_core::Panel::Pie(_) => 0,
+//! });
+//! assert_eq!(marks.sum::<usize>(), 1);
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
@@ -47,7 +51,7 @@ pub use crate::model::{HeatmapMark, HeatmapOptions};
 pub use crate::model::{
     HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
 };
-pub use crate::model::{PieAxesMut, PieOptions};
+pub use crate::model::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use crate::model::{StemMark, StemOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
 

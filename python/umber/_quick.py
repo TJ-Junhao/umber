@@ -7,6 +7,7 @@ passing ``x=Scale.category()`` for a bar chart. Errors found by the mark method 
 context, such as ``Axes.line(): …``, and the highlight points at the quick function's call.
 """
 
+from collections.abc import Sequence
 from typing import Final
 
 from umber._args import instance
@@ -33,6 +34,7 @@ def pie(
     hole: float = 0.0,
     annotate: bool = False,
     format: TickFormat | Auto = AUTO,
+    colors: Sequence[Color] | Auto = AUTO,
     size: Size = Size.AUTO,
     theme: Theme = Theme.PIGMENT,
 ) -> PieAxes:
@@ -46,7 +48,8 @@ def pie(
         values: Finite nonnegative values with a positive total.
         hole: Inner radius divided by outer radius; 0 for a pie, or a fraction below 1.
         annotate: Write each slice's share with its name.
-        format: Share format; AUTO uses whole percentages.
+        format: Share format; AUTO uses whole percentages; shares below 0.5 % print as "0%".
+        colors: One Color per slice; AUTO uses the theme palette without cycling.
         size: Direct label size, as Size.AUTO, Size.times(k) or Size.pt(p).
         theme: The theme of the new figure.
 
@@ -69,7 +72,15 @@ def pie(
         return (
             Figure(theme=theme)
             .add_pie_axes()
-            .pie(categories, values, hole=hole, annotate=annotate, format=format, size=size)
+            .pie(
+                categories,
+                values,
+                hole=hole,
+                annotate=annotate,
+                format=format,
+                colors=colors,
+                size=size,
+            )
         )
 
 

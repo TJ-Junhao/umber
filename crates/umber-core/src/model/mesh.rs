@@ -1705,7 +1705,7 @@ mod tests {
             },
         )
         .unwrap();
-        let crate::Mark::Hist2d(mark) = &f.panels().next().unwrap().marks()[0] else {
+        let crate::Mark::Hist2d(mark) = &f.cartesian_panels().next().unwrap().marks()[0] else {
             panic!()
         };
         for edges in [&mark.bins.x_edges, &mark.bins.y_edges] {
@@ -1894,7 +1894,8 @@ mod tests {
             .unwrap()
             .hexbin(&[0.0, 1.0], &[0.0, 1.0], HexbinOptions::default())
             .unwrap();
-        let marks = crate::resolve::resolve_axes_marks(f.panels().next().unwrap(), f.theme());
+        let marks =
+            crate::resolve::resolve_axes_marks(f.cartesian_panels().next().unwrap(), f.theme());
         assert_eq!(marks.len(), 3);
         for mark in &marks {
             for axis in [crate::resolve::ValueAxis::X, crate::resolve::ValueAxis::Y] {
@@ -2011,7 +2012,8 @@ mod tests {
                 HexbinOptions::default(),
             )
             .unwrap();
-        let marks = crate::resolve::resolve_axes_marks(f.panels().next().unwrap(), f.theme());
+        let marks =
+            crate::resolve::resolve_axes_marks(f.cartesian_panels().next().unwrap(), f.theme());
         let crate::resolve::ResolvedMark::Hexbin { mark, bins, .. } = &marks[0] else {
             panic!()
         };

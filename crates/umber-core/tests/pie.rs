@@ -29,6 +29,45 @@ fn endpoints(path: &Path) -> Vec<Point> {
 }
 
 #[test]
+fn separators_are_only_radial_between_adjacent_slices() {
+    for count in [1, 2, 4] {
+        for hole in [0.0, 0.5, 0.99] {
+            let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+            let mut axes = figure.add_pie_axes().unwrap();
+            axes.pie(
+                (0..count).map(|i| i.to_string()).collect(),
+                &vec![1.0; count],
+                PieOptions {
+                    hole,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            axes.legend(LegendStyle::None, None, SizeSpec::Auto)
+                .unwrap();
+            let scene = figure.to_scene(&FontLibrary::bundled()).unwrap();
+            let strokes: Vec<_> = leaves(&scene.items)
+                .into_iter()
+                .filter_map(|item| match item {
+                    Item::Stroke { path, style } if style.width == 1.0 => Some(path),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(strokes.len(), if count == 1 { 0 } else { count });
+            for path in strokes {
+                assert!(matches!(
+                    path.verbs(),
+                    [PathVerb::MoveTo(_), PathVerb::LineTo(_)]
+                ));
+                let points = endpoints(path);
+                let length = (points[1].x - points[0].x).hypot(points[1].y - points[0].y);
+                assert!((f64::from(length) - 132.0 * (1.0 - hole)).abs() < 0.001);
+            }
+        }
+    }
+}
+
+#[test]
 fn slices_start_at_twelve_clockwise() {
     let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let mut axes = figure.add_pie_axes().unwrap();
@@ -104,31 +143,17 @@ fn outside_labels_stay_outside_the_circle_after_spreading() {
             let library = FontLibrary::bundled();
             let scene = figure.to_scene(&library).unwrap();
             let fonts = library.with_figure_fonts(&scene.fonts).unwrap();
-            let bounds: Vec<_> = fills(&scene.items)
-                .iter()
-                .map(|path| path.bounds().unwrap())
-                .collect();
-            let left = bounds
-                .iter()
-                .map(|(lo, _)| lo.x)
-                .fold(f32::INFINITY, f32::min);
-            let right = bounds
-                .iter()
-                .map(|(_, hi)| hi.x)
-                .fold(f32::NEG_INFINITY, f32::max);
-            let top = bounds
-                .iter()
-                .map(|(lo, _)| lo.y)
-                .fold(f32::INFINITY, f32::min);
-            let bottom = bounds
-                .iter()
-                .map(|(_, hi)| hi.y)
-                .fold(f32::NEG_INFINITY, f32::max);
+            // Three outer-arc endpoints determine the circle. Path::bounds also includes
+            // Bezier control points, which are not on the circle.
+            let points = endpoints(fills(&scene.items)[0]);
+            let [a, b, c] = [points[0], points[1], points[2]];
+            let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+            let norm = |p: Point| p.x * p.x + p.y * p.y;
             let center = Point {
-                x: (left + right) / 2.0,
-                y: (top + bottom) / 2.0,
+                x: (norm(a) * (b.y - c.y) + norm(b) * (c.y - a.y) + norm(c) * (a.y - b.y)) / d,
+                y: (norm(a) * (c.x - b.x) + norm(b) * (a.x - c.x) + norm(c) * (b.x - a.x)) / d,
             };
-            let radius = (right - left) / 2.0;
+            let radius = (a.x - center.x).hypot(a.y - center.y);
             let mut outside = 0;
             for item in leaves(&scene.items) {
                 let Item::Text(text) = item else { continue };

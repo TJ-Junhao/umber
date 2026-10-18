@@ -545,12 +545,29 @@ pub(crate) fn measure_panel(
         StyleSizes {
             title: axes.title_size(),
             body: axes.subtitle_size(),
-            tick: axes.xtick_size(),
+            tick: axes
+                .cartesian()
+                .map_or(crate::SizeSpec::Auto, crate::Axes::xtick_size),
         },
     );
-    let ytick = styles.sized(theme, TextRole::Tick, axes.ytick_size());
-    let xaxis = styles.sized(theme, TextRole::Body, axes.xlabel_size());
-    let yaxis = styles.sized(theme, TextRole::Body, axes.ylabel_size());
+    let ytick = styles.sized(
+        theme,
+        TextRole::Tick,
+        axes.cartesian()
+            .map_or(crate::SizeSpec::Auto, crate::Axes::ytick_size),
+    );
+    let xaxis = styles.sized(
+        theme,
+        TextRole::Body,
+        axes.cartesian()
+            .map_or(crate::SizeSpec::Auto, crate::Axes::xlabel_size),
+    );
+    let yaxis = styles.sized(
+        theme,
+        TextRole::Body,
+        axes.cartesian()
+            .map_or(crate::SizeSpec::Auto, crate::Axes::ylabel_size),
+    );
 
     let row = legend.header_within(span.row_left, span.row_right);
     let heading = Header::measure(axes.title_text(), axes.subtitle_text(), &styles, &row, lib)?;
@@ -585,11 +602,15 @@ pub(crate) fn measure_panel(
         )
     };
 
-    let xlabel = (!axes.xlabel_text().is_empty())
-        .then(|| measure(lib, axes.xlabel_text(), xaxis))
+    let (xtext, ytext) = match axes {
+        crate::Panel::Cartesian(axes) => (axes.xlabel_text(), axes.ylabel_text()),
+        crate::Panel::Pie(_) => ("", ""),
+    };
+    let xlabel = (!xtext.is_empty())
+        .then(|| measure(lib, xtext, xaxis))
         .transpose()?;
-    let ylabel = (!axes.ylabel_text().is_empty())
-        .then(|| measure(lib, axes.ylabel_text(), yaxis))
+    let ylabel = (!ytext.is_empty())
+        .then(|| measure(lib, ytext, yaxis))
         .transpose()?;
     let (xlabel_ascent, xlabel_descent) = metrics(lib, &xaxis)?;
     let (y_ascent, y_descent) = metrics(lib, &yaxis)?;
@@ -624,8 +645,12 @@ pub(crate) fn measure_panel(
         0.0
     };
 
-    let colorbar =
-        super::colorbar::MeasuredColorbar::measure(axes, resolved.color.as_ref(), theme, lib)?;
+    let colorbar = match axes {
+        crate::Panel::Cartesian(axes) => {
+            super::colorbar::MeasuredColorbar::measure(axes, resolved.color.as_ref(), theme, lib)?
+        }
+        crate::Panel::Pie(_) => None,
+    };
     let (mut right_colorbar, mut bottom_colorbar, mut colorbar_tick_width) = (0.0, 0.0, 0.0);
     if let Some(bar) = &colorbar {
         right_colorbar = bar.right_reserve();
@@ -789,8 +814,12 @@ pub(crate) fn place_panel(
         .map(|bar| bar.place(plot, bands.direct_reserve, bottom, label_rise));
     let direct = input.legend.direct.placed(resolved, plot, frame);
     let baseline = resolved.baseline;
-    let draws_baseline =
-        resolved.draws_baseline(input.axes.marks(), input.axes.baseline_visibility());
+    let draws_baseline = match input.axes {
+        crate::Panel::Cartesian(axes) => {
+            resolved.draws_baseline(axes.marks(), axes.baseline_visibility())
+        }
+        crate::Panel::Pie(_) => false,
+    };
     // A drawn baseline replaces the gridline it coincides with.
     let off_baseline = |axis: ValueAxis| {
         move |tick: &&AxisTick| {

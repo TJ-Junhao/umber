@@ -325,6 +325,19 @@ impl Figure {
         Ok((axes.cells().row(), axes.cells().col()))
     }
 
+    /// Finds a circular panel at its top-left cell.
+    fn pie_axes_at(
+        &mut self,
+        row_kind: i64,
+        row: i64,
+        col_kind: i64,
+        col: i64,
+    ) -> PyResult<(usize, usize)> {
+        let (row, col) = (grid_index(row_kind, row)?, grid_index(col_kind, col)?);
+        let axes = self.0.pie_axes_at_mut(row, col).map_err(core_error)?;
+        Ok((axes.cells().row(), axes.cells().col()))
+    }
+
     /// Adds the circular panel's single pie from copied data.
     fn pie(
         &mut self,

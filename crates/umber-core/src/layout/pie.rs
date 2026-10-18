@@ -2,11 +2,19 @@
 
 use std::f64::consts::{PI, TAU};
 
+#[cfg(test)]
+mod property_tests;
+#[cfg(test)]
+mod tests;
+
 use super::{Area, BODY_LINE, Label, StyleSizes, Styles, TextRole, measure, metrics};
 use crate::model::pie::Pie;
 use crate::text::SceneFonts;
 use crate::ticks::TickValues;
 use crate::{Error, LegendStyle, Point, Result, Rgba, Theme, Tick, TickFormat};
+
+mod collision;
+mod spread;
 
 const RIM_GAP: f64 = 2.0;
 const RADIAL: f64 = 8.0;
@@ -73,22 +81,35 @@ impl MeasuredSlice {
         usize::from(self.angle().sin() >= 0.0)
     }
 
+    fn label_radius(&self, circle: Circle, hole: f64) -> f64 {
+        if hole == 0.0 && self.end - self.start >= TAU - 1e-12 {
+            0.0
+        } else {
+            circle.radius
+                * if hole == 0.0 {
+                    0.65
+                } else {
+                    (1.0 + hole) / 2.0
+                }
+        }
+    }
+
     /// The padded text rectangle must lie entirely in the annular sector, including its
     /// closest point to the hole, not merely its four corners.
     fn fits(&self, circle: Circle, hole: f64, line: f64) -> bool {
         if self.inside.is_empty() {
             return true;
         }
-        let distance = circle.radius
-            * if hole == 0.0 {
-                0.65
-            } else {
-                (1.0 + hole) / 2.0
-            };
+        let distance = self.label_radius(circle, hole);
         let x = self.angle().sin() * distance;
         let y = -self.angle().cos() * distance;
         let half_w = self.inside.iter().map(Label::width).fold(0.0, f64::max) / 2.0 + FIT_GAP;
-        let half_h = line * self.inside.len() as f64 / 2.0 + FIT_GAP;
+        let ink = self
+            .inside
+            .iter()
+            .map(|label| f64::from(label.layout.ascent() + label.layout.descent()))
+            .fold(0.0, f64::max);
+        let half_h = (line * (self.inside.len() - 1) as f64 + ink) / 2.0 + FIT_GAP;
         let near = (x.abs() - half_w)
             .max(0.0)
             .hypot((y.abs() - half_h).max(0.0));
@@ -184,6 +205,7 @@ pub(crate) fn place(
         y: area.y + area.height / 2.0,
         radius: area.width.min(area.height) / 2.0,
     };
+    let minimum_radius = circle.radius / 2.0;
     let mut outside = vec![false; slices.len()];
     loop {
         let mut changed = false;
@@ -202,25 +224,36 @@ pub(crate) fn place(
                     room[slice.side()].max(RIM_GAP + RADIAL + ELBOW + LABEL_GAP + label.width());
             }
         }
-        let vertical_room = if outside.iter().any(|&value| value) {
-            2.0 * (RIM_GAP + RADIAL)
-        } else {
-            0.0
-        };
-        let radius = ((area.width - room[0] - room[1]).min(area.height - vertical_room) / 2.0)
-            .min(circle.radius);
-        if radius < 1.0 {
-            return Err(room_error(
-                slices
-                    .iter()
-                    .filter(|slice| slice.outside.is_some())
-                    .map(|s| s.name.as_str()),
-            ));
+        let mut radius = ((area.width - room[0] - room[1]) / 2.0).min(circle.radius);
+        let vertical = |r| vertical_extents(&slices, &outside, r, line, ascent + descent);
+        if radius >= minimum_radius {
+            let (top, bottom) = vertical(radius);
+            if top + bottom > area.height {
+                let mut low = 0.0;
+                let mut high = radius;
+                for _ in 0..48 {
+                    let mid = (low + high) / 2.0;
+                    let (top, bottom) = vertical(mid);
+                    if top + bottom <= area.height {
+                        low = mid;
+                    } else {
+                        high = mid;
+                    }
+                }
+                radius = low;
+            }
+        }
+        if radius < minimum_radius {
+            return Err(outside_error(&slices, &outside));
         }
         let shrunk = radius < circle.radius;
         circle.radius = radius;
         circle.x = (area.x + room[0] + radius)
             .max((area.x + area.width / 2.0).min(area.right() - room[1] - radius));
+        let (top, bottom) = vertical(radius);
+        circle.y = (area.y + area.height / 2.0)
+            .max(area.y + top)
+            .min(area.bottom() - bottom);
         if !changed && !shrunk {
             break;
         }
@@ -230,12 +263,7 @@ pub(crate) fn place(
         if outside[i] {
             continue;
         }
-        let radius = circle.radius
-            * if pie.options.hole == 0.0 {
-                0.65
-            } else {
-                (1.0 + pie.options.hole) / 2.0
-            };
+        let radius = slice.label_radius(circle, pie.options.hole);
         let center = circle.point(slice.angle(), radius);
         let top = f64::from(center.y) - line * slice.inside.len() as f64 / 2.0;
         for (row, label) in slice.inside.iter().enumerate() {
@@ -250,36 +278,21 @@ pub(crate) fn place(
         }
     }
     for side in 0..2 {
-        let mut indices: Vec<_> = slices
+        let indices = side_indices(&slices, &outside, side);
+        let ink = ascent + descent;
+        if !indices.is_empty() && (indices.len() - 1) as f64 * line + ink > area.height {
+            return Err(outside_error(&slices, &outside));
+        }
+        let desired: Vec<_> = indices
             .iter()
-            .enumerate()
-            .filter(|(i, s)| outside[*i] && s.side() == side && s.outside.is_some())
-            .map(|(i, _)| i)
+            .map(|&i| circle.y - slices[i].angle().cos() * (circle.radius + RIM_GAP + RADIAL))
             .collect();
-        indices.sort_by(|&a, &b| (-slices[a].angle().cos()).total_cmp(&(-slices[b].angle().cos())));
-        if indices.len() as f64 * line > area.height {
-            return Err(room_error(indices.iter().map(|&i| slices[i].name.as_str())));
-        }
-        let mut ys = Vec::new();
-        for &i in &indices {
-            let desired = circle.y - slices[i].angle().cos() * (circle.radius + RIM_GAP + RADIAL);
-            let lower = ys
-                .last()
-                .map_or(area.y + line / 2.0, |previous| previous + line);
-            ys.push(desired.max(lower));
-        }
-        if let Some(&last) = ys.last() {
-            let shift = (last - (area.bottom() - line / 2.0)).max(0.0);
-            for y in &mut ys {
-                *y -= shift;
-            }
-        }
-        // A backward pass keeps the upper labels in the panel without reducing their gap.
-        if ys.first().is_some_and(|y| *y < area.y + line / 2.0) {
-            for (row, y) in ys.iter_mut().enumerate() {
-                *y = area.y + line * (row as f64 + 0.5);
-            }
-        }
+        let ys = spread::centres(
+            &desired,
+            line,
+            area.y + ink / 2.0,
+            area.bottom() - ink / 2.0,
+        );
         for (i, y) in indices.into_iter().zip(ys) {
             let slice = &slices[i];
             let Some(mut text) = slice.outside.clone() else {
@@ -288,34 +301,30 @@ pub(crate) fn place(
             let sign = if side == 0 { -1.0 } else { 1.0 };
             let rim = circle.point(slice.angle(), circle.radius + RIM_GAP);
             let radial = circle.point(slice.angle(), circle.radius + RIM_GAP + RADIAL);
-            // Move beyond the circle before spreading vertically, so neither the label
-            // nor its connecting segments can fall back onto another slice.
-            let column = (circle.x + sign * (circle.radius + RIM_GAP + RADIAL)) as f32;
             let elbow = Point {
-                x: column + (sign * ELBOW) as f32,
+                x: radial.x + (sign * ELBOW) as f32,
                 y: y as f32,
             };
+            let mut leader = vec![rim, radial];
+            if (y - f64::from(radial.y)).abs() > 1e-5 {
+                leader.push(Point {
+                    x: radial.x,
+                    y: y as f32,
+                });
+            }
+            leader.push(elbow);
             text.x =
                 f64::from(elbow.x) + sign * LABEL_GAP - if side == 0 { text.width() } else { 0.0 };
             text.y = super::baseline_in_line(y - line / 2.0, line, ascent, descent);
             labels.push(SliceLabel {
                 text,
                 fill: None,
-                leader: vec![
-                    rim,
-                    radial,
-                    Point {
-                        x: column,
-                        y: radial.y,
-                    },
-                    Point {
-                        x: column,
-                        y: y as f32,
-                    },
-                    elbow,
-                ],
+                leader,
             });
         }
+    }
+    if !collision::fits(&labels, circle, area) {
+        return Err(outside_error(&slices, &outside));
     }
     Ok(PieLayout {
         circle,
@@ -330,6 +339,52 @@ pub(crate) fn place(
             .collect(),
         labels,
     })
+}
+
+fn side_indices(slices: &[MeasuredSlice], outside: &[bool], side: usize) -> Vec<usize> {
+    let mut indices: Vec<_> = slices
+        .iter()
+        .enumerate()
+        .filter(|(i, slice)| outside[*i] && slice.side() == side && slice.outside.is_some())
+        .map(|(i, _)| i)
+        .collect();
+    indices.sort_by(|&a, &b| (-slices[a].angle().cos()).total_cmp(&(-slices[b].angle().cos())));
+    indices
+}
+
+/// Actual top and bottom extents, including the minimally spread outside text.
+fn vertical_extents(
+    slices: &[MeasuredSlice],
+    outside: &[bool],
+    radius: f64,
+    line: f64,
+    ink: f64,
+) -> (f64, f64) {
+    let mut top = radius;
+    let mut bottom = radius;
+    for side in 0..2 {
+        let indices = side_indices(slices, outside, side);
+        let desired: Vec<_> = indices
+            .iter()
+            .map(|&i| -slices[i].angle().cos() * (radius + RIM_GAP + RADIAL))
+            .collect();
+        let ys = spread::centres(&desired, line, f64::NEG_INFINITY, f64::INFINITY);
+        for (&original, &y) in desired.iter().zip(&ys) {
+            top = top.max(-original).max(-y + ink / 2.0);
+            bottom = bottom.max(original).max(y + ink / 2.0);
+        }
+    }
+    (top, bottom)
+}
+
+fn outside_error(slices: &[MeasuredSlice], outside: &[bool]) -> Error {
+    room_error(
+        slices
+            .iter()
+            .zip(outside)
+            .filter(|(_, is_outside)| **is_outside)
+            .map(|(slice, _)| slice.name.as_str()),
+    )
 }
 
 fn room_error<'a>(names: impl Iterator<Item = &'a str>) -> Error {

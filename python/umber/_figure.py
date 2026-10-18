@@ -388,6 +388,35 @@ class Figure:
             self._pies[top, left] = axes
             return axes
 
+    def pie_axes_at(self, *, row: int | Auto = AUTO, col: int | Auto = AUTO) -> PieAxes:
+        """Return an existing pie panel, including one in a copied figure.
+
+        Args:
+            row: Zero-based top row; AUTO means 0 only on a one-row figure.
+            col: Zero-based left column; AUTO means 0 only on a one-column figure.
+
+        Returns:
+            The pie panel at this top-left cell. Other cells covered by a span do not match.
+
+        Raises:
+            TypeError: If an index has the wrong type.
+            UsageError: If a position is missing, out of range or not a pie panel's top-left cell.
+
+        Example:
+            >>> import copy
+            >>> import umber as ub
+            >>> fig = ub.pie(["A", "B"], [1, 2]).figure
+            >>> twin = copy.copy(fig)
+            >>> twin.pie_axes_at().title("Variant").figure is twin
+            True
+        """
+        with api_call():
+            context = "Figure.pie_axes_at()"
+            row_index = _index(context, "row", row)
+            col_index = _index(context, "col", col)
+            position = self._native.pie_axes_at(*row_index, *col_index)
+            return self._pies[position]
+
     def axes_at(
         self,
         *,

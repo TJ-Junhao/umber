@@ -277,6 +277,7 @@ class Figure:
     def add_pie_axes(
         self, row_kind: int, row: int, col_kind: int, col: int, row_span: int, col_span: int
     ) -> tuple[int, int]: ...
+    def pie_axes_at(self, row_kind: int, row: int, col_kind: int, col: int) -> tuple[int, int]: ...
     def pie(
         self,
         row: int,

@@ -288,11 +288,9 @@ pub(super) fn check_add(
     for (axis, given) in [(SharedAxis::X, x), (SharedAxis::Y, y)] {
         let mode = axis.mode(grid);
         let key = group_key(grid, mode, cells.row(), cells.col());
-        if let Some(other) = figure.panels().find(|axes| {
+        if let Some(other) = figure.cartesian_panels().find(|axes| {
             let c = axes.cells();
-            axes.pie_panel.is_none()
-                && group_key(grid, mode, c.row(), c.col()) == key
-                && axis.kind(axes) != given
+            group_key(grid, mode, c.row(), c.col()) == key && axis.kind(axes) != given
         }) {
             return Err(Error::usage(
                 "Figure.add_axes()",
@@ -355,7 +353,8 @@ impl ShareGroups {
         figure
             .panels()
             .enumerate()
-            .map(|(i, axes)| {
+            .map(|(i, panel)| {
+                let axes = panel.cartesian()?;
                 if !axes.marks().iter().any(|mark| mark.color_scale().is_some()) {
                     return None;
                 }
@@ -374,9 +373,9 @@ impl ShareGroups {
                 .panels()
                 .enumerate()
                 .map(|(i, axes)| {
-                    if axes.pie_panel.is_some() {
+                    let Some(axes) = axes.cartesian() else {
                         return i;
-                    }
+                    };
                     let c = axes.cells();
                     let key = match axis {
                         SharedAxis::X => figure.x_group_of(c.row(), c.col()),
@@ -456,14 +455,14 @@ impl ShareGroups {
 /// exactly the same rows. Matching columns/rows also put the panels in the same shared group.
 pub(crate) fn label_visibility(figure: &Figure, cells: CellRange) -> [bool; 2] {
     let show_x = !matches!(figure.grid().share_x(), Share::Col | Share::All)
-        || !figure.panels().filter(|a| a.pie_panel.is_none()).any(|a| {
+        || !figure.cartesian_panels().any(|a| {
             let c = a.cells();
             c.col() == cells.col()
                 && c.col_span() == cells.col_span()
                 && c.row() >= cells.row() + cells.row_span()
         });
     let show_y = !matches!(figure.grid().share_y(), Share::Row | Share::All)
-        || !figure.panels().filter(|a| a.pie_panel.is_none()).any(|a| {
+        || !figure.cartesian_panels().any(|a| {
             let c = a.cells();
             c.row() == cells.row()
                 && c.row_span() == cells.row_span()

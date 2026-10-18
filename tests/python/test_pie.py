@@ -19,6 +19,46 @@ def texts(fig: ub.Figure) -> list[ET.Element]:
     )
 
 
+def test_pie_lookup_on_copy_and_spanned_cells() -> None:
+    fig = ub.Figure(rows=2, cols=2)
+    ax = fig.add_pie_axes(row=0, col=0, row_span=2).pie(["A"], [1])
+    assert fig.pie_axes_at(row=0, col=0) is ax
+    with pytest.raises(ub.UsageError):
+        fig.pie_axes_at(row=1, col=0)
+    twin = copy.copy(fig)
+    twin.pie_axes_at(row=0, col=0).title("Copy")
+    assert "Copy" not in {t.text for t in texts(fig)}
+    assert "Copy" in {t.text for t in texts(twin)}
+    with pytest.raises(ub.UsageError) as caught:
+        fig.axes_at(row=0, col=0)
+    assert "pie_axes_at" in str(details(caught.value))
+    with pytest.raises(ub.UsageError):
+        fig.pie_axes_at(row=0, col=1)
+    fig.add_axes(row=0, col=1)
+    with pytest.raises(ub.UsageError):
+        fig.pie_axes_at(row=0, col=1)
+
+
+def test_pie_names_and_second_call_errors() -> None:
+    ax = ub.Figure().add_pie_axes()
+    with pytest.raises(ub.DataError, match=r"categories\[1\]") as caught:
+        ax.pie(["A", ""], [1, 2])
+    assert details(caught.value) == ("categories", "give every slice a non-empty name.")
+    ax.pie(["A"], [1])
+    with pytest.raises(ub.UsageError) as caught_usage:
+        ax.pie(["B"], [1])
+    info = details(caught_usage.value)
+    assert info is not None and info[0] is None
+
+
+def test_quick_pie_accepts_colors_and_is_final() -> None:
+    ax = ub.pie([str(i) for i in range(9)], [1] * 9, colors=[ub.Color.RED] * 9)
+    ax.legend(ub.LegendStyle.NONE)
+    assert ax.figure.to_svg()
+    assert getattr(ub.PieAxes, "__final__", False)
+    assert "0.5" in (ub.PieAxes.pie.__doc__ or "")
+
+
 def test_pie_labels_and_annotations() -> None:
     ax = ub.pie(["North", "South"], [3, 1], annotate=True)
     assert isinstance(ax, ub.PieAxes)
@@ -43,7 +83,16 @@ def test_outside_labels_do_not_overlap(theme: ub.Theme) -> None:
         rng.shuffle(values)
         small = {name for name, value in zip(names, values, strict=True) if value < 3}
         fig = ub.pie(names, values, theme=theme).figure
-        labels = [t for t in texts(fig) if t.text in small]
+        try:
+            labels = [t for t in texts(fig) if t.text in small]
+        except ub.StyleError as error:
+            info = details(error)
+            assert info is not None
+            parameter, hint = info
+            assert parameter == "categories"
+            assert "Slice" in str(error)
+            assert hint is not None and "Other" in hint and "legend" in hint
+            continue
         for side in (False, True):
             ys = sorted(
                 float(t.attrib["y"]) for t in labels if (float(t.attrib["x"]) > 216) == side

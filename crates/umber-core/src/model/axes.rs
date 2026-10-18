@@ -63,8 +63,6 @@ pub struct Axes {
     pub(super) xlabel_size: SizeSpec,
     pub(super) ylabel_size: SizeSpec,
     pub(super) legend_size: SizeSpec,
-    /// Circular panel content; absent for Cartesian axes.
-    pub(crate) pie_panel: Option<super::pie::PiePanel>,
 }
 
 impl Axes {
@@ -98,7 +96,6 @@ impl Axes {
             xlabel_size: SizeSpec::Auto,
             ylabel_size: SizeSpec::Auto,
             legend_size: SizeSpec::Auto,
-            pie_panel: None,
         }
     }
 

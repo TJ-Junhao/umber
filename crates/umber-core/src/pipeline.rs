@@ -25,7 +25,7 @@ use crate::{Error, FontLibrary, Result, Theme, draw};
 /// theme, and its legend, measured. They are made once, before layout.
 struct Panel<'a> {
     /// The axes.
-    axes: &'a Axes,
+    axes: crate::Panel<'a>,
     /// The axes' marks, resolved.
     marks: Vec<ResolvedMark<'a>>,
     /// The axes' legend, measured.
@@ -50,28 +50,33 @@ fn panels<'a>(
         .panels()
         .zip(resolve::resolve_figure_marks(figure))
         .map(|(axes, marks)| {
-            let legend = if let Some(panel) = &axes.pie_panel {
-                let style = axes.legend_style().unwrap_or(crate::LegendStyle::Direct);
-                let mut measured = MeasuredLegend::measure(
-                    theme,
-                    &Legend::pie(style, panel.pie.as_ref()),
-                    lib,
-                    axes.legend_size(),
-                )?;
-                if style != crate::LegendStyle::Direct {
-                    measured.position = axes.legend_position().unwrap_or(theme.legend_position());
+            let legend = match axes {
+                crate::Panel::Pie(panel) => {
+                    let mut measured = MeasuredLegend::measure(
+                        theme,
+                        &Legend::pie(panel.legend, panel.pie.as_ref()),
+                        lib,
+                        panel.legend_size,
+                    )?;
+                    if panel.legend != crate::LegendStyle::Direct {
+                        measured.position =
+                            panel.legend_position.unwrap_or(theme.legend_position());
+                    }
+                    measured
                 }
-                measured
-            } else if figure.has_merged_legend() {
-                let style = axes.legend_style().unwrap_or(theme.legend_style());
-                MeasuredLegend::measure(
-                    theme,
-                    &Legend::panel(style, &marks, &Limits::of(axes), true),
-                    lib,
-                    figure.legend_size(),
-                )?
-            } else {
-                measure_legend(theme, axes, &marks, lib)?
+                crate::Panel::Cartesian(axes) => {
+                    if figure.has_merged_legend() {
+                        let style = axes.legend_style().unwrap_or(theme.legend_style());
+                        MeasuredLegend::measure(
+                            theme,
+                            &Legend::panel(style, &marks, &Limits::of(axes), true),
+                            lib,
+                            figure.legend_size(),
+                        )?
+                    } else {
+                        measure_legend(theme, axes, &marks, lib)?
+                    }
+                }
             };
             Ok(Panel {
                 axes,
@@ -96,7 +101,11 @@ fn resolve_colors(panels: &mut [Panel<'_>], groups: &ShareGroups, theme: &Theme)
             .enumerate()
             .filter(|(j, _)| groups.color[*j] == Some(i))
             .flat_map(|(_, panel)| panel.marks.iter());
-        let color = ResolvedColorScale::resolve(marks, panels[i].axes.color_limits(), theme);
+        let color = ResolvedColorScale::resolve(
+            marks,
+            panels[i].axes.cartesian().and_then(Axes::color_limits),
+            theme,
+        );
         for (j, panel) in panels.iter_mut().enumerate() {
             if groups.color[j] == Some(i) {
                 panel.color = color.clone();
@@ -323,23 +332,21 @@ fn color_side(side: layout::ColorbarSide) -> Side {
 fn color_tick_format<'a>(
     figure: &'a Figure,
     panel: &'a Panel<'_>,
-) -> (&'a crate::TickFormat, AutomaticTickTarget) {
+) -> Option<(&'a crate::TickFormat, AutomaticTickTarget)> {
     let shared = figure.grid().share_color() != crate::Share::None;
+    let axes = panel.axes.cartesian()?;
     let options = if shared {
         figure.colorbar_options()
     } else {
-        panel.axes.colorbar_options()
+        axes.colorbar_options()
     };
-    (
-        options
-            .format
-            .as_ref()
-            .unwrap_or(panel.axes.y_tick_format()),
+    Some((
+        options.format.as_ref().unwrap_or(axes.y_tick_format()),
         AutomaticTickTarget::Colorbar {
             shared,
             inherited: options.format.is_none(),
         },
-    )
+    ))
 }
 
 /// Relabels and spaces a visible colorbar without changing its norm or colormap.
@@ -349,8 +356,9 @@ fn choose_color_ticks(
     resolved: &mut Resolved,
     room: &layout::TickRoom<'_>,
 ) {
-    if let Some(color) = &resolved.color {
-        let (format, _) = color_tick_format(figure, panel);
+    if let Some(color) = &resolved.color
+        && let Some((format, _)) = color_tick_format(figure, panel)
+    {
         resolved.color = Some(color.with_ticks(room, format));
     }
 }
@@ -463,8 +471,22 @@ fn plan(
         .iter()
         .map(|panel| {
             Ok([
-                layout::TickFont::sized(lib, theme, panel.axes.xtick_size())?,
-                layout::TickFont::sized(lib, theme, panel.axes.ytick_size())?,
+                layout::TickFont::sized(
+                    lib,
+                    theme,
+                    panel
+                        .axes
+                        .cartesian()
+                        .map_or(crate::SizeSpec::Auto, Axes::xtick_size),
+                )?,
+                layout::TickFont::sized(
+                    lib,
+                    theme,
+                    panel
+                        .axes
+                        .cartesian()
+                        .map_or(crate::SizeSpec::Auto, Axes::ytick_size),
+                )?,
             ])
         })
         .collect::<Result<_>>()?;
@@ -500,7 +522,11 @@ fn plan(
                     .and_then(|_| layout::ColorbarSide::shared(figure))
                     .map(color_side)
             } else {
-                layout::ColorbarSide::resolve(panel.axes, theme).map(color_side)
+                panel
+                    .axes
+                    .cartesian()
+                    .and_then(|axes| layout::ColorbarSide::resolve(axes, theme))
+                    .map(color_side)
             }
         })
         .collect();
@@ -1090,8 +1116,8 @@ fn plan(
         if color_sides[i].is_some()
             && let Some(color) = &r.color
             && !matches!(color.norm, crate::color_scale::Norm::Log { .. })
+            && let Some((format, target)) = color_tick_format(figure, &panels[i])
         {
-            let (format, target) = color_tick_format(figure, &panels[i]);
             format
                 .check_automatic_ticks(&color.ticks, color.norm.range(), target, context)
                 .map_err(|error| in_cell(figure, panels[i].axes, error))?;
@@ -1215,7 +1241,10 @@ fn plan_cells(
             seen_states.push(state);
         }
         for (i, panel) in panels.iter_mut().enumerate() {
-            let limits = [panel.axes.x_limits(), panel.axes.y_limits()];
+            let Some(axes) = panel.axes.cartesian() else {
+                continue;
+            };
+            let limits = [axes.x_limits(), axes.y_limits()];
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
                 || groups.y.iter().filter(|&&g| g == groups.y[i]).count() > 1;
             // Hexbins without paired finite points count no cells, and leave the others alone.
@@ -1553,22 +1582,22 @@ fn scene_with_labels(
     }
     let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
-        if let Some(pie_panel) = &panel.axes.pie_panel {
-            scene.push(draw::chrome(theme, layout));
-            if let Some(pie) = &pie_panel.pie {
-                let style = panel
-                    .axes
-                    .legend_style()
-                    .unwrap_or(crate::LegendStyle::Direct);
-                let placed = layout::pie::place(pie, style, layout.plot, theme, fonts)
-                    .map_err(|err| in_cell(figure, panel.axes, err))?;
-                scene.push(draw::pie::draw(theme, &placed));
+        let axes = match panel.axes {
+            crate::Panel::Cartesian(axes) => axes,
+            crate::Panel::Pie(pie_panel) => {
+                scene.push(draw::chrome(theme, layout));
+                if let Some(pie) = &pie_panel.pie {
+                    let placed =
+                        layout::pie::place(pie, pie_panel.legend, layout.plot, theme, fonts)
+                            .map_err(|err| in_cell(figure, panel.axes, err))?;
+                    scene.push(draw::pie::draw(theme, &placed));
+                }
+                if let Some(legend) = draw::legend::legend(theme, layout) {
+                    scene.push(legend);
+                }
+                continue;
             }
-            if let Some(legend) = draw::legend::legend(theme, layout) {
-                scene.push(legend);
-            }
-            continue;
-        }
+        };
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
         draw::check_points(resolved, layout, &panel.marks, context)
@@ -1583,7 +1612,7 @@ fn scene_with_labels(
             resolved,
             layout,
             &panel.marks,
-            (panel.axes.y_tick_format(), context),
+            (axes.y_tick_format(), context),
         )
         .map_err(|err| in_cell(figure, panel.axes, err))?;
         if let Some(notes) = notes {
@@ -1592,7 +1621,7 @@ fn scene_with_labels(
         if let Some(legend) = draw::legend::legend(theme, layout) {
             scene.push(legend);
         }
-        if resolved.draws_baseline(panel.axes.marks(), panel.axes.baseline_visibility()) {
+        if resolved.draws_baseline(axes.marks(), axes.baseline_visibility()) {
             scene.push(draw::baseline(theme, layout));
         }
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
@@ -1612,12 +1641,12 @@ fn scene_with_labels(
 
 /// `err`, an error of the axes `axes` of `figure`, naming the axes' top-left cell first on a
 /// grid of more than one cell, as layout errors do.
-fn in_cell(figure: &Figure, axes: &Axes, err: Error) -> Error {
+fn in_cell<'a>(figure: &Figure, panel: impl Into<crate::Panel<'a>>, err: Error) -> Error {
     let grid = figure.grid();
     if grid.rows() * grid.cols() == 1 {
         return err;
     }
-    let cells = axes.cells();
+    let cells = panel.into().cells();
     err.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
 }
 
