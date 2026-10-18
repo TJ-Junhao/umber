@@ -8,11 +8,13 @@
 //! character's script, then a generic list, then every other face sorted by name. Within a
 //! family the face closest to the requested weight wins, upright before italic.
 //!
-//! Font files are never copied whole: fontdb memory-maps a font file each time it is read, and
-//! layouts keep the database alive through an `Arc`. The shaper needs data it can own, so the
-//! tables it reads (character map, metrics and layout tables, never outlines or bitmaps) are
-//! copied for each chosen face, and kept for later layouts within a fixed budget. A kept face
-//! is shaped from the tables of the file as it was when they were copied.
+//! Discovery, coverage reading and candidate confirmation read font files through fontdb, which
+//! memory-maps a file each time it is read. The file of a face chosen to draw a character is
+//! read into memory once, the first time one of its faces is chosen, and shared from then on
+//! by every face of the file and every layout, outline and scene that uses them, so a finished
+//! scene does not depend on the file. The shaper copies the tables it reads (character map,
+//! metrics and layout tables, never outlines or bitmaps) from those bytes for each chosen face,
+//! and keeps them for later layouts within a fixed budget.
 //!
 //! Work and memory are bounded:
 //! - the index holds at most [`Limits::max_faces`] faces and [`Limits::max_total_ranges`]
@@ -27,7 +29,8 @@
 //! - the lookup cache holds at most [`CACHE_LIMIT`](lookup::CACHE_LIMIT) entries;
 //! - shaping tables are kept for at most [`SHAPING_CACHE_FACES`](shaping::SHAPING_CACHE_FACES)
 //!   faces and [`SHAPING_CACHE_BYTES`] bytes in total, counting tables copied after a face was
-//!   kept.
+//!   kept;
+//! - the loaded font files take at most [`Limits::max_loaded_bytes`] in total.
 //!
 //! These caps apply after fontdb's own discovery: `load_system_fonts` enumerates every font in
 //! the system font directories and keeps its metadata, bounded only by those directories.
@@ -84,6 +87,9 @@ pub(super) struct Limits {
     max_build_visits: usize,
     /// The most shaping table bytes kept between layout calls; see [`SHAPING_CACHE_BYTES`].
     shaping_cache_bytes: usize,
+    /// The most bytes of font files the index loads into memory in total; see
+    /// [`Limits::max_loaded_bytes`].
+    max_loaded_bytes: usize,
 }
 
 impl Limits {
@@ -95,7 +101,15 @@ impl Limits {
         max_face_visits: 262_144,
         max_build_visits: 8_388_608,
         shaping_cache_bytes: SHAPING_CACHE_BYTES,
+        max_loaded_bytes: 1024 * 1024 * 1024,
     };
+
+    /// The most bytes of font files the index loads into memory in total: the files of the
+    /// faces chosen to draw characters, each loaded once. A face whose file does not fit is
+    /// not used.
+    pub(super) const fn max_loaded_bytes(&self) -> usize {
+        self.max_loaded_bytes
+    }
 }
 
 /// Smaller limits for unit tests.
@@ -133,6 +147,13 @@ impl Limits {
     pub(super) const fn with_shaping_cache_bytes(self, shaping_cache_bytes: usize) -> Limits {
         Limits {
             shaping_cache_bytes,
+            ..self
+        }
+    }
+
+    pub(super) const fn with_max_loaded_bytes(self, max_loaded_bytes: usize) -> Limits {
+        Limits {
+            max_loaded_bytes,
             ..self
         }
     }

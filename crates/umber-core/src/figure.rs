@@ -169,9 +169,7 @@ impl Figure {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn to_scene(&self, library: &FontLibrary) -> Result<Scene> {
-        let mut scene = self.scene(library, "Figure.to_scene()")?;
-        scene.capture_fonts();
-        Ok(scene)
+        self.scene(library, "Figure.to_scene()")
     }
 
     /// Renders the figure as a PNG at `dpi`, with the global [`FontLibrary`].
@@ -251,8 +249,7 @@ impl Figure {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn to_pdf(&self) -> Result<Vec<u8>> {
-        let mut scene = self.scene(FontLibrary::global(), "Figure.to_pdf()")?;
-        scene.capture_fonts();
+        let scene = self.scene(FontLibrary::global(), "Figure.to_pdf()")?;
         render_pdf(&scene)
     }
 }

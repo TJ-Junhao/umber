@@ -272,7 +272,10 @@ fn pdf_embeds_only_used_glyphs() {
     assert!(font.cmap().is_err(), "the subset keeps no cmap of its own");
     let text = String::from_utf8_lossy(&pdf);
     assert!(text.contains("/CIDFontType2"), "TrueType outlines");
-    assert!(text.contains("/CIDToGIDMap /Identity"));
+    // Each glyph and the text it stands for has a character code, mapped to its glyph.
+    let map = references(&pdf, "/CIDToGIDMap");
+    assert_eq!(map.len(), 1);
+    assert_eq!(stream_data(&pdf, map[0]), [0, 0, 0, 1, 0, 2, 0, 3]);
     assert!(text.contains("/Encoding /Identity-H"));
     // The base font is the PostScript name with a six-letter subset tag.
     let base = after(&text, "/BaseFont /");
@@ -489,18 +492,40 @@ fn mupdf_line(path: &FsPath) -> String {
 #[test]
 fn pdf_text_extracts_each_occurrence() {
     let without_system = FontLibrary::with_fallbacks(Vec::new());
+    let cff = FontLibrary::with_fallbacks(vec![fixture("outline-cff.otf")]);
     let dir = scratch("occurrences");
-    for (name, library, font, text, actual_text) in [
+    // In TrueType fonts every glyph standing for each text has a code of its own, so the
+    // `ToUnicode` map alone reads every occurrence, in pdf.js too, and nothing is marked. A CFF
+    // font has one code per glyph, so an occurrence its map misreads is marked with
+    // `/ActualText`, which pdf.js does not read.
+    for (name, library, font, text, marked, pdfjs) in [
+        // A combining cluster on its own.
+        (
+            "standalone",
+            FontLibrary::global(),
+            Font::SOURCE_SERIF_4,
+            "x\u{301}",
+            false,
+            true,
+        ),
         // A base glyph alone and inside different combining clusters.
         (
             "combining",
             FontLibrary::global(),
             Font::SOURCE_SERIF_4,
             "x x\u{301} x\u{302} x\u{301}\u{302}",
+            false,
             true,
         ),
         // .notdef standing for different characters.
-        ("notdef", &without_system, Font::INTER, "Missing 日本", true),
+        (
+            "notdef",
+            &without_system,
+            Font::INTER,
+            "Missing 日本",
+            false,
+            true,
+        ),
         // Ligatures, which stand for the same characters wherever they occur.
         (
             "ligatures",
@@ -508,15 +533,21 @@ fn pdf_text_extracts_each_occurrence() {
             Font::INTER,
             "office ffi fl ffi",
             false,
+            true,
+        ),
+        // The CFF font's .notdef standing for different marks.
+        (
+            "cff-marks",
+            &cff,
+            Font::INTER,
+            "\u{E001}\u{301} \u{E002}\u{302}",
+            true,
+            false,
         ),
     ] {
         let pdf = render_pdf(&text_scene(library, &[font], text)).unwrap();
         let content = page_content(&pdf);
-        assert_eq!(
-            content.contains("/ActualText"),
-            actual_text,
-            "{name}: {content}"
-        );
+        assert_eq!(content.contains("/ActualText"), marked, "{name}: {content}");
         let path = write(&dir, &format!("{name}.pdf"), &pdf);
         assert_readers_parse(&path);
         if have("qpdf") {
@@ -527,6 +558,9 @@ fn pdf_text_extracts_each_occurrence() {
         }
         if have("mutool") {
             assert_eq!(mupdf_line(&path), text, "{name} (MuPDF)");
+        }
+        if pdfjs && let Some(extracted) = pdfjs_text(&path) {
+            assert_eq!(extracted, text, "{name} (pdf.js)");
         }
     }
 }

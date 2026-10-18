@@ -6,7 +6,7 @@
 //! order.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use read_fonts::tables::cmap::{Cmap, Cmap2, CmapSubtable};
 use read_fonts::types::Tag;
@@ -16,7 +16,7 @@ use super::{Limits, Source};
 use crate::fonts::Weight;
 use crate::text::cmap::{Format2Byte, format2_byte, format2_range, is_unicode};
 use crate::text::font::FontHandle;
-use crate::text::guard::guarded;
+use crate::text::guard::{guarded, lock};
 
 /// Ranked families for Han ideographs.
 const HAN: &[&str] = &[
@@ -421,6 +421,11 @@ pub(in crate::text) fn coverage(
 /// The indexed system fonts.
 pub(in crate::text) struct FaceIndex {
     db: Arc<fontdb::Database>,
+    /// The font files of the faces chosen so far, loaded once and shared; see
+    /// [`FaceIndex::handle`].
+    loaded: Mutex<LoadedFiles>,
+    /// The most bytes of font files loaded in total.
+    max_loaded_bytes: usize,
     faces: Vec<IndexedFace>,
     /// Normalized family name to faces, for the ranked lists.
     by_family: HashMap<String, Vec<usize>>,
@@ -430,6 +435,13 @@ pub(in crate::text) struct FaceIndex {
     /// `cmap` segments and groups visited while building the index.
     #[cfg_attr(not(test), allow(dead_code))]
     visited: usize,
+}
+
+/// Font files loaded into memory, by path, and their total size.
+#[derive(Default)]
+struct LoadedFiles {
+    files: HashMap<String, Arc<Vec<u8>>>,
+    bytes: usize,
 }
 
 fn source_path(source: &fontdb::Source) -> String {
@@ -545,6 +557,8 @@ impl FaceIndex {
         let ordered = Weight::ALL.map(order);
         FaceIndex {
             db: Arc::new(db),
+            loaded: Mutex::new(LoadedFiles::default()),
+            max_loaded_bytes: limits.max_loaded_bytes(),
             faces,
             by_family,
             ordered,
@@ -568,14 +582,33 @@ impl FaceIndex {
         self.db.with_face_data(info.id, f)
     }
 
-    /// A shared handle to face `face`, which keeps the font database alive.
+    /// A shared handle to face `face`. Its font file is read into memory the first time one
+    /// of its faces is chosen, and kept: every face of the file, and every layout and scene
+    /// that uses them, shares those bytes, so later changes to the file reach none of them.
+    /// `None` when the file cannot be read, or would take the loaded files past
+    /// [`Limits::max_loaded_bytes`](super::Limits::max_loaded_bytes).
     pub(super) fn handle(&self, face: usize) -> Option<FontHandle> {
         let info = self.faces.get(face)?;
-        Some(FontHandle::system(
-            Arc::clone(&self.db),
-            info.id,
-            info.face_index,
-        ))
+        // A collection's faces share their file; an in-memory test font has no path.
+        let key = if info.path.is_empty() {
+            format!("#{:?}", info.id)
+        } else {
+            info.path.clone()
+        };
+        let mut loaded = lock(&self.loaded);
+        if let Some(bytes) = loaded.files.get(&key) {
+            return Some(FontHandle::shared(Arc::clone(bytes), info.face_index));
+        }
+        let room = self.max_loaded_bytes.saturating_sub(loaded.bytes);
+        let bytes = self
+            .db
+            .with_face_data(info.id, |data, _| {
+                (data.len() <= room).then(|| Arc::new(data.to_vec()))
+            })
+            .flatten()?;
+        loaded.bytes += bytes.len();
+        loaded.files.insert(key, Arc::clone(&bytes));
+        Some(FontHandle::shared(bytes, info.face_index))
     }
 
     /// The first candidate for `c` in preference order for which `accept` returns

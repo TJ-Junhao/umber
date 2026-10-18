@@ -3,21 +3,28 @@
 //!
 //! A page's fonts are collected from its text items first ([`FontSet`]), so that each font is
 //! subset once, with exactly the glyphs drawn, before the content refers to it ([`Fonts`]). A
-//! font is one font program (the same bytes and face), wherever its runs came from. Character
-//! ids are the glyphs' ids in the subset (`Identity-H`, and `/CIDToGIDMap /Identity` for
-//! TrueType outlines), in the order the glyphs are first used, `.notdef` first.
+//! font is one font program (the same bytes and face), wherever its runs came from. Glyph ids
+//! in the subset follow the order the glyphs are first used, `.notdef` first, and text is
+//! encoded `Identity-H`, two bytes per character code ([`Codes`]).
 //!
-//! The `ToUnicode` map gives each glyph the text it first stood for. A glyph can stand for
-//! different text elsewhere: a base letter alone and under a combining mark, or `.notdef` for
-//! different missing characters. A cluster of glyphs for which the map would give other text
-//! than the cluster stands for there is marked with its text as `/ActualText`, so text is
-//! extracted as written. Glyphs of a run whose font could not be embedded are drawn as
-//! outlines and are not extracted.
+//! A glyph can stand for different text in different places: `.notdef` for different missing
+//! characters, or a base letter alone and with a mark. In a TrueType font each glyph standing
+//! for each text has a character code of its own, mapped to its glyph by a `/CIDToGIDMap`
+//! stream, so the `ToUnicode` map alone reads every occurrence as written, in every reader. A
+//! glyph the shaper moved off the pen, such as a mark over its letter, gets a code whose
+//! advance brings the pen back to where the shaper left it, and the next glyph that is not a
+//! space starts a line of its own, so readers that place characters by their glyphs (MuPDF,
+//! pdf.js) see no gap and no overlap around it. A CFF font ties codes to glyphs one to one
+//! (codes are glyph ids in the subset), so its map gives each glyph the text it first stood
+//! for; a cluster the map would misread or leave a code of unmapped, and any cluster of
+//! several glyphs, is marked with its text as `/ActualText`. pdf.js does not read
+//! `/ActualText`, so it extracts such a CFF cluster as the map reads it. Glyphs of a run whose
+//! font could not be embedded are drawn as outlines and are not extracted.
 //!
 //! Text smaller than [`MIN_TEXT_SIZE`] is not written: the document's precision cannot place
 //! it, and no rasterizer draws it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use pdf_writer::types::{CidFontType, FontFlags, SystemInfo, UnicodeCmap};
 use pdf_writer::{Chunk, Content, Filter, Finish, Name, Rect as PdfRect, Ref, Str, TextStr};
@@ -49,12 +56,48 @@ pub(super) struct FontSet<'s> {
     index: HashMap<ProgramId, usize>,
 }
 
-/// One font of a [`FontSet`]: the glyphs used, in first-use order after `.notdef`, and the text
-/// each glyph first stood for.
+/// One font of a [`FontSet`]: the glyphs used, in first-use order after `.notdef`, and each
+/// glyph with each text it stands for somewhere, in first-use order.
 struct FontUse<'s> {
     font: RunFont<'s>,
     glyphs: GlyphRemapper,
-    texts: HashMap<u16, String>,
+    occurrences: Vec<Occurrence>,
+    seen: HashSet<Occurrence>,
+}
+
+/// A glyph standing for a text, at most [`MAX_GLYPH_CHARS`] characters of it, with the advance
+/// it is shown with.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Occurrence {
+    glyph: u16,
+    text: String,
+    advance: Advance,
+}
+
+/// The advance a character code of a TrueType font is shown with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Advance {
+    /// The glyph's own advance in the font.
+    Font,
+    /// An advance in glyph space (thousandths of the font size) that brings the pen back to
+    /// where the shaper left it, for a glyph the shaper moved off the pen, such as a mark over
+    /// its letter. Readers that place characters by their glyphs would otherwise see a gap
+    /// after the mark and extract a space.
+    Units(i32),
+}
+
+/// The occurrence of `glyph`, standing for `text`, in text of `size` points.
+fn occurrence(glyph: &PlacedGlyph, text: &str, size: f32) -> Occurrence {
+    let advance = if glyph.offset == 0.0 {
+        Advance::Font
+    } else {
+        Advance::Units(((glyph.advance - glyph.offset) * 1000.0 / size).round() as i32)
+    };
+    Occurrence {
+        glyph: glyph.id,
+        text: text.chars().take(MAX_GLYPH_CHARS).collect(),
+        advance,
+    }
 }
 
 /// Whether a text item is written as text: it is visible, has glyphs, and is at least
@@ -81,12 +124,13 @@ impl<'s> FontSet<'s> {
                 self.fonts.push(FontUse {
                     font,
                     glyphs: GlyphRemapper::new(),
-                    texts: HashMap::new(),
+                    occurrences: Vec::new(),
+                    seen: HashSet::new(),
                 });
                 self.fonts.len() - 1
             });
             if let Some(used) = self.fonts.get_mut(slot) {
-                used.add(run);
+                used.add(run, item.glyphs.size());
             }
         }
     }
@@ -102,17 +146,16 @@ impl<'s> FontSet<'s> {
 }
 
 impl FontUse<'_> {
-    fn add(&mut self, run: &GlyphRun) {
+    fn add(&mut self, run: &GlyphRun, size: f32) {
         for (glyph, text) in run.glyphs().iter().zip(run.glyph_texts()) {
             // A font has at most 65,535 glyphs, so a full remapper means a malformed run.
             if self.glyphs.num_gids() == u16::MAX {
                 return;
             }
             self.glyphs.remap(glyph.id);
-            if !text.is_empty() {
-                self.texts
-                    .entry(glyph.id)
-                    .or_insert_with(|| text.chars().take(MAX_GLYPH_CHARS).collect());
+            let occurrence = occurrence(glyph, text, size);
+            if self.seen.insert(occurrence.clone()) {
+                self.occurrences.push(occurrence);
             }
         }
     }
@@ -122,9 +165,10 @@ impl FontUse<'_> {
         let FontUse {
             font,
             glyphs,
-            texts,
+            occurrences,
+            ..
         } = self;
-        font.with_data(|data, index| Embedded::new(data, index, glyphs, &texts))
+        font.with_data(|data, index| Embedded::new(data, index, glyphs, &occurrences))
     }
 }
 
@@ -160,28 +204,114 @@ pub(super) struct Embedded {
     program: Vec<u8>,
     /// The PostScript name with the subset tag, as `BaseFont` and `FontName` write it.
     base_font: String,
-    /// Each glyph's character id in the subset.
-    cids: GlyphRemapper,
-    /// The advance of each character id, in glyph space.
+    /// Each glyph's id in the subset.
+    glyphs: GlyphRemapper,
+    /// The character codes of the glyphs.
+    codes: Codes,
+    /// The advance of each character code, in glyph space.
     widths: Vec<f32>,
-    /// The text the `ToUnicode` map gives each character id, empty for none.
-    texts: Vec<String>,
     descriptor: Descriptor,
 }
 
+/// How the glyphs of an embedded font are given character codes (CIDs).
+#[derive(Debug)]
+enum Codes {
+    /// One code for each glyph and each text it stands for, mapped to its glyph by a
+    /// `/CIDToGIDMap`, so the `ToUnicode` map reads every occurrence as written. Code 0 is
+    /// `.notdef` standing for nothing. Used for TrueType outlines.
+    Occurrences {
+        codes: HashMap<Occurrence, u16>,
+        /// The advance of each code.
+        advances: Vec<Advance>,
+        /// The subset glyph id of each code.
+        glyphs: Vec<u16>,
+        /// The text of each code, empty for none.
+        texts: Vec<String>,
+    },
+    /// One code for each glyph, its id in the subset, mapped to the text it first stood for.
+    /// Used for CFF outlines, whose subset ties codes to glyphs one to one, and where there
+    /// would be more occurrences than codes.
+    Glyphs {
+        /// The text of each code, empty for none.
+        texts: Vec<String>,
+    },
+}
+
+impl Codes {
+    /// Codes for `occurrences` of the glyphs of `glyphs`, one per occurrence when `outlines`
+    /// allow it.
+    fn new(outlines: Outlines, glyphs: &GlyphRemapper, occurrences: &[Occurrence]) -> Codes {
+        let subset = |glyph: u16| glyphs.get(glyph).unwrap_or(0);
+        if outlines == Outlines::TrueType && occurrences.len() < usize::from(u16::MAX) {
+            let notdef = Occurrence {
+                glyph: 0,
+                text: String::new(),
+                advance: Advance::Font,
+            };
+            let mut codes = HashMap::from([(notdef, 0)]);
+            let (mut subset_glyphs, mut texts, mut advances) =
+                (vec![0], vec![String::new()], vec![Advance::Font]);
+            for occurrence in occurrences {
+                if codes.contains_key(occurrence) {
+                    continue;
+                }
+                codes.insert(
+                    occurrence.clone(),
+                    u16::try_from(subset_glyphs.len()).unwrap_or(0),
+                );
+                subset_glyphs.push(subset(occurrence.glyph));
+                texts.push(occurrence.text.clone());
+                advances.push(occurrence.advance);
+            }
+            Codes::Occurrences {
+                codes,
+                advances,
+                glyphs: subset_glyphs,
+                texts,
+            }
+        } else {
+            let mut texts = vec![String::new(); usize::from(glyphs.num_gids())];
+            for occurrence in occurrences {
+                if let Some(slot) = texts.get_mut(usize::from(subset(occurrence.glyph)))
+                    && slot.is_empty()
+                {
+                    slot.clone_from(&occurrence.text);
+                }
+            }
+            Codes::Glyphs { texts }
+        }
+    }
+
+    /// The text of code `code`, empty for none.
+    fn text(&self, code: u16) -> &str {
+        let texts = match self {
+            Codes::Occurrences { texts, .. } | Codes::Glyphs { texts } => texts,
+        };
+        texts.get(usize::from(code)).map_or("", String::as_str)
+    }
+
+    /// The number of codes.
+    fn len(&self) -> usize {
+        match self {
+            Codes::Occurrences { texts, .. } | Codes::Glyphs { texts } => texts.len(),
+        }
+    }
+}
+
 impl Embedded {
-    /// The subset of face `index` of `data` holding `glyphs`, which stood for `texts`.
+    /// The subset of face `index` of `data` holding `glyphs`, which stood for the texts of
+    /// `occurrences`.
     fn new(
         data: &[u8],
         index: u32,
         glyphs: GlyphRemapper,
-        texts: &HashMap<u16, String>,
+        occurrences: &[Occurrence],
     ) -> Option<Embedded> {
         let font = FontRef::from_index(data, index).ok()?;
         let metrics = font.metrics(Size::unscaled(), LocationRef::default());
         let per_unit = 1000.0 / f32::from(metrics.units_per_em.max(1));
         let advances = font.glyph_metrics(Size::unscaled(), LocationRef::default());
-        let widths = glyphs
+        let glyph_widths: Vec<f32> = glyphs
             .remapped_gids()
             .map(|gid| {
                 rounded(
@@ -191,10 +321,6 @@ impl Embedded {
                         * per_unit,
                 )
             })
-            .collect();
-        let cid_texts = glyphs
-            .remapped_gids()
-            .map(|gid| texts.get(&gid).cloned().unwrap_or_default())
             .collect();
 
         // At the default instance: CFF2 outlines become TrueType outlines there.
@@ -210,11 +336,27 @@ impl Embedded {
             None => (Outlines::TrueType, subset),
             Some(table) => (Outlines::Cff, table),
         };
+        let codes = Codes::new(outlines, &glyphs, occurrences);
+        let glyph_width = |glyph: u16| glyph_widths.get(usize::from(glyph)).copied().unwrap_or(0.0);
+        let widths = (0..codes.len())
+            .map(|code| match &codes {
+                Codes::Occurrences {
+                    glyphs, advances, ..
+                } => match advances.get(code) {
+                    Some(Advance::Units(units)) => *units as f32,
+                    Some(Advance::Font) | None => {
+                        glyph_width(glyphs.get(code).copied().unwrap_or(0))
+                    }
+                },
+                Codes::Glyphs { .. } => glyph_width(u16::try_from(code).unwrap_or(0)),
+            })
+            .collect();
 
         let bounds = font.head().ok().map(|head| {
             [head.x_min(), head.y_min(), head.x_max(), head.y_max()]
                 .map(|v| rounded(f32::from(v) * per_unit))
         });
+        // The weight of the face embedded, the one place the descriptor reads a weight.
         let weight = font.os2().ok().map_or(400, |os2| os2.us_weight_class());
         let ascent = rounded(metrics.ascent * per_unit);
         let descriptor = Descriptor {
@@ -233,26 +375,33 @@ impl Embedded {
             outlines,
             program,
             base_font,
-            cids: glyphs,
+            glyphs,
+            codes,
             widths,
-            texts: cid_texts,
             descriptor,
         })
     }
 
-    /// The character id of `glyph`, which [`FontSet::collect`] added.
-    fn cid(&self, glyph: u16) -> u16 {
-        self.cids.get(glyph).unwrap_or(0)
+    /// The character code of `glyph` standing for `text` in text of `size` points, which
+    /// [`FontSet::collect`] added.
+    fn cid(&self, glyph: &PlacedGlyph, text: &str, size: f32) -> u16 {
+        match &self.codes {
+            Codes::Occurrences { codes, .. } => codes
+                .get(&occurrence(glyph, text, size))
+                .copied()
+                .unwrap_or(0),
+            Codes::Glyphs { .. } => self.glyphs.get(glyph.id).unwrap_or(0),
+        }
     }
 
-    /// The advance of character id `cid` in glyph space.
+    /// The advance of character code `cid` in glyph space.
     fn width(&self, cid: u16) -> f32 {
         self.widths.get(usize::from(cid)).copied().unwrap_or(0.0)
     }
 
-    /// The text the `ToUnicode` map gives character id `cid`, empty for none.
+    /// The text the `ToUnicode` map gives character code `cid`, empty for none.
     fn unicode(&self, cid: u16) -> &str {
-        self.texts.get(usize::from(cid)).map_or("", String::as_str)
+        self.codes.text(cid)
     }
 }
 
@@ -411,8 +560,9 @@ fn show_run(content: &mut Content, operations: &[Operation]) {
 /// The operations that show the glyphs of `run` in `font` at `size` where the shaper put them,
 /// in text space (y up). A new line starts at each change of baseline offset; within a line,
 /// each glyph is moved from where the previous glyph's width left the pen to its own position.
-/// A cluster for which the `ToUnicode` map gives other text than it stands for is marked with
-/// that text.
+/// A cluster the `ToUnicode` map would read as other text than it stands for, or leave a code
+/// of unmapped, and in a font with a code per glyph a cluster of several glyphs, is marked
+/// with its text.
 fn operations(font: &Embedded, run: &GlyphRun, size: f32) -> Vec<Operation> {
     let mut shower = Shower {
         font,
@@ -421,54 +571,47 @@ fn operations(font: &Embedded, run: &GlyphRun, size: f32) -> Vec<Operation> {
         pieces: Vec::new(),
         line: None,
         pen: 0.0,
+        after_moved: false,
     };
-    for (cluster, text) in clusters(run) {
-        let mapped: String = cluster
-            .iter()
-            .map(|glyph| font.unicode(font.cid(glyph.id)))
+    let glyphs = run.glyphs();
+    let texts = run.glyph_texts();
+    for (span, text) in run.clusters() {
+        let cluster: Vec<(&PlacedGlyph, u16, &str)> = span
+            .filter_map(|i| {
+                let glyph = glyphs.get(i)?;
+                let glyph_text = texts.get(i).copied().unwrap_or("");
+                Some((glyph, font.cid(glyph, glyph_text, size), glyph_text))
+            })
             .collect();
-        let marked = mapped != text;
-        if marked {
+        // An unmapped code is read as a replacement character by some readers. Without a code
+        // per occurrence, a cluster of several glyphs, such as a letter and a mark placed by
+        // the shaper, can be read apart or out of order by readers that place characters by
+        // their glyphs.
+        let mapped = (cluster.len() == 1 || matches!(font.codes, Codes::Occurrences { .. }))
+            && cluster
+                .iter()
+                .all(|&(_, code, _)| !font.unicode(code).is_empty())
+            && cluster
+                .iter()
+                .map(|&(_, code, _)| font.unicode(code))
+                .collect::<String>()
+                == text;
+        if !mapped {
             shower.flush();
             shower
                 .operations
                 .push(Operation::BeginText(text.to_owned()));
         }
-        for glyph in cluster {
-            shower.glyph(glyph);
+        for (glyph, code, glyph_text) in cluster {
+            shower.glyph(glyph, code, glyph_text);
         }
-        if marked {
+        if !mapped {
             shower.flush();
             shower.operations.push(Operation::EndText);
         }
     }
     shower.flush();
     shower.operations
-}
-
-/// The glyphs of `run` by cluster, each with the text it stands for: a cluster starts at each
-/// glyph that stands for text, and holds the glyphs after it that stand for none.
-fn clusters(run: &GlyphRun) -> Vec<(&[PlacedGlyph], &str)> {
-    let glyphs = run.glyphs();
-    let texts = run.glyph_texts();
-    let mut clusters: Vec<(&[PlacedGlyph], &str)> = Vec::new();
-    let mut start = 0;
-    for (i, text) in texts.iter().enumerate() {
-        if i > start && !text.is_empty() {
-            clusters.push((
-                glyphs.get(start..i).unwrap_or(&[]),
-                texts.get(start).copied().unwrap_or(""),
-            ));
-            start = i;
-        }
-    }
-    if start < glyphs.len() {
-        clusters.push((
-            glyphs.get(start..).unwrap_or(&[]),
-            texts.get(start).copied().unwrap_or(""),
-        ));
-    }
-    clusters
 }
 
 /// The state of [`operations`] between glyphs.
@@ -482,12 +625,19 @@ struct Shower<'f> {
     line: Option<f32>,
     /// Where the previous glyph's width leaves the pen.
     pen: f32,
+    /// Whether a glyph was moved off the pen, such as a mark over its letter, since the last
+    /// glyph that is not a space. The next such glyph then starts a line of its own: pdf.js
+    /// advances a mark by nothing whatever its width, and would otherwise see that glyph out of
+    /// place.
+    after_moved: bool,
 }
 
 impl Shower<'_> {
-    fn glyph(&mut self, glyph: &PlacedGlyph) {
+    /// Shows `glyph`, which stands for `text`, as code `cid`.
+    fn glyph(&mut self, glyph: &PlacedGlyph, cid: u16, text: &str) {
         let (x, y) = (glyph.x, rounded(-glyph.y));
-        if self.line != Some(y) {
+        let space = !text.is_empty() && text.chars().all(char::is_whitespace);
+        if (self.after_moved && !space) || self.line != Some(y) {
             self.flush();
             self.operations.push(Operation::Line { x: rounded(x), y });
             self.line = Some(y);
@@ -499,12 +649,16 @@ impl Shower<'_> {
             self.pieces.push(Piece::Move(shift));
         }
         let placed = self.pen - shift * self.size / 1000.0;
-        let cid = self.font.cid(glyph.id);
         match self.pieces.last_mut() {
             Some(Piece::Codes(codes)) => codes.extend(cid.to_be_bytes()),
             _ => self.pieces.push(Piece::Codes(cid.to_be_bytes().to_vec())),
         }
         self.pen = placed + self.font.width(cid) * self.size / 1000.0;
+        if glyph.offset != 0.0 {
+            self.after_moved = true;
+        } else if !space {
+            self.after_moved = false;
+        }
     }
 
     /// Ends the `TJ` array being built, if it has anything.
@@ -548,11 +702,29 @@ fn write_font(chunk: &mut Chunk, refs: &mut Refs, font: &Embedded) -> Ref {
     .base_font(base_font)
     .system_info(system)
     .font_descriptor(descriptor);
-    if font.outlines == Outlines::TrueType {
-        cid.cid_to_gid_map_predefined(Name(b"Identity"));
-    }
+    let glyph_map = match (&font.codes, font.outlines) {
+        (Codes::Occurrences { glyphs, .. }, _) => {
+            let map = refs.next();
+            cid.cid_to_gid_map_stream(map);
+            Some((map, glyphs))
+        }
+        (Codes::Glyphs { .. }, Outlines::TrueType) => {
+            cid.cid_to_gid_map_predefined(Name(b"Identity"));
+            None
+        }
+        (Codes::Glyphs { .. }, Outlines::Cff) => None,
+    };
     cid.widths().consecutive(0, font.widths.iter().copied());
     cid.finish();
+    if let Some((map, glyphs)) = glyph_map {
+        let bytes: Vec<u8> = glyphs
+            .iter()
+            .flat_map(|glyph| glyph.to_be_bytes())
+            .collect();
+        chunk
+            .stream(map, &compress(&bytes))
+            .filter(Filter::FlateDecode);
+    }
 
     let d = &font.descriptor;
     // Symbolic: the glyphs are addressed by id, not by a standard Latin encoding.
@@ -595,9 +767,10 @@ fn write_font(chunk: &mut Chunk, refs: &mut Refs, font: &Embedded) -> Ref {
     stream.finish();
 
     let mut cmap = UnicodeCmap::new(Name(b"Adobe-Identity-UCS"), UCS);
-    for (cid, text) in (0_u16..).zip(&font.texts) {
+    for code in (0..font.codes.len()).filter_map(|code| u16::try_from(code).ok()) {
+        let text = font.codes.text(code);
         if !text.is_empty() {
-            cmap.pair_with_multiple(cid, text.chars());
+            cmap.pair_with_multiple(code, text.chars());
         }
     }
     let cmap = compress(&cmap.finish());
@@ -686,10 +859,13 @@ mod tests {
                     }
                 }
                 assert_eq!(placed.len(), run.glyphs().len(), "{text}");
-                for (&(x, y, cid), glyph) in placed.iter().zip(run.glyphs()) {
+                let texts = run.glyph_texts();
+                for ((&(x, y, cid), glyph), glyph_text) in
+                    placed.iter().zip(run.glyphs()).zip(texts)
+                {
                     assert!((x - glyph.x).abs() < 0.002, "{text}: {x} vs {}", glyph.x);
                     assert_eq!(y, rounded(-glyph.y));
-                    assert_eq!(cid, font.cid(glyph.id));
+                    assert_eq!(cid, font.cid(glyph, glyph_text, 12.0));
                 }
             }
         }
@@ -714,30 +890,67 @@ mod tests {
     }
 
     #[test]
-    fn only_clusters_the_map_misreads_are_marked() {
-        // The first `x` maps x; the later ones stand for x with marks.
+    fn truetype_occurrences_have_codes_of_their_own() {
+        // A letter alone and under a mark: the map reads both, so nothing is marked.
         let items = [item_in(Font::SOURCE_SERIF_4, "x x\u{301} x")];
         let fonts = embed(&items);
         let run = &items[0].glyphs.runs()[0];
         let (_, font) = fonts.get(run).unwrap();
-        let marked: Vec<String> = operations(font, run, 12.0)
+        assert!(marks(font, run).is_empty());
+        let mapped: String = run
+            .glyphs()
+            .iter()
+            .zip(run.glyph_texts())
+            .map(|(glyph, text)| font.unicode(font.cid(glyph, text, 12.0)))
+            .collect();
+        assert_eq!(mapped, "x x\u{301} x");
+    }
+
+    #[test]
+    fn cff_glyphs_the_map_misreads_are_marked() {
+        let library = FontLibrary::with_fallbacks(vec![
+            include_bytes!("../../../tests/fixtures/outline-cff.otf").to_vec(),
+        ]);
+        let fonts = library.with_figure_fonts(&[Font::INTER]).unwrap();
+        let style = TextStyle {
+            face: FaceId::new(0),
+            weight: Weight::Regular,
+            size: 12.0,
+            tabular_figures: false,
+        };
+        let mut scene = Scene::new(300.0, 40.0, INK);
+        // The CFF font draws neither mark, so its .notdef stands for both.
+        scene
+            .push_text(
+                &fonts,
+                "\u{E001}\u{301}\u{E002}\u{302}",
+                style,
+                Point::default(),
+                INK,
+            )
+            .unwrap();
+        let Some(Item::Text(text)) = scene.items.pop() else {
+            panic!("no text");
+        };
+        let items = [text];
+        let fonts = embed(&items);
+        let run = &items[0].glyphs.runs()[0];
+        let (_, font) = fonts.get(run).unwrap();
+        assert_eq!(marks(font, run), ["\u{E001}\u{301}", "\u{E002}\u{302}"]);
+        // The map gives .notdef the first mark it stood for.
+        let second = run.glyphs().iter().filter(|g| g.id == 0).nth(1).unwrap();
+        assert_eq!(font.unicode(font.cid(second, "\u{302}", 12.0)), "\u{301}");
+    }
+
+    /// The texts `run` is marked with.
+    fn marks(font: &Embedded, run: &GlyphRun) -> Vec<String> {
+        operations(font, run, 12.0)
             .into_iter()
             .filter_map(|operation| match operation {
                 Operation::BeginText(text) => Some(text),
                 _ => None,
             })
-            .collect();
-        assert_eq!(marked, ["x\u{301}"]);
-        // Plain text needs no marks.
-        let items = [item("plain text")];
-        let fonts = embed(&items);
-        let run = &items[0].glyphs.runs()[0];
-        let (_, font) = fonts.get(run).unwrap();
-        assert!(
-            !operations(font, run, 12.0)
-                .iter()
-                .any(|operation| matches!(operation, Operation::BeginText(_)))
-        );
+            .collect()
     }
 
     #[test]
@@ -747,10 +960,16 @@ mod tests {
         let run = &items[0].glyphs.runs()[0];
         let (index, font) = fonts.get(run).unwrap();
         assert_eq!(index, 0);
-        let cids: Vec<u16> = run.glyphs().iter().map(|g| font.cid(g.id)).collect();
+        let cids: Vec<u16> = run
+            .glyphs()
+            .iter()
+            .zip(run.glyph_texts())
+            .map(|(g, text)| font.cid(g, text, 12.0))
+            .collect();
         assert_eq!(cids, [1, 2, 2, 1]);
         assert_eq!(font.widths.len(), 3, ".notdef, b and a");
-        assert_eq!(font.texts, ["", "b", "a"]);
+        let texts: Vec<&str> = (0..3).map(|code| font.unicode(code)).collect();
+        assert_eq!(texts, ["", "b", "a"]);
         assert_eq!(font.outlines, Outlines::TrueType);
         let (tag, name) = font.base_font.split_once('+').unwrap();
         assert_eq!(tag.len(), 6);

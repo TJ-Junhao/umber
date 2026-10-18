@@ -1,9 +1,10 @@
 //! Reading PDFs and running PDF readers, shared by the PDF integration tests.
 //!
-//! Tests run the PDF validators `qpdf`, Poppler (`pdftotext`, `pdftoppm`, `pdffonts`) and
-//! MuPDF (`mutool`). Where a tool is not installed a test skips its use of it with a note on
-//! stderr, unless the environment variable `UMBER_REQUIRE_PDF_TOOLS` is set, which makes a
-//! missing tool a failure.
+//! Tests run the PDF validators `qpdf`, Poppler (`pdftotext`, `pdftoppm`, `pdffonts`), MuPDF
+//! (`mutool`) and pdf.js (Firefox's PDF reader, run with `node`; the `pdfjs-dist` package is
+//! looked up at `UMBER_PDFJS_DIST`, else at `~/.local/share/pdfjs/node_modules/pdfjs-dist`).
+//! Where a tool is not installed a test skips its use of it with a note on stderr, unless the
+//! environment variable `UMBER_REQUIRE_PDF_TOOLS` is set, which makes a missing tool a failure.
 
 // clippy's allow-in-tests settings cover only `#[test]` functions, not the helpers here; each
 // includer uses a different part of this module.
@@ -294,4 +295,54 @@ pub fn assert_readers_parse(path: &FsPath) {
             out.status
         );
     }
+}
+
+/// The script that prints the text pdf.js extracts from page 1: its arguments are the path of
+/// pdf.js's `pdf.mjs` and the path of the PDF.
+const PDFJS_TEXT: &str = r#"
+import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
+const pdfjs = await import(pathToFileURL(process.argv[2]).href);
+const data = new Uint8Array(fs.readFileSync(process.argv[3]));
+const doc = await pdfjs.getDocument({ data, useSystemFonts: false, verbosity: 0 }).promise;
+const page = await doc.getPage(1);
+const content = await page.getTextContent({ disableNormalization: true });
+process.stdout.write(content.items.filter((item) => 'str' in item).map((item) => item.str).join(''));
+"#;
+
+/// The text pdf.js extracts from page 1 of `path`, or `None` (with a note, or a failure when
+/// the tools are required) when node or pdf.js is not installed.
+pub fn pdfjs_text(path: &FsPath) -> Option<String> {
+    let dist = std::env::var_os("UMBER_PDFJS_DIST")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|home| PathBuf::from(home).join(".local/share/pdfjs/node_modules/pdfjs-dist"))
+        });
+    let module = dist
+        .map(|dist| dist.join("legacy/build/pdf.mjs"))
+        .filter(|module| module.is_file());
+    let Some(module) = module.filter(|_| have("node")) else {
+        assert!(
+            std::env::var_os("UMBER_REQUIRE_PDF_TOOLS").is_none(),
+            "pdf.js is required but not installed"
+        );
+        eprintln!("skipped: pdf.js is not installed");
+        return None;
+    };
+    let script = path.with_extension("pdfjs.mjs");
+    std::fs::write(&script, PDFJS_TEXT).unwrap();
+    let out = Command::new("node")
+        .arg(&script)
+        .arg(&module)
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "pdf.js {}: {}",
+        path.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Some(String::from_utf8(out.stdout).unwrap())
 }
