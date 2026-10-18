@@ -182,7 +182,8 @@ fn figures() -> Vec<(String, Figure)> {
     ] {
         let mut f = figure(6.0, 4.0, Theme::graphite(), linear(), linear());
         axes(&mut f)
-            .legend(style)
+            .legend(style, Default::default())
+            .unwrap()
             .stem(
                 numbers(&[0.0, 1.0, 2.0]),
                 &[1.0, 4.0, 2.0],

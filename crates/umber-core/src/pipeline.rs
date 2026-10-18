@@ -47,6 +47,7 @@ fn panels<'a>(figure: &'a Figure, groups: &ShareGroups, lib: &FontLibrary) -> Ve
                     theme,
                     &Legend::panel(style, &marks, &Limits::of(axes), true),
                     lib,
+                    figure.legend_size(),
                 )
             } else {
                 measure_legend(theme, axes, &marks, lib)
@@ -93,7 +94,7 @@ fn measure_legend<'a>(
 ) -> MeasuredLegend<'a> {
     let style = axes.legend_style().unwrap_or(theme.legend_style());
     let legend = Legend::new(style, marks, &Limits::of(axes));
-    let mut measured = MeasuredLegend::measure(theme, &legend, lib);
+    let mut measured = MeasuredLegend::measure(theme, &legend, lib, axes.legend_size());
     if style != crate::LegendStyle::Direct {
         measured.position = axes.legend_position().unwrap_or(theme.legend_position());
     }
@@ -110,7 +111,7 @@ fn has_merged_legend(figure: &Figure) -> bool {
 fn figure_header(figure: &Figure, panels: &[Panel<'_>], lib: &FontLibrary) -> FigureHeader {
     let legend = if has_merged_legend(figure) {
         let merged = Legend::merged(figure, panels.iter().map(|panel| panel.marks.as_slice()));
-        MeasuredLegend::measure(figure.theme(), &merged, lib)
+        MeasuredLegend::measure(figure.theme(), &merged, lib, figure.legend_size())
     } else {
         MeasuredLegend::default()
     };
@@ -208,6 +209,26 @@ impl Side {
             Side::X => x,
             Side::Y => y,
         }
+    }
+
+    /// The tick label size of this side, including shared settings.
+    fn text_size(self, axes: &Axes) -> crate::SizeSpec {
+        match self {
+            Side::X => axes.xtick_size(),
+            Side::Y => axes.ytick_size(),
+        }
+    }
+
+    /// Tick room for axis labels, distinct from the theme-sized colorbar labels.
+    fn axis_room<'a>(
+        self,
+        plot: PlotSize,
+        theme: &Theme,
+        lib: &'a FontLibrary,
+        axes: &Axes,
+    ) -> layout::TickRoom<'a> {
+        self.room(plot, theme, lib)
+            .with_size(self.text_size(axes), theme)
     }
 }
 
@@ -614,7 +635,7 @@ fn plan(
                         .collect();
                     if categories.iter().all(|(i, side, _)| {
                         let plot = side.group_plot(groups, *i, &plots, &show_labels);
-                        side.room(plot, theme, lib)
+                        side.axis_room(plot, theme, lib, panels[*i].axes)
                             .with_labels(labels)
                             .slack(side.ticks(&tried[*i]))
                             >= 0.0
@@ -642,7 +663,12 @@ fn plan(
                 let y = Side::Y.group_plot(groups, i, plots, &show_labels);
                 let (x, _) = layout::tick_rooms(x, theme, lib, spacing);
                 let (_, y) = layout::tick_rooms(y, theme, lib, spacing);
-                [x.with_labels(labels), y.with_labels(labels)]
+                [
+                    x.with_size(panels[i].axes.xtick_size(), theme)
+                        .with_labels(labels),
+                    y.with_size(panels[i].axes.ytick_size(), theme)
+                        .with_labels(labels),
+                ]
             })
             .collect::<Vec<_>>()
     };
@@ -704,10 +730,15 @@ fn plan(
     let resolve_choices = |choices: &[[TickChoice; 3]], fits: &BubbleFits| {
         let rooms: Vec<_> = choices
             .iter()
-            .map(|c| {
+            .zip(panels)
+            .map(|(c, panel)| {
                 [
-                    c[0].room(Side::X, theme, lib).with_labels(labels),
-                    c[1].room(Side::Y, theme, lib).with_labels(labels),
+                    c[0].room(Side::X, theme, lib)
+                        .with_size(panel.axes.xtick_size(), theme)
+                        .with_labels(labels),
+                    c[1].room(Side::Y, theme, lib)
+                        .with_size(panel.axes.ytick_size(), theme)
+                        .with_labels(labels),
                 ]
             })
             .collect();
@@ -750,7 +781,7 @@ fn plan(
                     !show_labels[i][side.index()]
                         || !side.is_automatic(&limits[i])
                         || side
-                            .room(slot.plot.size(), theme, lib)
+                            .axis_room(slot.plot.size(), theme, lib, panels[i].axes)
                             .slack(side.ticks(&resolved[i]))
                             >= 0.0
                 })
@@ -806,7 +837,11 @@ fn plan(
                 if axis.is_category() {
                     continue;
                 }
-                if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
+                if !side.is_automatic(&limits[i])
+                    || side
+                        .axis_room(plot, theme, lib, panels[i].axes)
+                        .slack(ticks)
+                        >= 0.0
                 {
                     continue;
                 }
@@ -853,6 +888,7 @@ fn plan(
             let choice = &mut next[i][side.index()];
             if choice
                 .room(side, theme, lib)
+                .with_size(side.text_size(panels[i].axes), theme)
                 .slack(side.ticks(&tried_resolved[i]))
                 < 0.0
             {
@@ -912,7 +948,12 @@ fn plan(
                     .collect();
                 let plot = side.group_plot(groups, i, &plots, &show_labels);
                 let ticks = side.ticks(&resolved[i]);
-                if ticks.len() != 1 && side.room(plot, theme, lib).slack(ticks) >= 0.0 {
+                if ticks.len() != 1
+                    && side
+                        .axis_room(plot, theme, lib, panels[i].axes)
+                        .slack(ticks)
+                        >= 0.0
+                {
                     continue;
                 }
                 let resolve::AxisLimits::Continuous(axis) = limits[i].axis(side.axis()) else {
@@ -982,7 +1023,7 @@ fn plan(
                             !show_labels[j][side.index()]
                                 || !side.is_automatic(&limits[j])
                                 || side
-                                    .room(slot.plot.size(), theme, lib)
+                                    .axis_room(slot.plot.size(), theme, lib, panels[j].axes)
                                     .slack(side.ticks(&tried[j]))
                                     >= 0.0
                         })
@@ -1647,7 +1688,9 @@ mod tests {
     #[test]
     fn axes_none_hides_the_legend_under_a_header_theme() {
         let mut f = labelled_figure(Theme::pigment());
-        f.single_axes_mut().legend(LegendStyle::None);
+        f.single_axes_mut()
+            .legend(LegendStyle::None, Default::default())
+            .unwrap();
         assert_eq!(legend_and_groups(&f), (0, 2));
         // Without a legend the figure draws as if its marks were unlabelled.
         let mut unlabelled = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
@@ -1674,7 +1717,9 @@ mod tests {
             .with_legend_style(LegendStyle::None)
             .unwrap();
         let mut f = labelled_figure(none);
-        f.single_axes_mut().legend(LegendStyle::Header);
+        f.single_axes_mut()
+            .legend(LegendStyle::Header, Default::default())
+            .unwrap();
         assert_eq!(legend_and_groups(&f), (2, 3));
         // The same scene as under a theme whose own style is the header row.
         let scene_of = |f: &Figure| scene(f, FontLibrary::global(), "Figure.to_scene()").unwrap();
@@ -1690,11 +1735,15 @@ mod tests {
         assert_eq!(legend_and_groups(&f), (0, 3));
         assert_eq!(direct(&f), 2);
         // The axes ask for the header row.
-        f.single_axes_mut().legend(LegendStyle::Header);
+        f.single_axes_mut()
+            .legend(LegendStyle::Header, Default::default())
+            .unwrap();
         assert_eq!(legend_and_groups(&f), (2, 3));
         assert_eq!(direct(&f), 0);
         // Calling it again replaces the style.
-        f.single_axes_mut().legend(LegendStyle::None);
+        f.single_axes_mut()
+            .legend(LegendStyle::None, Default::default())
+            .unwrap();
         assert_eq!(legend_and_groups(&f), (0, 2));
         assert_eq!(direct(&f), 0);
     }

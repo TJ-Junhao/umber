@@ -11,8 +11,8 @@ use super::inset::TickSpan;
 use super::legend::{self, LegendRow};
 use super::{
     AXIS_LABEL_GAP, Area, BODY_LINE, END_LABEL_SHARE, HEADER_GAP, Label, Layout, LayoutInput,
-    PADDING, PlacedBaseline, Styles, TITLE_GAP, TITLE_LINE, X_LABEL_GAP, Y_LABEL_CENTER,
-    Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, metrics,
+    PADDING, PlacedBaseline, StyleSizes, Styles, TITLE_GAP, TITLE_LINE, X_LABEL_GAP,
+    Y_LABEL_CENTER, Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, metrics, text_size,
 };
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
 use crate::{Align, Figure, FontLibrary, Result};
@@ -274,9 +274,18 @@ impl FigureHeader {
         lib: &FontLibrary,
     ) -> FigureHeader {
         let theme = figure.theme();
-        let mut styles = Styles::new(theme);
-        styles.title.size =
-            super::scaled(theme.title_size() * FIGURE_TITLE_SCALE, theme.font_scale());
+        let mut styles = Styles::new(
+            theme,
+            StyleSizes {
+                body: figure.subtitle_size(),
+                ..StyleSizes::default()
+            },
+        );
+        styles.title.size = text_size(
+            figure.title_size(),
+            theme.title_size() * FIGURE_TITLE_SCALE,
+            theme.font_scale(),
+        );
         let box_ = HeaderBox {
             left: PADDING,
             right: figure.width_in() * 72.0 - PADDING,
@@ -372,13 +381,13 @@ pub(crate) struct PanelBands {
     xlabel: Option<Label>,
     /// The y axis label, not yet placed; `None` when it is empty.
     ylabel: Option<Label>,
-    /// The ascent of the tick label style's primary font.
+    /// The ascent of the x tick label style's primary font.
     tick_ascent: f64,
-    /// The tick label size.
+    /// The y tick label size.
     tick_size: f64,
-    /// The ascent of the body style's primary font.
+    /// The ascent of the x axis title's primary font.
     pub(super) body_ascent: f64,
-    /// The descent of the body style's primary font.
+    /// The descent of the x axis title's primary font.
     pub(super) body_descent: f64,
 }
 
@@ -473,16 +482,36 @@ pub(crate) fn measure_panel(
         lib,
         ..
     } = *input;
-    let styles = Styles::new(theme);
+    let styles = Styles::new(
+        theme,
+        StyleSizes {
+            title: axes.title_size(),
+            body: axes.subtitle_size(),
+            tick: axes.xtick_size(),
+        },
+    );
+    let ytick = crate::TextStyle {
+        size: text_size(axes.ytick_size(), theme.body_size(), theme.font_scale()),
+        ..styles.tick
+    };
+    let xaxis = crate::TextStyle {
+        size: text_size(axes.xlabel_size(), theme.body_size(), theme.font_scale()),
+        ..styles.body
+    };
+    let yaxis = crate::TextStyle {
+        size: text_size(axes.ylabel_size(), theme.body_size(), theme.font_scale()),
+        ..styles.body
+    };
 
     let row = legend.header_within(span.row_left, span.row_right);
     let heading = Header::measure(axes.title_text(), axes.subtitle_text(), &styles, &row, lib);
 
     // Tick labels.
     let (tick_ascent, tick_descent) = metrics(lib, &styles.tick);
-    let tick_size = f64::from(styles.tick.size);
+    let (y_tick_ascent, y_tick_descent) = metrics(lib, &ytick);
+    let tick_size = f64::from(ytick.size);
     let y_labels = if show_labels[1] {
-        labels.ticks(&resolved.y.ticks, styles.tick)
+        labels.ticks(&resolved.y.ticks, ytick)
     } else {
         Vec::new()
     };
@@ -502,20 +531,19 @@ pub(crate) fn measure_panel(
         (0.0, 0.0)
     } else {
         (
-            (tick_ascent - Y_LABEL_CENTER * tick_size).max(0.0),
-            (Y_LABEL_CENTER * tick_size + tick_descent).max(0.0),
+            (y_tick_ascent - Y_LABEL_CENTER * tick_size).max(0.0),
+            (Y_LABEL_CENTER * tick_size + y_tick_descent).max(0.0),
         )
     };
 
-    let xlabel =
-        (!axes.xlabel_text().is_empty()).then(|| measure(lib, axes.xlabel_text(), styles.body));
-    let ylabel =
-        (!axes.ylabel_text().is_empty()).then(|| measure(lib, axes.ylabel_text(), styles.body));
-    let (body_ascent, body_descent) = metrics(lib, &styles.body);
+    let xlabel = (!axes.xlabel_text().is_empty()).then(|| measure(lib, axes.xlabel_text(), xaxis));
+    let ylabel = (!axes.ylabel_text().is_empty()).then(|| measure(lib, axes.ylabel_text(), yaxis));
+    let (body_ascent, body_descent) = metrics(lib, &xaxis);
+    let (y_ascent, _) = metrics(lib, &yaxis);
 
     // The y label sits in the header region, above the top label row.
     let y_label_band = if ylabel.is_some() {
-        body_ascent + AXIS_LABEL_GAP
+        y_ascent + AXIS_LABEL_GAP
     } else {
         0.0
     };
@@ -782,7 +810,7 @@ mod tests {
             .xlabel(xlabel)
             .ylabel(ylabel);
         if let Some(style) = style {
-            axes.legend(style);
+            axes.legend(style, Default::default()).unwrap();
         }
         for (i, label) in ["North", "South", "East"].into_iter().enumerate() {
             axes.line(

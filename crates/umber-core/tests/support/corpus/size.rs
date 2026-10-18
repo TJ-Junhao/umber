@@ -129,7 +129,9 @@ fn figures() -> Vec<(String, Figure)> {
         let mut f = figure(6.0, 4.0, theme.clone(), linear(), linear());
         labelled(&mut f, "Emphasis, header legend");
         emphasis(&mut f);
-        axes(&mut f).legend(LegendStyle::Header);
+        axes(&mut f)
+            .legend(LegendStyle::Header, Default::default())
+            .unwrap();
         out.push((format!("fig-size-header-{theme_name}"), f));
 
         let mut f = figure(6.0, 4.0, theme, linear(), linear());
@@ -174,7 +176,7 @@ fn figures() -> Vec<(String, Figure)> {
             )
             .unwrap();
         }
-        a.legend(LegendStyle::Header);
+        a.legend(LegendStyle::Header, Default::default()).unwrap();
         out.push((format!("fig-size-points-{theme_name}"), f));
     }
 
@@ -199,7 +201,8 @@ fn figures() -> Vec<(String, Figure)> {
             sized_line("Thin", Dash::Dashed, times(0.5)),
         )
         .unwrap()
-        .legend(LegendStyle::Header);
+        .legend(LegendStyle::Header, Default::default())
+        .unwrap();
     out.push(("fig-size-wide-line-ends".to_owned(), f));
 
     // A category x axis: an emphasized area and line, and a large scatter, under chips.
@@ -234,7 +237,8 @@ fn figures() -> Vec<(String, Figure)> {
             sized_scatter("Sites", Marker::Square, times(2.0)),
         )
         .unwrap()
-        .legend(LegendStyle::Chips);
+        .legend(LegendStyle::Chips, Default::default())
+        .unwrap();
     out.push(("fig-size-category-chips".to_owned(), f));
 
     out

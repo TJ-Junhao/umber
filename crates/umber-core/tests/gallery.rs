@@ -586,7 +586,8 @@ fn pigment_legend_none() {
     figure
         .axes_at_mut(GridIndex::Auto, GridIndex::Auto)
         .unwrap()
-        .legend(LegendStyle::None);
+        .legend(LegendStyle::None, Default::default())
+        .unwrap();
     check("pigment_legend_none", &figure);
 }
 

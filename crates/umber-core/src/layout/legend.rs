@@ -151,11 +151,23 @@ impl MeasuredRow {
     /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
     /// Bubble references have no pill or horizontal padding and retain their true circle size,
     /// including the outline. Both row styles grow to contain the tallest reference circle.
-    pub fn measure(theme: &Theme, legend: &Legend, lib: &FontLibrary) -> Option<MeasuredRow> {
+    pub fn measure(
+        theme: &Theme,
+        legend: &Legend,
+        lib: &FontLibrary,
+        size: SizeSpec,
+    ) -> Option<MeasuredRow> {
         if legend.row().is_empty() {
             return None;
         }
-        let style = Styles::new(theme).body;
+        let style = Styles::new(
+            theme,
+            super::StyleSizes {
+                body: size,
+                ..Default::default()
+            },
+        )
+        .body;
         let size = f64::from(style.size);
         let (ascent, descent) = metrics(lib, &style);
         let row_style = legend.row_style();
@@ -367,14 +379,19 @@ pub(crate) struct MeasuredLegend<'a> {
 impl<'a> MeasuredLegend<'a> {
     /// The row entries and the direct labels of `legend`, measured; see
     /// [`MeasuredRow::measure`] and [`DirectLabels::measure`].
-    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &FontLibrary) -> MeasuredLegend<'a> {
+    pub fn measure(
+        theme: &Theme,
+        legend: &Legend<'a>,
+        lib: &FontLibrary,
+        size: SizeSpec,
+    ) -> MeasuredLegend<'a> {
         if legend.is_empty() {
             return MeasuredLegend::default();
         }
         MeasuredLegend {
             position: crate::LegendPosition::TopLeft,
-            row: MeasuredRow::measure(theme, legend, lib),
-            direct: DirectLabels::measure(theme, legend, lib),
+            row: MeasuredRow::measure(theme, legend, lib, size),
+            direct: DirectLabels::measure(theme, legend, lib, size),
         }
     }
 
@@ -449,13 +466,25 @@ impl<'a> DirectLabels<'a> {
     /// The direct labels of `legend`, measured in the body font at `SemiBold` weight and the
     /// body size, with end dots of the theme's drawn marker diameter, whatever the size of the
     /// line's own markers or width: an end dot marks where a line ends, alike for every line.
-    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &FontLibrary) -> DirectLabels<'a> {
+    pub fn measure(
+        theme: &Theme,
+        legend: &Legend<'a>,
+        lib: &FontLibrary,
+        size: SizeSpec,
+    ) -> DirectLabels<'a> {
         if legend.direct().is_empty() {
             return DirectLabels::default();
         }
         let style = TextStyle {
             weight: Weight::SemiBold,
-            ..Styles::new(theme).body
+            ..Styles::new(
+                theme,
+                super::StyleSizes {
+                    body: size,
+                    ..Default::default()
+                },
+            )
+            .body
         };
         let (ascent, descent) = metrics(lib, &style);
         let entries = legend
@@ -1152,7 +1181,8 @@ mod tests {
                     },
                 )
                 .unwrap()
-                .legend(crate::LegendStyle::Header);
+                .legend(crate::LegendStyle::Header, Default::default())
+                .unwrap();
             let (b, marks, legend) = swatch_and_items(&f);
             let Item::Stroke { style, .. } = &legend[0] else {
                 panic!("a line swatch is a stroke");
@@ -1581,7 +1611,8 @@ mod tests {
             let marks = crate::resolve::resolve_marks(axes.marks(), f.theme());
             let limits = crate::resolve::Limits::of(axes);
             let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits);
-            DirectLabels::measure(f.theme(), &legend, FontLibrary::global()).reserve(cap)
+            DirectLabels::measure(f.theme(), &legend, FontLibrary::global(), SizeSpec::Auto)
+                .reserve(cap)
         };
         let short = measured(&["Short"]);
         assert!(short > DIRECT_GAP && short < cap);

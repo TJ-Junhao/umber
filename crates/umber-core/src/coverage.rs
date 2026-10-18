@@ -470,8 +470,12 @@ mod tests {
             let mut axes = figure
                 .add_axes(ScaleKind::Linear, ScaleKind::Linear)
                 .unwrap();
-            axes.legend_at(LegendStyle::Header, LegendPosition::Best)
-                .unwrap();
+            axes.legend_at(
+                LegendStyle::Header,
+                LegendPosition::Best,
+                Default::default(),
+            )
+            .unwrap();
             match kind {
                 "line" => {
                     axes.line(

@@ -3,10 +3,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::axes::scale_name;
+use super::axes::{scale_name, size_name};
 use super::{Axes, AxisTicks, Cell, CellRange, Figure, Grid, Share};
 use crate::error::number;
-use crate::{ContinuousScale, Error, Instant, Result, ScaleKind};
+use crate::{ContinuousScale, Error, Instant, Result, ScaleKind, SizeSpec};
 
 /// The explicit limits of an axis, validated: the scale they define on a linear or log axis,
 /// the lower and the upper time on a time axis.
@@ -39,6 +39,8 @@ pub(super) struct AxisSettings {
     pub limits: Option<ExplicitLimits>,
     /// The explicit ticks and their format.
     pub ticks: AxisTicks,
+    /// The tick label size shared independently of ticks and their format.
+    pub tick_size: SizeSpec,
 }
 
 /// A coordinate axis.
@@ -119,6 +121,8 @@ pub(super) enum Setting {
     Ticks,
     /// Tick format.
     Format,
+    /// Tick label size.
+    TickSize,
 }
 
 /// Records an explicit setter unless it changes a value set by another member. Inheriting a
@@ -145,6 +149,8 @@ pub(super) struct Group {
     ticks_by: Vec<Cell>,
     /// Members that set the format, including explicitly setting AUTO.
     format_by: Vec<Cell>,
+    /// Members that set the tick label size, including explicitly setting AUTO.
+    tick_size_by: Vec<Cell>,
 }
 
 impl Group {
@@ -187,8 +193,26 @@ impl Group {
                 "another format".to_owned(),
                 "format",
             ),
+            Setting::TickSize => (
+                self.settings.tick_size == proposed.tick_size,
+                &mut self.tick_size_by,
+                "tick label size",
+                size_name(self.settings.tick_size),
+                "size",
+            ),
         };
         if let Err(other) = record_setter(by, cell, same) {
+            if matches!(setting, Setting::TickSize) {
+                return Err(Error::usage(
+                    context,
+                    format!(
+                        "size is {}; another panel's {} tick labels use {previous}, and the {} axis is shared.",
+                        size_name(proposed.tick_size), axis.name(), axis.name(),
+                    ),
+                )
+                .with_parameter("size")
+                .with_hint("set the same size on every panel."));
+            }
             let verb = if matches!(setting, Setting::Format) {
                 "is"
             } else {

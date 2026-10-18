@@ -99,10 +99,14 @@ fn box_coverage_counts_fills_whiskers_medians_and_outliers() {
     for grouped in [false, true] {
         let mut f = figure(Theme::pigment(), ScaleKind::Linear);
         let mut axes = f.single_axes_mut();
-        axes.legend_at(LegendStyle::Header, crate::LegendPosition::Best)
-            .unwrap()
-            .ylim(-2.0, 14.0)
-            .unwrap();
+        axes.legend_at(
+            LegendStyle::Header,
+            crate::LegendPosition::Best,
+            Default::default(),
+        )
+        .unwrap()
+        .ylim(-2.0, 14.0)
+        .unwrap();
         let samples = vec![0.0, 1.0, 2.0, 3.0, 4.0, 12.0];
         if grouped {
             axes.grouped_box_plot(

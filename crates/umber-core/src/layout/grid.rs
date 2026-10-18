@@ -1709,7 +1709,7 @@ mod tests {
                     LegendStyle::Direct,
                     LegendStyle::None,
                 ][rng.below(4)];
-                axes.legend(style);
+                axes.legend(style, Default::default()).unwrap();
                 if category {
                     let names: Vec<String> = (0..1 + rng.below(4))
                         .map(|i| format!("{i}{}", rng.text(1)))
@@ -2796,7 +2796,11 @@ mod tests {
                 .unwrap()
                 .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
                 .unwrap()
-                .legend_at(LegendStyle::Header, crate::LegendPosition::Bottom)
+                .legend_at(
+                    LegendStyle::Header,
+                    crate::LegendPosition::Bottom,
+                    Default::default(),
+                )
                 .unwrap()
                 .line(
                     AxisData::Numbers(vec![0.0, 1.0]),

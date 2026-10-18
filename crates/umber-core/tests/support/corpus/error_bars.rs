@@ -370,7 +370,8 @@ fn figures() -> Vec<(String, Figure)> {
                 },
             )
             .unwrap()
-            .legend(style);
+            .legend(style, Default::default())
+            .unwrap();
         out.push((format!("error-bars-legend-{style_name}"), f));
     }
 

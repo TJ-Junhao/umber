@@ -134,7 +134,13 @@ impl MeasuredColorbar {
         theme: &Theme,
         lib: &FontLibrary,
     ) -> Self {
-        let styles = Styles::new(theme);
+        let styles = Styles::new(
+            theme,
+            super::StyleSizes {
+                body: options.size,
+                ..Default::default()
+            },
+        );
         let ticks = measure_ticks(lib, &color.ticks, styles.tick);
         let label = (!options.label.is_empty()).then(|| measure(lib, &options.label, styles.body));
         let tick_width = ticks
@@ -453,8 +459,12 @@ mod tests {
             },
         )
         .unwrap();
-        axes.legend_at(LegendStyle::Header, LegendPosition::Right)
-            .unwrap();
+        axes.legend_at(
+            LegendStyle::Header,
+            LegendPosition::Right,
+            Default::default(),
+        )
+        .unwrap();
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
         let bar = layout.colorbar.unwrap();
         let right = bar
@@ -535,8 +545,12 @@ mod tests {
             },
         )
         .unwrap();
-        ax.legend_at(LegendStyle::Header, LegendPosition::Bottom)
-            .unwrap();
+        ax.legend_at(
+            LegendStyle::Header,
+            LegendPosition::Bottom,
+            Default::default(),
+        )
+        .unwrap();
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
         let bar = layout.colorbar.unwrap();
         let entry = &layout.legend.entries()[0];
@@ -557,7 +571,7 @@ mod tests {
             },
         )
         .unwrap();
-        ax.legend(LegendStyle::Direct);
+        ax.legend(LegendStyle::Direct, Default::default()).unwrap();
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
         let bar = layout.colorbar.unwrap();
         for direct in layout.direct {

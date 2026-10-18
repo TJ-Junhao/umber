@@ -211,7 +211,8 @@ fn figures() -> Vec<(String, Figure)> {
         .unwrap()
         .xlim(0.0, 3.0)
         .unwrap()
-        .legend(LegendStyle::Direct);
+        .legend(LegendStyle::Direct, Default::default())
+        .unwrap();
     out.push(("step-trailing-gap-limits".to_owned(), f));
 
     // A log x axis: the middle position changes level midway in log space.
@@ -295,7 +296,8 @@ fn figures() -> Vec<(String, Figure)> {
             },
         )
         .unwrap()
-        .legend(LegendStyle::Chips);
+        .legend(LegendStyle::Chips, Default::default())
+        .unwrap();
     out.push(("step-with-line-and-area".to_owned(), f));
 
     // Many points: reduced per pixel column first, then stepped.

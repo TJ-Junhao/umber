@@ -364,7 +364,11 @@ fn violin_coverage_counts_density_and_quantile_lines() {
     for grouped in [false, true] {
         let mut f = figure(Theme::pigment(), ScaleKind::Linear);
         f.single_axes_mut()
-            .legend_at(LegendStyle::Header, crate::LegendPosition::Best)
+            .legend_at(
+                LegendStyle::Header,
+                crate::LegendPosition::Best,
+                Default::default(),
+            )
             .unwrap();
         let groups = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
         if grouped {

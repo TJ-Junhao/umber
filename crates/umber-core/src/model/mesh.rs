@@ -2399,7 +2399,11 @@ mod tests {
                 },
             )
             .unwrap()
-            .legend_at(crate::LegendStyle::Chips, crate::LegendPosition::Right)
+            .legend_at(
+                crate::LegendStyle::Chips,
+                crate::LegendPosition::Right,
+                Default::default(),
+            )
             .unwrap();
         f
     }
