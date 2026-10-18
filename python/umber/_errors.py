@@ -8,6 +8,8 @@ from them (see ``umber._report``).
 
 _PARAMETER = "_umber_parameter"
 _HINT = "_umber_hint"
+_MESSAGE = "_umber_message"
+_ROW = "_umber_row"
 _UNSET = object()
 
 
@@ -30,6 +32,21 @@ def new_error[E: BaseException](
     err = cls(f"{context}: {message}")
     setattr(err, _PARAMETER, parameter)
     setattr(err, _HINT, hint)
+    setattr(err, _MESSAGE, message)
+    return err
+
+
+def at_row[E: BaseException](err: E, index: int) -> E:
+    """Attach the original input row to a conversion error.
+
+    Args:
+        err: The error raised while converting an input element.
+        index: The element's zero-based index in the original input column.
+
+    Returns:
+        The same error, with its input row attached.
+    """
+    setattr(err, _ROW, index)
     return err
 
 

@@ -244,7 +244,10 @@ pub fn times_from_micros(
             } else if (Instant::MIN.0..=Instant::MAX.0).contains(&us) {
                 Ok(Some(Instant(us)))
             } else {
-                Err(range_error(context, &format!("{name}[{i}]"), us).with_parameter(name))
+                Err(
+                    Error::at_input(context, name, "", [(Some(i), range_message(us))])
+                        .with_parameter(name),
+                )
             }
         })
         .collect()
@@ -334,18 +337,20 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 /// lies outside the supported range: `"<what> is <date>; times must lie between 0001-01-01
 /// and 9999-12-31."`, where `what` names the value, such as `x[3]`.
 pub(crate) fn range_error(context: &'static str, what: &str, us: i64) -> Error {
+    Error::data(context, format!("{what}{}", range_message(us)))
+}
+
+/// The explanation of a time outside the supported range, without its input position.
+fn range_message(us: i64) -> String {
     let c = civil_of(us);
     let year = if c.year < 0 {
         format!("-{:04}", -i64::from(c.year))
     } else {
         format!("{:04}", c.year)
     };
-    Error::data(
-        context,
-        format!(
-            "{what} is {year}-{:02}-{:02}; times must lie between 0001-01-01 and 9999-12-31.",
-            c.month, c.day
-        ),
+    format!(
+        " is {year}-{:02}-{:02}; times must lie between 0001-01-01 and 9999-12-31.",
+        c.month, c.day
     )
 }
 
