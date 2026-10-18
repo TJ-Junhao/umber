@@ -265,11 +265,15 @@ def test_kde_log_axis_rejected(
     assert _svg(ax) == before
 
 
-def test_a_density_beyond_the_supported_magnitudes_is_refused() -> None:
+@pytest.mark.parametrize("value", [0.0, 1.0])
+@pytest.mark.parametrize("bandwidth", [1e-305, float.fromhex("0x0.0000000000001p-1022")])
+def test_a_density_beyond_the_supported_magnitudes_is_refused(
+    value: float, bandwidth: float
+) -> None:
     ax = _axes().title("Kept")
     before = _svg(ax)
     with pytest.raises(ub.DataError) as caught:
-        ax.kde([0.0], bandwidth=1e-305)
+        ax.kde([value], bandwidth=bandwidth)
     message = str(caught.value)
     assert message.startswith("Axes.kde(): the density reaches "), message
     assert message.endswith("; densities must not exceed 1e300."), message

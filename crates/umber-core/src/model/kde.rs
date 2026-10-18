@@ -368,7 +368,8 @@ fn density_line(
 /// `Error::Style` naming `bandwidth` under `context` when that takes more than
 /// [`KDE_MAX_POINTS`].
 fn line_points(context: &'static str, (from, to): (f64, f64), bandwidth: f64) -> Result<usize> {
-    let needed = ((to - from) / (KDE_SPACING * bandwidth)).ceil() + 1.0;
+    // Divide by the bandwidth first: `KDE_SPACING * bandwidth` underflows for subnormal widths.
+    let needed = ((to - from) / bandwidth / KDE_SPACING).ceil() + 1.0;
     if needed <= KDE_MAX_POINTS as f64 {
         // At most `KDE_MAX_POINTS`, and at least 1: the cast is exact.
         return Ok((needed as usize).max(KDE_MIN_POINTS));
