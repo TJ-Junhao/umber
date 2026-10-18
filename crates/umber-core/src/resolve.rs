@@ -1573,6 +1573,8 @@ pub(crate) enum ResolvedMark<'a> {
         mapped: Option<MappedColors<'a>>,
         /// The color of its lines when they take one color.
         color: Rgba,
+        /// The labels of its levels, as `annotate` writes them.
+        labels: Vec<String>,
         /// Its lines along each level and its bands, computed once per render.
         shapes: std::sync::Arc<crate::contour::ContourShapes>,
     },
@@ -2372,8 +2374,9 @@ impl<'a> ResolvedMark<'a> {
     /// half their stroke.
     pub fn line_width(&self) -> Option<f32> {
         match *self {
-            ResolvedMark::Contour { .. }
-            | ResolvedMark::Mesh { .. }
+            // A contour's lines, drawn with lines or with both.
+            ResolvedMark::Contour { mark, .. } => crate::contour::line_width(mark.options().style),
+            ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. } => None,
@@ -3514,27 +3517,47 @@ impl SeriesKind {
 #[cfg(test)]
 pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<ResolvedMark<'a>> {
     let slots = label_slots(marks.iter());
-    resolve_panel_marks(marks, Orientation::Vertical, theme, &slots)
+    let format = TickFormat::default();
+    resolve_panel_marks(marks, Orientation::Vertical, (theme, &format), &slots)
 }
 
 /// Resolves the marks of `axes` as [`resolve_marks`] does, in the orientation of the axes.
 #[cfg(test)]
 pub(crate) fn resolve_axes_marks<'a>(axes: &'a Axes, theme: &Theme) -> Vec<ResolvedMark<'a>> {
     let slots = label_slots(axes.marks().iter());
-    resolve_panel_marks(axes.marks(), Limits::of(axes).orientation(), theme, &slots)
+    let format = axes
+        .colorbar_options()
+        .format
+        .as_ref()
+        .unwrap_or(axes.y_tick_format());
+    resolve_panel_marks(
+        axes.marks(),
+        Limits::of(axes).orientation(),
+        (theme, format),
+        &slots,
+    )
 }
 
 /// Resolves every panel in row-major order. Labels with automatic colors take slots in first
 /// appearance order across the figure. Each panel's unlabelled automatic series then count
 /// from the number of label slots. Explicit palette and fixed colors never register a label
-/// or consume a slot.
+/// or consume a slot. Contours without a format of their own write their levels in the format
+/// of the colorbar ticks: the colorbar's own format, the figure's under shared colors, or else
+/// the panel's y tick format.
 pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>> {
     let slots = label_slots(figure.panels().flat_map(|axes| axes.marks()));
+    let shared = figure.grid().share_color() != crate::Share::None;
     figure
         .panels()
         .map(|axes| {
             let orientation = Limits::of(axes).orientation();
-            resolve_panel_marks(axes.marks(), orientation, figure.theme(), &slots)
+            let colorbar = if shared {
+                figure.colorbar_options()
+            } else {
+                axes.colorbar_options()
+            };
+            let format = colorbar.format.as_ref().unwrap_or(axes.y_tick_format());
+            resolve_panel_marks(axes.marks(), orientation, (figure.theme(), format), &slots)
         })
         .collect()
 }
@@ -3591,11 +3614,12 @@ fn label_slots<'a>(marks: impl Iterator<Item = &'a Mark>) -> BTreeMap<&'a str, u
     slots
 }
 
-/// Resolves a panel, whose axes have `orientation`, against the label slots of its figure.
+/// Resolves a panel, whose axes have `orientation`, against the label slots of its figure; its
+/// contours write their levels in `colorbar_format` unless they have a format of their own.
 fn resolve_panel_marks<'a>(
     marks: &'a [Mark],
     orientation: Orientation,
-    theme: &Theme,
+    (theme, colorbar_format): (&Theme, &TickFormat),
     slots: &BTreeMap<&str, usize>,
 ) -> Vec<ResolvedMark<'a>> {
     let bubble_maximum = marks
@@ -3802,6 +3826,7 @@ fn resolve_panel_marks<'a>(
                     ColorSpec::Auto(_) => theme.text_color(),
                     spec => color_of(spec, ""),
                 },
+                labels: mark.labels_in(colorbar_format),
                 shapes: std::sync::Arc::new(crate::contour::ContourShapes::of(mark)),
             },
             Mark::Hist(mark) => ResolvedMark::Hist {

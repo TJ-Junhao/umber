@@ -14,21 +14,17 @@
 use super::MarkContext;
 use super::clip::clip_ring;
 use super::line::{LineClip, stroke};
-use super::mapping::{AxisPoint, PlotPoint, axis_numbers, point};
+use super::mapping::{AxisPoint, PlotPoint, axis_value, point};
 use crate::color_scale::ResolvedColorScale;
 use crate::contour::labels::{self, PagePoint, Placement};
-use crate::contour::{ContourShapes, GridPoint};
+use crate::contour::{BOTH_LINE_WIDTH, ContourShapes, GridPoint, LINE_WIDTH};
 use crate::layout::{Label, centered_tick_label};
-use crate::resolve::Resolved;
+use crate::resolve::{Resolved, ResolvedAxis};
 use crate::scene::{FillRule, Item, LineCap, LineJoin, Paint, StrokeStyle, TextItem};
 use crate::{
     Alpha, ColorSpec, ContourMark, ContourStyle, FontLibrary, Path, PathVerb, Point, Rgba,
 };
 
-/// The width of the lines of [`ContourStyle::Lines`], in points.
-const LINE_WIDTH: f32 = 1.25;
-/// The width of the lines of [`ContourStyle::Both`], in points.
-const BOTH_LINE_WIDTH: f32 = 0.6;
 /// The opacity of the lines of [`ContourStyle::Both`], in the theme's text color.
 const BOTH_LINE_OPACITY: f32 = 0.7;
 /// The length of line left out on each side of a level label, in points.
@@ -43,6 +39,8 @@ pub(super) struct Contour<'a> {
     pub(super) mapped: bool,
     /// The color of its lines when they take one color.
     pub(super) color: Rgba,
+    /// The labels of its levels, as `annotate` writes them.
+    pub(super) labels: &'a [String],
     /// Its lines and bands in grid index space.
     pub(super) shapes: &'a ContourShapes,
 }
@@ -72,35 +70,55 @@ impl LineColor<'_> {
     }
 }
 
-/// The map of grid index space onto axis space: the axis-space coordinates of the columns and
-/// of the rows, between which points are interpolated.
-struct GridMap {
-    /// The axis-space x of each column.
-    columns: Vec<f64>,
-    /// The axis-space y of each row.
-    rows: Vec<f64>,
+/// The map of grid index space onto axis space: a point is interpolated linearly between the
+/// coordinates of its column and of its row, as given, then mapped onto the axes, so a point
+/// at a fraction of a cell side lies at that fraction of the side in the data on any axis.
+struct GridMap<'a> {
+    /// The x of each column, as given.
+    columns: &'a [f64],
+    /// The y of each row, as given.
+    rows: &'a [f64],
+    /// The x axis.
+    x: &'a ResolvedAxis,
+    /// The y axis.
+    y: &'a ResolvedAxis,
 }
 
-impl GridMap {
+impl GridMap<'_> {
     /// The axis-space point of the grid point `p`.
     fn at(&self, p: GridPoint) -> AxisPoint {
         AxisPoint::new(
-            interpolated(&self.columns, p.x),
-            interpolated(&self.rows, p.y),
+            axis_value(self.x, interpolated(self.columns, p.x)),
+            axis_value(self.y, interpolated(self.rows, p.y)),
         )
     }
 }
 
 /// The value at the fractional index `at` of `values`, at least two of them: interpolated
-/// linearly between the two values around it.
+/// linearly between the two values around it, exactly the value itself at a whole index.
 fn interpolated(values: &[f64], at: f64) -> f64 {
     let last = values.len().saturating_sub(2);
     // Grid points lie in `0..=len - 1`; the cast saturates and the index is clamped.
     let i = (at.floor().max(0.0) as usize).min(last);
     let t = at - i as f64;
     match (values.get(i), values.get(i + 1)) {
-        (Some(&a), Some(&b)) => a + (b - a) * t,
+        (Some(&a), Some(&b)) => between(a, b, t),
         _ => f64::NAN,
+    }
+}
+
+/// The value the fraction `t` of the way from `a` to `b`: exactly `a` at 0 and `b` at 1. Across
+/// zero it weighs both ends, which keeps a small end exact beside a huge one; on one side of
+/// zero it steps from `a`, which keeps the result between the ends.
+fn between(a: f64, b: f64, t: f64) -> f64 {
+    if t <= 0.0 {
+        a
+    } else if t >= 1.0 {
+        b
+    } else if (a <= 0.0) != (b <= 0.0) {
+        a * (1.0 - t) + b * t
+    } else {
+        a + (b - a) * t
     }
 }
 
@@ -117,8 +135,10 @@ pub(super) fn contour_items(
 ) {
     let mark = contour.mark;
     let map = GridMap {
-        columns: axis_numbers(&resolved.x, mark.x()),
-        rows: axis_numbers(&resolved.y, mark.y()),
+        columns: mark.x(),
+        rows: mark.y(),
+        x: &resolved.x,
+        y: &resolved.y,
     };
     let levels = mark.levels();
     if let Some(scale) = &resolved.color {
@@ -143,7 +163,7 @@ pub(super) fn contour_items(
     let label_color = context.theme.text_color();
     let mut labels = Vec::new();
     for (index, lines) in contour.shapes.lines.iter().enumerate() {
-        let (Some(&level), Some(text)) = (levels.get(index), mark.labels().get(index)) else {
+        let (Some(&level), Some(text)) = (levels.get(index), contour.labels.get(index)) else {
             continue;
         };
         let Some(color) = line_color.at(level) else {
@@ -165,8 +185,10 @@ pub(super) fn contour_items(
                 })
                 .unzip();
             let pieces = super::clip::clip_polyline(&xs, &ys, &clip.bounds);
-            // A closed line that the clip leaves whole is still closed.
-            let closed = line.closed && pieces.len() == 1 && pieces[0].len() == xs.len();
+            // A closed line stays closed when the clip leaves it one piece that still returns to
+            // its start; a clipped ring is open, even with as many points.
+            let closed = line.closed
+                && matches!(pieces.as_slice(), [piece] if piece.len() > 2 && piece.first() == piece.last());
             for piece in pieces {
                 let page: Vec<PagePoint> = piece
                     .into_iter()
@@ -206,7 +228,7 @@ pub(super) fn contour_items(
 /// space to the plot and a margin.
 fn band_items(
     context: &MarkContext<'_>,
-    map: &GridMap,
+    map: &GridMap<'_>,
     shapes: &ContourShapes,
     (levels, scale): (&[f64], &ResolvedColorScale),
     items: &mut Vec<Item>,

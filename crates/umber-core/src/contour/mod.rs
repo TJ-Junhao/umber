@@ -54,21 +54,50 @@ impl ContourShapes {
                 bands: Vec::new(),
             };
         };
-        ContourShapes {
-            lines: if lines {
-                levels
+        match (lines, filled) {
+            (true, false) => ContourShapes {
+                lines: levels
                     .iter()
                     .map(|&level| iso_lines(&grid, level))
-                    .collect()
-            } else {
-                Vec::new()
+                    .collect(),
+                bands: Vec::new(),
             },
-            bands: if filled {
-                bands(&grid, &levels)
-            } else {
-                Vec::new()
+            (false, _) => ContourShapes {
+                lines: Vec::new(),
+                bands: bands(&grid, &levels),
             },
+            (true, true) => {
+                // Each level is marched once, for its lines and its band alike.
+                let mut shapes = ContourShapes {
+                    lines: Vec::new(),
+                    bands: vec![BandPolygons {
+                        rings: bands::region(&grid, None),
+                    }],
+                };
+                for &level in &levels {
+                    let segments = march::segments(&grid, level);
+                    shapes.lines.push(march::lines_of(&grid, level, &segments));
+                    shapes.bands.push(BandPolygons {
+                        rings: bands::region(&grid, Some((level, &segments))),
+                    });
+                }
+                shapes
+            }
         }
+    }
+}
+
+/// The width of the lines of [`ContourStyle::Lines`], in points.
+pub(crate) const LINE_WIDTH: f32 = 1.25;
+/// The width of the lines of [`ContourStyle::Both`], in points.
+pub(crate) const BOTH_LINE_WIDTH: f32 = 0.6;
+
+/// The width of the lines a contour of `style` draws, in points; `None` for bands alone.
+pub(crate) fn line_width(style: ContourStyle) -> Option<f32> {
+    match style {
+        ContourStyle::Lines => Some(LINE_WIDTH),
+        ContourStyle::Both => Some(BOTH_LINE_WIDTH),
+        ContourStyle::Filled => None,
     }
 }
 

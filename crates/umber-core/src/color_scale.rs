@@ -479,16 +479,16 @@ impl<'a> MappedColors<'a> {
     }
 }
 
-/// The levels of a contour that a colorbar marks: the levels of the first contour among the
-/// color-mapped marks of its axes (or sharing group).
+/// The levels of the contours that a colorbar marks: every color-mapped contour of its axes (or
+/// sharing group) has the same levels.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ColorLevels {
     /// The levels, increasing, with their automatic labels.
     pub ticks: Vec<Tick>,
     /// Where the level values come from, for writing them in a tick format.
     pub values: TickValues,
-    /// Whether the bar is drawn as bands between the levels, as a filled contour colors its
-    /// bands, rather than as a smooth gradient.
+    /// Whether the bar is drawn as bands between the levels, as filled contours color their
+    /// bands, rather than as a smooth gradient: when any of the contours is filled.
     pub banded: bool,
 }
 
@@ -512,8 +512,8 @@ impl ResolvedColorScale {
     /// limits are `limits`, under `theme`: the spec of the first color-mapped mark, over the
     /// limits, or else over the extent of the finite mapped values (positive ones on a log
     /// scale). `None` when no mark is color-mapped or no mapped value is finite, even with
-    /// limits: then nothing color-mapped is drawn. The levels of the first color-mapped contour
-    /// among the marks, if any, become the ticks ([`ColorLevels`]).
+    /// limits: then nothing color-mapped is drawn. The levels of the color-mapped contours among
+    /// the marks, if any, become the ticks ([`ColorLevels`]).
     pub fn resolve<'a, 'm: 'a>(
         marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
         limits: Option<(f64, f64)>,
@@ -521,7 +521,13 @@ impl ResolvedColorScale {
     ) -> Option<ResolvedColorScale> {
         let (spec, _) = marks.clone().find_map(ResolvedMark::color_values)?;
         let log = matches!(spec.scale, Transform::Log(_));
-        let levels = marks.clone().find_map(ResolvedMark::color_levels);
+        // Every contour of one scale has the same levels (the pipeline checks it); the bar is
+        // banded when any of them is filled.
+        let mut contours = marks.clone().filter_map(ResolvedMark::color_levels);
+        let levels = contours.next().map(|first| ColorLevels {
+            banded: first.banded || contours.any(|levels| levels.banded),
+            ..first
+        });
         let extent = marks
             .filter_map(ResolvedMark::color_values)
             .flat_map(|(_, values)| values.iter().copied())
@@ -542,17 +548,30 @@ impl ResolvedColorScale {
         Some(scale)
     }
 
-    /// The ticks at the contour levels inside the color range, labelled in `format`; `None`
-    /// without levels or when none lies inside the range.
+    /// The ticks at the contour levels inside the color range, labelled in `format`, with the
+    /// center among them on a centered norm, as on every centered color scale; `None` without
+    /// levels or when none lies inside the range.
     fn level_ticks(&self, format: &TickFormat) -> Option<Vec<AxisTick>> {
         let levels = self.levels.as_ref()?;
         let (low, high) = self.norm.range();
-        let inside: Vec<Tick> = levels
+        let mut inside: Vec<Tick> = levels
             .ticks
             .iter()
             .filter(|tick| low <= tick.value && tick.value <= high)
             .cloned()
             .collect();
+        if inside.is_empty() {
+            return None;
+        }
+        if let Norm::Centered { center, radius } = self.norm
+            && !inside
+                .iter()
+                .any(|tick| (tick.value - center).abs() <= 2e-9 * radius)
+        {
+            let at = inside.partition_point(|tick| tick.value < center);
+            inside.extend(labelled(vec![center]));
+            inside[at..].rotate_right(1);
+        }
         let ticks: Vec<AxisTick> = format
             .relabel(inside, levels.values)
             .into_iter()
@@ -592,10 +611,27 @@ impl ResolvedColorScale {
         format: &crate::TickFormat,
     ) -> Self {
         // Contour levels are ticks in their own right: every level is marked while the labels
-        // keep apart, and else every second, fifth or tenth one, as on a category axis.
+        // keep apart, and else every second, fifth or tenth one, as on a category axis, counted
+        // from the center on a centered scale so that the center stays.
         if let Some(levels) = self.level_ticks(format) {
+            let ticks = match self.norm {
+                Norm::Centered { .. } => {
+                    let center = levels
+                        .iter()
+                        .position(|tick| (tick.pos.get() - 0.5).abs() <= 1e-12)
+                        .unwrap_or(0);
+                    let mut below: Vec<AxisTick> =
+                        levels[..=center].iter().rev().cloned().collect();
+                    below = room.category_ticks(below);
+                    below.reverse();
+                    let above = room.category_ticks(levels[center..].to_vec());
+                    below.extend(above.into_iter().skip(1));
+                    below
+                }
+                Norm::Linear { .. } | Norm::Log { .. } => room.category_ticks(levels),
+            };
             return Self {
-                ticks: room.category_ticks(levels),
+                ticks,
                 ..self.clone()
             };
         }

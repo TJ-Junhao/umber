@@ -289,3 +289,21 @@ def test_nan_values_are_holes() -> None:
     empty = axes().contour(X, Y, np.full(Z.shape, np.nan), style=ub.Contour.FILLED)
     # Nothing to map: no colorbar.
     assert "fill-rule" not in empty.figure.to_svg()
+
+
+def test_types_are_checked_before_the_count_of_levels() -> None:
+    ax = axes()
+    with pytest.raises(TypeError) as caught:
+        call(ax.contour)(X, Y, Z, levels=0, style="bad")
+    assert parameter_of(caught.value) == "style"
+    with pytest.raises(TypeError) as caught:
+        call(ax.contour)(X, Y, Z, levels=0, format="%.1f")
+    assert parameter_of(caught.value) == "format"
+
+
+def test_level_labels_read_as_the_colorbar_ticks() -> None:
+    ax = axes().contour(X, Y, Z, levels=[0.25, 0.5, 0.75], annotate=True)
+    ax.ytick_format(ub.TickFormat.percent())
+    texts = [node.text or "" for node in tags(ax, "text")]
+    assert texts.count("50%") >= 2, texts
+    assert "0.50" not in texts

@@ -2794,9 +2794,14 @@ impl<'a> AxesMut<'a> {
     /// `options.color` gives them one color; the bands take the color of the middle of their
     /// range on the color scale, and the regions below the first level and above the last the
     /// colors at the ends of the color range. The colorbar shows the levels: bands for filled
-    /// contours, a smooth bar with a tick at each level for lines. With `options.annotate`,
-    /// every line at least three times as long as its label carries its level's value at its
-    /// middle, along the line and upright, the line broken under it. Automatic limits are the
+    /// contours, a smooth bar with a tick at each level for lines; every color-mapped contour
+    /// that shares the bar, on these axes or through shared colors, needs the same levels, and
+    /// rendering refuses different ones (`Error::Style`). With `options.annotate`, every line at
+    /// least three times as long as its label carries its level's value at its middle, along
+    /// the line and upright, in the colorbar's format unless it has its own, the line broken
+    /// under it. Points between grid coordinates are interpolated in the data, then placed on
+    /// the axes, so on a log axis too a line crosses a cell side where the data does. Automatic
+    /// limits are the
     /// outer coordinates, without padding, as for [`AxesMut::mesh`]; by default a contour
     /// alone draws no baseline.
     ///

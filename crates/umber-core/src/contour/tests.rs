@@ -13,6 +13,12 @@ fn on_grid_line(z: &[f64], columns: usize, rows: usize, p: GridPoint) -> Option<
         let i = (at.floor().max(0.0) as usize).min(count - 2);
         (i, at - i as f64)
     };
+    let on_grid =
+        |at: f64, count: usize| at.fract() == 0.0 && (0.0..=(count - 1) as f64).contains(&at);
+    if on_grid(p.x, columns) && on_grid(p.y, rows) {
+        // A grid point: its own value, whatever the values around it.
+        return value(p.x as usize, p.y as usize);
+    }
     if p.x.fract() == 0.0 && (0.0..=(columns - 1) as f64).contains(&p.x) {
         let (j, t) = split(p.y, rows);
         let i = p.x as usize;
@@ -119,8 +125,91 @@ fn grids() -> impl Strategy<Value = (usize, usize, Vec<f64>)> {
     })
 }
 
+/// A grid of `columns × rows` small whole values, so that plateaus and constant edges are
+/// common, some of them NaN, with levels drawn from its own values.
+fn plateaus() -> impl Strategy<Value = (usize, usize, Vec<f64>, Vec<f64>)> {
+    (2usize..7, 2usize..7).prop_flat_map(|(columns, rows)| {
+        let value = prop_oneof![
+            9 => (-2i32..=2).prop_map(f64::from),
+            1 => Just(f64::NAN),
+        ];
+        (
+            Just(columns),
+            Just(rows),
+            proptest::collection::vec(value, columns * rows),
+            proptest::collection::vec(-2i32..=2, 1..4),
+        )
+            .prop_map(|(columns, rows, z, picks)| {
+                let mut levels: Vec<f64> = picks.into_iter().map(f64::from).collect();
+                levels.sort_by(f64::total_cmp);
+                levels.dedup();
+                (columns, rows, z, levels)
+            })
+    })
+}
+
+/// Checks the bands of `z` at `levels` as `bands_tile_without_gaps` does: the first is the
+/// finite cells, each region has the area its cells give it one by one, the regions nest, and
+/// the shown parts add up to the finite cells.
+fn check_bands(columns: usize, rows: usize, z: &[f64], levels: &[f64]) -> Result<(), String> {
+    let grid = Grid::new(z, columns, rows).ok_or("not a grid")?;
+    let finite: Vec<(usize, usize)> = grid
+        .cells()
+        .filter(|&(i, j)| grid.is_finite_cell(i, j))
+        .collect();
+    let bands = bands(&grid, levels);
+    let areas: Vec<f64> = bands.iter().map(region_area).collect();
+    if (areas[0] - finite.len() as f64).abs() > 1e-9 {
+        return Err(format!(
+            "first band {} for {} finite cells",
+            areas[0],
+            finite.len()
+        ));
+    }
+    for (k, &level) in levels.iter().enumerate() {
+        let expected: f64 = finite
+            .iter()
+            .map(|&(i, j)| cell_high_area(grid.corner_values(i, j), level))
+            .sum();
+        if (areas[k + 1] - expected).abs() > 1e-9 {
+            return Err(format!(
+                "level {level}: area {} instead of {expected}",
+                areas[k + 1]
+            ));
+        }
+        if areas[k + 1] > areas[k] + 1e-9 {
+            return Err(format!("level {level}: regions do not nest: {areas:?}"));
+        }
+    }
+    for band in &bands {
+        if band.rings.iter().any(|ring| ring.len() < 3) {
+            return Err(format!("a ring of fewer than three points: {band:?}"));
+        }
+    }
+    Ok(())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(400))]
+
+    #[test]
+    fn bands_tile_at_levels_equal_to_values((columns, rows, z, levels) in plateaus()) {
+        prop_assert_eq!(check_bands(columns, rows, &z, &levels), Ok(()));
+    }
+
+    #[test]
+    fn lines_lie_on_levels_equal_to_values((columns, rows, z, levels) in plateaus()) {
+        let grid = Grid::new(&z, columns, rows).unwrap();
+        for level in levels {
+            for line in iso_lines(&grid, level) {
+                prop_assert!(line.points.len() >= 2);
+                for p in &line.points {
+                    let value = on_grid_line(&z, columns, rows, *p).unwrap();
+                    prop_assert!((value - level).abs() <= 1e-12, "{p:?}: {value} vs {level}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn level_lines_lie_on_level((columns, rows, z) in grids(), level in -10.0f64..10.0) {
@@ -371,5 +460,38 @@ fn labels_sit_upright_at_the_middle_of_long_lines() {
             (40.0, 40.0),
             (8.0, 40.0)
         ]
+    );
+}
+
+#[test]
+fn a_level_equal_to_values_keeps_its_region() {
+    // The right half of [[0, 1, 2], [0, 1, 2]] is at or above 1.
+    let z = [0.0, 1.0, 2.0, 0.0, 1.0, 2.0];
+    let grid = Grid::new(&z, 3, 2).unwrap();
+    let bands = bands(&grid, &[1.0]);
+    assert_eq!(region_area(&bands[0]), 2.0);
+    assert_eq!(region_area(&bands[1]), 1.0, "{bands:?}");
+    assert_eq!(check_bands(3, 2, &z, &[1.0]), Ok(()));
+}
+
+#[test]
+fn every_3_by_3_grid_of_0_1_2_tiles_at_level_1() {
+    let mut z = [0.0; 9];
+    let mut wrong = Vec::new();
+    for code in 0..3usize.pow(9) {
+        let mut rest = code;
+        for value in &mut z {
+            *value = (rest % 3) as f64;
+            rest /= 3;
+        }
+        if let Err(error) = check_bands(3, 3, &z, &[1.0]) {
+            wrong.push((z, error));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} grids, such as {:?}",
+        wrong.len(),
+        wrong.first()
     );
 }

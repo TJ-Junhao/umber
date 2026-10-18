@@ -354,6 +354,7 @@ pub(crate) fn marks(
                 mark,
                 ref mapped,
                 color,
+                ref labels,
                 ref shapes,
                 ..
             } => {
@@ -361,6 +362,7 @@ pub(crate) fn marks(
                     mark,
                     mapped: mapped.is_some(),
                     color,
+                    labels,
                     shapes,
                 };
                 contour::contour_items(&context, lib, resolved, contour, &mut items);

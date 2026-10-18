@@ -60,8 +60,10 @@ pub enum ContourLevels {
     /// round tick values are: on a log color scale, as log ticks.
     #[default]
     Auto,
-    /// About this many round values strictly inside the range of the finite values, chosen as
-    /// [`ContourLevels::Auto`] chooses them; from 1 to [`MAX_LEVELS`].
+    /// About this many round values strictly inside the range of the finite values, from 1 to
+    /// [`MAX_LEVELS`]: the round values of a search for two more ticks over the range, which may
+    /// fall on its ends, those strictly inside it; and the middle of the range when none is,
+    /// so a field that is not constant always has a level.
     Count(usize),
     /// Exactly these values, finite and strictly increasing. Levels outside the range of the
     /// values draw no line.
@@ -104,8 +106,8 @@ pub struct ContourOptions {
     /// Whether each line long enough to hold it carries its level's value.
     pub annotate: bool,
     /// The format of the level values that `annotate` writes; `None` writes each level as the
-    /// automatic ticks of the levels are written: with the decimals of the step between round
-    /// levels, or with the decimals given levels need. Only annotated contours take one.
+    /// colorbar writes its ticks (the colorbar's format, else the y tick format), so a level
+    /// reads the same on its line and on the bar. Only annotated contours take one.
     pub format: Option<TickFormat>,
 }
 
@@ -168,15 +170,13 @@ pub struct ContourMark {
     options: ContourOptions,
 }
 
-/// The levels of a contour, increasing, with the labels they are written with.
+/// The levels of a contour, increasing, with their automatic labels.
 #[derive(Debug, Clone, PartialEq)]
 struct Levels {
     /// The levels with their automatic labels.
     ticks: Arc<[Tick]>,
     /// Whether the levels were computed on a grid of round values, and with which step.
     values: TickValues,
-    /// The labels `annotate` writes: the automatic ones, or those of the contour's format.
-    labels: Arc<[String]>,
 }
 
 impl ContourMark {
@@ -336,32 +336,6 @@ impl ContourMark {
         self.levels.ticks.iter().map(|tick| tick.value).collect()
     }
 
-    /// The labels that `annotate` writes on the lines, one per level: in the contour's format,
-    /// or else as the automatic ticks of the levels are written.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::{ContourLevels, ContourOptions, Figure, Mark, ScaleKind, Theme, TickFormat};
-    ///
-    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let options = ContourOptions {
-    ///     levels: ContourLevels::Values(vec![0.5, 1.0, 1.5]),
-    ///     annotate: true,
-    ///     format: Some(TickFormat::fixed(2)?),
-    ///     ..ContourOptions::default()
-    /// };
-    /// axes.contour(&[0.0, 1.0], &[0.0, 1.0], &[0.0, 1.0, 1.0, 2.0], options)?;
-    /// let Some(Mark::Contour(contour)) = axes.marks().first() else { unreachable!() };
-    /// assert_eq!(contour.labels(), ["0.50", "1.00", "1.50"]);
-    /// # Ok::<(), umber_core::Error>(())
-    /// ```
-    #[must_use]
-    pub fn labels(&self) -> &[String] {
-        &self.levels.labels
-    }
-
     /// The style, colormap, scale, center, color, annotation and format, and the levels as
     /// given.
     ///
@@ -381,6 +355,18 @@ impl ContourMark {
     #[must_use]
     pub fn options(&self) -> &ContourOptions {
         &self.options
+    }
+
+    /// The labels that `annotate` writes on the lines, one per level: in the contour's format,
+    /// or without one in `colorbar`, the format of the colorbar's ticks, so that a level reads
+    /// the same on its line and on the bar.
+    pub(crate) fn labels_in(&self, colorbar: &TickFormat) -> Vec<String> {
+        let format = self.options.format.as_ref().unwrap_or(colorbar);
+        format
+            .relabel(self.levels.ticks.to_vec(), self.levels.values)
+            .into_iter()
+            .map(|tick| tick.label)
+            .collect()
     }
 
     /// The levels with their automatic labels, and where their values come from: what the
@@ -423,28 +409,32 @@ impl Levels {
                 };
                 (paired(levels.clone(), labels), TickValues::Exact)
             }
-            ContourLevels::Auto => round_levels(z, AUTO_LEVELS, options.scale),
-            ContourLevels::Count(count) => round_levels(z, *count, options.scale),
+            ContourLevels::Auto => round_levels(z, Ask::Auto, options.scale),
+            ContourLevels::Count(count) => round_levels(z, Ask::Count(*count), options.scale),
         };
-        let labels = match &options.format {
-            Some(format) => format.relabel(ticks.clone(), values),
-            None => ticks.clone(),
-        }
-        .into_iter()
-        .map(|tick| tick.label)
-        .collect();
         Levels {
             ticks: ticks.into(),
             values,
-            labels,
         }
     }
 }
 
-/// About `count` round levels strictly inside the range of the finite values of `z`, with
+/// How many round levels to choose.
+#[derive(Debug, Clone, Copy)]
+enum Ask {
+    /// The round values of a search for [`AUTO_LEVELS`] ticks over the range, those strictly
+    /// inside it.
+    Auto,
+    /// About this many levels strictly inside the range: the round values of a search for two
+    /// more ticks, which may fall on the ends, those strictly inside it; and when none is, the
+    /// middle of the range, so a field that is not constant always has a level.
+    Count(usize),
+}
+
+/// The round levels `ask` asks for strictly inside the range of the finite values of `z`, with
 /// their labels and where their values come from: Extended Wilkinson values on a linear scale,
 /// log ticks on a log scale. None when the values have no range.
-fn round_levels(z: &[f64], count: usize, scale: Transform) -> (Vec<Tick>, TickValues) {
+fn round_levels(z: &[f64], ask: Ask, scale: Transform) -> (Vec<Tick>, TickValues) {
     let none = (Vec::new(), TickValues::Exact);
     let Some((lo, hi)) =
         z.iter()
@@ -460,28 +450,41 @@ fn round_levels(z: &[f64], count: usize, scale: Transform) -> (Vec<Tick>, TickVa
         return none;
     }
     let inside = |v: f64| lo < v && v < hi;
+    let (target, fallback) = match ask {
+        Ask::Auto => (AUTO_LEVELS, false),
+        Ask::Count(count) => (count.saturating_add(2), true),
+    };
     match scale {
         Transform::Linear => {
-            let all = ticks::extended(lo, hi, count, TickCoverage::Free, &Fit::ANY);
+            let all = ticks::extended(lo, hi, target, TickCoverage::Free, &Fit::ANY);
             let step = match all.as_slice() {
                 [first, second, ..] => second - first,
                 _ => return none,
             };
-            let levels: Vec<f64> = ticks::snapped_to_zero(&all, step)
+            let mut levels: Vec<f64> = ticks::snapped_to_zero(&all, step)
                 .into_iter()
                 .filter(|&v| inside(v))
                 .collect();
+            if levels.is_empty() && fallback {
+                levels.push(lo / 2.0 + hi / 2.0);
+            }
             let labels = ticks::format_ticks(&levels, step);
             (paired(levels, labels), TickValues::Grid { step })
         }
         Transform::Log(_) => match ContinuousScale::new(scale, lo, hi, CONTEXT) {
-            Ok(axis) => (
-                axis.ticks(count)
+            Ok(axis) => {
+                let mut levels: Vec<Tick> = axis
+                    .ticks(target)
                     .into_iter()
                     .filter(|tick| inside(tick.value))
-                    .collect(),
-                TickValues::Exact,
-            ),
+                    .collect();
+                if levels.is_empty() && fallback {
+                    // The middle of the range on the log scale.
+                    let middle = (lo.ln() / 2.0 + hi.ln() / 2.0).exp().clamp(lo, hi);
+                    levels = paired(vec![middle], ticks::format_values(&[middle]));
+                }
+                (levels, TickValues::Exact)
+            }
             Err(_) => none,
         },
     }
@@ -984,7 +987,10 @@ mod tests {
             unreachable!()
         };
         assert_eq!(given.levels(), [-1.0, 0.25, 1.5, 9.0]);
-        assert_eq!(given.labels(), ["\u{2212}1.00", "0.25", "1.50", "9.00"]);
+        assert_eq!(
+            given.labels_in(&TickFormat::default()),
+            ["\u{2212}1.00", "0.25", "1.50", "9.00"]
+        );
     }
 
     #[test]

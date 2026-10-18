@@ -83,6 +83,63 @@ fn resolve_colors(panels: &mut [Panel<'_>], groups: &ShareGroups, theme: &Theme)
     }
 }
 
+/// Checks that the color-mapped contours of each color group, which share one colorbar, all
+/// have the same levels, so the bar explains every one of them: `Error::Style` under `context`
+/// naming the panels of the first two whose levels differ.
+fn check_contour_levels(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    groups: &ShareGroups,
+    context: &'static str,
+) -> Result<()> {
+    const HINT: &str = "pass the same levels to every contour that shares a colorbar.";
+    for source in 0..panels.len() {
+        if groups.color[source] != Some(source) {
+            continue;
+        }
+        let mut first: Option<(usize, Vec<f64>)> = None;
+        let members = panels
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| groups.color[*i] == Some(source));
+        for (i, panel) in members {
+            for levels in panel.marks.iter().filter_map(ResolvedMark::color_levels) {
+                let values: Vec<f64> = levels.ticks.iter().map(|tick| tick.value).collect();
+                let Some((j, known)) = &first else {
+                    first = Some((i, values));
+                    continue;
+                };
+                if *known == values {
+                    continue;
+                }
+                let required = "contours that share a colorbar need the same levels.";
+                if *j == i {
+                    let error = Error::style(
+                        context,
+                        format!("two contours of these axes have different levels; {required}"),
+                    )
+                    .with_hint(HINT);
+                    return Err(in_cell(figure, panel.axes, error));
+                }
+                let (a, b) = (panels[*j].axes.cells(), panel.axes.cells());
+                return Err(Error::style(
+                    context,
+                    format!(
+                        "the contours of row {}, col {} and row {}, col {} have different \
+                         levels; {required}",
+                        a.row(),
+                        a.col(),
+                        b.row(),
+                        b.col()
+                    ),
+                )
+                .with_hint(HINT));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The legend of `axes` with its resolved `marks`, its row entries and its direct labels,
 /// measured once. The legend uses the style set on the axes, else the theme's.
 fn measure_legend<'a>(
@@ -423,6 +480,7 @@ fn plan(
     context: &'static str,
     labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
+    check_contour_levels(figure, panels, groups, context)?;
     let theme = figure.theme();
     let header = figure_header(figure, panels, lib);
     let inputs: Vec<LayoutInput<'_>> = panels

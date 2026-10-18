@@ -2401,10 +2401,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             y: The y coordinates of the grid's rows, strictly increasing, at least two.
             z: The field as a two-dimensional array or a list of rows, shaped
                 ``(len(y), len(x))``: one row per y coordinate.
-            levels: ``AUTO`` for about seven round values strictly inside the range of the
-                finite values, chosen as round ticks are (log ticks on a log ``scale``); an int
-                from 1 to 64 for about that many; or the levels themselves, strictly
-                increasing. Levels outside the range of the values draw no line.
+            levels: ``AUTO`` for the round values strictly inside the range of the finite
+                values that a search for seven round ticks over the range finds (log ticks on a
+                log ``scale``); an int from 1 to 64 for about that many round values strictly
+                inside the range, and at least one, the middle of the range, on a field that is
+                not constant; or the levels themselves, strictly increasing. Levels outside the
+                range of the values draw no line. Contours that share a colorbar, on one axes
+                or through ``share_color``, need the same levels.
             style: ``Contour.LINES``, ``Contour.FILLED`` or ``Contour.BOTH``.
             cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center``
                 is given and its sequential colormap otherwise.
@@ -2417,9 +2420,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             annotate: Whether each line at least three times as long as its label carries its
                 level's value at its middle, along the line and upright, in the tick font, with
                 the line broken under it.
-            format: The format of the values that ``annotate`` writes. ``AUTO`` writes them
-                with the decimals of the step between round levels, or the decimals that given
-                levels need.
+            format: The format of the values that ``annotate`` writes. ``AUTO`` writes them as
+                the colorbar writes its ticks (its own format, else the y tick format), so a
+                level reads the same on its line and on the bar.
 
         Returns:
             These axes.
@@ -2453,8 +2456,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             context = "Axes.contour()"
             check_floats_type(context, "x", x)
             check_floats_type(context, "y", y)
-            count = _contour_count(context, levels)
-            if count is None and levels is not AUTO:
+            counted = _is_count(levels)
+            if not counted and levels is not AUTO:
                 check_floats_type(context, "levels", levels)
             drawn = instance(context, "style", style, Contour, _CONTOUR_HINT)
             native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
@@ -2465,6 +2468,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 if format is AUTO
                 else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
             )
+            count = _level_count(context, levels) if counted else None
             _numeric_cells(context, self, time=False)
             xs, ys = floats(context, "x", x), floats(context, "y", y)
             values = matrix(
@@ -2497,14 +2501,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
 
-def _contour_count(context: str, levels: object) -> int | None:
-    """Check a ``levels`` argument that is a count of levels and return it; ``None`` otherwise.
+def _is_count(levels: object) -> bool:
+    """Return whether a ``levels`` argument is a count: an int or NumPy integer, not a ``bool``."""
+    return not isinstance(levels, bool | np.bool_) and isinstance(levels, int | np.integer)
 
-    An int or NumPy integer, but not a ``bool``, is a count, from 1 to 64.
-    """
-    if isinstance(levels, bool | np.bool_) or not isinstance(levels, int | np.integer):
-        return None
-    count = integer(context, "levels", cast(object, levels))
+
+def _level_count(context: str, levels: object) -> int:
+    """Check a count of levels, from 1 to 64, and return it."""
+    count = integer(context, "levels", levels)
     if not 1 <= count <= _umber.MAX_LEVELS:
         raise new_error(
             StyleError,

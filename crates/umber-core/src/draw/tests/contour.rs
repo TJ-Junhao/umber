@@ -5,7 +5,7 @@ use crate::pipeline::plan_figure;
 use crate::scene::{FillRule, Item, Paint, Scene};
 use crate::{
     ContourLevels, ContourOptions, ContourStyle, Figure, FontLibrary, Mark, Rgba, ScaleKind,
-    SvgText, Theme,
+    SvgText, Theme, TickFormat,
 };
 
 /// A figure with one contour of `z` on the grid `x` by `y`.
@@ -283,7 +283,7 @@ fn colorbar_banded_for_filled() {
     let Mark::Contour(contour) = &f.single_axes().marks()[0] else {
         unreachable!()
     };
-    assert_eq!(labels, contour.labels());
+    assert_eq!(labels, contour.labels_in(&TickFormat::default()));
 }
 
 #[test]
@@ -366,7 +366,13 @@ fn level_labels_sit_on_long_lines_and_break_them() {
         .collect();
     assert!(!labels.is_empty());
     for (text, angle) in &labels {
-        assert!(contour.labels().iter().any(|label| label == text), "{text}");
+        assert!(
+            contour
+                .labels_in(&TickFormat::default())
+                .iter()
+                .any(|label| label == text),
+            "{text}"
+        );
         assert!(*angle > -90.0 && *angle <= 90.0, "{angle}");
     }
     // The labels come after the lines, which have more pieces than without labels.

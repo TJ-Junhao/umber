@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use super::march::cell_segments;
+use super::march::{Segment, segments};
 use super::{Grid, GridPoint, Side, grid_point};
 
 /// One band of a filled contour: the region of the finite cells where the field is at or above
@@ -30,12 +30,13 @@ pub(crate) struct BandPolygons {
 /// then for each level the finite cells where the field is at or above it (see
 /// [`BandPolygons`]).
 pub(crate) fn bands(grid: &Grid<'_>, levels: &[f64]) -> Vec<BandPolygons> {
-    std::iter::once(None)
-        .chain(levels.iter().copied().map(Some))
-        .map(|level| BandPolygons {
-            rings: region(grid, level),
-        })
-        .collect()
+    std::iter::once(BandPolygons {
+        rings: region(grid, None),
+    })
+    .chain(levels.iter().map(|&level| BandPolygons {
+        rings: region(grid, Some((level, &segments(grid, level)))),
+    }))
+    .collect()
 }
 
 /// A corner of a region's boundary: a grid point, or the crossing of the level on a side.
@@ -58,9 +59,14 @@ struct Edge {
     at: GridPoint,
 }
 
-/// The boundary rings of the finite cells of `grid` where the field is at or above `level`, or
-/// of every finite cell for `None`.
-fn region(grid: &Grid<'_>, level: Option<f64>) -> Vec<Vec<GridPoint>> {
+/// The boundary rings of the finite cells of `grid` where the field is at or above a level,
+/// given with the oriented segments of the finite cells there ([`segments`]), or of every
+/// finite cell for `None`.
+pub(super) fn region(grid: &Grid<'_>, level: Option<(f64, &[Segment])>) -> Vec<Vec<GridPoint>> {
+    let (level, segments) = match level {
+        Some((level, segments)) => (Some(level), segments),
+        None => (None, &[][..]),
+    };
     let high = |(i, j): (usize, usize)| level.is_none_or(|level| grid.value(i, j) >= level);
     let position = |vertex: Vertex, level: f64| match vertex {
         Vertex::Point(i, j) => grid_point((i, j)),
@@ -74,17 +80,14 @@ fn region(grid: &Grid<'_>, level: Option<f64>) -> Vec<Vec<GridPoint>> {
             at: position(from, level.unwrap_or(f64::NAN)),
         });
     };
+    // The segments come in row-major cell order, each cell's together.
+    let mut next = segments.iter().peekable();
     for (i, j) in grid.cells() {
         if !grid.is_finite_cell(i, j) {
             continue;
         }
-        if let Some(level) = level {
-            for (from, to) in cell_segments(grid.corner_values(i, j), level) {
-                push(
-                    Vertex::Crossing(Grid::side(i, j, from)),
-                    Vertex::Crossing(Grid::side(i, j, to)),
-                );
-            }
+        while let Some(segment) = next.next_if(|segment| segment.cell == (i, j)) {
+            push(Vertex::Crossing(segment.from), Vertex::Crossing(segment.to));
         }
         let corners = Grid::corners(i, j);
         for (k, (&a, &b)) in corners
@@ -112,9 +115,15 @@ fn region(grid: &Grid<'_>, level: Option<f64>) -> Vec<Vec<GridPoint>> {
 /// reaching it: each ring starts at the first unused piece in order and, at a vertex where two
 /// rings touch, follows the first unused piece leaving it.
 fn rings(edges: &[Edge]) -> Vec<Vec<GridPoint>> {
-    let mut leaving: HashMap<Vertex, Vec<usize>> = HashMap::new();
-    for (index, edge) in edges.iter().enumerate() {
-        leaving.entry(edge.from).or_default().push(index);
+    // The pieces leaving each vertex, in order, as a list: the first one, and after each the
+    // next one leaving the same vertex.
+    let mut leaving: HashMap<Vertex, usize> = HashMap::with_capacity(edges.len());
+    let mut after: Vec<Option<usize>> = vec![None; edges.len()];
+    for (index, edge) in edges.iter().enumerate().rev() {
+        if let (Some(slot), Some(first)) = (after.get_mut(index), leaving.insert(edge.from, index))
+        {
+            *slot = Some(first);
+        }
     }
     let mut used = vec![false; edges.len()];
     let mut rings = Vec::new();
@@ -132,19 +141,17 @@ fn rings(edges: &[Edge]) -> Vec<Vec<GridPoint>> {
             if edge.to == start.from {
                 break;
             }
-            let next = leaving.get(&edge.to).and_then(|indices| {
-                indices
-                    .iter()
-                    .copied()
-                    .find(|&index| used.get(index) == Some(&false))
-            });
+            let mut next = leaving.get(&edge.to).copied();
+            while let Some(index) = next.filter(|&index| used.get(index) != Some(&false)) {
+                next = after.get(index).copied().flatten();
+            }
             match next {
                 Some(next) => current = next,
                 // Every vertex is balanced, so a ring always returns to its start.
                 None => break,
             }
         }
-        let ring = without_collinear(ring);
+        let ring = simplified(ring);
         if ring.len() >= 3 {
             rings.push(ring);
         }
@@ -152,20 +159,51 @@ fn rings(edges: &[Edge]) -> Vec<Vec<GridPoint>> {
     rings
 }
 
-/// `ring` without the points that lie on a grid line with both their neighbours, such as the
-/// grid points along the edge of the grid; the shape is unchanged.
-fn without_collinear(ring: Vec<GridPoint>) -> Vec<GridPoint> {
-    let n = ring.len();
-    if n < 3 {
-        return ring;
+/// `ring` simplified without changing the region it bounds: first without repeated points
+/// (distinct corners, such as a grid point and a crossing of a level equal to its value, can
+/// lie at one position), then without the points that lie on a grid line between their two
+/// neighbours, such as the grid points along the edge of the grid. A point is dropped only when
+/// it lies on the segment that joins its neighbours, so no corner of the ring is lost.
+fn simplified(ring: Vec<GridPoint>) -> Vec<GridPoint> {
+    let mut distinct: Vec<GridPoint> = Vec::with_capacity(ring.len());
+    for point in ring {
+        if distinct.last() != Some(&point) {
+            distinct.push(point);
+        }
     }
-    let at = |i: usize| ring.get(i % n).copied();
-    (0..n)
-        .filter_map(|i| {
-            let (previous, point, next) = (at(i + n - 1)?, at(i)?, at(i + 1)?);
-            let vertical = previous.x == point.x && point.x == next.x;
-            let horizontal = previous.y == point.y && point.y == next.y;
-            (!vertical && !horizontal).then_some(point)
-        })
-        .collect()
+    while distinct.len() > 1 && distinct.first() == distinct.last() {
+        distinct.pop();
+    }
+    let mut kept: Vec<GridPoint> = Vec::with_capacity(distinct.len());
+    for point in distinct {
+        while let [.., before, last] = kept.as_slice()
+            && between(*before, *last, point)
+        {
+            kept.pop();
+        }
+        kept.push(point);
+    }
+    // The ring closes on itself: its last and first points have neighbours across the start.
+    loop {
+        let n = kept.len();
+        if n < 3 {
+            break;
+        }
+        if between(kept[n - 2], kept[n - 1], kept[0]) {
+            kept.pop();
+        } else if between(kept[n - 1], kept[0], kept[1]) {
+            kept.remove(0);
+        } else {
+            break;
+        }
+    }
+    kept
+}
+
+/// Whether `point` lies on the segment from `a` to `b` along one grid line: all three share
+/// their x or their y, and `point` is between the other two.
+fn between(a: GridPoint, point: GridPoint, b: GridPoint) -> bool {
+    let inside = |p: f64, a: f64, b: f64| a.min(b) <= p && p <= a.max(b);
+    (a.x == point.x && point.x == b.x && inside(point.y, a.y, b.y))
+        || (a.y == point.y && point.y == b.y && inside(point.x, a.x, b.x))
 }
