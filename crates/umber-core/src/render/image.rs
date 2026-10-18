@@ -261,11 +261,8 @@ pub(super) fn base64(bytes: &[u8]) -> String {
         ]),
         _ => {}
     }
-    #[allow(
-        clippy::expect_used,
-        reason = "the alphabet and padding are exclusively ASCII"
-    )]
-    String::from_utf8(out).expect("base64 is ASCII")
+    // The alphabet and padding are ASCII, so the conversion never takes the lossy branch.
+    String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
 #[cfg(test)]

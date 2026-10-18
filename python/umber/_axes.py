@@ -109,6 +109,8 @@ _FORMAT_HINT: Final = (
 
 
 @final
+# PEP 695 syntax on Python 3.12 cannot give type parameters defaults, so ``Axes``
+# could not mean ``Axes[float, float]``.
 class Axes(Generic[X, Y]):  # noqa: UP046
     """The plot area of a figure: marks, titles, axis labels, limits and the legend.
 
@@ -1523,7 +1525,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         values: object,
         *,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
         render: Render | Auto = AUTO,
     ) -> SXY:
@@ -1618,7 +1620,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         bins: int | tuple[int, int] = 30,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         render: Render | Auto = AUTO,
     ) -> "Axes[float, float]":
         """Count paired points in equal-width rectangular bins over their data ranges.
@@ -1674,7 +1676,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         gridsize: int = 30,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
     ) -> "Axes[float, float]":
         """Count paired points in pointy-top hexagons, regular in screen coordinates.
 
@@ -2517,7 +2519,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         values: object,
         *,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
         annotate: bool = False,
         format: TickFormat | Auto = AUTO,

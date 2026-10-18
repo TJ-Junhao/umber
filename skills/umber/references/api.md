@@ -5112,7 +5112,7 @@ TickFormat.scientific()
 ## `umber.Time`
 
 ```text
-Time: TypeAlias
+type Time = datetime.datetime | datetime.date | np.datetime64
 ```
 
 A time on a time axis: a ``datetime``, a ``date`` (midnight of that day) or a
