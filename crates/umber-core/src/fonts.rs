@@ -16,6 +16,14 @@
 //! assert!(!font_bytes(BundledFont::Inter, Weight::Regular).is_empty());
 //! ```
 
+mod digest;
+
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+
+use crate::text::OwnedFace;
+use crate::{Error, Result};
+
 /// A font family bundled with the crate.
 ///
 /// # Examples
@@ -117,6 +125,82 @@ impl BundledFont {
 pub enum Font {
     /// A family bundled with the crate.
     Bundled(BundledFont),
+    /// Validated regular and optional bold font files, identified by their SHA-256 digests.
+    File(Arc<FontFiles>),
+    /// An installed family, with the selected faces kept in memory.
+    System(Arc<SystemFamily>),
+}
+
+/// The immutable files of a font made with [`Font::from_files`].
+///
+/// Paths and display names do not affect equality; the regular and optional bold digests do.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{BundledFont, Font, Weight};
+/// use umber_core::fonts::font_bytes;
+/// let font = Font::from_files(font_bytes(BundledFont::Inter, Weight::Regular).to_vec(), None, "Inter".into())?;
+/// assert!(matches!(font, Font::File(_)));
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug)]
+pub struct FontFiles {
+    regular: OwnedFace,
+    bold: Option<OwnedFace>,
+    identity: ([u8; 32], Option<[u8; 32]>),
+}
+
+impl PartialEq for FontFiles {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity == other.identity
+    }
+}
+impl Eq for FontFiles {}
+impl Hash for FontFiles {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.identity.hash(state);
+    }
+}
+
+/// An installed family and immutable copies of its selected regular and bold faces.
+///
+/// Equality uses the canonical family name, independently of the spelling used to find it.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::Font;
+/// if let Ok(font) = Font::system("DejaVu Sans") {
+///     assert!(matches!(font, Font::System(_)));
+/// }
+/// ```
+#[derive(Debug)]
+pub struct SystemFamily {
+    name: String,
+    regular: OwnedFace,
+    bold: Option<OwnedFace>,
+}
+
+impl SystemFamily {
+    pub(crate) fn new(name: String, regular: OwnedFace, bold: Option<OwnedFace>) -> Self {
+        SystemFamily {
+            name,
+            regular,
+            bold,
+        }
+    }
+}
+impl PartialEq for SystemFamily {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+impl Eq for SystemFamily {}
+impl Hash for SystemFamily {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
 }
 
 impl Font {
@@ -175,6 +259,80 @@ impl Font {
     /// ```
     pub const JETBRAINS_MONO: Font = Font::Bundled(BundledFont::JetBrainsMono);
 
+    /// Parses a regular font file and an optional bold file into an immutable font.
+    ///
+    /// The bold file fills the SemiBold slot; no synthetic bold is made. Variable fonts use
+    /// their default instance. `name` is used when the font has no family name. Font licensing
+    /// is the caller's responsibility. Editable SVG viewers need the font installed.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Data` if either file is damaged, is not a TrueType or OpenType font, or is a
+    /// collection (`.ttc`). A missing bold face is allowed here and fails only when laying out
+    /// bold text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BundledFont, Font, Weight};
+    /// use umber_core::fonts::font_bytes;
+    /// let font = Font::from_files(font_bytes(BundledFont::Inter, Weight::Regular).to_vec(), None, "Inter".into())?;
+    /// assert_eq!(font.family_name(), "Inter");
+    /// assert!(!font.has_face(Weight::SemiBold));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn from_files(regular: Vec<u8>, bold: Option<Vec<u8>>, name: String) -> Result<Font> {
+        let identity = (
+            digest::sha256(&regular),
+            bold.as_deref().map(digest::sha256),
+        );
+        let regular = parse_file(regular, "regular", &name)?;
+        let bold = bold
+            .map(|bytes| parse_file(bytes, "bold", &name))
+            .transpose()?;
+        Ok(Font::File(Arc::new(FontFiles {
+            regular,
+            bold,
+            identity,
+        })))
+    }
+
+    /// Finds an installed family and keeps its selected faces in memory.
+    ///
+    /// The regular face is closest to weight 400, preferring upright faces. The bold face is
+    /// upright, at least weight 600, and closest to 600. Family matching is case-insensitive.
+    /// Font licensing is the caller's responsibility.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` if the family is not installed, with the closest installed names in the
+    /// message, or if a selected font file cannot be read or parsed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    /// if let Ok(font) = Font::system("DejaVu Sans") {
+    ///     assert_eq!(font.family_name(), "DejaVu Sans");
+    /// }
+    /// ```
+    pub fn system(family: &str) -> Result<Font> {
+        crate::text::find_family(family).map(|family| Font::System(Arc::new(family)))
+    }
+
+    /// The owned face of a custom font; bundled faces live in the font library instead.
+    pub(crate) fn owned_face(&self, weight: Weight) -> Option<&OwnedFace> {
+        let (regular, bold) = match self {
+            Font::Bundled(_) => return None,
+            Font::File(font) => (&font.regular, &font.bold),
+            Font::System(font) => (&font.regular, &font.bold),
+        };
+        match weight {
+            Weight::Regular => Some(regular),
+            Weight::SemiBold => bold.as_ref(),
+        }
+    }
+
     /// The family name, as SVG `font-family` writes it.
     ///
     /// # Examples
@@ -188,6 +346,8 @@ impl Font {
     pub fn family_name(&self) -> &str {
         match self {
             Font::Bundled(font) => font.family_name(),
+            Font::File(font) => &font.regular.family,
+            Font::System(font) => &font.name,
         }
     }
 
@@ -203,8 +363,9 @@ impl Font {
     /// ```
     #[must_use]
     pub fn has_face(&self, weight: Weight) -> bool {
-        match (self, weight) {
-            (Font::Bundled(_), Weight::Regular | Weight::SemiBold) => true,
+        match self {
+            Font::Bundled(_) => true,
+            Font::File(_) | Font::System(_) => self.owned_face(weight).is_some(),
         }
     }
 
@@ -221,11 +382,32 @@ impl Font {
     pub fn generic_family(&self) -> &'static str {
         match self {
             Font::Bundled(font) => font.generic_family(),
+            Font::File(font) => font.regular.generic,
+            Font::System(font) => font.regular.generic,
         }
     }
 }
 
-/// A bundled font weight.
+fn parse_file(bytes: Vec<u8>, parameter: &'static str, name: &str) -> Result<OwnedFace> {
+    let hint = if bytes.starts_with(b"ttcf") {
+        "extract one face from the collection, or use Font.system()."
+    } else {
+        return OwnedFace::parse(bytes, 0, name)
+            .ok_or_else(|| invalid_file(parameter, "pass a .ttf or .otf file."));
+    };
+    Err(invalid_file(parameter, hint))
+}
+
+fn invalid_file(parameter: &'static str, hint: &'static str) -> Error {
+    Error::data(
+        "Font.from_file()",
+        format!("{parameter} is not a valid font; it must be a TrueType or OpenType font."),
+    )
+    .with_parameter(parameter)
+    .with_hint(hint)
+}
+
+/// A font weight.
 ///
 /// # Examples
 ///

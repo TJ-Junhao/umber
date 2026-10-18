@@ -3086,8 +3086,13 @@ class Font
 
 An immutable font family for a theme's titles or body text.
 
-The families bundled with umber are constants of this class. A font compares equal to
-another that names the same family.
+The bundled families are constants. ``from_file()`` reads regular and optional bold
+files; ``system()`` finds an installed family. Fonts compare equal by bundled constant,
+file bytes' SHA-256 digests, or installed family, never by a file's path.
+
+Variable fonts use their default instance. A font without bold is allowed until bold text
+is drawn; no synthetic bold is made. Font licensing is your responsibility. Editable SVG
+viewers need the font installed; outlined SVG and PNG do not.
 
 Example:
 
@@ -3176,6 +3181,77 @@ Example:
 >>> import umber as ub
 >>> ub.Font.SOURCE_SERIF_4
 Font.SOURCE_SERIF_4
+```
+
+### `umber.Font.from_file`
+
+```text
+Font.from_file(regular: str | os.PathLike[str], *, bold: str | os.PathLike[str] | Auto=AUTO) -> 'Font'
+```
+
+Read a TrueType or OpenType regular file and an optional bold file.
+
+Bytes are kept in memory, so changing or removing the files does not change the font.
+The family name comes from the regular file. Collections (``.ttc``) are not accepted;
+use ``Font.system()`` to choose a family from an installed collection.
+
+Args:
+    regular: Path to the regular ``.ttf`` or ``.otf`` file.
+    bold: Path to the bold face, used for SemiBold text, or ``AUTO`` for no bold face.
+
+Returns:
+    An immutable font for ``Theme.with_title_font()`` or ``Theme.with_body_font()``.
+
+Raises:
+    TypeError: If a path is not a string or string-valued path-like object.
+    UsageError: If a file cannot be read.
+    DataError: If either file is damaged, is not a font, or is a collection.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> from pathlib import Path
+>>> regular = Path("Example-Regular.ttf")
+>>> bold = Path("Example-Bold.ttf")
+>>> if regular.is_file() and bold.is_file():
+...     font = ub.Font.from_file(regular, bold=bold)
+...     theme = ub.Theme.PIGMENT.with_title_font(font)
+```
+
+### `umber.Font.system`
+
+```text
+Font.system(family: str) -> 'Font'
+```
+
+Find an installed font family, matching its name case-insensitively.
+
+The regular face is closest to weight 400, with upright faces preferred. The bold face
+is upright and closest to weight 600 among weights at least 600. Selected bytes are
+kept in memory. A family without bold fails only when bold text is drawn.
+
+Args:
+    family: An installed family name, not a font file path.
+
+Returns:
+    An immutable font for a theme.
+
+Raises:
+    TypeError: If ``family`` is not a string.
+    UsageError: If the family is not installed or its selected files cannot be read.
+        An unknown family reports the closest installed names.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> try:
+...     font = ub.Font.system("DejaVu Sans")
+... except ub.UsageError:
+...     font = ub.Font.INTER
+>>> isinstance(font, ub.Font)
+True
 ```
 
 ## `umber.GridLines`

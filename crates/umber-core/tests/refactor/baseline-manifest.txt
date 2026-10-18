@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: c677e4b78152e53fa4053894be5ff1f9ad4fadb0
+# revision: 7b28f69318ae3cb5f5c759d09d8e1548d3902ae4
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 af10b9e8d0c96cc7d716f99ca46cde4e34a86ef0adaf415e43c55ff3a0fb1800  api/cmaps.txt
@@ -833,6 +833,12 @@ eaa387c99feb1ce15851d4bc0bbae88663ec7e0f7c4104f4bd99d36bc1dc960d  png/fig-xlabel
 6e21f3ad0f02332ab1c83f31a68d20eb6a7c2509f29b8d4c2756d105e893380a  png/fig-xlabel-only.dpi72.png
 3ec8c6117ace625cd78c44ae9ba011fd47ac2a14b83d3ac723b72ad0c1809474  png/fig-ylabel-only.dpi200.png
 041508b9526b66b558aee69b8d958a5060063d39c9e06524f48e46d58a2b8b80  png/fig-ylabel-only.dpi72.png
+62f325f56edc22ef1e525e5136a2d8ff47f8fa5eae06aa0e96a58d816a89d677  png/font-file-graphite.dpi200.png
+f6f2a38209dda7096839d8f8dc3114ac8a972c876985cb6bd4264c5b9362d036  png/font-file-graphite.dpi72.png
+b132bb0c430482c4e6fd297739a2761dcd717753bdf6ede4df0e877a8787719f  png/font-file-midnight.dpi200.png
+aa5b23ba4acd0f023da89d08e54759b5ac1f6566eeb7c64684536797354fedb7  png/font-file-midnight.dpi72.png
+a5435f9366cb9b055485eb993659ce029849fa8789b16f5efaa357d4e38711bd  png/font-file-pigment.dpi200.png
+8623d57e385645a95a57107e94319c1af9546bfebe9f8ffb65d9f4e3140ef7d0  png/font-file-pigment.dpi72.png
 b7e440bc11abe641645790f241b029f7970464d3e2b8aeaa8e6968d6fb2cf3ce  png/grid-1x2-graphite.dpi200.png
 27e5acd10d1553bb59735dc6d85e2d255106b39b9e26152918b7be920881bc14  png/grid-1x2-graphite.dpi72.png
 ac90b7d592e09a828f46bc22706c90ff1894667855432d8604d3f9dce5af6a7c  png/grid-1x2-midnight.dpi200.png
@@ -1813,6 +1819,9 @@ bcd7be072a61e931e207b30a2b1e8fe094e044f34cf32844f946bd8bd81d949c  scene/fig-x-en
 3fc0ff31a641338a471874b386ff1d99ee2d7648681b0142ef52f5eb8a74c474  scene/fig-x-end-label-near-cap.txt
 f6e8b7562dd50fba7daf8963ac4527c2b2d120e49662a4d160453098f71e7c34  scene/fig-xlabel-only.txt
 f1f94be757a63bde135c03fe2b1f14a53da8cb5b7e4d6e02556d365e9851a2bb  scene/fig-ylabel-only.txt
+5264fedf331d71e3cc0f73aa64b69d1a3dda5178c26a20e0c2e728b128799448  scene/font-file-graphite.txt
+a7aaa2706d4e3ed896459e5069ed5782b2cb78e4e05f62ce2b7fad32e7318b32  scene/font-file-midnight.txt
+3d2adba88dd0c95f13057934e65d0e886148ebf8a9fa5258c9f824e2a3ff7129  scene/font-file-pigment.txt
 9286a7bf4d0e597197b69d25ea2c1a2f3e3fbfa2f6d92c8d4301656177fc153c  scene/grid-1x2-graphite.txt
 6faa064743280f42cd185838dbe868e930044cdd8883788ae28c709e673a8adf  scene/grid-1x2-midnight.txt
 165b75330470c6d1bd4de42c41943bedf0298d37451ca471915dfff68953aca2  scene/grid-1x2-pigment.txt
@@ -2891,6 +2900,12 @@ e9f14416ed6f55d37bacef8b45b9e6f5c0c0b114c7eb2f9d8215a6d2cae9b204  svg/fig-x-end-
 f91fe8e553968e49df0dd68e41f88802e46e4171de922d05cd71ddb92ae853bf  svg/fig-xlabel-only.outlines.svg
 e54e9b4263bb6007d88ddb77ff06a39bb365affec065d572ca994bf48135bdcd  svg/fig-ylabel-only.editable.svg
 cc480af592f6d3697c994d04178fa2d028a564c8630a2dc8fdd3252e1dad5578  svg/fig-ylabel-only.outlines.svg
+03ce49a62f4d6f5dc0101cbd32f4b27f8784997b95f41cae6ca2dab10953dbfc  svg/font-file-graphite.editable.svg
+520425d38bdd6d8791a5f3dab23d153fe053acfc18becf8ea31dac5740dc374a  svg/font-file-graphite.outlines.svg
+65d55dbff4cefe9ae60b9590f18a494bcce6e08d17bee3017b632a86902ad5fc  svg/font-file-midnight.editable.svg
+3962c1018c782a341e65d618f0f6ff828bdcb64014054ab27ec20e1e96e48e5a  svg/font-file-midnight.outlines.svg
+e3b4e8325a3e0f643e87037d96b934eb4844dd16d9b7b14a78fb47c13210cacf  svg/font-file-pigment.editable.svg
+460c9a095720422a769e75b5dc0dd3d78624f447ea5492769440e07963949378  svg/font-file-pigment.outlines.svg
 5fb5066676fbb7d7cc8e4fdda7d06fce7e3aa03900329af65f74758a753f9ea3  svg/grid-1x2-graphite.editable.svg
 f9c4fecd69ea023036cd09c92c3ed2e2cc4b43d82861738c2a808269ca7eef56  svg/grid-1x2-graphite.outlines.svg
 7b48e331e08edc99c261c9f25414e9660be3562fbfc989c56fc56e7558a5ee93  svg/grid-1x2-midnight.editable.svg

@@ -1,0 +1,193 @@
+//! Named-family selection with an in-memory font database.
+
+use super::*;
+use crate::fonts::{BundledFont, Font, font_bytes};
+use std::sync::Arc;
+
+fn insert(
+    db: &mut fontdb::Database,
+    family: &str,
+    font: BundledFont,
+    weight: u16,
+    style: fontdb::Style,
+) {
+    let mut source = fontdb::Database::new();
+    source.load_font_data(font_bytes(font, Weight::Regular).to_vec());
+    let mut face = source.faces().next().unwrap().clone();
+    face.families = vec![(family.into(), fontdb::Language::English_UnitedStates)];
+    face.weight = fontdb::Weight(weight);
+    face.style = style;
+    db.push_face_info(face);
+}
+
+fn resolve(db: &fontdb::Database, family: &str) -> Font {
+    Font::System(Arc::new(family_in(db, family).unwrap()))
+}
+
+fn chosen(font: &Font, weight: Weight) -> &[u8] {
+    &font.owned_face(weight).unwrap().bytes
+}
+
+#[test]
+fn system_family_selects_upright_weights_and_canonical_name() {
+    let mut db = fontdb::Database::new();
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Geist,
+        400,
+        fontdb::Style::Italic,
+    );
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Inter,
+        400,
+        fontdb::Style::Normal,
+    );
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Geist,
+        600,
+        fontdb::Style::Italic,
+    );
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::IbmPlexSans,
+        700,
+        fontdb::Style::Normal,
+    );
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::SourceSerif4,
+        600,
+        fontdb::Style::Normal,
+    );
+    let font = resolve(&db, "eXaMpLe");
+    assert_eq!(font.family_name(), "Example");
+    assert_eq!(font, resolve(&db, "Example"));
+    assert_eq!(
+        chosen(&font, Weight::Regular),
+        font_bytes(BundledFont::Inter, Weight::Regular)
+    );
+    assert_eq!(
+        chosen(&font, Weight::SemiBold),
+        font_bytes(BundledFont::SourceSerif4, Weight::Regular)
+    );
+}
+
+#[test]
+fn system_family_uses_closest_regular_and_does_not_synthesize_bold() {
+    let mut db = fontdb::Database::new();
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Geist,
+        300,
+        fontdb::Style::Normal,
+    );
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Inter,
+        450,
+        fontdb::Style::Normal,
+    );
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::SourceSerif4,
+        900,
+        fontdb::Style::Italic,
+    );
+    let font = resolve(&db, "Example");
+    assert_eq!(
+        chosen(&font, Weight::Regular),
+        font_bytes(BundledFont::Inter, Weight::Regular)
+    );
+    assert!(!font.has_face(Weight::SemiBold));
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::IbmPlexSans,
+        700,
+        fontdb::Style::Normal,
+    );
+    let font = resolve(&db, "Example");
+    assert_eq!(
+        chosen(&font, Weight::SemiBold),
+        font_bytes(BundledFont::IbmPlexSans, Weight::Regular)
+    );
+}
+
+#[test]
+fn system_unknown_lists_closest_with_static_hint() {
+    let mut db = fontdb::Database::new();
+    for family in ["Times New Roman", "Times"] {
+        insert(
+            &mut db,
+            family,
+            BundledFont::Inter,
+            400,
+            fontdb::Style::Normal,
+        );
+    }
+    let error = family_in(&db, "Tmes").unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Font.system(): no installed family is named 'Tmes'; it must name an installed font family. Closest: Times, Times New Roman."
+    );
+    assert_eq!(error.parameter(), Some("family"));
+    assert_eq!(error.hint(), Some("check the installed family names."));
+    let empty = family_in(&fontdb::Database::new(), "Tmes").unwrap_err();
+    assert!(!empty.to_string().contains("Closest:"));
+    assert_eq!(edit_distance("字体", "字体a"), 1);
+}
+
+#[test]
+fn system_family_missing_file_is_reported_at_construction() {
+    let mut source = fontdb::Database::new();
+    source.load_font_data(font_bytes(BundledFont::Inter, Weight::Regular).to_vec());
+    let mut face = source.faces().next().unwrap().clone();
+    face.source = fontdb::Source::File(std::path::PathBuf::from("/umber-absent-font-394856.ttf"));
+    let mut db = fontdb::Database::new();
+    db.push_face_info(face);
+    let error = family_in(&db, "Inter").unwrap_err();
+    assert_eq!(error.parameter(), Some("family"));
+    assert_eq!(error.hint(), Some("check the installed font files."));
+}
+
+#[test]
+fn system_family_accepts_an_installed_collection() {
+    let original = font_bytes(BundledFont::Inter, Weight::Regular);
+    let mut bytes = b"ttcf\0\x01\0\0\0\0\0\x01\0\0\0\x10".to_vec();
+    bytes.extend(original);
+    let count = u16::from_be_bytes([original[4], original[5]]) as usize;
+    for record in 0..count {
+        let offset = 16 + 12 + 16 * record + 8;
+        let value = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) + 16;
+        bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+    }
+    assert!(Font::from_files(bytes.clone(), None, "collection".into()).is_err());
+    let mut db = fontdb::Database::new();
+    db.load_font_data(bytes);
+    let font = resolve(&db, "Inter");
+    let lib = crate::FontLibrary::with_fallbacks(vec![]);
+    let fonts = lib.with_figure_fonts(&[font]).unwrap();
+    let layout = fonts
+        .layout(
+            "Collection 123",
+            &crate::TextStyle {
+                face: crate::FaceId::new(0),
+                weight: Weight::Regular,
+                size: 12.0,
+                tabular_figures: false,
+            },
+        )
+        .unwrap();
+    assert!(layout.width() > 0.0);
+    assert!(!layout.outline(crate::Point { x: 0.0, y: 0.0 }).is_empty());
+}

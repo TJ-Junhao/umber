@@ -15,7 +15,7 @@ use read_fonts::model::Blob;
 use skrifa::MetadataProvider;
 use skrifa::instance::{LocationRef, Size};
 
-use super::font::{Face, FontHandle, FontKey, ShapingFont};
+use super::font::{Face, FaceMetrics, FontHandle, FontKey, ShapingFont};
 use super::guard::{guarded, lock};
 use super::layout::TextLayout;
 use super::runs::{self, TextRun, group_by_font};
@@ -118,6 +118,15 @@ impl BundledFace {
             descender: metrics.descent,
         })
     }
+}
+
+/// The resolved primary face of one layout, independent of where its bytes came from.
+struct PrimaryFace<'a> {
+    key: FontKey,
+    handle: FontHandle,
+    shaping: &'a ShapingFont,
+    face: &'a Face<'a>,
+    metrics: FaceMetrics,
 }
 
 /// A font passed to [`FontLibrary::with_fallbacks`]: its bytes, shared with layouts, and the
@@ -303,15 +312,58 @@ impl FontLibrary {
                 .get(index)
                 .map(|extra| FontHandle::extra(Arc::clone(&extra.bytes))),
             FontKey::System(face) => self.system.as_ref()?.handle(face),
+            FontKey::Custom => None,
         }
     }
 
-    /// Shapes `text` with `style`, with `primary_font` as its primary font, and measures it.
-    /// See [`SceneFonts::layout`].
-    fn layout_bundled(
+    /// Resolves bundled or owned bytes to the same shaping path.
+    fn layout_font(&self, text: &str, font: &Font, style: &TextStyle) -> TextLayout {
+        match font {
+            Font::Bundled(font) => {
+                let Some(face) = self.bundled_face(*font, style.weight) else {
+                    return TextLayout::empty(0.0, 0.0);
+                };
+                self.layout_primary(
+                    text,
+                    PrimaryFace {
+                        key: FontKey::Bundled(*font, style.weight),
+                        handle: FontHandle::bundled(*font, style.weight),
+                        shaping: &face.shaping,
+                        face: &face.face,
+                        metrics: FaceMetrics {
+                            units_per_em: face.units_per_em,
+                            ascender: face.ascender,
+                            descender: face.descender,
+                        },
+                    },
+                    style,
+                )
+            }
+            Font::File(_) | Font::System(_) => guarded(|| {
+                let owned = font.owned_face(style.weight)?;
+                let face = Face::parse(&owned.bytes, owned.index)?;
+                Some(self.layout_primary(
+                    text,
+                    PrimaryFace {
+                        key: FontKey::Custom,
+                        handle: FontHandle::owned(owned),
+                        shaping: &owned.shaping,
+                        face: &face,
+                        metrics: owned.metrics,
+                    },
+                    style,
+                ))
+            })
+            .flatten()
+            .unwrap_or_else(|| TextLayout::empty(0.0, 0.0)),
+        }
+    }
+
+    /// Shapes and measures text with a resolved primary face and the usual fallback order.
+    fn layout_primary(
         &self,
         text: &str,
-        primary_font: BundledFont,
+        primary: PrimaryFace<'_>,
         style: &TextStyle,
     ) -> TextLayout {
         let size = if style.size.is_finite() && style.size > 0.0 {
@@ -319,27 +371,27 @@ impl FontLibrary {
         } else {
             0.0
         };
-        let primary = self.bundled_face(primary_font, style.weight);
-        let (ascent, descent) = primary.map_or((0.0, 0.0), |face| {
-            let scale = size / f32::from(face.units_per_em.max(1));
-            (
-                (face.ascender * scale).max(0.0),
-                (-face.descender * scale).max(0.0),
-            )
-        });
+        let scale = size / f32::from(primary.metrics.units_per_em.max(1));
+        let (ascent, descent) = (
+            (primary.metrics.ascender * scale).max(0.0),
+            (-primary.metrics.descender * scale).max(0.0),
+        );
         if size == 0.0 || text.is_empty() {
             return TextLayout::empty(ascent, descent);
         }
 
-        let runs = self.split_runs(text, primary_font, style);
+        let runs = self.split_runs(text, &primary, style);
         let features = features(style.tabular_figures);
-        let primary_key = FontKey::Bundled(primary_font, style.weight);
+        let primary_key = primary.key;
         let mut shaped: Vec<ShapedSlot> = runs.iter().map(|_| None).collect();
         let extents_budget = Cell::new(EXTENTS_PER_LAYOUT);
         for (key, members) in group_by_font(runs.iter().map(|run| run.font)) {
-            let Some(handle) = self.handle(key) else {
-                continue;
+            let handle = if key == primary.key {
+                Some(primary.handle.clone())
+            } else {
+                self.handle(key)
             };
+            let Some(handle) = handle else { continue };
             let shape_all = |font: &ShapingFont, face: &Face<'_>| {
                 let funcs = if matches!(key, FontKey::System(_)) {
                     Funcs::system(face, &extents_budget)
@@ -356,29 +408,36 @@ impl FontLibrary {
                     })
                     .collect::<Vec<_>>()
             };
-            let results = match key {
-                FontKey::Bundled(font, weight) => self
-                    .bundled_face(font, weight)
-                    .map(|bundled| shape_all(&bundled.shaping, &bundled.face)),
-                // Fonts that did not ship with the crate are parsed and shaped under a guard.
-                FontKey::Extra(index) => self.extra.get(index).and_then(|extra| {
-                    guarded(|| Face::parse(&extra.bytes, 0).map(|f| shape_all(&extra.shaping, &f)))
-                        .flatten()
-                }),
-                FontKey::System(face) => self.system.as_ref().and_then(|system| {
-                    let shaping = system.shaping_font(face)?;
-                    let results = handle
-                        .with_data(|data, index| {
-                            guarded(|| {
-                                Face::parse(data, index).map(|f| shape_all(&shaping.font, &f))
-                            })
-                            .flatten()
+            let results = if key == primary.key {
+                Some(shape_all(primary.shaping, primary.face))
+            } else {
+                match key {
+                    FontKey::Custom => None,
+                    FontKey::Bundled(font, weight) => self
+                        .bundled_face(font, weight)
+                        .map(|bundled| shape_all(&bundled.shaping, &bundled.face)),
+                    // Fonts that did not ship with the crate are parsed and shaped under a guard.
+                    FontKey::Extra(index) => self.extra.get(index).and_then(|extra| {
+                        guarded(|| {
+                            Face::parse(&extra.bytes, 0).map(|f| shape_all(&extra.shaping, &f))
                         })
-                        .flatten()?;
-                    // Only a font that shaped without panicking is kept for later layouts.
-                    system.keep_shaping_font(face, shaping);
-                    Some(results)
-                }),
+                        .flatten()
+                    }),
+                    FontKey::System(face) => self.system.as_ref().and_then(|system| {
+                        let shaping = system.shaping_font(face)?;
+                        let results = handle
+                            .with_data(|data, index| {
+                                guarded(|| {
+                                    Face::parse(data, index).map(|f| shape_all(&shaping.font, &f))
+                                })
+                                .flatten()
+                            })
+                            .flatten()?;
+                        // Only a font that shaped without panicking is kept for later layouts.
+                        system.keep_shaping_font(face, shaping);
+                        Some(results)
+                    }),
+                }
             };
             for (i, run) in results.unwrap_or_default() {
                 if let Some(slot) = shaped.get_mut(i) {
@@ -390,10 +449,10 @@ impl FontLibrary {
         // A fallback font that could not be read again (for example a system font file that
         // disappeared, or a font that panicked while shaping) is replaced by the primary font,
         // so the text keeps a width.
-        if let Some(face) = primary {
-            let funcs = Funcs::new(&face.face);
-            let mut shaper = Shaper::new(&face.shaping, &funcs, &features);
-            let handle = FontHandle::bundled(primary_font, style.weight);
+        {
+            let funcs = Funcs::new(primary.face);
+            let mut shaper = Shaper::new(primary.shaping, &funcs, &features);
+            let handle = primary.handle;
             for (slot, run) in shaped.iter_mut().zip(&runs) {
                 if slot.is_none()
                     && let Some(glyphs) = text
@@ -410,20 +469,19 @@ impl FontLibrary {
 
     /// Splits `text` into runs, choosing a font for each character the primary font lacks with
     /// [`FontLibrary::fallback_for`], within this layout call's budgets.
-    fn split_runs(&self, text: &str, primary_font: BundledFont, style: &TextStyle) -> Vec<TextRun> {
-        let primary_key = FontKey::Bundled(primary_font, style.weight);
-        let primary = self.bundled_face(primary_font, style.weight);
+    fn split_runs(&self, text: &str, primary: &PrimaryFace<'_>, style: &TextStyle) -> Vec<TextRun> {
+        let primary_key = primary.key;
         let mut extras: Option<ParsedExtras<'_>> = None;
         let mut budget = Budget::per_layout();
         let mut extra_budget = EXTRA_CONFIRMATIONS_PER_LAYOUT;
         runs::split_runs(
             text,
             primary_key,
-            |c| primary.is_some_and(|face| face.face.glyph(c).is_some()),
+            |c| primary.face.glyph(c).is_some(),
             |c| {
                 self.fallback_for(
                     c,
-                    primary_font,
+                    primary_key,
                     style.weight,
                     &mut extras,
                     &mut extra_budget,
@@ -441,14 +499,14 @@ impl FontLibrary {
     fn fallback_for<'a>(
         &'a self,
         c: char,
-        primary: BundledFont,
+        primary: FontKey,
         weight: Weight,
         extras: &mut Option<ParsedExtras<'a>>,
         extra_budget: &mut usize,
         budget: &mut Budget,
     ) -> Option<FontKey> {
         for font in BundledFont::ALL {
-            if font == primary {
+            if FontKey::Bundled(font, weight) == primary {
                 continue;
             }
             if self
@@ -542,7 +600,8 @@ const LAYOUT_CONTEXT: &str = "SceneFonts.layout()";
 const UNKNOWN_FACE_HINT: &str = "name a face by the index of a font given to with_figure_fonts.";
 
 /// The hint of the error for a font without a face for the weight of the text.
-const MISSING_WEIGHT_HINT: &str = "choose a font with a face for that weight.";
+const MISSING_WEIGHT_HINT: &str =
+    "pass bold= to Font.from_file, or choose a family with a bold face.";
 
 /// Why a style cannot be laid out with a scene's fonts.
 enum Unavailable<'a> {
@@ -553,12 +612,11 @@ enum Unavailable<'a> {
 }
 
 /// A text style checked against a scene's fonts by [`SceneFonts::check`], with the font of its
-/// face and the bundled font that sets it: text in it lays out without error.
+/// face: text in it has an available weight and lays out without error.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CheckedStyle {
     style: TextStyle,
     font: Font,
-    primary: BundledFont,
 }
 
 impl CheckedStyle {
@@ -673,21 +731,19 @@ impl SceneFonts<'_> {
     ///
     /// As [`SceneFonts::layout`]: the error of a missing weight names `text`.
     pub(crate) fn check(&self, text: &str, style: &TextStyle) -> Result<CheckedStyle> {
-        let (font, primary) = self
+        let font = self
             .primary(style)
             .map_err(|unavailable| self.error(unavailable, Some(text)))?;
         Ok(CheckedStyle {
             style: *style,
             font: font.clone(),
-            primary,
         })
     }
 
     /// Shapes `text` with the checked style `style` and measures it, as
     /// [`SceneFonts::layout`] does.
     pub(crate) fn layout_checked(&self, text: &str, style: &CheckedStyle) -> TextLayout {
-        self.library
-            .layout_bundled(text, style.primary, &style.style)
+        self.library.layout_font(text, &style.font, &style.style)
     }
 
     /// The ascent and descent of the primary font of `style`, in points.
@@ -698,23 +754,20 @@ impl SceneFonts<'_> {
     /// but no text, so a caller with text to set checks that text first
     /// ([`SceneFonts::check`]).
     pub(crate) fn metrics(&self, style: &TextStyle) -> Result<(f32, f32)> {
-        let (_, primary) = self
+        let primary = self
             .primary(style)
             .map_err(|unavailable| self.error(unavailable, None))?;
-        let empty = self.library.layout_bundled("", primary, style);
+        let empty = self.library.layout_font("", primary, style);
         Ok((empty.ascent(), empty.descent()))
     }
 
-    /// The font of the face of `style`, and the bundled font that sets text of `style`.
+    /// The primary font of `style`, checked for the requested weight.
     ///
     /// This is the one place where a style is resolved to a face. A font without a face for
     /// the style's weight ([`Font::has_face`]) is detected here as [`Unavailable::Weight`].
     /// Every bundled font has a face for every weight; unit tests also treat the faces and
     /// weights given to `without_weight` as missing.
-    fn primary(
-        &self,
-        style: &TextStyle,
-    ) -> std::result::Result<(&Font, BundledFont), Unavailable<'_>> {
+    fn primary(&self, style: &TextStyle) -> std::result::Result<&Font, Unavailable<'_>> {
         let font = self.font(style.face).ok_or(Unavailable::Face(style.face))?;
         let has_face = font.has_face(style.weight);
         #[cfg(test)]
@@ -722,9 +775,7 @@ impl SceneFonts<'_> {
         if !has_face {
             return Err(Unavailable::Weight(font, style.weight));
         }
-        match font {
-            Font::Bundled(bundled) => Ok((font, *bundled)),
-        }
+        Ok(font)
     }
 
     /// The error for a style that cannot be laid out, naming `text` when there is text to set.

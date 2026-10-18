@@ -3,6 +3,7 @@
 Checked by pyright and mypy in strict mode; see ``check_errors.py`` for the marker convention.
 """
 
+from pathlib import Path
 from typing import assert_type
 
 import umber as ub
@@ -12,6 +13,16 @@ assert_type(ub.Font.INTER, ub.Font)
 assert_type(ub.Theme.PIGMENT.with_title_font(ub.Font.INTER), ub.Theme)
 assert_type(ub.Theme.MIDNIGHT.with_body_font(ub.Font.JETBRAINS_MONO), ub.Theme)
 same: bool = ub.Font.GEIST == ub.Font.GEIST
+assert_type(ub.Font.from_file("regular.ttf"), ub.Font)
+assert_type(ub.Font.from_file(Path("regular.ttf"), bold=Path("bold.otf")), ub.Font)
+assert_type(ub.Font.from_file("regular.ttf", bold=ub.AUTO), ub.Font)
+assert_type(ub.Font.system("Inter"), ub.Font)
+
+ub.Font.from_file(None)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+ub.Font.from_file(b"regular.ttf")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+ub.Font.from_file("regular.ttf", bold=None)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+ub.Font.from_file("regular.ttf", "bold.ttf")  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue]
+ub.Font.system(3)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
 # Negative: a family name, an index or another enum is not a font.
 ub.Theme.PIGMENT.with_title_font("Inter")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

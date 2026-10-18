@@ -92,6 +92,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/colorbar.rs
   crates/umber-core/tests/support/corpus/ecdf.rs
   crates/umber-core/tests/support/corpus/error_bars.rs
+  crates/umber-core/tests/support/corpus/font_file.rs
   crates/umber-core/tests/support/corpus/grid.rs
   crates/umber-core/tests/support/corpus/header.rs
   crates/umber-core/tests/support/corpus/heatmap.rs

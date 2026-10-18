@@ -54,7 +54,7 @@ fn a_panel_title_without_a_bold_face_fails_the_render_naming_the_title_and_font(
     );
     assert_eq!(
         err.hint(),
-        Some("choose a font with a face for that weight.")
+        Some("pass bold= to Font.from_file, or choose a family with a bold face.")
     );
 }
 
