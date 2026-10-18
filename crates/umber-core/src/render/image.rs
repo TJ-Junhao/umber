@@ -236,29 +236,33 @@ pub(super) fn png_bytes(width: u32, height: u32, pixels: &[Rgba]) -> Option<Vec<
 /// `bytes` in standard base64 (RFC 4648, with `+`, `/` and `=` padding), as data URIs carry it.
 pub(super) fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    // The character of the six-bit group `bits`.
-    let digit = |bits: u8| char::from(ALPHABET[usize::from(bits)]);
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut out = Vec::with_capacity(bytes.len().div_ceil(3) * 4);
     let mut chunks = bytes.chunks_exact(3);
     for chunk in &mut chunks {
-        out.extend([
-            digit(chunk[0] >> 2),
-            digit((chunk[0] & 3) << 4 | chunk[1] >> 4),
-            digit((chunk[1] & 15) << 2 | chunk[2] >> 6),
-            digit(chunk[2] & 63),
+        out.extend_from_slice(&[
+            ALPHABET[usize::from(chunk[0] >> 2)],
+            ALPHABET[usize::from((chunk[0] & 3) << 4 | chunk[1] >> 4)],
+            ALPHABET[usize::from((chunk[1] & 15) << 2 | chunk[2] >> 6)],
+            ALPHABET[usize::from(chunk[2] & 63)],
         ]);
     }
     match *chunks.remainder() {
-        [a] => out.extend([digit(a >> 2), digit((a & 3) << 4), '=', '=']),
-        [a, b] => out.extend([
-            digit(a >> 2),
-            digit((a & 3) << 4 | b >> 4),
-            digit((b & 15) << 2),
-            '=',
+        [a] => out.extend_from_slice(&[
+            ALPHABET[usize::from(a >> 2)],
+            ALPHABET[usize::from((a & 3) << 4)],
+            b'=',
+            b'=',
+        ]),
+        [a, b] => out.extend_from_slice(&[
+            ALPHABET[usize::from(a >> 2)],
+            ALPHABET[usize::from((a & 3) << 4 | b >> 4)],
+            ALPHABET[usize::from((b & 15) << 2)],
+            b'=',
         ]),
         _ => {}
     }
-    out
+    // The alphabet and padding are ASCII, so the conversion never takes the lossy branch.
+    String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
 #[cfg(test)]
