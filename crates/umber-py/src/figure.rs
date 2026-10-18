@@ -668,7 +668,7 @@ impl Figure {
         let (categories, series) = (names(categories)?, Self::series(series)?);
         let labels = value_labels(annotate, format, size)?;
         self.axes(row, col)?
-            .grouped_bar_annotated(categories, series, labels)
+            .grouped_bar(categories, series, labels)
             .map(drop)
             .map_err(core_error)
     }
@@ -785,7 +785,7 @@ impl Figure {
         let (categories, series) = (names(categories)?, Self::series(series)?);
         let labels = value_labels(annotate, format, size)?;
         self.axes(row, col)?
-            .stacked_bar_annotated(categories, series, labels)
+            .stacked_bar(categories, series, labels)
             .map(drop)
             .map_err(core_error)
     }

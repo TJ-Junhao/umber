@@ -5147,13 +5147,18 @@ mod tests {
             .grouped_bar(
                 names(&["a", "b"]),
                 vec![auto(&[12.0, f64::NAN]), auto(&[36.5, 3.0])],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         assert_eq!(y_domain(&f), (0.0, 38.325));
         // The heights of every series count, not only the first's.
         let mut f = figure(ScaleKind::Category, LIN);
         axes(&mut f)
-            .grouped_bar(names(&["a"]), vec![auto(&[-12.0]), auto(&[-36.5])])
+            .grouped_bar(
+                names(&["a"]),
+                vec![auto(&[-12.0]), auto(&[-36.5])],
+                crate::ValueLabels::default(),
+            )
             .unwrap();
         assert_eq!(y_domain(&f), (-38.325, 0.0));
     }
@@ -5169,6 +5174,7 @@ mod tests {
             .grouped_bar(
                 names(&["a", "b"]),
                 vec![auto(&[0.0, 0.0]), auto(&[0.0, 0.0])],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         let mut stacked = figure(ScaleKind::Category, LIN);
@@ -5176,6 +5182,7 @@ mod tests {
             .stacked_bar(
                 names(&["a", "b"]),
                 vec![auto(&[0.0, 0.0]), auto(&[0.0, 0.0])],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         assert_eq!(y_domain(&plain), y_domain(&grouped));
@@ -5190,6 +5197,7 @@ mod tests {
             .stacked_bar(
                 names(&["a", "b"]),
                 vec![auto(&[12.0, 5.0]), auto(&[24.5, f64::NAN])],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);
@@ -5198,7 +5206,11 @@ mod tests {
         // All negative: mirrored.
         let mut f = figure(ScaleKind::Category, LIN);
         axes(&mut f)
-            .stacked_bar(names(&["a"]), vec![auto(&[-12.0]), auto(&[-24.5])])
+            .stacked_bar(
+                names(&["a"]),
+                vec![auto(&[-12.0]), auto(&[-24.5])],
+                crate::ValueLabels::default(),
+            )
             .unwrap();
         assert_eq!(y_domain(&f), (-38.325, 0.0));
     }
@@ -5211,6 +5223,7 @@ mod tests {
             .stacked_bar(
                 names(&["a", "b"]),
                 vec![auto(&[30.0, -12.0]), auto(&[6.0, -7.0]), auto(&[-3.0, 2.0])],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);
@@ -5239,6 +5252,7 @@ mod tests {
             .stacked_bar(
                 names(&["a", "b"]),
                 vec![auto(&[2.0, 500.0]), auto(&[f64::NAN, 1000.0])],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         let domain = y_domain(&f);
@@ -5279,6 +5293,7 @@ mod tests {
                     series(at(5), &[1.0]),
                     auto(&[1.0]),
                 ],
+                crate::ValueLabels::default(),
             )
             .unwrap()
             .line(cats(&["a"]), &[1.0], LineOptions::default())
@@ -5286,6 +5301,7 @@ mod tests {
             .stacked_bar(
                 names(&["a"]),
                 vec![auto(&[1.0]), series(at(0), &[1.0]), auto(&[2.0])],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         let resolved = resolve_marks(f.single_axes().marks(), f.theme());
@@ -5308,9 +5324,17 @@ mod tests {
         axes(&mut f)
             .bar(names(&["b"]), &[1.0], BarOptions::default())
             .unwrap()
-            .stacked_bar(names(&["c", "b", "a"]), vec![auto(&[1.0, 2.0, 3.0])])
+            .stacked_bar(
+                names(&["c", "b", "a"]),
+                vec![auto(&[1.0, 2.0, 3.0])],
+                crate::ValueLabels::default(),
+            )
             .unwrap()
-            .grouped_bar(names(&["d", "a"]), vec![auto(&[1.0, 2.0])])
+            .grouped_bar(
+                names(&["d", "a"]),
+                vec![auto(&[1.0, 2.0])],
+                crate::ValueLabels::default(),
+            )
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);
         assert_eq!(labels(&r.x.ticks), ["b", "c", "a", "d"]);
@@ -7392,18 +7416,26 @@ mod tests {
                     values: vec![2.0, 6.0],
                     ..Series::default()
                 };
-                a.grouped_bar(vec!["a".into(), "b".into()], vec![series.clone(), series])
-                    .map(drop)
-                    .unwrap();
+                a.grouped_bar(
+                    vec!["a".into(), "b".into()],
+                    vec![series.clone(), series],
+                    crate::ValueLabels::default(),
+                )
+                .map(drop)
+                .unwrap();
             }),
             ("stacked bar", |a| {
                 let series = Series {
                     values: vec![2.0, 6.0],
                     ..Series::default()
                 };
-                a.stacked_bar(vec!["a".into(), "b".into()], vec![series.clone(), series])
-                    .map(drop)
-                    .unwrap();
+                a.stacked_bar(
+                    vec!["a".into(), "b".into()],
+                    vec![series.clone(), series],
+                    crate::ValueLabels::default(),
+                )
+                .map(drop)
+                .unwrap();
             }),
             ("box", |a| {
                 let groups = vec![vec![1.0, 2.0, 4.0, 30.0], vec![3.0, 5.0]];
@@ -7708,6 +7740,7 @@ mod tests {
             .stacked_bar(
                 names(&["c", "a"]),
                 vec![auto(&[2.0, 4.0]), auto(&[1.0, 3.0])],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         let r = resolve_axes(f.single_axes(), 5, 4);

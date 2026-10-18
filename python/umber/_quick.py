@@ -13,12 +13,13 @@ from umber._args import instance
 from umber._axes import Axes
 from umber._color import Color
 from umber._color_by import ColorBy
-from umber._enums import Dash, Hist, Marker, Stat
+from umber._enums import AUTO, Auto, Dash, Hist, Marker, Stat
 from umber._figure import Figure
 from umber._report import api_call
 from umber._scale import Scale
 from umber._size import Size
 from umber._theme import Theme
+from umber._ticks import TickFormat
 from umber._types import Values
 
 _THEME_HINT: Final = "use Theme.PIGMENT, Theme.GRAPHITE or Theme.MIDNIGHT."
@@ -121,6 +122,9 @@ def bar(
     *,
     label: str = "",
     color: Color = Color.AUTO,
+    annotate: bool = False,
+    format: TickFormat | Auto = AUTO,
+    size: Size = Size.AUTO,
     theme: Theme = Theme.PIGMENT,
 ) -> Axes[str, float]:
     """Plot one bar per category on a new figure and return its axes.
@@ -134,6 +138,9 @@ def bar(
         heights: The bar heights, one per category.
         label: The name shown in the legend; an empty string leaves the bars out of it.
         color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
+        annotate: Whether each bar shows its value just beyond its end, as in ``Axes.bar()``.
+        format: The format of the values shown by ``annotate``, as in ``Axes.bar()``.
+        size: The size of the values shown by ``annotate``, as in ``Axes.bar()``.
         theme: The theme of the new figure.
 
     Returns:
@@ -143,17 +150,28 @@ def bar(
         TypeError: If an argument has the wrong type.
         DataError: If the data cannot be plotted: lengths differ, a category repeats, or a
             height is infinite.
-        StyleError: If ``label`` or a category name is too long.
+        StyleError: If ``label`` or a category name is too long, or ``format`` is
+            ``TickFormat.iso()``.
+        UsageError: If ``format`` or ``size`` is given without ``annotate``.
 
     Example:
         >>> import umber as ub
         >>> ax = ub.bar(["North", "South", "East"], [3, 5, 2], theme=ub.Theme.GRAPHITE)
         >>> ax.figure.save_svg("regions.svg")
+        >>> labelled = ub.bar(["North", "South"], [3.5, 5.25], annotate=True)
     """
     with api_call():
         instance("bar()", "theme", theme, Theme, _THEME_HINT)
         axes = Figure(theme=theme).add_axes(x=Scale.category())
-        return axes.bar(categories, heights, label=label, color=color)
+        return axes.bar(
+            categories,
+            heights,
+            label=label,
+            color=color,
+            annotate=annotate,
+            format=format,
+            size=size,
+        )
 
 
 def hist(

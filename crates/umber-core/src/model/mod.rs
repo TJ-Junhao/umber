@@ -432,8 +432,14 @@ mod tests {
             "Axes.scatter()",
         );
         assert_category_x(a.bar(names(), &[1.0], BarOptions::default()), "Axes.bar()");
-        assert_category_x(a.grouped_bar(names(), series()), "Axes.grouped_bar()");
-        assert_category_x(a.stacked_bar(names(), series()), "Axes.stacked_bar()");
+        assert_category_x(
+            a.grouped_bar(names(), series(), crate::ValueLabels::default()),
+            "Axes.grouped_bar()",
+        );
+        assert_category_x(
+            a.stacked_bar(names(), series(), crate::ValueLabels::default()),
+            "Axes.stacked_bar()",
+        );
         assert_category_x(
             a.box_plot(names(), one(), BoxOptions::default()),
             "Axes.box()",
@@ -492,9 +498,9 @@ mod tests {
         let two = || vec![vec![1.0], vec![2.0, 3.0]];
         a.bar(names(), &[1.0, 2.0], BarOptions::default())
             .unwrap()
-            .grouped_bar(names(), series())
+            .grouped_bar(names(), series(), crate::ValueLabels::default())
             .unwrap()
-            .stacked_bar(names(), series())
+            .stacked_bar(names(), series(), crate::ValueLabels::default())
             .unwrap()
             .box_plot(names(), two(), BoxOptions::default())
             .unwrap()
@@ -933,12 +939,14 @@ mod tests {
 
     fn grouped(a: &mut AxesMut<'_>, categories: &[&str], heights: &[&[f64]]) -> Result<()> {
         let list = heights.iter().map(|h| series(h)).collect();
-        a.grouped_bar(names(categories), list).map(|_| ())
+        a.grouped_bar(names(categories), list, crate::ValueLabels::default())
+            .map(|_| ())
     }
 
     fn stacked(a: &mut AxesMut<'_>, categories: &[&str], heights: &[&[f64]]) -> Result<()> {
         let list = heights.iter().map(|h| series(h)).collect();
-        a.stacked_bar(names(categories), list).map(|_| ())
+        a.stacked_bar(names(categories), list, crate::ValueLabels::default())
+            .map(|_| ())
     }
 
     const GROUPED: &str = "Axes.grouped_bar()";
@@ -1084,10 +1092,18 @@ mod tests {
             },
             series(&[2.0, -1.0]),
         ];
-        a.grouped_bar(names(&["b", "a"]), input.clone())
-            .unwrap()
-            .stacked_bar(names(&["c"]), vec![series(&[1.0])])
-            .unwrap();
+        a.grouped_bar(
+            names(&["b", "a"]),
+            input.clone(),
+            crate::ValueLabels::default(),
+        )
+        .unwrap()
+        .stacked_bar(
+            names(&["c"]),
+            vec![series(&[1.0])],
+            crate::ValueLabels::default(),
+        )
+        .unwrap();
         let copy = f.clone();
         let (
             Some([Mark::GroupedBar(group), Mark::StackedBar(stack)]),
@@ -1116,7 +1132,11 @@ mod tests {
         let mut f = figure();
         f.add_axes(ScaleKind::Category, ScaleKind::Linear)
             .unwrap()
-            .grouped_bar(names(&["a"]), vec![series(&[1.0])])
+            .grouped_bar(
+                names(&["a"]),
+                vec![series(&[1.0])],
+                crate::ValueLabels::default(),
+            )
             .unwrap();
         let before = f.clone();
         let mut a = f.single_axes_mut();

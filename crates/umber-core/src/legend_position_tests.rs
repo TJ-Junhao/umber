@@ -610,8 +610,10 @@ fn every_existing_mark_provides_drawn_coverage() {
     };
     axes.bar(categories(), &[1.0, 2.0], BarOptions::default())
         .unwrap();
-    axes.grouped_bar(categories(), series()).unwrap();
-    axes.stacked_bar(categories(), series()).unwrap();
+    axes.grouped_bar(categories(), series(), crate::ValueLabels::default())
+        .unwrap();
+    axes.stacked_bar(categories(), series(), crate::ValueLabels::default())
+        .unwrap();
     let groups = || vec![vec![0.0, 1.0, 2.0, 3.0, 4.0, 12.0], vec![2.0]];
     axes.box_plot(categories(), groups(), BoxOptions::default())
         .unwrap();

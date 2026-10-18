@@ -23,6 +23,8 @@ use crate::text::SceneFonts;
 use crate::ticks::{self, TickValues};
 use crate::{Error, Result, Rgba, ScaleKind, Theme, Tick, TickFormat};
 
+/// The significant digits of a value written in the automatic format.
+const SIGNIFICANT_DIGITS: usize = 6;
 /// The gap between the end of a bar and its label, in points.
 pub(crate) const END_GAP: f64 = 3.0;
 /// The room a label inside a stacked segment keeps from each side of the segment, in points.
@@ -235,14 +237,14 @@ impl<'a> Annotated<'a> {
     }
 }
 
-/// The labels of finite `values` in `format`. The automatic format writes every value with the
-/// decimals the most precise of them needs (`28.4`, `42.0`), in scientific form when one lies
-/// outside `1e-4 <= |v| < 1e6`; the other formats write each value as they write ticks there,
-/// with their prefix and suffix.
+/// The labels of finite `values` in `format`. The automatic format writes each value on its own
+/// to [`SIGNIFICANT_DIGITS`] significant digits, as C's `%g` does (`42`, `28.4`, `0.12345`;
+/// scientific outside `1e-4 <= |v| < 1e6`, see [`ticks::format_each`]); the other formats write
+/// each value as they write ticks, and every format adds its prefix and suffix.
 fn value_texts(values: &[f64], format: &TickFormat) -> Vec<String> {
     let ticks = values
         .iter()
-        .zip(ticks::format_given(values))
+        .zip(ticks::format_each(values, SIGNIFICANT_DIGITS))
         .map(|(&value, label)| Tick { value, label })
         .collect();
     format
@@ -378,9 +380,13 @@ impl Drawing<'_> {
                         else {
                             continue;
                         };
-                        let Some(ends) = segment_ends(&bars, values, segment, half_gap) else {
-                            continue;
-                        };
+                        // A segment the stack gap leaves no height shows no room, so its label
+                        // does not fit; only NaN and 0, which have no segment, have no label.
+                        let ends =
+                            segment_ends(&bars, values, segment, half_gap).unwrap_or_else(|| {
+                                let top = axis_value(values, segment.top);
+                                (top, top)
+                            });
                         items.push(self.inside(value, &bar, span, ends, fill)?);
                     }
                     None => {
@@ -556,14 +562,16 @@ mod tests {
     }
 
     #[test]
-    fn automatic_labels_share_the_finest_decimals() {
+    fn automatic_labels_write_each_value_on_its_own() {
         assert_eq!(
             texts(&[28.4, 42.0, -16.5], &TickFormat::AUTO),
-            ["28.4", "42.0", "\u{2212}16.5"]
+            ["28.4", "42", "\u{2212}16.5"]
         );
-        assert_eq!(texts(&[32.0, 18.0], &TickFormat::AUTO), ["32", "18"]);
-        assert_eq!(texts(&[0.25, 1.5], &TickFormat::AUTO), ["0.25", "1.50"]);
-        assert_eq!(texts(&[2.5e6, 1.0], &TickFormat::AUTO), ["2.5e6", "1e0"]);
+        assert_eq!(
+            texts(&[0.12345, 0.9], &TickFormat::AUTO),
+            ["0.12345", "0.9"]
+        );
+        assert_eq!(texts(&[2.5e6, 1.0], &TickFormat::AUTO), ["2.5e6", "1"]);
     }
 
     #[test]

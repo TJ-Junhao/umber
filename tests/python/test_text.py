@@ -159,3 +159,17 @@ def test_text_does_not_change_limits() -> None:
     assert set(before) | {"top"} == set(after)
     for name, node in before.items():
         assert (node.get("x"), node.get("y")) == (after[name].get("x"), after[name].get("y"))
+
+
+def test_text_checks_every_type_before_the_point_values() -> None:
+    category = ub.Figure().add_axes(x=ub.Scale.category())
+    timed = ub.Figure().add_axes(x=ub.Scale.time())
+    cases: list[tuple[ub.Axes[Any, Any], tuple[object, float]]] = [
+        (category, ("a" * 1001, 1.0)),
+        (timed, (np.datetime64("NaT", "D"), 1.0)),
+    ]
+    for ax, at in cases:
+        with pytest.raises(TypeError) as caught:
+            call(ax.text)("x", at, size=12)
+        info = details(caught.value)
+        assert info is not None and info[0] == "size"

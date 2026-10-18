@@ -69,8 +69,9 @@ impl Figure {
     /// written on annotated bars as one unclipped group when there are any, the legend as one
     /// unclipped group when it shows anything, and the baseline as an unclipped group of its
     /// own, so marks never cover it. The text written by [`AxesMut::text`] and
-    /// [`AxesMut::annotate`], with its arrows, comes after the axes' other groups, as one
-    /// unclipped group. By default, the baseline is drawn only when the
+    /// [`AxesMut::annotate`], with its arrows, comes last in the scene, after every panel and
+    /// the figure header: one unclipped group per axes that has any, in the order of the axes.
+    /// By default, the baseline is drawn only when the
     /// axes hold a bar (including grouped and stacked bars), histogram, area (including stacked
     /// areas) or stem: at zero on the value axis, or at its lower edge when zero is out of range.
     /// Other marks do not suppress it. [`AxesMut::baseline`] overrides visibility for these axes

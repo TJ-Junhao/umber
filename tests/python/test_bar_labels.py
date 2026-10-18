@@ -35,7 +35,7 @@ SERIES = [ub.Series("Online", [24.5, 31.2]), ub.Series("Retail", [18.2, 26.3])]
 
 def test_bar_labels_vertical_horizontal_grouped_stacked() -> None:
     up = vertical().bar(["A", "B", "C"], [28.4, 42.0, -16.5], annotate=True)
-    assert {"28.4", "42.0", "−16.5"} <= set(texts(up))
+    assert {"28.4", "42", "−16.5"} <= set(texts(up))
     side = horizontal().bar(["A", "B"], [28.4, 52.8], annotate=True)
     assert {"28.4", "52.8"} <= set(texts(side))
     grouped = vertical().grouped_bar(["Q1", "Q2"], SERIES, annotate=True)
@@ -124,4 +124,32 @@ def test_stacked_label_that_does_not_fit_names_the_segment() -> None:
         ax.figure.to_svg()
     assert str(caught.value).startswith(
         'Figure.to_svg(): the value label "0.8" of the series "Service" in the bar "Q2" needs '
+    )
+
+
+def test_automatic_labels_write_each_value_on_its_own() -> None:
+    ax = vertical().bar(["A", "B"], [0.12345, 0.9], annotate=True)
+    assert {"0.12345", "0.9"} <= set(texts(ax))
+
+
+def test_quick_bar_takes_value_labels() -> None:
+    ax = ub.bar(["A", "B"], [3.5, 2], annotate=True, format=ub.TickFormat.fixed(1))
+    assert {"3.5", "2.0"} <= set(texts(ax))
+    sized = ub.bar(["A"], [3], annotate=True, size=ub.Size.pt(11))
+    assert "11" in (texts(sized)["3"].get("font-size") or "")
+    with pytest.raises(ub.UsageError):
+        ub.bar(["A"], [3], format=ub.TickFormat.fixed(1))
+
+
+def test_tiny_stacked_segment_reports_the_room_error() -> None:
+    ax = vertical().stacked_bar(
+        ["A"],
+        [ub.Series("Large", [100]), ub.Series("Small", [0.01])],
+        annotate=True,
+        format=ub.TickFormat.fixed(2),
+    )
+    with pytest.raises(ub.StyleError) as caught:
+        ax.figure.to_svg()
+    assert str(caught.value).startswith(
+        'Figure.to_svg(): the value label "0.01" of the series "Small" in the bar "A" needs '
     )

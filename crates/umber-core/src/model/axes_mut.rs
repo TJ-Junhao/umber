@@ -1124,10 +1124,10 @@ impl<'a> AxesMut<'a> {
     /// lengths; two numeric axes, whose x axis is not a category axis; a category that appears
     /// twice; a height that is infinite, beyond [`MAX_MAGNITUDE`], or outside the log range on
     /// a log value axis. NaN is allowed and draws no bar. Then the value labels of `options`
-    /// are checked as for [`AxesMut::grouped_bar_annotated`].
+    /// are checked as for [`AxesMut::grouped_bar`].
     ///
     /// With `options.annotation`, each bar shows its value just beyond its end, placed and
-    /// checked as [`AxesMut::grouped_bar_annotated`] describes.
+    /// checked as [`AxesMut::grouped_bar`] describes.
     ///
     /// The mark stores its own copy of `heights`, made once. To store heights already held in
     /// an `Arc<[f64]>` without copying them, use [`AxesMut::bar_shared`].
@@ -1209,13 +1209,21 @@ impl<'a> AxesMut<'a> {
     /// Errors leave the axes unchanged. Two category axes are `Error::Usage`, naming `x`. The
     /// others are `Error::Data`, checked in this order: an empty `series`; a series whose values
     /// are not one per category (the message names the series' index); then the categories and
-    /// each series' values as in [`AxesMut::bar`]. NaN is allowed and draws no bar.
+    /// each series' values as in [`AxesMut::bar`]. NaN is allowed and draws no bar. Then a
+    /// format or a size in `annotation` without `annotate` is `Error::Usage`, and
+    /// [`TickFormat::iso`] is `Error::Style`, both naming the parameter.
+    ///
+    /// With `annotation.annotate`, each bar shows its value (see [`ValueLabels`]) 3 pt beyond its
+    /// end, in the theme's text color at the tick label size. Automatic limits grow, only when a
+    /// label does not fit in them, so that every label fits inside the plot. Rendering a label
+    /// that still does not fit, under explicit limits or on a plot too small for it, is
+    /// `Error::Style`, naming the bar.
     ///
     /// # Examples
     ///
     /// ```
     /// use umber_core::figure::Series;
-    /// use umber_core::{Figure, ScaleKind, Theme};
+    /// use umber_core::{Figure, ScaleKind, Theme, ValueLabels};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
@@ -1224,13 +1232,16 @@ impl<'a> AxesMut<'a> {
     ///     values: values.to_vec(),
     ///     ..Series::default()
     /// };
+    /// let labels = ValueLabels { annotate: true, ..ValueLabels::default() };
     /// axes.grouped_bar(
     ///     vec!["2025".into(), "2026".into()],
     ///     vec![series("north", &[3.0, 4.0]), series("south", &[2.5, f64::NAN])],
+    ///     labels,
     /// )?;
     /// assert_eq!(axes.marks().len(), 1);
     /// // A series with a height missing is an error, and the axes keep their one mark.
-    /// assert!(axes.grouped_bar(vec!["a".into()], vec![series("x", &[])]).is_err());
+    /// let plain = ValueLabels::default();
+    /// assert!(axes.grouped_bar(vec!["a".into()], vec![series("x", &[])], plain).is_err());
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -1238,8 +1249,22 @@ impl<'a> AxesMut<'a> {
         &mut self,
         categories: Vec<String>,
         series: Vec<Series>,
+        annotation: ValueLabels,
     ) -> Result<&mut Self> {
-        self.grouped_bar_annotated(categories, series, ValueLabels::default())
+        const CONTEXT: &str = "Axes.grouped_bar()";
+        let axes = self.axes_mut();
+        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
+        let mark = BarGroupMark::new(
+            CONTEXT,
+            Arrangement::Grouped,
+            along,
+            values,
+            categories,
+            series,
+            annotation,
+        )?;
+        axes.marks.push(Mark::GroupedBar(mark));
+        Ok(self)
     }
 
     /// Adds one box per category: type-7 quartiles, 1.5-IQR Tukey whiskers and outliers.
@@ -1381,21 +1406,31 @@ impl<'a> AxesMut<'a> {
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
     /// [`AxesMut::grouped_bar`], with one more check at the end: in each category, the positive
     /// values and the negative values must each add up to at most
-    /// [`MAX_MAGNITUDE`] in magnitude (the message names the category).
+    /// [`MAX_MAGNITUDE`] in magnitude (the message names the category). Then the checks of
+    /// `annotation` as in [`AxesMut::grouped_bar`].
+    ///
+    /// With `annotation.annotate`, each segment shows its value centred inside it, in black or
+    /// white, whichever contrasts more with the segment, at the tick label size. Rendering a
+    /// finite, non-zero segment whose label does not fit inside it with 2 pt to spare on every
+    /// side is `Error::Style`, naming the series and the bar; NaN and 0 have no segment and no
+    /// label.
     ///
     /// # Examples
     ///
     /// ```
     /// use umber_core::figure::Series;
-    /// use umber_core::{Figure, ScaleKind, Theme};
+    /// use umber_core::{Figure, ScaleKind, Theme, ValueLabels};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let series = |values: &[f64]| Series { values: values.to_vec(), ..Series::default() };
-    /// axes.stacked_bar(vec!["a".into(), "b".into()], vec![series(&[3.0, -1.0]), series(&[2.0, 4.0])])?;
+    /// let plain = ValueLabels::default();
+    /// let pair = vec![series(&[3.0, -1.0]), series(&[2.0, 4.0])];
+    /// axes.stacked_bar(vec!["a".into(), "b".into()], pair, plain.clone())?;
     /// assert_eq!(axes.marks().len(), 1);
     /// // Totals beyond the supported magnitudes are an error.
-    /// assert!(axes.stacked_bar(vec!["a".into()], vec![series(&[1e300]), series(&[1e300])]).is_err());
+    /// let huge = vec![series(&[1e300]), series(&[1e300])];
+    /// assert!(axes.stacked_bar(vec!["a".into()], huge, plain).is_err());
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -1405,8 +1440,22 @@ impl<'a> AxesMut<'a> {
         &mut self,
         categories: Vec<String>,
         series: Vec<Series>,
+        annotation: ValueLabels,
     ) -> Result<&mut Self> {
-        self.stacked_bar_annotated(categories, series, ValueLabels::default())
+        const CONTEXT: &str = "Axes.stacked_bar()";
+        let axes = self.axes_mut();
+        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
+        let mark = BarGroupMark::new(
+            CONTEXT,
+            Arrangement::Stacked,
+            along,
+            values,
+            categories,
+            series,
+            annotation,
+        )?;
+        axes.marks.push(Mark::StackedBar(mark));
+        Ok(self)
     }
 
     /// Adds a histogram: the finite `values` counted in the bins of `options.bins`, drawn as
@@ -3219,97 +3268,6 @@ impl<'a> AxesMut<'a> {
             })
             .collect::<Result<Vec<_>>>()?;
         axes.marks.extend(marks.into_iter().map(Mark::Kde));
-        Ok(self)
-    }
-
-    /// Adds grouped bars as [`AxesMut::grouped_bar`] does, writing their values as `annotation`
-    /// says: each bar's value just beyond its end (see [`ValueLabels`]). Same rules and errors
-    /// as [`AxesMut::grouped_bar`]; then a format or a size given without `annotate` is
-    /// `Error::Usage`, and [`TickFormat::iso`] is `Error::Style`, both naming the parameter.
-    ///
-    /// A label is 3 pt from the end of its bar, in the theme's text color at the tick label size.
-    /// With automatic limits the value axis grows so that every label fits inside the plot.
-    /// Rendering a label that still does not fit, under explicit limits or on a plot too small
-    /// for it, is `Error::Style`, naming the bar.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::figure::Series;
-    /// use umber_core::{Figure, ScaleKind, Theme, ValueLabels};
-    ///
-    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// let series = Series { label: "north".into(), values: vec![3.0, 4.5], ..Series::default() };
-    /// let labels = ValueLabels { annotate: true, ..ValueLabels::default() };
-    /// axes.grouped_bar_annotated(vec!["2025".into(), "2026".into()], vec![series], labels)?;
-    /// assert_eq!(axes.marks().len(), 1);
-    /// # Ok::<(), umber_core::Error>(())
-    /// ```
-    pub fn grouped_bar_annotated(
-        &mut self,
-        categories: Vec<String>,
-        series: Vec<Series>,
-        annotation: ValueLabels,
-    ) -> Result<&mut Self> {
-        const CONTEXT: &str = "Axes.grouped_bar()";
-        let axes = self.axes_mut();
-        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
-        let mark = BarGroupMark::new(
-            CONTEXT,
-            Arrangement::Grouped,
-            along,
-            values,
-            categories,
-            series,
-            annotation,
-        )?;
-        axes.marks.push(Mark::GroupedBar(mark));
-        Ok(self)
-    }
-
-    /// Adds stacked bars as [`AxesMut::stacked_bar`] does, writing their values as
-    /// `annotation` says: each segment's value centred inside it (see [`ValueLabels`]). Same
-    /// rules and errors as [`AxesMut::stacked_bar`], then the label checks of
-    /// [`AxesMut::grouped_bar_annotated`].
-    ///
-    /// A label is black or white, whichever contrasts more with its segment, at the tick label
-    /// size. Rendering a label that does not fit inside its segment with 2 pt to spare on every
-    /// side is `Error::Style`, naming the series and the bar.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use umber_core::figure::Series;
-    /// use umber_core::{Figure, ScaleKind, Theme, ValueLabels};
-    ///
-    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
-    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// let series = |values: &[f64]| Series { values: values.to_vec(), ..Series::default() };
-    /// let labels = ValueLabels { annotate: true, ..ValueLabels::default() };
-    /// axes.stacked_bar_annotated(vec!["a".into()], vec![series(&[30.0]), series(&[20.0])], labels)?;
-    /// assert_eq!(axes.marks().len(), 1);
-    /// # Ok::<(), umber_core::Error>(())
-    /// ```
-    pub fn stacked_bar_annotated(
-        &mut self,
-        categories: Vec<String>,
-        series: Vec<Series>,
-        annotation: ValueLabels,
-    ) -> Result<&mut Self> {
-        const CONTEXT: &str = "Axes.stacked_bar()";
-        let axes = self.axes_mut();
-        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
-        let mark = BarGroupMark::new(
-            CONTEXT,
-            Arrangement::Stacked,
-            along,
-            values,
-            categories,
-            series,
-            annotation,
-        )?;
-        axes.marks.push(Mark::StackedBar(mark));
         Ok(self)
     }
 

@@ -1025,11 +1025,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             label: The name shown in the legend; an empty string leaves the bars out of it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
             annotate: Whether each bar shows its value just beyond its end, 3 pt away, in
-                the theme's text color at the tick label size. With automatic limits the
-                value axis grows so that every label fits inside the plot.
+                the theme's text color at the tick label size. Automatic limits grow, only
+                when a label does not fit in them, so that every label fits inside the plot.
             format: The format of the values shown by ``annotate``. ``AUTO`` follows the tick
-                format of the value axis; its automatic format writes every value with the
-                decimals the most precise of them needs.
+                format of the value axis. ``TickFormat.AUTO``, also the axis's default, writes
+                each value on its own to six significant digits in the shortest form, like
+                ``%g``: ``42``, ``28.4``, ``0.12345``, in scientific form outside 1e-4 to 1e6.
             size: The size of the values shown by ``annotate``. ``Size.AUTO`` is the tick
                 label size, ``Size.times(k)`` multiplies it after font scaling, and
                 ``Size.pt(p)`` uses points without font scaling.
@@ -2893,10 +2894,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             context = "Axes.text()"
             _args.require_text(context, "text", text)
-            point = self._point(context, at)
+            pair = self._point_types(context, at)
             style = instance(context, "align", align, Align, _ALIGN_HINT)
             instance(context, "size", size, Size, _SIZE_HINT)
             spec = _color_argument(context, color)
+            point = self._point(context, pair)
             content = _args.text(context, "text", text)
             self._native.text(
                 self._row, self._col, content, point, style.value, _size.native(size), spec
@@ -2956,27 +2958,36 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             context = "Axes.annotate()"
             _args.require_text(context, "text", text)
-            point = self._point(context, at)
+            pair = self._point_types(context, at)
             shift = _offset_argument(context, offset)
             drawn = _args.boolean(context, "arrow", arrow)
             instance(context, "size", size, Size, _SIZE_HINT)
             spec = _color_argument(context, color)
+            point = self._point(context, pair)
             content = _args.text(context, "text", text)
             self._native.annotate(
                 self._row, self._col, content, point, shift, drawn, _size.native(size), spec
             )
             return self
 
-    def _point(self, context: str, at: object) -> tuple[float | str | int, float | str | int]:
-        """Check an ``at`` argument and return its coordinates in the native form of their axes.
-
-        A coordinate is a ``float`` on a numeric axis, a name on a category axis and a time in
-        microseconds on a time axis.
-        """
+    def _point_types(self, context: str, at: object) -> tuple[object, object]:
+        """Check the types of an ``at`` argument: a pair whose coordinates suit their axes."""
         pair = _pair(at)
         if pair is None:
             message = f"at is {_shown_pair(at)}; at must be a pair (x, y)."
             raise new_error(TypeError, context, message, parameter="at", hint=_AT_HINT)
+        _check_coordinate_type(context, self._x, pair[0])
+        _check_coordinate_type(context, self._y, pair[1])
+        return pair
+
+    def _point(
+        self, context: str, pair: tuple[object, object]
+    ) -> tuple[float | str | int, float | str | int]:
+        """Convert the coordinates of an ``at`` pair whose types were checked to native form.
+
+        A coordinate is a ``float`` on a numeric axis, a name on a category axis and a time in
+        microseconds on a time axis.
+        """
         x, y = pair
         return _coordinate(context, self._x, x), _coordinate(context, self._y, y)
 
@@ -3022,13 +3033,22 @@ def _value_labels(
     return shows, checked, _size.native(instance(context, "size", size, Size, _SIZE_HINT))
 
 
+def _check_coordinate_type(context: str, scale: Scale[Any], value: object) -> None:
+    """Check the type of one coordinate of ``at`` for an axis of ``scale``, converting nothing."""
+    if scale == _CATEGORY:
+        _args.require_text(context, "at", value)
+    elif scale == _TIME:
+        _time.check_instant_type(context, "at", value)
+    else:
+        real(context, "at", value)
+
+
 def _coordinate(context: str, scale: Scale[Any], value: object) -> float | str | int:
-    """Check one coordinate of ``at`` for an axis of ``scale`` and return its native form.
+    """Convert one coordinate of ``at``, of a checked type, to its native form for ``scale``.
 
     The form is a category name, a time in microseconds, or a ``float``.
     """
     if scale == _CATEGORY:
-        _args.require_text(context, "at", value)
         return _args.checked_text(context, "at", "at", cast(str, value), DataError)
     if scale == _TIME:
         return _time.instant(context, "at", value)

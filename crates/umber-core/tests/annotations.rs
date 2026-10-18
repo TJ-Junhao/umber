@@ -6,8 +6,8 @@
 use umber_core::scene::{Item, Scene, TextItem};
 use umber_core::{
     Align, AnnotateOptions, AxesMut, AxisData, AxisValue, BarOptions, ColorSpec, Error, Figure,
-    FontLibrary, GridIndex, Instant, Paint, Point, Rgba, ScaleKind, ScatterOptions, Series,
-    SizeSpec, TextOptions, Theme, TickFormat, ValueLabels,
+    FontLibrary, Grid, GridIndex, HeatmapOptions, Instant, LogBase, Paint, Placement, Point, Rgba,
+    ScaleKind, ScatterOptions, Series, SizeSpec, TextOptions, Theme, TickFormat, ValueLabels,
 };
 
 const TOLERANCE: f64 = 2e-3;
@@ -597,7 +597,7 @@ fn bar_labels_vertical_horizontal_grouped_stacked() {
         .unwrap();
     let scene = render(&f);
     let fills = bars(&scene);
-    for (label, (bar, _)) in ["28.4", "42.0", "\u{2212}16.5"].iter().zip(&fills) {
+    for (label, (bar, _)) in ["28.4", "42", "\u{2212}16.5"].iter().zip(&fills) {
         let item = text(&scene, label);
         let [left, top, right, bottom] = text_box(&scene, item);
         assert!(
@@ -643,7 +643,7 @@ fn bar_labels_vertical_horizontal_grouped_stacked() {
         color: ColorSpec::AUTO,
     };
     axes(&mut f)
-        .grouped_bar_annotated(
+        .grouped_bar(
             names(&["Q1", "Q2"]),
             vec![
                 series("Online", &[24.5, 31.2]),
@@ -666,7 +666,7 @@ fn bar_labels_vertical_horizontal_grouped_stacked() {
     // Stacked: centred in each segment, in black or white by contrast.
     let mut f = figure(ScaleKind::Category, ScaleKind::Linear);
     axes(&mut f)
-        .stacked_bar_annotated(
+        .stacked_bar(
             names(&["Q1", "Q2"]),
             vec![
                 series("Core", &[32.0, 38.0]),
@@ -803,7 +803,7 @@ fn stacked_label_that_does_not_fit_names_the_segment() {
         color: ColorSpec::AUTO,
     };
     axes(&mut f)
-        .stacked_bar_annotated(
+        .stacked_bar(
             names(&["Q1", "Q2"]),
             vec![
                 series("Core", &[32.0, 38.0]),
@@ -863,7 +863,7 @@ fn bar_label_options_are_checked() {
             .unwrap_err();
         assert_eq!(err.parameter(), Some(parameter), "{err}");
         let err = axes(&mut f)
-            .stacked_bar_annotated(
+            .stacked_bar(
                 names(&["A"]),
                 vec![Series {
                     values: vec![1.0],
@@ -880,4 +880,120 @@ fn bar_label_options_are_checked() {
             .marks()
             .is_empty()
     );
+}
+
+#[test]
+fn automatic_labels_write_each_value_on_its_own() {
+    let mut f = figure(ScaleKind::Category, ScaleKind::Linear);
+    let options = BarOptions {
+        annotation: annotated(),
+        ..BarOptions::default()
+    };
+    axes(&mut f)
+        .bar(names(&["A", "B", "C"]), &[0.12345, 0.9, 1234567.0], options)
+        .unwrap();
+    let scene = render(&f);
+    for label in ["0.12345", "0.9", "1.23457e6"] {
+        text(&scene, label);
+    }
+}
+
+#[test]
+fn labels_that_fit_keep_the_automatic_range() {
+    let log = ScaleKind::Log { base: LogBase::TEN };
+    let tops = |annotate: bool| {
+        let mut f = Figure::new(6.0, 8.0, Theme::pigment()).unwrap();
+        let options = BarOptions {
+            annotation: ValueLabels {
+                annotate,
+                ..ValueLabels::default()
+            },
+            ..BarOptions::default()
+        };
+        f.add_axes(ScaleKind::Category, log)
+            .unwrap()
+            .bar(names(&["A", "B"]), &[1.0, 10.0], options)
+            .unwrap();
+        bars(&render(&f))
+            .into_iter()
+            .map(|(bounds, _)| bounds)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(tops(true), tops(false));
+}
+
+#[test]
+fn annotations_are_painted_after_every_panel() {
+    let mut f = Figure::with_grid(8.0, 3.0, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
+    f.title("Figure title");
+    let at = |col| Placement {
+        row: GridIndex::At(0),
+        col: GridIndex::At(col),
+        row_span: 1,
+        col_span: 1,
+    };
+    f.add_axes_at(at(0), ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .annotate(
+            "OVERLAY",
+            (number(1.0), number(0.5)),
+            AnnotateOptions {
+                offset: (90.0, 0.0),
+                arrow: false,
+                size: SizeSpec::pt(24.0).unwrap(),
+                ..AnnotateOptions::default()
+            },
+        )
+        .unwrap();
+    f.add_axes_at(at(1), ScaleKind::Category, ScaleKind::Category)
+        .unwrap()
+        .heatmap(
+            &["X".to_owned()],
+            &["Y".to_owned()],
+            &[1.0],
+            HeatmapOptions::default(),
+        )
+        .unwrap();
+    let scene = render(&f);
+    let last = annotation_items(&scene);
+    assert!(
+        matches!(last.as_slice(), [Item::Text(t)] if t.text == "OVERLAY"),
+        "{last:?}"
+    );
+}
+
+#[test]
+fn tiny_stacked_segment_reports_the_room_error() {
+    for small in [0.01, 0.1] {
+        let mut f = figure(ScaleKind::Category, ScaleKind::Linear);
+        let series = |label: &str, values: &[f64]| Series {
+            label: label.into(),
+            values: values.to_vec(),
+            color: ColorSpec::AUTO,
+        };
+        axes(&mut f)
+            .stacked_bar(
+                names(&["A"]),
+                vec![series("Large", &[100.0]), series("Small", &[small])],
+                ValueLabels {
+                    annotate: true,
+                    format: Some(TickFormat::fixed(2).unwrap()),
+                    ..ValueLabels::default()
+                },
+            )
+            .unwrap();
+        let err = f.to_scene(FontLibrary::global()).unwrap_err();
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        assert!(
+            err.to_string().starts_with(&format!(
+                "Figure.to_scene(): the value label \"{small:.2}\" of the series \"Small\" in \
+                 the bar \"A\" needs "
+            )),
+            "{err}"
+        );
+    }
 }

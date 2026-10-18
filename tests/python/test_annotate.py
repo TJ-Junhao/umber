@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any, cast
 from xml.etree import ElementTree
 
+import numpy as np
 import pytest
 
 import umber as ub
@@ -114,3 +115,17 @@ def test_text_outside_the_figure_rejected() -> None:
     with pytest.raises(ub.StyleError) as caught:
         ax.figure.to_svg()
     assert details(caught.value) == (None, "change align or offset.")
+
+
+def test_annotate_checks_every_type_before_the_point_values() -> None:
+    category = ub.Figure().add_axes(x=ub.Scale.category())
+    timed = ub.Figure().add_axes(x=ub.Scale.time())
+    cases: list[tuple[ub.Axes[Any, Any], tuple[object, float]]] = [
+        (category, ("a" * 1001, 1.0)),
+        (timed, (np.datetime64("NaT", "D"), 1.0)),
+    ]
+    for ax, at in cases:
+        with pytest.raises(TypeError) as caught:
+            call(ax.annotate)("x", at, size=12)
+        info = details(caught.value)
+        assert info is not None and info[0] == "size"

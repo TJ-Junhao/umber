@@ -1506,9 +1506,12 @@ pub(crate) fn with_layout_input<R>(
 /// - the legend, when it has row entries or direct labels, as one unclipped group;
 /// - the baseline, as an unclipped group of its own, when the axes hold a mark that grows
 ///   from zero, unless overridden by `AxesMut::baseline` (see [`Resolved::draws_baseline`]);
-/// - the colorbar of the axes, when it has one of its own;
-/// - the text written at data positions, with its arrows, when there is any, as one unclipped
-///   group ([`draw::annotations`]).
+/// - the colorbar of the axes, when it has one of its own.
+///
+/// The shared colorbars and the figure header follow the panels. Last, over everything else,
+/// comes the text each axes writes at data positions, with its arrows, as one unclipped group
+/// per axes that has any, in the order of the axes ([`draw::annotations`]): it may reach past
+/// its cells, and no later panel, colorbar or header covers it.
 ///
 /// The scene's fonts are the figure's ([`layout::figure_fonts`]): the theme's title font, then
 /// its body font.
@@ -1554,6 +1557,7 @@ fn scene_with_labels(
         return Ok(scene);
     }
     let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
+    let mut annotations = Vec::new();
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
@@ -1607,9 +1611,7 @@ fn scene_with_labels(
             context,
         )
         .map_err(|err| in_cell(figure, panel.axes, err))?;
-        if let Some(notes) = notes {
-            scene.push(notes);
-        }
+        annotations.extend(notes);
     }
     for (source, bar) in &planned.colorbars {
         if let Some(color) = &planned.panels[*source].0.color {
@@ -1618,6 +1620,10 @@ fn scene_with_labels(
     }
     if let Some(header) = draw::figure_header(theme, &planned.header) {
         scene.push(header);
+    }
+    // Text at data positions may reach past its cell: it goes over everything else.
+    for notes in annotations {
+        scene.push(notes);
     }
     Ok(scene)
 }

@@ -147,10 +147,34 @@ def instant(context: str, name: str, value: object) -> int:
         message = f"{name} is NaT; it must be a time."
         hint = "pass a time; NaT marks a missing value."
         raise new_error(DataError, context, message, parameter=name, hint=hint)
+    check_instant_type(context, name, value)
+    return _one(context, name, name, value)
+
+
+def check_instant_type(context: str, name: str, value: object) -> None:
+    """Check the type of one time argument without converting it, for type checks that come first.
+
+    A missing value such as ``NaT`` passes: ``instant()`` refuses it as a value.
+
+    Args:
+        context: The API call, such as ``"Axes.text()"``.
+        name: The parameter name.
+        value: The value passed.
+
+    Raises:
+        TypeError: The value is neither a ``datetime``, a ``date``, a ``numpy.datetime64`` nor
+            a missing value.
+
+    Example:
+        >>> import datetime as dt
+        >>> from umber._time import check_instant_type
+        >>> check_instant_type("Axes.text()", "at", dt.date(2026, 3, 1))
+    """
+    if value is not None and is_missing(value):
+        return
     if not isinstance(value, datetime.date | np.datetime64):
         message = f"{name} is {type_name(value)}; {name} must be a time."
         raise new_error(TypeError, context, message, parameter=name, hint=_SCALAR_HINT)
-    return _one(context, name, name, cast(object, value))
 
 
 def _zone_of_column(values: object) -> str | None:

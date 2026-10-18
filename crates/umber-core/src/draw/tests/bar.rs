@@ -316,9 +316,11 @@ fn group_figure(
     let mut axes = f.add_axes(ScaleKind::Category, y).unwrap();
     let list: Vec<Series> = heights.iter().map(|h| series(h)).collect();
     if stacked {
-        axes.stacked_bar(names(categories), list).unwrap();
+        axes.stacked_bar(names(categories), list, crate::ValueLabels::default())
+            .unwrap();
     } else {
-        axes.grouped_bar(names(categories), list).unwrap();
+        axes.grouped_bar(names(categories), list, crate::ValueLabels::default())
+            .unwrap();
     }
     f
 }
@@ -451,9 +453,11 @@ fn grouped_and_stacked_bars_are_drawn_by_category_then_series() {
         .unwrap();
         let list = vec![series(&[2.0, 1.0]), series(&[3.0, 4.0])];
         if stacked {
-            axes.stacked_bar(names(&["b", "a"]), list).unwrap();
+            axes.stacked_bar(names(&["b", "a"]), list, crate::ValueLabels::default())
+                .unwrap();
         } else {
-            axes.grouped_bar(names(&["b", "a"]), list).unwrap();
+            axes.grouped_bar(names(&["b", "a"]), list, crate::ValueLabels::default())
+                .unwrap();
         }
         let scene = f.to_scene(FontLibrary::global()).unwrap();
         let plot = layout_of(&f).plot;

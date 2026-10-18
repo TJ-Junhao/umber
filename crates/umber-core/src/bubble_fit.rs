@@ -5,7 +5,9 @@
 //! the plot size is known only once the layout is solved, so the final layout loop asks the fits
 //! again after every solve ([`BubbleFits::update`]). A bubble reaches as far on both sides of
 //! its centre; a bar's label reaches past the bar's end on one side only ([`EndReach`]), and is
-//! fitted as a bubble is, with no reach on the other side. A fit starts from the axis's raw
+//! fitted as a bubble is, with no reach on the other side. A fit of bar labels alone is made
+//! only once a label reaches past the plot edge, so a range that already holds every label is
+//! kept as it is; a fit holding a bubble is always made. A fit starts from the axis's raw
 //! extent, the extent of the data and of any explicit tick positions as resolve sees it, and
 //! widens it to the smallest extent in which every bubble reaches no further than the plot edge
 //! at its share of the plot length. Resolve then pads that extent once (rounding it first on log
@@ -162,6 +164,10 @@ struct BubbleFit {
     seed: ContinuousScale,
     /// Every drawn bubble and bar label of the group.
     bubbles: Vec<Bubble>,
+    /// Whether the fit holds bar labels alone, no bubble: then it widens the axis only once a
+    /// label reaches past the plot edges, and keeps a range that already holds every label.
+    /// A fit holding a bubble is made on its first update, whatever the range.
+    on_demand: bool,
     /// Where the fit stands.
     state: State,
 }
@@ -177,6 +183,7 @@ impl BubbleFit {
         members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>], &'a [EndReach])> + Clone,
     ) -> Option<BubbleFit> {
         let mut bubbles = Self::drawn(axis, None, members.clone().map(|(i, marks, _)| (i, marks)));
+        let on_demand = bubbles.is_empty();
         bubbles.extend(members.clone().flat_map(|(panel, _, ends)| {
             ends.iter()
                 .filter(move |end| end.axis == axis.which())
@@ -198,6 +205,7 @@ impl BubbleFit {
             axis,
             seed,
             bubbles,
+            on_demand,
             state: State::Unfitted,
         })
     }
@@ -240,6 +248,7 @@ impl BubbleFit {
             axis,
             seed,
             bubbles,
+            on_demand: false,
             state: State::Unfitted,
         })
     }
@@ -279,12 +288,14 @@ impl BubbleFit {
     }
 
     /// Fits again for the axis resolved as `scale` on plots of `lengths`, when needed: the
-    /// first time, and whenever a bubble reaches past the plot edges. Returns whether the
-    /// extent this fit adds changed.
+    /// first time (for a fit of bar labels alone, only once a label reaches past the plot
+    /// edges), and whenever a bubble reaches past the plot edges. Returns whether the extent
+    /// this fit adds changed.
     fn update(&mut self, scale: ContinuousScale, lengths: &[f64]) -> bool {
         let next = match &self.state {
             State::Clipped => return false,
             State::Fitted { .. } if self.contains(scale, lengths) => return false,
+            State::Unfitted if self.on_demand && self.contains(scale, lengths) => return false,
             State::Unfitted => self.fitted(0.0, lengths.to_vec(), 0),
             State::Fitted { refits, .. } if *refits == MAX_REFITS => State::Clipped,
             State::Fitted {
@@ -312,6 +323,18 @@ impl BubbleFit {
         let before = self.extent();
         self.state = next;
         self.extent() != before
+    }
+
+    /// Clips this fit when its bubbles or labels reach past the plot edges of `scale` on plots
+    /// of `lengths`. Returns whether the extent it adds changed, or, for a fit not made yet,
+    /// whether its range stopped holding its labels.
+    fn clip_if_unsettled(&mut self, scale: ContinuousScale, lengths: &[f64]) -> bool {
+        if self.state == State::Clipped || self.contains(scale, lengths) {
+            return false;
+        }
+        let changed = self.extent().is_some() || self.state == State::Unfitted;
+        self.state = State::Clipped;
+        changed
     }
 
     /// The state of a fit measuring the reaches against at least `span`, on plots of `lengths`:
@@ -537,16 +560,10 @@ impl BubbleFits {
 
     /// Clips every fit whose bubbles still reach past the plot edges of the axes `resolved` on
     /// the solved plots `plots`: the fits that did not settle. Returns whether any extent
-    /// changed.
+    /// changed, or a fit of bar labels not made yet, whose range held its labels until now, no
+    /// longer holds them.
     pub fn clip_unsettled(&mut self, resolved: &[Resolved], plots: &[PlotSize]) -> bool {
-        self.each(resolved, plots, |fit, scale, lengths| {
-            if fit.state == State::Clipped || fit.contains(scale, lengths) {
-                return false;
-            }
-            let changed = fit.extent().is_some();
-            fit.state = State::Clipped;
-            changed
-        })
+        self.each(resolved, plots, BubbleFit::clip_if_unsettled)
     }
 
     /// Clips every fit, for a layout that cannot hold the fitted limits. Returns whether any
@@ -651,6 +668,7 @@ mod tests {
             axis: Axis::X,
             seed: ContinuousScale::new(transform, lo, hi, "test").unwrap(),
             bubbles,
+            on_demand: false,
             state: State::Unfitted,
         }
     }
@@ -844,6 +862,32 @@ mod tests {
             ],
         );
         assert_eq!(both.solve(0.0, &[100.0]), None);
+    }
+
+    #[test]
+    fn a_fit_of_labels_alone_keeps_a_range_that_holds_them() {
+        let label = |high| Bubble {
+            value: 10.0,
+            low: 0.0,
+            high,
+            panel: 0,
+        };
+        let mut f = BubbleFit {
+            on_demand: true,
+            ..fit(Transform::Linear, (0.0, 10.0), vec![label(20.0)])
+        };
+        // The range 0 to 15 leaves a third of a 100 pt plot above the bar: the label fits.
+        assert!(!f.update(linear(0.0, 15.0), &[100.0]));
+        assert_eq!(f.state, State::Unfitted);
+        assert!(!f.clone().clip_if_unsettled(linear(0.0, 15.0), &[100.0]));
+        // On the range 0 to 10 it does not: the fit is made, and a range not yet fitted that
+        // stops holding the label counts as unsettled.
+        assert!(f.clone().clip_if_unsettled(linear(0.0, 10.0), &[100.0]));
+        assert!(f.update(linear(0.0, 10.0), &[100.0]));
+        assert!(matches!(f.state, State::Fitted { .. }));
+        // A fit holding a bubble is made on its first update, as before.
+        let mut bubbles = fit(Transform::Linear, (0.0, 10.0), vec![bubble(5.0, 1.0)]);
+        assert!(bubbles.update(linear(0.0, 15.0), &[100.0]));
     }
 
     #[test]

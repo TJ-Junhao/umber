@@ -65,7 +65,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut f = figure(6.0, 4.0, theme.clone(), ScaleKind::Category, linear());
         axes(&mut f)
             .title("Orders by quarter")
-            .grouped_bar_annotated(
+            .grouped_bar(
                 quarters.clone(),
                 vec![
                     series("Online", &[24.5, 31.2, 42.0, 38.6]),
@@ -84,7 +84,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         axes(&mut f)
             .title("Components of each total")
             .ylabel("Orders")
-            .stacked_bar_annotated(
+            .stacked_bar(
                 quarters.clone(),
                 vec![
                     series("Core", &[32.0, 38.0, 29.0, 41.0]),
@@ -103,7 +103,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut f = figure(6.0, 4.0, theme.clone(), linear(), ScaleKind::Category);
         axes(&mut f)
             .title("Stacked rows")
-            .stacked_bar_annotated(
+            .stacked_bar(
                 quarters.clone(),
                 vec![
                     series("Core", &[32.0, 38.0, 29.0, 41.0]),
