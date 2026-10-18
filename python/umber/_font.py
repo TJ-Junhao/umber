@@ -17,7 +17,7 @@ _FILE = 1
 _SYSTEM = 2
 
 type _Native = tuple[int, int | _umber.FontValue]
-type _Source = int | str | tuple[bytes, bytes | None, str]
+type _Source = int | str | tuple[bytes, bytes | None, str, str | None]
 
 
 @final
@@ -26,11 +26,17 @@ class Font:
 
     The bundled families are constants. ``from_file()`` reads regular and optional bold
     files; ``system()`` finds an installed family. Fonts compare equal by bundled constant,
-    file bytes' SHA-256 digests, or installed family, never by a file's path.
+    the same file bytes and resolved family name, or installed family. A file's path matters
+    only when its stem supplies a missing family name.
 
-    Variable fonts use their default instance. A font without bold is allowed until bold text
-    is drawn; no synthetic bold is made. Font licensing is your responsibility. Editable SVG
+    Variable fonts use their default instance. Families installed only as variable fonts
+    (for example Ubuntu or Cantarell) have no bold face here: titles need ``bold=`` via
+    ``Font.from_file()``, or another family. A font without bold is allowed until bold text is
+    drawn; no synthetic bold is made. Font licensing is your responsibility. Editable SVG
     viewers need the font installed; outlined SVG and PNG do not.
+
+    A pickled file font carries its bytes and original paths; unpickling does not read the
+    files. A pickled system font looks the family up again when unpickled.
 
     Example:
         >>> import umber as ub
@@ -39,10 +45,8 @@ class Font:
         False
     """
 
-    __slots__ = ("_name", "_native", "_source")
-    _name: str
+    __slots__ = ("_native",)
     _native: _Native
-    _source: _Source
 
     SOURCE_SERIF_4: ClassVar["Font"]
     """Source Serif 4, a bundled serif face.
@@ -90,12 +94,13 @@ class Font:
     """
 
     def __init__(self) -> None:
-        """Refuse construction; use one of the font constants."""
+        """Refuse construction; use a font constant, ``from_file()`` or ``system()``."""
         with api_call():
             raise new_error(
                 TypeError,
                 "Font()",
-                "Font has no public constructor; use a bundled font.",
+                "Font has no public constructor; "
+                "use a bundled font, Font.from_file() or Font.system().",
                 parameter=None,
                 hint=FONT_HINT,
             )
@@ -107,8 +112,10 @@ class Font:
         """Read a TrueType or OpenType regular file and an optional bold file.
 
         Bytes are kept in memory, so changing or removing the files does not change the font.
-        The family name comes from the regular file. Collections (``.ttc``) are not accepted;
-        use ``Font.system()`` to choose a family from an installed collection.
+        The family name comes from the regular file, or its path's stem if no name is stored.
+        Collections (``.ttc``) are not accepted; use ``Font.system()`` to choose a family from
+        an installed collection. Pickling carries the bytes and original paths; unpickling
+        does not reopen the files.
 
         Args:
             regular: Path to the regular ``.ttf`` or ``.otf`` file.
@@ -137,11 +144,18 @@ class Font:
             if not isinstance(bold, Auto):
                 _args.require_path(context, "bold", bold)
             regular_path = _args.path(context, "regular", regular)
-            bold_path = AUTO if isinstance(bold, Auto) else _args.path(context, "bold", bold)
+            bold_path = None if isinstance(bold, Auto) else _args.path(context, "bold", bold)
             regular_bytes = _read(regular_path, "regular")
-            bold_bytes = None if isinstance(bold_path, Auto) else _read(bold_path, "bold")
+            if bold_path is None:
+                bold_bytes = None
+            else:
+                bold_bytes = (
+                    regular_bytes if bold_path == regular_path else _read(bold_path, "bold")
+                )
             try:
-                value = _umber.font_from_files(regular_bytes, bold_bytes, Path(regular_path).stem)
+                value = _umber.font_from_files(
+                    regular_bytes, bold_bytes, Path(regular_path).stem, regular_path, bold_path
+                )
             except DataError as err:
                 detail = details(err)
                 if detail is None:
@@ -156,19 +170,22 @@ class Font:
                     parameter=parameter,
                     hint=hint,
                 ) from None
-            name = f"from_file({regular_path!r}"
-            if not isinstance(bold_path, Auto):
-                name += f", bold={bold_path!r}"
-            source = (regular_bytes, bold_bytes, Path(regular_path).stem)
-            return _new(name + ")", (_FILE, value), source)
+            return _new((_FILE, value))
 
     @staticmethod
     def system(family: str) -> "Font":
         """Find an installed font family, matching its name case-insensitively.
 
-        The regular face is closest to weight 400, with upright faces preferred. The bold face
-        is upright and closest to weight 600 among weights at least 600. Selected bytes are
-        kept in memory. A family without bold fails only when bold text is drawn.
+        Every call scans the installed fonts; there is no cache. Both typographic and legacy
+        family names are matched. Regular faces prefer upright, normal width, then the closest
+        weight to 400. Bold requires a separate upright static face of at least weight 600,
+        preferring normal width, then the closest weight to 600. Selected bytes stay in memory.
+
+        Variable fonts use their default instance, not a bold variation. Families installed
+        only as variable fonts (for example Ubuntu or Cantarell) have no bold face here:
+        titles need ``bold=`` via ``Font.from_file()``, or another family. A family without
+        bold fails only when bold text is drawn. A pickled system font looks the family up
+        again when unpickled.
 
         Args:
             family: An installed family name, not a font file path.
@@ -178,8 +195,8 @@ class Font:
 
         Raises:
             TypeError: If ``family`` is not a string.
-            UsageError: If the family is not installed or its selected files cannot be read.
-                An unknown family reports the closest installed names.
+            UsageError: If the name is empty, the family is not installed, or its selected files
+                cannot be read. An unknown family reports the closest installed names.
 
         Example:
             >>> import umber as ub
@@ -193,8 +210,7 @@ class Font:
         with api_call():
             family = _args.text("Font.system()", "family", family)
             value = _umber.font_system(family)
-            name = value.family_name()
-            return _new(f"system({name!r})", (_SYSTEM, value), name)
+            return _new((_SYSTEM, value))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Font):
@@ -205,7 +221,15 @@ class Font:
         return hash(self._native)
 
     def __repr__(self) -> str:
-        return f"Font.{self._name}"
+        _, value = self._native
+        if isinstance(value, int):
+            return f"Font.{_BUNDLED_NAMES[value]}"
+        paths = value.file_paths()
+        if paths is None:
+            return f"Font.system({value.family_name()!r})"
+        regular, bold = paths
+        suffix = "" if bold is None else f", bold={bold!r}"
+        return f"Font.from_file({regular!r}{suffix})"
 
     def __copy__(self) -> Self:
         return self
@@ -214,7 +238,11 @@ class Font:
         return self
 
     def __reduce__(self) -> tuple[Callable[[_Source], "Font"], tuple[_Source]]:
-        return _restore, (self._source,)
+        _, value = self._native
+        if isinstance(value, int):
+            return _restore, (value,)
+        source = value.file_source()
+        return _restore, (value.family_name() if source is None else source,)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("a Font is immutable")
@@ -223,12 +251,10 @@ class Font:
         raise AttributeError("a Font is immutable")
 
 
-def _new(name: str, native: _Native, source: _Source) -> Font:
+def _new(native: _Native) -> Font:
     """Build a font; the class has no public constructor."""
     font = object.__new__(Font)
-    object.__setattr__(font, "_name", name)
     object.__setattr__(font, "_native", native)
-    object.__setattr__(font, "_source", source)
     return font
 
 
@@ -254,10 +280,12 @@ def native(font: Font) -> _Native:
 
 
 _BUNDLED_FONTS: Final[list[Font]] = []
+_BUNDLED_NAMES: Final[list[str]] = []
 for _name, _index in _umber.bundled_fonts():
-    _constant = _new(_name, (_BUNDLED, _index), _index)
+    _constant = _new((_BUNDLED, _index))
     setattr(Font, _name, _constant)
     _BUNDLED_FONTS.append(_constant)
+    _BUNDLED_NAMES.append(_name)
 
 
 def _restore(source: _Source) -> Font:
@@ -266,9 +294,9 @@ def _restore(source: _Source) -> Font:
         return _BUNDLED_FONTS[source]
     if isinstance(source, str):
         return Font.system(source)
-    regular, bold, name = source
-    value = _umber.font_from_files(regular, bold, name)
-    return _new(f"from_file({name!r})", (_FILE, value), source)
+    regular, bold, regular_path, bold_path = source
+    value = _umber.font_from_files(regular, bold, Path(regular_path).stem, regular_path, bold_path)
+    return _new((_FILE, value))
 
 
 def _read(path: str, parameter: str) -> bytes:
@@ -285,5 +313,5 @@ def _read(path: str, parameter: str) -> bytes:
         ) from None
 
 
-FONT_HINT: Final = f"use {', '.join(map(repr, _BUNDLED_FONTS[:-1]))} or {_BUNDLED_FONTS[-1]!r}."
-"""The hint of the errors for a value that is not a ``Font``: it lists the bundled fonts."""
+FONT_HINT: Final = f"use {', '.join(map(repr, _BUNDLED_FONTS))}, Font.from_file() or Font.system()."
+"""The hint for a value that is not a ``Font``: bundled constants and custom constructors."""

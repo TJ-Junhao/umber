@@ -4,8 +4,13 @@
 //! face, within a per-lookup and a per-layout budget of confirmations. Answers are cached per
 //! library, `(character, weight)` to the chosen face or to no face.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use read_fonts::{FontRef, TableProvider};
+use skrifa::MetadataProvider;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::index::{FaceIndex, Verdict};
@@ -129,77 +134,193 @@ impl Lookups {
     }
 }
 
-/// Finds a named installed family without changing the fallback database or its caches.
+/// Finds a named installed family. Every call scans the installed fonts; there is no cache.
 pub(crate) fn find_family(family: &str) -> crate::Result<crate::fonts::SystemFamily> {
+    check_family(family)?;
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
     family_in(&db, family)
 }
 
-fn family_in(db: &fontdb::Database, family: &str) -> crate::Result<crate::fonts::SystemFamily> {
-    let normalized = family.to_lowercase();
-    let faces: Vec<_> = db
-        .faces()
-        .filter(|face| {
-            face.families
-                .iter()
-                .any(|(name, _)| name.to_lowercase() == normalized)
-        })
-        .collect();
-    let regular = faces
-        .iter()
-        .copied()
-        .min_by_key(|face| {
-            (
-                face.style != fontdb::Style::Normal,
-                face.weight.0.abs_diff(400),
-                face.stretch != fontdb::Stretch::Normal,
-                face.weight.0,
-                &face.post_script_name,
-                face.index,
-            )
-        })
-        .ok_or_else(|| unknown_family(db, family))?;
-    let name = regular
-        .families
-        .first()
-        .map_or(family, |(name, _)| name)
-        .to_owned();
-    let bold = faces
-        .iter()
-        .copied()
-        .filter(|face| face.style == fontdb::Style::Normal && face.weight.0 >= 600)
-        .min_by_key(|face| {
-            (
-                face.weight.0 - 600,
-                face.stretch != fontdb::Stretch::Normal,
-                face.weight.0,
-                &face.post_script_name,
-                face.index,
-            )
-        });
-    let read = |face: &fontdb::FaceInfo| {
-        db.with_face_data(face.id, |bytes, index| crate::text::OwnedFace::parse(bytes.to_vec(), index, &name))
-            .flatten()
-            .ok_or_else(|| crate::Error::usage(
-                "Font.system()",
-                format!("the selected face '{}' of '{}' cannot be read; it must be a readable TrueType or OpenType font.", face.post_script_name.escape_debug(), family.escape_debug()),
-            ).with_parameter("family").with_hint("check the installed font files."))
-    };
-    let regular = read(regular)?;
-    let bold = bold.map(read).transpose()?;
-    Ok(crate::fonts::SystemFamily::new(name, regular, bold))
+fn check_family(family: &str) -> crate::Result<()> {
+    if family.is_empty() {
+        return Err(crate::Error::usage(
+            "Font.system()",
+            "the family name is empty; it must name an installed font family.",
+        )
+        .with_parameter("family")
+        .with_hint("check the installed family names."));
+    }
+    Ok(())
 }
 
-fn unknown_family(db: &fontdb::Database, family: &str) -> crate::Error {
-    let mut names: Vec<_> = db
-        .faces()
-        .flat_map(|face| face.families.iter().map(|(name, _)| name.as_str()))
-        .collect();
-    names.sort_unstable();
-    names.dedup();
+/// Faces from one source are inspected together, so a collection is copied only once.
+#[derive(Hash, PartialEq, Eq)]
+enum SourceKey<'a> {
+    File(&'a Path),
+    Binary(*const ()),
+}
+
+fn source_key(source: &fontdb::Source) -> SourceKey<'_> {
+    match source {
+        fontdb::Source::File(path) | fontdb::Source::SharedFile(path, _) => SourceKey::File(path),
+        fontdb::Source::Binary(bytes) => SourceKey::Binary(Arc::as_ptr(bytes).cast::<()>()),
+    }
+}
+
+fn source_groups(db: &fontdb::Database) -> Vec<Vec<&fontdb::FaceInfo>> {
+    let mut slots = HashMap::new();
+    let mut groups: Vec<Vec<&fontdb::FaceInfo>> = Vec::new();
+    for face in db.faces() {
+        let index = *slots.entry(source_key(&face.source)).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        if let Some(group) = groups.get_mut(index) {
+            group.push(face);
+        }
+    }
+    groups
+}
+
+/// A matching face with the name used to find it and a shared copy of its source.
+struct FamilyFace<'a> {
+    info: &'a fontdb::FaceInfo,
+    name: String,
+    bytes: Option<Arc<Vec<u8>>>,
+    variable: bool,
+}
+
+impl FamilyFace<'_> {
+    fn parse(&self, family: &str) -> crate::Result<crate::text::OwnedFace> {
+        let parsed = self.bytes.as_ref().and_then(|bytes| {
+            crate::text::OwnedFace::parse(Arc::clone(bytes), self.info.index, &self.name)
+        });
+        parsed.ok_or_else(|| {
+            crate::Error::usage(
+                "Font.system()",
+                format!(
+                    "the selected face '{}' of '{}' cannot be read; it must be a readable \
+                     TrueType or OpenType font.",
+                    self.info.post_script_name.escape_debug(),
+                    family.escape_debug(),
+                ),
+            )
+            .with_parameter("family")
+            .with_hint("check the installed font files.")
+        })
+    }
+}
+
+fn family_faces<'a>(db: &'a fontdb::Database, family: &str) -> (Vec<FamilyFace<'a>>, Vec<String>) {
+    let normalized = family.to_lowercase();
+    let mut matches = Vec::new();
+    let mut installed_names = Vec::new();
+    for group in source_groups(db) {
+        let Some(first) = group.first() else { continue };
+        let bytes = match &first.source {
+            fontdb::Source::File(path) => std::fs::read(path).ok(),
+            fontdb::Source::Binary(bytes) | fontdb::Source::SharedFile(_, bytes) => {
+                Some(bytes.as_ref().as_ref().to_vec())
+            }
+        }
+        .map(Arc::new);
+        for info in group {
+            let mut names: Vec<String> =
+                info.families.iter().map(|(name, _)| name.clone()).collect();
+            let mut variable = false;
+            if let Some(font) = bytes
+                .as_ref()
+                .and_then(|bytes| FontRef::from_index(bytes, info.index).ok())
+            {
+                // fontdb prefers name ID 16 and may omit the legacy family (name ID 1).
+                names.extend(
+                    font.localized_strings(read_fonts::types::NameId::new(1))
+                        .map(|name| name.to_string())
+                        .filter(|name| !name.is_empty()),
+                );
+                variable = font.fvar().is_ok();
+            }
+            if let Some(name) = names.iter().find(|name| name.to_lowercase() == normalized) {
+                matches.push(FamilyFace {
+                    info,
+                    name: name.clone(),
+                    bytes: bytes.clone(),
+                    variable,
+                });
+            }
+            installed_names.extend(names);
+        }
+        // Only matching families retain their bytes; other sources are released here.
+    }
+    (matches, installed_names)
+}
+
+fn family_in(db: &fontdb::Database, family: &str) -> crate::Result<crate::fonts::SystemFamily> {
+    check_family(family)?;
+    let (faces, names) = family_faces(db, family);
+    let regular = faces
+        .iter()
+        .min_by_key(|face| {
+            let info = face.info;
+            (
+                info.style != fontdb::Style::Normal,
+                info.stretch != fontdb::Stretch::Normal,
+                info.weight.0.abs_diff(400),
+                info.weight.0,
+                &info.post_script_name,
+                info.index,
+            )
+        })
+        .ok_or_else(|| unknown_family(names, family))?;
+    let bold = faces
+        .iter()
+        .filter(|face| {
+            !face.variable && face.info.style == fontdb::Style::Normal && face.info.weight.0 >= 600
+        })
+        .min_by_key(|face| {
+            let info = face.info;
+            (
+                info.stretch != fontdb::Stretch::Normal,
+                info.weight.0 - 600,
+                &info.post_script_name,
+                info.index,
+            )
+        });
+    let variable_only = faces.iter().all(|face| face.variable);
+    let name = regular.name.clone();
+    let regular = regular.parse(family)?;
+    let bold = bold.map(|face| face.parse(family)).transpose()?;
+    Ok(crate::fonts::SystemFamily::new(
+        name,
+        regular,
+        bold,
+        variable_only,
+    ))
+}
+
+fn unknown_family(mut names: Vec<String>, family: &str) -> crate::Error {
+    names.sort_unstable_by_key(|name| (name.to_lowercase(), name.clone()));
+    names.dedup_by(|a, b| a.to_lowercase() == b.to_lowercase());
     let query = family.to_lowercase();
-    names.sort_by_cached_key(|name| (edit_distance(&query, &name.to_lowercase()), *name));
+    names.sort_by_cached_key(|name| {
+        let lower = name.to_lowercase();
+        let shared_words = query
+            .split_whitespace()
+            .filter(|word| lower.split_whitespace().any(|other| *word == other))
+            .count();
+        let prefix = query
+            .chars()
+            .zip(lower.chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        (
+            Reverse(shared_words),
+            Reverse(prefix),
+            edit_distance(&query, &lower),
+            lower,
+        )
+    });
     let mut message = format!(
         "no installed family is named '{}'; it must name an installed font family.",
         family.escape_debug()

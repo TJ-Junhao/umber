@@ -16,8 +16,7 @@
 //! assert!(!font_bytes(BundledFont::Inter, Weight::Regular).is_empty());
 //! ```
 
-mod digest;
-
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -125,7 +124,7 @@ impl BundledFont {
 pub enum Font {
     /// A family bundled with the crate.
     Bundled(BundledFont),
-    /// Validated regular and optional bold font files, identified by their SHA-256 digests.
+    /// Validated regular and optional bold files, identified by bytes and resolved family name.
     File(Arc<FontFiles>),
     /// An installed family, with the selected faces kept in memory.
     System(Arc<SystemFamily>),
@@ -133,7 +132,8 @@ pub enum Font {
 
 /// The immutable files of a font made with [`Font::from_files`].
 ///
-/// Paths and display names do not affect equality; the regular and optional bold digests do.
+/// Equality uses the regular and optional bold bytes and the resolved family name. Paths do
+/// not affect equality, except for the fallback name used when the regular file has no name.
 ///
 /// # Examples
 ///
@@ -148,18 +148,62 @@ pub enum Font {
 pub struct FontFiles {
     regular: OwnedFace,
     bold: Option<OwnedFace>,
-    identity: ([u8; 32], Option<[u8; 32]>),
+    fingerprint: (u64, Option<u64>),
+}
+
+fn same_bytes(left: &Arc<Vec<u8>>, right: &Arc<Vec<u8>>) -> bool {
+    Arc::ptr_eq(left, right) || (left.len() == right.len() && left.as_slice() == right.as_slice())
+}
+
+fn fingerprint(bytes: &[u8]) -> u64 {
+    let mut hash = DefaultHasher::new();
+    hash.write(bytes);
+    hash.finish()
 }
 
 impl PartialEq for FontFiles {
     fn eq(&self, other: &Self) -> bool {
-        self.identity == other.identity
+        self.regular.family == other.regular.family
+            && same_bytes(&self.regular.bytes, &other.regular.bytes)
+            && match (&self.bold, &other.bold) {
+                (Some(left), Some(right)) => same_bytes(&left.bytes, &right.bytes),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 impl Eq for FontFiles {}
 impl Hash for FontFiles {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.identity.hash(state);
+        self.regular.family.hash(state);
+        self.regular.bytes.len().hash(state);
+        self.bold.as_ref().map(|face| face.bytes.len()).hash(state);
+        self.fingerprint.hash(state);
+    }
+}
+
+impl FontFiles {
+    /// The stored bytes for a weight, without copying or reopening the file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BundledFont, Font, Weight};
+    /// use umber_core::fonts::font_bytes;
+    /// let bytes = font_bytes(BundledFont::Inter, Weight::Regular);
+    /// let Font::File(files) = Font::from_files(bytes.to_vec(), None, "Inter".into())? else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!(files.bytes(Weight::Regular), Some(bytes));
+    /// assert_eq!(files.bytes(Weight::SemiBold), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn bytes(&self, weight: Weight) -> Option<&[u8]> {
+        match weight {
+            Weight::Regular => Some(&self.regular.bytes),
+            Weight::SemiBold => self.bold.as_ref().map(|face| face.bytes.as_slice()),
+        }
     }
 }
 
@@ -180,14 +224,21 @@ pub struct SystemFamily {
     name: String,
     regular: OwnedFace,
     bold: Option<OwnedFace>,
+    variable_only: bool,
 }
 
 impl SystemFamily {
-    pub(crate) fn new(name: String, regular: OwnedFace, bold: Option<OwnedFace>) -> Self {
+    pub(crate) fn new(
+        name: String,
+        regular: OwnedFace,
+        bold: Option<OwnedFace>,
+        variable_only: bool,
+    ) -> Self {
         SystemFamily {
             name,
             regular,
             bold,
+            variable_only,
         }
     }
 }
@@ -282,26 +333,40 @@ impl Font {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn from_files(regular: Vec<u8>, bold: Option<Vec<u8>>, name: String) -> Result<Font> {
-        let identity = (
-            digest::sha256(&regular),
-            bold.as_deref().map(digest::sha256),
-        );
         let regular = parse_file(regular, "regular", &name)?;
         let bold = bold
-            .map(|bytes| parse_file(bytes, "bold", &name))
+            .map(|bytes| {
+                if bytes == *regular.bytes {
+                    Ok(regular.clone())
+                } else {
+                    parse_file(bytes, "bold", &name)
+                }
+            })
             .transpose()?;
+        // Validate both faces before traversing their bytes for hashing.
+        let regular_hash = fingerprint(&regular.bytes);
+        let bold_hash = bold.as_ref().map(|face| {
+            if Arc::ptr_eq(&regular.bytes, &face.bytes) {
+                regular_hash
+            } else {
+                fingerprint(&face.bytes)
+            }
+        });
         Ok(Font::File(Arc::new(FontFiles {
             regular,
             bold,
-            identity,
+            fingerprint: (regular_hash, bold_hash),
         })))
     }
 
     /// Finds an installed family and keeps its selected faces in memory.
     ///
-    /// The regular face is closest to weight 400, preferring upright faces. The bold face is
-    /// upright, at least weight 600, and closest to 600. Family matching is case-insensitive.
-    /// Font licensing is the caller's responsibility.
+    /// Every call scans the installed fonts; there is no cache. Family matching includes
+    /// typographic and legacy names and is case-insensitive. The regular face prefers upright,
+    /// normal-width faces, then the closest weight to 400. Bold requires a separate upright
+    /// static face at least weight 600, preferring normal width, then the closest weight to 600.
+    /// Variable fonts use their default instance, not a bold variation. Families installed only
+    /// as variable fonts have no bold face here. Font licensing is the caller's responsibility.
     ///
     /// # Errors
     ///
@@ -318,6 +383,11 @@ impl Font {
     /// ```
     pub fn system(family: &str) -> Result<Font> {
         crate::text::find_family(family).map(|family| Font::System(Arc::new(family)))
+    }
+
+    /// Whether a missing bold face comes from an installed family containing only variable files.
+    pub(crate) fn is_variable_only_system(&self) -> bool {
+        matches!(self, Font::System(family) if family.variable_only)
     }
 
     /// The owned face of a custom font; bundled faces live in the font library instead.
@@ -392,7 +462,7 @@ fn parse_file(bytes: Vec<u8>, parameter: &'static str, name: &str) -> Result<Own
     let hint = if bytes.starts_with(b"ttcf") {
         "extract one face from the collection, or use Font.system()."
     } else {
-        return OwnedFace::parse(bytes, 0, name)
+        return OwnedFace::parse(Arc::new(bytes), 0, name)
             .ok_or_else(|| invalid_file(parameter, "pass a .ttf or .otf file."));
     };
     Err(invalid_file(parameter, hint))
@@ -572,6 +642,24 @@ mod tests {
 
     fn codepoints(ranges: &[(u32, u32)]) -> impl Iterator<Item = u32> + '_ {
         ranges.iter().flat_map(|&(lo, hi)| lo..=hi)
+    }
+
+    #[test]
+    fn fingerprint_collisions_do_not_make_different_files_equal() {
+        let make = |suffix| {
+            let mut bytes = font_bytes(BundledFont::Inter, Weight::Regular).to_vec();
+            bytes.push(suffix);
+            let Font::File(files) = Font::from_files(bytes, None, "Inter".into()).unwrap() else {
+                unreachable!()
+            };
+            files
+        };
+        let first = make(1);
+        let mut second = make(2);
+        Arc::get_mut(&mut second).unwrap().fingerprint = first.fingerprint;
+        assert_ne!(first, second);
+        assert_eq!(first, make(1));
+        assert_eq!(first, Arc::clone(&first));
     }
 
     #[test]

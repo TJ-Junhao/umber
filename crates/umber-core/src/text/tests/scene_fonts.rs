@@ -133,6 +133,49 @@ fn a_font_without_a_face_for_the_weight_names_the_text_and_the_font() {
 }
 
 #[test]
+fn custom_run_keys_distinguish_scene_faces_and_weights() {
+    let font = |family| {
+        Font::from_files(
+            crate::fonts::font_bytes(family, Weight::Regular).to_vec(),
+            Some(crate::fonts::font_bytes(family, Weight::SemiBold).to_vec()),
+            "file".into(),
+        )
+        .unwrap()
+    };
+    let lib = FontLibrary::with_fallbacks(vec![]);
+    let fonts = lib
+        .with_figure_fonts(&[font(BundledFont::Inter), font(BundledFont::Geist)])
+        .unwrap();
+    let regular = fonts.layout("Ab", &style(0)).unwrap();
+    let bold = fonts
+        .layout(
+            "Ab",
+            &TextStyle {
+                weight: Weight::SemiBold,
+                ..style(0)
+            },
+        )
+        .unwrap();
+    let other = fonts.layout("Ab", &style(1)).unwrap();
+    assert_ne!(regular.runs()[0].font(), bold.runs()[0].font());
+    assert_ne!(regular.runs()[0].font(), other.runs()[0].font());
+    assert_eq!(
+        regular.runs()[0].font(),
+        fonts.layout("Cd", &style(0)).unwrap().runs()[0].font()
+    );
+}
+
+#[test]
+fn file_regular_and_bold_share_identical_bytes() {
+    let bytes = crate::fonts::font_bytes(BundledFont::Inter, Weight::Regular).to_vec();
+    let font = Font::from_files(bytes.clone(), Some(bytes), "Inter".into()).unwrap();
+    assert!(std::sync::Arc::ptr_eq(
+        &font.owned_face(Weight::Regular).unwrap().bytes,
+        &font.owned_face(Weight::SemiBold).unwrap().bytes,
+    ));
+}
+
+#[test]
 fn face_ids_are_plain_indices() {
     assert_eq!(FaceId::new(3).index(), 3);
     assert_eq!(FaceId::new(0), FaceId::new(0));

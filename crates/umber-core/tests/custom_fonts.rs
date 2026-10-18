@@ -149,6 +149,65 @@ fn missing_bold_fails_when_bold_text_is_drawn() {
 }
 
 #[test]
+fn source_serif_uses_panose_when_family_class_is_zero() {
+    for bytes in [
+        include_bytes!("../../../tests/fonts/SourceSerif4-Regular.otf").as_slice(),
+        include_bytes!("../../../tests/fonts/SourceSerif4Variable-Roman.ttf").as_slice(),
+    ] {
+        let font = Font::from_files(bytes.to_vec(), None, "Source Serif 4".into()).unwrap();
+        assert_eq!(font.generic_family(), "serif");
+    }
+}
+
+#[test]
+fn variable_font_renders_its_default_instance() {
+    let bytes = include_bytes!("../../../tests/fonts/SourceSerif4Variable-Roman.ttf");
+    // Removing variation tables leaves the base outlines and metrics of the default instance.
+    let mut static_bytes = bytes.to_vec();
+    let count = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;
+    let records: Vec<_> = bytes[12..12 + 16 * count]
+        .chunks_exact(16)
+        .filter(|record| {
+            !matches!(
+                &record[..4],
+                b"fvar" | b"gvar" | b"avar" | b"HVAR" | b"MVAR" | b"STAT"
+            )
+        })
+        .collect();
+    static_bytes[4..6].copy_from_slice(&(records.len() as u16).to_be_bytes());
+    for (target, record) in static_bytes[12..].chunks_exact_mut(16).zip(records) {
+        target.copy_from_slice(record);
+    }
+    let variable = Font::from_files(bytes.to_vec(), None, "variable".into()).unwrap();
+    let default = Font::from_files(static_bytes, None, "default".into()).unwrap();
+    let lib = FontLibrary::with_fallbacks(vec![]);
+    let fonts = lib.with_figure_fonts(&[variable, default]).unwrap();
+    let style = TextStyle {
+        face: FaceId::new(0),
+        weight: Weight::Regular,
+        size: 24.0,
+        tabular_figures: false,
+    };
+    let a = fonts.layout("Ag Revenue 123 −", &style).unwrap();
+    let b = fonts
+        .layout(
+            "Ag Revenue 123 −",
+            &TextStyle {
+                face: FaceId::new(1),
+                ..style
+            },
+        )
+        .unwrap();
+    assert_eq!(a.width(), b.width());
+    assert_eq!(a.ascent(), b.ascent());
+    assert_eq!(a.descent(), b.descent());
+    assert_eq!(
+        a.outline(umber_core::Point::default()),
+        b.outline(umber_core::Point::default())
+    );
+}
+
+#[test]
 fn font_file_edge_cases_missing_digits_fall_back_and_layouts_own_their_data() {
     let sparse = include_bytes!("fixtures/fallback-only.ttf").to_vec();
     let font = Font::from_files(sparse.clone(), Some(sparse), "sparse.ttf".into()).unwrap();

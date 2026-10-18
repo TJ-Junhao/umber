@@ -1,4 +1,4 @@
-//! File-backed fonts in the three themes, using the bundled OFL files without system lookup.
+//! File-backed fonts in the three themes, using OFL files without system lookup.
 
 use umber_core::fonts::font_bytes;
 use umber_core::{AxisData, BundledFont, Font, FontLibrary, LegendStyle, LineOptions, Weight};
@@ -12,6 +12,28 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         "Inter".into(),
     )
     .unwrap();
+    font_cases("font-file", font, lib, sink);
+    for (name, bytes) in [
+        (
+            "font-file-cff",
+            include_bytes!("../../../../../tests/fonts/SourceSerif4-Regular.otf").as_slice(),
+        ),
+        (
+            "font-file-variable",
+            include_bytes!("../../../../../tests/fonts/SourceSerif4Variable-Roman.ttf").as_slice(),
+        ),
+    ] {
+        let font = Font::from_files(
+            bytes.to_vec(),
+            Some(bytes.to_vec()),
+            "Source Serif 4".into(),
+        )
+        .unwrap();
+        font_cases(name, font, lib, sink);
+    }
+}
+
+fn font_cases(prefix: &str, font: Font, lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     for (name, theme) in themes() {
         let theme = theme
             .with_title_font(font.clone())
@@ -41,10 +63,6 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                 },
             )
             .unwrap();
-        emit_scene(
-            &format!("font-file-{name}"),
-            &f.to_scene(lib).unwrap(),
-            sink,
-        );
+        emit_scene(&format!("{prefix}-{name}"), &f.to_scene(lib).unwrap(), sink);
     }
 }

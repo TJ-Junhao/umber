@@ -100,10 +100,7 @@ impl std::fmt::Debug for FontLibrary {
 struct BundledFace {
     shaping: ShapingFont,
     face: Face<'static>,
-    units_per_em: u16,
-    /// Ascender and descender in font units, from the font's metrics; descender is negative.
-    ascender: f32,
-    descender: f32,
+    metrics: FaceMetrics,
 }
 
 impl BundledFace {
@@ -113,9 +110,11 @@ impl BundledFace {
         Some(BundledFace {
             shaping: ShapingFont::new(bytes, 0)?,
             face: Face::parse(bytes, 0)?,
-            units_per_em: metrics.units_per_em,
-            ascender: metrics.ascent,
-            descender: metrics.descent,
+            metrics: FaceMetrics {
+                units_per_em: metrics.units_per_em,
+                ascender: metrics.ascent,
+                descender: metrics.descent,
+            },
         })
     }
 }
@@ -303,8 +302,8 @@ impl FontLibrary {
             .and_then(Option::as_ref)
     }
 
-    /// A shared handle to the font behind `key`.
-    fn handle(&self, key: FontKey) -> Option<FontHandle> {
+    /// A shared handle to a run's font. Scene keys only arise from this layout's primary face.
+    fn handle(&self, key: FontKey, primary: &PrimaryFace<'_>) -> Option<FontHandle> {
         match key {
             FontKey::Bundled(font, weight) => Some(FontHandle::bundled(font, weight)),
             FontKey::Extra(index) => self
@@ -312,7 +311,7 @@ impl FontLibrary {
                 .get(index)
                 .map(|extra| FontHandle::extra(Arc::clone(&extra.bytes))),
             FontKey::System(face) => self.system.as_ref()?.handle(face),
-            FontKey::Custom => None,
+            FontKey::Scene(..) => Some(primary.handle.clone()),
         }
     }
 
@@ -330,11 +329,7 @@ impl FontLibrary {
                         handle: FontHandle::bundled(*font, style.weight),
                         shaping: &face.shaping,
                         face: &face.face,
-                        metrics: FaceMetrics {
-                            units_per_em: face.units_per_em,
-                            ascender: face.ascender,
-                            descender: face.descender,
-                        },
+                        metrics: face.metrics,
                     },
                     style,
                 )
@@ -345,7 +340,7 @@ impl FontLibrary {
                 Some(self.layout_primary(
                     text,
                     PrimaryFace {
-                        key: FontKey::Custom,
+                        key: FontKey::Scene(style.face, style.weight),
                         handle: FontHandle::owned(owned),
                         shaping: &owned.shaping,
                         face: &face,
@@ -386,11 +381,7 @@ impl FontLibrary {
         let mut shaped: Vec<ShapedSlot> = runs.iter().map(|_| None).collect();
         let extents_budget = Cell::new(EXTENTS_PER_LAYOUT);
         for (key, members) in group_by_font(runs.iter().map(|run| run.font)) {
-            let handle = if key == primary.key {
-                Some(primary.handle.clone())
-            } else {
-                self.handle(key)
-            };
+            let handle = self.handle(key, &primary);
             let Some(handle) = handle else { continue };
             let shape_all = |font: &ShapingFont, face: &Face<'_>| {
                 let funcs = if matches!(key, FontKey::System(_)) {
@@ -408,36 +399,30 @@ impl FontLibrary {
                     })
                     .collect::<Vec<_>>()
             };
-            let results = if key == primary.key {
-                Some(shape_all(primary.shaping, primary.face))
-            } else {
-                match key {
-                    FontKey::Custom => None,
-                    FontKey::Bundled(font, weight) => self
-                        .bundled_face(font, weight)
-                        .map(|bundled| shape_all(&bundled.shaping, &bundled.face)),
-                    // Fonts that did not ship with the crate are parsed and shaped under a guard.
-                    FontKey::Extra(index) => self.extra.get(index).and_then(|extra| {
-                        guarded(|| {
-                            Face::parse(&extra.bytes, 0).map(|f| shape_all(&extra.shaping, &f))
-                        })
+            let results = match key {
+                FontKey::Scene(..) => Some(shape_all(primary.shaping, primary.face)),
+                FontKey::Bundled(font, weight) => self
+                    .bundled_face(font, weight)
+                    .map(|bundled| shape_all(&bundled.shaping, &bundled.face)),
+                // Fonts that did not ship with the crate are parsed and shaped under a guard.
+                FontKey::Extra(index) => self.extra.get(index).and_then(|extra| {
+                    guarded(|| Face::parse(&extra.bytes, 0).map(|f| shape_all(&extra.shaping, &f)))
                         .flatten()
-                    }),
-                    FontKey::System(face) => self.system.as_ref().and_then(|system| {
-                        let shaping = system.shaping_font(face)?;
-                        let results = handle
-                            .with_data(|data, index| {
-                                guarded(|| {
-                                    Face::parse(data, index).map(|f| shape_all(&shaping.font, &f))
-                                })
-                                .flatten()
+                }),
+                FontKey::System(face) => self.system.as_ref().and_then(|system| {
+                    let shaping = system.shaping_font(face)?;
+                    let results = handle
+                        .with_data(|data, index| {
+                            guarded(|| {
+                                Face::parse(data, index).map(|f| shape_all(&shaping.font, &f))
                             })
-                            .flatten()?;
-                        // Only a font that shaped without panicking is kept for later layouts.
-                        system.keep_shaping_font(face, shaping);
-                        Some(results)
-                    }),
-                }
+                            .flatten()
+                        })
+                        .flatten()?;
+                    // Only a font that shaped without panicking is kept for later layouts.
+                    system.keep_shaping_font(face, shaping);
+                    Some(results)
+                }),
             };
             for (i, run) in results.unwrap_or_default() {
                 if let Some(slot) = shaped.get_mut(i) {
@@ -801,11 +786,16 @@ impl SceneFonts<'_> {
                     || "text".to_owned(),
                     |text| format!("the text {}", quoted(text)),
                 );
+                let reason = if weight == Weight::SemiBold && font.is_variable_only_system() {
+                    " The family's installed files are variable fonts; only the default instance is used."
+                } else {
+                    ""
+                };
                 Error::style(
                     self.context,
                     format!(
                         "{subject} needs the {} face of {}, which the font does not have; text \
-                         can only be set in a weight its font has.",
+                         can only be set in a weight its font has.{reason}",
                         weight_name(weight),
                         font.family_name()
                     ),

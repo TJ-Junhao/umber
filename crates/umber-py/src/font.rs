@@ -4,7 +4,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use pyo3::prelude::*;
-use umber_core::{BundledFont, Font};
+use pyo3::types::PyBytes;
+use umber_core::{BundledFont, Font, Weight};
 
 use crate::errors::{core_error, internal_value};
 
@@ -18,12 +19,49 @@ const BUNDLED: [BundledFont; 5] = BundledFont::ALL;
 #[derive(Clone)]
 pub(crate) struct FontValue {
     inner: Font,
+    paths: Option<FilePaths>,
 }
+
+#[derive(Clone)]
+struct FilePaths {
+    regular: String,
+    bold: Option<String>,
+}
+
+type FileSource<'py> = (
+    Bound<'py, PyBytes>,
+    Option<Bound<'py, PyBytes>>,
+    String,
+    Option<String>,
+);
 
 #[pymethods]
 impl FontValue {
     fn family_name(&self) -> &str {
         self.inner.family_name()
+    }
+
+    fn file_paths(&self) -> Option<(String, Option<String>)> {
+        self.paths
+            .as_ref()
+            .map(|paths| (paths.regular.clone(), paths.bold.clone()))
+    }
+
+    fn file_source<'py>(&self, py: Python<'py>) -> Option<FileSource<'py>> {
+        let Font::File(files) = &self.inner else {
+            return None;
+        };
+        let paths = self.paths.as_ref()?;
+        let regular = files.bytes(Weight::Regular)?;
+        let saved = PyBytes::new(py, regular);
+        let bold = files.bytes(Weight::SemiBold).map(|bytes| {
+            if std::ptr::eq(regular, bytes) {
+                saved.clone()
+            } else {
+                PyBytes::new(py, bytes)
+            }
+        });
+        Some((saved, bold, paths.regular.clone(), paths.bold.clone()))
     }
 
     fn __eq__(&self, other: &Self) -> bool {
@@ -40,12 +78,20 @@ impl FontValue {
 /// Parses bytes at construction, before a font is assigned to a theme.
 #[pyfunction]
 pub(crate) fn font_from_files(
-    regular: Vec<u8>,
-    bold: Option<Vec<u8>>,
+    regular: &[u8],
+    bold: Option<&[u8]>,
     name: String,
+    regular_path: String,
+    bold_path: Option<String>,
 ) -> PyResult<FontValue> {
-    Font::from_files(regular, bold, name)
-        .map(|inner| FontValue { inner })
+    Font::from_files(regular.to_vec(), bold.map(<[u8]>::to_vec), name)
+        .map(|inner| FontValue {
+            inner,
+            paths: Some(FilePaths {
+                regular: regular_path,
+                bold: bold_path,
+            }),
+        })
         .map_err(core_error)
 }
 
@@ -53,7 +99,7 @@ pub(crate) fn font_from_files(
 #[pyfunction]
 pub(crate) fn font_system(family: &str) -> PyResult<FontValue> {
     Font::system(family)
-        .map(|inner| FontValue { inner })
+        .map(|inner| FontValue { inner, paths: None })
         .map_err(core_error)
 }
 
@@ -97,12 +143,14 @@ pub(crate) fn font((kind, payload): FontArg) -> PyResult<Font> {
             FILE_KIND,
             FontPayload::Loaded(FontValue {
                 inner: font @ Font::File(_),
+                ..
             }),
         )
         | (
             SYSTEM_KIND,
             FontPayload::Loaded(FontValue {
                 inner: font @ Font::System(_),
+                ..
             }),
         ) => Ok(font),
         _ => Err(internal_value(format!("{kind} is not a font kind"))),
@@ -144,6 +192,10 @@ mod tests {
         .unwrap();
         let value = FontValue {
             inner: file.clone(),
+            paths: Some(FilePaths {
+                regular: "Inter.ttf".into(),
+                bold: None,
+            }),
         };
         assert_eq!(font((FILE_KIND, FontPayload::Loaded(value))).unwrap(), file);
     }

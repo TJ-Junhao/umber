@@ -3088,11 +3088,17 @@ An immutable font family for a theme's titles or body text.
 
 The bundled families are constants. ``from_file()`` reads regular and optional bold
 files; ``system()`` finds an installed family. Fonts compare equal by bundled constant,
-file bytes' SHA-256 digests, or installed family, never by a file's path.
+the same file bytes and resolved family name, or installed family. A file's path matters
+only when its stem supplies a missing family name.
 
-Variable fonts use their default instance. A font without bold is allowed until bold text
-is drawn; no synthetic bold is made. Font licensing is your responsibility. Editable SVG
+Variable fonts use their default instance. Families installed only as variable fonts
+(for example Ubuntu or Cantarell) have no bold face here: titles need ``bold=`` via
+``Font.from_file()``, or another family. A font without bold is allowed until bold text is
+drawn; no synthetic bold is made. Font licensing is your responsibility. Editable SVG
 viewers need the font installed; outlined SVG and PNG do not.
+
+A pickled file font carries its bytes and original paths; unpickling does not read the
+files. A pickled system font looks the family up again when unpickled.
 
 Example:
 
@@ -3192,8 +3198,10 @@ Font.from_file(regular: str | os.PathLike[str], *, bold: str | os.PathLike[str] 
 Read a TrueType or OpenType regular file and an optional bold file.
 
 Bytes are kept in memory, so changing or removing the files does not change the font.
-The family name comes from the regular file. Collections (``.ttc``) are not accepted;
-use ``Font.system()`` to choose a family from an installed collection.
+The family name comes from the regular file, or its path's stem if no name is stored.
+Collections (``.ttc``) are not accepted; use ``Font.system()`` to choose a family from
+an installed collection. Pickling carries the bytes and original paths; unpickling
+does not reopen the files.
 
 Args:
     regular: Path to the regular ``.ttf`` or ``.otf`` file.
@@ -3227,9 +3235,16 @@ Font.system(family: str) -> 'Font'
 
 Find an installed font family, matching its name case-insensitively.
 
-The regular face is closest to weight 400, with upright faces preferred. The bold face
-is upright and closest to weight 600 among weights at least 600. Selected bytes are
-kept in memory. A family without bold fails only when bold text is drawn.
+Every call scans the installed fonts; there is no cache. Both typographic and legacy
+family names are matched. Regular faces prefer upright, normal width, then the closest
+weight to 400. Bold requires a separate upright static face of at least weight 600,
+preferring normal width, then the closest weight to 600. Selected bytes stay in memory.
+
+Variable fonts use their default instance, not a bold variation. Families installed
+only as variable fonts (for example Ubuntu or Cantarell) have no bold face here:
+titles need ``bold=`` via ``Font.from_file()``, or another family. A family without
+bold fails only when bold text is drawn. A pickled system font looks the family up
+again when unpickled.
 
 Args:
     family: An installed family name, not a font file path.
@@ -3239,8 +3254,8 @@ Returns:
 
 Raises:
     TypeError: If ``family`` is not a string.
-    UsageError: If the family is not installed or its selected files cannot be read.
-        An unknown family reports the closest installed names.
+    UsageError: If the name is empty, the family is not installed, or its selected files
+        cannot be read. An unknown family reports the closest installed names.
 
 Example:
 

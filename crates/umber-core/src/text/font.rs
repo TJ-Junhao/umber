@@ -1,7 +1,7 @@
 //! Font identity, font bytes and parsed faces.
 //!
-//! A [`FontKey`] names a font within one library. A [`FontHandle`] shares the font's bytes, so a
-//! layout can be outlined after its library is gone. A [`Face`] is a font parsed for character
+//! A [`FontKey`] names a library font or a primary face in one scene. A [`FontHandle`] shares
+//! the font's bytes, so a layout can be outlined after its library is gone. A [`Face`] is a font parsed for character
 //! lookup, outlines and glyph bounds.
 
 use std::sync::Arc;
@@ -19,9 +19,10 @@ use skrifa::outline::{OutlineGlyphCollection, OutlineGlyphFormat};
 
 use super::cmap::{secondary_subtables, subtable_glyph};
 use super::outline::{draws_segments, unhinted};
+use super::style::FaceId;
 use crate::fonts::{BundledFont, Weight, font_bytes};
 
-/// Which font a run of text is drawn with, within one [`FontLibrary`](super::FontLibrary).
+/// Which font a run is drawn with, within one scene and its [`FontLibrary`](super::FontLibrary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum FontKey {
     Bundled(BundledFont, Weight),
@@ -29,8 +30,9 @@ pub(super) enum FontKey {
     Extra(usize),
     /// Index into the system font index.
     System(usize),
-    /// The owned primary face of this layout, supplied by a file or installed family.
-    Custom,
+    /// A file or installed-family face in one SceneFonts, with its requested weight.
+    /// Stable across layouts in that scene, not across different scene font sets.
+    Scene(FaceId, Weight),
 }
 
 /// Where the bytes of a font live.
@@ -119,8 +121,9 @@ pub(super) type ShapingFont = harfrust::Font;
 
 /// A validated, owned primary face. Its bytes and default-instance shaper are immutable.
 /// Unlike a fallback discovered during layout, it cannot disappear before outlining.
+#[derive(Clone)]
 pub(crate) struct OwnedFace {
-    pub(super) bytes: Arc<Vec<u8>>,
+    pub(crate) bytes: Arc<Vec<u8>>,
     pub(super) index: u32,
     pub(super) shaping: ShapingFont,
     pub(super) metrics: FaceMetrics,
@@ -138,7 +141,7 @@ pub(super) struct FaceMetrics {
 
 impl OwnedFace {
     /// Validates the table ranges and required outline and metric tables at construction.
-    pub(crate) fn parse(bytes: Vec<u8>, index: u32, name: &str) -> Option<OwnedFace> {
+    pub(crate) fn parse(bytes: Arc<Vec<u8>>, index: u32, name: &str) -> Option<OwnedFace> {
         super::guard::guarded(|| {
             let font = FontRef::from_index(&bytes, index).ok()?;
             let records = font.table_directory().table_records();
@@ -186,15 +189,18 @@ impl OwnedFace {
                 .unwrap_or_else(|| name.to_owned());
             let generic = if font.post().is_ok_and(|post| post.is_fixed_pitch() != 0) {
                 "monospace"
-            } else if font
-                .os2()
-                .is_ok_and(|os2| (1..=7).contains(&(os2.s_family_class() >> 8)))
-            {
+            } else if font.os2().is_ok_and(|os2| {
+                let class = os2.s_family_class() >> 8;
+                let panose = os2.panose_10();
+                (1..=7).contains(&class)
+                    || (class == 0
+                        && panose.first() == Some(&2)
+                        && panose.get(1).is_some_and(|serif| (2..=10).contains(serif)))
+            }) {
                 "serif"
             } else {
                 "sans-serif"
             };
-            let bytes = Arc::new(bytes);
             let shared: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::clone(&bytes) as _;
             let shaping = ShapingFont::new(read_fonts::model::Blob::from(shared), index)?;
             Some(OwnedFace {

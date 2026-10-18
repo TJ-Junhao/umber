@@ -144,6 +144,20 @@ def test_system_family_found_or_skipped() -> None:
     assert family in _figure(font).to_svg(text=ub.SvgText.EDITABLE)
 
 
+def test_system_pickle_looks_up_the_family_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    family, font = _installed()
+    saved = pickle.dumps(font)
+    queries: list[str] = []
+
+    def lookup(name: str) -> ub.Font:
+        queries.append(name)
+        return ub.Font.INTER
+
+    monkeypatch.setattr(ub.Font, "system", lookup)
+    assert pickle.loads(saved) is ub.Font.INTER
+    assert queries == [family]
+
+
 def test_system_unknown_lists_closest() -> None:
     family, _ = _installed()
     unknown = family[:-1] + "zzzz"
@@ -217,8 +231,91 @@ def test_font_file_edge_cases_paths_and_missing_glyphs(tmp_path: Path) -> None:
     assert svg == fallback.to_svg()
 
 
-def test_font_fixtures_are_excluded_from_distributions() -> None:
-    import tomllib
+def test_font_fixtures_are_excluded_from_distributions(tmp_path: Path) -> None:
+    import subprocess
+    import tarfile
 
-    config = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert "tests/fonts/**" in config["tool"]["maturin"]["exclude"]
+    subprocess.run(
+        ["maturin", "sdist", "--out", str(tmp_path)], cwd=ROOT, check=True, capture_output=True
+    )
+    [sdist] = tmp_path.glob("*.tar.gz")
+    with tarfile.open(sdist) as archive:
+        names = archive.getnames()
+    assert any(name.endswith("/python/umber/_font.py") for name in names)
+    assert not any("/tests/fonts/" in name for name in names)
+
+
+def test_font_file_without_name_table_uses_stem_in_identity(tmp_path: Path) -> None:
+    data = bytearray(REGULAR.read_bytes())
+    for offset in range(12, 12 + 16 * int.from_bytes(data[4:6], "big"), 16):
+        if bytes(data[offset : offset + 4]) == b"name":
+            data[offset : offset + 4] = b"namf"
+            break
+    else:
+        pytest.fail("fixture has no name table")
+    first, second = tmp_path / "First.ttf", tmp_path / "Second.ttf"
+    first.write_bytes(data)
+    second.write_bytes(data)
+    a, b = ub.Font.from_file(first, bold=first), ub.Font.from_file(second, bold=second)
+    assert a != b
+    assert hash(a) != hash(b)
+    assert a == ub.Font.from_file(first, bold=first)
+    assert "First" in _figure(a).to_svg(text=ub.SvgText.EDITABLE)
+    assert "Second" in _figure(b).to_svg(text=ub.SvgText.EDITABLE)
+
+
+@pytest.mark.parametrize("with_bold", [False, True])
+def test_file_pickle_preserves_paths_without_reopening(tmp_path: Path, with_bold: bool) -> None:
+    regular, bold = tmp_path / "字体-Regular.ttf", tmp_path / "字体-Bold.ttf"
+    regular.write_bytes(REGULAR.read_bytes())
+    bold.write_bytes(BOLD.read_bytes())
+    font = ub.Font.from_file(regular, bold=bold if with_bold else ub.AUTO)
+    saved = pickle.dumps(font)
+    regular.unlink()
+    bold.unlink()
+    restored = pickle.loads(saved)
+    assert restored == font
+    assert repr(restored) == repr(font)
+    assert str(regular) in repr(restored)
+
+
+def test_file_bytes_live_only_in_native_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads: list[Path] = []
+    original = Path.read_bytes
+
+    def read(path: Path) -> bytes:
+        reads.append(path)
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    font = ub.Font.from_file(REGULAR, bold=REGULAR)
+    assert reads == [REGULAR]
+    assert not hasattr(font, "_source")
+    source = font.__reduce__()[1][0]
+    assert isinstance(source, tuple)
+    assert source[0] is source[1]
+    restored = pickle.loads(pickle.dumps(font))
+    assert reads == [REGULAR]
+    assert restored == font
+
+
+def test_system_empty_family_has_specific_error() -> None:
+    with pytest.raises(ub.UsageError) as caught:
+        ub.Font.system("")
+    assert str(caught.value) == (
+        "Font.system(): the family name is empty; it must name an installed font family."
+    )
+    assert details(caught.value) == ("family", "check the installed family names.")
+
+
+def test_font_constructor_and_invalid_value_hint_include_custom_fonts() -> None:
+    with pytest.raises(TypeError) as caught:
+        ub.Font()
+    assert "Font.from_file()" in str(caught.value)
+    assert "Font.system()" in str(caught.value)
+    detail = details(caught.value)
+    assert detail is not None and detail[1] is not None
+    assert "Font.from_file()" in detail[1] and "Font.system()" in detail[1]
+    with pytest.raises(TypeError) as invalid:
+        ub.Theme.PIGMENT.with_body_font(cast(ub.Font, "Inter"))
+    assert details(invalid.value) == ("value", detail[1])
