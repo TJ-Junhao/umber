@@ -148,17 +148,25 @@ impl MeasuredRow {
     /// fewer dash cycles. Plain rows are one body line tall (`1.35 ×` the label size), or as
     /// tall as the tallest swatch.
     ///
+    /// # Errors
+    ///
+    /// As [`measure`], for the first label that cannot be laid out; labels are measured
+    /// before the metrics of their style, so the error names the label.
+    ///
     /// A chip is a pill one body line plus `2 × 3` pt tall, holding a dot of `0.6 ×` the label
     /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
     /// Bubble references have no pill or horizontal padding and retain their true circle size,
     /// including the outline. Both row styles grow to contain the tallest reference circle.
-    pub fn measure(theme: &Theme, legend: &Legend, lib: &SceneFonts<'_>) -> Option<MeasuredRow> {
+    pub fn measure(
+        theme: &Theme,
+        legend: &Legend,
+        lib: &SceneFonts<'_>,
+    ) -> Result<Option<MeasuredRow>> {
         if legend.row().is_empty() {
-            return None;
+            return Ok(None);
         }
         let style = Styles::new(theme).body;
         let size = f64::from(style.size);
-        let (ascent, descent) = metrics(lib, &style);
         let row_style = legend.row_style();
         let (padding_x, entry_gap, line) = match row_style {
             RowStyle::Plain => (0.0, ENTRY_GAP, BODY_LINE * size),
@@ -173,7 +181,7 @@ impl MeasuredRow {
             .iter()
             .map(|entry| {
                 let (kind, w, h) = swatch_size(theme, row_style, entry.swatch(), size);
-                RowEntry {
+                Ok(RowEntry {
                     swatch: SwatchBox {
                         kind,
                         color: entry.color(),
@@ -183,18 +191,19 @@ impl MeasuredRow {
                         width: w,
                         height: h,
                     },
-                    label: measure(lib, entry.label(), style),
+                    label: measure(lib, entry.label(), style)?,
                     chip: None,
                     #[cfg(test)]
                     row: 0,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<_>>()?;
+        let (ascent, descent) = metrics(lib, &style)?;
         let row_height = entries
             .iter()
             .map(|entry| entry.swatch.height)
             .fold(line, f64::max);
-        Some(MeasuredRow {
+        Ok(Some(MeasuredRow {
             entries,
             row_style,
             padding_x,
@@ -202,7 +211,7 @@ impl MeasuredRow {
             row_height,
             ascent,
             descent,
-        })
+        }))
     }
 
     /// The entries laid out left to right from `left`, wrapping onto a further row before an
@@ -368,15 +377,23 @@ pub(crate) struct MeasuredLegend<'a> {
 impl<'a> MeasuredLegend<'a> {
     /// The row entries and the direct labels of `legend`, measured; see
     /// [`MeasuredRow::measure`] and [`DirectLabels::measure`].
-    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &SceneFonts<'_>) -> MeasuredLegend<'a> {
+    ///
+    /// # Errors
+    ///
+    /// As those two.
+    pub fn measure(
+        theme: &Theme,
+        legend: &Legend<'a>,
+        lib: &SceneFonts<'_>,
+    ) -> Result<MeasuredLegend<'a>> {
         if legend.is_empty() {
-            return MeasuredLegend::default();
+            return Ok(MeasuredLegend::default());
         }
-        MeasuredLegend {
+        Ok(MeasuredLegend {
             position: crate::LegendPosition::TopLeft,
-            row: MeasuredRow::measure(theme, legend, lib),
-            direct: DirectLabels::measure(theme, legend, lib),
-        }
+            row: MeasuredRow::measure(theme, legend, lib)?,
+            direct: DirectLabels::measure(theme, legend, lib)?,
+        })
     }
 
     /// The header row, absent when the entries sit beside, below or inside the plot.
@@ -450,31 +467,42 @@ impl<'a> DirectLabels<'a> {
     /// The direct labels of `legend`, measured in the body font at `SemiBold` weight and the
     /// body size, with end dots of the theme's drawn marker diameter, whatever the size of the
     /// line's own markers or width: an end dot marks where a line ends, alike for every line.
-    pub fn measure(theme: &Theme, legend: &Legend<'a>, lib: &SceneFonts<'_>) -> DirectLabels<'a> {
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`], for the first label that cannot be laid out; the labels are measured
+    /// before the metrics of their style, so the error names the label.
+    pub fn measure(
+        theme: &Theme,
+        legend: &Legend<'a>,
+        lib: &SceneFonts<'_>,
+    ) -> Result<DirectLabels<'a>> {
         if legend.direct().is_empty() {
-            return DirectLabels::default();
+            return Ok(DirectLabels::default());
         }
         let style = TextStyle {
             weight: Weight::SemiBold,
             ..Styles::new(theme).body
         };
-        let (ascent, descent) = metrics(lib, &style);
         let entries = legend
             .direct()
             .iter()
-            .map(|entry| MeasuredDirect {
-                label: measure(lib, entry.label(), style),
-                color: entry.color(),
-                anchor: entry.anchor(),
+            .map(|entry| {
+                Ok(MeasuredDirect {
+                    label: measure(lib, entry.label(), style)?,
+                    color: entry.color(),
+                    anchor: entry.anchor(),
+                })
             })
-            .collect();
-        DirectLabels {
+            .collect::<Result<_>>()?;
+        let (ascent, descent) = metrics(lib, &style)?;
+        Ok(DirectLabels {
             entries,
             size: f64::from(style.size),
             ascent,
             descent,
             dot: f64::from(theme.drawn_marker_size(SizeSpec::Auto)),
-        }
+        })
     }
 
     /// The room the labels need right of the plot area, for a label whose anchor is on the
@@ -1583,7 +1611,9 @@ mod tests {
             let limits = crate::resolve::Limits::of(axes);
             let legend = Legend::new(crate::LegendStyle::Direct, &marks, &limits);
             let fonts = crate::test_support::figure_fonts(f.theme());
-            DirectLabels::measure(f.theme(), &legend, &fonts).reserve(cap)
+            DirectLabels::measure(f.theme(), &legend, &fonts)
+                .unwrap()
+                .reserve(cap)
         };
         let short = measured(&["Short"]);
         assert!(short > DIRECT_GAP && short < cap);

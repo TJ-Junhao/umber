@@ -22,8 +22,9 @@ use super::runs::{self, TextRun, group_by_font};
 use super::shaping::{EXTENTS_PER_LAYOUT, Funcs, ShapedRun, Shaper, features};
 use super::style::{FaceId, TextStyle};
 use super::system::{Budget, Limits, Source, SystemFonts};
-use crate::Result;
+use crate::error::quoted;
 use crate::fonts::{BundledFont, Font, Weight, font_bytes};
+use crate::{Error, Result};
 
 /// The most `with_fallbacks` outline confirmations one layout call performs: checks that a
 /// fallback font's glyph for a character has an outline. Beyond it, characters skip those
@@ -69,7 +70,7 @@ const BUNDLED_COUNT: usize = BundledFont::ALL.len() * Weight::ALL.len();
 /// let lib = FontLibrary::with_fallbacks(Vec::new());
 /// let fonts = lib.with_figure_fonts(&[Font::JETBRAINS_MONO])?;
 /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 9.0, tabular_figures: true };
-/// assert!(fonts.layout("1,234.5", &style).width() > 0.0);
+/// assert!(fonts.layout("1,234.5", &style)?.width() > 0.0);
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 pub struct FontLibrary {
@@ -200,7 +201,7 @@ impl FontLibrary {
     /// let lib = FontLibrary::bundled();
     /// let fonts = lib.with_figure_fonts(&[Font::INTER])?;
     /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// assert!(fonts.layout("Profit", &style).width() > 0.0);
+    /// assert!(fonts.layout("Profit", &style)?.width() > 0.0);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
@@ -232,7 +233,7 @@ impl FontLibrary {
     /// let lib = FontLibrary::with_fallbacks(vec![b"not a font".to_vec()]);
     /// let fonts = lib.with_figure_fonts(&[Font::INTER])?;
     /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// assert!(fonts.layout("AB", &style).width() > 0.0);
+    /// assert!(fonts.layout("AB", &style)?.width() > 0.0);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
@@ -274,13 +275,16 @@ impl FontLibrary {
     /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::SOURCE_SERIF_4, Font::INTER])?;
     /// assert_eq!(fonts.font(FaceId::new(1)), Some(&Font::INTER));
     /// let title = TextStyle { face: FaceId::new(0), weight: Weight::SemiBold, size: 15.0, tabular_figures: false };
-    /// assert!(fonts.layout("Revenue", &title).width() > 0.0);
+    /// assert!(fonts.layout("Revenue", &title)?.width() > 0.0);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn with_figure_fonts(&self, fonts: &[Font]) -> Result<SceneFonts<'_>> {
         Ok(SceneFonts {
             library: self,
             fonts: fonts.to_vec(),
+            context: LAYOUT_CONTEXT,
+            #[cfg(test)]
+            missing_weights: Vec::new(),
         })
     }
 
@@ -507,12 +511,18 @@ impl FontLibrary {
 ///
 /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::GEIST, Font::JETBRAINS_MONO])?;
 /// let mono = TextStyle { face: FaceId::new(1), weight: Weight::Regular, size: 9.0, tabular_figures: true };
-/// assert_eq!(fonts.layout("1111", &mono).width(), fonts.layout("8888", &mono).width());
+/// assert_eq!(fonts.layout("1111", &mono)?.width(), fonts.layout("8888", &mono)?.width());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 pub struct SceneFonts<'a> {
     library: &'a FontLibrary,
     fonts: Vec<Font>,
+    /// The API call that errors of these fonts are reported in.
+    context: &'static str,
+    /// Faces and weights treated as missing, to exercise the error of a font without a face
+    /// for a weight.
+    #[cfg(test)]
+    missing_weights: Vec<(FaceId, Weight)>,
 }
 
 impl std::fmt::Debug for SceneFonts<'_> {
@@ -520,7 +530,69 @@ impl std::fmt::Debug for SceneFonts<'_> {
         f.debug_struct("SceneFonts")
             .field("library", self.library)
             .field("fonts", &self.fonts)
-            .finish()
+            .field("context", &self.context)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The context of the errors of fonts made by [`FontLibrary::with_figure_fonts`].
+const LAYOUT_CONTEXT: &str = "SceneFonts.layout()";
+
+/// The hint of the error for a face that names no font.
+const UNKNOWN_FACE_HINT: &str = "name a face by the index of a font given to with_figure_fonts.";
+
+/// The hint of the error for a font without a face for the weight of the text.
+const MISSING_WEIGHT_HINT: &str = "choose a font with a face for that weight.";
+
+/// Why a style cannot be laid out with a scene's fonts.
+enum Unavailable<'a> {
+    /// The style's face names no font.
+    Face(FaceId),
+    /// The font of the style's face has no face for the style's weight.
+    Weight(&'a Font, Weight),
+}
+
+/// A text style checked against a scene's fonts by [`SceneFonts::check`], with the font of its
+/// face and the bundled font that sets it: text in it lays out without error.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CheckedStyle {
+    style: TextStyle,
+    font: Font,
+    primary: BundledFont,
+}
+
+impl CheckedStyle {
+    /// The style.
+    pub(crate) fn style(&self) -> TextStyle {
+        self.style
+    }
+
+    /// The font of the style's face.
+    pub(crate) fn font(&self) -> &Font {
+        &self.font
+    }
+}
+
+/// The name of `weight` in error messages.
+fn weight_name(weight: Weight) -> &'static str {
+    match weight {
+        Weight::Regular => "regular",
+        Weight::SemiBold => "bold",
+    }
+}
+
+impl<'a> SceneFonts<'a> {
+    /// These fonts with their errors reported in `context`, the API call that lays text out
+    /// with them, such as `"Figure.to_png()"`.
+    pub(crate) fn in_context(self, context: &'static str) -> SceneFonts<'a> {
+        SceneFonts { context, ..self }
+    }
+
+    /// These fonts with the font of `face` treated as having no face for `weight`.
+    #[cfg(test)]
+    pub(crate) fn without_weight(mut self, face: FaceId, weight: Weight) -> SceneFonts<'a> {
+        self.missing_weights.push((face, weight));
+        self
     }
 }
 
@@ -562,8 +634,7 @@ impl SceneFonts<'_> {
     ///
     /// Characters missing from the font of `style.face` are drawn with the other bundled
     /// families in the same weight, then with the fallback fonts, and as `.notdef` if no font
-    /// has them. A face these fonts do not have lays out as empty text, with no width, ascent
-    /// or descent.
+    /// has them.
     ///
     /// One call checks at most 4,096 uncached glyph outlines in the
     /// [`with_fallbacks`](FontLibrary::with_fallbacks) fonts; beyond that, characters skip
@@ -572,6 +643,12 @@ impl SceneFonts<'_> {
     /// (at most 16 per character). Characters beyond these limits are drawn as `.notdef`. This
     /// bounds the work a single string can cause.
     ///
+    /// # Errors
+    ///
+    /// `Error::Usage` when `style.face` names none of these fonts, and `Error::Style`, naming
+    /// `text` and the font, when the font has no face for `style.weight`. The bundled fonts
+    /// have a face for every weight.
+    ///
     /// # Examples
     ///
     /// ```
@@ -579,17 +656,111 @@ impl SceneFonts<'_> {
     ///
     /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
     /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// let small = fonts.layout("Signal", &style).width();
-    /// let large = fonts.layout("Signal", &TextStyle { size: 20.0, ..style }).width();
+    /// let small = fonts.layout("Signal", &style)?.width();
+    /// let large = fonts.layout("Signal", &TextStyle { size: 20.0, ..style })?.width();
     /// assert!((large - 2.0 * small).abs() < 1e-3);
-    /// assert!(fonts.layout("Signal", &TextStyle { face: FaceId::new(1), ..style }).is_empty());
+    /// assert!(fonts.layout("Signal", &TextStyle { face: FaceId::new(1), ..style }).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    #[must_use]
-    pub fn layout(&self, text: &str, style: &TextStyle) -> TextLayout {
-        match self.font(style.face) {
-            Some(Font::Bundled(primary)) => self.library.layout_bundled(text, *primary, style),
-            None => TextLayout::empty(0.0, 0.0),
+    pub fn layout(&self, text: &str, style: &TextStyle) -> Result<TextLayout> {
+        let checked = self.check(text, style)?;
+        Ok(self.layout_checked(text, &checked))
+    }
+
+    /// `style` checked against these fonts for setting `text`.
+    ///
+    /// # Errors
+    ///
+    /// As [`SceneFonts::layout`]: the error of a missing weight names `text`.
+    pub(crate) fn check(&self, text: &str, style: &TextStyle) -> Result<CheckedStyle> {
+        let (font, primary) = self
+            .primary(style)
+            .map_err(|unavailable| self.error(unavailable, Some(text)))?;
+        Ok(CheckedStyle {
+            style: *style,
+            font: font.clone(),
+            primary,
+        })
+    }
+
+    /// Shapes `text` with the checked style `style` and measures it, as
+    /// [`SceneFonts::layout`] does.
+    pub(crate) fn layout_checked(&self, text: &str, style: &CheckedStyle) -> TextLayout {
+        self.library
+            .layout_bundled(text, style.primary, &style.style)
+    }
+
+    /// The ascent and descent of the primary font of `style`, in points.
+    ///
+    /// # Errors
+    ///
+    /// As [`SceneFonts::layout`]; the error of a missing weight names the font and the weight
+    /// but no text, so a caller with text to set checks that text first
+    /// ([`SceneFonts::check`]).
+    pub(crate) fn metrics(&self, style: &TextStyle) -> Result<(f32, f32)> {
+        let (_, primary) = self
+            .primary(style)
+            .map_err(|unavailable| self.error(unavailable, None))?;
+        let empty = self.library.layout_bundled("", primary, style);
+        Ok((empty.ascent(), empty.descent()))
+    }
+
+    /// The font of the face of `style`, and the bundled font that sets text of `style`.
+    ///
+    /// This is the one place where a style is resolved to a face. A font without a face for
+    /// the style's weight ([`Font::has_face`]) is detected here as [`Unavailable::Weight`].
+    /// Every bundled font has a face for every weight; unit tests also treat the faces and
+    /// weights given to `without_weight` as missing.
+    fn primary(
+        &self,
+        style: &TextStyle,
+    ) -> std::result::Result<(&Font, BundledFont), Unavailable<'_>> {
+        let font = self.font(style.face).ok_or(Unavailable::Face(style.face))?;
+        let has_face = font.has_face(style.weight);
+        #[cfg(test)]
+        let has_face = has_face && !self.missing_weights.contains(&(style.face, style.weight));
+        if !has_face {
+            return Err(Unavailable::Weight(font, style.weight));
+        }
+        match font {
+            Font::Bundled(bundled) => Ok((font, *bundled)),
+        }
+    }
+
+    /// The error for a style that cannot be laid out, naming `text` when there is text to set.
+    fn error(&self, unavailable: Unavailable<'_>, text: Option<&str>) -> Error {
+        match unavailable {
+            Unavailable::Face(face) => {
+                let fonts = match self.fonts.len().checked_sub(1) {
+                    Some(last) => format!("the last face is {last}"),
+                    None => "there are no fonts".to_owned(),
+                };
+                Error::usage(
+                    self.context,
+                    format!(
+                        "the text style names face {}, but {fonts}; a face must be the index \
+                         of one of the fonts.",
+                        face.index()
+                    ),
+                )
+                .with_hint(UNKNOWN_FACE_HINT)
+            }
+            Unavailable::Weight(font, weight) => {
+                let subject = text.map_or_else(
+                    || "text".to_owned(),
+                    |text| format!("the text {}", quoted(text)),
+                );
+                Error::style(
+                    self.context,
+                    format!(
+                        "{subject} needs the {} face of {}, which the font does not have; text \
+                         can only be set in a weight its font has.",
+                        weight_name(weight),
+                        font.family_name()
+                    ),
+                )
+                .with_hint(MISSING_WEIGHT_HINT)
+            }
         }
     }
 }

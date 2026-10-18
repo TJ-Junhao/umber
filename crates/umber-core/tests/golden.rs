@@ -166,36 +166,40 @@ fn primitives_scene(dx: f32) -> Scene {
         .with_figure_fonts(&[Font::INTER, Font::SOURCE_SERIF_4])
         .unwrap();
     let black = rgb(20, 20, 20);
-    scene.push_text(
-        &fonts,
-        "Revenue \u{2212}12.5%",
-        TextStyle {
-            face: FaceId::new(0),
-            weight: Weight::SemiBold,
-            size: 13.0,
-            tabular_figures: false,
-        },
-        Point {
-            x: 20.0 + dx,
-            y: 185.0,
-        },
-        black,
-    );
-    scene.push_text(
-        &fonts,
-        "Q1 Q2 Q3",
-        TextStyle {
-            face: FaceId::new(1),
-            weight: Weight::Regular,
-            size: 10.0,
-            tabular_figures: false,
-        },
-        Point {
-            x: 20.0 + dx,
-            y: 203.0,
-        },
-        black,
-    );
+    scene
+        .push_text(
+            &fonts,
+            "Revenue \u{2212}12.5%",
+            TextStyle {
+                face: FaceId::new(0),
+                weight: Weight::SemiBold,
+                size: 13.0,
+                tabular_figures: false,
+            },
+            Point {
+                x: 20.0 + dx,
+                y: 185.0,
+            },
+            black,
+        )
+        .unwrap();
+    scene
+        .push_text(
+            &fonts,
+            "Q1 Q2 Q3",
+            TextStyle {
+                face: FaceId::new(1),
+                weight: Weight::Regular,
+                size: 10.0,
+                tabular_figures: false,
+            },
+            Point {
+                x: 20.0 + dx,
+                y: 203.0,
+            },
+            black,
+        )
+        .unwrap();
     scene
 }
 

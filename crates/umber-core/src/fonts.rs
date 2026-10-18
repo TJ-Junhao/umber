@@ -191,6 +191,23 @@ impl Font {
         }
     }
 
+    /// Whether the font has a face for `weight`. Every bundled font has a face for every
+    /// weight.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Font, Weight};
+    ///
+    /// assert!(Font::INTER.has_face(Weight::SemiBold));
+    /// ```
+    #[must_use]
+    pub fn has_face(&self, weight: Weight) -> bool {
+        match (self, weight) {
+            (Font::Bundled(_), Weight::Regular | Weight::SemiBold) => true,
+        }
+    }
+
     /// The CSS generic family that SVG `font-family` falls back to.
     ///
     /// # Examples
@@ -499,6 +516,11 @@ mod tests {
             assert_eq!(*constant, Font::Bundled(bundled));
             assert_eq!(constant.family_name(), bundled.family_name());
             assert_eq!(constant.generic_family(), bundled.generic_family());
+            assert!(
+                Weight::ALL
+                    .into_iter()
+                    .all(|weight| constant.has_face(weight))
+            );
         }
         for (i, a) in constants.iter().enumerate() {
             for (j, b) in constants.iter().enumerate() {

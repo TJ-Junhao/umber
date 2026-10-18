@@ -3796,7 +3796,6 @@ mod tests {
         AreaOptions, BandOptions, BarOptions, Figure, HistOptions, LineOptions, ScatterOptions,
         Series, Step, StepOptions,
     };
-    use crate::text::SceneFonts;
     use crate::{AxesMut, FontLibrary, LogBase, MIN_LOG_VALUE, ScaleKind, Theme, TickFormat};
 
     fn nums(v: &[f64]) -> AxisData {
@@ -3844,8 +3843,8 @@ mod tests {
     /// Both axes of `axes`, resolved from its marks.
     fn resolve_axes(axes: &Axes, x_target: usize, y_target: usize) -> Resolved {
         let marks = resolve_axes_marks(axes, &Theme::pigment());
-        let fonts = crate::test_support::figure_fonts(&Theme::pigment());
-        let (x, y) = TickRoom::unlimited(x_target, y_target, &fonts);
+        let tick = crate::test_support::tick_font(&Theme::pigment());
+        let (x, y) = TickRoom::unlimited(x_target, y_target, tick);
         resolve(&marks, &Limits::of(axes), &x, &y)
     }
 
@@ -7157,20 +7156,16 @@ mod tests {
     }
 
     /// The tick rooms resolve is asked with: for the targets alone, and with labels kept apart
-    /// on a plot of 400 by 300 pt, in the fonts `lib` of a pigment figure.
-    fn rooms<'a>(lib: &'a SceneFonts<'a>) -> [(TickRoom<'a>, TickRoom<'a>); 2] {
+    /// on a plot of 400 by 300 pt, with the tick labels of a pigment figure.
+    fn rooms() -> [(TickRoom<'static>, TickRoom<'static>); 2] {
         let plot = crate::layout::PlotSize {
             width: 400.0,
             height: 300.0,
         };
+        let tick = crate::test_support::tick_font(&Theme::pigment());
         [
-            TickRoom::unlimited(5, 4, lib),
-            crate::layout::tick_rooms(
-                plot,
-                &Theme::pigment(),
-                lib,
-                crate::layout::TickSpacing::LabelsApart,
-            ),
+            TickRoom::unlimited(5, 4, tick),
+            crate::layout::tick_rooms(plot, tick, crate::layout::TickSpacing::LabelsApart),
         ]
     }
 
@@ -7258,7 +7253,6 @@ mod tests {
 
     #[test]
     fn resolved_y_is_a_resolved_axis() {
-        let lib = &crate::test_support::figure_fonts(&Theme::pigment());
         let figures = mark_figures();
         assert!(figures.len() > 100, "{}", figures.len());
         for (name, f) in &figures {
@@ -7268,7 +7262,7 @@ mod tests {
             let AxisLimits::Continuous(y_limits) = limits.y else {
                 panic!("{name}: a numeric y axis")
             };
-            for (x_room, y_room) in rooms(lib) {
+            for (x_room, y_room) in rooms() {
                 for bubbles in [None, Some((-3.0, 50.0)), Some((2.0, 2.5))] {
                     let bubbles = bubbles.filter(|_| y_limits.transform == Transform::Linear);
                     let (y, base) = resolve_axis(
@@ -7295,12 +7289,11 @@ mod tests {
 
     #[test]
     fn resolved_x_keeps_the_rules_of_the_x_axis() {
-        let lib = &crate::test_support::figure_fonts(&Theme::pigment());
         for (name, f) in &mark_figures() {
             let axes = f.single_axes();
             let marks = resolve_marks(axes.marks(), f.theme());
             let limits = Limits::of(axes);
-            for (x_room, y_room) in rooms(lib) {
+            for (x_room, y_room) in rooms() {
                 for bubbles in [None, Some((-3.0, 50.0))] {
                     let (x, _) = resolve_axis(
                         marks.iter(),

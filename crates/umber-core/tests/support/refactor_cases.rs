@@ -887,13 +887,15 @@ fn primitives_scene(lib: &FontLibrary) -> Scene {
     ];
     let fonts = bundled(lib);
     for (i, (text, font, weight, size, tabular)) in runs.into_iter().enumerate() {
-        scene.push_text(
-            &fonts,
-            text,
-            style(font, weight, size, tabular),
-            pt(20.0, 185.0 + 14.0 * i as f32),
-            black,
-        );
+        scene
+            .push_text(
+                &fonts,
+                text,
+                style(font, weight, size, tabular),
+                pt(20.0, 185.0 + 14.0 * i as f32),
+                black,
+            )
+            .unwrap();
     }
     scene
 }
@@ -1356,27 +1358,33 @@ fn hostile_text_scene(lib: &FontLibrary) -> Scene {
     ] {
         scene.push(Item::Text(variant));
     }
-    scene.push_text(
-        &fonts,
-        "",
-        style(BundledFont::Inter, Weight::Regular, 10.0, false),
-        pt(0.0, 0.0),
-        rgb(0, 0, 0),
-    );
-    scene.push_text(
-        &fonts,
-        "pushed text",
-        style(BundledFont::Inter, Weight::Regular, f32::INFINITY, false),
-        pt(0.0, 40.0),
-        rgb(0, 0, 0),
-    );
-    scene.push_text(
-        &fonts,
-        "pushed text \u{E000}",
-        style(BundledFont::Geist, Weight::Regular, 9.0, false),
-        pt(f32::NAN, 40.0),
-        rgb(0, 0, 0),
-    );
+    scene
+        .push_text(
+            &fonts,
+            "",
+            style(BundledFont::Inter, Weight::Regular, 10.0, false),
+            pt(0.0, 0.0),
+            rgb(0, 0, 0),
+        )
+        .unwrap();
+    scene
+        .push_text(
+            &fonts,
+            "pushed text",
+            style(BundledFont::Inter, Weight::Regular, f32::INFINITY, false),
+            pt(0.0, 40.0),
+            rgb(0, 0, 0),
+        )
+        .unwrap();
+    scene
+        .push_text(
+            &fonts,
+            "pushed text \u{E000}",
+            style(BundledFont::Geist, Weight::Regular, 9.0, false),
+            pt(f32::NAN, 40.0),
+            rgb(0, 0, 0),
+        )
+        .unwrap();
     scene
 }
 
@@ -1436,13 +1444,15 @@ fn font_weights_scene(lib: &FontLibrary) -> Scene {
     for font in BundledFont::ALL {
         for weight in Weight::ALL {
             for tabular in [false, true] {
-                scene.push_text(
-                    &fonts,
-                    "Revenue \u{2212}12.5% 0123456789 AV To fi \u{E000}",
-                    style(font, weight, 11.0, tabular),
-                    pt(10.0, 16.0 + 15.0 * row),
-                    rgb(20, 20, 20),
-                );
+                scene
+                    .push_text(
+                        &fonts,
+                        "Revenue \u{2212}12.5% 0123456789 AV To fi \u{E000}",
+                        style(font, weight, 11.0, tabular),
+                        pt(10.0, 16.0 + 15.0 * row),
+                        rgb(20, 20, 20),
+                    )
+                    .unwrap();
                 row += 1.0;
             }
         }
@@ -3071,7 +3081,7 @@ fn text_layout_cases(lib: &FontLibrary) -> String {
                 for size in [11.0, 0.0, -1.0, f32::NAN, 1.0e4] {
                     for sample in samples {
                         let s = style(font, weight, size, tabular);
-                        let layout = fonts.layout(sample, &s);
+                        let layout = fonts.layout(sample, &s).unwrap();
                         let outline = layout.outline(pt(0.0, 0.0));
                         let _ = writeln!(
                             out,

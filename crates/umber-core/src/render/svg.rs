@@ -38,8 +38,9 @@ use crate::scene::{
 ///
 /// With [`SvgText::Outlines`] text is drawn as filled glyph outlines. With
 /// [`SvgText::Editable`] it is written as `<text>` elements that name the font family: the
-/// scene font of the item's face, so editable text in a face the scene has no font for is
-/// skipped. Everything that cannot be drawn is skipped, so the result always parses as XML.
+/// scene font of the item's face. Such a face is missing only from a text record built by
+/// hand, since [`Scene::push_text`] fails for a face its fonts do not have; editable text in
+/// it is skipped, as everything that cannot be drawn is, so the result always parses as XML.
 /// Content of groups nested deeper than [`MAX_GROUP_DEPTH`] is omitted.
 ///
 /// An [`Item::Image`] is an `<image>` holding its pixels as a PNG data URI, stretched without
@@ -665,7 +666,9 @@ mod tests {
     fn text_with_an_invalid_origin_is_skipped_in_every_mode() {
         for bad in [p(f32::NAN, 5.0), p(5.0, f32::INFINITY), p(2.0e6, 5.0)] {
             let mut scene = Scene::new(100.0, 40.0, WHITE);
-            scene.push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), RED);
+            scene
+                .push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), RED)
+                .unwrap();
             if let Some(Item::Text(t)) = scene.items.first_mut() {
                 t.origin = bad;
             }
@@ -683,7 +686,9 @@ mod tests {
     #[test]
     fn text_outlines_vs_editable() {
         let mut scene = Scene::new(100.0, 40.0, WHITE);
-        scene.push_text(&inter_fonts(), "Hello", inter(12.0), p(5.0, 20.0), RED);
+        scene
+            .push_text(&inter_fonts(), "Hello", inter(12.0), p(5.0, 20.0), RED)
+            .unwrap();
 
         let outlines = render_svg(&scene, SvgText::Outlines);
         assert!(!outlines.contains("<text"));
@@ -719,7 +724,9 @@ mod tests {
                     size: 12.0,
                     tabular_figures: false,
                 };
-                scene.push_text(&fonts, "Ab", style, p(5.0, 20.0), RED);
+                scene
+                    .push_text(&fonts, "Ab", style, p(5.0, 20.0), RED)
+                    .unwrap();
                 let editable = render_svg(&scene, SvgText::Editable);
                 let doc = parse(&editable);
                 let text = doc
@@ -752,7 +759,9 @@ mod tests {
             face: FaceId::new(1),
             ..inter(12.0)
         };
-        scene.push_text(&fonts, "Ab", mono, p(5.0, 20.0), RED);
+        scene
+            .push_text(&fonts, "Ab", mono, p(5.0, 20.0), RED)
+            .unwrap();
         let editable = render_svg(&scene, SvgText::Editable);
         let doc = parse(&editable);
         let text = doc
@@ -768,7 +777,9 @@ mod tests {
     #[test]
     fn editable_text_in_a_face_the_scene_lacks_is_skipped() {
         let mut scene = Scene::new(100.0, 40.0, WHITE);
-        scene.push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), RED);
+        scene
+            .push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), RED)
+            .unwrap();
         if let Some(Item::Text(t)) = scene.items.first_mut() {
             t.style.face = FaceId::new(1);
         }
@@ -783,7 +794,9 @@ mod tests {
     fn svg_escapes_text_and_attributes() {
         let mut scene = Scene::new(100.0, 40.0, WHITE);
         let source = "a<b & \"c\" 'd'\u{0007}e";
-        scene.push_text(&inter_fonts(), source, inter(12.0), p(5.0, 20.0), RED);
+        scene
+            .push_text(&inter_fonts(), source, inter(12.0), p(5.0, 20.0), RED)
+            .unwrap();
         let svg = render_svg(&scene, SvgText::Editable);
         let doc = parse(&svg);
         let texts: Vec<_> = doc
@@ -1054,7 +1067,9 @@ mod tests {
             stroke: None,
             positions: vec![p(1.0, 1.0)],
         });
-        scene.push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), clear);
+        scene
+            .push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), clear)
+            .unwrap();
         for mode in [SvgText::Outlines, SvgText::Editable] {
             let svg = render_svg(&scene, mode);
             let doc = parse(&svg);
@@ -1070,7 +1085,9 @@ mod tests {
     fn editable_text_preserves_spaces() {
         let mut scene = Scene::new(200.0, 40.0, WHITE);
         let source = "  A     B  ";
-        scene.push_text(&inter_fonts(), source, inter(12.0), p(5.0, 20.0), RED);
+        scene
+            .push_text(&inter_fonts(), source, inter(12.0), p(5.0, 20.0), RED)
+            .unwrap();
         let svg = render_svg(&scene, SvgText::Editable);
         let doc = parse(&svg);
         let text = doc

@@ -549,7 +549,7 @@ fn merged_legend_follows_figure_title_alignment() {
         f.title("Figure").subtitle("Summary");
         let groups = ShareGroups::new(&f);
         let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
-        let panels = panels(&f, &groups, &fonts);
+        let panels = panels(&f, &groups, &fonts).unwrap();
         let planned = plan(
             &f,
             &panels,
@@ -590,7 +590,7 @@ fn figure_title_is_one_and_a_half_title_sizes() {
         f.title("Figure");
         let groups = ShareGroups::new(&f);
         let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
-        let panels = panels(&f, &groups, &fonts);
+        let panels = panels(&f, &groups, &fonts).unwrap();
         let planned = plan(
             &f,
             &panels,
@@ -750,7 +750,7 @@ fn merged_rows_wrap_and_align_independently_in_both_styles() {
             let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
             let planned = plan(
                 &f,
-                &panels(&f, &groups, &fonts),
+                &panels(&f, &groups, &fonts).unwrap(),
                 &groups,
                 &fonts,
                 "Figure.to_scene()",
@@ -841,7 +841,7 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
     let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
     let planned = plan(
         &f,
-        &panels(&f, &groups, &fonts),
+        &panels(&f, &groups, &fonts).unwrap(),
         &groups,
         &fonts,
         "Figure.to_scene()",
@@ -863,7 +863,7 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
     let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
     let planned = plan(
         &f,
-        &panels(&f, &groups, &fonts),
+        &panels(&f, &groups, &fonts).unwrap(),
         &groups,
         &fonts,
         "Figure.to_scene()",
@@ -921,7 +921,7 @@ fn per_panel_legends_do_not_follow_title_alignment() {
             let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
             let planned = plan(
                 &f,
-                &panels(&f, &groups, &fonts),
+                &panels(&f, &groups, &fonts).unwrap(),
                 &groups,
                 &fonts,
                 "Figure.to_scene()",
@@ -979,7 +979,7 @@ fn figure_header_joins_single_and_grid_height_needs() {
         let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
         let planned = plan(
             &f,
-            &panels(&f, &groups, &fonts),
+            &panels(&f, &groups, &fonts).unwrap(),
             &groups,
             &fonts,
             "Figure.to_scene()",

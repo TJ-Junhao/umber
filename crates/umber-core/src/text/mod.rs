@@ -29,7 +29,7 @@
 //!
 //! let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
 //! let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
-//! let layout = fonts.layout("Revenue", &style);
+//! let layout = fonts.layout("Revenue", &style)?;
 //! assert!(layout.width() > 0.0);
 //! let path = layout.outline(Point { x: 0.0, y: 0.0 });
 //! assert!(!path.is_empty());
@@ -62,5 +62,6 @@ mod system;
 mod tests;
 
 pub use layout::TextLayout;
+pub(crate) use library::CheckedStyle;
 pub use library::{FontLibrary, SceneFonts};
 pub use style::{FaceId, TextStyle};

@@ -4,8 +4,9 @@
 //! axis pointing down and the origin at the top-left corner of the figure. Text enters a scene
 //! already shaped and outlined, and keeps its source string and style so that the SVG backend
 //! can also write it as editable text; the style names its font by its index in the scene's font
-//! list. No validation happens when a scene is built; the renderers skip values they cannot
-//! draw.
+//! list. Apart from [`Scene::push_text`], which lays text out and so fails for a face its fonts
+//! do not have, no validation happens when a scene is built; the renderers skip values they
+//! cannot draw.
 //!
 //! # Examples
 //!
@@ -258,7 +259,7 @@ pub enum Paint {
 /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
 /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 12.0, tabular_figures: false };
 /// let mut scene = Scene::new(100.0, 40.0, white);
-/// scene.push_text(&fonts, "Hi", style, Point { x: 5.0, y: 20.0 }, white);
+/// scene.push_text(&fonts, "Hi", style, Point { x: 5.0, y: 20.0 }, white)?;
 /// let Some(Item::Text(item)) = scene.items.first() else { unreachable!() };
 /// assert_eq!(item.text, "Hi");
 /// assert_eq!(scene.font(item.style.face), Some(&Font::INTER));

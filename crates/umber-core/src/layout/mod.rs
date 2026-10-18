@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use crate::error::{number, quoted};
 use crate::model::Axes;
 use crate::resolve::{AxisTick, Baseline, NormalizedPos, ValueAxis};
-use crate::text::{FaceId, SceneFonts};
+use crate::text::{CheckedStyle, FaceId, SceneFonts};
 use crate::{Error, FontLibrary, Result, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
@@ -253,9 +253,9 @@ fn scaled(size: f32, scale: f32) -> f32 {
 }
 
 /// The face of the title font in the fonts of a figure (see [`figure_fonts`]).
-const TITLE_FACE: FaceId = FaceId::new(0);
+pub(crate) const TITLE_FACE: FaceId = FaceId::new(0);
 /// The face of the body font in the fonts of a figure (see [`figure_fonts`]).
-const BODY_FACE: FaceId = FaceId::new(1);
+pub(crate) const BODY_FACE: FaceId = FaceId::new(1);
 
 /// The fonts of a figure with `theme`, laid out through `library`: the title font as
 /// [`TITLE_FACE`] and the body font as [`BODY_FACE`], the faces [`Styles`] name.
@@ -296,9 +296,14 @@ impl Styles {
 }
 
 /// Ascent and descent of `style`'s primary font.
-fn metrics(lib: &SceneFonts<'_>, style: &TextStyle) -> (f64, f64) {
-    let layout = lib.layout("", style);
-    (f64::from(layout.ascent()), f64::from(layout.descent()))
+///
+/// # Errors
+///
+/// As [`SceneFonts::layout`], naming no text: where text is set in `style`, measure it first,
+/// so that its error names it.
+fn metrics(lib: &SceneFonts<'_>, style: &TextStyle) -> Result<(f64, f64)> {
+    let (ascent, descent) = lib.metrics(style)?;
+    Ok((f64::from(ascent), f64::from(descent)))
 }
 
 fn fits(layout: &TextLayout) -> bool {
@@ -308,8 +313,19 @@ fn fits(layout: &TextLayout) -> bool {
 
 /// Shapes `text`, cutting it to the longest prefix (on a character boundary) whose width is at
 /// most [`MAX_TEXT_WIDTH`].
-fn measure(lib: &SceneFonts<'_>, text: &str, style: TextStyle) -> Label {
-    let full = lib.layout(text, &style);
+///
+/// # Errors
+///
+/// As [`SceneFonts::layout`], naming `text`.
+fn measure(lib: &SceneFonts<'_>, text: &str, style: TextStyle) -> Result<Label> {
+    let checked = lib.check(text, &style)?;
+    Ok(measure_checked(lib, text, &checked))
+}
+
+/// [`measure`] in a style already checked against `lib`.
+fn measure_checked(lib: &SceneFonts<'_>, text: &str, checked: &CheckedStyle) -> Label {
+    let style = checked.style();
+    let full = lib.layout_checked(text, checked);
     let (text, layout) = if fits(&full) {
         (text.to_owned(), full)
     } else {
@@ -320,11 +336,11 @@ fn measure(lib: &SceneFonts<'_>, text: &str, style: TextStyle) -> Label {
             .collect();
         // Invariant: the prefix ending at ends[lo] fits, the one at ends[hi] does not.
         let (mut lo, mut hi) = (0_usize, ends.len().saturating_sub(1));
-        let mut best = (String::new(), lib.layout("", &style));
+        let mut best = (String::new(), lib.layout_checked("", checked));
         while hi > lo + 1 {
             let mid = lo + (hi - lo) / 2;
             let prefix = ends.get(mid).and_then(|&end| text.get(..end)).unwrap_or("");
-            let candidate = lib.layout(prefix, &style);
+            let candidate = lib.layout_checked(prefix, checked);
             if fits(&candidate) {
                 lo = mid;
                 best = (prefix.to_owned(), candidate);
@@ -379,16 +395,33 @@ impl<'a> LabelCache<'a> {
         }
     }
 
+    /// `use_label` of the label of `text` in `style`.
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`].
     fn with_label<T>(
         &self,
         text: &str,
         style: TextStyle,
         use_label: impl FnOnce(&Label) -> T,
+    ) -> Result<T> {
+        let checked = self.lib.check(text, &style)?;
+        Ok(self.with_checked_label(text, &checked, use_label))
+    }
+
+    /// `use_label` of the label of `text` in the style `checked`, checked against the fonts.
+    fn with_checked_label<T>(
+        &self,
+        text: &str,
+        checked: &CheckedStyle,
+        use_label: impl FnOnce(&Label) -> T,
     ) -> T {
         #[cfg(test)]
         if !self.enabled {
-            return use_label(&measure(self.lib, text, style));
+            return use_label(&measure_checked(self.lib, text, checked));
         }
+        let style = checked.style();
         let key = LabelStyle {
             face: style.face,
             weight: style.weight,
@@ -400,55 +433,85 @@ impl<'a> LabelCache<'a> {
         if let Some(label) = by_text.get(text) {
             return use_label(label);
         }
-        let label = measure(self.lib, text, style);
+        let label = measure_checked(self.lib, text, checked);
         let result = use_label(&label);
         by_text.insert(text.to_owned(), label);
         result
     }
 
-    fn measure(&self, text: &str, style: TextStyle) -> Label {
+    /// The label of `text` in `style`.
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`].
+    fn measure(&self, text: &str, style: TextStyle) -> Result<Label> {
         self.with_label(text, style, Label::clone)
     }
 
-    /// Reads only the width, without copying the cached text or glyph runs.
-    fn width(&self, text: &str, style: TextStyle) -> f64 {
+    /// The width of `text` in `style`. Reads only the width, without copying the cached text
+    /// or glyph runs.
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`].
+    #[cfg(test)]
+    fn width(&self, text: &str, style: TextStyle) -> Result<f64> {
         self.with_label(text, style, Label::width)
     }
 
-    fn ticks(&self, ticks: &[AxisTick], style: TextStyle) -> Vec<(NormalizedPos, Label)> {
+    /// The width of `text` in the style `checked`, checked against the fonts. Reads only the
+    /// width, without copying the cached text or glyph runs.
+    fn checked_width(&self, text: &str, checked: &CheckedStyle) -> f64 {
+        self.with_checked_label(text, checked, Label::width)
+    }
+
+    /// The labels of `ticks` in `style`, each with its tick's position.
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`], for the first label that cannot be laid out.
+    fn ticks(&self, ticks: &[AxisTick], style: TextStyle) -> Result<Vec<(NormalizedPos, Label)>> {
         ticks
             .iter()
-            .map(|tick| (tick.pos, self.measure(&tick.label, style)))
+            .map(|tick| Ok((tick.pos, self.measure(&tick.label, style)?)))
             .collect()
     }
 }
 
 /// Measures the label of every tick, keeping each tick's position.
+///
+/// # Errors
+///
+/// As [`measure`], for the first label that cannot be laid out.
 fn measure_ticks(
     lib: &SceneFonts<'_>,
     ticks: &[AxisTick],
     style: TextStyle,
-) -> Vec<(NormalizedPos, Label)> {
+) -> Result<Vec<(NormalizedPos, Label)>> {
     ticks
         .iter()
-        .map(|tick| (tick.pos, measure(lib, &tick.label, style)))
+        .map(|tick| Ok((tick.pos, measure(lib, &tick.label, style)?)))
         .collect()
 }
 
 /// `text` shaped in the tick label style of `theme` and centered on the point `(x, y)`:
 /// horizontally on `x`, and vertically as a y tick label is centered on its tick. For labels
 /// drawn inside the plot area, such as the values written on heatmap cells.
+///
+/// # Errors
+///
+/// As [`measure`].
 pub(crate) fn centered_tick_label(
     lib: &SceneFonts<'_>,
     theme: &Theme,
     text: &str,
     (x, y): (f64, f64),
-) -> Label {
+) -> Result<Label> {
     let style = Styles::new(theme).tick;
-    let mut label = measure(lib, text, style);
+    let mut label = measure(lib, text, style)?;
     label.x = x - label.width() / 2.0;
     label.y = y + Y_LABEL_CENTER * f64::from(style.size);
-    label
+    Ok(label)
 }
 
 /// The baseline of text with `ascent` and `descent` in a line box of `height` whose top is
@@ -533,10 +596,8 @@ pub(crate) struct TickRoom<'a> {
     length: f64,
     /// How the labels take room along the axis.
     extent: LabelExtent,
-    /// The fonts.
-    lib: &'a SceneFonts<'a>,
-    /// The tick label style.
-    style: TextStyle,
+    /// The tick labels' style and fonts.
+    tick: &'a TickFont<'a>,
     /// The widths of the labels measured so far: tick searches judge the same labels often.
     widths: RefCell<HashMap<String, f64>>,
     /// Measurements shared with panel layout by `pipeline::plan`'s category-candidate slack
@@ -546,32 +607,61 @@ pub(crate) struct TickRoom<'a> {
     most: Option<usize>,
 }
 
-/// The tick rooms of the x and the y axis of a plot area of `plot`, with tick labels in the
-/// tick label style of `theme`, spaced as `spacing` says.
+/// The tick labels of a figure: their style, checked against the figure's fonts, and the
+/// measures every tick room uses. One per layout, so that tick rooms measure tick labels
+/// without errors.
+pub(crate) struct TickFont<'a> {
+    /// The fonts.
+    lib: &'a SceneFonts<'a>,
+    /// The tick label style.
+    style: CheckedStyle,
+    /// The line of a tick label: ascent and descent, in points.
+    line: f64,
+    /// The width of a tabular digit, in points.
+    digit: f64,
+}
+
+impl<'a> TickFont<'a> {
+    /// The tick labels in the tick label style of `theme`, set in `lib`.
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`], naming the digit `0`, which it measures.
+    pub(crate) fn new(lib: &'a SceneFonts<'a>, theme: &Theme) -> Result<TickFont<'a>> {
+        let style = Styles::new(theme).tick;
+        let checked = lib.check("0", &style)?;
+        let (ascent, descent) = metrics(lib, &style)?;
+        let digit = measure_checked(lib, "0", &checked).width();
+        Ok(TickFont {
+            lib,
+            style: checked,
+            line: ascent + descent,
+            digit,
+        })
+    }
+}
+
+/// The tick rooms of the x and the y axis of a plot area of `plot`, with the tick labels of
+/// `tick`, spaced as `spacing` says.
 pub(crate) fn tick_rooms<'a>(
     plot: PlotSize,
-    theme: &Theme,
-    lib: &'a SceneFonts<'a>,
+    tick: &'a TickFont<'a>,
     spacing: TickSpacing,
 ) -> (TickRoom<'a>, TickRoom<'a>) {
     let (x_target, y_target) = tick_targets(plot);
-    let style = Styles::new(theme).tick;
-    let (ascent, descent) = metrics(lib, &style);
-    let digit = measure(lib, "0", style).width();
     let room = |target, length, extent| TickRoom {
         target,
         spacing,
         length,
         extent,
-        lib,
-        style,
+        tick,
         widths: RefCell::new(HashMap::new()),
         labels: None,
         most: None,
     };
     (
-        room(x_target, plot.width, LabelExtent::Width(digit)),
-        room(y_target, plot.height, LabelExtent::Line(ascent + descent)),
+        room(x_target, plot.width, LabelExtent::Width(tick.digit)),
+        room(y_target, plot.height, LabelExtent::Line(tick.line)),
     )
 }
 
@@ -599,7 +689,7 @@ impl<'a> TickRoom<'a> {
 
     /// The least gap between adjacent labels, in points.
     fn gap(&self) -> f64 {
-        TICK_LABEL_GAP * f64::from(self.style.size)
+        TICK_LABEL_GAP * f64::from(self.tick.style.style().size)
     }
 
     /// The width of `label`.
@@ -608,8 +698,8 @@ impl<'a> TickRoom<'a> {
             return width;
         }
         let width = self.labels.map_or_else(
-            || measure(self.lib, label, self.style).width(),
-            |labels| labels.width(label, self.style),
+            || measure_checked(self.tick.lib, label, &self.tick.style).width(),
+            |labels| labels.checked_width(label, &self.tick.style),
         );
         self.widths.borrow_mut().insert(label.to_owned(), width);
         width
@@ -677,18 +767,18 @@ impl<'a> TickRoom<'a> {
 
 #[cfg(test)]
 impl<'a> TickRoom<'a> {
-    /// Tick rooms for ticks chosen for about `x_target` and `y_target` alone, with tick labels
-    /// in the style of [`Theme::pigment`] and `lib` the fonts of a pigment figure.
+    /// Tick rooms for ticks chosen for about `x_target` and `y_target` alone, with the tick
+    /// labels of `tick`.
     pub(crate) fn unlimited(
         x_target: usize,
         y_target: usize,
-        lib: &'a SceneFonts<'a>,
+        tick: &'a TickFont<'a>,
     ) -> (TickRoom<'a>, TickRoom<'a>) {
         let size = PlotSize {
             width: 400.0,
             height: 300.0,
         };
-        let (x, y) = tick_rooms(size, &Theme::pigment(), lib, TickSpacing::Target);
+        let (x, y) = tick_rooms(size, tick, TickSpacing::Target);
         (
             TickRoom {
                 target: x_target,
@@ -2095,9 +2185,9 @@ mod tests {
         let layout = plan_of(&f).1;
         let fonts = crate::test_support::figure_fonts(f.theme());
         let label = &layout.y_tick_labels[0];
-        let bottom = label.y + metrics(&fonts, &label.style).1;
+        let bottom = label.y + metrics(&fonts, &label.style).unwrap().1;
         let entry = &layout.legend.entries()[0];
-        let top = entry.label.y - metrics(&fonts, &entry.label.style).0;
+        let top = entry.label.y - metrics(&fonts, &entry.label.style).unwrap().0;
         assert!(
             top >= bottom + placement::BOTTOM_GAP,
             "legend top {top}, y label bottom {bottom}"
@@ -2109,8 +2199,10 @@ mod tests {
         let f = bottom_without_x_labels(4.0);
         let layout = plan_of(&f).1;
         let label = &layout.y_tick_labels[0];
-        let bottom =
-            label.y + metrics(&crate::test_support::figure_fonts(f.theme()), &label.style).1;
+        let bottom = label.y
+            + metrics(&crate::test_support::figure_fonts(f.theme()), &label.style)
+                .unwrap()
+                .1;
         let required = bottom + placement::BOTTOM_GAP + layout.legend.height() + PADDING;
         assert!(
             required <= f.height_in() * 72.0 + 1e-9,
@@ -2370,7 +2462,7 @@ mod tests {
         }
         let lib = FontLibrary::with_fallbacks(Vec::new());
         let fonts = figure_fonts(&lib, &Theme::pigment()).unwrap();
-        let label = measure(&fonts, "WWWW", Styles::new(&Theme::pigment()).body);
+        let label = measure(&fonts, "WWWW", Styles::new(&Theme::pigment()).body).unwrap();
         let width = label.width().ceil();
         for container in ["figure", "panel"] {
             for (room, shown) in [(width - 0.6, width - 1.0), (-0.1, -1.0)] {

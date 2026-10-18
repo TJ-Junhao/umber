@@ -56,7 +56,7 @@ impl GlyphRun {
 ///
 /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
 /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 12.0, tabular_figures: false };
-/// let layout = fonts.layout("Hg", &style);
+/// let layout = fonts.layout("Hg", &style)?;
 /// assert!(layout.width() > 0.0 && layout.ascent() > 0.0 && layout.descent() > 0.0);
 /// # Ok::<(), umber_core::Error>(())
 /// ```
@@ -126,7 +126,7 @@ impl TextLayout {
     ///
     /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
     /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// assert!(fonts.layout("wide text", &style).width() > fonts.layout("w", &style).width());
+    /// assert!(fonts.layout("wide text", &style)?.width() > fonts.layout("w", &style)?.width());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
@@ -143,7 +143,7 @@ impl TextLayout {
     ///
     /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::SOURCE_SERIF_4])?;
     /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// let ascent = fonts.layout("", &style).ascent();
+    /// let ascent = fonts.layout("", &style)?.ascent();
     /// assert!(ascent > 5.0 && ascent < 15.0);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -161,7 +161,7 @@ impl TextLayout {
     ///
     /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::IBM_PLEX_SANS])?;
     /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// let descent = fonts.layout("g", &style).descent();
+    /// let descent = fonts.layout("g", &style)?.descent();
     /// assert!(descent > 0.0 && descent < 5.0);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -179,8 +179,8 @@ impl TextLayout {
     ///
     /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::GEIST])?;
     /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 10.0, tabular_figures: false };
-    /// assert!(fonts.layout("", &style).is_empty());
-    /// assert!(!fonts.layout("x", &style).is_empty());
+    /// assert!(fonts.layout("", &style)?.is_empty());
+    /// assert!(!fonts.layout("x", &style)?.is_empty());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
@@ -202,7 +202,7 @@ impl TextLayout {
     ///
     /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER])?;
     /// let style = TextStyle { face: FaceId::new(0), weight: Weight::Regular, size: 12.0, tabular_figures: false };
-    /// let layout = fonts.layout("H", &style);
+    /// let layout = fonts.layout("H", &style)?;
     /// let (min, max) = layout.outline(Point { x: 10.0, y: 30.0 }).bounds().unwrap();
     /// assert!(min.x >= 10.0 && max.x <= 10.0 + layout.width());
     /// assert!(min.y < 30.0 && max.y <= 30.0 + 0.01);

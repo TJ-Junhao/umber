@@ -27,7 +27,9 @@ pub(super) trait LayoutBundled {
 
 impl LayoutBundled for FontLibrary {
     fn layout(&self, text: &str, style: &TextStyle) -> TextLayout {
-        bundled_fonts(self).layout(text, style)
+        bundled_fonts(self)
+            .layout(text, style)
+            .expect("every bundled font has every weight")
     }
 }
 

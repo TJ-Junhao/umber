@@ -4,6 +4,7 @@
 //! [`Scene::push_text`] shapes with the [`SceneFonts`] of a scene and then uses it. Keeping both
 //! here leaves [`crate::scene`] as plain records with no dependency on the text shaping service.
 
+use crate::Result;
 use crate::color::Rgba;
 use crate::fonts::Font;
 use crate::geometry::Point;
@@ -39,7 +40,11 @@ impl Scene {
     /// `origin` is the left end of the baseline. `style.face` names a font of `fonts`; the
     /// item names the same font by its index in this scene's [`fonts`](Scene::fonts), which
     /// gains the font when it does not hold it yet. Empty text still pushes an item, with an
-    /// empty outline and zero width. Text in a face that `fonts` does not have pushes nothing.
+    /// empty outline and zero width.
+    ///
+    /// # Errors
+    ///
+    /// As [`SceneFonts::layout`]; then the scene is unchanged.
     ///
     /// # Examples
     ///
@@ -51,7 +56,7 @@ impl Scene {
     /// let fonts = FontLibrary::global().with_figure_fonts(&[Font::INTER, Font::GEIST])?;
     /// let style = TextStyle { face: FaceId::new(1), weight: Weight::Regular, size: 10.0, tabular_figures: false };
     /// let mut scene = Scene::new(100.0, 30.0, black);
-    /// scene.push_text(&fonts, "Axis", style, Point { x: 2.0, y: 15.0 }, black);
+    /// scene.push_text(&fonts, "Axis", style, Point { x: 2.0, y: 15.0 }, black)?;
     /// assert_eq!(scene.leaf_count(), 1);
     /// assert_eq!(scene.fonts, [Font::GEIST]);
     /// # Ok::<(), umber_core::Error>(())
@@ -63,13 +68,11 @@ impl Scene {
         style: TextStyle,
         origin: Point,
         color: Rgba,
-    ) {
-        let Some(font) = fonts.font(style.face) else {
-            return;
-        };
-        let layout = fonts.layout(text, &style);
+    ) -> Result<()> {
+        let checked = fonts.check(text, &style)?;
+        let layout = fonts.layout_checked(text, &checked);
         let style = TextStyle {
-            face: self.face_of(font),
+            face: self.face_of(checked.font()),
             ..style
         };
         self.items.push(Item::Text(TextItem::from_layout(
@@ -79,6 +82,7 @@ impl Scene {
             color,
             &layout,
         )));
+        Ok(())
     }
 
     /// The face of `font` in this scene, adding the font to [`fonts`](Scene::fonts) when the
@@ -136,7 +140,9 @@ mod tests {
     fn push_text_places_the_outline_at_the_origin() {
         let mut scene = Scene::new(200.0, 100.0, BLACK);
         let origin = Point { x: 40.0, y: 60.0 };
-        scene.push_text(&fonts(), "Hamburg", style(), origin, BLACK);
+        scene
+            .push_text(&fonts(), "Hamburg", style(), origin, BLACK)
+            .unwrap();
         let item = text_item(&scene);
         let (min, max) = item.outline.bounds().expect("outline has geometry");
         assert!(min.x >= origin.x - 1.0, "min.x {}", min.x);
@@ -148,10 +154,12 @@ mod tests {
     fn push_text_records_source_and_width() {
         let mut scene = Scene::new(200.0, 100.0, BLACK);
         let s = style();
-        scene.push_text(&fonts(), "Revenue", s, Point::default(), BLACK);
+        scene
+            .push_text(&fonts(), "Revenue", s, Point::default(), BLACK)
+            .unwrap();
         let item = text_item(&scene);
         assert_eq!(item.text, "Revenue");
-        assert_eq!(item.width, fonts().layout("Revenue", &s).width());
+        assert_eq!(item.width, fonts().layout("Revenue", &s).unwrap().width());
     }
 
     #[test]
@@ -162,9 +170,15 @@ mod tests {
             face: FaceId::new(0),
             ..style()
         };
-        scene.push_text(&fonts, "Inter", style(), Point::default(), BLACK);
-        scene.push_text(&fonts, "Inter again", style(), Point::default(), BLACK);
-        scene.push_text(&fonts, "Geist", geist, Point::default(), BLACK);
+        scene
+            .push_text(&fonts, "Inter", style(), Point::default(), BLACK)
+            .unwrap();
+        scene
+            .push_text(&fonts, "Inter again", style(), Point::default(), BLACK)
+            .unwrap();
+        scene
+            .push_text(&fonts, "Geist", geist, Point::default(), BLACK)
+            .unwrap();
         assert_eq!(scene.fonts, [Font::INTER, Font::GEIST]);
         let faces: Vec<FaceId> = scene
             .items
@@ -188,13 +202,21 @@ mod tests {
     }
 
     #[test]
-    fn text_in_a_face_the_fonts_lack_is_not_pushed() {
+    fn text_in_a_face_the_fonts_lack_is_an_error_and_pushes_nothing() {
         let mut scene = Scene::new(200.0, 100.0, BLACK);
         let missing = TextStyle {
             face: FaceId::new(2),
             ..style()
         };
-        scene.push_text(&fonts(), "Lost", missing, Point::default(), BLACK);
+        let err = scene
+            .push_text(&fonts(), "Lost", missing, Point::default(), BLACK)
+            .unwrap_err();
+        assert!(matches!(err, crate::Error::Usage { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "SceneFonts.layout(): the text style names face 2, but the last face is 1; a face \
+             must be the index of one of the fonts."
+        );
         assert!(scene.items.is_empty());
         assert!(scene.fonts.is_empty());
     }
@@ -202,7 +224,9 @@ mod tests {
     #[test]
     fn empty_text_pushes_an_empty_item() {
         let mut scene = Scene::new(10.0, 10.0, BLACK);
-        scene.push_text(&fonts(), "", style(), Point::default(), BLACK);
+        scene
+            .push_text(&fonts(), "", style(), Point::default(), BLACK)
+            .unwrap();
         assert_eq!(scene.leaf_count(), 1);
         let item = text_item(&scene);
         assert_eq!(item.width, 0.0);
@@ -226,7 +250,7 @@ mod tests {
             a: 200,
         };
         let item = {
-            let layout = fonts.layout("Signal", &s);
+            let layout = fonts.layout("Signal", &s).unwrap();
             let item = TextItem::from_layout("Signal".to_owned(), s, origin, color, &layout);
             assert_eq!(item.outline, layout.outline(origin));
             assert_eq!(item.width, layout.width());
@@ -239,7 +263,7 @@ mod tests {
         assert!(!item.outline.is_empty());
 
         let mut scene = Scene::new(100.0, 50.0, BLACK);
-        scene.push_text(&fonts, "Signal", s, origin, color);
+        scene.push_text(&fonts, "Signal", s, origin, color).unwrap();
         assert_eq!(text_item(&scene), &item);
     }
 }

@@ -141,14 +141,12 @@ fn a_zero_tick_is_not_snapped_to_a_nearby_padding_endpoint() {
 #[test]
 fn single_tick_labels_describe_their_own_value() {
     let theme = Theme::pigment();
-    let fonts = crate::test_support::figure_fonts(&theme);
     let (room, _) = tick_rooms(
         PlotSize {
             width: 1.0,
             height: 100.0,
         },
-        &theme,
-        &fonts,
+        crate::test_support::tick_font(&theme),
         TickSpacing::LabelsApart,
     );
     let judge = DrawnTicks {
@@ -166,14 +164,12 @@ fn single_tick_labels_describe_their_own_value() {
 #[test]
 fn fixed_decimals_choose_exactly_representable_steps() {
     let theme = Theme::pigment();
-    let fonts = crate::test_support::figure_fonts(&theme);
     let (room, _) = tick_rooms(
         PlotSize {
             width: 800.0,
             height: 200.0,
         },
-        &theme,
-        &fonts,
+        crate::test_support::tick_font(&theme),
         TickSpacing::LabelsApart,
     );
     for (factor, format) in [
@@ -220,9 +216,8 @@ proptest! {
             (low - pad, high + pad)
         };
         let theme = Theme::pigment();
-        let fonts = crate::test_support::figure_fonts(&theme);
         for spacing in [TickSpacing::Target, TickSpacing::LabelsApart] {
-            let (x, y) = tick_rooms(PlotSize { width: length, height: length }, &theme, &fonts, spacing);
+            let (x, y) = tick_rooms(PlotSize { width: length, height: length }, crate::test_support::tick_font(&theme), spacing);
             for room in [&x, &y] {
                 let judge = DrawnTicks { format: &TickFormat::AUTO, room };
                 let (scale, _, ticks) = automatic(Transform::Linear, None, data, AutoLimits::Padded(Padding::BothSides), room.target, &judge);

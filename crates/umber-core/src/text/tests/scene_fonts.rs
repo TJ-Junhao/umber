@@ -1,5 +1,6 @@
 //! The fonts of one scene: a face is the font at its index, laid out through the library.
 
+use crate::Error;
 use crate::fonts::{BundledFont, Font, Weight};
 use crate::geometry::Point;
 use crate::text::{FaceId, FontLibrary, TextStyle};
@@ -21,13 +22,22 @@ fn a_face_is_the_font_at_its_index() {
         .unwrap();
     let alone = lib.with_figure_fonts(&[Font::SOURCE_SERIF_4]).unwrap();
     let text = "Quarterly revenue";
-    let serif = fonts.layout(text, &style(1));
-    assert_eq!(serif.width(), alone.layout(text, &style(0)).width());
+    let serif = fonts.layout(text, &style(1)).unwrap();
+    assert_eq!(
+        serif.width(),
+        alone.layout(text, &style(0)).unwrap().width()
+    );
     assert_eq!(
         serif.outline(Point::default()),
-        alone.layout(text, &style(0)).outline(Point::default())
+        alone
+            .layout(text, &style(0))
+            .unwrap()
+            .outline(Point::default())
     );
-    assert_ne!(serif.width(), fonts.layout(text, &style(0)).width());
+    assert_ne!(
+        serif.width(),
+        fonts.layout(text, &style(0)).unwrap().width()
+    );
     assert_eq!(fonts.fonts(), [Font::GEIST, Font::SOURCE_SERIF_4]);
     assert_eq!(fonts.font(FaceId::new(1)), Some(&Font::SOURCE_SERIF_4));
 }
@@ -38,7 +48,12 @@ fn every_bundled_font_lays_out_in_its_own_family() {
     let all: Vec<Font> = BundledFont::ALL.into_iter().map(Font::Bundled).collect();
     let fonts = lib.with_figure_fonts(&all).unwrap();
     let outlines: Vec<_> = (0..all.len())
-        .map(|face| fonts.layout("Ag", &style(face)).outline(Point::default()))
+        .map(|face| {
+            fonts
+                .layout("Ag", &style(face))
+                .unwrap()
+                .outline(Point::default())
+        })
         .collect();
     for (i, outline) in outlines.iter().enumerate() {
         assert!(!outline.is_empty(), "{:?}", all[i]);
@@ -55,8 +70,8 @@ fn every_bundled_font_lays_out_in_its_own_family() {
 fn a_font_listed_twice_lays_out_the_same_under_both_faces() {
     let lib = FontLibrary::with_fallbacks(vec![]);
     let fonts = lib.with_figure_fonts(&[Font::INTER, Font::INTER]).unwrap();
-    let first = fonts.layout("Signal 2026", &style(0));
-    let second = fonts.layout("Signal 2026", &style(1));
+    let first = fonts.layout("Signal 2026", &style(0)).unwrap();
+    let second = fonts.layout("Signal 2026", &style(1)).unwrap();
     assert_eq!(first.width(), second.width());
     assert_eq!(
         first.outline(Point::default()),
@@ -65,19 +80,56 @@ fn a_font_listed_twice_lays_out_the_same_under_both_faces() {
 }
 
 #[test]
-fn a_face_outside_the_fonts_lays_out_as_empty_text() {
+fn a_face_outside_the_fonts_is_a_usage_error() {
     let lib = FontLibrary::with_fallbacks(vec![]);
     let fonts = lib.with_figure_fonts(&[Font::INTER]).unwrap();
-    let layout = fonts.layout("Signal", &style(1));
-    assert!(layout.is_empty());
+    let err = fonts.layout("Signal", &style(1)).unwrap_err();
+    assert!(matches!(err, Error::Usage { .. }), "{err}");
     assert_eq!(
-        (layout.width(), layout.ascent(), layout.descent()),
-        (0.0, 0.0, 0.0)
+        err.to_string(),
+        "SceneFonts.layout(): the text style names face 1, but the last face is 0; a face must \
+         be the index of one of the fonts."
+    );
+    assert_eq!(
+        err.hint(),
+        Some("name a face by the index of a font given to with_figure_fonts.")
     );
     assert_eq!(fonts.font(FaceId::new(1)), None);
     let none = lib.with_figure_fonts(&[]).unwrap();
     assert!(none.fonts().is_empty());
-    assert!(none.layout("Signal", &style(0)).is_empty());
+    assert!(none.layout("Signal", &style(0)).is_err());
+}
+
+#[test]
+fn a_font_without_a_face_for_the_weight_names_the_text_and_the_font() {
+    let lib = FontLibrary::with_fallbacks(vec![]);
+    let fonts = lib
+        .with_figure_fonts(&[Font::INTER, Font::GEIST])
+        .unwrap()
+        .in_context("Figure.to_png()")
+        .without_weight(FaceId::new(1), Weight::SemiBold);
+    let bold = TextStyle {
+        weight: Weight::SemiBold,
+        ..style(1)
+    };
+    let err = fonts.layout("Quarterly revenue", &bold).unwrap_err();
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "Figure.to_png(): the text \"Quarterly revenue\" needs the bold face of Geist, which the \
+         font does not have; text can only be set in a weight its font has."
+    );
+    assert_eq!(
+        err.hint(),
+        Some("choose a font with a face for that weight.")
+    );
+    // The same font still sets regular text, and the other font bold text.
+    assert!(fonts.layout("Quarterly revenue", &style(1)).is_ok());
+    let inter_bold = TextStyle {
+        face: FaceId::new(0),
+        ..bold
+    };
+    assert!(fonts.layout("Quarterly revenue", &inter_bold).is_ok());
 }
 
 #[test]

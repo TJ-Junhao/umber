@@ -115,35 +115,49 @@ pub(crate) struct PlacedColorbar {
 
 impl MeasuredColorbar {
     /// Measures a visible colorbar. No finite color range or a hidden position takes no room.
+    ///
+    /// # Errors
+    ///
+    /// As [`MeasuredColorbar::with_options`].
     pub(crate) fn measure(
         axes: &Axes,
         color: Option<&ResolvedColorScale>,
         theme: &Theme,
         lib: &SceneFonts<'_>,
-    ) -> Option<Self> {
-        let color = color?;
+    ) -> Result<Option<Self>> {
+        let Some(color) = color else {
+            return Ok(None);
+        };
         let options = axes.colorbar_options();
-        let position = ColorbarSide::resolve(axes, theme)?;
-        Some(Self::with_options(options, color, position, theme, lib))
+        let Some(position) = ColorbarSide::resolve(axes, theme) else {
+            return Ok(None);
+        };
+        Self::with_options(options, color, position, theme, lib).map(Some)
     }
 
     /// Measures the same block for either panel or figure settings.
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`], for the first label that cannot be laid out.
     pub(crate) fn with_options(
         options: &crate::ColorbarOptions,
         color: &ResolvedColorScale,
         position: ColorbarSide,
         theme: &Theme,
         lib: &SceneFonts<'_>,
-    ) -> Self {
+    ) -> Result<Self> {
         let styles = Styles::new(theme);
-        let ticks = measure_ticks(lib, &color.ticks, styles.tick);
-        let label = (!options.label.is_empty()).then(|| measure(lib, &options.label, styles.body));
+        let ticks = measure_ticks(lib, &color.ticks, styles.tick)?;
+        let label = (!options.label.is_empty())
+            .then(|| measure(lib, &options.label, styles.body))
+            .transpose()?;
         let tick_width = ticks
             .iter()
             .map(|(_, label)| label.width())
             .fold(0.0, f64::max);
-        let (ascent, descent) = metrics(lib, &styles.tick);
-        let (label_ascent, label_descent) = metrics(lib, &styles.body);
+        let (ascent, descent) = metrics(lib, &styles.tick)?;
+        let (label_ascent, label_descent) = metrics(lib, &styles.body)?;
         let label_height = if label.is_some() {
             match position {
                 ColorbarSide::Right => label_ascent + AXIS_LABEL_GAP,
@@ -152,7 +166,7 @@ impl MeasuredColorbar {
         } else {
             0.0
         };
-        Self {
+        Ok(Self {
             position,
             ticks,
             label,
@@ -165,7 +179,7 @@ impl MeasuredColorbar {
             thickness: f64::from(theme.colorbar_thickness()),
             gap: f64::from(theme.colorbar_gap()),
             tick_length: f64::from(theme.colorbar_tick_length()),
-        }
+        })
     }
 
     /// Width of a bottom bar's left-aligned label; zero for a right bar.
@@ -337,7 +351,7 @@ impl PlacedColorbar {
                     false,
                 ));
             }
-            let (ascent, descent) = metrics(lib, &label.style);
+            let (ascent, descent) = metrics(lib, &label.style)?;
             if label.y - ascent < frame.y - 1e-7 || label.y + descent > frame.bottom() + 1e-7 {
                 return Err(room_error(
                     context,
@@ -498,14 +512,12 @@ mod tests {
         for position in [ColorbarPosition::Right, ColorbarPosition::Bottom] {
             let f = figure(position, Some(0.3));
             let (resolved, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
-            let fonts = crate::test_support::figure_fonts(f.theme());
             let (x, y) = crate::layout::tick_rooms(
                 crate::layout::PlotSize {
                     width: layout.plot.width,
                     height: layout.plot.height,
                 },
-                f.theme(),
-                &fonts,
+                crate::test_support::tick_font(f.theme()),
                 crate::layout::TickSpacing::LabelsApart,
             );
             let room = if position == ColorbarPosition::Bottom {

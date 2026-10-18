@@ -41,3 +41,12 @@ pub(crate) fn bundled_face(font: crate::BundledFont) -> crate::FaceId {
         .expect("every bundled font is listed");
     crate::FaceId::new(index)
 }
+
+/// The tick labels of a figure with `theme`, as [`figure_fonts`] sets them. Leaked, so that tick
+/// rooms borrowing them can outlive the call.
+pub(crate) fn tick_font(theme: &crate::Theme) -> &'static crate::layout::TickFont<'static> {
+    let fonts: &'static crate::text::SceneFonts<'static> = Box::leak(Box::new(figure_fonts(theme)));
+    Box::leak(Box::new(
+        crate::layout::TickFont::new(fonts, theme).expect("the tick labels lay out"),
+    ))
+}

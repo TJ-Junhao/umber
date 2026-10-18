@@ -36,7 +36,15 @@ struct Panel<'a> {
 
 /// The records of every panel of `figure`, in the order of [`Figure::panels`]. The legend uses
 /// the style set on the axes, else the theme's.
-fn panels<'a>(figure: &'a Figure, groups: &ShareGroups, lib: &SceneFonts<'_>) -> Vec<Panel<'a>> {
+///
+/// # Errors
+///
+/// As [`MeasuredLegend::measure`], for the first legend label that cannot be laid out.
+fn panels<'a>(
+    figure: &'a Figure,
+    groups: &ShareGroups,
+    lib: &SceneFonts<'_>,
+) -> Result<Vec<Panel<'a>>> {
     let theme = figure.theme();
     let mut panels: Vec<_> = figure
         .panels()
@@ -48,20 +56,20 @@ fn panels<'a>(figure: &'a Figure, groups: &ShareGroups, lib: &SceneFonts<'_>) ->
                     theme,
                     &Legend::panel(style, &marks, &Limits::of(axes), true),
                     lib,
-                )
+                )?
             } else {
-                measure_legend(theme, axes, &marks, lib)
+                measure_legend(theme, axes, &marks, lib)?
             };
-            Panel {
+            Ok(Panel {
                 axes,
                 marks,
                 legend,
                 color: None,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
     resolve_colors(&mut panels, groups, theme);
-    panels
+    Ok(panels)
 }
 
 /// Resolves each color group's scale from its members' current mapped values.
@@ -91,14 +99,14 @@ fn measure_legend<'a>(
     axes: &Axes,
     marks: &[ResolvedMark<'a>],
     lib: &SceneFonts<'_>,
-) -> MeasuredLegend<'a> {
+) -> Result<MeasuredLegend<'a>> {
     let style = axes.legend_style().unwrap_or(theme.legend_style());
     let legend = Legend::new(style, marks, &Limits::of(axes));
-    let mut measured = MeasuredLegend::measure(theme, &legend, lib);
+    let mut measured = MeasuredLegend::measure(theme, &legend, lib)?;
     if style != crate::LegendStyle::Direct {
         measured.position = axes.legend_position().unwrap_or(theme.legend_position());
     }
-    measured
+    Ok(measured)
 }
 
 /// Whether row legends belong to the figure rather than its individual panels.
@@ -108,10 +116,18 @@ fn has_merged_legend(figure: &Figure) -> bool {
 }
 
 /// Measures the figure title, subtitle and merged legend once, before the grid solve.
-fn figure_header(figure: &Figure, panels: &[Panel<'_>], lib: &SceneFonts<'_>) -> FigureHeader {
+///
+/// # Errors
+///
+/// As [`MeasuredLegend::measure`] and [`FigureHeader::measure`].
+fn figure_header(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    lib: &SceneFonts<'_>,
+) -> Result<FigureHeader> {
     let legend = if has_merged_legend(figure) {
         let merged = Legend::merged(figure, panels.iter().map(|panel| panel.marks.as_slice()));
-        MeasuredLegend::measure(figure.theme(), &merged, lib)
+        MeasuredLegend::measure(figure.theme(), &merged, lib)?
     } else {
         MeasuredLegend::default()
     };
@@ -202,14 +218,9 @@ impl Side {
         }
     }
 
-    /// The tick room of this side of a plot area of `plot`.
-    fn room<'a>(
-        self,
-        plot: PlotSize,
-        theme: &Theme,
-        lib: &'a SceneFonts<'a>,
-    ) -> layout::TickRoom<'a> {
-        let (x, y) = layout::tick_rooms(plot, theme, lib, TickSpacing::LabelsApart);
+    /// The tick room of this side of a plot area of `plot`, with the tick labels of `tick`.
+    fn room<'a>(self, plot: PlotSize, tick: &'a layout::TickFont<'a>) -> layout::TickRoom<'a> {
+        let (x, y) = layout::tick_rooms(plot, tick, TickSpacing::LabelsApart);
         match self {
             Side::X => x,
             Side::Y => y,
@@ -251,9 +262,9 @@ impl TickChoice {
         }
     }
 
-    /// The tick room of `side`.
-    fn room<'a>(&self, side: Side, theme: &Theme, lib: &'a SceneFonts<'a>) -> layout::TickRoom<'a> {
-        let room = side.room(self.plot, theme, lib);
+    /// The tick room of `side`, with the tick labels of `tick`.
+    fn room<'a>(&self, side: Side, tick: &'a layout::TickFont<'a>) -> layout::TickRoom<'a> {
+        let room = side.room(self.plot, tick);
         match self.most {
             Some(most) => room.at_most(most),
             None => room,
@@ -430,7 +441,8 @@ fn plan(
     labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
     let theme = figure.theme();
-    let header = figure_header(figure, panels, lib);
+    let header = figure_header(figure, panels, lib)?;
+    let tick = layout::TickFont::new(lib, theme)?;
     let inputs: Vec<LayoutInput<'_>> = panels
         .iter()
         .map(|panel| LayoutInput {
@@ -466,7 +478,7 @@ fn plan(
             }
         })
         .collect();
-    let solve = |resolved: &[Resolved], bands: &[PanelBands]| {
+    let solve = |resolved: &[Resolved], bands: &[PanelBands]| -> Result<layout::GridSolution> {
         let colorbars: Vec<_> = color_cells
             .iter()
             .enumerate()
@@ -474,19 +486,20 @@ fn plan(
                 let cells = (*cells)?;
                 let position = layout::ColorbarSide::shared(figure)?;
                 let color = resolved[i].color.as_ref()?;
-                Some(layout::SharedColorbar {
+                let measured = layout::MeasuredColorbar::with_options(
+                    figure.colorbar_options(),
+                    color,
+                    position,
+                    theme,
+                    lib,
+                );
+                Some(measured.map(|measured| layout::SharedColorbar {
                     source: i,
                     cells,
-                    measured: layout::MeasuredColorbar::with_options(
-                        figure.colorbar_options(),
-                        color,
-                        position,
-                        theme,
-                        lib,
-                    ),
-                })
+                    measured,
+                }))
             })
-            .collect();
+            .collect::<Result<_>>()?;
         layout::solve_grid(
             &GridInput {
                 colorbars: &colorbars,
@@ -517,19 +530,22 @@ fn plan(
     let has_shared_colorbar = shared
         && layout::ColorbarSide::shared(figure).is_some()
         && panels.iter().any(|panel| panel.color.is_some());
-    let measure = |i: usize, resolved: &Resolved| {
+    // Whether a style can be laid out does not depend on its text, and every pass sets text in
+    // the same styles; the first pass, below, propagates its measurement errors, so a later
+    // pass that takes a failed solve for a layout that does not fit never hides a text error.
+    let measure = |i: usize, resolved: &Resolved| -> Result<PanelBands> {
         let input = &inputs[i];
         let mut span = grid.span(input.axes.cells());
         if has_shared_colorbar {
             // Keep direct labels inside their panel, before any shared colorbar.
             span.reserve_cap = f64::INFINITY;
         }
-        let bands = layout::measure_panel(input, resolved, span, show_labels[i], labels);
-        if shared {
+        let bands = layout::measure_panel(input, resolved, span, show_labels[i], labels)?;
+        Ok(if shared {
             bands.without_colorbar(span.reserve_cap)
         } else {
             bands
-        }
+        })
     };
 
     // Try category steps on their own solved plots, not on the previous step's plot. Y goes
@@ -597,7 +613,7 @@ fn plan(
             .iter()
             .enumerate()
             .map(|(i, r)| measure(i, r))
-            .collect();
+            .collect::<Result<_>>()?;
         let mut solution = solve(&resolved, &bands)?;
         loop {
             let mut changed = false;
@@ -609,7 +625,7 @@ fn plan(
                         .iter()
                         .enumerate()
                         .map(|(i, r)| measure(i, r))
-                        .collect();
+                        .collect::<Result<_>>()?;
                     let Ok(tried_solution) = solve(&tried, &tried_bands) else {
                         continue;
                     };
@@ -620,7 +636,7 @@ fn plan(
                         .collect();
                     if categories.iter().all(|(i, side, _)| {
                         let plot = side.group_plot(groups, *i, &plots, &show_labels);
-                        side.room(plot, theme, lib)
+                        side.room(plot, &tick)
                             .with_labels(labels)
                             .slack(side.ticks(&tried[*i]))
                             >= 0.0
@@ -646,8 +662,8 @@ fn plan(
             .map(|i| {
                 let x = Side::X.group_plot(groups, i, plots, &show_labels);
                 let y = Side::Y.group_plot(groups, i, plots, &show_labels);
-                let (x, _) = layout::tick_rooms(x, theme, lib, spacing);
-                let (_, y) = layout::tick_rooms(y, theme, lib, spacing);
+                let (x, _) = layout::tick_rooms(x, &tick, spacing);
+                let (_, y) = layout::tick_rooms(y, &tick, spacing);
                 [x.with_labels(labels), y.with_labels(labels)]
             })
             .collect::<Vec<_>>()
@@ -667,7 +683,7 @@ fn plan(
     for (i, resolved) in first.iter_mut().enumerate() {
         if let Some(side) = color_sides[i] {
             let size = color_cells[i].map_or(guesses[i], |cells| grid.initial_plot_size(cells));
-            let room = side.room(size, theme, lib);
+            let room = side.room(size, &tick);
             choose_color_ticks(figure, &panels[i], resolved, &room);
         }
     }
@@ -675,7 +691,7 @@ fn plan(
         .iter()
         .enumerate()
         .map(|(i, r)| measure(i, r))
-        .collect();
+        .collect::<Result<_>>()?;
     let first = solve(&first, &first_bands).or_else(|error| {
         // Automatic x labels can exceed the canvas inset before their first fit. Obtain
         // a provisional plot without them, then let the normal tick choice retry on it.
@@ -700,7 +716,7 @@ fn plan(
             .iter()
             .enumerate()
             .map(|(i, r)| measure(i, r))
-            .collect();
+            .collect::<Result<_>>()?;
         solve(&provisional, &bands).map_err(|_| error)
     })?;
     let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
@@ -712,15 +728,15 @@ fn plan(
             .iter()
             .map(|c| {
                 [
-                    c[0].room(Side::X, theme, lib).with_labels(labels),
-                    c[1].room(Side::Y, theme, lib).with_labels(labels),
+                    c[0].room(Side::X, &tick).with_labels(labels),
+                    c[1].room(Side::Y, &tick).with_labels(labels),
                 ]
             })
             .collect();
         let mut resolved = resolve_groups(panels, &limits, groups, &rooms, fits);
         for (i, r) in resolved.iter_mut().enumerate() {
             if let Some(side) = color_sides[i] {
-                let room = choices[i][2].room(side, theme, lib);
+                let room = choices[i][2].room(side, &tick);
                 choose_color_ticks(figure, &panels[i], r, &room);
             }
         }
@@ -745,7 +761,7 @@ fn plan(
     );
     for (i, r) in resolved.iter_mut().enumerate() {
         if let Some(side) = color_sides[i] {
-            let room = side.room(bar_plots[i], theme, lib);
+            let room = side.room(bar_plots[i], &tick);
             choose_color_ticks(figure, &panels[i], r, &room);
         }
     }
@@ -756,7 +772,7 @@ fn plan(
                     !show_labels[i][side.index()]
                         || !side.is_automatic(&limits[i])
                         || side
-                            .room(slot.plot.size(), theme, lib)
+                            .room(slot.plot.size(), &tick)
                             .slack(side.ticks(&resolved[i]))
                             >= 0.0
                 })
@@ -812,8 +828,7 @@ fn plan(
                 if axis.is_category() {
                     continue;
                 }
-                if !side.is_automatic(&limits[i]) || side.room(plot, theme, lib).slack(ticks) >= 0.0
-                {
+                if !side.is_automatic(&limits[i]) || side.room(plot, &tick).slack(ticks) >= 0.0 {
                     continue;
                 }
                 let choice = &mut next[i][side.index()];
@@ -838,7 +853,7 @@ fn plan(
             let Some(side) = color_sides[i] else {
                 continue;
             };
-            if side.room(bar_plots[i], theme, lib).slack(&color.ticks) >= 0.0 {
+            if side.room(bar_plots[i], &tick).slack(&color.ticks) >= 0.0 {
                 continue;
             }
             let choice = &mut next[i][2];
@@ -858,7 +873,7 @@ fn plan(
             // A choice that crowds even on the plot it was made for is the fallback.
             let choice = &mut next[i][side.index()];
             if choice
-                .room(side, theme, lib)
+                .room(side, &tick)
                 .slack(side.ticks(&tried_resolved[i]))
                 < 0.0
             {
@@ -868,7 +883,7 @@ fn plan(
         for &i in &color_again {
             if let Some(color) = &tried_resolved[i].color
                 && let Some(side) = color_sides[i]
-                && next[i][2].room(side, theme, lib).slack(&color.ticks) < 0.0
+                && next[i][2].room(side, &tick).slack(&color.ticks) < 0.0
             {
                 next[i][2].state = ChoiceState::Settled;
             }
@@ -918,7 +933,7 @@ fn plan(
                     .collect();
                 let plot = side.group_plot(groups, i, &plots, &show_labels);
                 let ticks = side.ticks(&resolved[i]);
-                if ticks.len() != 1 && side.room(plot, theme, lib).slack(ticks) >= 0.0 {
+                if ticks.len() != 1 && side.room(plot, &tick).slack(ticks) >= 0.0 {
                     continue;
                 }
                 let resolve::AxisLimits::Continuous(axis) = limits[i].axis(side.axis()) else {
@@ -988,7 +1003,7 @@ fn plan(
                             !show_labels[j][side.index()]
                                 || !side.is_automatic(&limits[j])
                                 || side
-                                    .room(slot.plot.size(), theme, lib)
+                                    .room(slot.plot.size(), &tick)
                                     .slack(side.ticks(&tried[j]))
                                     >= 0.0
                         })
@@ -1000,7 +1015,7 @@ fn plan(
                             .enumerate()
                             .all(|(j, r)| match (color_sides[j], &r.color) {
                                 (Some(side), Some(color)) => {
-                                    side.room(bars[j], theme, lib).slack(&color.ticks) >= 0.0
+                                    side.room(bars[j], &tick).slack(&color.ticks) >= 0.0
                                 }
                                 _ => true,
                             });
@@ -1331,10 +1346,10 @@ pub(crate) fn try_plan_figure(
     library: &FontLibrary,
 ) -> Result<(Resolved, Layout)> {
     let index = panel_index(figure, cell);
-    let fonts = layout::figure_fonts(library, figure.theme())?;
+    let fonts = layout::figure_fonts(library, figure.theme())?.in_context("Figure.to_scene()");
     let lib = &fonts;
     let groups = ShareGroups::new(figure);
-    let mut panels = panels(figure, &groups, lib);
+    let mut panels = panels(figure, &groups, lib)?;
     let labels = layout::LabelCache::new(lib);
     let mut planned = plan_cells(
         figure,
@@ -1355,10 +1370,12 @@ pub(crate) fn plan_panel_marks<'a>(
     figure: &'a Figure,
     library: &FontLibrary,
 ) -> Vec<(Resolved, Layout, Vec<ResolvedMark<'a>>)> {
-    let fonts = layout::figure_fonts(library, figure.theme()).expect("the fonts resolve");
+    let fonts = layout::figure_fonts(library, figure.theme())
+        .expect("the fonts resolve")
+        .in_context("Figure.to_scene()");
     let lib = &fonts;
     let groups = ShareGroups::new(figure);
-    let mut panels = panels(figure, &groups, lib);
+    let mut panels = panels(figure, &groups, lib).expect("the legends lay out");
     let labels = layout::LabelCache::new(lib);
     let planned = plan_cells(
         figure,
@@ -1384,12 +1401,12 @@ pub(crate) fn try_plan_panels(
     figure: &Figure,
     library: &FontLibrary,
 ) -> Result<Vec<(Resolved, Layout)>> {
-    let fonts = layout::figure_fonts(library, figure.theme())?;
+    let fonts = layout::figure_fonts(library, figure.theme())?.in_context("Figure.to_scene()");
     let lib = &fonts;
     let groups = ShareGroups::new(figure);
     plan_cells(
         figure,
-        &mut panels(figure, &groups, lib),
+        &mut panels(figure, &groups, lib)?,
         &groups,
         lib,
         "Figure.to_scene()",
@@ -1420,11 +1437,13 @@ pub(crate) fn with_layout_input<R>(
     f: impl FnOnce(&LayoutInput<'_>, &GridInput<'_>) -> R,
 ) -> R {
     let index = panel_index(figure, cell);
-    let fonts = layout::figure_fonts(library, figure.theme()).expect("the fonts resolve");
+    let fonts = layout::figure_fonts(library, figure.theme())
+        .expect("the fonts resolve")
+        .in_context("Figure.to_scene()");
     let lib = &fonts;
     let groups = ShareGroups::new(figure);
-    let panels = panels(figure, &groups, lib);
-    let header = figure_header(figure, &panels, lib);
+    let panels = panels(figure, &groups, lib).expect("the legends lay out");
+    let header = figure_header(figure, &panels, lib).expect("the figure header lays out");
     let inputs: Vec<LayoutInput<'_>> = panels
         .iter()
         .map(|panel| LayoutInput {
@@ -1476,7 +1495,7 @@ pub(crate) fn scene(
     library: &FontLibrary,
     context: &'static str,
 ) -> Result<Scene> {
-    let fonts = layout::figure_fonts(library, figure.theme())?;
+    let fonts = layout::figure_fonts(library, figure.theme())?.in_context(context);
     scene_with_labels(figure, &fonts, context, &layout::LabelCache::new(&fonts))
 }
 
@@ -1493,9 +1512,9 @@ fn scene_with_labels(
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
     scene.fonts = fonts.fonts().to_vec();
     let groups = ShareGroups::new(figure);
-    let mut panels = panels(figure, &groups, fonts);
+    let mut panels = panels(figure, &groups, fonts)?;
     if panels.is_empty() {
-        let header = figure_header(figure, &panels, fonts);
+        let header = figure_header(figure, &panels, fonts)?;
         header.check(figure, context)?;
         if let Some(header) = draw::figure_header(theme, &header) {
             scene.push(header);
@@ -1565,6 +1584,10 @@ mod category_label_tests;
 #[cfg(test)]
 #[path = "header_tests.rs"]
 mod header_tests;
+
+#[cfg(test)]
+#[path = "font_error_tests.rs"]
+mod font_error_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1813,7 +1836,7 @@ mod tests {
             ] {
                 let figure = color_grid(share, scale, center);
                 let fonts = crate::test_support::figure_fonts(figure.theme());
-                let panels = panels(&figure, &ShareGroups::new(&figure), &fonts);
+                let panels = panels(&figure, &ShareGroups::new(&figure), &fonts).unwrap();
                 for (i, panel) in panels.iter().enumerate() {
                     let (row, col) = ((i / 2) as f64, (i % 2) as f64);
                     let (low, high) = match share {
@@ -1870,7 +1893,7 @@ mod tests {
             let lib = FontLibrary::global();
             let fonts = crate::test_support::figure_fonts(figure.theme());
             let groups = ShareGroups::new(&figure);
-            let mut panels = panels(&figure, &groups, &fonts);
+            let mut panels = panels(&figure, &groups, &fonts).unwrap();
             crate::bin2d::COUNT_CALLS.with(|calls| calls.set(0));
             let planned = plan_cells(
                 &figure,
@@ -1947,7 +1970,7 @@ mod tests {
             let figure = color_grid(share, Transform::Linear, None);
             let fonts = crate::test_support::figure_fonts(figure.theme());
             let groups = ShareGroups::new(&figure);
-            let panels = panels(&figure, &groups, &fonts);
+            let panels = panels(&figure, &groups, &fonts).unwrap();
             let planned = plan(
                 &figure,
                 &panels,
@@ -2117,9 +2140,14 @@ mod tests {
         lib: &'a SceneFonts<'a>,
     ) -> Vec<(Resolved, layout::TickRoom<'a>, layout::TickRoom<'a>)> {
         panels(figure, &ShareGroups::new(figure), lib)
+            .unwrap()
             .iter()
             .map(|panel| {
-                let (x, y) = layout::tick_rooms(size, figure.theme(), lib, spacing);
+                let (x, y) = layout::tick_rooms(
+                    size,
+                    crate::test_support::tick_font(figure.theme()),
+                    spacing,
+                );
                 let resolved = resolve::resolve(&panel.marks, &Limits::of(panel.axes), &x, &y);
                 (resolved, x, y)
             })
@@ -2157,12 +2185,10 @@ mod tests {
         let f = sensors();
         let lib = FontLibrary::global();
         let planned = try_plan_panels(&f, lib).unwrap();
-        let fonts = layout::figure_fonts(lib, f.theme()).unwrap();
         for (resolved, layout) in &planned {
             let (x, y) = layout::tick_rooms(
                 layout.plot.size(),
-                f.theme(),
-                &fonts,
+                crate::test_support::tick_font(f.theme()),
                 TickSpacing::LabelsApart,
             );
             assert!(y.slack(&resolved.y.ticks) >= 0.0, "{:?}", layout.plot);
@@ -2190,8 +2216,7 @@ mod tests {
         let slack = side
             .room(
                 layout.plot.size(),
-                figure.theme(),
-                &layout::figure_fonts(lib, figure.theme()).unwrap(),
+                crate::test_support::tick_font(figure.theme()),
             )
             .slack(ticks);
         let labels = ticks.iter().map(|tick| tick.label.clone()).collect();
@@ -2204,7 +2229,7 @@ mod tests {
         let fonts = layout::figure_fonts(library, figure.theme())?;
         let lib = &fonts;
         let groups = ShareGroups::new(figure);
-        let panels = panels(figure, &groups, lib);
+        let panels = panels(figure, &groups, lib).unwrap();
         let theme = figure.theme();
         let inputs: Vec<_> = panels
             .iter()
@@ -2219,7 +2244,7 @@ mod tests {
         let grid = GridInput {
             width: figure.width_in() * 72.0,
             height: figure.height_in() * 72.0,
-            top: figure_header(figure, &panels, lib).bottom,
+            top: figure_header(figure, &panels, lib).unwrap().bottom,
             grid: figure.grid(),
             theme,
             context: "Figure.to_scene()",
@@ -2231,7 +2256,8 @@ mod tests {
                 .iter()
                 .zip(sizes)
                 .map(|(panel, size)| {
-                    let (x, y) = layout::tick_rooms(size, theme, lib, spacing);
+                    let (x, y) =
+                        layout::tick_rooms(size, crate::test_support::tick_font(theme), spacing);
                     resolve::resolve(&panel.marks, &Limits::of(panel.axes), &x, &y)
                 })
                 .collect();
@@ -2246,6 +2272,7 @@ mod tests {
                         [true; 2],
                         &layout::LabelCache::new(lib),
                     )
+                    .unwrap()
                 })
                 .collect();
             (resolved, bands)
@@ -2294,8 +2321,7 @@ mod tests {
         let slack = Side::X
             .room(
                 layout.plot.size(),
-                f.theme(),
-                &layout::figure_fonts(lib, f.theme()).unwrap(),
+                crate::test_support::tick_font(f.theme()),
             )
             .slack(&resolved.x.ticks);
         // No whole-step pair fits this width; one grid label keeps the solved layout and
@@ -2379,8 +2405,7 @@ mod tests {
             Side::X
                 .room(
                     layout.plot.size(),
-                    f.theme(),
-                    &crate::test_support::figure_fonts(f.theme())
+                    crate::test_support::tick_font(f.theme())
                 )
                 .slack(&resolved.x.ticks)
                 >= 0.0
@@ -2484,8 +2509,7 @@ mod tests {
                                     let slack = side
                                         .room(
                                             layout.plot.size(),
-                                            trial.theme(),
-                                            &layout::figure_fonts(lib, trial.theme()).unwrap(),
+                                            crate::test_support::tick_font(trial.theme()),
                                         )
                                         .slack(side.ticks(&tr));
                                     assert!(
@@ -2719,8 +2743,7 @@ mod tests {
                     let slack = side
                         .room(
                             layout.plot.size(),
-                            figure.theme(),
-                            &layout::figure_fonts(lib, figure.theme()).unwrap(),
+                            crate::test_support::tick_font(figure.theme()),
                         )
                         .slack(ticks);
                     prop_assert!(
@@ -2747,8 +2770,7 @@ mod tests {
                 Side::BOTH.into_iter().any(|side| {
                     side.room(
                         layout.plot.size(),
-                        figure.theme(),
-                        &layout::figure_fonts(lib, figure.theme()).unwrap(),
+                        crate::test_support::tick_font(figure.theme()),
                     )
                     .slack(side.ticks(resolved))
                         < 0.0
@@ -2774,8 +2796,7 @@ mod tests {
                         prop_assert!(
                             side.room(
                                 layout.plot.size(),
-                                figure.theme(),
-                                &layout::figure_fonts(lib, figure.theme()).unwrap()
+                                crate::test_support::tick_font(figure.theme())
                             )
                             .slack(&new.ticks)
                                 >= 0.0
@@ -2875,8 +2896,7 @@ mod tests {
                 let slack = side
                     .room(
                         layout.plot.size(),
-                        f.theme(),
-                        &layout::figure_fonts(lib, f.theme()).unwrap(),
+                        crate::test_support::tick_font(f.theme()),
                     )
                     .slack(ticks);
                 assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
@@ -2915,8 +2935,7 @@ mod tests {
                 let slack = side
                     .room(
                         layout.plot.size(),
-                        f.theme(),
-                        &layout::figure_fonts(lib, f.theme()).unwrap(),
+                        crate::test_support::tick_font(f.theme()),
                     )
                     .slack(ticks);
                 assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
@@ -2952,8 +2971,7 @@ mod tests {
                 let slack = side
                     .room(
                         layout.plot.size(),
-                        f.theme(),
-                        &layout::figure_fonts(lib, f.theme()).unwrap(),
+                        crate::test_support::tick_font(f.theme()),
                     )
                     .slack(ticks);
                 assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");

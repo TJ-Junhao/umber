@@ -234,6 +234,7 @@ pub(super) fn heatmap_items(
 ///
 /// `Error::Style` under `context` when a drawn label does not fit its cell: naming the widest
 /// label when one is wider than the cells, else the label height when it is taller than them.
+/// A label that cannot be laid out fails as `lib` reports it.
 pub(crate) fn annotations(
     theme: &Theme,
     lib: &SceneFonts<'_>,
@@ -281,7 +282,7 @@ pub(crate) fn annotations(
         for (cell, label) in shown.into_iter().zip(labels) {
             let [left, top, right, bottom] = cell.bounds;
             let center = ((left + right) / 2.0, (top + bottom) / 2.0);
-            let label = centered_tick_label(lib, theme, &label, center);
+            let label = centered_tick_label(lib, theme, &label, center)?;
             placed.push((label, cell));
         }
     }
@@ -830,7 +831,7 @@ mod tests {
     fn a_label_fitting_its_cell_up_to_rounding_is_accepted() {
         let theme = Theme::pigment();
         let fonts = crate::test_support::figure_fonts(&theme);
-        let label = centered_tick_label(&fonts, &theme, "12.5", (0.0, 0.0));
+        let label = centered_tick_label(&fonts, &theme, "12.5", (0.0, 0.0)).unwrap();
         let width = label.width();
         let height = f64::from(label.layout.ascent() + label.layout.descent());
         // The cell edges are rounded, so the size they give can differ from the label's by a

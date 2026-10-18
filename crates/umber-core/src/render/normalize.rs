@@ -814,7 +814,7 @@ mod tests {
             for (color, origin, visible) in cases {
                 assert_eq!(text_is_visible(color, origin), visible, "{origin:?}");
                 let mut scene = Scene::new(40.0, 20.0, WHITE);
-                scene.push_text(&fonts, "Hi", style, origin, color);
+                scene.push_text(&fonts, "Hi", style, origin, color).unwrap();
                 for mode in [SvgText::Editable, SvgText::Outlines] {
                     let svg = render_svg(&scene, mode);
                     let drawn = svg.contains("<text") || svg.contains("<path");
