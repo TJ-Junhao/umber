@@ -24,10 +24,7 @@ pub(crate) trait IntEnum: Sized + Copy {
     /// The variant with integer value `value`, or `None` for an unknown value.
     fn from_value(value: i64) -> Option<Self>;
     /// The integer value of this variant.
-    #[allow(
-        dead_code,
-        reason = "only the round-trip test of the tables reads values back"
-    )]
+    #[cfg(test)]
     fn value_of(self) -> i64;
 }
 
@@ -46,6 +43,7 @@ macro_rules! int_enum {
                 }
             }
 
+            #[cfg(test)]
             fn value_of(self) -> i64 {
                 match self {
                     $($variant => $value,)+

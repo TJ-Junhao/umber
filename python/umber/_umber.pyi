@@ -161,6 +161,7 @@ class Cmap:
     """An immutable colormap; ``colors()`` lists its stops as opaque ``0xRRGGBBAA`` integers."""
 
     def __eq__(self, other: object, /) -> bool: ...
+    # mypy does not infer that a class defining __eq__ is unhashable.
     __hash__: ClassVar[None]  # type: ignore[assignment]  # pyright: ignore[reportIncompatibleMethodOverride]
     @staticmethod
     def viridis() -> Cmap: ...
@@ -197,6 +198,7 @@ class Theme:
     """An immutable theme. Theme colors must be concrete (color kind 2)."""
 
     def __eq__(self, other: object, /) -> bool: ...
+    # mypy does not infer that a class defining __eq__ is unhashable.
     __hash__: ClassVar[None]  # type: ignore[assignment]  # pyright: ignore[reportIncompatibleMethodOverride]
     @staticmethod
     def pigment() -> Theme: ...
