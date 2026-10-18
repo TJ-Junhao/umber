@@ -1,11 +1,14 @@
 //! Event ticks arranged in category rows.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::AxisData;
-use super::validation::check_event_positions;
+use super::share::SharedAxis;
+use super::validation::{check_categories, check_event_positions, check_group_count};
 use crate::{ColorSpec, Error, Result, ScaleKind, SizeSpec};
+
+/// Default event tick width in physical points, independent of the theme's line width.
+const TICK_WIDTH: f32 = 1.0;
 
 /// Options of an event mark.
 ///
@@ -19,10 +22,17 @@ use crate::{ColorSpec, Error, Result, ScaleKind, SizeSpec};
 pub struct EventsOptions {
     /// The tick length as a fraction of the row band, above zero and at most one.
     pub length: f64,
-    /// The tick stroke width; automatic uses the theme's line width.
+    /// The tick stroke width; automatic draws 1 pt ticks.
     pub width: SizeSpec,
     /// The color of all ticks in this mark.
     pub color: ColorSpec,
+}
+
+impl EventsOptions {
+    /// The tick width in points, bounded like other strokes.
+    pub(crate) fn drawn_width(&self) -> f32 {
+        crate::theme::drawn_stroke_width(self.width.resolve(TICK_WIDTH))
+    }
 }
 
 impl Default for EventsOptions {
@@ -65,10 +75,21 @@ impl EventsMark {
         options: EventsOptions,
     ) -> Result<Self> {
         const CONTEXT: &str = "Axes.events()";
-        if y != ScaleKind::Category || x == ScaleKind::Category {
-            return Err(Error::usage(CONTEXT, "events need a numeric or time x axis and a category y axis; choose those axis scales.")
-                .with_parameter("rows")
-                .with_hint("pass y=Scale.category() with a linear, log or time x axis."));
+        if x == ScaleKind::Category {
+            return Err(Error::usage(
+                CONTEXT,
+                "the x axis is not a numeric or time axis; events need a numeric or time x axis.",
+            )
+            .with_hint(
+                "pass x=Scale.linear(), Scale.log() or Scale.time() to Figure.add_axes().",
+            ));
+        }
+        if y != ScaleKind::Category {
+            return Err(Error::usage(
+                CONTEXT,
+                "the y axis is not a category axis; events need a category y axis.",
+            )
+            .with_hint("pass y=Scale.category() to Figure.add_axes()."));
         }
         if !options.length.is_finite() || options.length <= 0.0 || options.length > 1.0 {
             return Err(Error::style(
@@ -81,29 +102,21 @@ impl EventsMark {
             .with_parameter("length")
             .with_hint("pass a fraction of the row height, such as 0.8."));
         }
-        if rows.len() != positions.len() {
-            return Err(Error::data(
-                CONTEXT,
-                format!(
-                    "positions has {} groups; rows has {}.",
-                    positions.len(),
-                    rows.len()
-                ),
-            )
-            .with_parameter("positions")
-            .with_hint("pass one group per row, using an empty group when there are no events."));
-        }
-        let mut first = HashMap::with_capacity(rows.len());
-        for (i, row) in rows.iter().enumerate() {
-            if let Some(j) = first.insert(row, i) {
-                return Err(Error::data(
-                    CONTEXT,
-                    format!("rows[{i}] repeats {row:?} from rows[{j}]; each row must appear once."),
-                )
-                .with_parameter("rows")
-                .with_hint("combine the events of repeated rows."));
-            }
-        }
+        check_group_count(
+            CONTEXT,
+            "positions",
+            "positions",
+            positions.len(),
+            ("rows", rows.len()),
+            "pass one group per row, using an empty group when there are no events.",
+        )?;
+        check_categories(
+            CONTEXT,
+            ("rows", "row", SharedAxis::Y),
+            y,
+            &rows,
+            "combine the events of repeated rows.",
+        )?;
         for (i, group) in positions.iter().enumerate() {
             check_event_positions(x, i, group)?;
         }

@@ -110,17 +110,6 @@ pub(crate) fn grid_cells(rows: i64, cols: i64, count: i64) -> PyResult<Vec<(usiz
     Ok(cells.into_iter().map(|cell| (cell.row, cell.col)).collect())
 }
 
-/// Deferred swarm validation retains its originating call and data parameter.
-fn render_error(error: umber_core::Error, context: &'static str) -> PyErr {
-    match error {
-        umber_core::Error::Style {
-            context: "Axes.swarm()",
-            ..
-        } => core_error(error),
-        error => core_error(error.with_context(context)),
-    }
-}
-
 /// A figure: a size in inches, a theme, a grid and the axes placed on it with their marks.
 #[pyclass(module = "umber._umber")]
 pub(crate) struct Figure(umber_core::Figure);
@@ -151,7 +140,7 @@ impl Figure {
         let py = slf.py();
         let png = py
             .detach(move || figure.to_png(dpi))
-            .map_err(|err| render_error(err, context))?;
+            .map_err(|err| core_error(err.with_context(context)))?;
         Ok(PyBytes::new(py, &png))
     }
 
@@ -162,7 +151,7 @@ impl Figure {
         let figure = Self::snapshot(slf)?;
         slf.py()
             .detach(move || figure.to_svg(text))
-            .map_err(|err| render_error(err, context))
+            .map_err(|err| core_error(err.with_context(context)))
     }
 
     /// The tick positions `obj` of a time axis, an int64 buffer of microseconds, named
@@ -1402,13 +1391,14 @@ impl Figure {
     }
 
     /// Adds event positions grouped into category rows.
+    #[pyo3(signature = (row, col, rows, positions, length, width, color))]
     fn events(
         &mut self,
         row: i64,
         col: i64,
         rows: &Bound<'_, PyAny>,
         positions: Vec<Bound<'_, PyAny>>,
-        length: f64,
+        length: Option<f64>,
         width: SizeArg,
         color: ColorArg,
     ) -> PyResult<()> {
@@ -1417,12 +1407,14 @@ impl Figure {
             .iter()
             .map(|values| series_data("Axes.events()", "positions", values))
             .collect::<PyResult<Vec<_>>>()?;
-        let options = umber_core::EventsOptions {
-            length,
+        let mut options = umber_core::EventsOptions {
             width: size_spec(width)?,
             color: color_spec(color)?,
             ..Default::default()
         };
+        if let Some(length) = length {
+            options.length = length;
+        }
         self.axes(row, col)?
             .events(rows, positions, options)
             .map(drop)
@@ -1430,6 +1422,7 @@ impl Figure {
     }
 
     /// Adds strip samples in category groups.
+    #[pyo3(signature = (row, col, categories, groups, label, color, size, jitter))]
     fn strip(
         &mut self,
         row: i64,
@@ -1439,17 +1432,19 @@ impl Figure {
         label: String,
         color: ColorArg,
         size: SizeArg,
-        jitter: f64,
+        jitter: Option<f64>,
     ) -> PyResult<()> {
         let categories = names(categories)?;
         let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
-        let options = umber_core::StripOptions {
+        let mut options = umber_core::StripOptions {
             label,
             color: color_spec(color)?,
             size: size_spec(size)?,
-            jitter,
             ..Default::default()
         };
+        if let Some(jitter) = jitter {
+            options.jitter = jitter;
+        }
         self.axes(row, col)?
             .strip(categories, groups, options)
             .map(drop)

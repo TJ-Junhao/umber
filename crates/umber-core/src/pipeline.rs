@@ -1486,7 +1486,7 @@ fn scene_with_labels(
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
-        draw::check_points(resolved, layout, &panel.marks)
+        draw::check_points(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
         scene.push(draw::chrome(theme, layout));
         if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {

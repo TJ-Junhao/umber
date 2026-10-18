@@ -21,6 +21,12 @@ def test_strip_is_deterministic() -> None:
     assert len(outputs) == 1
 
 
+def test_strip_auto_jitter_matches_explicit_default() -> None:
+    implicit = ub.Figure().add_axes(x=ub.Scale.category()).strip(["A"], [[1, 2, 3]])
+    explicit = ub.Figure().add_axes(x=ub.Scale.category()).strip(["A"], [[1, 2, 3]], jitter=0.4)
+    assert implicit.figure.to_svg() == explicit.figure.to_svg()
+
+
 @pytest.mark.parametrize("method", ["strip", "swarm"])
 @pytest.mark.parametrize("horizontal", [False, True])
 def test_points_support_both_band_orientations(method: str, horizontal: bool) -> None:

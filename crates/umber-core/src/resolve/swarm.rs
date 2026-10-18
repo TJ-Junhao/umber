@@ -3,31 +3,19 @@
 /// How category samples are spread across their band.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Placement {
-    /// Uniform jitter up to this fraction of the band.
-    Jitter(f64),
+    /// Uniform jitter up to a fraction of the band, seeded by the strip's ordinal.
+    Jitter {
+        /// The maximum displacement as a fraction of the band.
+        fraction: f64,
+        /// This strip's ordinal among strips on the same axes.
+        strip: usize,
+    },
     /// Nearest-free-offset circle packing.
     Swarm,
 }
 
-/// SplitMix64 with a category-local seed; no mutable state is shared across marks or renders.
-pub(crate) struct Jitter(u64);
-
-impl Jitter {
-    /// Starts a reproducible stream for one category index.
-    pub(crate) fn new(category: usize) -> Self {
-        Self(category as u64)
-    }
-
-    /// The next uniform displacement in `[-1, 1)` using the high 53 random bits.
-    pub(crate) fn next(&mut self) -> f64 {
-        self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-        z ^= z >> 31;
-        ((z >> 11) as f64 / ((1_u64 << 53) as f64)) * 2.0 - 1.0
-    }
-}
+/// Tolerance in physical points for tangent pockets and equal-distance choices.
+const OFFSET_TOLERANCE: f64 = 1e-9;
 
 /// A packed prefix and whether all requested circles fit. An incomplete packing is used only
 /// during tentative legend layout; final rendering checks it and returns a category error.
@@ -40,7 +28,8 @@ pub(crate) struct Packing {
 
 /// Packs sorted physical value coordinates at the nearest available centre-line offset.
 /// Neighbours less than one diameter away exclude open intervals of offsets. Their union
-/// gives the exact nearest free position; ties go to the negative side. The circle radius
+/// gives the nearest free position; equal-distance choices alternate sides by point order.
+/// Touching ends leave a tangent pocket even when their last bits differ. The circle radius
 /// must stay inside `half_band`. Only nearby previous points enter the interval calculation.
 pub(crate) fn pack(values: &[f64], diameter: f64, half_band: f64) -> Packing {
     let limit = half_band - diameter / 2.0;
@@ -49,7 +38,7 @@ pub(crate) fn pack(values: &[f64], diameter: f64, half_band: f64) -> Packing {
     let mut offsets = Vec::with_capacity(values.len());
     let mut active: Vec<(f64, f64)> = Vec::new();
     let mut intervals = Vec::new();
-    for &value in values {
+    for (order, &value) in values.iter().enumerate() {
         active.retain(|&(previous, _)| (value - previous).abs() < distance);
         intervals.clear();
         for &(previous, offset) in &active {
@@ -63,12 +52,18 @@ pub(crate) fn pack(values: &[f64], diameter: f64, half_band: f64) -> Packing {
         while i < intervals.len() {
             let (low, mut high) = intervals[i];
             i += 1;
-            while i < intervals.len() && intervals[i].0 < high {
+            while i < intervals.len() && intervals[i].0 < high - OFFSET_TOLERANCE {
                 high = high.max(intervals[i].1);
                 i += 1;
             }
-            if low < 0.0 && high > 0.0 {
-                chosen = if low.abs() <= high.abs() { low } else { high };
+            if low < -OFFSET_TOLERANCE && high > OFFSET_TOLERANCE {
+                chosen = if (low.abs() - high.abs()).abs() <= OFFSET_TOLERANCE {
+                    if order % 2 == 0 { high } else { low }
+                } else if low.abs() < high.abs() {
+                    low
+                } else {
+                    high
+                };
                 break;
             }
         }
@@ -112,26 +107,101 @@ mod tests {
         }
     }
 
+    /// Searches every tangent candidate independently of the interval-union algorithm.
+    fn nearest_free(values: &[f64], offsets: &[f64], value: f64, diameter: f64) -> f64 {
+        let distance = diameter + 1e-5;
+        let mut candidates = vec![0.0];
+        for (&previous, &offset) in values.iter().zip(offsets) {
+            let dy = (value - previous).abs();
+            if dy < distance {
+                let reach = (distance * distance - dy * dy).sqrt();
+                candidates.extend([offset - reach, offset + reach]);
+            }
+        }
+        candidates
+            .into_iter()
+            .filter(|&candidate| {
+                values.iter().zip(offsets).all(|(&previous, &offset)| {
+                    (candidate - offset).hypot(value - previous) >= distance - 1e-9
+                })
+            })
+            .map(f64::abs)
+            .min_by(f64::total_cmp)
+            .unwrap()
+    }
+
+    #[test]
+    fn touching_intervals_leave_a_tangent_pocket() {
+        let values = [0.0, 3.0, 6.0, 7.0, 11.0, 12.0];
+        let packing = pack(&values, 6.0, 1e9);
+        assert!(packing.complete);
+        let nearest = nearest_free(&values, &packing.offsets[..5], values[5], 6.0);
+        assert!(
+            (packing.offsets[5].abs() - nearest).abs() <= 1e-9,
+            "last offset = {}, nearest free distance = {nearest}",
+            packing.offsets[5]
+        );
+        assert!((2.60..2.62).contains(&nearest));
+    }
+
+    #[test]
+    fn swarm_points_never_overlap() {
+        let mut seed = 0x6a09_e667_f3bc_c909_u64;
+        let mut random = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (seed >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        for step in [0.0, 0.5, 2.0, 3.0] {
+            for trial in 0..48 {
+                let count = 10 + (random() * 151.0) as usize;
+                let mut values: Vec<_> = (0..count)
+                    .map(|_| {
+                        let value = random() * 60.0;
+                        if step == 0.0 {
+                            value
+                        } else {
+                            (value / step).round() * step
+                        }
+                    })
+                    .collect();
+                values.sort_by(f64::total_cmp);
+                let half_band = 20.0 + random() * 100.0;
+                let packing = pack(&values, 6.0, half_band);
+                for (i, &offset) in packing.offsets.iter().enumerate() {
+                    assert!(offset.abs() + 3.0 <= half_band);
+                    for j in 0..i {
+                        assert!((offset - packing.offsets[j]).hypot(values[i] - values[j]) >= 6.0);
+                    }
+                    let nearest = nearest_free(&values, &packing.offsets[..i], values[i], 6.0);
+                    assert!(
+                        (offset.abs() - nearest).abs() <= 1e-9,
+                        "step={step}, trial={trial}, point={i}: offset={offset}, nearest={nearest}"
+                    );
+                }
+                if !packing.complete {
+                    let i = packing.offsets.len();
+                    assert!(
+                        nearest_free(&values, &packing.offsets, values[i], 6.0) > half_band - 3.0
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn equidistant_offsets_alternate_by_point_order() {
+        // Each pair starts on the centre line; the second point has two equal choices.
+        let packing = pack(&[0.0, 0.0, 20.0, 40.0, 40.0], 6.0, 100.0);
+        assert!(packing.complete);
+        assert!(packing.offsets[1] < 0.0);
+        assert!(packing.offsets[4] > 0.0);
+    }
+
     #[test]
     fn empty_and_oversize_circles() {
         assert!(pack(&[], 100.0, 1.0).complete);
         assert!(!pack(&[1.0], 100.0, 1.0).complete);
         assert!(pack(&[1.0], 2.0, 1.0).complete);
         assert!(!pack(&[1.0; 100], 6.0, 20.0).complete);
-    }
-
-    #[test]
-    fn splitmix_stream_is_fixed_and_category_local() {
-        let mut a = Jitter::new(0);
-        let mut b = Jitter::new(0);
-        let mut c = Jitter::new(1);
-        assert_eq!(a.next(), 0.7666216164272852);
-        let _ = b.next();
-        for _ in 0..1000 {
-            let x = a.next();
-            assert_eq!(x, b.next());
-            assert!((-1.0..1.0).contains(&x));
-            assert_ne!(x, c.next());
-        }
     }
 }

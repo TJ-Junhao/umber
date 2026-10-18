@@ -51,13 +51,17 @@ fn strip_jitter_within_band() {
 }
 
 #[test]
-fn swarm_points_never_overlap() {
+fn swarm_scene_points_never_overlap() {
+    let mut seed = 0xbb67_ae85_84ca_a73b_u64;
+    let mut random = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (seed >> 11) as f64 / (1_u64 << 53) as f64
+    };
     for horizontal in [false, true] {
-        for seed in 0..32 {
+        for _ in 0..32 {
             let mut f = figure(horizontal);
-            let values = (0..40)
-                .map(|i| f64::from((i * 17 + seed * 13) % 31) / 10.0)
-                .collect();
+            let count = 10 + (random() * 151.0) as usize;
+            let values = (0..count).map(|_| random() * 30.0).collect();
             f.single_axes_mut()
                 .swarm(
                     vec!["A".into()],
@@ -72,7 +76,7 @@ fn swarm_points_never_overlap() {
             let [Item::Markers { positions, .. }] = mark_items(&scene) else {
                 panic!("markers expected")
             };
-            assert_eq!(positions.len(), 40);
+            assert_eq!(positions.len(), count);
             for (i, a) in positions.iter().enumerate() {
                 for b in &positions[i + 1..] {
                     assert!(
@@ -82,6 +86,81 @@ fn swarm_points_never_overlap() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn unrelated_marks_do_not_change_strip_jitter() {
+    for horizontal in [false, true] {
+        let mut offsets = Vec::new();
+        for before in [false, true] {
+            let mut f = figure(horizontal);
+            let mut ax = f.single_axes_mut();
+            let samples = vec![vec![2.0; 40]];
+            if !before {
+                ax.strip(vec!["A".into()], samples.clone(), StripOptions::default())
+                    .unwrap();
+            }
+            ax.box_plot(
+                vec!["B".into(), "A".into()],
+                vec![vec![], vec![]],
+                BoxOptions::default(),
+            )
+            .unwrap();
+            if before {
+                ax.strip(vec!["A".into()], samples, StripOptions::default())
+                    .unwrap();
+            }
+            let (_, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
+            let scene = f.to_scene(FontLibrary::global()).unwrap();
+            let [Item::Markers { positions, .. }] = mark_items(&scene) else {
+                panic!("markers expected")
+            };
+            let (start, extent) = if horizontal {
+                (layout.plot.y, layout.plot.height)
+            } else {
+                (layout.plot.x, layout.plot.width)
+            };
+            let category = usize::from(before);
+            offsets.push(
+                positions
+                    .iter()
+                    .map(|p| {
+                        let coordinate = if horizontal { p.y } else { p.x };
+                        (f64::from(coordinate) - start) / (extent / 2.0) - category as f64 - 0.5
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+        for (a, b) in offsets[0].iter().zip(&offsets[1]) {
+            assert!((a - b).abs() < 1e-6, "{a} != {b}");
+        }
+    }
+}
+
+#[test]
+fn strips_on_the_same_category_have_independent_jitter() {
+    for horizontal in [false, true] {
+        let mut f = figure(horizontal);
+        for _ in 0..2 {
+            f.single_axes_mut()
+                .strip(
+                    vec!["A".into()],
+                    vec![vec![1.0; 40]],
+                    StripOptions::default(),
+                )
+                .unwrap();
+        }
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
+        let [
+            Item::Markers { positions: a, .. },
+            Item::Markers { positions: b, .. },
+        ] = mark_items(&scene)
+        else {
+            panic!("two marker batches expected")
+        };
+        assert_ne!(a, b);
+        assert_eq!(scene, f.to_scene(FontLibrary::global()).unwrap());
     }
 }
 

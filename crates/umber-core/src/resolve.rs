@@ -2946,8 +2946,8 @@ impl<'a> ResolvedMark<'a> {
         }
     }
 
-    /// The orientation of a mark of the bar, box and violin families, which lie along the
-    /// category axis of their axes and grow along the other: horizontal on a category y axis.
+    /// The orientation of a category-band mark: bars, boxes, violins, events, strips and
+    /// swarms are horizontal on a category y axis. Events always have that orientation.
     /// `None` for every other mark, whose values have an axis of their own.
     pub fn band_orientation(&self) -> Option<Orientation> {
         match *self {
@@ -3044,19 +3044,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Band { .. }
             | ResolvedMark::Stem { .. }
             | ResolvedMark::Heatmap { .. }
-            | ResolvedMark::ErrorBars { .. } => &[],
-            ResolvedMark::Events { mark, .. } => {
-                return DomainValues::Computed(Box::new(
-                    mark.positions()
-                        .iter()
-                        .flat_map(|p| p.numbers().iter().copied()),
-                ));
-            }
-            ResolvedMark::Points { groups, .. } => {
-                return DomainValues::Computed(Box::new(
-                    groups.iter().flat_map(|g| g.iter().copied()),
-                ));
-            }
+            | ResolvedMark::ErrorBars { .. }
+            | ResolvedMark::Events { .. }
+            | ResolvedMark::Points { .. } => &[],
         };
         DomainValues::Data(values.iter().copied())
     }
@@ -3703,6 +3693,7 @@ fn resolve_panel_marks<'a>(
         };
         spec.resolve(palette, slot)
     };
+    let mut next_strip = 0;
     marks
         .iter()
         .map(|mark| match mark {
@@ -3916,18 +3907,25 @@ fn resolve_panel_marks<'a>(
                 mark,
                 geometry: None,
                 color: color_of(mark.options().color, ""),
-                width: theme.drawn_line_width(mark.options().width),
+                width: mark.options().drawn_width(),
             },
-            Mark::Strip(mark) => ResolvedMark::Points {
-                geometry: None,
-                categories: mark.categories(),
-                groups: mark.groups(),
-                label: &mark.options().label,
-                color: color_of(mark.options().color, &mark.options().label),
-                size: theme.drawn_marker_size(mark.options().size),
-                orientation,
-                placement: swarm::Placement::Jitter(mark.options().jitter),
-            },
+            Mark::Strip(mark) => {
+                let strip = next_strip;
+                next_strip += 1;
+                ResolvedMark::Points {
+                    geometry: None,
+                    categories: mark.categories(),
+                    groups: mark.groups(),
+                    label: &mark.options().label,
+                    color: color_of(mark.options().color, &mark.options().label),
+                    size: theme.drawn_marker_size(mark.options().size),
+                    orientation,
+                    placement: swarm::Placement::Jitter {
+                        fraction: mark.options().jitter,
+                        strip,
+                    },
+                }
+            }
             Mark::Swarm(mark) => ResolvedMark::Points {
                 geometry: None,
                 categories: mark.categories(),

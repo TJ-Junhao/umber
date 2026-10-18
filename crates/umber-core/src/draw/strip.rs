@@ -5,16 +5,42 @@ use std::sync::Arc;
 use super::MarkContext;
 use super::mapping::{AxisMaps, axis_value};
 use super::scatter::scatter_item;
-use crate::resolve::swarm::{Jitter, Placement, pack};
+use crate::resolve::swarm::{Placement, pack};
 use crate::resolve::{AxisScale, Resolved, ResolvedAxis, ResolvedMark};
 use crate::scene::Item;
 use crate::{Error, Marker, Result, Rgba};
+
+/// SplitMix64 seeded by the input category index and the strip's ordinal on its axes.
+struct Jitter(u64);
+
+impl Jitter {
+    fn new(category: usize, strip: usize) -> Self {
+        Self((category as u64).wrapping_add((strip as u64).wrapping_mul(0xd1b54a32d192ed03)))
+    }
+
+    /// The next uniform displacement in `[-1, 1)` using the high 53 random bits.
+    fn next(&mut self) -> f64 {
+        self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+        z ^= z >> 31;
+        ((z >> 11) as f64 / ((1_u64 << 53) as f64)) * 2.0 - 1.0
+    }
+}
+
+/// The first category that cannot fit, with its required and available widths in points.
+struct Overflow {
+    index: usize,
+    needed: f64,
+    room: f64,
+}
 
 /// Coordinates in the category-first frame, plus the first category that cannot fit.
 struct Points {
     along: Vec<f64>,
     values: Vec<f64>,
-    overflow: Option<(usize, usize)>,
+    overflow: Option<Overflow>,
 }
 
 /// Maps and spreads groups in their category-first frame. Only points whose circles can
@@ -44,10 +70,10 @@ fn coordinates(
         let (start, end) = categories.band(index);
         let center = (start + end) / 2.0;
         match placement {
-            Placement::Jitter(jitter) => {
-                let mut random = Jitter::new(index);
+            Placement::Jitter { fraction, strip } => {
+                let mut random = Jitter::new(i, strip);
                 for &sample in samples.iter().filter(|v| v.is_finite()) {
-                    let offset = random.next() * jitter * (end - start);
+                    let offset = random.next() * fraction * (end - start);
                     let value = axis_value(values, sample);
                     if (low..=high).contains(&value) {
                         points.along.push(center + offset);
@@ -64,9 +90,21 @@ fn coordinates(
                     .collect();
                 mapped.sort_by(f64::total_cmp);
                 let physical: Vec<_> = mapped.iter().map(|&v| maps.y.plot_at(v)).collect();
-                let packing = pack(&physical, f64::from(size), maps.x.points(end - start) / 2.0);
+                let room = maps.x.points(end - start);
+                let packing = pack(&physical, f64::from(size), room / 2.0);
                 if !packing.complete && points.overflow.is_none() {
-                    points.overflow = Some((i, samples.iter().filter(|v| v.is_finite()).count()));
+                    let full = pack(&physical, f64::from(size), f64::INFINITY);
+                    let radius = full
+                        .offsets
+                        .iter()
+                        .copied()
+                        .map(f64::abs)
+                        .fold(0.0, f64::max);
+                    points.overflow = Some(Overflow {
+                        index: i,
+                        needed: 2.0 * radius + f64::from(size),
+                        room,
+                    });
                 }
                 for (value, offset) in mapped.into_iter().zip(packing.offsets) {
                     points.along.push(center + maps.x.length(offset));
@@ -84,6 +122,7 @@ pub(crate) fn check(
     resolved: &Resolved,
     layout: &crate::layout::Layout,
     marks: &[ResolvedMark<'_>],
+    context: &'static str,
 ) -> Result<()> {
     let maps = AxisMaps::new(&resolved.x, &resolved.y, layout.plot);
     for mark in marks {
@@ -104,9 +143,22 @@ pub(crate) fn check(
                 *size,
                 Placement::Swarm,
             );
-            if let Some((index, count)) = points.overflow {
-                return Err(Error::style("Axes.swarm()", format!("category '{}' has {count} points, which do not fit in its width; use fewer or smaller points, or a wider category band.", categories[index]))
-                    .with_parameter("groups").with_hint("use strip() or violin() for many points."));
+            if let Some(Overflow {
+                index,
+                needed,
+                room,
+            }) = points.overflow
+            {
+                let (needed, room) = crate::layout::widths(needed, room);
+                return Err(Error::style(
+                    context,
+                    format!(
+                        "the swarm of category '{}' needs {needed} pt across; \
+                         its band is {room} pt.",
+                        categories[index]
+                    ),
+                )
+                .with_hint("use strip() or violin() for many points."));
             }
         }
     }
@@ -132,5 +184,27 @@ pub(super) fn items(
         size,
     ) {
         items.push(item);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Jitter;
+
+    #[test]
+    fn splitmix_stream_is_fixed_and_local_to_each_category_and_strip() {
+        let mut a = Jitter::new(0, 0);
+        let mut b = Jitter::new(0, 0);
+        let mut category = Jitter::new(1, 0);
+        let mut strip = Jitter::new(0, 1);
+        assert_eq!(a.next(), 0.7666216164272852);
+        let _ = b.next();
+        for _ in 0..1000 {
+            let x = a.next();
+            assert_eq!(x, b.next());
+            assert!((-1.0..1.0).contains(&x));
+            assert_ne!(x, category.next());
+            assert_ne!(x, strip.next());
+        }
     }
 }

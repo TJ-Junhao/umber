@@ -1,6 +1,6 @@
 //! Event rows on numeric, logarithmic and time axes in every theme.
 
-use umber_core::{AxisData, EventsOptions, FontLibrary, Instant, ScaleKind, SizeSpec};
+use umber_core::{AxisData, EventsOptions, FontLibrary, Instant, ScaleKind};
 
 use super::super::{Output, axes, emit_scene, figure, linear, log, themes};
 
@@ -37,11 +37,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                 .events(
                     ["North", "Empty", "South"].map(String::from).to_vec(),
                     positions,
-                    EventsOptions {
-                        length: 0.8,
-                        width: SizeSpec::pt(1.5).unwrap(),
-                        ..Default::default()
-                    },
+                    EventsOptions::default(),
                 )
                 .unwrap();
             emit_scene(

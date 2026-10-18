@@ -6,6 +6,22 @@ use super::box_plot::store_groups;
 use super::validation::check_box_groups;
 use crate::{ColorSpec, Error, Result, ScaleKind, SizeSpec, Transform};
 
+/// Category names and sample groups shared by strip and swarm marks and their clones.
+#[derive(Debug, Clone, PartialEq)]
+struct Samples {
+    categories: Arc<[String]>,
+    groups: Arc<[Arc<[f64]>]>,
+}
+
+impl Samples {
+    fn new(categories: Vec<String>, groups: Vec<Vec<f64>>) -> Self {
+        Self {
+            categories: categories.into(),
+            groups: store_groups(groups),
+        }
+    }
+}
+
 /// Options of a strip mark.
 ///
 /// # Examples
@@ -52,8 +68,7 @@ impl Default for StripOptions {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct StripMark {
-    categories: Arc<[String]>,
-    groups: Arc<[Arc<[f64]>]>,
+    samples: Samples,
     options: StripOptions,
 }
 
@@ -86,8 +101,7 @@ impl StripMark {
             .with_hint("use 0 for a centre line, or a fraction up to 0.5 for jitter."));
         }
         Ok(Self {
-            categories: categories.into(),
-            groups: store_groups(groups),
+            samples: Samples::new(categories, groups),
             options,
         })
     }
@@ -107,7 +121,7 @@ impl StripMark {
     /// ```
     #[must_use]
     pub fn categories(&self) -> &[String] {
-        &self.categories
+        &self.samples.categories
     }
 
     /// One group per category; NaN samples are kept and are not drawn.
@@ -125,7 +139,7 @@ impl StripMark {
     /// ```
     #[must_use]
     pub fn groups(&self) -> &[Arc<[f64]>] {
-        &self.groups
+        &self.samples.groups
     }
 
     /// The drawing options as given.
@@ -190,8 +204,7 @@ impl Default for SwarmOptions {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct SwarmMark {
-    categories: Arc<[String]>,
-    groups: Arc<[Arc<[f64]>]>,
+    samples: Samples,
     options: SwarmOptions,
 }
 
@@ -213,8 +226,7 @@ impl SwarmMark {
             &groups,
         )?;
         Ok(Self {
-            categories: categories.into(),
-            groups: store_groups(groups),
+            samples: Samples::new(categories, groups),
             options,
         })
     }
@@ -234,7 +246,7 @@ impl SwarmMark {
     /// ```
     #[must_use]
     pub fn categories(&self) -> &[String] {
-        &self.categories
+        &self.samples.categories
     }
 
     /// One group per category; NaN samples are kept and are not drawn.
@@ -252,7 +264,7 @@ impl SwarmMark {
     /// ```
     #[must_use]
     pub fn groups(&self) -> &[Arc<[f64]>] {
-        &self.groups
+        &self.samples.groups
     }
 
     /// The drawing options as given.

@@ -76,8 +76,20 @@ def test_events_data_errors_are_atomic(
 )
 def test_events_require_continuous_x_and_category_y(x: ub.Scale[Any], y: ub.Scale[Any]) -> None:
     ax = ub.Figure().add_axes(x=x, y=y)
-    with pytest.raises(ub.UsageError):
+    with pytest.raises(ub.UsageError) as caught:
         cast(Callable[..., object], ax.events)(["A"], [[1]])
+    if x == ub.Scale.category():
+        assert str(caught.value) == (
+            "Axes.events(): the x axis is not a numeric or time axis; "
+            "events need a numeric or time x axis."
+        )
+        hint = "pass x=Scale.linear(), Scale.log() or Scale.time() to Figure.add_axes()."
+    else:
+        assert str(caught.value) == (
+            "Axes.events(): the y axis is not a category axis; events need a category y axis."
+        )
+        hint = "pass y=Scale.category() to Figure.add_axes()."
+    assert details(caught.value) == (None, hint)
 
 
 def test_events_copy_data_and_skip_nan() -> None:
@@ -97,7 +109,33 @@ def test_events_nested_errors_highlight_positions(positions: object) -> None:
         cast(Callable[..., object], ax.events)(["A"], positions)
     info = details(caught.value)
     assert info is not None and info[0] == "positions" and info[1]
-    assert "groups" not in str(caught.value)
+    assert "groups[" not in str(caught.value)
+    assert not str(caught.value).startswith("Axes.events(): groups")
+
+
+@pytest.mark.parametrize("time", [False, True])
+def test_events_group_container_names_parameter_and_type(time: bool) -> None:
+    ax: ub.Axes[ub.Time, str] | ub.Axes[float, str]
+    if time:
+        ax = ub.Figure().add_axes(x=ub.Scale.time(), y=ub.Scale.category())
+    else:
+        ax = ub.Figure().add_axes(y=ub.Scale.category())
+    with pytest.raises(TypeError) as caught:
+        cast(Callable[..., object], ax.events)(["A"], "bad")
+    kind = "time" if time else "numeric"
+    assert str(caught.value) == (
+        f"Axes.events(): positions is str; positions must be a sequence of {kind} groups."
+    )
+    info = details(caught.value)
+    assert info is not None and info[0] == "positions"
+    if time:
+        assert info[1] is not None and "dates or times" in info[1]
+
+
+def test_events_auto_length_matches_explicit_default() -> None:
+    implicit = ub.Figure().add_axes(y=ub.Scale.category()).events(["A"], [[1, 2]])
+    explicit = ub.Figure().add_axes(y=ub.Scale.category()).events(["A"], [[1, 2]], length=0.8)
+    assert implicit.figure.to_svg() == explicit.figure.to_svg()
 
 
 def test_events_time_conversion_errors_highlight_positions() -> None:

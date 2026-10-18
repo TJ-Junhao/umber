@@ -737,10 +737,25 @@ pub(super) fn check_event_positions(x: ScaleKind, index: usize, data: &AxisData)
                 ScaleKind::Log { base } => Transform::Log(base),
                 _ => Transform::Linear,
             };
-            check_numbers(CONTEXT, (&format!("positions[{index}]"), "positions"), values, transform, "use NaN to leave an event out.")
+            check_numbers(
+                CONTEXT,
+                (&format!("positions[{index}]"), "positions"),
+                values,
+                transform,
+                "use NaN to leave an event out.",
+            )
         }
-        _ => Err(Error::data(CONTEXT, format!("positions[{index}] does not match the x axis; pass numbers on numeric axes or times on a time axis."))
-            .with_parameter("positions").with_hint("use x=Scale.time() for dates and times, or a linear or log x axis for numbers.")),
+        _ => Err(Error::data(
+            CONTEXT,
+            format!(
+                "positions[{index}] does not match the x axis; \
+                 pass numbers on numeric axes or times on a time axis."
+            ),
+        )
+        .with_parameter("positions")
+        .with_hint(
+            "use x=Scale.time() for dates and times, or a linear or log x axis for numbers.",
+        )),
     }
 }
 
@@ -943,6 +958,7 @@ pub(super) fn check_bars(
     }
     check_categories(
         context,
+        ("categories", "category", SharedAxis::X),
         x_kind,
         categories,
         "combine repeated categories and sum their heights.",
@@ -997,6 +1013,7 @@ pub(super) fn check_bar_group(
     }
     check_categories(
         context,
+        ("categories", "category", SharedAxis::X),
         x_kind,
         categories,
         "combine repeated categories and sum their heights within each series.",
@@ -1033,6 +1050,7 @@ fn check_box_categories(
     }
     check_categories(
         context,
+        ("categories", "category", SharedAxis::X),
         x,
         categories,
         "combine the samples of repeated categories.",
@@ -1040,22 +1058,21 @@ fn check_box_categories(
 }
 
 /// Checks that a distribution has one group per category, naming its container on failure.
-fn check_group_count(
+pub(super) fn check_group_count(
     context: &'static str,
     name: &str,
     parameter: &'static str,
     count: usize,
-    categories: usize,
+    (category_name, categories): (&str, usize),
+    hint: &'static str,
 ) -> Result<()> {
     if count != categories {
         return Err(Error::data(
             context,
-            format!("{name} has {count} groups; categories has {categories}."),
+            format!("{name} has {count} groups; {category_name} has {categories}."),
         )
         .with_parameter(parameter)
-        .with_hint(
-            "pass one group per category, using an empty group when there are no samples.",
-        ));
+        .with_hint(hint));
     }
     Ok(())
 }
@@ -1090,7 +1107,14 @@ pub(super) fn check_box_groups(
     groups: &[Vec<f64>],
 ) -> Result<()> {
     check_box_categories(context, kind, x, &[])?;
-    check_group_count(context, "groups", "groups", groups.len(), categories.len())?;
+    check_group_count(
+        context,
+        "groups",
+        "groups",
+        groups.len(),
+        ("categories", categories.len()),
+        "pass one group per category, using an empty group when there are no samples.",
+    )?;
     check_box_categories(context, kind, x, categories)?;
     check_group_values(context, "groups", "groups", y, groups)
 }
@@ -1119,7 +1143,8 @@ pub(super) fn check_distributions(
             &format!("distributions[{k}].groups"),
             "distributions",
             d.groups.len(),
-            categories.len(),
+            ("categories", categories.len()),
+            "pass one group per category, using an empty group when there are no samples.",
         )?;
     }
     check_box_categories(context, kind, x, categories)?;
@@ -1191,20 +1216,27 @@ pub(super) fn check_hist(
     Ok(count)
 }
 
-/// Checks the categories of a bar mark: the x axis is a category axis, and no category appears
-/// twice.
-fn check_categories(
+/// Checks that names lie on a category axis and that none appears twice.
+pub(super) fn check_categories(
     context: &'static str,
-    x_kind: ScaleKind,
+    (parameter, singular, axis): (&'static str, &str, SharedAxis),
+    kind: ScaleKind,
     categories: &[String],
     repeat_hint: &'static str,
 ) -> Result<()> {
-    if x_kind != ScaleKind::Category {
+    if kind != ScaleKind::Category {
+        let name = axis.name();
         return Err(Error::data(
             context,
-            "categories holds names but the x axis is not a category axis; use a category x axis.",
+            format!(
+                "{parameter} holds names but the {name} axis is not a category axis; \
+                 use a category {name} axis."
+            ),
         )
-        .with_hint("pass x=Scale.category() to Figure.add_axes()."));
+        .with_hint(match axis {
+            SharedAxis::X => "pass x=Scale.category() to Figure.add_axes().",
+            SharedAxis::Y => "pass y=Scale.category() to Figure.add_axes().",
+        }));
     }
     let mut first_index: HashMap<&str, usize> = HashMap::with_capacity(categories.len());
     for (i, name) in categories.iter().enumerate() {
@@ -1212,10 +1244,11 @@ fn check_categories(
             return Err(Error::data(
                 context,
                 format!(
-                    "categories[{i}] repeats {name:?} from categories[{first}]; each category must appear once."
+                    "{parameter}[{i}] repeats {name:?} from {parameter}[{first}]; \
+                     each {singular} must appear once."
                 ),
             )
-            .with_parameter("categories")
+            .with_parameter(parameter)
             .with_hint(repeat_hint));
         }
     }

@@ -571,7 +571,7 @@ class Figure:
         col: int,
         rows: list[str],
         positions: list[_FloatArray | _TimeArray],
-        length: float,
+        length: float | None,
         width: _SizeArg,
         color: _ColorArg,
     ) -> None: ...
@@ -584,7 +584,7 @@ class Figure:
         label: str,
         color: _ColorArg,
         size: _SizeArg,
-        jitter: float,
+        jitter: float | None,
     ) -> None: ...
     def swarm(
         self,

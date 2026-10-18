@@ -46,6 +46,35 @@ fn events_one_row_per_category() {
 }
 
 #[test]
+fn events_auto_width_is_one_point_in_every_theme() {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        for (width, expected) in [
+            (crate::SizeSpec::Auto, 1.0),
+            (crate::SizeSpec::times(2.0).unwrap(), 2.0),
+            (crate::SizeSpec::pt(3.0).unwrap(), 3.0),
+        ] {
+            let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+            f.add_axes(ScaleKind::Linear, ScaleKind::Category)
+                .unwrap()
+                .events(
+                    vec!["A".into()],
+                    vec![AxisData::Numbers(vec![1.0])],
+                    EventsOptions {
+                        width,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            let scene = f.to_scene(FontLibrary::global()).unwrap();
+            let [Item::Stroke { style, .. }] = mark_items(&scene) else {
+                panic!("event strokes expected")
+            };
+            assert_eq!(style.width, expected);
+        }
+    }
+}
+
+#[test]
 fn events_on_time_x() {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     f.add_axes(ScaleKind::Time, ScaleKind::Category)

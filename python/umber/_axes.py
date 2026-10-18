@@ -2375,7 +2375,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             rows: Unique row names.
             positions: One group of numbers or times per row, matching the x axis.
             length: Fraction of the row height, above 0 and at most 1; AUTO uses 0.8.
-            width: Tick stroke width; Size.AUTO uses the theme's line width.
+            width: Tick stroke width. Size.AUTO draws 1 pt ticks.
             color: Tick color; Color.AUTO takes the next palette color.
 
         Returns:
@@ -2395,11 +2395,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             context = "Axes.events()"
             check_names_type(context, "rows", rows)
-            try:
-                _series.check_groups_type(context, positions)
-            except (TypeError, UmberError) as error:
-                raise _event_error(context, error) from None
-            extent = 0.8 if length is AUTO else real(context, "length", length)
+            _series.check_groups_type(
+                context, positions, name="positions", kind="time" if self._x == _TIME else "numeric"
+            )
+            extent = None if length is AUTO else real(context, "length", length)
             stroke = _size_argument(context, "width", width)
             paint = _color_argument(context, color)
             row_names = names(context, "rows", rows)
@@ -2409,7 +2408,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     for i, group in enumerate(positions):
                         converted.append(_time.micros(context, f"positions[{i}]", group))
                 else:
-                    converted.extend(_series.group_values(context, positions))
+                    converted.extend(_series.group_values(context, positions, name="positions"))
             except (TypeError, UmberError) as error:
                 raise _event_error(context, error) from None
             self._native.events(self._row, self._col, row_names, converted, extent, stroke, paint)
@@ -2428,7 +2427,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Add individual circular samples within each category band.
 
         Jitter is uniform within the chosen fraction of each band, from a fixed
-        category-local SplitMix64 seed. Repeated renders are byte-identical.
+        SplitMix64 seed for each input category and strip on these axes. Repeated
+        renders are byte-identical; unrelated marks do not change the jitter.
         A category x axis gives vertical groups; a category y axis gives horizontal
         groups. NaN is ignored and empty groups draw nothing. The numeric axis may be
         linear or log. Markers use the scatter opacity and outline. Marks draw in call
@@ -2462,7 +2462,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "categories", categories)
             _series.check_groups_type(context, groups)
             _args.require_text(context, "label", label)
-            spread = 0.4 if jitter is AUTO else real(context, "jitter", jitter)
+            spread = None if jitter is AUTO else real(context, "jitter", jitter)
             extent = _size_argument(context, "size", size)
             paint = _color_argument(context, color)
             category_names = names(context, "categories", categories)
@@ -2832,5 +2832,5 @@ def _event_error(context: str, error: TypeError | UmberError) -> TypeError | Umb
     """Keep nested conversion messages while highlighting the positions argument."""
     info = details(error)
     hint = info[1] if info is not None else "pass one group of numbers or times per row."
-    message = str(error).removeprefix(f"{context}: ").replace("groups", "positions")
+    message = str(error).removeprefix(f"{context}: ")
     return new_error(type(error), context, message, parameter="positions", hint=hint)
