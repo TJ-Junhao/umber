@@ -11,6 +11,7 @@ tests/golden/**/*.diff.png
 .claude/
 .codex/
 .agent/
+.agents/
 CLAUDE.md
 AGENT.md
 AGENTS.md
