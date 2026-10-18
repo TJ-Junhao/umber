@@ -559,14 +559,19 @@ fn union(a: Option<(f64, f64)>, b: Option<(f64, f64)>) -> Option<(f64, f64)> {
 }
 
 /// The smallest and largest finite value, ignoring NaN; `None` when there is none.
+///
+/// The fold starts from an empty extent (low above high) and compares the finite values with
+/// plain `<` and `>`: a single compare-and-select per bound, with no `Option` to test per value
+/// and none of the NaN handling that `f64::min` and `f64::max` add. Over a million values this
+/// loop is bound by the latency of that chain, so it is kept that short.
 fn extent(values: impl IntoIterator<Item = f64>) -> Option<(f64, f64)> {
-    values
+    let (lo, hi) = values
         .into_iter()
         .filter(|v| v.is_finite())
-        .fold(None, |acc, v| match acc {
-            None => Some((v, v)),
-            Some((lo, hi)) => Some((lo.min(v), hi.max(v))),
-        })
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+            (if v < lo { v } else { lo }, if v > hi { v } else { hi })
+        });
+    (lo <= hi).then_some((lo, hi))
 }
 
 /// A continuous axis resolved by [`continuous`]: its scale, its ticks and the lower limit of
