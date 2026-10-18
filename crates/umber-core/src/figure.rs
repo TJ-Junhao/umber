@@ -31,12 +31,19 @@ pub use crate::model::{
 };
 pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use crate::model::{BandMark, BandOptions};
+pub use crate::model::{
+    Bandwidth, Bins, EcdfMark, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistGroupMark,
+    HistStat, HistStyle, KdeMark, KdeOptions,
+};
 pub use crate::model::{BaselineVisibility, StackedAreaMark};
 pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use crate::model::{BubbleMark, BubbleOptions};
 pub use crate::model::{CmapChoice, ColorBy, PointColor};
 pub use crate::model::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
 pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use crate::model::{
+    EventsMark, EventsOptions, StripMark, StripOptions, SwarmMark, SwarmOptions,
+};
 pub use crate::model::{HeatmapMark, HeatmapOptions};
 pub use crate::model::{
     HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,

@@ -57,10 +57,10 @@ def native_figure() -> _umber.Figure:
     theme = _umber.Theme.graphite().with_line_width(2.5)
     fig = _umber.Figure(5.0, 3.5, theme, *ONE_CELL)
     fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LOG, 2.0)
-    fig.title(0, 0, "Growth")
-    fig.subtitle(0, 0, "Two regions")
-    fig.xlabel(0, 0, "Year")
-    fig.ylabel(0, 0, "Revenue")
+    fig.title(0, 0, "Growth", NO_SIZE)
+    fig.subtitle(0, 0, "Two regions", NO_SIZE)
+    fig.xlabel(0, 0, "Year", NO_SIZE)
+    fig.ylabel(0, 0, "Revenue", NO_SIZE)
     fig.line(0, 0, floats(2020, 2021, 2022, 2023), floats(1, 2, 4, 8), "North", AUTO, 0, NO_SIZE)
     teal = (2, 0x2E8B8BCC, 1.0)
     fig.line(
@@ -69,7 +69,7 @@ def native_figure() -> _umber.Figure:
     fig.scatter(0, 0, floats(2020.5, 2022.5), floats(2, 5), "Events", (1, 3, 1.0), 3, NO_SIZE)
     fig.xlim(0, 0, 2019.5, 2023.5)
     fig.ylim(0, 0, 0.5, 16.0)
-    fig.legend(0, 0, 2)
+    fig.legend(0, 0, 2, NO_SIZE)
     return fig
 
 

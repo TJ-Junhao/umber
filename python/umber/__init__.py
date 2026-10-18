@@ -23,19 +23,21 @@ from umber._enums import (
     Contour,
     Dash,
     FillStyle,
-    Font,
     GridLines,
+    Hist,
     Legend,
     LegendPosition,
     LegendStyle,
     Marker,
     Render,
     Share,
+    Stat,
     Step,
     SvgText,
 )
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
+from umber._font import Font
 from umber._quick import bar, hist, line, scatter
 from umber._scale import Scale
 from umber._series import Distribution, Series
@@ -75,6 +77,7 @@ __all__ = [
     "Figure",
     "Font",
     "GridLines",
+    "Hist",
     "Legend",
     "LegendPosition",
     "LegendStyle",
@@ -83,6 +86,7 @@ __all__ = [
     "Scale",
     "Share",
     "Size",
+    "Stat",
     "Step",
     "StyleError",
     "SupportsArray",
@@ -132,6 +136,7 @@ _report_package_as_module(
     Figure,
     Font,
     GridLines,
+    Hist,
     Legend,
     LegendPosition,
     LegendStyle,
@@ -140,6 +145,7 @@ _report_package_as_module(
     Scale,
     Share,
     Size,
+    Stat,
     Step,
     SupportsArray,
     SvgText,

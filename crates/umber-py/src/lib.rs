@@ -12,6 +12,7 @@ mod color;
 mod enums;
 mod errors;
 mod figure;
+mod font;
 mod scale;
 mod size;
 mod test_support;
@@ -44,6 +45,7 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(figure::grid_auto_size, m)?)?;
     m.add_function(wrap_pyfunction!(figure::grid_cells, m)?)?;
     m.add_function(wrap_pyfunction!(color::named_colors, m)?)?;
+    m.add_function(wrap_pyfunction!(font::bundled_fonts, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_hex, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_rgb, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_with_alpha, m)?)?;
@@ -55,5 +57,8 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ticks::check_tick_format, m)?)?;
     m.add_function(wrap_pyfunction!(test_support::box_stats, m)?)?;
     m.add_function(wrap_pyfunction!(test_support::kde_scott, m)?)?;
+    m.add_function(wrap_pyfunction!(test_support::scott_bandwidth, m)?)?;
+    m.add_function(wrap_pyfunction!(test_support::kde_curve, m)?)?;
+    m.add_function(wrap_pyfunction!(test_support::ecdf_steps, m)?)?;
     Ok(())
 }

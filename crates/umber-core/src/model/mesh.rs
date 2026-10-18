@@ -1091,11 +1091,13 @@ mod tests {
                 }
                 if let Some(Item::Group { items, .. }) = crate::draw::marks(
                     f.theme(),
-                    FontLibrary::global(),
+                    &crate::test_support::figure_fonts(f.theme()),
                     &resolved,
                     &layout,
                     std::slice::from_ref(mark),
-                ) {
+                )
+                .unwrap()
+                {
                     panel.fills.extend(items.iter().map(|item| {
                         match item {
                             Item::Fill { path, .. } => path
@@ -2403,7 +2405,11 @@ mod tests {
                 },
             )
             .unwrap()
-            .legend_at(crate::LegendStyle::Chips, crate::LegendPosition::Right)
+            .legend_at(
+                crate::LegendStyle::Chips,
+                crate::LegendPosition::Right,
+                crate::SizeSpec::Auto,
+            )
             .unwrap();
         f
     }

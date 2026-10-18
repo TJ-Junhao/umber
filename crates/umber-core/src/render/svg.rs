@@ -28,6 +28,7 @@ use super::normalize::{
     normalize_gradient, normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
 use crate::color::Rgba;
+use crate::fonts::Font;
 use crate::geometry::{Path, Point};
 use crate::scene::{
     FillRule, Item, LineCap, LineJoin, MAX_GROUP_DEPTH, Paint, Rect, Scene, StrokeStyle, TextItem,
@@ -36,9 +37,11 @@ use crate::scene::{
 /// Writes `scene` as an SVG document.
 ///
 /// With [`SvgText::Outlines`] text is drawn as filled glyph outlines. With
-/// [`SvgText::Editable`] it is written as `<text>` elements that name the font family.
-/// Everything that cannot be drawn is skipped, so the result always parses as XML. Content of
-/// groups nested deeper than [`MAX_GROUP_DEPTH`] is omitted.
+/// [`SvgText::Editable`] it is written as `<text>` elements that name the font family: the
+/// scene font of the item's face. Such a face is missing only from a text record built by
+/// hand, since [`Scene::push_text`] fails for a face its fonts do not have; editable text in
+/// it is skipped, as everything that cannot be drawn is, so the result always parses as XML.
+/// Content of groups nested deeper than [`MAX_GROUP_DEPTH`] is omitted.
 ///
 /// An [`Item::Image`] is an `<image>` holding its pixels as a PNG data URI, stretched without
 /// keeping its aspect ratio and marked `image-rendering="optimizeSpeed"` with the class
@@ -68,6 +71,7 @@ pub fn render_svg(scene: &Scene, text: SvgText) -> String {
         body: String::new(),
         next_id: 0,
         text,
+        fonts: &scene.fonts,
         images: false,
     };
     for item in &scene.items {
@@ -234,16 +238,18 @@ fn write_stroke(out: &mut String, style: &StrokeStyle, path_len: f32) -> bool {
 /// The class of every `<image>`, which the document's one stylesheet selects.
 const IMAGE_CLASS: &str = "umber-raster";
 
-struct Writer {
+struct Writer<'a> {
     defs: String,
     body: String,
     next_id: usize,
     text: SvgText,
+    /// The scene's fonts, which the faces of text items index.
+    fonts: &'a [Font],
     /// Whether an image was written, so the document needs the stylesheet of images.
     images: bool,
 }
 
-impl Writer {
+impl Writer<'_> {
     fn id(&mut self) -> usize {
         let id = self.next_id;
         self.next_id += 1;
@@ -433,6 +439,9 @@ impl Writer {
                 if !t.style.size.is_finite() || t.style.size <= 0.0 {
                     return;
                 }
+                let Some(font) = self.fonts.get(t.style.face.index()) else {
+                    return;
+                };
                 let weight = t.style.weight.numeric();
                 let mut attrs = String::new();
                 let _ = write!(
@@ -440,8 +449,8 @@ impl Writer {
                     r#" x="{}" y="{}" font-family="'{}', {}" font-size="{}" font-weight="{weight}""#,
                     num(t.origin.x),
                     num(t.origin.y),
-                    escape(t.style.font.family_name()),
-                    t.style.font.generic_family(),
+                    escape(font.family_name()),
+                    font.generic_family(),
                     num(t.style.size)
                 );
                 if t.style.tabular_figures {
@@ -507,9 +516,9 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fonts::{Font, Weight};
+    use crate::fonts::{BundledFont, Font, Weight};
     use crate::scene::{GradientStop, LinearGradient};
-    use crate::text::{FontLibrary, TextStyle};
+    use crate::text::{FaceId, FontLibrary, SceneFonts, TextStyle};
 
     const WHITE: Rgba = Rgba {
         r: 255,
@@ -577,9 +586,17 @@ mod tests {
         ]
     }
 
+    /// Inter as face 0.
+    fn inter_fonts() -> SceneFonts<'static> {
+        FontLibrary::global()
+            .with_figure_fonts(&[Font::INTER])
+            .unwrap()
+    }
+
+    /// Inter, face 0 of [`inter_fonts`].
     fn inter(size: f32) -> TextStyle {
         TextStyle {
-            font: Font::Inter,
+            face: FaceId::new(0),
             weight: Weight::Regular,
             size,
             tabular_figures: false,
@@ -662,7 +679,9 @@ mod tests {
     fn text_with_an_invalid_origin_is_skipped_in_every_mode() {
         for bad in [p(f32::NAN, 5.0), p(5.0, f32::INFINITY), p(2.0e6, 5.0)] {
             let mut scene = Scene::new(100.0, 40.0, WHITE);
-            scene.push_text(FontLibrary::global(), "Hi", inter(12.0), p(5.0, 20.0), RED);
+            scene
+                .push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), RED)
+                .unwrap();
             if let Some(Item::Text(t)) = scene.items.first_mut() {
                 t.origin = bad;
             }
@@ -680,13 +699,9 @@ mod tests {
     #[test]
     fn text_outlines_vs_editable() {
         let mut scene = Scene::new(100.0, 40.0, WHITE);
-        scene.push_text(
-            FontLibrary::global(),
-            "Hello",
-            inter(12.0),
-            p(5.0, 20.0),
-            RED,
-        );
+        scene
+            .push_text(&inter_fonts(), "Hello", inter(12.0), p(5.0, 20.0), RED)
+            .unwrap();
 
         let outlines = render_svg(&scene, SvgText::Outlines);
         assert!(!outlines.contains("<text"));
@@ -710,16 +725,21 @@ mod tests {
 
     #[test]
     fn editable_text_names_every_family_and_css_weight() {
-        for font in Font::ALL {
+        for font in BundledFont::ALL {
+            let fonts = FontLibrary::global()
+                .with_figure_fonts(&[Font::Bundled(font)])
+                .unwrap();
             for weight in Weight::ALL {
                 let mut scene = Scene::new(100.0, 40.0, WHITE);
                 let style = TextStyle {
-                    font,
+                    face: FaceId::new(0),
                     weight,
                     size: 12.0,
                     tabular_figures: false,
                 };
-                scene.push_text(FontLibrary::global(), "Ab", style, p(5.0, 20.0), RED);
+                scene
+                    .push_text(&fonts, "Ab", style, p(5.0, 20.0), RED)
+                    .unwrap();
                 let editable = render_svg(&scene, SvgText::Editable);
                 let doc = parse(&editable);
                 let text = doc
@@ -742,16 +762,54 @@ mod tests {
     }
 
     #[test]
+    fn editable_text_names_the_scene_font_of_its_face() {
+        let mut scene = Scene::new(100.0, 40.0, WHITE);
+        scene.fonts = vec![Font::SOURCE_SERIF_4, Font::JETBRAINS_MONO];
+        let fonts = FontLibrary::global()
+            .with_figure_fonts(&scene.fonts)
+            .unwrap();
+        let mono = TextStyle {
+            face: FaceId::new(1),
+            ..inter(12.0)
+        };
+        scene
+            .push_text(&fonts, "Ab", mono, p(5.0, 20.0), RED)
+            .unwrap();
+        let editable = render_svg(&scene, SvgText::Editable);
+        let doc = parse(&editable);
+        let text = doc
+            .descendants()
+            .find(|n| n.has_tag_name("text"))
+            .unwrap_or_else(|| panic!("no text in {editable}"));
+        assert_eq!(
+            text.attribute("font-family"),
+            Some("'JetBrains Mono', monospace")
+        );
+    }
+
+    #[test]
+    fn editable_text_in_a_face_the_scene_lacks_is_skipped() {
+        let mut scene = Scene::new(100.0, 40.0, WHITE);
+        scene
+            .push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), RED)
+            .unwrap();
+        if let Some(Item::Text(t)) = scene.items.first_mut() {
+            t.style.face = FaceId::new(1);
+        }
+        let editable = render_svg(&scene, SvgText::Editable);
+        parse(&editable);
+        assert!(!editable.contains("<text"), "{editable}");
+        let outlines = render_svg(&scene, SvgText::Outlines);
+        assert_eq!(outlines.matches("<path").count(), 1, "{outlines}");
+    }
+
+    #[test]
     fn svg_escapes_text_and_attributes() {
         let mut scene = Scene::new(100.0, 40.0, WHITE);
         let source = "a<b & \"c\" 'd'\u{0007}e";
-        scene.push_text(
-            FontLibrary::global(),
-            source,
-            inter(12.0),
-            p(5.0, 20.0),
-            RED,
-        );
+        scene
+            .push_text(&inter_fonts(), source, inter(12.0), p(5.0, 20.0), RED)
+            .unwrap();
         let svg = render_svg(&scene, SvgText::Editable);
         let doc = parse(&svg);
         let texts: Vec<_> = doc
@@ -1022,13 +1080,9 @@ mod tests {
             stroke: None,
             positions: vec![p(1.0, 1.0)],
         });
-        scene.push_text(
-            FontLibrary::global(),
-            "Hi",
-            inter(12.0),
-            p(5.0, 20.0),
-            clear,
-        );
+        scene
+            .push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), clear)
+            .unwrap();
         for mode in [SvgText::Outlines, SvgText::Editable] {
             let svg = render_svg(&scene, mode);
             let doc = parse(&svg);
@@ -1044,13 +1098,9 @@ mod tests {
     fn editable_text_preserves_spaces() {
         let mut scene = Scene::new(200.0, 40.0, WHITE);
         let source = "  A     B  ";
-        scene.push_text(
-            FontLibrary::global(),
-            source,
-            inter(12.0),
-            p(5.0, 20.0),
-            RED,
-        );
+        scene
+            .push_text(&inter_fonts(), source, inter(12.0), p(5.0, 20.0), RED)
+            .unwrap();
         let svg = render_svg(&scene, SvgText::Editable);
         let doc = parse(&svg);
         let text = doc

@@ -25,13 +25,6 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
     assert _umber.enum_members() == {
         "Dash": [("SOLID", 0), ("DASHED", 1), ("DOTTED", 2)],
         "Marker": [("CIRCLE", 0), ("SQUARE", 1), ("TRIANGLE", 2), ("DIAMOND", 3), ("CROSS", 4)],
-        "Font": [
-            ("SOURCE_SERIF_4", 0),
-            ("IBM_PLEX_SANS", 1),
-            ("GEIST", 2),
-            ("INTER", 3),
-            ("JETBRAINS_MONO", 4),
-        ],
         "LegendStyle": [("HEADER", 0), ("DIRECT", 1), ("CHIPS", 2), ("NONE", 3)],
         "FillStyle": [("SOLID", 0), ("GRADIENT", 1)],
         "GridLines": [("HORIZONTAL", 0), ("VERTICAL", 1), ("BOTH", 2), ("NONE", 3)],
@@ -49,15 +42,26 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
         "Step": [("POST", 0), ("PRE", 1), ("MID", 2)],
         "ColorbarPosition": [("RIGHT", 0), ("BOTTOM", 1), ("NONE", 2)],
         "Render": [("VECTOR", 0), ("RASTER", 1)],
+        "Hist": [("BARS", 0), ("STEP", 1), ("STACKED", 2)],
+        "Stat": [("COUNT", 0), ("FRACTION", 1), ("DENSITY", 2)],
         "Contour": [("LINES", 0), ("FILLED", 1), ("BOTH", 2)],
     }
+
+
+def test_bundled_fonts_lists_every_bundled_font_in_order() -> None:
+    assert _umber.bundled_fonts() == [
+        ("SOURCE_SERIF_4", 0),
+        ("IBM_PLEX_SANS", 1),
+        ("GEIST", 2),
+        ("INTER", 3),
+        ("JETBRAINS_MONO", 4),
+    ]
 
 
 def test_enum_members_keys_are_the_bound_enum_names() -> None:
     assert set(_umber.enum_members()) == {
         "Dash",
         "Marker",
-        "Font",
         "LegendStyle",
         "FillStyle",
         "GridLines",
@@ -69,6 +73,8 @@ def test_enum_members_keys_are_the_bound_enum_names() -> None:
         "Step",
         "ColorbarPosition",
         "Render",
+        "Hist",
+        "Stat",
         "Contour",
     }
 

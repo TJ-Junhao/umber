@@ -28,6 +28,7 @@ EXPECTED = [
     "Figure",
     "Font",
     "GridLines",
+    "Hist",
     "Legend",
     "LegendPosition",
     "LegendStyle",
@@ -36,6 +37,7 @@ EXPECTED = [
     "Scale",
     "Share",
     "Size",
+    "Stat",
     "Step",
     "StyleError",
     "SupportsArray",
@@ -95,7 +97,6 @@ def test_enums_are_exported_as_enums() -> None:
         "LegendPosition",
         "Dash",
         "FillStyle",
-        "Font",
         "GridLines",
         "LegendStyle",
         "Marker",
@@ -103,6 +104,8 @@ def test_enums_are_exported_as_enums() -> None:
         "Step",
         "SvgText",
         "ColorbarPosition",
+        "Hist",
+        "Stat",
         "Contour",
     }
 
@@ -182,6 +185,7 @@ def _constant_docs() -> dict[str, str]:
     collect(ast.parse((package / "__init__.py").read_text()).body, "")
     for module, class_name in (
         ("_color.py", "Color"),
+        ("_font.py", "Font"),
         ("_size.py", "Size"),
         ("_theme.py", "Theme"),
         ("_ticks.py", "TickFormat"),
@@ -199,6 +203,8 @@ def test_class_constant_and_attribute_examples_run() -> None:
         "Color.AUTO",
         "Color.BLUE",
         "Color.BROWN",
+        "Font.INTER",
+        "Font.JETBRAINS_MONO",
         "Size.AUTO",
         "TickFormat.AUTO",
     } <= set(docs)

@@ -34,6 +34,10 @@ use umber_core::{
 };
 use umber_core::{AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
 use umber_core::{
+    Bandwidth, Bins, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistStat, HistStyle,
+    KdeOptions,
+};
+use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };
 use umber_core::{ContourLevels, ContourOptions, ContourStyle};
@@ -91,6 +95,19 @@ fn cell_colors(
         }),
         transform,
     ))
+}
+
+/// The bins of a histogram: an int is a bin count, a float64 buffer the edges.
+fn bins_arg(bins: &Bound<'_, PyAny>) -> PyResult<Bins> {
+    if bins.is_instance_of::<PyInt>() {
+        return Ok(Bins::Count(bins.extract()?));
+    }
+    Ok(Bins::Edges(floats(bins)?))
+}
+
+/// The bandwidth of a kernel density: `None` is the Python facade's `AUTO`, Scott's rule.
+fn bandwidth_arg(bandwidth: Option<f64>) -> Bandwidth {
+    bandwidth.map_or(Bandwidth::Scott, Bandwidth::Fixed)
 }
 
 /// The grid of `rows × cols` cells.
@@ -290,36 +307,42 @@ impl Figure {
     }
 
     /// Sets the figure title above every panel.
-    fn figure_title(&mut self, text: &str) {
-        self.0.title(text);
+    fn figure_title(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
+        self.0.title_sized(text, size_spec(size)?);
+        Ok(())
     }
 
     /// Sets the figure subtitle below its title.
-    fn figure_subtitle(&mut self, text: &str) {
-        self.0.subtitle(text);
+    fn figure_subtitle(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
+        self.0.subtitle_sized(text, size_spec(size)?);
+        Ok(())
     }
 
     /// Sets the title.
-    fn title(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.title(text);
+    fn title(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.title_sized(text, size);
         Ok(())
     }
 
     /// Sets the subtitle.
-    fn subtitle(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.subtitle(text);
+    fn subtitle(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.subtitle_sized(text, size);
         Ok(())
     }
 
     /// Sets the x axis label.
-    fn xlabel(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.xlabel(text);
+    fn xlabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.xlabel_sized(text, size);
         Ok(())
     }
 
     /// Sets the y axis label.
-    fn ylabel(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.ylabel(text);
+    fn ylabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.ylabel_sized(text, size);
         Ok(())
     }
 
@@ -420,18 +443,29 @@ impl Figure {
     }
 
     /// Sets the legend style (a `LegendStyle` value).
-    fn legend(&mut self, row: i64, col: i64, style: i64) -> PyResult<()> {
+    fn legend(&mut self, row: i64, col: i64, style: i64, size: SizeArg) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
-        self.axes(row, col)?.legend(style);
-        Ok(())
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .legend(style, size)
+            .map(drop)
+            .map_err(core_error)
     }
 
     /// Sets the legend style and position (`LegendStyle` and `LegendPosition` values).
-    fn legend_at(&mut self, row: i64, col: i64, style: i64, position: i64) -> PyResult<()> {
+    fn legend_at(
+        &mut self,
+        row: i64,
+        col: i64,
+        style: i64,
+        position: i64,
+        size: SizeArg,
+    ) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
         let position = enum_value::<LegendPosition>(position)?;
+        let size = size_spec(size)?;
         self.axes(row, col)?
-            .legend_at(style, position)
+            .legend_at(style, position, size)
             .map(drop)
             .map_err(core_error)
     }
@@ -744,19 +778,26 @@ impl Figure {
             .map_err(core_error)
     }
 
-    /// Adds a histogram of `values` in `bins` bins.
+    /// Adds a histogram of `values` in `bins`, an int bin count or a float64 buffer of edges,
+    /// drawn in `style` (a `Hist` value) with the statistic `stat` (a `Stat` value).
     fn hist(
         &mut self,
         row: i64,
         col: i64,
         values: &Bound<'_, PyAny>,
-        bins: i64,
+        bins: &Bound<'_, PyAny>,
+        style: i64,
+        cumulative: bool,
+        stat: i64,
         label: String,
         color: ColorArg,
     ) -> PyResult<()> {
         let values = shared_floats(values)?;
         let options = HistOptions {
-            bins,
+            bins: bins_arg(bins)?,
+            style: enum_value::<HistStyle>(style)?,
+            cumulative,
+            stat: enum_value::<HistStat>(stat)?,
             label,
             color: color_spec(color)?,
             ..Default::default()
@@ -1101,7 +1142,7 @@ impl Figure {
     }
 
     /// Replaces the axes' colorbar label and optional overrides.
-    #[pyo3(signature = (row, col, label, position, format))]
+    #[pyo3(signature = (row, col, label, position, format, size))]
     fn colorbar(
         &mut self,
         row: i64,
@@ -1109,6 +1150,7 @@ impl Figure {
         label: String,
         position: Option<i64>,
         format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let options = umber_core::ColorbarOptions {
             label,
@@ -1116,6 +1158,7 @@ impl Figure {
                 .map(enum_value::<umber_core::ColorbarPosition>)
                 .transpose()?,
             format: format.map(tick_format).transpose()?,
+            size: size_spec(size)?,
         };
         self.axes(row, col)?
             .colorbar(options)
@@ -1124,12 +1167,13 @@ impl Figure {
     }
 
     /// Replaces the shared colorbars' label and optional overrides.
-    #[pyo3(signature = (label, position, format))]
+    #[pyo3(signature = (label, position, format, size))]
     fn figure_colorbar(
         &mut self,
         label: String,
         position: Option<i64>,
         format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let options = umber_core::ColorbarOptions {
             label,
@@ -1137,6 +1181,7 @@ impl Figure {
                 .map(enum_value::<umber_core::ColorbarPosition>)
                 .transpose()?,
             format: format.map(tick_format).transpose()?,
+            size: size_spec(size)?,
         };
         self.0.colorbar(options).map(drop).map_err(core_error)
     }
@@ -1435,6 +1480,212 @@ impl Figure {
         let (x, series) = (times("Axes.stacked_area()", "x", x)?, Self::series(series)?);
         self.axes(row, col)?
             .stacked_area_time(x.into(), series)
+            .map(drop)
+            .map_err(core_error)
+    }
+    /// Sets the x tick label size.
+    fn xtick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .xtick_labels(size)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Sets the y tick label size.
+    fn ytick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .ytick_labels(size)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds event positions grouped into category rows.
+    #[pyo3(signature = (row, col, rows, positions, length, width, color))]
+    fn events(
+        &mut self,
+        row: i64,
+        col: i64,
+        rows: &Bound<'_, PyAny>,
+        positions: Vec<Bound<'_, PyAny>>,
+        length: Option<f64>,
+        width: SizeArg,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let rows = names(rows)?;
+        let positions = positions
+            .iter()
+            .map(|values| series_data("Axes.events()", "positions", values))
+            .collect::<PyResult<Vec<_>>>()?;
+        let mut options = umber_core::EventsOptions {
+            width: size_spec(width)?,
+            color: color_spec(color)?,
+            ..Default::default()
+        };
+        if let Some(length) = length {
+            options.length = length;
+        }
+        self.axes(row, col)?
+            .events(rows, positions, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds strip samples in category groups.
+    #[pyo3(signature = (row, col, categories, groups, label, color, size, jitter))]
+    fn strip(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        groups: Vec<Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+        size: SizeArg,
+        jitter: Option<f64>,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
+        let mut options = umber_core::StripOptions {
+            label,
+            color: color_spec(color)?,
+            size: size_spec(size)?,
+            ..Default::default()
+        };
+        if let Some(jitter) = jitter {
+            options.jitter = jitter;
+        }
+        self.axes(row, col)?
+            .strip(categories, groups, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds swarm samples in category groups.
+    fn swarm(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        groups: Vec<Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
+        let options = umber_core::SwarmOptions {
+            label,
+            color: color_spec(color)?,
+            size: size_spec(size)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .swarm(categories, groups, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a histogram of several series sharing their `bins`, drawn in `style` (a `Hist`
+    /// value) with the statistic `stat` (a `Stat` value).
+    fn grouped_hist(
+        &mut self,
+        row: i64,
+        col: i64,
+        series: SeriesArgs<'_>,
+        bins: &Bound<'_, PyAny>,
+        style: i64,
+        cumulative: bool,
+        stat: i64,
+    ) -> PyResult<()> {
+        let options = GroupedHistOptions {
+            bins: bins_arg(bins)?,
+            style: enum_value::<HistStyle>(style)?,
+            cumulative,
+            stat: enum_value::<HistStat>(stat)?,
+            ..Default::default()
+        };
+        let series = Self::series(series)?;
+        self.axes(row, col)?
+            .grouped_hist(series, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds the ECDF of `values`: a float64 buffer of numbers, or an int64 buffer of times.
+    fn ecdf(
+        &mut self,
+        row: i64,
+        col: i64,
+        values: &Bound<'_, PyAny>,
+        complementary: bool,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let values = series_data("Axes.ecdf()", "values", values)?;
+        let options = EcdfOptions {
+            complementary,
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .ecdf(values, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds the kernel density line of `values`; a `bandwidth` of `None` is Scott's rule.
+    fn kde(
+        &mut self,
+        row: i64,
+        col: i64,
+        values: &Bound<'_, PyAny>,
+        bandwidth: Option<f64>,
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let values = floats(values)?;
+        let options = KdeOptions {
+            bandwidth: bandwidth_arg(bandwidth),
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .kde(&values, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds one kernel density line per series; a `bandwidth` of `None` is Scott's rule.
+    fn grouped_kde(
+        &mut self,
+        row: i64,
+        col: i64,
+        series: SeriesArgs<'_>,
+        bandwidth: Option<f64>,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let options = GroupedKdeOptions {
+            bandwidth: bandwidth_arg(bandwidth),
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+            ..Default::default()
+        };
+        let series = Self::series(series)?;
+        self.axes(row, col)?
+            .grouped_kde(series, options)
             .map(drop)
             .map_err(core_error)
     }

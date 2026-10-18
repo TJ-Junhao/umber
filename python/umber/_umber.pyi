@@ -52,7 +52,11 @@ __all__ = [
     "Theme",
     "__version__",
     "box_stats",
+    "bundled_fonts",
     "kde_scott",
+    "scott_bandwidth",
+    "kde_curve",
+    "ecdf_steps",
     "check_alpha",
     "check_log_base",
     "check_palette_index",
@@ -84,6 +88,14 @@ def grid_cells(rows: int, cols: int, count: int) -> list[tuple[int, int]]: ...
 # Named colors as (name, 0xRRGGBBAA), in the order BLACK, WHITE, GRAY, RED, ORANGE, YELLOW,
 # GREEN, TEAL, BLUE, PURPLE, PINK, BROWN.
 def named_colors() -> list[tuple[str, int]]: ...
+
+# A font argument: (kind, payload). Kind 0 is a bundled font (payload: its index in
+# bundled_fonts()).
+type _FontArg = tuple[int, int]
+
+# Bundled fonts as (constant name, index), in the order SOURCE_SERIF_4, IBM_PLEX_SANS, GEIST,
+# INTER, JETBRAINS_MONO.
+def bundled_fonts() -> list[tuple[str, int]]: ...
 
 # Concrete colors are returned as 0xRRGGBBAA.
 def color_hex(code: str) -> int: ...
@@ -131,6 +143,18 @@ def box_stats(
 
 # Test hook: 128 (position, density) pairs, or None below two distinct finite samples.
 def kde_scott(values: _FloatArray) -> list[tuple[float, float]] | None: ...
+
+# Test hook: Scott's bandwidth in data units, or None below two distinct finite samples.
+def scott_bandwidth(values: _FloatArray) -> float | None: ...
+
+# Test hook: `points` (position, density) pairs from `start` to `end`, the density in data units,
+# or None without a finite sample or below two points.
+def kde_curve(
+    values: _FloatArray, bandwidth: float, start: float, end: float, points: int
+) -> list[tuple[float, float]] | None: ...
+
+# Test hook: the x and y of the ECDF's post step line, NaN left out.
+def ecdf_steps(values: _FloatArray, complementary: bool) -> tuple[list[float], list[float]]: ...
 
 @final
 class Cmap:
@@ -188,9 +212,9 @@ class Theme:
     def with_baseline_color(self, value: _ColorArg) -> Theme: ...
     def with_grid_lines(self, value: int) -> Theme: ...
     def with_grid_dash(self, value: int) -> Theme: ...
-    def with_title_font(self, value: int) -> Theme: ...
+    def with_title_font(self, value: _FontArg) -> Theme: ...
     def with_title_align(self, value: int) -> Theme: ...
-    def with_body_font(self, value: int) -> Theme: ...
+    def with_body_font(self, value: _FontArg) -> Theme: ...
     def with_legend_style(self, value: int) -> Theme: ...
     def with_legend_position(self, value: int) -> Theme: ...
     def with_fill_style(self, value: int) -> Theme: ...
@@ -252,12 +276,12 @@ class Figure:
         y_kind: int,
         y_base: float,
     ) -> tuple[int, int]: ...
-    def figure_title(self, text: str) -> None: ...
-    def figure_subtitle(self, text: str) -> None: ...
-    def title(self, row: int, col: int, text: str) -> None: ...
-    def subtitle(self, row: int, col: int, text: str) -> None: ...
-    def xlabel(self, row: int, col: int, text: str) -> None: ...
-    def ylabel(self, row: int, col: int, text: str) -> None: ...
+    def figure_title(self, text: str, size: _SizeArg) -> None: ...
+    def figure_subtitle(self, text: str, size: _SizeArg) -> None: ...
+    def title(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
+    def subtitle(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
+    def xlabel(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
+    def ylabel(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
     def xlim(self, row: int, col: int, low: float, high: float) -> None: ...
     def ylim(self, row: int, col: int, low: float, high: float) -> None: ...
     def xticks(self, row: int, col: int, positions: _FloatArray) -> None: ...
@@ -271,8 +295,8 @@ class Figure:
     def xtick_format(self, row: int, col: int, format: _TickFormatArg) -> None: ...
     def ytick_format(self, row: int, col: int, format: _TickFormatArg) -> None: ...
     def baseline(self, row: int, col: int, shown: bool | None) -> None: ...
-    def legend(self, row: int, col: int, style: int) -> None: ...
-    def legend_at(self, row: int, col: int, style: int, position: int) -> None: ...
+    def legend(self, row: int, col: int, style: int, size: _SizeArg) -> None: ...
+    def legend_at(self, row: int, col: int, style: int, position: int, size: _SizeArg) -> None: ...
     def line(
         self,
         row: int,
@@ -379,7 +403,16 @@ class Figure:
         self, row: int, col: int, x: _FloatArray, series: list[_SeriesArg]
     ) -> None: ...
     def hist(
-        self, row: int, col: int, values: _FloatArray, bins: int, label: str, color: _ColorArg
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray,
+        bins: int | _FloatArray,
+        style: int,
+        cumulative: bool,
+        stat: int,
+        label: str,
+        color: _ColorArg,
     ) -> None: ...
     def mesh(
         self,
@@ -546,11 +579,21 @@ class Figure:
         self, row: int, col: int, x: _TimeArray, series: list[_SeriesArg]
     ) -> None: ...
     def figure_colorbar(
-        self, label: str, position: int | None, format: _TickFormatArg | None
+        self,
+        label: str,
+        position: int | None,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
     ) -> None: ...
     def clim(self, row: int, col: int, low: float, high: float) -> None: ...
     def colorbar(
-        self, row: int, col: int, label: str, position: int | None, format: _TickFormatArg | None
+        self,
+        row: int,
+        col: int,
+        label: str,
+        position: int | None,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
     ) -> None: ...
     def heatmap(
         self,
@@ -566,6 +609,80 @@ class Figure:
         annotate: bool,
         format: _TickFormatArg | None,
         render: int | None,
+    ) -> None: ...
+    def xtick_labels(self, row: int, col: int, size: _SizeArg) -> None: ...
+    def ytick_labels(self, row: int, col: int, size: _SizeArg) -> None: ...
+    def events(
+        self,
+        row: int,
+        col: int,
+        rows: list[str],
+        positions: list[_FloatArray | _TimeArray],
+        length: float | None,
+        width: _SizeArg,
+        color: _ColorArg,
+    ) -> None: ...
+    def strip(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+        size: _SizeArg,
+        jitter: float | None,
+    ) -> None: ...
+    def swarm(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+        size: _SizeArg,
+    ) -> None: ...
+    def grouped_hist(
+        self,
+        row: int,
+        col: int,
+        series: list[_SeriesArg],
+        bins: int | _FloatArray,
+        style: int,
+        cumulative: bool,
+        stat: int,
+    ) -> None: ...
+    def ecdf(
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray | _TimeArray,
+        complementary: bool,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def kde(
+        self,
+        row: int,
+        col: int,
+        values: _FloatArray,
+        bandwidth: float | None,
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_kde(
+        self,
+        row: int,
+        col: int,
+        series: list[_SeriesArg],
+        bandwidth: float | None,
+        dash: int,
+        width: _SizeArg,
     ) -> None: ...
     def contour(
         self,

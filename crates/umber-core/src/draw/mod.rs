@@ -42,11 +42,13 @@ mod chrome;
 mod clip;
 pub(crate) mod colorbar;
 mod contour;
+mod ecdf;
 mod error_bars;
 pub(crate) mod fill;
 mod heatmap;
 mod hexbin;
 mod hist;
+mod kde;
 pub(crate) mod legend;
 mod line;
 mod mapping;
@@ -55,21 +57,25 @@ mod mesh;
 mod rule;
 mod scatter;
 pub(crate) use scatter::{MARKER_OUTLINE, marker_reach};
+mod events;
 mod stacked_area;
 mod stem;
 mod step;
+mod strip;
 mod stroke;
 #[cfg(test)]
 mod tests;
 mod violin;
+pub(crate) use strip::check as check_points;
 
 pub(crate) use chrome::{baseline, chrome, figure_header};
 pub(crate) use heatmap::annotations as heatmap_annotations;
 
+use crate::Theme;
 use crate::layout::{Area, Layout};
 use crate::resolve::{Baseline, Orientation, Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
-use crate::{FontLibrary, Theme};
+use crate::text::SceneFonts;
 use mapping::{AxisMaps, axis_values};
 
 /// What every mark implementation draws with: the theme, the axis maps and the plot geometry.
@@ -106,15 +112,19 @@ impl MarkContext<'_> {
 }
 
 /// The `marks` as one group clipped to [`marks_clip`], in the given order, each in its resolved
-/// color, with the text they carry (the level labels of contours) shaped with `lib`. `None`
-/// when nothing is visible.
+/// color, with the text they carry (the level labels of contours) shaped with the scene's
+/// `fonts`. `Ok(None)` when nothing is visible.
+///
+/// # Errors
+///
+/// A level label that cannot be laid out fails as `fonts` reports it.
 pub(crate) fn marks(
     theme: &Theme,
-    lib: &FontLibrary,
+    fonts: &SceneFonts<'_>,
     resolved: &Resolved,
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
-) -> Option<Item> {
+) -> crate::Result<Option<Item>> {
     let plot = layout.plot;
     let context = MarkContext {
         theme,
@@ -243,17 +253,19 @@ pub(crate) fn marks(
                 }
             }
             ResolvedMark::Hist {
-                ref histogram,
-                color,
+                ref bins,
+                ref layers,
+                style,
+                width,
                 ..
             } => {
-                if let Some(histogram) = histogram {
+                if let Some(bins) = bins {
                     hist::hist_items(
                         &context,
-                        &resolved.x,
-                        &resolved.y,
-                        histogram,
-                        color,
+                        (&resolved.x, &resolved.y),
+                        bins,
+                        layers,
+                        (style, width),
                         &mut items,
                     );
                 }
@@ -365,23 +377,62 @@ pub(crate) fn marks(
                     labels,
                     shapes,
                 };
-                contour::contour_items(&context, lib, resolved, contour, &mut items);
+                contour::contour_items(&context, fonts, resolved, contour, &mut items)?;
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. } => {}
+            ResolvedMark::Events {
+                mark, color, width, ..
+            } => {
+                events::items(&context, resolved, mark, (color, width), &mut items);
+            }
+            ResolvedMark::Points {
+                categories,
+                groups,
+                color,
+                size,
+                orientation,
+                placement,
+                ..
+            } => {
+                strip::items(
+                    &context.oriented(orientation),
+                    resolved.along_and_values(orientation),
+                    categories,
+                    groups,
+                    (color, size, placement),
+                    &mut items,
+                );
+            }
+            ResolvedMark::Ecdf {
+                mark: ecdf_mark,
+                color,
+                width,
+                ..
+            } => {
+                ecdf::ecdf_items(&context, resolved, ecdf_mark, (color, width), &mut items);
+            }
+            ResolvedMark::Kde {
+                mark: kde_mark,
+                color,
+                width,
+                ..
+            } => {
+                kde::kde_items(&context, resolved, kde_mark, (color, width), &mut items);
+            }
         }
     }
     rule::rule_layer(&context, resolved, marks, layer_clip, &mut items);
     if items.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some(Item::Group {
+    Ok(Some(Item::Group {
         clip: Some(clip),
         items,
-    })
+    }))
 }
 
 /// Checks that every mark of `marks` that draws something and whose options draw its cells as

@@ -28,7 +28,7 @@ fn max_bins() -> i64 {
 /// Options with `bins` bins, no label and the automatic color.
 fn bins(bins: i64) -> HistOptions {
     HistOptions {
-        bins,
+        bins: umber_core::Bins::Count(bins),
         ..HistOptions::default()
     }
 }
@@ -245,9 +245,10 @@ fn hist_errors() -> String {
                     f64::from_bits(0xfff0_0000_dead_beef),
                 ],
                 HistOptions {
-                    bins: 3,
+                    bins: umber_core::Bins::Count(3),
                     label: "kept".into(),
                     color: ColorSpec::Fixed(Rgba::opaque(1, 2, 3)),
+                    ..HistOptions::default()
                 },
             )
             .map(drop)

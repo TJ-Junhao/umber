@@ -23,7 +23,8 @@ use crate::layout::{Label, Layout, centered_tick_label, widths};
 use crate::model::HeatmapMark;
 use crate::resolve::{AxisScale, Resolved, ResolvedMark};
 use crate::scene::{FillRule, Item, Paint, Rect};
-use crate::{CategoryScale, Error, FontLibrary, Result, Rgba, Theme, TickFormat};
+use crate::text::SceneFonts;
+use crate::{CategoryScale, Error, Result, Rgba, Theme, TickFormat};
 
 /// How far, in points, a label may exceed its cell and still count as fitting: the cell size
 /// comes from two rounded edges, so a label of exactly the cell's size can measure larger by a
@@ -233,9 +234,10 @@ pub(super) fn heatmap_items(
 ///
 /// `Error::Style` under `context` when a drawn label does not fit its cell: naming the widest
 /// label when one is wider than the cells, else the label height when it is taller than them.
+/// A label that cannot be laid out fails as `lib` reports it.
 pub(crate) fn annotations(
     theme: &Theme,
-    lib: &FontLibrary,
+    lib: &SceneFonts<'_>,
     resolved: &Resolved,
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
@@ -280,7 +282,7 @@ pub(crate) fn annotations(
         for (cell, label) in shown.into_iter().zip(labels) {
             let [left, top, right, bottom] = cell.bounds;
             let center = ((left + right) / 2.0, (top + bottom) / 2.0);
-            let label = centered_tick_label(lib, theme, &label, center);
+            let label = centered_tick_label(lib, theme, &label, center)?;
             placed.push((label, cell));
         }
     }
@@ -373,7 +375,7 @@ mod tests {
     use crate::render::render_png;
     use crate::scene::Scene;
     use crate::test_support::image::decode_rgba8;
-    use crate::{Cmap, CmapChoice, ScaleKind};
+    use crate::{Cmap, CmapChoice, FontLibrary, ScaleKind};
 
     fn names(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| (*s).to_owned()).collect()
@@ -409,11 +411,13 @@ mod tests {
         let marks = crate::resolve::resolve_figure_marks(f).swap_remove(0);
         let fills = match crate::draw::marks(
             f.theme(),
-            crate::FontLibrary::global(),
+            &crate::test_support::figure_fonts(f.theme()),
             &resolved,
             &layout,
             &marks,
-        ) {
+        )
+        .unwrap()
+        {
             Some(Item::Group { items, .. }) => items
                 .iter()
                 .map(|item| match item {
@@ -834,7 +838,8 @@ mod tests {
     #[test]
     fn a_label_fitting_its_cell_up_to_rounding_is_accepted() {
         let theme = Theme::pigment();
-        let label = centered_tick_label(FontLibrary::global(), &theme, "12.5", (0.0, 0.0));
+        let fonts = crate::test_support::figure_fonts(&theme);
+        let label = centered_tick_label(&fonts, &theme, "12.5", (0.0, 0.0)).unwrap();
         let width = label.width();
         let height = f64::from(label.layout.ascent() + label.layout.descent());
         // The cell edges are rounded, so the size they give can differ from the label's by a

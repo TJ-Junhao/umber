@@ -1,5 +1,6 @@
 """``Axes``: the plot area of a figure, with its marks, texts, limits and legend."""
 
+import numbers
 from collections.abc import Sequence
 from enum import Enum
 from operator import attrgetter
@@ -23,16 +24,19 @@ from umber._enums import (
     ColorbarPosition,
     Contour,
     Dash,
+    Hist,
     LegendPosition,
     LegendStyle,
     Marker,
     Render,
+    Stat,
     Step,
 )
-from umber._errors import DataError, StyleError, UsageError, new_error
+from umber._errors import DataError, StyleError, UmberError, UsageError, details, new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._series import Distribution, Series
+from umber._size import TEXT_SIZE_HINT as _SIZE_HINT
 from umber._size import Size
 from umber._ticks import TickFormat
 from umber._time import MicrosArray
@@ -86,7 +90,10 @@ def _members_hint(cls: type[Enum]) -> str:
 _DASH_HINT: Final = _members_hint(Dash)
 _MARKER_HINT: Final = _members_hint(Marker)
 _STEP_HINT: Final = _members_hint(Step)
-_SIZE_HINT: Final = (
+_HIST_HINT: Final = _members_hint(Hist)
+_STAT_HINT: Final = _members_hint(Stat)
+_BANDWIDTH_HINT: Final = "pass a bandwidth in data units greater than 0, or ub.AUTO."
+_MARK_SIZE_HINT: Final = (
     "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
 )
 _LEGEND_HINT: Final = _members_hint(LegendStyle)
@@ -155,17 +162,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         return self._figure
 
-    def title(self, text: str) -> Self:
+    def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the title, shown above the plot.
 
         Args:
             text: The title, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long.
 
         Example:
@@ -173,20 +182,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().title("Revenue")
         """
         with api_call():
-            self._native.title(self._row, self._col, _args.text("Axes.title()", "text", text))
+            context = "Axes.title()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.title(
+                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+            )
             return self
 
-    def subtitle(self, text: str) -> Self:
+    def subtitle(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the subtitle, shown under the title.
 
         Args:
             text: The subtitle, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long.
 
         Example:
@@ -194,20 +210,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().title("Revenue").subtitle("Per quarter")
         """
         with api_call():
-            self._native.subtitle(self._row, self._col, _args.text("Axes.subtitle()", "text", text))
+            context = "Axes.subtitle()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.subtitle(
+                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+            )
             return self
 
-    def xlabel(self, text: str) -> Self:
+    def xlabel(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the x axis label, shown under the x tick labels.
 
         Args:
             text: The label, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long.
 
         Example:
@@ -215,20 +238,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().xlabel("Year")
         """
         with api_call():
-            self._native.xlabel(self._row, self._col, _args.text("Axes.xlabel()", "text", text))
+            context = "Axes.xlabel()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.xlabel(
+                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+            )
             return self
 
-    def ylabel(self, text: str) -> Self:
+    def ylabel(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the y axis label, shown left of the y tick labels.
 
         Args:
             text: The label, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``text`` is not a ``str``.
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long.
 
         Example:
@@ -236,7 +266,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ub.Figure().add_axes().ylabel("Revenue")
         """
         with api_call():
-            self._native.ylabel(self._row, self._col, _args.text("Axes.ylabel()", "text", text))
+            context = "Axes.ylabel()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.ylabel(
+                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+            )
             return self
 
     def xlim(self: SX, low: X, high: X) -> SX:
@@ -588,7 +623,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.baseline(self._row, self._col, flag)
             return self
 
-    def legend(self, style: LegendStyle, *, position: LegendPosition | Auto = AUTO) -> Self:
+    def legend(
+        self, style: LegendStyle, *, position: LegendPosition | Auto = AUTO, size: Size = Size.AUTO
+    ) -> Self:
         """Set the legend style and position, overriding the theme's.
 
         The legend lists marks with a non-empty ``label``; ``LegendStyle.NONE`` hides it.
@@ -608,13 +645,20 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 clears any previous override. ``LegendPosition.BEST`` instead chooses the
                 position inside the plot that covers the least data.
 
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. In a merged legend, only these explicit
+                sizes must agree. ``Size.AUTO`` clears this panel's size setting and inherits
+                the agreed explicit size, or the theme's size when none is set. Panels with
+                ``LegendStyle.NONE`` do not take part in the agreement.
+
         Returns:
             These axes.
 
         Raises:
             TypeError: If ``style`` is not a ``LegendStyle``, or ``position`` is neither a
-                ``LegendPosition`` nor ``AUTO``.
-            UsageError: If ``style`` is ``DIRECT`` and a ``LegendPosition`` is supplied.
+                ``LegendPosition`` nor ``AUTO``, or ``size`` is not a ``Size``.
+            UsageError: If ``style`` is ``DIRECT`` and a ``LegendPosition`` is supplied,
+                or another panel has set a different size for the merged legend.
 
         Example:
             >>> import umber as ub
@@ -624,13 +668,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             member = instance("Axes.legend()", "style", style, LegendStyle, _LEGEND_HINT)
-            if position is AUTO:
-                self._native.legend(self._row, self._col, member.value)
-            else:
-                placement = instance(
+            if position is not AUTO:
+                instance(
                     "Axes.legend()", "position", position, LegendPosition, _LEGEND_POSITION_HINT
                 )
-                self._native.legend_at(self._row, self._col, member.value, placement.value)
+            instance("Axes.legend()", "size", size, Size, _SIZE_HINT)
+            if isinstance(position, LegendPosition):
+                self._native.legend_at(
+                    self._row, self._col, member.value, position.value, _size.native(size)
+                )
+            else:
+                self._native.legend(self._row, self._col, member.value, _size.native(size))
             return self
 
     def line(
@@ -1247,19 +1295,33 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         self: "Axes[float, float]",
         values: Values[float],
         *,
-        bins: int = 30,
+        bins: int | Values[float] = 30,
+        style: Hist = Hist.BARS,
+        cumulative: bool = False,
+        stat: Stat = Stat.COUNT,
         label: str = "",
         color: Color = Color.AUTO,
     ) -> "Axes[float, float]":
-        """Add a histogram: the count of ``values`` in equal-width bins over their range.
+        """Add a histogram: the values counted in bins, one bar per bin.
 
-        NaN values are left out of the counts. The x axis must be linear. The baseline is
-        drawn at zero, or at the lower edge when zero is out of range, even alongside other
-        marks.
+        ``bins`` is a number of equal-width bins over the range of the values, or the bin
+        edges. Bins include their low edge; the last also includes its high edge. NaN values
+        are left out of the counts. ``stat`` sets what each bar shows: the count of its bin,
+        the fraction of all values (the bars sum to 1), or the density (the fraction over the
+        bin's width, so the bars have an area of 1). With ``cumulative=True`` each bar adds up
+        the bins up to its own, so the last shows the total, or 1 for fractions. The x axis must
+        be linear. The baseline is drawn at zero, or at the lower edge when zero is out of
+        range, even alongside other marks.
 
         Args:
             values: The values to count.
-            bins: The number of bins, from 1 to ``MAX_BINS``.
+            bins: The number of equal-width bins, from 1 to ``MAX_BINS``, or the bin edges: at
+                least two, increasing, holding every finite value.
+            style: How the bins are drawn: ``Hist.BARS`` fills one bar per bin, ``Hist.STEP``
+                draws only their outline, as one line. ``Hist.STACKED`` stacks the bars of
+                groups; for one set of values it draws the same bars as ``Hist.BARS``.
+            cumulative: Whether each bar adds up every bin up to its own, from the left.
+            stat: What each bar shows: ``Stat.COUNT``, ``Stat.FRACTION`` or ``Stat.DENSITY``.
             label: The name shown in the legend; an empty string leaves the histogram out of
                 it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
@@ -1269,24 +1331,51 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If a value is infinite, or the x axis is a category axis.
-            StyleError: If ``bins`` is out of range, or ``label`` is too long.
-            UsageError: If the x axis is a log axis.
+            DataError: If a value is infinite, the edges are fewer than two, not finite or not
+                increasing, finite values lie outside the edges, or the x axis is a category
+                axis.
+            StyleError: If the number of bins is out of range, or ``label`` is too long.
+            UsageError: If the x axis is a log axis, or ``cumulative=True`` comes with
+                ``Stat.DENSITY``, whose densities do not add up.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.hist([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bins=4, label="Sizes")
+            >>> edges = ub.Figure().add_axes()
+            >>> edges = edges.hist([0.2, 1.5, 1.7, 4.0], bins=[0, 1, 2, 5], stat=ub.Stat.DENSITY)
+            >>> runs = ub.Figure().add_axes()
+            >>> runs = runs.hist([3.0, 1.0, 2.0], cumulative=True, stat=ub.Stat.FRACTION)
+            >>> outline = ub.Figure().add_axes().hist([1.0, 2.0, 2.0], style=ub.Hist.STEP)
         """
         with api_call():
             context = "Axes.hist()"
             check_floats_type(context, "values", values)
-            count = integer(context, "bins", bins)
+            edges = _holds_edges(bins)
+            count = 0
+            if edges:
+                check_floats_type(context, "bins", bins)
+            else:
+                count = integer(context, "bins", bins)
+            drawn = instance(context, "style", style, Hist, _HIST_HINT)
+            running = _args.boolean(context, "cumulative", cumulative)
+            shown = instance(context, "stat", stat, Stat, _STAT_HINT)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             data = floats(context, "values", values)
+            native_bins = floats(context, "bins", bins) if edges else count
             name = _args.text(context, "label", label)
-            self._native.hist(self._row, self._col, data, count, name, spec)
+            self._native.hist(
+                self._row,
+                self._col,
+                data,
+                native_bins,
+                drawn.value,
+                running,
+                shown.value,
+                name,
+                spec,
+            )
             return self
 
     def mesh(
@@ -2184,6 +2273,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         position: ColorbarPosition | Auto = AUTO,
         format: TickFormat | Auto = AUTO,
+        size: Size = Size.AUTO,
     ) -> Self:
         """Set the colorbar label, position and tick format.
 
@@ -2197,6 +2287,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 clears a previous override.
             format: The tick format. ``AUTO`` follows the y tick format and clears a
                 previous override.
+
+            size: The label size only; colorbar ticks keep the theme's size. ``Size.AUTO``
+                follows the theme, ``Size.times(k)`` multiplies its scaled size, and
+                ``Size.pt(p)`` uses points without font scaling.
 
         Returns:
             These axes.
@@ -2236,6 +2330,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     _FORMAT_HINT,
                 )
             )
+            instance(context, "size", size, Size, _SIZE_HINT)
             name = _args.text(context, "label", label)
             self._native.colorbar(
                 self._row,
@@ -2243,6 +2338,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 name,
                 placement,
                 None if checked is None else _ticks.native(checked),
+                _size.native(size),
             )
             return self
 
@@ -2362,6 +2458,357 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 checked,
                 drawn,
             )
+            return self
+
+    def xtick_labels(self, *, size: Size = Size.AUTO) -> Self:
+        """Set the x tick label size without changing ticks or their format.
+
+        Args:
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. Only these explicit sizes must agree in
+                the shared axis group. ``Size.AUTO`` clears this panel's size setting and
+                inherits the group's agreed explicit size, or the theme's size when none
+                is set. Ticks and their format are unchanged.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``size`` is not a ``Size``.
+            UsageError: If another panel sharing this axis set a different size.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().xtick_labels(size=ub.Size.pt(10))
+        """
+        with api_call():
+            instance("Axes.xtick_labels()", "size", size, Size, _SIZE_HINT)
+            self._native.xtick_labels(self._row, self._col, _size.native(size))
+            return self
+
+    def ytick_labels(self, *, size: Size = Size.AUTO) -> Self:
+        """Set the y tick label size without changing ticks or their format.
+
+        Args:
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. Only these explicit sizes must agree in
+                the shared axis group. ``Size.AUTO`` clears this panel's size setting and
+                inherits the group's agreed explicit size, or the theme's size when none
+                is set. Ticks and their format are unchanged.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``size`` is not a ``Size``.
+            UsageError: If another panel sharing this axis set a different size.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes().ytick_labels(size=ub.Size.pt(10))
+        """
+        with api_call():
+            instance("Axes.ytick_labels()", "size", size, Size, _SIZE_HINT)
+            self._native.ytick_labels(self._row, self._col, _size.native(size))
+            return self
+
+    def events(
+        self: "Axes[float, str] | Axes[Time, str]",
+        rows: Values[str],
+        positions: Sequence[Values[X]],
+        *,
+        length: float | Auto = AUTO,
+        width: Size = Size.AUTO,
+        color: Color = Color.AUTO,
+    ) -> "Axes[X, Y]":
+        """Add short vertical ticks at event positions, one row per category.
+
+        Rows run from top to bottom in first-appearance order. A numeric or time x axis
+        supplies the positions. Empty groups keep their row; NaN and NaT draw no tick.
+        Times are rounded to the nearest microsecond, as for other time-axis marks.
+        Marks draw in call order. Input data is copied and a failed call changes nothing.
+
+        Args:
+            rows: Unique row names.
+            positions: One group of numbers or times per row, matching the x axis.
+            length: Fraction of the row height, above 0 and at most 1; AUTO uses 0.8.
+            width: Tick stroke width. Size.AUTO draws 1 pt ticks.
+            color: Tick color; Color.AUTO takes the next palette color.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If rows repeat, group counts differ, or a position is invalid.
+            StyleError: If length is non-finite or outside its permitted range.
+            UsageError: If x is not numeric or time, or y is not a category axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> ax = ax.events(["North", "South"], [[1, 3, 5], [2, 4]])
+        """
+        with api_call():
+            context = "Axes.events()"
+            check_names_type(context, "rows", rows)
+            _series.check_groups_type(context, positions, name="positions", time=self._x == _TIME)
+            extent = None if length is AUTO else real(context, "length", length)
+            stroke = _size_argument(context, "width", width)
+            paint = _color_argument(context, color)
+            row_names = names(context, "rows", rows)
+            converted: list[FloatArray | MicrosArray] = []
+            if self._x == _TIME:
+                try:
+                    for i, group in enumerate(positions):
+                        converted.append(_time.micros(context, f"positions[{i}]", group))
+                except (TypeError, UmberError) as error:
+                    raise _event_error(context, error) from None
+            else:
+                converted.extend(_series.group_values(context, positions, name="positions"))
+            self._native.events(self._row, self._col, row_names, converted, extent, stroke, paint)
+            return cast("Axes[X, Y]", self)
+
+    def strip(
+        self: "Axes[str, float] | Axes[float, str]",
+        categories: Values[str],
+        groups: Sequence[Values[float]],
+        *,
+        jitter: float | Auto = AUTO,
+        size: Size = Size.AUTO,
+        color: Color = Color.AUTO,
+        label: str = "",
+    ) -> "Axes[X, Y]":
+        """Add individual circular samples within each category band.
+
+        Jitter is uniform within the chosen fraction of each band, from a fixed
+        SplitMix64 seed for each input category and strip on these axes. Repeated
+        renders are byte-identical; unrelated marks do not change the jitter.
+        A category x axis gives vertical groups; a category y axis gives horizontal
+        groups. NaN is ignored and empty groups draw nothing. The numeric axis may be
+        linear or log. Markers use the scatter opacity and outline. Marks draw in call
+        order, so call this after box() or violin() to put points above them.
+        Input data is copied and a failed call changes nothing.
+
+        Args:
+            categories: Unique category names.
+            groups: One group of numeric samples per category.
+            jitter: Maximum displacement as a band fraction from 0 to 0.5; AUTO uses 0.4.
+            size: Marker diameter; Size.AUTO uses the theme's marker size.
+            color: Marker color; Color.AUTO takes the next palette color.
+            label: The legend label; empty for none. Points use a marker swatch.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If categories repeat, group counts differ, or samples are invalid.
+            StyleError: If jitter is non-finite or outside 0 to 0.5, or label is too long.
+            UsageError: If the axes are not one category axis and one numeric axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.strip(["North", "South"], [[1, 2, 3], [2, 3, 4]], label="Samples")
+        """
+        with api_call():
+            context = "Axes.strip()"
+            check_names_type(context, "categories", categories)
+            _series.check_groups_type(context, groups)
+            _args.require_text(context, "label", label)
+            spread = None if jitter is AUTO else real(context, "jitter", jitter)
+            extent = _size_argument(context, "size", size)
+            paint = _color_argument(context, color)
+            category_names = names(context, "categories", categories)
+            values = _series.group_values(context, groups)
+            name = _args.text(context, "label", label)
+            self._native.strip(
+                self._row, self._col, category_names, values, name, paint, extent, spread
+            )
+            return cast("Axes[X, Y]", self)
+
+    def swarm(
+        self: "Axes[str, float] | Axes[float, str]",
+        categories: Values[str],
+        groups: Sequence[Values[float]],
+        *,
+        size: Size = Size.AUTO,
+        color: Color = Color.AUTO,
+        label: str = "",
+    ) -> "Axes[X, Y]":
+        """Add individual circular samples within each category band.
+
+        Points are sorted by value, then placed at the free offset nearest the centre
+        line. When circles do not fit in a category band at the final plot size,
+        rendering raises StyleError naming the category; use strip() or violin().
+        A category x axis gives vertical groups; a category y axis gives horizontal
+        groups. NaN is ignored and empty groups draw nothing. The numeric axis may be
+        linear or log. Markers use the scatter opacity and outline. Marks draw in call
+        order, so call this after box() or violin() to put points above them.
+        Input data is copied and a failed call changes nothing.
+
+        Args:
+            categories: Unique category names.
+            groups: One group of numeric samples per category.
+            size: Marker diameter; Size.AUTO uses the theme's marker size.
+            color: Marker color; Color.AUTO takes the next palette color.
+            label: The legend label; empty for none. Points use a marker swatch.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If categories repeat, group counts differ, or samples are invalid.
+            StyleError: If label is too long, or a category cannot fit its points at render.
+            UsageError: If the axes are not one category axis and one numeric axis.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.swarm(["North", "South"], [[1, 2, 3], [2, 3, 4]], label="Samples")
+        """
+        with api_call():
+            context = "Axes.swarm()"
+            check_names_type(context, "categories", categories)
+            _series.check_groups_type(context, groups)
+            _args.require_text(context, "label", label)
+            extent = _size_argument(context, "size", size)
+            paint = _color_argument(context, color)
+            category_names = names(context, "categories", categories)
+            values = _series.group_values(context, groups)
+            name = _args.text(context, "label", label)
+            self._native.swarm(self._row, self._col, category_names, values, name, paint, extent)
+            return cast("Axes[X, Y]", self)
+
+    def ecdf(
+        self: SXF,
+        values: Values[X],
+        *,
+        complementary: bool = False,
+        label: str = "",
+        color: Color = Color.AUTO,
+        dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
+    ) -> SXF:
+        """Add the empirical cumulative distribution (ECDF) of ``values``, as a step line.
+
+        At each distinct value, from the smallest, the line steps up to the fraction of the
+        values at or below it: from 0 at the smallest value to 1 at the largest. With
+        ``complementary=True`` it steps down to the fraction above each value instead, from 1
+        to 0. NaN values and missing times (``NaT``) are left out. The y axis must be linear;
+        when it holds only ECDFs, it runs exactly from 0 to 1. A labelled ECDF is listed and
+        labelled as a step line is; a direct label goes to its end.
+
+        Args:
+            values: The values: numbers on a linear or log x axis, times on a time x axis.
+            complementary: Whether to draw the fraction above each value, from 1 down to 0.
+            label: The name shown in the legend; an empty string leaves the line out of it.
+            color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+            dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If no value is finite, a value is infinite or not positive on a log
+                axis, or the values do not suit the x axis.
+            StyleError: If ``label`` is too long.
+            UsageError: If the y axis is not linear.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.ecdf([12.0, 9.5, 30.1, 12.0, 14.2], label="Latency")
+            >>> ax = ax.ecdf([10.0, 11.0, 25.0], complementary=True, dash=ub.Dash.DASHED)
+            >>> import datetime as dt
+            >>> days = ub.Figure().add_axes(x=ub.Scale.time())
+            >>> days = days.ecdf([dt.date(2026, 1, 3), dt.date(2026, 1, 1), dt.date(2026, 1, 9)])
+        """
+        with api_call():
+            context = "Axes.ecdf()"
+            _check_coordinates_type(context, "values", values, self._x)
+            flag = _args.boolean(context, "complementary", complementary)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
+            data = _limit_values(context, "values", values, self._x)
+            name = _args.text(context, "label", label)
+            self._native.ecdf(self._row, self._col, data, flag, name, spec, style.value, extent)
+            return self
+
+    def kde(
+        self: "Axes[float, float]",
+        values: Values[float],
+        *,
+        bandwidth: float | Auto = AUTO,
+        label: str = "",
+        color: Color = Color.AUTO,
+        dash: Dash = Dash.SOLID,
+        width: Size = Size.AUTO,
+    ) -> "Axes[float, float]":
+        """Add the Gaussian kernel density estimate (KDE) of ``values``, as a line.
+
+        The line is the mean of Gaussian kernels placed at the values, in data units, so the
+        area under it is 1. It runs from three bandwidths below the smallest value to three
+        above the largest, through evenly spaced points at most a quarter bandwidth apart (at
+        least 256, at most 16,384). NaN values are left out. The x axis must be linear, and so
+        must the y axis, which includes zero. A labelled density is listed and labelled as a
+        line is.
+
+        Args:
+            values: The values.
+            bandwidth: The standard deviation of the kernels, in data units, greater than 0.
+                ``AUTO`` uses Scott's rule, as ``violin()`` does, so a violin and a density
+                line of the same values agree; it needs at least two distinct values.
+            label: The name shown in the legend; an empty string leaves the line out of it.
+            color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+            dash: How the line is stroked.
+            width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If no value is finite, a value is infinite, ``AUTO`` finds fewer than
+                two distinct values, the line would reach beyond 1e300, the density would
+                exceed 1e300, or the x axis is a category axis.
+            StyleError: If ``bandwidth`` is not a finite number greater than 0, is so narrow
+                that the line would need more than 16,384 points, or ``label`` is too long.
+            UsageError: If the x axis is a log or time axis, or the y axis is not linear.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes()
+            >>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], label="Sizes")
+            >>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bandwidth=0.3, dash=ub.Dash.DOTTED)
+        """
+        with api_call():
+            context = "Axes.kde()"
+            check_floats_type(context, "values", values)
+            width_of = (
+                None
+                if bandwidth is AUTO
+                else real(
+                    context,
+                    "bandwidth",
+                    bandwidth,
+                    expected="a float or ub.AUTO",
+                    hint=_BANDWIDTH_HINT,
+                )
+            )
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            style = instance(context, "dash", dash, Dash, _DASH_HINT)
+            extent = _size_argument(context, "width", width)
+            data = floats(context, "values", values)
+            name = _args.text(context, "label", label)
+            self._native.kde(self._row, self._col, data, width_of, name, spec, style.value, extent)
             return self
 
     def contour(
@@ -2548,7 +2995,18 @@ def _color_argument(context: str, value: object) -> tuple[int, int, float]:
 
 def _size_argument(context: str, name: str, value: object) -> tuple[int, float]:
     """Check a ``width`` or ``size`` argument and return its native form."""
-    return _size.native(instance(context, name, value, Size, _SIZE_HINT))
+    return _size.native(instance(context, name, value, Size, _MARK_SIZE_HINT))
+
+
+def _holds_edges(bins: object) -> bool:
+    """Whether a ``bins`` argument is a sequence or an array of edges, not a bin count.
+
+    Text and single numbers, ``bool`` and NumPy scalars included, are not: they go to the
+    whole-number check, which names the accepted type.
+    """
+    if is_text_or_buffer(bins) or isinstance(bins, numbers.Number | np.generic):
+        return False
+    return hasattr(bins, "__array__") or isinstance(bins, Sequence)
 
 
 def _series_arguments(
@@ -2824,3 +3282,11 @@ def scales(axes: Axes[Any, Any]) -> tuple[Scale[Any], Scale[Any]]:
         (Scale.category(), Scale.linear())
     """
     return cast(tuple[Scale[Any], Scale[Any]], _SCALES(axes))
+
+
+def _event_error(context: str, error: TypeError | UmberError) -> TypeError | UmberError:
+    """Keep nested conversion messages while highlighting the positions argument."""
+    info = details(error)
+    hint = info[1] if info is not None else "pass one group of numbers or times per row."
+    message = str(error).removeprefix(f"{context}: ")
+    return new_error(type(error), context, message, parameter="positions", hint=hint)

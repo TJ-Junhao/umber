@@ -21,9 +21,8 @@ use crate::contour::{BOTH_LINE_WIDTH, ContourShapes, GridPoint, LINE_WIDTH};
 use crate::layout::{Label, centered_tick_label};
 use crate::resolve::{Resolved, ResolvedAxis};
 use crate::scene::{FillRule, Item, LineCap, LineJoin, Paint, StrokeStyle, TextItem};
-use crate::{
-    Alpha, ColorSpec, ContourMark, ContourStyle, FontLibrary, Path, PathVerb, Point, Rgba,
-};
+use crate::text::SceneFonts;
+use crate::{Alpha, ColorSpec, ContourMark, ContourStyle, Path, PathVerb, Point, Result, Rgba};
 
 /// The opacity of the lines of [`ContourStyle::Both`], in the theme's text color.
 const BOTH_LINE_OPACITY: f32 = 0.7;
@@ -125,14 +124,18 @@ fn between(a: f64, b: f64, t: f64) -> f64 {
 /// The items of `contour` appended to `items`: its bands, when it is filled and the axes have a
 /// color scale; then its lines, colored by level on the color scale (none without one) or in its
 /// own color, or for [`ContourStyle::Both`] in the theme's text color; then its level labels,
-/// shaped with `lib`.
+/// shaped with the scene's `fonts`.
+///
+/// # Errors
+///
+/// A level label that cannot be laid out fails as `fonts` reports it.
 pub(super) fn contour_items(
     context: &MarkContext<'_>,
-    lib: &FontLibrary,
+    fonts: &SceneFonts<'_>,
     resolved: &Resolved,
     contour: Contour<'_>,
     items: &mut Vec<Item>,
-) {
+) -> Result<()> {
     let mark = contour.mark;
     let map = GridMap {
         columns: mark.x(),
@@ -180,7 +183,8 @@ pub(super) fn contour_items(
         let label = mark
             .options()
             .annotate
-            .then(|| centered_tick_label(lib, context.theme, text, (0.0, 0.0)));
+            .then(|| centered_tick_label(fonts, context.theme, text, (0.0, 0.0)))
+            .transpose()?;
         let clip = LineClip::of(context, width);
         let mut subpaths: Vec<Vec<PlotPoint>> = Vec::new();
         for line in lines {
@@ -229,6 +233,7 @@ pub(super) fn contour_items(
         }
     }
     items.extend(labels);
+    Ok(())
 }
 
 /// The bands of `shapes` appended to `items`, each filled in its color on `scale` between its

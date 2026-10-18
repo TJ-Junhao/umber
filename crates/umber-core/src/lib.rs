@@ -56,12 +56,15 @@
 //!   position, [`StemOptions`], [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of
 //!   a vertical line, [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
 //!   [`BoxOptions`], [`ViolinOptions`] and [`Distribution`], [`BarOptions`], [`Series`],
-//!   [`HistOptions`] with its bin limit [`MAX_BINS`] and [`HeatmapOptions`], and the
+//!   [`HistOptions`] with its [`Bins`], bin limit [`MAX_BINS`], [`HistStyle`] and [`HistStat`],
+//!   [`GroupedHistOptions`], [`EcdfOptions`], [`KdeOptions`] and [`GroupedKdeOptions`] with
+//!   their [`Bandwidth`], and [`HeatmapOptions`], and the
 //!   read-only [`Mark`], [`LineMark`], [`ScatterMark`], [`BubbleMark`], [`AreaMark`],
 //!   [`StackedAreaMark`], [`StepMark`], [`StemMark`], [`HLineMark`], [`VLineMark`], [`SpanMark`],
 //!   [`BarMark`], [`BarGroupMark`], [`SeriesView`], [`BoxMark`], [`BoxGroupMark`],
 //!   [`ViolinMark`], [`ViolinGroupMark`], [`DistributionView`], [`BandMark`], [`ErrorBarMark`],
-//!   [`HistMark`] and [`HeatmapMark`] that [`Axes::marks`] returns;
+//!   [`HistMark`], [`HistGroupMark`], [`EcdfMark`], [`KdeMark`] and [`HeatmapMark`] that
+//!   [`Axes::marks`] returns;
 //! - numeric cells: [`MeshOptions`], [`Hist2dOptions`] and [`HexbinOptions`], with the
 //!   read-only [`MeshMark`], [`Hist2dMark`] and [`HexbinMark`] payloads of [`Mark`], and
 //!   [`Render`], which draws the cells of heatmaps, 2-D histograms and meshes as vector shapes
@@ -79,6 +82,8 @@
 //!   [`time_from_micros`], which read times given as microseconds, with [`MISSING_TIME`];
 //! - scales: [`ScaleKind`] and [`LogBase`];
 //! - output: [`SvgText`];
+//! - event rows: [`EventsMark`] and [`EventsOptions`]; category points: [`StripMark`],
+//!   [`StripOptions`], [`SwarmMark`] and [`SwarmOptions`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
 //!
 //! **Advanced Rust API.** Lower-level building blocks for direct Rust use. They are public and
@@ -88,8 +93,9 @@
 //!   [`StrokeStyle`] and the rest of [`scene`]), [`Path`], [`PathVerb`] and [`Point`];
 //! - rendering a scene: [`render_png`](render::render_png) and
 //!   [`render_svg`](render::render_svg), and [`Figure::to_scene`] to get a figure's scene;
-//! - text: [`FontLibrary`], [`TextStyle`], [`TextLayout`] and [`Weight`];
-//! - the bundled fonts: [`fonts::font_bytes`] and [`fonts::license_text`];
+//! - text: [`FontLibrary`], the [`SceneFonts`] of one scene with its [`FaceId`], [`TextStyle`],
+//!   [`TextLayout`] and [`Weight`];
+//! - the bundled fonts: [`BundledFont`], [`fonts::font_bytes`] and [`fonts::license_text`];
 //! - scale and tick algorithms: [`ContinuousScale`], [`CategoryScale`], [`Transform`],
 //!   [`Tick`], the numeric limits [`MAX_MAGNITUDE`] and [`MIN_LOG_VALUE`], and the M4
 //!   downsampling of [`m4_indices`].
@@ -163,18 +169,23 @@ pub use figure::{
 };
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};
+pub use figure::{
+    Bandwidth, Bins, EcdfMark, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistGroupMark,
+    HistStat, HistStyle, KdeMark, KdeOptions,
+};
 pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{CmapChoice, ColorBy, PointColor};
 pub use figure::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use figure::{EventsMark, EventsOptions, StripMark, StripOptions, SwarmMark, SwarmOptions};
 pub use figure::{HeatmapMark, HeatmapOptions};
 pub use figure::{
     HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
 };
 pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
-pub use fonts::{Font, Weight};
+pub use fonts::{BundledFont, Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use model::{BaselineVisibility, ColorbarOptions};
 pub use render::SvgText;
@@ -186,7 +197,7 @@ pub use scene::{
     StrokeStyle, TextItem,
 };
 pub use size::{Factor, Points, SizeSpec};
-pub use text::{FontLibrary, TextLayout, TextStyle};
+pub use text::{FaceId, FontLibrary, SceneFonts, TextLayout, TextStyle};
 pub use theme::ColorbarPosition;
 pub use theme::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, Marker, Theme};
 pub use tick_format::{Decimals, NumberStyle, TickFormat};

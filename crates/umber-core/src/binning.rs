@@ -1,8 +1,11 @@
-//! Binning: the validated bin count, the histogram of a set of values (its range and the
-//! count in each bin) and the rule that assigns each value to a bin.
+//! Binning: the validated bins of a histogram (a count of equal-width bins or explicit edges),
+//! the rule that assigns each value to a bin, the count in each bin, and the bar heights that
+//! a histogram's statistic and style make of the counts of one or more groups.
 
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
+use crate::model::{HistStat, HistStyle};
 use crate::scale::{MAX_MAGNITUDE, too_narrow};
 
 /// The largest number of bins a histogram may have; more is an `Error::Style` from
@@ -12,13 +15,14 @@ use crate::scale::{MAX_MAGNITUDE, too_narrow};
 ///
 /// ```
 /// use umber_core::figure::HistOptions;
-/// use umber_core::{Figure, MAX_BINS, ScaleKind, Theme};
+/// use umber_core::{Bins, Figure, MAX_BINS, ScaleKind, Theme};
 ///
 /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
 /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
 /// let max = MAX_BINS as i64;
-/// assert!(axes.hist(&[1.0], HistOptions { bins: max, ..HistOptions::default() }).is_ok());
-/// assert!(axes.hist(&[1.0], HistOptions { bins: max + 1, ..HistOptions::default() }).is_err());
+/// let bins = |n| HistOptions { bins: Bins::Count(n), ..HistOptions::default() };
+/// assert!(axes.hist(&[1.0], bins(max)).is_ok());
+/// assert!(axes.hist(&[1.0], bins(max + 1)).is_err());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 pub const MAX_BINS: usize = 10_000;
@@ -47,69 +51,197 @@ impl BinCount {
     }
 }
 
-/// Equal-width bins over a range, and the number of values in each.
-///
-/// Bins are half-open, `[edge(i), edge(i + 1))`, except the last, which also holds `hi`.
+/// The validated bins of a histogram: a number of equal-width bins over the range of the
+/// values, or explicit edges.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Histogram {
-    lo: f64,
-    hi: f64,
-    counts: Box<[u64]>,
+pub(crate) enum BinSpec {
+    /// Equal-width bins from the smallest to the largest finite value.
+    Count(BinCount),
+    /// At least two finite, strictly increasing edges, within the supported magnitudes and wide
+    /// enough for a linear axis; clones share them.
+    Edges(Arc<[f64]>),
 }
 
-impl Histogram {
-    /// Bins the finite `values` into `bins` equal-width bins from their minimum to their
-    /// maximum. NaN and infinite values are ignored. Constant data, and data narrower than
-    /// the minimum width of a scale domain, get the range `v ± max(0.5, |v| × 1e-9)` around
-    /// their midpoint `v`, clamped to `±MAX_MAGNITUDE`.
-    ///
-    /// Returns `None` when there is no finite value.
-    pub(crate) fn from_values(values: &[f64], bins: BinCount) -> Option<Histogram> {
-        let (min, max) = values.iter().copied().filter(|v| v.is_finite()).fold(
-            None,
-            |range: Option<(f64, f64)>, v| match range {
-                None => Some((v, v)),
-                Some((lo, hi)) => Some((lo.min(v), hi.max(v))),
-            },
-        )?;
-        let (lo, hi) = bin_range(min, max);
-        let mut histogram = Histogram {
-            lo,
-            hi,
-            counts: vec![0; bins.get()].into_boxed_slice(),
-        };
-        for v in values.iter().copied().filter(|v| v.is_finite()) {
-            let index = histogram.index_of(v);
-            if let Some(count) = histogram.counts.get_mut(index) {
-                *count += 1;
+/// How a histogram turns values into bars: its validated bins, its style, whether it
+/// accumulates, and its statistic. Accumulating densities is refused before one is made.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HistBinning {
+    bins: BinSpec,
+    style: HistStyle,
+    cumulative: bool,
+    stat: HistStat,
+}
+
+impl HistBinning {
+    /// The binning of `bins` drawn in `style`, accumulated when `cumulative`, of `stat`; the
+    /// model has validated each part.
+    pub(crate) fn new(
+        bins: BinSpec,
+        style: HistStyle,
+        cumulative: bool,
+        stat: HistStat,
+    ) -> HistBinning {
+        HistBinning {
+            bins,
+            style,
+            cumulative,
+            stat,
+        }
+    }
+
+    /// The bins.
+    pub(crate) fn bins(&self) -> &BinSpec {
+        &self.bins
+    }
+
+    /// The style.
+    pub(crate) fn style(&self) -> HistStyle {
+        self.style
+    }
+
+    /// Whether the bars accumulate from left to right.
+    pub(crate) fn cumulative(&self) -> bool {
+        self.cumulative
+    }
+
+    /// The statistic of each bar.
+    pub(crate) fn stat(&self) -> HistStat {
+        self.stat
+    }
+}
+
+/// The edges of a histogram's bins: equal-width bins over a range, or the explicit edges.
+///
+/// Bins are half-open, `[edge(i), edge(i + 1))`, except the last, which also holds its high
+/// edge.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Edges {
+    /// `bins` bins of equal width from `lo` to `hi`.
+    Equal {
+        /// The low edge of the first bin.
+        lo: f64,
+        /// The high edge of the last bin.
+        hi: f64,
+        /// The number of bins, at least 1.
+        bins: usize,
+    },
+    /// Explicit, strictly increasing edges, at least two.
+    Given(Arc<[f64]>),
+}
+
+impl Edges {
+    /// The edges of `spec` for the finite values among `values`: explicit edges as given, and
+    /// equal-width bins from the smallest to the largest finite value. Constant data, and data
+    /// narrower than the minimum width of a scale domain, get the range `v ± max(0.5, |v| ×
+    /// 1e-9)` around their midpoint `v`, clamped to `±MAX_MAGNITUDE`. `None` for equal-width
+    /// bins without a finite value.
+    fn of(spec: &BinSpec, values: impl Iterator<Item = f64>) -> Option<Edges> {
+        match spec {
+            BinSpec::Edges(edges) => Some(Edges::Given(Arc::clone(edges))),
+            BinSpec::Count(count) => {
+                let (min, max) = values.filter(|v| v.is_finite()).fold(
+                    None,
+                    |range: Option<(f64, f64)>, v| match range {
+                        None => Some((v, v)),
+                        Some((lo, hi)) => Some((lo.min(v), hi.max(v))),
+                    },
+                )?;
+                let (lo, hi) = bin_range(min, max);
+                Some(Edges::Equal {
+                    lo,
+                    hi,
+                    bins: count.get(),
+                })
             }
         }
-        Some(histogram)
     }
 
     /// The number of bins.
     fn bins(&self) -> usize {
-        self.counts.len()
-    }
-
-    /// The width of one bin.
-    fn width(&self) -> f64 {
-        (self.hi - self.lo) / self.bins() as f64
-    }
-
-    /// The lower edge of bin `i`. `edge(0)` is `lo` and `edge(n)` is `hi`, exactly; an index
-    /// beyond `n` saturates to `hi`.
-    pub(crate) fn edge(&self, i: usize) -> f64 {
-        if i >= self.bins() {
-            self.hi
-        } else {
-            self.lo + i as f64 * self.width()
+        match self {
+            Edges::Equal { bins, .. } => *bins,
+            Edges::Given(edges) => edges.len() - 1,
         }
     }
 
-    /// The binned range: the low edge of the first bin and the high edge of the last.
-    pub(crate) fn range(&self) -> (f64, f64) {
-        (self.lo, self.hi)
+    /// The lower edge of bin `i`. `edge(0)` is the low end and `edge(n)` the high end, exactly;
+    /// an index beyond `n` saturates to the high end.
+    fn edge(&self, i: usize) -> f64 {
+        match self {
+            Edges::Equal { lo, hi, bins } => {
+                if i >= *bins {
+                    *hi
+                } else {
+                    lo + i as f64 * ((hi - lo) / *bins as f64)
+                }
+            }
+            Edges::Given(edges) => edges[i.min(edges.len() - 1)],
+        }
+    }
+
+    /// The bin that holds `v`, or `None` when `v` lies outside the edges (or is not finite).
+    fn index_of(&self, v: f64) -> Option<usize> {
+        let last = self.bins() - 1;
+        if !(self.edge(0) <= v && v <= self.edge(last + 1)) {
+            return None;
+        }
+        match self {
+            Edges::Equal { lo, hi, bins } => {
+                // The estimate from the bin width, corrected against the actual edges, which
+                // rounding may place off by one. A float-to-integer cast saturates, so a value
+                // outside the estimate is still in range.
+                let width = (hi - lo) / *bins as f64;
+                let mut index = (((v - lo) / width) as usize).min(last);
+                while index > 0 && v < self.edge(index) {
+                    index -= 1;
+                }
+                while index < last && v >= self.edge(index + 1) {
+                    index += 1;
+                }
+                Some(index)
+            }
+            // The number of edges at or below `v`, less one, is the bin of a value inside.
+            Edges::Given(edges) => Some((edges.partition_point(|&e| e <= v) - 1).min(last)),
+        }
+    }
+
+    /// The count of the finite `values` in each bin, lowest first; values outside the edges
+    /// are not counted.
+    fn count(&self, values: &[f64]) -> Box<[u64]> {
+        let mut counts = vec![0; self.bins()].into_boxed_slice();
+        for v in values.iter().copied().filter(|v| v.is_finite()) {
+            if let Some(count) = self.index_of(v).and_then(|i| counts.get_mut(i)) {
+                *count += 1;
+            }
+        }
+        counts
+    }
+}
+
+/// Equal-width bins over the range of a set of values, and the number of values in each.
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Histogram {
+    edges: Edges,
+    counts: Box<[u64]>,
+}
+
+#[cfg(test)]
+impl Histogram {
+    /// Bins the finite `values` into `bins` equal-width bins from their minimum to their
+    /// maximum, as [`Edges::of`] places them. NaN and infinite values are ignored. Returns
+    /// `None` when there is no finite value.
+    pub(crate) fn from_values(values: &[f64], bins: BinCount) -> Option<Histogram> {
+        let edges = Edges::of(&BinSpec::Count(bins), values.iter().copied())?;
+        Some(Histogram {
+            counts: edges.count(values),
+            edges,
+        })
+    }
+
+    /// The lower edge of bin `i`; see [`Edges::edge`].
+    pub(crate) fn edge(&self, i: usize) -> f64 {
+        self.edges.edge(i)
     }
 
     /// The count in each bin, lowest first.
@@ -121,22 +253,102 @@ impl Histogram {
     pub(crate) fn max_count(&self) -> u64 {
         self.counts.iter().copied().max().unwrap_or(0)
     }
+}
 
-    /// The bin that holds `v`, a value within `lo..=hi`: the estimate from the bin width,
-    /// corrected against the actual edges, which rounding may place off by one.
-    fn index_of(&self, v: f64) -> usize {
-        let last = self.bins() - 1;
-        let width = self.width();
-        // A float-to-integer cast saturates, so a value outside the estimate is still in range.
-        let mut index = (((v - self.lo) / width) as usize).min(last);
-        while index > 0 && v < self.edge(index) {
-            index -= 1;
-        }
-        while index < last && v >= self.edge(index + 1) {
-            index += 1;
-        }
-        index
+/// The bins of a histogram of one or more groups, which share them, and the height of each
+/// group's bar in each bin, as its statistic and style make it.
+///
+/// A count is the number of values in the bin; a fraction is the count over the number of
+/// finite values, and a density that fraction over the bin's width. [`HistStyle::Stacked`]
+/// takes the number of finite values of all groups together, so the stack of every bin shows
+/// the whole; the other styles take each group's own. Cumulative heights add up the counts
+/// from the left before dividing, so a cumulative fraction ends at exactly 1. A group without
+/// a finite value has heights of 0.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HistBins {
+    edges: Edges,
+    heights: Box<[Box<[f64]>]>,
+}
+
+impl HistBins {
+    /// The bins of `binning` for the `groups`, in order, and their heights. `None` for
+    /// equal-width bins when no group has a finite value. Explicit edges hold every finite
+    /// value, as the model checked.
+    pub(crate) fn new(binning: &HistBinning, groups: &[&[f64]]) -> Option<HistBins> {
+        let all = groups.iter().flat_map(|values| values.iter().copied());
+        let edges = Edges::of(binning.bins(), all)?;
+        let counts: Vec<Box<[u64]>> = groups.iter().map(|values| edges.count(values)).collect();
+        let stacked_total: u64 = counts.iter().flat_map(|c| c.iter()).sum();
+        let heights = counts
+            .iter()
+            .map(|counts| {
+                let total = if binning.style() == HistStyle::Stacked {
+                    stacked_total
+                } else {
+                    counts.iter().sum()
+                };
+                bar_heights(&edges, counts, total, binning)
+            })
+            .collect();
+        Some(HistBins { edges, heights })
     }
+
+    /// The number of bins.
+    pub(crate) fn bins(&self) -> usize {
+        self.edges.bins()
+    }
+
+    /// The lower edge of bin `i`; `edge(bins())` is the high edge of the last bin.
+    pub(crate) fn edge(&self, i: usize) -> f64 {
+        self.edges.edge(i)
+    }
+
+    /// The binned range: the low edge of the first bin and the high edge of the last.
+    pub(crate) fn range(&self) -> (f64, f64) {
+        (self.edges.edge(0), self.edges.edge(self.bins()))
+    }
+
+    /// The number of groups.
+    pub(crate) fn groups(&self) -> usize {
+        self.heights.len()
+    }
+
+    /// The height of group `g`'s bar in each bin, lowest bin first.
+    pub(crate) fn heights(&self, g: usize) -> &[f64] {
+        &self.heights[g]
+    }
+
+    /// The top of the stack of every bin, lowest bin first: the sum of the groups' heights, in
+    /// group order.
+    pub(crate) fn tops(&self) -> impl Iterator<Item = f64> + '_ {
+        (0..self.bins()).map(|i| self.heights.iter().map(|h| h[i]).sum())
+    }
+}
+
+/// The heights of the bars of one group with `counts` in the bins of `edges`, as `binning`
+/// says, `total` finite values making the whole.
+fn bar_heights(edges: &Edges, counts: &[u64], total: u64, binning: &HistBinning) -> Box<[f64]> {
+    let mut running = 0;
+    counts
+        .iter()
+        .enumerate()
+        .map(|(i, &count)| {
+            let count = if binning.cumulative() {
+                running += count;
+                running
+            } else {
+                count
+            };
+            match binning.stat() {
+                HistStat::Count => count as f64,
+                _ if total == 0 => 0.0,
+                HistStat::Fraction => count as f64 / total as f64,
+                HistStat::Density => {
+                    count as f64 / total as f64 / (edges.edge(i + 1) - edges.edge(i))
+                }
+            }
+        })
+        .collect()
 }
 
 /// The range binned for data spanning `min..=max` (both finite, `min <= max`). Data narrower
@@ -222,6 +434,124 @@ mod tests {
         assert_eq!(h.edge(3), MAX_MAGNITUDE);
         assert!(h.edge(0) < h.edge(3));
         assert_eq!(h.counts().iter().sum::<u64>(), 1);
+    }
+
+    fn binning(style: HistStyle, cumulative: bool, stat: HistStat) -> HistBinning {
+        HistBinning::new(BinSpec::Count(bins(4)), style, cumulative, stat)
+    }
+
+    fn edges(values: &[f64]) -> BinSpec {
+        BinSpec::Edges(Arc::from(values))
+    }
+
+    #[test]
+    fn explicit_edges_count_as_numpy_does() {
+        // Half-open bins, the last closed: ties go to the bin above, the last edge to the last
+        // bin, as numpy.histogram counts.
+        let spec = HistBinning::new(
+            edges(&[0.0, 1.0, 2.5, 4.0, 10.0]),
+            HistStyle::Bars,
+            false,
+            HistStat::Count,
+        );
+        let values = [0.0, 0.5, 1.0, 1.0, 2.4, 2.5, 3.9, 4.0, 7.5, 10.0, f64::NAN];
+        let bins = HistBins::new(&spec, &[&values]).unwrap();
+        assert_eq!(bins.heights(0), [2.0, 3.0, 2.0, 3.0]);
+        assert_eq!((bins.edge(0), bins.edge(4)), (0.0, 10.0));
+        assert_eq!(bins.range(), (0.0, 10.0));
+        // Explicit edges are kept even without a finite value to count.
+        let empty = HistBins::new(&spec, &[&[f64::NAN]]).unwrap();
+        assert_eq!(empty.heights(0), [0.0; 4]);
+    }
+
+    #[test]
+    fn equal_width_counts_are_the_plain_histogram() {
+        let values = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let spec = binning(HistStyle::Bars, false, HistStat::Count);
+        let binned = HistBins::new(&spec, &[&values]).unwrap();
+        let plain = Histogram::from_values(&values, bins(4)).unwrap();
+        let counts: Vec<f64> = plain.counts().iter().map(|&c| c as f64).collect();
+        assert_eq!(binned.heights(0), counts.as_slice());
+        for i in 0..=4 {
+            assert_eq!(binned.edge(i).to_bits(), plain.edge(i).to_bits());
+        }
+        assert!(HistBins::new(&spec, &[&[]]).is_none());
+    }
+
+    #[test]
+    fn cumulative_fraction_ends_at_one() {
+        let values = [0.1, 0.2, 0.7, 1.9, 2.0, 2.0, 3.3];
+        for style in [HistStyle::Bars, HistStyle::Step] {
+            let spec = binning(style, true, HistStat::Fraction);
+            let binned = HistBins::new(&spec, &[&values]).unwrap();
+            let heights = binned.heights(0);
+            assert_eq!(*heights.last().unwrap(), 1.0, "{heights:?}");
+            assert!(heights.windows(2).all(|pair| pair[0] <= pair[1]));
+        }
+        // Counts accumulate to the total.
+        let spec = binning(HistStyle::Bars, true, HistStat::Count);
+        let binned = HistBins::new(&spec, &[&values]).unwrap();
+        assert_eq!(*binned.heights(0).last().unwrap(), 7.0);
+        // Stacked groups share one total, so the cumulative stack ends at one.
+        let spec = binning(HistStyle::Stacked, true, HistStat::Fraction);
+        let binned = HistBins::new(&spec, &[&values[..3], &values[3..]]).unwrap();
+        let top: f64 = (0..2).map(|g| *binned.heights(g).last().unwrap()).sum();
+        assert!((top - 1.0).abs() < 1e-15, "{top}");
+    }
+
+    /// The area under the bars of group `g`: each height times its bin's width.
+    fn area(binned: &HistBins, g: usize) -> f64 {
+        binned
+            .heights(g)
+            .iter()
+            .enumerate()
+            .map(|(i, h)| h * (binned.edge(i + 1) - binned.edge(i)))
+            .sum()
+    }
+
+    #[test]
+    fn density_area_is_one() {
+        let values = [0.0, 0.5, 1.0, 1.0, 2.4, 2.5, 3.9, 4.0, 7.5, 10.0];
+        let uneven = HistBinning::new(
+            edges(&[0.0, 1.0, 2.5, 4.0, 10.0]),
+            HistStyle::Step,
+            false,
+            HistStat::Density,
+        );
+        let binned = HistBins::new(&uneven, &[&values]).unwrap();
+        assert!((area(&binned, 0) - 1.0).abs() < 1e-12);
+        let spec = binning(HistStyle::Bars, false, HistStat::Density);
+        let binned = HistBins::new(&spec, &[&values]).unwrap();
+        assert!((area(&binned, 0) - 1.0).abs() < 1e-12);
+        // Step groups each have area one; stacked groups have area one together.
+        let groups: [&[f64]; 2] = [&values[..2], &values[2..]];
+        let spec = binning(HistStyle::Step, false, HistStat::Density);
+        let step = HistBins::new(&spec, &groups).unwrap();
+        assert!((area(&step, 0) - 1.0).abs() < 1e-12);
+        assert!((area(&step, 1) - 1.0).abs() < 1e-12);
+        let spec = binning(HistStyle::Stacked, false, HistStat::Density);
+        let stacked = HistBins::new(&spec, &groups).unwrap();
+        assert!((area(&stacked, 0) + area(&stacked, 1) - 1.0).abs() < 1e-12);
+        assert!((area(&stacked, 0) - 0.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn fractions_normalize_by_the_style() {
+        let groups: [&[f64]; 2] = [&[0.0, 1.0, 1.0, 4.0], &[2.0, f64::NAN]];
+        let spec = binning(HistStyle::Step, false, HistStat::Fraction);
+        let step = HistBins::new(&spec, &groups).unwrap();
+        assert_eq!(step.heights(0).iter().sum::<f64>(), 1.0);
+        assert_eq!(step.heights(1), [0.0, 0.0, 1.0, 0.0]);
+        let spec = binning(HistStyle::Stacked, false, HistStat::Fraction);
+        let stacked = HistBins::new(&spec, &groups).unwrap();
+        assert_eq!(stacked.heights(1), [0.0, 0.0, 0.2, 0.0]);
+        // The stack tops of every bin, for the domain.
+        let tops: Vec<f64> = stacked.tops().collect();
+        assert_eq!(tops, [0.2, 0.4, 0.2, 0.2]);
+        // A group without finite values has nothing to normalize, and its heights are 0.
+        let spec = binning(HistStyle::Step, false, HistStat::Fraction);
+        let none = HistBins::new(&spec, &[&[1.0, 2.0], &[f64::NAN]]).unwrap();
+        assert_eq!(none.heights(1), [0.0; 4]);
     }
 
     proptest! {

@@ -221,7 +221,7 @@ fn errors_carry_their_parameter_and_hint() {
                 a.hist(
                     &[1.0],
                     HistOptions {
-                        bins: 0,
+                        bins: umber_core::Bins::Count(0),
                         ..HistOptions::default()
                     },
                 )

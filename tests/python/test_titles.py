@@ -72,10 +72,10 @@ def test_figure_text_matches_native_rendering() -> None:
     fig = ub.Figure().title("Whole figure").subtitle("Figure subtitle")
     fig.add_axes().title("Panel")
     expected = _umber.Figure(6, 4, native(ub.Theme.PIGMENT), 1, 1, 0, 0, 0, 0)
-    expected.figure_title("Whole figure")
-    expected.figure_subtitle("Figure subtitle")
+    expected.figure_title("Whole figure", (0, 0.0))
+    expected.figure_subtitle("Figure subtitle", (0, 0.0))
     expected.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
-    expected.title(0, 0, "Panel")
+    expected.title(0, 0, "Panel", (0, 0.0))
     assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value)
 
 

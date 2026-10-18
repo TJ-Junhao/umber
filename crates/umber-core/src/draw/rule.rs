@@ -191,7 +191,11 @@ pub(super) fn span_layer(
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
-            | ResolvedMark::Heatmap { .. } => {}
+            | ResolvedMark::Heatmap { .. }
+            | ResolvedMark::Events { .. }
+            | ResolvedMark::Points { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => {}
         }
     }
     push_layer(items, clip, layer);
@@ -245,7 +249,11 @@ pub(super) fn rule_layer(
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
-            | ResolvedMark::Heatmap { .. } => {}
+            | ResolvedMark::Heatmap { .. }
+            | ResolvedMark::Events { .. }
+            | ResolvedMark::Points { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => {}
         }
     }
     push_layer(items, clip, layer);
