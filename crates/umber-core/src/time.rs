@@ -244,13 +244,10 @@ pub fn times_from_micros(
             } else if (Instant::MIN.0..=Instant::MAX.0).contains(&us) {
                 Ok(Some(Instant(us)))
             } else {
-                Err(Error::at_input(
-                    context,
-                    name,
-                    vec![Some(i)],
-                    vec![String::new(), range_message(us)],
+                Err(
+                    Error::at_input(context, name, "", [(Some(i), range_message(us))])
+                        .with_parameter(name),
                 )
-                .with_parameter(name))
             }
         })
         .collect()

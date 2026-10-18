@@ -44,14 +44,11 @@ fn grouped_xy_calls_are_atomic() {
                     panic!("expected a Data error");
                 };
                 assert_eq!(message, "y[1] is inf; values must be finite.");
-                let location = message.location().unwrap();
-                assert_eq!(location.group, Some(1));
-                assert_eq!(location.name, "y");
-                assert_eq!(location.indices, vec![Some(1)]);
-                assert_eq!(
-                    location.fragments,
-                    vec!["", " is inf; values must be finite."]
-                );
+                assert_eq!(message.group(), Some(1));
+                let (name, indices, fragments) = message.input().unwrap();
+                assert_eq!(name, "y");
+                assert_eq!(indices, vec![Some(1)]);
+                assert_eq!(fragments, vec!["", " is inf; values must be finite."]);
             }
             assert_eq!(axes.marks().len(), if bad { 1 } else { 3 }, "{method}");
         }

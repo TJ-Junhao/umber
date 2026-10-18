@@ -1,23 +1,45 @@
 //! Error type shared by all of umber-core.
 
-/// Input references retained separately from an error's display text.
-///
-/// # Examples
-///
-/// ```
-/// let message: umber_core::ErrorMessage = "invalid data".into();
-/// assert!(message.location().is_none());
-/// ```
-#[derive(Debug, Default)]
-pub struct InputLocation {
-    /// The column used by each position.
-    pub name: String,
-    /// Local row positions; `None` refers to the column as a whole.
-    pub indices: Vec<Option<usize>>,
-    /// Text before, between and after the input references.
-    pub fragments: Vec<String>,
-    /// The series position in a grouped call, if known.
-    pub group: Option<usize>,
+use std::ops::Range;
+
+/// Input references stored as byte ranges in the message, not a second copy of its text.
+#[derive(Debug)]
+pub(crate) struct InputLocation {
+    name: String,
+    references: Vec<(Option<usize>, Range<usize>)>,
+}
+
+impl InputLocation {
+    /// Builds the display text and its reference spans together, so every span is valid.
+    fn new(
+        name: &str,
+        prefix: &str,
+        references: impl IntoIterator<Item = (Option<usize>, String)>,
+    ) -> (String, Self) {
+        use std::fmt::Write;
+
+        let mut text = prefix.to_owned();
+        let references = references
+            .into_iter()
+            .map(|(index, suffix)| {
+                let start = text.len();
+                text.push_str(name);
+                if let Some(index) = index {
+                    let _ = write!(text, "[{index}]");
+                }
+                let end = text.len();
+                text.push_str(&suffix);
+                (index, start..end)
+            })
+            .collect();
+        (
+            text,
+            Self {
+                name: name.into(),
+                references,
+            },
+        )
+    }
 }
 
 /// Error text with optional structured input positions for long-form data.
@@ -33,19 +55,46 @@ pub struct InputLocation {
 pub struct ErrorMessage {
     text: String,
     location: Option<Box<InputLocation>>,
+    group: Option<usize>,
 }
 
+type InputParts<'a> = (&'a str, Vec<Option<usize>>, Vec<&'a str>);
+
 impl ErrorMessage {
-    /// The input references recorded during validation, if any.
+    /// The failed series' position in a grouped call, if known.
     ///
     /// # Examples
     ///
     /// ```
     /// let message: umber_core::ErrorMessage = "invalid data".into();
-    /// assert!(message.location().is_none());
+    /// assert_eq!(message.group(), None);
     /// ```
-    pub fn location(&self) -> Option<&InputLocation> {
-        self.location.as_deref()
+    pub fn group(&self) -> Option<usize> {
+        self.group
+    }
+
+    /// The input column, local row positions and intervening text for a binding to remap.
+    /// `None` positions refer to the whole column. There is always one more text fragment
+    /// than position; the fragments borrow the message's only copy of the text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let message: umber_core::ErrorMessage = "invalid data".into();
+    /// assert!(message.input().is_none());
+    /// ```
+    pub fn input(&self) -> Option<InputParts<'_>> {
+        let location = self.location.as_ref()?;
+        let mut end = 0;
+        let mut indices = Vec::with_capacity(location.references.len());
+        let mut fragments = Vec::with_capacity(location.references.len() + 1);
+        for (index, span) in &location.references {
+            indices.push(*index);
+            fragments.push(&self.text[end..span.start]);
+            end = span.end;
+        }
+        fragments.push(&self.text[end..]);
+        Some((&location.name, indices, fragments))
     }
 }
 
@@ -54,6 +103,7 @@ impl From<String> for ErrorMessage {
         Self {
             text,
             location: None,
+            group: None,
         }
     }
 }
@@ -198,30 +248,16 @@ impl Error {
     pub(crate) fn at_input(
         context: &'static str,
         name: &str,
-        indices: Vec<Option<usize>>,
-        fragments: Vec<String>,
+        prefix: &str,
+        references: impl IntoIterator<Item = (Option<usize>, String)>,
     ) -> Error {
-        let mut message = String::new();
-        for (i, fragment) in fragments.iter().enumerate() {
-            message.push_str(fragment);
-            if let Some(index) = indices.get(i) {
-                message.push_str(name);
-                if let Some(index) = index {
-                    use std::fmt::Write;
-                    let _ = write!(message, "[{index}]");
-                }
-            }
-        }
+        let (text, location) = InputLocation::new(name, prefix, references);
         Error::Data {
             context,
             message: ErrorMessage {
-                text: message,
-                location: Some(Box::new(InputLocation {
-                    name: name.into(),
-                    indices,
-                    fragments,
-                    group: None,
-                })),
+                text,
+                location: Some(Box::new(location)),
+                group: None,
             },
             parameter: None,
             hint: None,
@@ -234,7 +270,7 @@ impl Error {
         | Error::Style { message, .. }
         | Error::Usage { message, .. } = &mut self
         {
-            message.location.get_or_insert_with(Default::default).group = Some(index);
+            message.group = Some(index);
         }
         self
     }
@@ -343,10 +379,11 @@ impl Error {
         | Error::Usage { message, .. } = &mut self
         {
             message.text.insert_str(0, prefix);
-            if let Some(location) = &mut message.location
-                && let Some(first) = location.fragments.first_mut()
-            {
-                first.insert_str(0, prefix);
+            if let Some(location) = &mut message.location {
+                for (_, span) in &mut location.references {
+                    span.start += prefix.len();
+                    span.end += prefix.len();
+                }
             }
         }
         self
@@ -428,6 +465,56 @@ mod tests {
             ),
             _ => Error::usage("Figure.add_axes()", "the figure already has axes."),
         }
+    }
+
+    #[test]
+    fn input_fragments_borrow_one_message_and_survive_prefixes() {
+        for references in [
+            vec![],
+            vec![(None, " has no values.".into())],
+            vec![(Some(3), " is below ".into()), (Some(1), ".".into())],
+        ] {
+            let error = Error::at_input("Axes.step()", "x", "日本: ", references.clone())
+                .in_group(2)
+                .with_message_prefix("cell: ");
+            let Error::Data { message, .. } = error else {
+                unreachable!()
+            };
+            assert_eq!(message.group(), Some(2));
+            let (name, indices, fragments) = message.input().unwrap();
+            assert_eq!(name, "x");
+            assert_eq!(fragments.len(), indices.len() + 1);
+            assert_eq!(
+                indices,
+                references.iter().map(|(i, _)| *i).collect::<Vec<_>>()
+            );
+            let mut rebuilt = fragments[0].to_owned();
+            for (index, fragment) in indices.iter().zip(&fragments[1..]) {
+                rebuilt.push_str(name);
+                if let Some(index) = index {
+                    rebuilt.push_str(&format!("[{index}]"));
+                }
+                rebuilt.push_str(fragment);
+            }
+            assert_eq!(message, rebuilt);
+            for fragment in fragments {
+                assert!(fragment.as_ptr() >= message.text.as_ptr());
+                assert!(
+                    fragment.as_ptr() <= message.text.as_ptr().wrapping_add(message.text.len())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn whole_group_errors_do_not_invent_input_locations() {
+        let error = Error::data("Axes.ecdf()", "values is empty.").in_group(1);
+        let Error::Data { message, .. } = error else {
+            unreachable!()
+        };
+        assert_eq!(message.group(), Some(1));
+        assert!(message.input().is_none());
+        assert_eq!(message, "values is empty.");
     }
 
     #[test]

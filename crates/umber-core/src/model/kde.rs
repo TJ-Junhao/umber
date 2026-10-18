@@ -191,12 +191,12 @@ impl KdeMark {
                 Error::at_input(
                     context,
                     name,
-                    vec![None],
-                    vec![
-                        String::new(),
+                    "",
+                    [(
+                        None,
                         " has 1 distinct finite value; the Scott bandwidth needs at least 2."
                             .into(),
-                    ],
+                    )],
                 )
                 .with_parameter("values")
                 .with_hint("pass bandwidth= in data units.")

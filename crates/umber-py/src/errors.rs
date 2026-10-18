@@ -40,15 +40,18 @@ pub(crate) fn core_error(err: umber_core::Error) -> PyErr {
             if let Error::Data { message, .. }
             | Error::Style { message, .. }
             | Error::Usage { message, .. } = &err
-                && let Some(location) = message.location()
             {
-                let value = reported.value(py);
-                value.setattr("_umber_message", message.to_string())?;
-                value.setattr("_umber_group", location.group)?;
-                value.setattr(
-                    "_umber_input",
-                    (&location.name, &location.indices, &location.fragments),
-                )?;
+                let input = message.input();
+                if input.is_some() || message.group().is_some() {
+                    let value = reported.value(py);
+                    value.setattr("_umber_message", message.to_string())?;
+                    if let Some(group) = message.group() {
+                        value.setattr("_umber_group", group)?;
+                    }
+                    if let Some(input) = input {
+                        value.setattr("_umber_input", input)?;
+                    }
+                }
             }
             Ok(reported)
         };

@@ -3,6 +3,7 @@
 import numbers
 from collections.abc import Sequence
 from enum import Enum
+from functools import partial
 from operator import attrgetter
 from typing import Any, Final, Generic, Never, Self, cast, final
 
@@ -697,12 +698,24 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 by,
                 label,
                 color,
-                lambda: {"x": self._x_values(context, x), "y": self._y_values(context, y)},
-                lambda data, name: self._native.line(
-                    self._row, self._col, data[0], data[1], name, spec, style.value, extent
-                ),
-                lambda arguments: self._native.grouped_line(
-                    self._row, self._col, arguments[0], style.value, extent
+                _group.XY(
+                    x=partial(self._x_values, context, x),
+                    y=partial(self._y_values, context, y),
+                    draw=partial(
+                        self._native.line,
+                        self._row,
+                        self._col,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_line,
+                        self._row,
+                        self._col,
+                        dash=style.value,
+                        width=extent,
+                    ),
                 ),
             )
             return self
@@ -770,12 +783,24 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 by,
                 label,
                 color,
-                lambda: {"x": self._x_values(context, x), "y": self._y_values(context, y)},
-                lambda data, name: self._native.area(
-                    self._row, self._col, data[0], data[1], name, spec, style.value, extent
-                ),
-                lambda arguments: self._native.grouped_area(
-                    self._row, self._col, arguments[0], style.value, extent
+                _group.XY(
+                    x=partial(self._x_values, context, x),
+                    y=partial(self._y_values, context, y),
+                    draw=partial(
+                        self._native.area,
+                        self._row,
+                        self._col,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_area,
+                        self._row,
+                        self._col,
+                        dash=style.value,
+                        width=extent,
+                    ),
                 ),
             )
             return self
@@ -851,12 +876,24 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 by,
                 label,
                 color,
-                lambda: {"x": self._x_values(context, x), "y": self._y_values(context, y)},
-                lambda data, name: self._native.scatter(
-                    self._row, self._col, data[0], data[1], name, spec, shape.value, extent
-                ),
-                lambda arguments: self._native.grouped_scatter(
-                    self._row, self._col, arguments[0], shape.value, extent
+                _group.XY(
+                    x=partial(self._x_values, context, x),
+                    y=partial(self._y_values, context, y),
+                    draw=partial(
+                        self._native.scatter,
+                        self._row,
+                        self._col,
+                        color=spec,
+                        marker=shape.value,
+                        size=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_scatter,
+                        self._row,
+                        self._col,
+                        marker=shape.value,
+                        size=extent,
+                    ),
                 ),
             )
             return self
@@ -1068,15 +1105,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 by,
                 label,
                 color,
-                lambda: {
-                    "categories": names(context, "categories", categories),
-                    "heights": floats(context, "heights", heights),
-                },
-                lambda data, name: self._native.bar(
-                    self._row, self._col, data[0], data[1], name, spec
-                ),
-                lambda arguments: self._native.bar_by(
-                    self._row, self._col, arguments[0], arguments[1]
+                _group.Bars(
+                    categories=partial(names, context, "categories", categories),
+                    heights=partial(floats, context, "heights", heights),
+                    draw=partial(self._native.bar, self._row, self._col, color=spec),
+                    draw_groups=partial(self._native.bar_by, self._row, self._col),
                 ),
             )
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
@@ -1403,31 +1436,40 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             shown = instance(context, "stat", stat, Stat, _STAT_HINT)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
+
+            def draw(samples: FloatArray, *, label: str) -> None:
+                self._native.hist(
+                    self._row,
+                    self._col,
+                    samples,
+                    floats(context, "bins", bins) if edges else count,
+                    drawn.value,
+                    running,
+                    shown.value,
+                    label,
+                    spec,
+                )
+
+            def draw_groups(series: list[_group.NativeSeries]) -> None:
+                self._native.grouped_hist(
+                    self._row,
+                    self._col,
+                    series,
+                    floats(context, "bins", bins) if edges else count,
+                    drawn.value,
+                    running,
+                    shown.value,
+                )
+
             _group.call(
                 context,
                 by,
                 label,
                 color,
-                lambda: {"values": floats(context, "values", values)},
-                lambda data, name: self._native.hist(
-                    self._row,
-                    self._col,
-                    data[0],
-                    floats(context, "bins", bins) if edges else count,
-                    drawn.value,
-                    running,
-                    shown.value,
-                    name,
-                    spec,
-                ),
-                lambda arguments: self._native.grouped_hist(
-                    self._row,
-                    self._col,
-                    arguments[0],
-                    floats(context, "bins", bins) if edges else count,
-                    drawn.value,
-                    running,
-                    shown.value,
+                _group.Samples(
+                    values=partial(floats, context, "values", values),
+                    draw=draw,
+                    draw_groups=draw_groups,
                 ),
             )
             return self
@@ -1705,20 +1747,26 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 by,
                 label,
                 color,
-                lambda: {"x": self._x_values(context, x), "y": self._y_values(context, y)},
-                lambda data, name: self._native.step(
-                    self._row,
-                    self._col,
-                    data[0],
-                    data[1],
-                    position.value,
-                    name,
-                    spec,
-                    style.value,
-                    extent,
-                ),
-                lambda arguments: self._native.grouped_step(
-                    self._row, self._col, arguments[0], position.value, style.value, extent
+                _group.XY(
+                    x=partial(self._x_values, context, x),
+                    y=partial(self._y_values, context, y),
+                    draw=partial(
+                        self._native.step,
+                        self._row,
+                        self._col,
+                        position=position.value,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_step,
+                        self._row,
+                        self._col,
+                        position=position.value,
+                        dash=style.value,
+                        width=extent,
+                    ),
                 ),
             )
             return self
@@ -2591,12 +2639,25 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 by,
                 label,
                 color,
-                lambda: {"values": _limit_values(context, "values", values, self._x)},
-                lambda data, name: self._native.ecdf(
-                    self._row, self._col, data[0], flag, name, spec, style.value, extent
-                ),
-                lambda arguments: self._native.grouped_ecdf(
-                    self._row, self._col, arguments[0], flag, style.value, extent
+                _group.Ecdf(
+                    values=partial(_limit_values, context, "values", values, self._x),
+                    draw=partial(
+                        self._native.ecdf,
+                        self._row,
+                        self._col,
+                        complementary=flag,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_ecdf,
+                        self._row,
+                        self._col,
+                        complementary=flag,
+                        dash=style.value,
+                        width=extent,
+                    ),
                 ),
             )
             return self
@@ -2680,12 +2741,25 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 by,
                 label,
                 color,
-                lambda: {"values": floats(context, "values", values)},
-                lambda data, name: self._native.kde(
-                    self._row, self._col, data[0], width_of, name, spec, style.value, extent
-                ),
-                lambda arguments: self._native.grouped_kde(
-                    self._row, self._col, arguments[0], width_of, style.value, extent
+                _group.Samples(
+                    values=partial(floats, context, "values", values),
+                    draw=partial(
+                        self._native.kde,
+                        self._row,
+                        self._col,
+                        bandwidth=width_of,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_kde,
+                        self._row,
+                        self._col,
+                        bandwidth=width_of,
+                        dash=style.value,
+                        width=extent,
+                    ),
                 ),
             )
             return self

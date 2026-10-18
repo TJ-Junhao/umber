@@ -598,6 +598,150 @@ def test_by_group_names_checked_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == ["by"]
 
 
+@pytest.mark.parametrize("kind", ["list", "object", "pandas", "categorical", "polars"])
+def test_by_string_columns_validate_names_per_group(
+    kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from umber import _group
+
+    values = ["B", "A", "D", "C"] * 100
+    factories: dict[str, Callable[[list[str]], Any]] = {
+        "list": list,
+        "object": lambda items: np.asarray(items, dtype=object),
+        "pandas": pd.Series,
+        "categorical": lambda items: pd.Series(pd.Categorical(items)),
+        "polars": pl.Series,
+    }
+    calls: list[int] = []
+    original = cast(Callable[[str, int, object], str], getattr(_group, "_name", None))
+
+    def counted(context: str, index: int, value: object) -> str:
+        calls.append(index)
+        return original(context, index, value)
+
+    monkeypatch.setattr(_group, "_name", counted)
+    groups = _group.split_by("Axes.line()", factories[kind](values), np.arange(len(values)))
+    assert [label for label, _ in groups] == ["B", "A", "D", "C"]
+    assert calls == [0, 1, 2, 3]
+
+
+@pytest.mark.parametrize("kind", ["list", "object", "pandas"])
+@pytest.mark.parametrize("bad", [None, float("nan"), pd.NA, 3, b"A", "", "\ud800", "X" * 10001])
+def test_by_vectorized_names_keep_first_error(kind: str, bad: Any) -> None:
+    from umber import _group
+
+    values = ["B", bad, None]
+    by: Any = np.asarray(values, dtype=object) if kind == "object" else values
+    if kind == "pandas":
+        by = pd.Series(values, dtype=object)
+    validate = cast(Callable[[str, int, object], str], getattr(_group, "_name", None))
+    with pytest.raises(ub.UmberError) as expected:
+        validate("Axes.line()", 1, bad)
+    with pytest.raises(type(expected.value)) as actual:
+        _group.split_by("Axes.line()", by, [1, 2, 3])
+    assert str(actual.value) == str(expected.value)
+    assert _details(actual.value) == _details(expected.value)
+
+
+def test_by_string_subclasses_use_plain_content() -> None:
+    from umber._group import split_by
+
+    class Name(str):
+        def __str__(self) -> str:
+            return "Wrong"
+
+        def __len__(self) -> int:
+            return 0
+
+    groups = split_by("Axes.line()", [Name("B"), "A", Name("B")], [1, 2, 3])
+    assert [label for label, _ in groups] == ["B", "A"]
+    assert groups[0][1][0].tolist() == [1, 3]
+
+
+def test_dataframe_string_subclasses_are_normalized_before_factorizing() -> None:
+    from umber._group import split_by
+
+    class Name(str):
+        def __hash__(self) -> int:
+            return hash("A")
+
+        def __eq__(self, other: object) -> bool:
+            return True
+
+    by = pd.Series([Name("B"), "A", Name("B")], dtype=object)
+    groups = split_by("Axes.line()", by, [1, 2, 3])
+    assert [name for name, _ in groups] == ["B", "A"]
+    assert groups[0][1][0].tolist() == [1, 3]
+
+
+def test_polars_object_names_use_the_same_errors_as_lists() -> None:
+    from umber._group import split_by
+
+    by: Any
+    for by in (["B", 3, "A"], pl.Series(["B", 3, "A"], dtype=pl.Object)):
+        with pytest.raises(ub.DataError, match=r"by\[1\] is 3, not a string"):
+            split_by("Axes.line()", by, [1, 2, 3])
+
+
+@pytest.mark.parametrize("size", [3, 4])
+def test_object_group_names_check_length_before_unicode_conversion(size: int) -> None:
+    from umber._group import split_by
+
+    for column in (
+        ["B", "X" * 1000 + "\0", "A"],
+        np.array(["B", "X" * 1000 + "\0", "A"], dtype=object),
+    ):
+        with pytest.raises(ub.StyleError, match=r"by\[1\] has 1,001 characters"):
+            split_by("Axes.line()", column, np.arange(size))
+
+
+@pytest.mark.parametrize("size", [3, 4])
+def test_trailing_nul_group_names_keep_conversion_and_error_order(size: int) -> None:
+    from umber._group import split_by
+
+    factories: list[Callable[[list[str]], Any]] = [
+        list,
+        lambda values: np.array(values, dtype=object),
+        pd.Series,
+        lambda values: pd.Series(pd.Categorical(values)),
+        pl.Series,
+    ]
+    for factory in factories:
+        with pytest.raises(ub.DataError) as caught:
+            split_by("Axes.line()", factory(["B", "\0", "A"]), np.arange(size))
+        expected = "by[1] is empty" if size == 3 else "by has 3 values but columns[0] has 4"
+        assert expected in str(caught.value)
+        if size == 3:
+            groups = split_by("Axes.line()", factory(["A\0", "A", "B"]), np.arange(size))
+            assert [name for name, _ in groups] == ["A", "B"]
+            assert groups[0][1][0].tolist() == [0, 1]
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_grouping_dispatch_does_not_depend_on_error_context(
+    method: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from umber import _group
+
+    expected = _axes(method)
+    _call(expected, method, by=GROUPS)
+    original = _group.call
+
+    def renamed(
+        context: str,
+        by: Any,
+        label: str,
+        color: object,
+        description: _group.XY | _group.Bars | _group.Samples | _group.Ecdf,
+    ) -> None:
+        original("Other API()", by, label, color, description)
+
+    monkeypatch.setattr(_group, "call", renamed)
+    actual = _axes(method)
+    _call(actual, method, by=GROUPS)
+    assert _svg(actual) == _svg(expected)
+
+
 def test_by_label_checks_plain_string_content() -> None:
     class Label(str):
         def __len__(self) -> int:

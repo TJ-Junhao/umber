@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::axes::Axes;
 use super::axis_data::{AxisData, SharedValues, XySeries};
 use super::band::{BandMark, BandOptions};
-use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series};
+use super::bar::{Arrangement, BarGroupMark, BarInput, BarMark, BarOptions, Series};
 use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
 use super::color_by::{check_point_color, check_scatter_label};
 use super::ecdf::{EcdfMark, EcdfOptions};
@@ -1212,7 +1212,7 @@ impl<'a> AxesMut<'a> {
         categories: Vec<String>,
         series: Vec<Series>,
     ) -> Result<&mut Self> {
-        self.bar_groups("Axes.grouped_bar()", categories, series)
+        self.bar_groups("Axes.grouped_bar()", BarInput::Series, categories, series)
     }
 
     /// Adds aligned long-form bars, reporting errors under the ordinary bar call.
@@ -1229,13 +1229,14 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn bar_by(&mut self, categories: Vec<String>, series: Vec<Series>) -> Result<&mut Self> {
-        self.bar_groups("Axes.bar()", categories, series)
+        self.bar_groups("Axes.bar()", BarInput::Heights, categories, series)
     }
 
     /// Validates aligned bars with the caller's context before storing a mark.
     fn bar_groups(
         &mut self,
         context: &'static str,
+        input: BarInput,
         categories: Vec<String>,
         series: Vec<Series>,
     ) -> Result<&mut Self> {
@@ -1244,6 +1245,7 @@ impl<'a> AxesMut<'a> {
         let mark = BarGroupMark::new(
             context,
             Arrangement::Grouped,
+            input,
             along,
             values,
             categories,
@@ -1423,6 +1425,7 @@ impl<'a> AxesMut<'a> {
         let mark = BarGroupMark::new(
             CONTEXT,
             Arrangement::Stacked,
+            BarInput::Series,
             along,
             values,
             categories,
