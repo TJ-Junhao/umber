@@ -95,6 +95,7 @@ mod corpus {
     pub mod cmap;
     pub mod color_by;
     pub mod colorbar;
+    pub mod contour;
     pub mod ecdf;
     pub mod error_bars;
     pub mod events;
@@ -200,6 +201,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::hist_variants::cases(&lib, &mut sink);
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);
+    corpus::contour::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -2184,6 +2186,10 @@ mod record {
                     self.path(shape);
                 }
                 Item::Text(t) => self.text_item(t),
+                Item::RotatedText { text, angle } => {
+                    self.line(&format!("rotated angle={}", f32(*angle)));
+                    self.text_item(text);
+                }
                 Item::Image {
                     rect: at,
                     width,

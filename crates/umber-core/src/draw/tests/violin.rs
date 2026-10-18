@@ -396,7 +396,15 @@ fn violin_coverage_counts_density_and_quantile_lines() {
         }
         let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
         let marks = resolve_marks(f.single_axes().marks(), f.theme());
-        let item = crate::draw::marks(f.theme(), &resolved, &layout, &marks).unwrap();
+        let item = crate::draw::marks(
+            f.theme(),
+            &crate::test_support::figure_fonts(f.theme()),
+            &resolved,
+            &layout,
+            &marks,
+        )
+        .unwrap()
+        .unwrap();
         let prepared = marks[0].for_coverage(Some(crate::coverage::Geometry::of(&item)));
         let candidate = crate::layout::Frame {
             x: layout.plot.x + layout.plot.width / 2.0 - 1.0,

@@ -147,7 +147,7 @@ impl Geometry {
                     });
                 }
             }
-            Item::Text(_) => {}
+            Item::Text(_) | Item::RotatedText { .. } => {}
         }
     }
 
@@ -540,10 +540,12 @@ mod tests {
             {
                 let item = crate::draw::marks(
                     figure.theme(),
+                    &crate::layout::figure_fonts(library, figure.theme()).unwrap(),
                     &resolved,
                     &layout,
                     std::slice::from_ref(&mark),
                 )
+                .unwrap()
                 .unwrap();
                 let geometry = Geometry::of(&item);
                 for (x, y) in [

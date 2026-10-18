@@ -409,7 +409,15 @@ mod tests {
     fn cell_fills(f: &Figure) -> (Layout, Fills) {
         let (resolved, layout) = crate::pipeline::plan_figure(f, (0, 0), FontLibrary::global());
         let marks = crate::resolve::resolve_figure_marks(f).swap_remove(0);
-        let fills = match crate::draw::marks(f.theme(), &resolved, &layout, &marks) {
+        let fills = match crate::draw::marks(
+            f.theme(),
+            &crate::test_support::figure_fonts(f.theme()),
+            &resolved,
+            &layout,
+            &marks,
+        )
+        .unwrap()
+        {
             Some(Item::Group { items, .. }) => items
                 .iter()
                 .map(|item| match item {
