@@ -549,7 +549,15 @@ fn merged_legend_follows_figure_title_alignment() {
         f.title("Figure").subtitle("Summary");
         let groups = ShareGroups::new(&f);
         let panels = panels(&f, &groups, &lib);
-        let planned = plan(&f, &panels, &groups, &lib, "Figure.to_scene()").unwrap();
+        let planned = plan(
+            &f,
+            &panels,
+            &groups,
+            &lib,
+            "Figure.to_scene()",
+            &layout::LabelCache::new(&lib),
+        )
+        .unwrap();
         let entries = planned.header.legend.entries();
         let left = entries.first().unwrap().swatch.x;
         let last = entries.last().unwrap();
@@ -581,7 +589,15 @@ fn figure_title_is_one_and_a_half_title_sizes() {
         f.title("Figure");
         let groups = ShareGroups::new(&f);
         let panels = panels(&f, &groups, &lib);
-        let planned = plan(&f, &panels, &groups, &lib, "Figure.to_scene()").unwrap();
+        let planned = plan(
+            &f,
+            &panels,
+            &groups,
+            &lib,
+            "Figure.to_scene()",
+            &layout::LabelCache::new(&lib),
+        )
+        .unwrap();
         let title = planned.header.title.unwrap();
         assert_eq!(
             title.style.size,
@@ -735,6 +751,7 @@ fn merged_rows_wrap_and_align_independently_in_both_styles() {
                 &groups,
                 &lib,
                 "Figure.to_scene()",
+                &layout::LabelCache::new(&lib),
             )
             .unwrap();
             let rows: Vec<_> = planned
@@ -824,6 +841,7 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
         &groups,
         &lib,
         "Figure.to_scene()",
+        &layout::LabelCache::new(&lib),
     )
     .unwrap();
     assert_eq!(planned.header.legend.entries().len(), 1);
@@ -844,6 +862,7 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
         &groups,
         &lib,
         "Figure.to_scene()",
+        &layout::LabelCache::new(&lib),
     )
     .unwrap();
     let labels: Vec<_> = planned
@@ -900,6 +919,7 @@ fn per_panel_legends_do_not_follow_title_alignment() {
                 &groups,
                 &lib,
                 "Figure.to_scene()",
+                &layout::LabelCache::new(&lib),
             )
             .unwrap();
             assert!(planned.header.legend.is_empty());
@@ -956,6 +976,7 @@ fn figure_header_joins_single_and_grid_height_needs() {
             &groups,
             &lib,
             "Figure.to_scene()",
+            &layout::LabelCache::new(&lib),
         )
         .unwrap();
         assert_eq!(planned.header.bottom, PADDING + 22.5 * 1.25 + 8.0);

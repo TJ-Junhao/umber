@@ -12,7 +12,7 @@ use super::legend::{self, LegendRow};
 use super::{
     AXIS_LABEL_GAP, Area, BODY_LINE, END_LABEL_SHARE, HEADER_GAP, Label, Layout, LayoutInput,
     PADDING, PlacedBaseline, Styles, TITLE_GAP, TITLE_LINE, X_LABEL_GAP, Y_LABEL_CENTER,
-    Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, measure_ticks, metrics,
+    Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, metrics,
 };
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
 use crate::{Align, Figure, FontLibrary, Result};
@@ -464,6 +464,7 @@ pub(crate) fn measure_panel(
     resolved: &Resolved,
     span: PanelSpan,
     show_labels: [bool; 2],
+    labels: &super::LabelCache<'_>,
 ) -> PanelBands {
     let LayoutInput {
         theme,
@@ -481,12 +482,12 @@ pub(crate) fn measure_panel(
     let (tick_ascent, tick_descent) = metrics(lib, &styles.tick);
     let tick_size = f64::from(styles.tick.size);
     let y_labels = if show_labels[1] {
-        measure_ticks(lib, &resolved.y.ticks, styles.tick)
+        labels.ticks(&resolved.y.ticks, styles.tick)
     } else {
         Vec::new()
     };
     let x_labels = if show_labels[0] {
-        measure_ticks(lib, &resolved.x.ticks, styles.tick)
+        labels.ticks(&resolved.x.ticks, styles.tick)
     } else {
         Vec::new()
     };
@@ -1085,8 +1086,13 @@ mod tests {
         for (name, figure) in &fixtures {
             let (resolved, layout) = plan_figure(figure, (0, 0), lib);
             with_layout_input(figure, (0, 0), lib, |input, grid| {
-                let bands =
-                    measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
+                let bands = measure_panel(
+                    input,
+                    &resolved,
+                    grid.span(input.axes.cells()),
+                    [true; 2],
+                    &super::super::LabelCache::new(lib),
+                );
                 // A figure of one axes has the canvas as its frame.
                 let slot = single_slot(grid, layout.plot, &bands);
                 assert_eq!(layout.frame, slot.frame, "{name}");
@@ -1106,8 +1112,13 @@ mod tests {
         for (name, figure) in &panel_fixtures() {
             let (resolved, layout) = plan_figure(figure, (0, 0), lib);
             with_layout_input(figure, (0, 0), lib, |input, grid| {
-                let bands =
-                    measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
+                let bands = measure_panel(
+                    input,
+                    &resolved,
+                    grid.span(input.axes.cells()),
+                    [true; 2],
+                    &super::super::LabelCache::new(lib),
+                );
                 let header = bands.heading.bottom(0.0);
                 let plot = layout.plot;
                 assert!(
@@ -1144,7 +1155,13 @@ mod tests {
         );
         let (resolved, layout) = plan_figure(&figure, (0, 0), lib);
         with_layout_input(&figure, (0, 0), lib, |input, grid| {
-            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
+            let bands = measure_panel(
+                input,
+                &resolved,
+                grid.span(input.axes.cells()),
+                [true; 2],
+                &super::super::LabelCache::new(lib),
+            );
             assert!(bands.y_tick_column > Y_LABEL_GAP);
             assert!(
                 close(layout.plot.x, PADDING + bands.y_tick_column),
@@ -1167,7 +1184,13 @@ mod tests {
         );
         let (resolved, layout) = plan_figure(&figure, (0, 0), lib);
         with_layout_input(&figure, (0, 0), lib, |input, grid| {
-            let bands = measure_panel(input, &resolved, grid.span(input.axes.cells()), [true; 2]);
+            let bands = measure_panel(
+                input,
+                &resolved,
+                grid.span(input.axes.cells()),
+                [true; 2],
+                &super::super::LabelCache::new(lib),
+            );
             let mut slot = single_slot(grid, layout.plot, &bands);
             slot.header.left += 30.0;
             slot.header.right += 30.0;

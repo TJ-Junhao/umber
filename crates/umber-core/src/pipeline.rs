@@ -421,6 +421,7 @@ fn plan(
     groups: &ShareGroups,
     lib: &FontLibrary,
     context: &'static str,
+    labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
     let theme = figure.theme();
     let header = figure_header(figure, panels, lib);
@@ -517,7 +518,7 @@ fn plan(
             // Keep direct labels inside their panel, before any shared colorbar.
             span.reserve_cap = f64::INFINITY;
         }
-        let bands = layout::measure_panel(input, resolved, span, show_labels[i]);
+        let bands = layout::measure_panel(input, resolved, span, show_labels[i], labels);
         if shared {
             bands.without_colorbar(span.reserve_cap)
         } else {
@@ -613,7 +614,10 @@ fn plan(
                         .collect();
                     if categories.iter().all(|(i, side, _)| {
                         let plot = side.group_plot(groups, *i, &plots, &show_labels);
-                        side.room(plot, theme, lib).slack(side.ticks(&tried[*i])) >= 0.0
+                        side.room(plot, theme, lib)
+                            .with_labels(labels)
+                            .slack(side.ticks(&tried[*i]))
+                            >= 0.0
                     }) {
                         selected[group] = candidate;
                         resolved = tried;
@@ -638,7 +642,7 @@ fn plan(
                 let y = Side::Y.group_plot(groups, i, plots, &show_labels);
                 let (x, _) = layout::tick_rooms(x, theme, lib, spacing);
                 let (_, y) = layout::tick_rooms(y, theme, lib, spacing);
-                [x, y]
+                [x.with_labels(labels), y.with_labels(labels)]
             })
             .collect::<Vec<_>>()
     };
@@ -702,8 +706,8 @@ fn plan(
             .iter()
             .map(|c| {
                 [
-                    c[0].room(Side::X, theme, lib),
-                    c[1].room(Side::Y, theme, lib),
+                    c[0].room(Side::X, theme, lib).with_labels(labels),
+                    c[1].room(Side::Y, theme, lib).with_labels(labels),
                 ]
             })
             .collect();
@@ -1111,8 +1115,9 @@ fn plan_cells(
     groups: &ShareGroups,
     lib: &FontLibrary,
     context: &'static str,
+    labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
-    let mut planned = plan(figure, panels, groups, lib, context)?;
+    let mut planned = plan(figure, panels, groups, lib, context, labels)?;
     if !panels.iter().any(|panel| {
         panel
             .marks
@@ -1244,7 +1249,7 @@ fn plan_cells(
             }
         }
         resolve_colors(panels, groups, figure.theme());
-        planned = plan(figure, panels, groups, lib, context)?;
+        planned = plan(figure, panels, groups, lib, context, labels)?;
         if planned
             .panels
             .iter()
@@ -1322,7 +1327,15 @@ pub(crate) fn try_plan_figure(
     let index = panel_index(figure, cell);
     let groups = ShareGroups::new(figure);
     let mut panels = panels(figure, &groups, lib);
-    let mut planned = plan_cells(figure, &mut panels, &groups, lib, "Figure.to_scene()")?;
+    let labels = layout::LabelCache::new(lib);
+    let mut planned = plan_cells(
+        figure,
+        &mut panels,
+        &groups,
+        lib,
+        "Figure.to_scene()",
+        &labels,
+    )?;
     Ok(planned.panels.swap_remove(index))
 }
 
@@ -1336,8 +1349,16 @@ pub(crate) fn plan_panel_marks<'a>(
 ) -> Vec<(Resolved, Layout, Vec<ResolvedMark<'a>>)> {
     let groups = ShareGroups::new(figure);
     let mut panels = panels(figure, &groups, lib);
-    let planned = plan_cells(figure, &mut panels, &groups, lib, "Figure.to_scene()")
-        .expect("the figure lays out");
+    let labels = layout::LabelCache::new(lib);
+    let planned = plan_cells(
+        figure,
+        &mut panels,
+        &groups,
+        lib,
+        "Figure.to_scene()",
+        &labels,
+    )
+    .expect("the figure lays out");
     planned
         .panels
         .into_iter()
@@ -1360,6 +1381,7 @@ pub(crate) fn try_plan_panels(
         &groups,
         lib,
         "Figure.to_scene()",
+        &layout::LabelCache::new(lib),
     )
     .map(|planned| planned.panels)
 }
@@ -1437,6 +1459,16 @@ pub(crate) fn scene(
     library: &FontLibrary,
     context: &'static str,
 ) -> Result<Scene> {
+    scene_with_labels(figure, library, context, &layout::LabelCache::new(library))
+}
+
+/// Draws with a cache owned by this scene call, shared by all its panels and layout passes.
+fn scene_with_labels(
+    figure: &Figure,
+    library: &FontLibrary,
+    context: &'static str,
+    labels: &layout::LabelCache<'_>,
+) -> Result<Scene> {
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
@@ -1450,7 +1482,7 @@ pub(crate) fn scene(
         }
         return Ok(scene);
     }
-    let planned = plan_cells(figure, &mut panels, &groups, library, context)?;
+    let planned = plan_cells(figure, &mut panels, &groups, library, context, labels)?;
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
@@ -1501,6 +1533,10 @@ fn in_cell(figure: &Figure, axes: &Axes, err: Error) -> Error {
     let cells = axes.cells();
     err.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
 }
+
+#[cfg(test)]
+#[path = "label_cache_tests.rs"]
+mod label_cache_tests;
 
 #[cfg(test)]
 #[path = "category_label_tests.rs"]
@@ -1814,8 +1850,15 @@ mod tests {
             let groups = ShareGroups::new(&figure);
             let mut panels = panels(&figure, &groups, lib);
             crate::bin2d::COUNT_CALLS.with(|calls| calls.set(0));
-            let planned =
-                plan_cells(&figure, &mut panels, &groups, lib, "Figure.to_scene()").unwrap();
+            let planned = plan_cells(
+                &figure,
+                &mut panels,
+                &groups,
+                lib,
+                "Figure.to_scene()",
+                &layout::LabelCache::new(lib),
+            )
+            .unwrap();
             let calls = crate::bin2d::COUNT_CALLS.with(|calls| calls.get());
             if fixed_y {
                 assert!(
@@ -1883,7 +1926,15 @@ mod tests {
             let lib = FontLibrary::global();
             let groups = ShareGroups::new(&figure);
             let panels = panels(&figure, &groups, lib);
-            let planned = plan(&figure, &panels, &groups, lib, "Figure.to_scene()").unwrap();
+            let planned = plan(
+                &figure,
+                &panels,
+                &groups,
+                lib,
+                "Figure.to_scene()",
+                &layout::LabelCache::new(lib),
+            )
+            .unwrap();
             assert_eq!(
                 planned.colorbars.len(),
                 if share == Share::All { 1 } else { 2 }
@@ -2155,7 +2206,13 @@ mod tests {
                 .iter()
                 .zip(&resolved)
                 .map(|(input, resolved)| {
-                    layout::measure_panel(input, resolved, grid.span(input.axes.cells()), [true; 2])
+                    layout::measure_panel(
+                        input,
+                        resolved,
+                        grid.span(input.axes.cells()),
+                        [true; 2],
+                        &layout::LabelCache::new(lib),
+                    )
                 })
                 .collect();
             (resolved, bands)
