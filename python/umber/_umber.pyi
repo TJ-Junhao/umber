@@ -49,6 +49,10 @@ __all__ = [
     "Cmap",
     "ColorBy",
     "Figure",
+    "FontValue",
+    "font_from_files",
+    "font_system",
+    "check_file_bold_fallback",
     "Theme",
     "__version__",
     "box_stats",
@@ -89,9 +93,28 @@ def grid_cells(rows: int, cols: int, count: int) -> list[tuple[int, int]]: ...
 # GREEN, TEAL, BLUE, PURPLE, PINK, BROWN.
 def named_colors() -> list[tuple[str, int]]: ...
 
-# A font argument: (kind, payload). Kind 0 is a bundled font (payload: its index in
-# bundled_fonts()).
-type _FontArg = tuple[int, int]
+# Font arguments have kind 0 (bundled index), 1 (file value) or 2 (system value).
+type _FontArg = tuple[int, int | FontValue]
+
+@final
+class FontValue:
+    def family_name(self) -> str: ...
+    def bold_fallback(self) -> bool: ...
+    def file_paths(self) -> tuple[str, str | None] | None: ...
+    def file_source(self) -> tuple[bytes, bytes | None, str, str | None] | None: ...
+    def __eq__(self, other: object, /) -> bool: ...
+    def __hash__(self) -> int: ...
+
+def font_from_files(
+    regular: bytes,
+    bold: bytes | None,
+    name: str,
+    regular_path: str,
+    bold_path: str | None,
+    bold_fallback: bool,
+) -> FontValue: ...
+def font_system(family: str, bold_fallback: bool) -> FontValue: ...
+def check_file_bold_fallback(has_bold: bool, bold_fallback: bool) -> None: ...
 
 # Bundled fonts as (constant name, index), in the order SOURCE_SERIF_4, IBM_PLEX_SANS, GEIST,
 # INTER, JETBRAINS_MONO.

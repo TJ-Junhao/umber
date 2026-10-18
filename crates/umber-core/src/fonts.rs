@@ -16,6 +16,13 @@
 //! assert!(!font_bytes(BundledFont::Inter, Weight::Regular).is_empty());
 //! ```
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+
+use crate::text::OwnedFace;
+use crate::{Error, Result};
+
 /// A font family bundled with the crate.
 ///
 /// # Examples
@@ -117,6 +124,142 @@ impl BundledFont {
 pub enum Font {
     /// A family bundled with the crate.
     Bundled(BundledFont),
+    /// Validated regular and optional bold files, identified by bytes and resolved family name.
+    File(Arc<FontFiles>),
+    /// An installed family, with the selected faces kept in memory.
+    System(Arc<SystemFamily>),
+}
+
+/// The immutable files of a font made with [`Font::from_files`].
+///
+/// Equality uses the regular and optional bold bytes, the resolved family name and the bold
+/// fallback setting. Paths do not affect equality, except for the fallback name used when the
+/// regular file has no name.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{BundledFont, Font, Weight};
+/// use umber_core::fonts::font_bytes;
+/// let font = Font::from_files(font_bytes(BundledFont::Inter, Weight::Regular).to_vec(), None, "Inter".into())?;
+/// assert!(matches!(font, Font::File(_)));
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Clone)]
+pub struct FontFiles {
+    regular: OwnedFace,
+    bold: Option<OwnedFace>,
+    fingerprint: (u64, Option<u64>),
+    bold_fallback: bool,
+}
+
+fn same_bytes(left: &Arc<Vec<u8>>, right: &Arc<Vec<u8>>) -> bool {
+    Arc::ptr_eq(left, right) || (left.len() == right.len() && left.as_slice() == right.as_slice())
+}
+
+fn fingerprint(bytes: &[u8]) -> u64 {
+    let mut hash = DefaultHasher::new();
+    hash.write(bytes);
+    hash.finish()
+}
+
+impl PartialEq for FontFiles {
+    fn eq(&self, other: &Self) -> bool {
+        self.bold_fallback == other.bold_fallback
+            && self.regular.family == other.regular.family
+            && same_bytes(&self.regular.bytes, &other.regular.bytes)
+            && match (&self.bold, &other.bold) {
+                (Some(left), Some(right)) => same_bytes(&left.bytes, &right.bytes),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+impl Eq for FontFiles {}
+impl Hash for FontFiles {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.regular.family.hash(state);
+        self.regular.bytes.len().hash(state);
+        self.bold.as_ref().map(|face| face.bytes.len()).hash(state);
+        self.fingerprint.hash(state);
+        self.bold_fallback.hash(state);
+    }
+}
+
+impl FontFiles {
+    /// The stored bytes for a weight, without copying or reopening the file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BundledFont, Font, Weight};
+    /// use umber_core::fonts::font_bytes;
+    /// let bytes = font_bytes(BundledFont::Inter, Weight::Regular);
+    /// let Font::File(files) = Font::from_files(bytes.to_vec(), None, "Inter".into())? else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!(files.bytes(Weight::Regular), Some(bytes));
+    /// assert_eq!(files.bytes(Weight::SemiBold), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn bytes(&self, weight: Weight) -> Option<&[u8]> {
+        match weight {
+            Weight::Regular => Some(&self.regular.bytes),
+            Weight::SemiBold => self.bold.as_ref().map(|face| face.bytes.as_slice()),
+        }
+    }
+}
+
+/// An installed family and immutable copies of its selected regular and bold faces.
+///
+/// Equality uses the canonical family name and the bold fallback setting, independently of
+/// the spelling used to find the family.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::Font;
+/// if let Ok(font) = Font::system("DejaVu Sans") {
+///     assert!(matches!(font, Font::System(_)));
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct SystemFamily {
+    name: String,
+    regular: OwnedFace,
+    bold: Option<OwnedFace>,
+    variable_only: bool,
+    bold_fallback: bool,
+}
+
+impl SystemFamily {
+    pub(crate) fn new(
+        name: String,
+        regular: OwnedFace,
+        bold: Option<OwnedFace>,
+        variable_only: bool,
+    ) -> Self {
+        SystemFamily {
+            name,
+            regular,
+            bold,
+            variable_only,
+            bold_fallback: false,
+        }
+    }
+}
+impl PartialEq for SystemFamily {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.bold_fallback == other.bold_fallback
+    }
+}
+impl Eq for SystemFamily {}
+impl Hash for SystemFamily {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.bold_fallback.hash(state);
+    }
 }
 
 impl Font {
@@ -175,6 +318,163 @@ impl Font {
     /// ```
     pub const JETBRAINS_MONO: Font = Font::Bundled(BundledFont::JetBrainsMono);
 
+    /// Parses a regular font file and an optional bold file into an immutable font.
+    ///
+    /// The bold file fills the SemiBold slot; no synthetic bold is made. Variable fonts use
+    /// their default instance. `name` is used when the font has no family name. Font licensing
+    /// is the caller's responsibility. Editable SVG viewers need the font installed.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Data` if either file is damaged, is not a TrueType or OpenType font, or is a
+    /// collection (`.ttc`). A missing bold face is allowed here and fails only when laying out
+    /// bold text, unless [`Font::with_bold_fallback`] allows the regular face instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BundledFont, Font, Weight};
+    /// use umber_core::fonts::font_bytes;
+    /// let font = Font::from_files(font_bytes(BundledFont::Inter, Weight::Regular).to_vec(), None, "Inter".into())?;
+    /// assert_eq!(font.family_name(), "Inter");
+    /// assert!(!font.has_face(Weight::SemiBold));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn from_files(regular: Vec<u8>, bold: Option<Vec<u8>>, name: String) -> Result<Font> {
+        let regular = parse_file(regular, "regular", &name)?;
+        let bold = bold
+            .map(|bytes| {
+                if bytes == *regular.bytes {
+                    Ok(regular.clone())
+                } else {
+                    parse_file(bytes, "bold", &name)
+                }
+            })
+            .transpose()?;
+        // Validate both faces before traversing their bytes for hashing.
+        let regular_hash = fingerprint(&regular.bytes);
+        let bold_hash = bold.as_ref().map(|face| {
+            if Arc::ptr_eq(&regular.bytes, &face.bytes) {
+                regular_hash
+            } else {
+                fingerprint(&face.bytes)
+            }
+        });
+        Ok(Font::File(Arc::new(FontFiles {
+            regular,
+            bold,
+            fingerprint: (regular_hash, bold_hash),
+            bold_fallback: false,
+        })))
+    }
+
+    /// Finds an installed family and keeps its selected faces in memory.
+    ///
+    /// Every call scans the installed fonts; there is no cache. Family matching is
+    /// case-insensitive; legacy names are tried only when typographic names do not match.
+    /// The regular face prefers upright,
+    /// normal-width faces, then the closest weight to 400. Bold requires a separate upright
+    /// static face at least weight 600, preferring normal width, then the closest weight to 600.
+    /// Variable fonts use their default instance, not a bold variation. Families installed only
+    /// as variable fonts have no bold face here. [`Font::with_bold_fallback`] allows them to
+    /// draw bold text in the regular face. Font licensing is the caller's responsibility.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` if the family is not installed, with the closest installed names in the
+    /// message, or if a selected font file cannot be read or parsed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    /// if let Ok(font) = Font::system("DejaVu Sans") {
+    ///     assert_eq!(font.family_name(), "DejaVu Sans");
+    /// }
+    /// ```
+    pub fn system(family: &str) -> Result<Font> {
+        crate::text::find_family(family).map(|family| Font::System(Arc::new(family)))
+    }
+
+    /// Sets whether a custom font without bold draws bold text in its regular face.
+    ///
+    /// No synthetic bold is made. An existing system bold face is always used; bundled fonts
+    /// are unchanged. This setting is part of a custom font's equality and hash, but does not
+    /// change [`Font::has_face`].
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage` if `value` is true and a file font has an explicit bold face.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BundledFont, Font, Weight};
+    /// use umber_core::fonts::font_bytes;
+    /// let font = Font::from_files(font_bytes(BundledFont::Inter, Weight::Regular).to_vec(), None, "Inter".into())?
+    ///     .with_bold_fallback(true)?;
+    /// assert!(font.bold_fallback());
+    /// assert!(!font.has_face(Weight::SemiBold));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn with_bold_fallback(mut self, value: bool) -> Result<Font> {
+        match &mut self {
+            Font::Bundled(_) => {}
+            Font::File(font) => {
+                check_file_bold_fallback(font.bold.is_some(), value)?;
+                Arc::make_mut(font).bold_fallback = value;
+            }
+            Font::System(font) => Arc::make_mut(font).bold_fallback = value,
+        }
+        Ok(self)
+    }
+
+    /// Whether a custom font may draw bold text in its regular face when bold is absent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Font;
+    /// assert!(!Font::INTER.bold_fallback());
+    /// ```
+    #[must_use]
+    pub fn bold_fallback(&self) -> bool {
+        match self {
+            Font::Bundled(_) => false,
+            Font::File(font) => font.bold_fallback,
+            Font::System(font) => font.bold_fallback,
+        }
+    }
+
+    /// The actual weight for shaping and editable output, without inventing a bold face.
+    pub(crate) fn resolved_weight(&self, weight: Weight) -> Option<Weight> {
+        if self.has_face(weight) {
+            Some(weight)
+        } else if weight == Weight::SemiBold && self.bold_fallback() {
+            Some(Weight::Regular)
+        } else {
+            None
+        }
+    }
+
+    /// Whether a missing bold face comes from an installed family containing only variable files.
+    pub(crate) fn is_variable_only_system(&self) -> bool {
+        matches!(self, Font::System(family) if family.variable_only)
+    }
+
+    /// The owned face of a custom font; bundled faces live in the font library instead.
+    pub(crate) fn owned_face(&self, weight: Weight) -> Option<&OwnedFace> {
+        let (regular, bold) = match self {
+            Font::Bundled(_) => return None,
+            Font::File(font) => (&font.regular, &font.bold),
+            Font::System(font) => (&font.regular, &font.bold),
+        };
+        match weight {
+            Weight::Regular => Some(regular),
+            Weight::SemiBold => bold.as_ref(),
+        }
+    }
+
     /// The family name, as SVG `font-family` writes it.
     ///
     /// # Examples
@@ -188,6 +488,8 @@ impl Font {
     pub fn family_name(&self) -> &str {
         match self {
             Font::Bundled(font) => font.family_name(),
+            Font::File(font) => &font.regular.family,
+            Font::System(font) => &font.name,
         }
     }
 
@@ -203,8 +505,9 @@ impl Font {
     /// ```
     #[must_use]
     pub fn has_face(&self, weight: Weight) -> bool {
-        match (self, weight) {
-            (Font::Bundled(_), Weight::Regular | Weight::SemiBold) => true,
+        match self {
+            Font::Bundled(_) => true,
+            Font::File(_) | Font::System(_) => self.owned_face(weight).is_some(),
         }
     }
 
@@ -221,11 +524,58 @@ impl Font {
     pub fn generic_family(&self) -> &'static str {
         match self {
             Font::Bundled(font) => font.generic_family(),
+            Font::File(font) => font.regular.generic,
+            Font::System(font) => font.regular.generic,
         }
     }
 }
 
-/// A bundled font weight.
+/// Checks a file font's bold options before its files are read or parsed.
+///
+/// # Errors
+///
+/// `Error::Usage` if both an explicit bold face and regular-face fallback are requested.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::fonts::check_file_bold_fallback;
+/// assert!(check_file_bold_fallback(true, true).is_err());
+/// assert!(check_file_bold_fallback(false, true).is_ok());
+/// ```
+pub fn check_file_bold_fallback(has_bold: bool, bold_fallback: bool) -> Result<()> {
+    if has_bold && bold_fallback {
+        return Err(Error::usage(
+            "Font.from_file()",
+            "bold_fallback is True with bold given; \
+             the fallback applies only to a font without a bold face.",
+        )
+        .with_parameter("bold_fallback")
+        .with_hint("drop bold_fallback, or drop bold."));
+    }
+    Ok(())
+}
+
+fn parse_file(bytes: Vec<u8>, parameter: &'static str, name: &str) -> Result<OwnedFace> {
+    let hint = if bytes.starts_with(b"ttcf") {
+        "extract one face from the collection, or use Font.system()."
+    } else {
+        return OwnedFace::parse(Arc::new(bytes), 0, name)
+            .ok_or_else(|| invalid_file(parameter, "pass a .ttf or .otf file."));
+    };
+    Err(invalid_file(parameter, hint))
+}
+
+fn invalid_file(parameter: &'static str, hint: &'static str) -> Error {
+    Error::data(
+        "Font.from_file()",
+        format!("{parameter} is not a valid font; it must be a TrueType or OpenType font."),
+    )
+    .with_parameter(parameter)
+    .with_hint(hint)
+}
+
+/// A font weight.
 ///
 /// # Examples
 ///
@@ -390,6 +740,24 @@ mod tests {
 
     fn codepoints(ranges: &[(u32, u32)]) -> impl Iterator<Item = u32> + '_ {
         ranges.iter().flat_map(|&(lo, hi)| lo..=hi)
+    }
+
+    #[test]
+    fn fingerprint_collisions_do_not_make_different_files_equal() {
+        let make = |suffix| {
+            let mut bytes = font_bytes(BundledFont::Inter, Weight::Regular).to_vec();
+            bytes.push(suffix);
+            let Font::File(files) = Font::from_files(bytes, None, "Inter".into()).unwrap() else {
+                unreachable!()
+            };
+            files
+        };
+        let first = make(1);
+        let mut second = make(2);
+        Arc::get_mut(&mut second).unwrap().fingerprint = first.fingerprint;
+        assert_ne!(first, second);
+        assert_eq!(first, make(1));
+        assert_eq!(first, Arc::clone(&first));
     }
 
     #[test]

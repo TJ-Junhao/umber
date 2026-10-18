@@ -44,7 +44,8 @@ FONTS = [
     ub.Font.JETBRAINS_MONO,
 ]
 FONT_HINT = (
-    "use Font.SOURCE_SERIF_4, Font.IBM_PLEX_SANS, Font.GEIST, Font.INTER or Font.JETBRAINS_MONO."
+    "use Font.SOURCE_SERIF_4, Font.IBM_PLEX_SANS, Font.GEIST, Font.INTER, "
+    "Font.JETBRAINS_MONO, Font.from_file() or Font.system()."
 )
 # (setter, parameter name in the native message, two valid values, an invalid value, requirement)
 GREATER_THAN_0 = "a finite number greater than 0"
@@ -411,8 +412,8 @@ def test_font_hint_lists_every_font() -> None:
         BASE.with_title_font(cast(ub.Font, "Inter"))
     assert details(caught.value) == (
         "value",
-        "use Font.SOURCE_SERIF_4, Font.IBM_PLEX_SANS, Font.GEIST, Font.INTER "
-        "or Font.JETBRAINS_MONO.",
+        "use Font.SOURCE_SERIF_4, Font.IBM_PLEX_SANS, Font.GEIST, Font.INTER, "
+        "Font.JETBRAINS_MONO, Font.from_file() or Font.system().",
     )
 
 
