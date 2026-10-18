@@ -120,15 +120,28 @@ impl<'s> FontSet<'s> {
             let Some(program) = font.program() else {
                 continue;
             };
-            let slot = *self.index.entry(program).or_insert_with(|| {
-                self.fonts.push(FontUse {
-                    font,
-                    glyphs: GlyphRemapper::new(),
-                    occurrences: Vec::new(),
-                    seen: HashSet::new(),
-                });
-                self.fonts.len() - 1
-            });
+            let slot = match self.index.get(&program) {
+                Some(&slot) => slot,
+                None => {
+                    // Fonts with the same bytes and face draw the same, whichever font value or
+                    // library they came from, so they share one subset.
+                    let same = self
+                        .fonts
+                        .iter()
+                        .position(|used| same_program(used.font, font));
+                    let slot = same.unwrap_or_else(|| {
+                        self.fonts.push(FontUse {
+                            font,
+                            glyphs: GlyphRemapper::new(),
+                            occurrences: Vec::new(),
+                            seen: HashSet::new(),
+                        });
+                        self.fonts.len() - 1
+                    });
+                    self.index.insert(program, slot);
+                    slot
+                }
+            };
             if let Some(used) = self.fonts.get_mut(slot) {
                 used.add(run, item.glyphs.size());
             }
@@ -143,6 +156,13 @@ impl<'s> FontSet<'s> {
             index: self.index,
         }
     }
+}
+
+/// Whether `a` and `b` hold the same font bytes and face.
+fn same_program(a: RunFont<'_>, b: RunFont<'_>) -> bool {
+    a.with_data(|a_data, a_index| {
+        b.with_data(|b_data, b_index| Some(a_index == b_index && a_data == b_data))
+    }) == Some(true)
 }
 
 impl FontUse<'_> {

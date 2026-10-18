@@ -232,6 +232,15 @@ pub(super) enum Arrangement {
     Stacked,
 }
 
+/// The public input whose heights are represented by aligned series.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum BarInput {
+    /// Explicit series supplied to grouped or stacked bars.
+    Series,
+    /// A long-form heights column split by group.
+    Heights,
+}
+
 /// One stored series of a [`BarGroupMark`].
 #[derive(Debug, Clone, PartialEq)]
 struct StoredSeries {
@@ -296,12 +305,13 @@ impl BarGroupMark {
     pub(super) fn new(
         context: &'static str,
         arrangement: Arrangement,
+        input: BarInput,
         x_kind: ScaleKind,
         y: Transform,
         categories: Vec<String>,
         series: Vec<Series>,
     ) -> Result<BarGroupMark> {
-        check_bar_group(context, arrangement, x_kind, y, &categories, &series)?;
+        check_bar_group(context, arrangement, input, x_kind, y, &categories, &series)?;
         let series: Vec<StoredSeries> = series
             .into_iter()
             .map(|s| StoredSeries {

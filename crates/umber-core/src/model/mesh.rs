@@ -682,7 +682,7 @@ impl HexbinMark {
 }
 
 /// Both axes must be numeric, before any coordinate is converted or stored.
-fn numeric_axes(context: &'static str, axes: &Axes) -> Result<[Transform; 2]> {
+pub(super) fn numeric_axes(context: &'static str, axes: &Axes) -> Result<[Transform; 2]> {
     let mut transforms = [Transform::Linear; 2];
     for (i, (name, kind)) in [("x", axes.x_scale()), ("y", axes.y_scale())]
         .into_iter()
@@ -825,7 +825,7 @@ fn check_points(
 }
 
 /// A mark must use the axes' and shared group's colormap, transform, center and color limits.
-fn check_mapping(
+pub(super) fn check_mapping(
     context: &'static str,
     figure: &Figure,
     index: usize,
@@ -1089,8 +1089,14 @@ mod tests {
                     });
                     panel.cells.push(HexCell { hexagon, whole });
                 }
-                if let Some(Item::Group { items, .. }) =
-                    crate::draw::marks(f.theme(), &resolved, &layout, std::slice::from_ref(mark))
+                if let Some(Item::Group { items, .. }) = crate::draw::marks(
+                    f.theme(),
+                    &crate::test_support::figure_fonts(f.theme()),
+                    &resolved,
+                    &layout,
+                    std::slice::from_ref(mark),
+                )
+                .unwrap()
                 {
                     panel.fills.extend(items.iter().map(|item| {
                         match item {
@@ -2399,7 +2405,11 @@ mod tests {
                 },
             )
             .unwrap()
-            .legend_at(crate::LegendStyle::Chips, crate::LegendPosition::Right)
+            .legend_at(
+                crate::LegendStyle::Chips,
+                crate::LegendPosition::Right,
+                crate::SizeSpec::Auto,
+            )
             .unwrap();
         f
     }

@@ -327,6 +327,15 @@ pub enum Item {
     },
     /// Shaped text.
     Text(TextItem),
+    /// Shaped text turned about its origin by `angle` degrees, clockwise on the page (the y
+    /// axis points down), such as a level label along a contour line. The outline of `text` is
+    /// already turned; a backend that writes text as text turns it about `text.origin`.
+    RotatedText {
+        /// The text, its outline already turned.
+        text: TextItem,
+        /// The angle in degrees, clockwise on the page.
+        angle: f32,
+    },
     /// A grid of colored pixels stretched over a rectangle, each pixel a solid rectangle of
     /// its color: scaled with nearest-neighbour sampling, never smoothed. Heatmaps, 2-D
     /// histograms and meshes draw their cells as one image, one pixel per cell (see

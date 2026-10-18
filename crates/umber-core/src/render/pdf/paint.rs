@@ -86,7 +86,8 @@ impl<'f, 's> Page<'f, 's> {
                 stroke,
                 positions,
             } => self.markers(shape, *fill, stroke.as_ref(), positions),
-            Item::Text(text) => self.text(text),
+            Item::Text(text) => self.text(text, Turn::NONE),
+            Item::RotatedText { text, angle } => self.text(text, Turn::degrees(*angle)),
             Item::Image {
                 rect,
                 width,
@@ -291,52 +292,65 @@ impl<'f, 's> Page<'f, 's> {
         self.content.restore_state();
     }
 
-    /// Writes `item` as text in the fonts that were embedded, and fills the outlines of runs
-    /// whose font could not be embedded. A text record without glyphs (built by hand) is
-    /// filled from its outline; text smaller than
-    /// [`MIN_TEXT_SIZE`](super::text::MIN_TEXT_SIZE) is not drawn.
-    fn text(&mut self, item: &TextItem) {
+    /// Writes `item`, turned by `turn` about its origin, as text in the fonts that were
+    /// embedded, and fills the outlines of runs whose font could not be embedded. A text record
+    /// without glyphs (built by hand) is filled from its outline, which a turned record holds
+    /// turned already; text smaller than [`MIN_TEXT_SIZE`](super::text::MIN_TEXT_SIZE) is not
+    /// drawn.
+    fn text(&mut self, item: &TextItem, turn: Turn) {
         if !text_is_visible(item.color, item.origin) {
             return;
         }
         if item.glyphs.is_empty() {
-            self.fill_text_outline(&item.outline, item.color);
+            self.fill_text_outline(&item.outline, item.color, None);
             return;
         }
         if !written(item) {
             return;
         }
+        let (ox, oy) = (rounded(item.origin.x), rounded(item.origin.y));
         if self.fonts.shows_any(item) {
             self.content.save_state();
             self.opacity(item.color.a, 255);
             fill_color(&mut self.content, item.color);
-            // Text space: the origin at the left end of the baseline, the y axis up.
-            self.content.transform([
-                1.0,
-                0.0,
-                0.0,
-                -1.0,
-                rounded(item.origin.x),
-                rounded(item.origin.y),
-            ]);
+            // Text space: the origin at the left end of the baseline, the x axis along the
+            // text, turned clockwise on the page, and the y axis up from the baseline.
+            let (cos, sin) = (turn.cos, turn.sin);
+            self.content.transform([cos, sin, sin, -cos, ox, oy]);
             self.fonts.show(&mut self.content, item);
             self.content.restore_state();
         }
+        // The outlines of runs come unturned; they are turned about the origin as the text is.
+        let about = (turn != Turn::NONE).then(|| {
+            let (cos, sin) = (turn.cos, turn.sin);
+            [
+                cos,
+                sin,
+                -sin,
+                cos,
+                rounded(ox - cos * ox + sin * oy),
+                rounded(oy - sin * ox - cos * oy),
+            ]
+        });
         for run in item.glyphs.runs() {
             if self.fonts.get(run).is_none() {
-                self.fill_text_outline(&run.outline(item.origin), item.color);
+                self.fill_text_outline(&run.outline(item.origin), item.color, about);
             }
         }
     }
 
-    /// Fills glyph outlines in the color of their text.
-    fn fill_text_outline(&mut self, outline: &Path, color: Rgba) {
+    /// Fills glyph outlines in the color of their text, in the coordinates `matrix` maps to the
+    /// page when there is one.
+    fn fill_text_outline(&mut self, outline: &Path, color: Rgba, matrix: Option<[f32; 6]>) {
         let Some(normalized) = normalize_path(outline) else {
             return;
         };
         self.content.save_state();
         self.opacity(color.a, 255);
         fill_color(&mut self.content, color);
+        if let Some(matrix) = matrix {
+            self.content.transform(matrix);
+        }
         write_path(&mut self.content, &normalized);
         self.content.fill_nonzero();
         self.content.restore_state();
@@ -365,6 +379,30 @@ impl<'f, 's> Page<'f, 's> {
         ]);
         self.content.x_object(Name(name.as_bytes()));
         self.content.restore_state();
+    }
+}
+
+/// A turn clockwise on the page (the y axis points down), by its cosine and sine.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Turn {
+    cos: f32,
+    sin: f32,
+}
+
+impl Turn {
+    /// No turn.
+    const NONE: Turn = Turn { cos: 1.0, sin: 0.0 };
+
+    /// A turn by `angle` degrees; none for an angle that is not finite, as in SVG.
+    fn degrees(angle: f32) -> Turn {
+        if !angle.is_finite() {
+            return Turn::NONE;
+        }
+        let (sin, cos) = f64::from(angle).to_radians().sin_cos();
+        Turn {
+            cos: cos as f32,
+            sin: sin as f32,
+        }
     }
 }
 

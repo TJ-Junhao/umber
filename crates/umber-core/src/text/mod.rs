@@ -61,8 +61,10 @@ mod system;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use font::OwnedFace;
 pub(crate) use layout::{GlyphRun, PlacedGlyph, ProgramId, RunFont};
 pub use layout::{TextGlyphs, TextLayout};
 pub(crate) use library::CheckedStyle;
 pub use library::{FontLibrary, SceneFonts};
 pub use style::{FaceId, TextStyle};
+pub(crate) use system::find_family;

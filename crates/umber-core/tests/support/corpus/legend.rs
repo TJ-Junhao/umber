@@ -219,10 +219,14 @@ fn figures() -> Vec<(&'static str, Figure)> {
         lines(none.clone(), "Theme without legend", &names("Series", 3)),
     ));
     let mut off = lines(Theme::pigment(), "Legend off", &names("Series", 3));
-    axes(&mut off).legend(LegendStyle::None);
+    axes(&mut off)
+        .legend(LegendStyle::None, umber_core::SizeSpec::Auto)
+        .unwrap();
     out.push(("fig-legend-axes-none", off));
     let mut on = lines(none, "Legend on", &names("Series", 3));
-    axes(&mut on).legend(LegendStyle::Header);
+    axes(&mut on)
+        .legend(LegendStyle::Header, umber_core::SizeSpec::Auto)
+        .unwrap();
     out.push(("fig-legend-axes-header", on));
     for (name, theme) in [
         ("fig-legend-graphite-header", Theme::graphite()),
@@ -243,7 +247,8 @@ fn figures() -> Vec<(&'static str, Figure)> {
                 },
             )
             .unwrap()
-            .legend(LegendStyle::Header);
+            .legend(LegendStyle::Header, umber_core::SizeSpec::Auto)
+            .unwrap();
         out.push((name, f));
     }
 
@@ -714,7 +719,9 @@ fn direct_figures() -> Vec<(&'static str, Figure)> {
 
     // Direct labels set on the axes under a header theme.
     let mut on_axes = lines(Theme::pigment(), "Direct on the axes", &names("Series", 3));
-    axes(&mut on_axes).legend(LegendStyle::Direct);
+    axes(&mut on_axes)
+        .legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
+        .unwrap();
     out.push(("fig-direct-axes-override", on_axes));
 
     out
@@ -750,7 +757,9 @@ fn api_cases() -> String {
     };
     let _ = writeln!(out, "axes legend_style {}", override_of(&mut f));
     for style in [LegendStyle::Chips, LegendStyle::None, LegendStyle::Header] {
-        axes(&mut f).legend(style);
+        axes(&mut f)
+            .legend(style, umber_core::SizeSpec::Auto)
+            .unwrap();
         let _ = writeln!(
             out,
             "axes legend({}) legend_style {}",

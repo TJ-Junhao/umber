@@ -55,6 +55,7 @@ bench = [
 manifest-path = "crates/umber-py/Cargo.toml"
 python-source = "python"
 module-name = "umber._umber"
+exclude = ["tests/fonts/**"]
 include = [
     { path = "README-ZH.md", format = "sdist" },
     { path = "THIRD-PARTY-LICENSES.txt", format = "sdist" },
@@ -75,6 +76,9 @@ src = ["python", "tests/python", "examples"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "D"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["umber._scale.Scale.linear"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

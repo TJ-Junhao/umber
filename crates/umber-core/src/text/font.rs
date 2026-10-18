@@ -1,7 +1,7 @@
 //! Font identity, font bytes and parsed faces.
 //!
-//! A [`FontKey`] names a font within one library. A [`FontHandle`] shares the font's bytes, so a
-//! layout can be outlined after its library is gone. A [`Face`] is a font parsed for character
+//! A [`FontKey`] names a library font or a primary face in one scene. A [`FontHandle`] shares
+//! the font's bytes, so a layout can be outlined after its library is gone. A [`Face`] is a font parsed for character
 //! lookup, outlines and glyph bounds.
 
 use std::sync::Arc;
@@ -19,9 +19,10 @@ use skrifa::outline::{OutlineGlyphCollection, OutlineGlyphFormat};
 
 use super::cmap::{secondary_subtables, subtable_glyph};
 use super::outline::{draws_segments, unhinted};
+use super::style::FaceId;
 use crate::fonts::{BundledFont, Weight, font_bytes};
 
-/// Which font a run of text is drawn with, within one [`FontLibrary`](super::FontLibrary).
+/// Which font a run is drawn with, within one scene and its [`FontLibrary`](super::FontLibrary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum FontKey {
     Bundled(BundledFont, Weight),
@@ -29,6 +30,9 @@ pub(super) enum FontKey {
     Extra(usize),
     /// Index into the system font index.
     System(usize),
+    /// A file or installed-family face in one SceneFonts, with its requested weight.
+    /// Stable across layouts in that scene, not across different scene font sets.
+    Scene(FaceId, Weight),
 }
 
 /// Where the bytes of a font live.
@@ -61,6 +65,11 @@ impl FontHandle {
     /// A font file passed by the caller, face 0 of it.
     pub(super) fn extra(bytes: Arc<Vec<u8>>) -> FontHandle {
         FontHandle::shared(bytes, 0)
+    }
+
+    /// An owned face, including a face selected from an installed collection.
+    pub(super) fn owned(font: &OwnedFace) -> FontHandle {
+        FontHandle::shared(Arc::clone(&font.bytes), font.index)
     }
 
     /// Face `index` of the font file `bytes`, loaded and shared.
@@ -101,6 +110,116 @@ impl std::fmt::Debug for FontHandle {
 
 /// A font prepared for shaping.
 pub(super) type ShapingFont = harfrust::Font;
+
+/// A validated, owned primary face. Its bytes and default-instance shaper are immutable.
+/// Unlike a fallback discovered during layout, it cannot disappear before outlining.
+#[derive(Clone)]
+pub(crate) struct OwnedFace {
+    pub(crate) bytes: Arc<Vec<u8>>,
+    pub(super) index: u32,
+    pub(super) shaping: ShapingFont,
+    pub(super) metrics: FaceMetrics,
+    pub(crate) family: String,
+    pub(crate) generic: &'static str,
+}
+
+/// Default-instance vertical metrics, in font units.
+#[derive(Clone, Copy)]
+pub(super) struct FaceMetrics {
+    pub(super) units_per_em: u16,
+    pub(super) ascender: f32,
+    pub(super) descender: f32,
+}
+
+impl OwnedFace {
+    /// Validates the table ranges and required outline and metric tables at construction.
+    pub(crate) fn parse(bytes: Arc<Vec<u8>>, index: u32, name: &str) -> Option<OwnedFace> {
+        super::guard::guarded(|| {
+            let font = FontRef::from_index(&bytes, index).ok()?;
+            let records = font.table_directory().table_records();
+            if records
+                .windows(2)
+                .any(|pair| pair[0].tag() >= pair[1].tag())
+            {
+                return None;
+            }
+            for record in records {
+                font.table_data(record.tag())?;
+            }
+            let head = font.head().ok()?;
+            let maxp = font.maxp().ok()?;
+            if head.units_per_em() == 0 || maxp.num_glyphs() == 0 {
+                return None;
+            }
+            font.hhea().ok()?;
+            font.hmtx().ok()?;
+            font.cmap().ok()?;
+            match font.outline_glyphs().format()? {
+                OutlineGlyphFormat::Glyf => {
+                    font.glyf().ok()?;
+                    font.loca(None).ok()?;
+                }
+                OutlineGlyphFormat::Cff => {
+                    font.cff().ok()?;
+                }
+                OutlineGlyphFormat::Cff2 => {
+                    font.cff2().ok()?;
+                }
+                OutlineGlyphFormat::Varc => {
+                    font.varc().ok()?;
+                }
+            }
+            let metrics = font.metrics(Size::unscaled(), LocationRef::default());
+            let family = [16, 1]
+                .into_iter()
+                .find_map(|id| {
+                    font.localized_strings(read_fonts::types::NameId::new(id))
+                        .english_or_first()
+                        .map(|s| s.to_string())
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or_else(|| name.to_owned());
+            let generic = if font.post().is_ok_and(|post| post.is_fixed_pitch() != 0) {
+                "monospace"
+            } else if font.os2().is_ok_and(|os2| {
+                let class = os2.s_family_class() >> 8;
+                let panose = os2.panose_10();
+                (1..=7).contains(&class)
+                    || (class == 0
+                        && panose.first() == Some(&2)
+                        && panose.get(1).is_some_and(|serif| (2..=10).contains(serif)))
+            }) {
+                "serif"
+            } else {
+                "sans-serif"
+            };
+            let shared: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::clone(&bytes) as _;
+            let shaping = ShapingFont::new(read_fonts::model::Blob::from(shared), index)?;
+            Some(OwnedFace {
+                bytes,
+                index,
+                shaping,
+                metrics: FaceMetrics {
+                    units_per_em: metrics.units_per_em,
+                    ascender: metrics.ascent,
+                    descender: metrics.descent,
+                },
+                family,
+                generic,
+            })
+        })
+        .flatten()
+    }
+}
+
+impl std::fmt::Debug for OwnedFace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedFace")
+            .field("family", &self.family)
+            .field("index", &self.index)
+            .finish_non_exhaustive()
+    }
+}
 
 /// Slots in a face's cache of secondary lookups.
 const SECONDARY_CACHE_SLOTS: usize = 256;

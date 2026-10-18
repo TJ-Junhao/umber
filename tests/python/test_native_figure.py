@@ -69,7 +69,7 @@ def figure(x: int = LINEAR, y: int = LINEAR, *, base: float = 10.0) -> _umber.Fi
 
 def line_figure() -> _umber.Figure:
     fig = figure()
-    fig.title(0, 0, "Signal")
+    fig.title(0, 0, "Signal", NO_SIZE)
     fig.line(0, 0, floats(0, 1, 2), floats(1, 3, 2), "north", AUTO, 0, NO_SIZE)
     return fig
 
@@ -342,10 +342,10 @@ def test_unknown_scale_kinds_are_internal_errors() -> None:
 
 # Every axes method, called on the axes at `row`, `col` of a native figure.
 AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
-    "title": lambda f, r, c: f.title(r, c, "t"),
-    "subtitle": lambda f, r, c: f.subtitle(r, c, "t"),
-    "xlabel": lambda f, r, c: f.xlabel(r, c, "t"),
-    "ylabel": lambda f, r, c: f.ylabel(r, c, "t"),
+    "title": lambda f, r, c: f.title(r, c, "t", NO_SIZE),
+    "subtitle": lambda f, r, c: f.subtitle(r, c, "t", NO_SIZE),
+    "xlabel": lambda f, r, c: f.xlabel(r, c, "t", NO_SIZE),
+    "ylabel": lambda f, r, c: f.ylabel(r, c, "t", NO_SIZE),
     "xlim": lambda f, r, c: f.xlim(r, c, 0.0, 1.0),
     "ylim": lambda f, r, c: f.ylim(r, c, 0.0, 1.0),
     "xticks": lambda f, r, c: f.xticks(r, c, floats(0, 1)),
@@ -354,8 +354,8 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "yticks_labeled": lambda f, r, c: f.yticks_labeled(r, c, floats(0, 1), ["zero", "one"]),
     "xtick_format": lambda f, r, c: f.xtick_format(r, c, (1, 1, "", "")),
     "ytick_format": lambda f, r, c: f.ytick_format(r, c, (1, 1, "", "")),
-    "legend": lambda f, r, c: f.legend(r, c, 0),
-    "legend_at": lambda f, r, c: f.legend_at(r, c, 0, 2),
+    "legend": lambda f, r, c: f.legend(r, c, 0, NO_SIZE),
+    "legend_at": lambda f, r, c: f.legend_at(r, c, 0, 2, NO_SIZE),
     "line": lambda f, r, c: f.line(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "area": lambda f, r, c: f.area(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "scatter": lambda f, r, c: f.scatter(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
@@ -463,7 +463,7 @@ def test_native_grid_places_and_finds_axes() -> None:
     assert fig.add_axes(*at(1, 2), LOG, 2.0, LOG, 10.0) == (1, 2)
     assert fig.axes_at(1, 0, 1, 0, CATEGORY, 0.0, LINEAR, 10.0) == (0, 0)
     assert fig.axes_at(1, 1, 1, 2, LOG, 2.0, LOG, 10.0) == (1, 2)
-    fig.title(1, 2, "Corner")
+    fig.title(1, 2, "Corner", NO_SIZE)
     fig.bar(0, 0, ["a", "b"], floats(1, 2), "", AUTO)
     assert ">Corner</text>" in fig.to_svg(EDITABLE)
     assert_reported(
@@ -474,7 +474,7 @@ def test_native_grid_places_and_finds_axes() -> None:
         "pass the scales the axes was created with.",
     )
     assert_reported(
-        lambda: fig.title(0, 1, "Covered"),
+        lambda: fig.title(0, 1, "Covered", NO_SIZE),
         ub.UsageError,
         "Figure.axes_at(): row 0, col 1 is part of the axes added at row 0, col 0.",
         None,
@@ -612,10 +612,10 @@ def test_native_grid_arguments_are_checked() -> None:
 
 def test_texts_appear_in_editable_svg() -> None:
     fig = figure()
-    fig.title(0, 0, "Growth")
-    fig.subtitle(0, 0, "Per year")
-    fig.xlabel(0, 0, "Year")
-    fig.ylabel(0, 0, "Revenue")
+    fig.title(0, 0, "Growth", NO_SIZE)
+    fig.subtitle(0, 0, "Per year", NO_SIZE)
+    fig.xlabel(0, 0, "Year", NO_SIZE)
+    fig.ylabel(0, 0, "Revenue", NO_SIZE)
     svg = fig.to_svg(EDITABLE)
     for text in ("Growth", "Per year", "Year", "Revenue"):
         assert f">{text}</text>" in svg
@@ -629,9 +629,11 @@ def test_limits_and_legend_change_the_output() -> None:
     fig.ylim(0, 0, 0.0, 10.0)
     limited = fig.to_svg(OUTLINES)
     assert limited != before
-    fig.legend(0, 0, 3)
+    fig.legend(0, 0, 3, NO_SIZE)
     assert fig.to_svg(OUTLINES) != limited
-    assert_internal(lambda: fig.legend(0, 0, 4), ValueError, "4 is not a value of LegendStyle")
+    assert_internal(
+        lambda: fig.legend(0, 0, 4, NO_SIZE), ValueError, "4 is not a value of LegendStyle"
+    )
 
 
 def range_message(context: str, limits: str, rule: str) -> str:
@@ -771,7 +773,7 @@ def test_marks_draw() -> None:
 
 def test_mark_labels_and_colors_reach_the_legend() -> None:
     fig = figure()
-    fig.legend(0, 0, 2)
+    fig.legend(0, 0, 2, NO_SIZE)
     fig.line(0, 0, floats(0, 1), floats(1, 2), "North", RED, 0, NO_SIZE)
     fig.scatter(0, 0, floats(0, 1), floats(2, 1), "South", BLUE, 0, NO_SIZE)
     svg = fig.to_svg(EDITABLE)
@@ -1233,13 +1235,13 @@ def test_a_clone_is_independent_of_the_original() -> None:
     assert copy is not original
     assert copy.to_svg(EDITABLE) == svg
 
-    copy.title(0, 0, "Changed")
+    copy.title(0, 0, "Changed", NO_SIZE)
     copy.scatter(0, 0, floats(0, 1), floats(2, 2), "south", RED, 0, NO_SIZE)
     copy.xlim(0, 0, -1.0, 3.0)
     assert ">Changed</text>" in copy.to_svg(EDITABLE)
     assert original.to_svg(EDITABLE) == svg
 
-    original.subtitle(0, 0, "Only here")
+    original.subtitle(0, 0, "Only here", NO_SIZE)
     assert ">Only here</text>" not in copy.to_svg(EDITABLE)
 
 
@@ -1247,9 +1249,9 @@ def test_a_clone_of_a_figure_without_axes_gets_its_own_axes() -> None:
     original = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
     copy = original.clone()
     copy.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
-    copy.title(0, 0, "Copy")
+    copy.title(0, 0, "Copy", NO_SIZE)
     assert_reported(
-        lambda: original.title(0, 0, "Original"),
+        lambda: original.title(0, 0, "Original", NO_SIZE),
         ub.UsageError,
         NO_AXES_AT_ORIGIN,
         None,
@@ -1268,7 +1270,7 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
     expected_pngs: set[bytes] = set()
     for title in titles:
         reference = changing.clone()
-        reference.title(0, 0, title)
+        reference.title(0, 0, title, NO_SIZE)
         expected_svgs.add(reference.to_svg(OUTLINES))
         expected_pngs.add(reference.to_png(40))
     unchanged = line_figure()
@@ -1309,12 +1311,12 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
         nonlocal retitled
         try:
             while not stop.is_set():
-                when_free(partial(changing.title, 0, 0, titles[retitled % 2]))
+                when_free(partial(changing.title, 0, 0, titles[retitled % 2], NO_SIZE))
                 retitled += 1
         except BaseException as err:  # reported below
             errors.append(err)
 
-    changing.title(0, 0, titles[0])
+    changing.title(0, 0, titles[0], NO_SIZE)
     renderers = [threading.Thread(target=render) for _ in range(2)]
     writer = threading.Thread(target=retitle)
     writer.start()

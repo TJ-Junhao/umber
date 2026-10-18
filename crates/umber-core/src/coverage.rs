@@ -147,7 +147,7 @@ impl Geometry {
                     });
                 }
             }
-            Item::Text(_) => {}
+            Item::Text(_) | Item::RotatedText { .. } => {}
         }
     }
 
@@ -470,8 +470,12 @@ mod tests {
             let mut axes = figure
                 .add_axes(ScaleKind::Linear, ScaleKind::Linear)
                 .unwrap();
-            axes.legend_at(LegendStyle::Header, LegendPosition::Best)
-                .unwrap();
+            axes.legend_at(
+                LegendStyle::Header,
+                LegendPosition::Best,
+                crate::SizeSpec::Auto,
+            )
+            .unwrap();
             match kind {
                 "line" => {
                     axes.line(
@@ -536,10 +540,12 @@ mod tests {
             {
                 let item = crate::draw::marks(
                     figure.theme(),
+                    &crate::layout::figure_fonts(library, figure.theme()).unwrap(),
                     &resolved,
                     &layout,
                     std::slice::from_ref(&mark),
                 )
+                .unwrap()
                 .unwrap();
                 let geometry = Geometry::of(&item);
                 for (x, y) in [

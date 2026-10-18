@@ -91,12 +91,16 @@ mod corpus {
     pub mod baseline;
     pub mod r#box;
     pub mod bubbles;
+    pub mod by;
     pub mod category_labels;
     pub mod cmap;
     pub mod color_by;
     pub mod colorbar;
+    pub mod contour;
     pub mod ecdf;
     pub mod error_bars;
+    pub mod events;
+    pub mod font_file;
     pub mod grid;
     pub mod header;
     pub mod heatmap;
@@ -116,6 +120,8 @@ mod corpus {
     pub mod stacked_area;
     pub mod stem;
     pub mod step;
+    pub mod strip;
+    pub mod text_size;
     pub mod ticks;
     pub mod time;
     pub mod violin;
@@ -191,9 +197,15 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::mesh::cases(&lib, &mut sink);
     corpus::heatmap::cases(&lib, &mut sink);
     corpus::mesh::raster_cases(&lib, &mut sink);
+    corpus::text_size::cases(&lib, &mut sink);
+    corpus::events::cases(&lib, &mut sink);
+    corpus::strip::cases(&lib, &mut sink);
     corpus::hist_variants::cases(&lib, &mut sink);
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);
+    corpus::font_file::cases(&lib, &mut sink);
+    corpus::by::cases(&lib, &mut sink);
+    corpus::contour::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1535,13 +1547,14 @@ mod record {
         )
     }
 
-    pub fn font(f: &Font) -> &'static str {
+    pub fn font(f: &Font) -> &str {
         match f {
             Font::Bundled(BundledFont::SourceSerif4) => "source-serif-4",
             Font::Bundled(BundledFont::IbmPlexSans) => "ibm-plex-sans",
             Font::Bundled(BundledFont::Geist) => "geist",
             Font::Bundled(BundledFont::Inter) => "inter",
             Font::Bundled(BundledFont::JetBrainsMono) => "jetbrains-mono",
+            Font::File(_) | Font::System(_) => f.family_name(),
         }
     }
 
@@ -2179,6 +2192,10 @@ mod record {
                     self.path(shape);
                 }
                 Item::Text(t) => self.text_item(t),
+                Item::RotatedText { text, angle } => {
+                    self.line(&format!("rotated angle={}", f32(*angle)));
+                    self.text_item(text);
+                }
                 Item::Image {
                     rect: at,
                     width,

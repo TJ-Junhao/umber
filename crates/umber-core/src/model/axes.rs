@@ -10,7 +10,8 @@ use super::share::{AxisSettings, ExplicitLimits};
 use super::ticks::{AxisTicks, ExplicitTicks};
 use crate::error::number;
 use crate::{
-    ContinuousScale, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, TickFormat,
+    ContinuousScale, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec,
+    TickFormat,
 };
 
 /// A plotting area with its scales, texts, limits and marks.
@@ -56,6 +57,12 @@ pub struct Axes {
     pub(super) color_limits: Option<(f64, f64)>,
     /// The colorbar's label and optional position and tick format overrides.
     pub(super) colorbar: super::ColorbarOptions,
+    /// Per-call sizes of the panel's text roles.
+    pub(super) title_size: SizeSpec,
+    pub(super) subtitle_size: SizeSpec,
+    pub(super) xlabel_size: SizeSpec,
+    pub(super) ylabel_size: SizeSpec,
+    pub(super) legend_size: SizeSpec,
 }
 
 impl Axes {
@@ -84,6 +91,11 @@ impl Axes {
             marks: Vec::new(),
             color_limits: None,
             colorbar: super::ColorbarOptions::default(),
+            title_size: SizeSpec::Auto,
+            subtitle_size: SizeSpec::Auto,
+            xlabel_size: SizeSpec::Auto,
+            ylabel_size: SizeSpec::Auto,
+            legend_size: SizeSpec::Auto,
         }
     }
 
@@ -507,6 +519,41 @@ impl Axes {
     pub(crate) fn colorbar_options(&self) -> &super::ColorbarOptions {
         &self.colorbar
     }
+
+    /// The panel title's per-call size.
+    pub(crate) fn title_size(&self) -> SizeSpec {
+        self.title_size
+    }
+
+    /// The panel subtitle's per-call size.
+    pub(crate) fn subtitle_size(&self) -> SizeSpec {
+        self.subtitle_size
+    }
+
+    /// The x axis title's per-call size.
+    pub(crate) fn xlabel_size(&self) -> SizeSpec {
+        self.xlabel_size
+    }
+
+    /// The y axis title's per-call size.
+    pub(crate) fn ylabel_size(&self) -> SizeSpec {
+        self.ylabel_size
+    }
+
+    /// The panel legend's per-call size.
+    pub(crate) fn legend_size(&self) -> SizeSpec {
+        self.legend_size
+    }
+
+    /// The x tick label size, inherited by every member of the shared group.
+    pub(crate) fn xtick_size(&self) -> SizeSpec {
+        self.x_settings.tick_size
+    }
+
+    /// The y tick label size, inherited by every member of the shared group.
+    pub(crate) fn ytick_size(&self) -> SizeSpec {
+        self.y_settings.tick_size
+    }
 }
 
 /// `kind` as the Python `Scale` call that makes it: `Scale.linear()`, `Scale.log(2)`,
@@ -517,6 +564,15 @@ pub(super) fn scale_name(kind: ScaleKind) -> String {
         ScaleKind::Log { base } => format!("Scale.log({})", number(base.get())),
         ScaleKind::Category => "Scale.category()".to_owned(),
         ScaleKind::Time => "Scale.time()".to_owned(),
+    }
+}
+
+/// A text size as the Python value that selects it.
+pub(super) fn size_name(size: SizeSpec) -> String {
+    match size {
+        SizeSpec::Auto => "Size.AUTO".to_owned(),
+        SizeSpec::Times(factor) => format!("Size.times({})", number(factor.get())),
+        SizeSpec::Points(points) => format!("Size.pt({})", number(points.get())),
     }
 }
 

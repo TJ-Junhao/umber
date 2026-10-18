@@ -36,6 +36,7 @@ use pyo3::prelude::*;
 fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", umber_core::VERSION)?;
     m.add("MAX_BINS", umber_core::MAX_BINS)?;
+    m.add("MAX_LEVELS", umber_core::MAX_LEVELS)?;
     m.add_class::<theme::Theme>()?;
     m.add_class::<cmap::Cmap>()?;
     m.add_class::<figure::Figure>()?;
@@ -45,6 +46,10 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(figure::grid_cells, m)?)?;
     m.add_function(wrap_pyfunction!(color::named_colors, m)?)?;
     m.add_function(wrap_pyfunction!(font::bundled_fonts, m)?)?;
+    m.add_class::<font::FontValue>()?;
+    m.add_function(wrap_pyfunction!(font::font_from_files, m)?)?;
+    m.add_function(wrap_pyfunction!(font::font_system, m)?)?;
+    m.add_function(wrap_pyfunction!(font::check_file_bold_fallback, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_hex, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_rgb, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_with_alpha, m)?)?;

@@ -45,7 +45,7 @@ fn check_items(items: &[Item]) {
                 check_path(shape);
                 positions.iter().copied().for_each(check);
             }
-            Item::Text(t) => {
+            Item::Text(t) | Item::RotatedText { text: t, .. } => {
                 check(t.origin);
                 check_path(&t.outline);
                 assert!(t.width.is_finite());

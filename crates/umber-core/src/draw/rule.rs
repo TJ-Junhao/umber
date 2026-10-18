@@ -183,6 +183,7 @@ pub(super) fn span_layer(
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Contour { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
@@ -191,6 +192,8 @@ pub(super) fn span_layer(
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Heatmap { .. }
+            | ResolvedMark::Events { .. }
+            | ResolvedMark::Points { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => {}
         }
@@ -238,6 +241,7 @@ pub(super) fn rule_layer(
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Contour { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
@@ -246,6 +250,8 @@ pub(super) fn rule_layer(
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Heatmap { .. }
+            | ResolvedMark::Events { .. }
+            | ResolvedMark::Points { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => {}
         }

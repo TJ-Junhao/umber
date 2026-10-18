@@ -8,7 +8,7 @@ fn cache_keys_keep_style_bits_text_and_unplaced_layout() {
     let fonts = figure_fonts(&lib, &Theme::pigment()).unwrap();
     let cache = LabelCache::new(&fonts);
     let text = "a\u{301} ffi 012日";
-    let regular = Styles::new(&Theme::pigment()).tick;
+    let regular = Styles::new(&Theme::pigment(), TextRole::Title, StyleSizes::default()).tick;
     let styles = [
         regular,
         TextStyle {

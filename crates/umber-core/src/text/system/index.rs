@@ -433,7 +433,7 @@ pub(in crate::text) struct FaceIndex {
     /// [`Weight::slot`].
     ordered: [Vec<usize>; Weight::ALL.len()],
     /// `cmap` segments and groups visited while building the index.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     visited: usize,
 }
 
@@ -562,6 +562,7 @@ impl FaceIndex {
             faces,
             by_family,
             ordered,
+            #[cfg(test)]
             visited,
         }
     }

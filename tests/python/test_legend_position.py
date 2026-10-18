@@ -64,9 +64,9 @@ def test_explicit_position_matches_native(
     assert ax.legend(style, position=position) is ax
     expected = _umber.Figure(6, 4, native(ub.Theme.PIGMENT), 1, 1, 0, 0, 0, 0)
     expected.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
-    expected.title(0, 0, "Panel")
+    expected.title(0, 0, "Panel", (0, 0.0))
     expected.hline(0, 0, 1, "North", (0, 0, 1.0), ub.Dash.SOLID.value, (0, 0.0))
-    expected.legend_at(0, 0, style.value, position.value)
+    expected.legend_at(0, 0, style.value, position.value, (0, 0.0))
     assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value)
 
 

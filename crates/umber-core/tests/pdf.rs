@@ -682,3 +682,140 @@ fn pdf_embeds_cff2_as_text() {
         assert_matches_png(&path, &render_png(&scene, 144).unwrap(), 144);
     }
 }
+
+/// The texts of the turned text items of `items`, with their angles, through groups.
+fn rotated_texts(items: &[Item]) -> Vec<(String, f32)> {
+    items
+        .iter()
+        .flat_map(|item| match item {
+            Item::RotatedText { text, angle } => vec![(text.text.clone(), *angle)],
+            Item::Group { items, .. } => rotated_texts(items),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+#[test]
+fn pdf_writes_rotated_labels_as_text() {
+    let (x, y): (Vec<f64>, Vec<f64>) = (
+        (0..40).map(f64::from).collect(),
+        (0..30).map(f64::from).collect(),
+    );
+    let z: Vec<f64> = y
+        .iter()
+        .flat_map(|&y| {
+            x.iter()
+                .map(move |&x| ((x - 20.0) / 7.0).powi(2) + ((y - 15.0) / 5.0).powi(2))
+        })
+        .collect();
+    let mut figure = Figure::new(5.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .contour(
+            &x,
+            &y,
+            &z,
+            umber_core::ContourOptions {
+                annotate: true,
+                ..umber_core::ContourOptions::default()
+            },
+        )
+        .unwrap();
+    let scene = figure.to_scene(FontLibrary::global()).unwrap();
+    let labels = rotated_texts(&scene.items);
+    assert!(
+        labels.iter().any(|(_, angle)| angle.abs() > 1.0),
+        "no turned label: {labels:?}"
+    );
+    let pdf = figure.to_pdf().unwrap();
+    let content = page_content(&pdf);
+    // Each label is set in a turned text space, not filled as outlines.
+    let turned = content
+        .lines()
+        .filter(|line| line.ends_with(" cm"))
+        .filter(|line| {
+            let v: Vec<f32> = line
+                .split_whitespace()
+                .take(4)
+                .filter_map(|n| n.parse().ok())
+                .collect();
+            v.len() == 4 && v[1] != 0.0 && (v[0] - -v[3]).abs() < 1e-4 && (v[1] - v[2]).abs() < 1e-4
+        })
+        .count();
+    let tilted = labels
+        .iter()
+        .filter(|(_, angle)| f64::from(*angle).to_radians().sin() as f32 != 0.0)
+        .count();
+    assert!(
+        tilted > 0 && turned >= tilted,
+        "{turned} turned text spaces for {tilted} tilted labels"
+    );
+    let dir = scratch("rotated");
+    let path = write(&dir, "contour.pdf", &pdf);
+    assert_readers_parse(&path);
+    let readers: Vec<(&str, Option<String>)> = vec![
+        ("Poppler", have("pdftotext").then(|| extracted_text(&path))),
+        ("MuPDF", have("mutool").then(|| mupdf_line(&path))),
+        ("pdf.js", pdfjs_text(&path)),
+    ];
+    for (reader, text) in readers {
+        let Some(text) = text else { continue };
+        let compact: String = text.split_whitespace().collect();
+        for (label, _) in &labels {
+            assert!(
+                compact.contains(label.as_str()),
+                "{reader}: no {label:?} in {text:?}"
+            );
+        }
+    }
+    if have("pdftoppm") {
+        assert_matches_png(&path, &figure.to_png(144).unwrap(), 144);
+    }
+}
+
+#[test]
+fn pdf_resolves_bold_fallback_to_the_regular_face() {
+    let inter = umber_core::fonts::font_bytes(umber_core::BundledFont::Inter, Weight::Regular);
+    let file = Font::from_files(inter.to_vec(), None, "Inter File".into())
+        .unwrap()
+        .with_bold_fallback(true)
+        .unwrap();
+    let theme = Theme::pigment()
+        .with_title_font(file)
+        .unwrap()
+        .with_body_font(Font::INTER)
+        .unwrap();
+    let mut figure = Figure::new(4.0, 3.0, theme).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title("Bold fallback");
+    let pdf = figure.to_pdf().unwrap();
+    let body = String::from_utf8_lossy(&pdf);
+    // The bold title is set in the regular face, whose bytes the bundled body font shares:
+    // one subset of Inter Regular, and no bold face.
+    let base_fonts: Vec<&str> = body
+        .match_indices("/BaseFont /")
+        .map(|(at, m)| body[at + m.len()..].split_whitespace().next().unwrap())
+        .collect();
+    assert!(
+        !base_fonts.iter().any(|name| name.contains("Bold")),
+        "{base_fonts:?}"
+    );
+    let inter_fonts: std::collections::BTreeSet<&str> = base_fonts
+        .iter()
+        .copied()
+        .filter(|name| name.contains("Inter"))
+        .collect();
+    assert_eq!(inter_fonts.len(), 1, "{base_fonts:?}");
+    // The descriptor gives the weight of the face embedded: 400.
+    let descriptor = after(&body, "/Type /FontDescriptor");
+    assert!(descriptor.contains("/StemV 95.4"), "{descriptor}");
+    let dir = scratch("bold-fallback");
+    let path = write(&dir, "title.pdf", &pdf);
+    assert_readers_parse(&path);
+    if have("pdftotext") {
+        assert!(extracted_text(&path).contains("Bold fallback"));
+    }
+}

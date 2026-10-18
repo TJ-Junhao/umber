@@ -1,8 +1,8 @@
-//! Sizes: per-series line widths and marker sizes, relative to the theme's or in points.
+//! Sizes: line widths, markers and text, relative to the theme's or in points.
 //!
-//! A [`SizeSpec`] says how wide a line or how large a marker one series asks for. It is
-//! resolved at render time, against the theme of the figure the series ends up in, so
-//! [`SizeSpec::times`] keeps a series emphasized (or muted) under any theme.
+//! A [`SizeSpec`] says how wide a line or how large a marker or text should be. It is
+//! resolved at render time against the figure's theme, so [`SizeSpec::times`] keeps emphasis
+//! under any theme. Text uses its role size after font scaling; fixed points ignore scaling.
 //!
 //! # Examples
 //!
@@ -88,16 +88,18 @@ impl Points {
     }
 }
 
-/// The width of a line or the size of a marker that one series asks for: the line width of a
+/// The width of a line, the size of a marker or a text role: the line width of a
 /// line or area ([`LineOptions::width`](crate::LineOptions::width)), the marker diameter of a
-/// scatter ([`ScatterOptions::size`](crate::ScatterOptions::size)).
+/// scatter ([`ScatterOptions::size`](crate::ScatterOptions::size)), or a text size such as
+/// [`AxesMut::title_sized`](crate::AxesMut::title_sized).
 ///
 /// The size is resolved at render time against the theme of the figure: [`SizeSpec::Auto`] is
 /// the theme's value ([`Theme::line_width`](crate::Theme::line_width) or
 /// [`Theme::marker_size`](crate::Theme::marker_size)), [`SizeSpec::Times`] a multiple of it, and
 /// [`SizeSpec::Points`] a fixed size that ignores the theme. Prefer [`SizeSpec::times`]: an
 /// emphasized series then stays emphasized under any theme. A drawn size never exceeds
-/// 10 000 pt, whatever the theme says.
+/// 10 000 pt, whatever the theme says. Text resolves against the role size after font
+/// scaling, except fixed points, which ignore font scaling.
 ///
 /// # Examples
 ///
@@ -121,7 +123,7 @@ pub enum SizeSpec {
 }
 
 impl SizeSpec {
-    /// A size relative to the theme's: `factor` times its line width or marker size.
+    /// A size relative to the theme's line width, marker size or scaled text role size.
     ///
     /// # Errors
     ///
@@ -235,7 +237,7 @@ mod tests {
                 let Error::Style { message, .. } = &e else {
                     unreachable!()
                 };
-                (message.clone(), e.parameter(), e.hint())
+                (message.to_string(), e.parameter(), e.hint())
             }
             other => panic!("expected a Style error, got {other:?}"),
         }

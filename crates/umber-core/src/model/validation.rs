@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::axis_data::{AxisData, SharedValues};
-use super::bar::{Arrangement, Series};
+use super::bar::{Arrangement, BarInput, Series};
 use super::box_plot::Distribution;
 use super::hist::{Bins, GroupedHistOptions, HistOptions, HistStat, HistStyle};
 use super::share::SharedAxis;
@@ -51,41 +51,62 @@ fn check_numbers(
             continue;
         }
         if v.is_infinite() {
-            return Err(Error::data(
+            return Err(Error::at_input(
                 context,
-                format!("{name}[{i}] is {v}; values must be finite.", v = number(v)),
+                name,
+                "",
+                [(
+                    Some(i),
+                    format!(" is {v}; values must be finite.", v = number(v)),
+                )],
             )
             .with_parameter(parameter)
             .with_hint(infinite_hint));
         }
         if v.abs() > MAX_MAGNITUDE {
-            return Err(Error::data(
+            return Err(Error::at_input(
                 context,
-                format!(
-                    "{name}[{i}] is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
-                    v = number(v)
-                ),
+                name,
+                "",
+                [(
+                    Some(i),
+                    format!(
+                        " is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
+                        v = number(v)
+                    ),
+                )],
             )
             .with_parameter(parameter));
         }
         if log {
             if v <= 0.0 {
-                return Err(Error::data(
+                return Err(Error::at_input(
                     context,
-                    format!(
-                        "{name}[{i}] is {v} on a log axis; values must be positive.",
-                        v = number(v)
-                    ),
+                    name,
+                    "",
+                    [(
+                        Some(i),
+                        format!(
+                            " is {v} on a log axis; values must be positive.",
+                            v = number(v)
+                        ),
+                    )],
                 )
                 .with_parameter(parameter)
                 .with_hint("use a linear axis, or remove values that are not positive."));
             }
             if v < MIN_LOG_VALUE {
-                return Err(Error::data(
+                return Err(Error::at_input(
                     context,
-                    format!(
-                        "{name}[{i}] is {v} on a log axis; values must be at least {MIN_LOG_VALUE:e}.", v = number(v),
-                    ),
+                    name,
+                    "",
+                    [(
+                        Some(i),
+                        format!(
+                            " is {v} on a log axis; values must be at least {MIN_LOG_VALUE:e}.",
+                            v = number(v),
+                        ),
+                    )],
                 )
                 .with_parameter(parameter)
                 .with_hint("use a linear axis, or rescale the values."));
@@ -241,13 +262,17 @@ fn check_sorted_times(context: &'static str, mark: &str, x: &[Option<Instant>]) 
         if let Some((j, u)) = previous
             && t < u
         {
-            return Err(Error::data(
+            return Err(Error::at_input(
                 context,
-                format!(
-                    "x[{i}] is {}, below x[{j}] = {}; {mark} needs x in non-decreasing order.",
-                    t.label(),
-                    u.label()
-                ),
+                "x",
+                "",
+                [
+                    (Some(i), format!(" is {}, below ", t.label())),
+                    (
+                        Some(j),
+                        format!(" = {}; {mark} needs x in non-decreasing order.", u.label()),
+                    ),
+                ],
             )
             .with_parameter("x")
             .with_hint("sort the points by x first."));
@@ -277,13 +302,17 @@ fn check_sorted(context: &'static str, mark: &str, x: &[f64]) -> Result<()> {
         if let Some((j, u)) = previous
             && v < u
         {
-            return Err(Error::data(
+            return Err(Error::at_input(
                 context,
-                format!(
-                    "x[{i}] is {v}, below x[{j}] = {u}; {mark} needs x in non-decreasing order.",
-                    v = number(v),
-                    u = number(u)
-                ),
+                "x",
+                "",
+                [
+                    (Some(i), format!(" is {}, below ", number(v))),
+                    (
+                        Some(j),
+                        format!(" = {}; {mark} needs x in non-decreasing order.", number(u)),
+                    ),
+                ],
             )
             .with_parameter("x")
             .with_hint("sort the points by x first."));
@@ -729,6 +758,38 @@ pub(super) fn check_time_error_bars(
     Ok(())
 }
 
+/// Checks one event row, retaining its group index and the positions highlight.
+pub(super) fn check_event_positions(x: ScaleKind, index: usize, data: &AxisData) -> Result<()> {
+    const CONTEXT: &str = "Axes.events()";
+    match (data, x) {
+        (AxisData::Times(_), ScaleKind::Time) => Ok(()),
+        (AxisData::Numbers(values), ScaleKind::Linear | ScaleKind::Log { .. }) => {
+            let transform = match x {
+                ScaleKind::Log { base } => Transform::Log(base),
+                _ => Transform::Linear,
+            };
+            check_numbers(
+                CONTEXT,
+                (&format!("positions[{index}]"), "positions"),
+                values,
+                transform,
+                "use NaN to leave an event out.",
+            )
+        }
+        _ => Err(Error::data(
+            CONTEXT,
+            format!(
+                "positions[{index}] does not match the x axis; \
+                 pass numbers on numeric axes or times on a time axis."
+            ),
+        )
+        .with_parameter("positions")
+        .with_hint(
+            "use x=Scale.time() for dates and times, or a linear or log x axis for numbers.",
+        )),
+    }
+}
+
 /// The words that finish the message for a reference line whose value is not finite.
 pub(super) const REFERENCE_LINE: &str = "a reference line needs a finite value";
 
@@ -928,6 +989,7 @@ pub(super) fn check_bars(
     }
     check_categories(
         context,
+        ("categories", "category", SharedAxis::X),
         x_kind,
         categories,
         "combine repeated categories and sum their heights.",
@@ -956,6 +1018,7 @@ pub(super) fn check_bars(
 pub(super) fn check_bar_group(
     context: &'static str,
     arrangement: Arrangement,
+    input: BarInput,
     x_kind: ScaleKind,
     y_transform: Transform,
     categories: &[String],
@@ -982,23 +1045,56 @@ pub(super) fn check_bar_group(
     }
     check_categories(
         context,
+        ("categories", "category", SharedAxis::X),
         x_kind,
         categories,
         "combine repeated categories and sum their heights within each series.",
     )?;
+    let (parameter, hint) = match input {
+        BarInput::Heights => ("heights", BAR_GAP_HINT),
+        BarInput::Series => ("series", "use NaN to omit that height."),
+    };
     for (i, s) in series.iter().enumerate() {
         check_numbers(
             context,
-            (&format!("series[{i}].values"), "series"),
+            (&format!("series[{i}].values"), parameter),
             &s.values,
             y_transform,
-            "use NaN to omit that height.",
-        )?;
+            hint,
+        )
+        .map_err(|error| error.in_group(i))?;
     }
     if arrangement == Arrangement::Stacked {
         check_stacked_totals(context, categories, series)?;
     }
     Ok(())
+}
+
+#[test]
+fn bar_input_details_do_not_depend_on_context() {
+    for context in ["Axes.bar()", "Axes.grouped_bar()", "Another API()"] {
+        for (input, parameter, hint) in [
+            (BarInput::Heights, "heights", BAR_GAP_HINT),
+            (BarInput::Series, "series", "use NaN to omit that height."),
+        ] {
+            let error = check_bar_group(
+                context,
+                Arrangement::Grouped,
+                input,
+                ScaleKind::Category,
+                Transform::Linear,
+                &["A".into()],
+                &[Series {
+                    values: vec![f64::INFINITY],
+                    ..Series::default()
+                }],
+            )
+            .unwrap_err();
+            assert_eq!(error.parameter(), Some(parameter));
+            assert_eq!(error.hint(), Some(hint));
+            assert!(error.to_string().starts_with(context));
+        }
+    }
 }
 
 /// Checks the category axis before any distribution data, then the unique category names.
@@ -1018,6 +1114,7 @@ fn check_box_categories(
     }
     check_categories(
         context,
+        ("categories", "category", SharedAxis::X),
         x,
         categories,
         "combine the samples of repeated categories.",
@@ -1025,22 +1122,21 @@ fn check_box_categories(
 }
 
 /// Checks that a distribution has one group per category, naming its container on failure.
-fn check_group_count(
+pub(super) fn check_group_count(
     context: &'static str,
     name: &str,
     parameter: &'static str,
     count: usize,
-    categories: usize,
+    (category_name, categories): (&str, usize),
+    hint: &'static str,
 ) -> Result<()> {
     if count != categories {
         return Err(Error::data(
             context,
-            format!("{name} has {count} groups; categories has {categories}."),
+            format!("{name} has {count} groups; {category_name} has {categories}."),
         )
         .with_parameter(parameter)
-        .with_hint(
-            "pass one group per category, using an empty group when there are no samples.",
-        ));
+        .with_hint(hint));
     }
     Ok(())
 }
@@ -1075,7 +1171,14 @@ pub(super) fn check_box_groups(
     groups: &[Vec<f64>],
 ) -> Result<()> {
     check_box_categories(context, kind, x, &[])?;
-    check_group_count(context, "groups", "groups", groups.len(), categories.len())?;
+    check_group_count(
+        context,
+        "groups",
+        "groups",
+        groups.len(),
+        ("categories", categories.len()),
+        "pass one group per category, using an empty group when there are no samples.",
+    )?;
     check_box_categories(context, kind, x, categories)?;
     check_group_values(context, "groups", "groups", y, groups)
 }
@@ -1104,7 +1207,8 @@ pub(super) fn check_distributions(
             &format!("distributions[{k}].groups"),
             "distributions",
             d.groups.len(),
-            categories.len(),
+            ("categories", categories.len()),
+            "pass one group per category, using an empty group when there are no samples.",
         )?;
     }
     check_box_categories(context, kind, x, categories)?;
@@ -1217,7 +1321,8 @@ pub(super) fn check_grouped_hist(
             &s.values,
             Transform::Linear,
             HIST_GAP_HINT,
-        )?;
+        )
+        .map_err(|error| error.in_group(i))?;
     }
     for (i, s) in series.iter().enumerate() {
         check_inside_edges(
@@ -1225,7 +1330,8 @@ pub(super) fn check_grouped_hist(
             &format!("series[{i}].values"),
             &s.values,
             binning.bins(),
-        )?;
+        )
+        .map_err(|error| error.in_group(i))?;
     }
     let values: Vec<&[f64]> = series.iter().map(|s| s.values.as_slice()).collect();
     check_heights(context, &binning, &values)?;
@@ -1365,14 +1471,19 @@ fn check_inside_edges(
         return Ok(());
     }
     let noun = if outside == 1 { "value" } else { "values" };
-    Err(Error::data(
+    Err(Error::at_input(
         context,
-        format!(
-            "{name} has {outside} finite {noun} outside the bin edges, which span {lo} to {hi}; \
+        name,
+        "",
+        [(
+            None,
+            format!(
+                " has {outside} finite {noun} outside the bin edges, which span {lo} to {hi}; \
              every finite value must lie within the edges.",
-            lo = number(lo),
-            hi = number(hi),
-        ),
+                lo = number(lo),
+                hi = number(hi),
+            ),
+        )],
     )
     .with_parameter("values")
     .with_hint("widen the edges or filter the values first."))
@@ -1410,7 +1521,7 @@ fn check_heights(context: &'static str, binning: &HistBinning, groups: &[&[f64]]
         for g in 0..bins.groups() {
             let height = bins.heights(g)[i];
             if !drawable(height) {
-                return Err(refused(i, "height", height));
+                return Err(refused(i, "height", height).in_group(g));
             }
         }
         if stacked && !drawable(top) {
@@ -1440,20 +1551,27 @@ fn check_hist_x(context: &'static str, x_kind: ScaleKind) -> Result<()> {
     }
 }
 
-/// Checks the categories of a bar mark: the x axis is a category axis, and no category appears
-/// twice.
-fn check_categories(
+/// Checks that names lie on a category axis and that none appears twice.
+pub(super) fn check_categories(
     context: &'static str,
-    x_kind: ScaleKind,
+    (parameter, singular, axis): (&'static str, &str, SharedAxis),
+    kind: ScaleKind,
     categories: &[String],
     repeat_hint: &'static str,
 ) -> Result<()> {
-    if x_kind != ScaleKind::Category {
+    if kind != ScaleKind::Category {
+        let name = axis.name();
         return Err(Error::data(
             context,
-            "categories holds names but the x axis is not a category axis; use a category x axis.",
+            format!(
+                "{parameter} holds names but the {name} axis is not a category axis; \
+                 use a category {name} axis."
+            ),
         )
-        .with_hint("pass x=Scale.category() to Figure.add_axes()."));
+        .with_hint(match axis {
+            SharedAxis::X => "pass x=Scale.category() to Figure.add_axes().",
+            SharedAxis::Y => "pass y=Scale.category() to Figure.add_axes().",
+        }));
     }
     let mut first_index: HashMap<&str, usize> = HashMap::with_capacity(categories.len());
     for (i, name) in categories.iter().enumerate() {
@@ -1461,10 +1579,11 @@ fn check_categories(
             return Err(Error::data(
                 context,
                 format!(
-                    "categories[{i}] repeats {name:?} from categories[{first}]; each category must appear once."
+                    "{parameter}[{i}] repeats {name:?} from {parameter}[{first}]; \
+                     each {singular} must appear once."
                 ),
             )
-            .with_parameter("categories")
+            .with_parameter(parameter)
             .with_hint(repeat_hint));
         }
     }
@@ -2076,9 +2195,14 @@ pub(super) fn check_kde_values(context: &'static str, name: &str, values: &[f64]
         "a density curve ignores NaN, so use it to leave a value out.",
     )?;
     if values.iter().all(|v| v.is_nan()) {
-        return Err(Error::data(
+        return Err(Error::at_input(
             context,
-            format!("{name} has no finite value; a density curve needs at least one."),
+            name,
+            "",
+            [(
+                None,
+                " has no finite value; a density curve needs at least one.".into(),
+            )],
         )
         .with_parameter("values")
         .with_hint(NO_FINITE_HINT));

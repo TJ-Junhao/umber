@@ -269,7 +269,8 @@ impl Writer<'_> {
             } => {
                 self.markers(shape, *fill, stroke.as_ref(), positions);
             }
-            Item::Text(t) => self.text(t),
+            Item::Text(t) => self.text(t, 0.0),
+            Item::RotatedText { text, angle } => self.text(text, *angle),
             Item::Image {
                 rect,
                 width,
@@ -413,7 +414,10 @@ impl Writer<'_> {
         self.body.push_str("</g>\n");
     }
 
-    fn text(&mut self, t: &TextItem) {
+    /// Writes a text item turned by `angle` degrees about its origin, clockwise on the page. As
+    /// outlines it is a path of its outline, which is already turned; as editable text a
+    /// `<text>` element, turned about its origin unless `angle` is zero (or not finite).
+    fn text(&mut self, t: &TextItem, angle: f32) {
         // Shared rule: a text item whose origin cannot be drawn is skipped in every mode.
         if !text_is_visible(t.color, t.origin) {
             return;
@@ -438,7 +442,10 @@ impl Writer<'_> {
                 let Some(font) = self.fonts.get(t.style.face.index()) else {
                     return;
                 };
-                let weight = t.style.weight.numeric();
+                let weight = font
+                    .resolved_weight(t.style.weight)
+                    .unwrap_or(t.style.weight)
+                    .numeric();
                 let mut attrs = String::new();
                 let _ = write!(
                     attrs,
@@ -451,6 +458,15 @@ impl Writer<'_> {
                 );
                 if t.style.tabular_figures {
                     attrs.push_str(r#" font-variant-numeric="tabular-nums""#);
+                }
+                if angle != 0.0 && angle.is_finite() {
+                    let _ = write!(
+                        attrs,
+                        r#" transform="rotate({} {} {})""#,
+                        num(angle),
+                        num(t.origin.x),
+                        num(t.origin.y)
+                    );
                 }
                 write_color(&mut attrs, "fill", "fill-opacity", t.color);
                 let _ = writeln!(

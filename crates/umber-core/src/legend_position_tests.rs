@@ -11,7 +11,7 @@ fn figure(position: LegendPosition) -> Figure {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
-        .legend_at(LegendStyle::Header, position)
+        .legend_at(LegendStyle::Header, position, crate::SizeSpec::Auto)
         .unwrap()
         .xlim(0.0, 1.0)
         .unwrap()
@@ -165,7 +165,7 @@ fn right_and_bottom_reserve_room_and_keep_plots_aligned() {
                 ScaleKind::Linear,
             )
             .unwrap()
-            .legend_at(LegendStyle::Header, position)
+            .legend_at(LegendStyle::Header, position, crate::SizeSpec::Auto)
             .unwrap()
             .xlabel("Time")
             .line(
@@ -211,7 +211,7 @@ fn single_bottom_wraps_and_reserves_the_inner_canvas_width() {
             let make = |position| {
                 let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
                 let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-                axes.legend_at(style, position)
+                axes.legend_at(style, position, crate::SizeSpec::Auto)
                     .unwrap()
                     .xlabel(xlabel)
                     .yticks_labeled(&[0.0, 1.0], vec!["1234567890".repeat(3); 2])
@@ -266,7 +266,11 @@ fn direct_style_rejects_a_position() {
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap()
-            .legend_at(LegendStyle::Header, LegendPosition::Bottom)
+            .legend_at(
+                LegendStyle::Header,
+                LegendPosition::Bottom,
+                crate::SizeSpec::Auto,
+            )
             .unwrap()
             .line(
                 AxisData::Numbers(vec![0.0, 1.0]),
@@ -280,7 +284,7 @@ fn direct_style_rejects_a_position() {
         let before = f.clone();
         let err = f
             .single_axes_mut()
-            .legend_at(LegendStyle::Direct, position)
+            .legend_at(LegendStyle::Direct, position, crate::SizeSpec::Auto)
             .unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -349,7 +353,8 @@ fn theme_position_is_inherited_and_legend_resets_an_override() {
         let mut f = Figure::new(6.0, 4.0, theme).unwrap();
         f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap()
-            .legend(LegendStyle::Header)
+            .legend(LegendStyle::Header, crate::SizeSpec::Auto)
+            .unwrap()
             .line(
                 AxisData::Numbers(vec![0.0, 1.0]),
                 &[0.0, 1.0],
@@ -363,10 +368,16 @@ fn theme_position_is_inherited_and_legend_resets_an_override() {
         let l = layout(&f);
         near(l.legend.entries()[0].swatch.x, l.plot.right() + 12.0);
         f.single_axes_mut()
-            .legend_at(LegendStyle::Header, LegendPosition::Bottom)
+            .legend_at(
+                LegendStyle::Header,
+                LegendPosition::Bottom,
+                crate::SizeSpec::Auto,
+            )
             .unwrap();
         assert_ne!(f.to_svg(crate::SvgText::Outlines).unwrap(), inherited);
-        f.single_axes_mut().legend(LegendStyle::Header);
+        f.single_axes_mut()
+            .legend(LegendStyle::Header, crate::SizeSpec::Auto)
+            .unwrap();
         assert_eq!(f.single_axes().legend_position(), None);
         assert_eq!(f.to_svg(crate::SvgText::Outlines).unwrap(), inherited);
     }
@@ -388,7 +399,7 @@ fn merged_grid_ignores_panel_positions() {
                 ScaleKind::Linear,
             )
             .unwrap()
-            .legend_at(LegendStyle::Header, position)
+            .legend_at(LegendStyle::Header, position, crate::SizeSpec::Auto)
             .unwrap()
             .line(
                 AxisData::Numbers(vec![0.0, 1.0]),
@@ -441,7 +452,7 @@ fn room_error(
             ScaleKind::Linear,
         )
         .unwrap();
-    axes.legend_at(style, position)
+    axes.legend_at(style, position, crate::SizeSpec::Auto)
         .unwrap()
         .xlim(0.0, 1.0)
         .unwrap()
@@ -527,8 +538,12 @@ fn every_existing_mark_provides_drawn_coverage() {
     let mut axes = numeric
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
-    axes.legend_at(LegendStyle::Header, LegendPosition::Best)
-        .unwrap();
+    axes.legend_at(
+        LegendStyle::Header,
+        LegendPosition::Best,
+        crate::SizeSpec::Auto,
+    )
+    .unwrap();
     let x = || AxisData::Numbers(vec![0.2, 0.8]);
     let y = &[0.3, 0.7];
     axes.line(
@@ -579,8 +594,12 @@ fn every_existing_mark_provides_drawn_coverage() {
     let mut axes = categorical
         .add_axes(ScaleKind::Category, ScaleKind::Linear)
         .unwrap();
-    axes.legend_at(LegendStyle::Header, LegendPosition::Best)
-        .unwrap();
+    axes.legend_at(
+        LegendStyle::Header,
+        LegendPosition::Best,
+        crate::SizeSpec::Auto,
+    )
+    .unwrap();
     let categories = || vec!["A".into(), "B".into()];
     let series = || {
         vec![Series {
@@ -619,9 +638,15 @@ fn every_existing_mark_provides_drawn_coverage() {
             ..inside
         };
         for mark in crate::resolve::resolve_marks(f.single_axes().marks(), f.theme()) {
-            let item =
-                crate::draw::marks(f.theme(), &resolved, &layout, std::slice::from_ref(&mark))
-                    .unwrap();
+            let item = crate::draw::marks(
+                f.theme(),
+                &crate::test_support::figure_fonts(f.theme()),
+                &resolved,
+                &layout,
+                std::slice::from_ref(&mark),
+            )
+            .unwrap()
+            .unwrap();
             let prepared = mark.for_coverage(Some(crate::coverage::Geometry::of(&item)));
             assert!(prepared.coverage(&p, &inside) > 0.0, "{mark:?}");
             assert_eq!(prepared.coverage(&p, &outside), 0.0);

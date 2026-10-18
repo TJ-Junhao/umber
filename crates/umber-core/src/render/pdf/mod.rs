@@ -126,7 +126,7 @@ pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>> {
 fn fonts_of(scene: &Scene, (width, height): (f32, f32)) -> Fonts {
     let mut fonts = FontSet::default();
     walk_page(scene, (width, height), &mut |item, _| {
-        if let Item::Text(text) = item {
+        if let Item::Text(text) | Item::RotatedText { text, .. } = item {
             fonts.collect(text);
         }
     });
@@ -599,6 +599,114 @@ mod tests {
         assert!(!text.contains("/F1"), "{text}");
         // The background, then the outline of the fallback run alone.
         assert_eq!(ops.iter().filter(|op| **op == "f").count(), 2, "{text}");
+    }
+
+    /// The text item of `text` in Inter at 12 pt from `library`, at (5, 20).
+    fn shaped(library: &FontLibrary, text: &str) -> TextItem {
+        let fonts = library.with_figure_fonts(&[Font::INTER]).unwrap();
+        let style = TextStyle {
+            face: FaceId::new(0),
+            weight: Weight::Regular,
+            size: 12.0,
+            tabular_figures: false,
+        };
+        let mut scene = Scene::new(100.0, 30.0, WHITE);
+        scene
+            .push_text(&fonts, text, style, p(5.0, 20.0), RED)
+            .unwrap();
+        match scene.items.pop() {
+            Some(Item::Text(item)) => item,
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    /// The `cm` operators of `content`, as numbers.
+    fn transforms(content: &str) -> Vec<Vec<f32>> {
+        content
+            .lines()
+            .filter(|line| line.ends_with(" cm"))
+            .map(|line| {
+                line.split_whitespace()
+                    .filter_map(|n| n.parse().ok())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn turned_text_is_written_in_a_turned_text_space() {
+        let mut scene = Scene::new(100.0, 60.0, WHITE);
+        scene.push(Item::RotatedText {
+            text: shaped(FontLibrary::global(), "Turn"),
+            angle: 30.0,
+        });
+        let text = content(&scene);
+        let (cos, sin) = (30.0_f32.to_radians().cos(), 30.0_f32.to_radians().sin());
+        let turned = transforms(&text)
+            .into_iter()
+            .find(|m| m.len() == 6 && (m[1] - sin).abs() < 1e-5)
+            .unwrap_or_else(|| panic!("no turned text space in {text}"));
+        assert!((turned[0] - cos).abs() < 1e-5 && (turned[2] - sin).abs() < 1e-5);
+        assert!((turned[3] + cos).abs() < 1e-5);
+        assert_eq!(&turned[4..], [5.0, 20.0]);
+        assert!(operators(&text).contains(&"TJ"), "{text}");
+        // A turn that is not finite writes the text unturned, as SVG does.
+        let mut scene = Scene::new(100.0, 60.0, WHITE);
+        scene.push(Item::RotatedText {
+            text: shaped(FontLibrary::global(), "Turn"),
+            angle: f32::NAN,
+        });
+        assert!(content(&scene).contains("1 0 0 -1 5 20 cm"));
+    }
+
+    #[test]
+    fn turned_outlines_are_not_turned_again() {
+        // A record built by hand holds its outline turned already: it is filled as it is.
+        let mut scene = Scene::new(60.0, 30.0, WHITE);
+        scene.push(Item::RotatedText {
+            text: TextItem {
+                text: "hand".into(),
+                style: TextStyle {
+                    face: FaceId::new(0),
+                    weight: Weight::Regular,
+                    size: 12.0,
+                    tabular_figures: false,
+                },
+                origin: p(5.0, 20.0),
+                color: RED,
+                outline: square(5.0, 10.0, 8.0),
+                width: 8.0,
+                glyphs: TextGlyphs::default(),
+            },
+            angle: 45.0,
+        });
+        let text = content(&scene);
+        assert_eq!(transforms(&text).len(), 1, "only the page's own: {text}");
+        assert_eq!(operators(&text).iter().filter(|op| **op == "f").count(), 2);
+        // A run whose font was not embedded is drawn from its unturned glyph outlines, turned
+        // about the origin, while the other runs stay text.
+        let library = FontLibrary::with_fallbacks(vec![
+            include_bytes!("../../../tests/fixtures/outline-cff.otf").to_vec(),
+        ]);
+        let mut scene = Scene::new(100.0, 60.0, WHITE);
+        scene.push(Item::RotatedText {
+            text: shaped(&library, "Ab\u{E001}"),
+            angle: 90.0,
+        });
+        let size = page_size(&scene).unwrap();
+        let fonts = fonts_of(&scene, size).without(1);
+        let (bytes, _) = page_content(&scene, &fonts, size);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(operators(&text).contains(&"TJ"), "{text}");
+        let about = transforms(&text)
+            .into_iter()
+            .find(|m| m.len() == 6 && (m[1] - 1.0).abs() < 1e-5 && (m[2] + 1.0).abs() < 1e-5)
+            .unwrap_or_else(|| panic!("no turn about the origin in {text}"));
+        // Turning (5, 20) by a quarter turn about itself leaves it in place.
+        assert!(
+            (about[4] - 25.0).abs() < 1e-3 && (about[5] - 15.0).abs() < 1e-3,
+            "{about:?}"
+        );
     }
 
     #[test]

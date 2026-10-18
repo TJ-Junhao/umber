@@ -75,9 +75,15 @@ fn overshoot(
         else {
             continue;
         };
-        let Item::Group { items, .. } =
-            crate::draw::marks(f.theme(), resolved, layout, std::slice::from_ref(mark)).unwrap()
-        else {
+        let Item::Group { items, .. } = crate::draw::marks(
+            f.theme(),
+            &crate::test_support::figure_fonts(f.theme()),
+            resolved,
+            layout,
+            std::slice::from_ref(mark),
+        )
+        .unwrap()
+        .unwrap() else {
             panic!("a mark group")
         };
         let drawn = data
@@ -260,7 +266,15 @@ fn explicit_limits_are_kept_and_clip_the_bubbles() {
     let Item::Group {
         items,
         clip: Some(clip),
-    } = crate::draw::marks(f.theme(), &r, &layout, &marks).unwrap()
+    } = crate::draw::marks(
+        f.theme(),
+        &crate::test_support::figure_fonts(f.theme()),
+        &r,
+        &layout,
+        &marks,
+    )
+    .unwrap()
+    .unwrap()
     else {
         panic!("clipped marks")
     };
@@ -344,7 +358,8 @@ fn bubbles_larger_than_the_plot_keep_the_data_limits_and_are_clipped() {
     let make = |draw| {
         let mut f = Figure::new(0.75, 0.75, Theme::pigment()).unwrap();
         let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-        a.legend(LegendStyle::None)
+        a.legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap()
             .xticks(&[])
             .unwrap()
             .yticks(&[])

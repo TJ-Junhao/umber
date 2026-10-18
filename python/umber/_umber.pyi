@@ -45,9 +45,14 @@ import numpy.typing
 
 __all__ = [
     "MAX_BINS",
+    "MAX_LEVELS",
     "Cmap",
     "ColorBy",
     "Figure",
+    "FontValue",
+    "font_from_files",
+    "font_system",
+    "check_file_bold_fallback",
     "Theme",
     "__version__",
     "box_stats",
@@ -73,6 +78,7 @@ __all__ = [
 
 __version__: str
 MAX_BINS: int
+MAX_LEVELS: int
 
 # A color argument: (kind, payload, alpha). Kind 0 is Color.AUTO (payload unused, 0), 1 is
 # Color.palette() (payload: the index), 2 is a fixed color (payload: 0xRRGGBBAA; alpha unused,
@@ -87,9 +93,28 @@ def grid_cells(rows: int, cols: int, count: int) -> list[tuple[int, int]]: ...
 # GREEN, TEAL, BLUE, PURPLE, PINK, BROWN.
 def named_colors() -> list[tuple[str, int]]: ...
 
-# A font argument: (kind, payload). Kind 0 is a bundled font (payload: its index in
-# bundled_fonts()).
-type _FontArg = tuple[int, int]
+# Font arguments have kind 0 (bundled index), 1 (file value) or 2 (system value).
+type _FontArg = tuple[int, int | FontValue]
+
+@final
+class FontValue:
+    def family_name(self) -> str: ...
+    def bold_fallback(self) -> bool: ...
+    def file_paths(self) -> tuple[str, str | None] | None: ...
+    def file_source(self) -> tuple[bytes, bytes | None, str, str | None] | None: ...
+    def __eq__(self, other: object, /) -> bool: ...
+    def __hash__(self) -> int: ...
+
+def font_from_files(
+    regular: bytes,
+    bold: bytes | None,
+    name: str,
+    regular_path: str,
+    bold_path: str | None,
+    bold_fallback: bool,
+) -> FontValue: ...
+def font_system(family: str, bold_fallback: bool) -> FontValue: ...
+def check_file_bold_fallback(has_bold: bool, bold_fallback: bool) -> None: ...
 
 # Bundled fonts as (constant name, index), in the order SOURCE_SERIF_4, IBM_PLEX_SANS, GEIST,
 # INTER, JETBRAINS_MONO.
@@ -159,6 +184,7 @@ class Cmap:
     """An immutable colormap; ``colors()`` lists its stops as opaque ``0xRRGGBBAA`` integers."""
 
     def __eq__(self, other: object, /) -> bool: ...
+    # mypy does not infer that a class defining __eq__ is unhashable.
     __hash__: ClassVar[None]  # type: ignore[assignment]  # pyright: ignore[reportIncompatibleMethodOverride]
     @staticmethod
     def viridis() -> Cmap: ...
@@ -195,6 +221,7 @@ class Theme:
     """An immutable theme. Theme colors must be concrete (color kind 2)."""
 
     def __eq__(self, other: object, /) -> bool: ...
+    # mypy does not infer that a class defining __eq__ is unhashable.
     __hash__: ClassVar[None]  # type: ignore[assignment]  # pyright: ignore[reportIncompatibleMethodOverride]
     @staticmethod
     def pigment() -> Theme: ...
@@ -274,12 +301,12 @@ class Figure:
         y_kind: int,
         y_base: float,
     ) -> tuple[int, int]: ...
-    def figure_title(self, text: str) -> None: ...
-    def figure_subtitle(self, text: str) -> None: ...
-    def title(self, row: int, col: int, text: str) -> None: ...
-    def subtitle(self, row: int, col: int, text: str) -> None: ...
-    def xlabel(self, row: int, col: int, text: str) -> None: ...
-    def ylabel(self, row: int, col: int, text: str) -> None: ...
+    def figure_title(self, text: str, size: _SizeArg) -> None: ...
+    def figure_subtitle(self, text: str, size: _SizeArg) -> None: ...
+    def title(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
+    def subtitle(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
+    def xlabel(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
+    def ylabel(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
     def xlim(self, row: int, col: int, low: float, high: float) -> None: ...
     def ylim(self, row: int, col: int, low: float, high: float) -> None: ...
     def xticks(self, row: int, col: int, positions: _FloatArray) -> None: ...
@@ -293,8 +320,8 @@ class Figure:
     def xtick_format(self, row: int, col: int, format: _TickFormatArg) -> None: ...
     def ytick_format(self, row: int, col: int, format: _TickFormatArg) -> None: ...
     def baseline(self, row: int, col: int, shown: bool | None) -> None: ...
-    def legend(self, row: int, col: int, style: int) -> None: ...
-    def legend_at(self, row: int, col: int, style: int, position: int) -> None: ...
+    def legend(self, row: int, col: int, style: int, size: _SizeArg) -> None: ...
+    def legend_at(self, row: int, col: int, style: int, position: int, size: _SizeArg) -> None: ...
     def line(
         self,
         row: int,
@@ -577,11 +604,21 @@ class Figure:
         self, row: int, col: int, x: _TimeArray, series: list[_SeriesArg]
     ) -> None: ...
     def figure_colorbar(
-        self, label: str, position: int | None, format: _TickFormatArg | None
+        self,
+        label: str,
+        position: int | None,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
     ) -> None: ...
     def clim(self, row: int, col: int, low: float, high: float) -> None: ...
     def colorbar(
-        self, row: int, col: int, label: str, position: int | None, format: _TickFormatArg | None
+        self,
+        row: int,
+        col: int,
+        label: str,
+        position: int | None,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
     ) -> None: ...
     def heatmap(
         self,
@@ -597,6 +634,39 @@ class Figure:
         annotate: bool,
         format: _TickFormatArg | None,
         render: int | None,
+    ) -> None: ...
+    def xtick_labels(self, row: int, col: int, size: _SizeArg) -> None: ...
+    def ytick_labels(self, row: int, col: int, size: _SizeArg) -> None: ...
+    def events(
+        self,
+        row: int,
+        col: int,
+        rows: list[str],
+        positions: list[_FloatArray | _TimeArray],
+        length: float | None,
+        width: _SizeArg,
+        color: _ColorArg,
+    ) -> None: ...
+    def strip(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+        size: _SizeArg,
+        jitter: float | None,
+    ) -> None: ...
+    def swarm(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+        size: _SizeArg,
     ) -> None: ...
     def grouped_hist(
         self,
@@ -638,4 +708,70 @@ class Figure:
         bandwidth: float | None,
         dash: int,
         width: _SizeArg,
+    ) -> None: ...
+    def bar_by(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        series: list[_SeriesArg],
+    ) -> None: ...
+    def grouped_line(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_area(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_scatter(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        marker: int,
+        size: _SizeArg,
+    ) -> None: ...
+    def grouped_step(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        position: int,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_ecdf(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues]],
+        complementary: bool,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def contour(
+        self,
+        row: int,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        z: _FloatArray,
+        levels: int | _FloatArray | None,
+        style: int,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
+        color: _ColorArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
     ) -> None: ...

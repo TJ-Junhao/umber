@@ -364,7 +364,11 @@ fn violin_coverage_counts_density_and_quantile_lines() {
     for grouped in [false, true] {
         let mut f = figure(Theme::pigment(), ScaleKind::Linear);
         f.single_axes_mut()
-            .legend_at(LegendStyle::Header, crate::LegendPosition::Best)
+            .legend_at(
+                LegendStyle::Header,
+                crate::LegendPosition::Best,
+                crate::SizeSpec::Auto,
+            )
             .unwrap();
         let groups = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
         if grouped {
@@ -392,7 +396,15 @@ fn violin_coverage_counts_density_and_quantile_lines() {
         }
         let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
         let marks = resolve_marks(f.single_axes().marks(), f.theme());
-        let item = crate::draw::marks(f.theme(), &resolved, &layout, &marks).unwrap();
+        let item = crate::draw::marks(
+            f.theme(),
+            &crate::test_support::figure_fonts(f.theme()),
+            &resolved,
+            &layout,
+            &marks,
+        )
+        .unwrap()
+        .unwrap();
         let prepared = marks[0].for_coverage(Some(crate::coverage::Geometry::of(&item)));
         let candidate = crate::layout::Frame {
             x: layout.plot.x + layout.plot.width / 2.0 - 1.0,
