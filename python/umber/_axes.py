@@ -31,7 +31,7 @@ from umber._enums import (
     Stat,
     Step,
 )
-from umber._errors import DataError, StyleError, UmberError, UsageError, new_error
+from umber._errors import DataError, StyleError, UsageError, new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._series import Distribution, Series
@@ -659,11 +659,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
-
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
-                a non-empty ``label`` or an explicit ``color``. Missing names and an
-                empty grouping column are refused. Column names are never read.
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
@@ -693,17 +692,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            _group.check_type(context, by)
-            if by is not AUTO:
-                _group.check_style(context, label, color)
-            xs = self._x_values(context, x)
-            ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
-            if by is AUTO:
-                self._native.line(self._row, self._col, xs, ys, name, spec, style.value, extent)
-            else:
-                groups = _group.xy_arguments(context, by, xs, ys)
-                self._native.grouped_line(self._row, self._col, groups, style.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                lambda: {"x": self._x_values(context, x), "y": self._y_values(context, y)},
+                lambda data, name: self._native.line(
+                    self._row, self._col, data[0], data[1], name, spec, style.value, extent
+                ),
+                lambda arguments: self._native.grouped_line(
+                    self._row, self._col, arguments[0], style.value, extent
+                ),
+            )
             return self
 
     def area(
@@ -731,11 +732,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The area color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
-
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
-                a non-empty ``label`` or an explicit ``color``. Missing names and an
-                empty grouping column are refused. Column names are never read.
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
@@ -765,17 +765,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            _group.check_type(context, by)
-            if by is not AUTO:
-                _group.check_style(context, label, color)
-            xs = self._x_values(context, x)
-            ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
-            if by is AUTO:
-                self._native.area(self._row, self._col, xs, ys, name, spec, style.value, extent)
-            else:
-                groups = _group.xy_arguments(context, by, xs, ys)
-                self._native.grouped_area(self._row, self._col, groups, style.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                lambda: {"x": self._x_values(context, x), "y": self._y_values(context, y)},
+                lambda data, name: self._native.area(
+                    self._row, self._col, data[0], data[1], name, spec, style.value, extent
+                ),
+                lambda arguments: self._native.grouped_area(
+                    self._row, self._col, arguments[0], style.value, extent
+                ),
+            )
             return self
 
     def scatter(
@@ -805,11 +807,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 ``scale`` and ``center`` must match the other color-mapped marks of these axes.
             marker: The marker shape.
             size: The marker size. ``Size.AUTO`` is the marker size of the theme.
-
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
-                a non-empty ``label`` or an explicit ``color``. Missing names and an
-                empty grouping column are refused. Column names are never read.
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
@@ -845,17 +846,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             extent = _size_argument(context, "size", size)
-            _group.check_type(context, by)
-            if by is not AUTO:
-                _group.check_style(context, label, color)
-            xs = self._x_values(context, x)
-            ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
-            if by is AUTO:
-                self._native.scatter(self._row, self._col, xs, ys, name, spec, shape.value, extent)
-            else:
-                groups = _group.xy_arguments(context, by, xs, ys)
-                self._native.grouped_scatter(self._row, self._col, groups, shape.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                lambda: {"x": self._x_values(context, x), "y": self._y_values(context, y)},
+                lambda data, name: self._native.scatter(
+                    self._row, self._col, data[0], data[1], name, spec, shape.value, extent
+                ),
+                lambda arguments: self._native.grouped_scatter(
+                    self._row, self._col, arguments[0], shape.value, extent
+                ),
+            )
             return self
 
     def bubbles(
@@ -1026,11 +1029,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             heights: The bar heights, one per category.
             label: The name shown in the legend; an empty string leaves the bars out of it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
-
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
-                a non-empty ``label`` or an explicit ``color``. Missing names and an
-                empty grouping column are refused. Column names are never read.
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
                 Categories may repeat across groups, but a (category, group) pair may
                 not repeat. Missing pairs draw no bar.
 
@@ -1061,20 +1063,22 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "heights", heights)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
-            _group.check_type(context, by)
-            if by is not AUTO:
-                _group.check_style(context, label, color)
-            category_names = names(context, "categories", categories)
-            values = floats(context, "heights", heights)
-            name = _args.text(context, "label", label)
-            if by is AUTO:
-                self._native.bar(self._row, self._col, category_names, values, name, spec)
-            else:
-                categories_by, series = _group.bar_arguments(context, by, category_names, values)
-                try:
-                    self._native.grouped_bar(self._row, self._col, categories_by, series)
-                except UmberError as error:
-                    raise _group.bar_error(context, error) from None
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                lambda: {
+                    "categories": names(context, "categories", categories),
+                    "heights": floats(context, "heights", heights),
+                },
+                lambda data, name: self._native.bar(
+                    self._row, self._col, data[0], data[1], name, spec
+                ),
+                lambda arguments: self._native.bar_by(
+                    self._row, self._col, arguments[0], arguments[1]
+                ),
+            )
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -1353,11 +1357,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             label: The name shown in the legend; an empty string leaves the histogram out of
                 it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
-
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
-                a non-empty ``label`` or an explicit ``color``. Missing names and an
-                empty grouping column are refused. Column names are never read.
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
                 Groups share the bins. ``Hist.STEP`` normalizes each group separately;
                 ``Hist.STACKED`` normalizes their total. ``Hist.BARS`` is refused.
 
@@ -1400,29 +1403,33 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             shown = instance(context, "stat", stat, Stat, _STAT_HINT)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
-            _group.check_type(context, by)
-            if by is not AUTO:
-                _group.check_style(context, label, color)
-            data = floats(context, "values", values)
-            native_bins = floats(context, "bins", bins) if edges else count
-            name = _args.text(context, "label", label)
-            if by is AUTO:
-                self._native.hist(
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                lambda: {"values": floats(context, "values", values)},
+                lambda data, name: self._native.hist(
                     self._row,
                     self._col,
-                    data,
-                    native_bins,
+                    data[0],
+                    floats(context, "bins", bins) if edges else count,
                     drawn.value,
                     running,
                     shown.value,
                     name,
                     spec,
-                )
-            else:
-                series = _group.series_arguments(context, by, data)
-                self._native.grouped_hist(
-                    self._row, self._col, series, native_bins, drawn.value, running, shown.value
-                )
+                ),
+                lambda arguments: self._native.grouped_hist(
+                    self._row,
+                    self._col,
+                    arguments[0],
+                    floats(context, "bins", bins) if edges else count,
+                    drawn.value,
+                    running,
+                    shown.value,
+                ),
+            )
             return self
 
     def mesh(
@@ -1659,11 +1666,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
-
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
-                a non-empty ``label`` or an explicit ``color``. Missing names and an
-                empty grouping column are refused. Column names are never read.
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
@@ -1694,21 +1700,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            _group.check_type(context, by)
-            if by is not AUTO:
-                _group.check_style(context, label, color)
-            xs = self._x_values(context, x)
-            ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
-            if by is AUTO:
-                self._native.step(
-                    self._row, self._col, xs, ys, position.value, name, spec, style.value, extent
-                )
-            else:
-                groups = _group.xy_arguments(context, by, xs, ys)
-                self._native.grouped_step(
-                    self._row, self._col, groups, position.value, style.value, extent
-                )
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                lambda: {"x": self._x_values(context, x), "y": self._y_values(context, y)},
+                lambda data, name: self._native.step(
+                    self._row,
+                    self._col,
+                    data[0],
+                    data[1],
+                    position.value,
+                    name,
+                    spec,
+                    style.value,
+                    extent,
+                ),
+                lambda arguments: self._native.grouped_step(
+                    self._row, self._col, arguments[0], position.value, style.value, extent
+                ),
+            )
             return self
 
     def hline(
@@ -2539,11 +2551,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
-
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
-                a non-empty ``label`` or an explicit ``color``. Missing names and an
-                empty grouping column are refused. Column names are never read.
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
@@ -2575,16 +2586,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            _group.check_type(context, by)
-            if by is not AUTO:
-                _group.check_style(context, label, color)
-            data = _limit_values(context, "values", values, self._x)
-            name = _args.text(context, "label", label)
-            if by is AUTO:
-                self._native.ecdf(self._row, self._col, data, flag, name, spec, style.value, extent)
-            else:
-                groups = _group.ecdf_arguments(context, by, data)
-                self._native.grouped_ecdf(self._row, self._col, groups, flag, style.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                lambda: {"values": _limit_values(context, "values", values, self._x)},
+                lambda data, name: self._native.ecdf(
+                    self._row, self._col, data[0], flag, name, spec, style.value, extent
+                ),
+                lambda arguments: self._native.grouped_ecdf(
+                    self._row, self._col, arguments[0], flag, style.value, extent
+                ),
+            )
             return self
 
     def kde(
@@ -2616,11 +2630,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
-
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
-                a non-empty ``label`` or an explicit ``color``. Missing names and an
-                empty grouping column are refused. Column names are never read.
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
                 Each group has its own density with area 1.
 
         Returns:
@@ -2662,20 +2675,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            _group.check_type(context, by)
-            if by is not AUTO:
-                _group.check_style(context, label, color)
-            data = floats(context, "values", values)
-            name = _args.text(context, "label", label)
-            if by is AUTO:
-                self._native.kde(
-                    self._row, self._col, data, width_of, name, spec, style.value, extent
-                )
-            else:
-                series = _group.series_arguments(context, by, data)
-                self._native.grouped_kde(
-                    self._row, self._col, series, width_of, style.value, extent
-                )
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                lambda: {"values": floats(context, "values", values)},
+                lambda data, name: self._native.kde(
+                    self._row, self._col, data[0], width_of, name, spec, style.value, extent
+                ),
+                lambda arguments: self._native.grouped_kde(
+                    self._row, self._col, arguments[0], width_of, style.value, extent
+                ),
+            )
             return self
 
 

@@ -43,7 +43,7 @@ use umber_core::{
 
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::{enum_value, render_choice};
-use crate::errors::{core_error, internal_value};
+use crate::errors::{core_error, group_error, internal_value};
 use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
@@ -68,11 +68,12 @@ fn xy_groups(
 ) -> PyResult<Vec<(String, umber_core::AxisData, umber_core::AxisData)>> {
     groups
         .into_iter()
-        .map(|(label, x, y)| {
+        .enumerate()
+        .map(|(i, (label, x, y))| {
             Ok((
                 label,
-                series_data(context, "x", &x)?,
-                series_data(context, "y", &y)?,
+                series_data(context, "x", &x).map_err(|error| group_error(error, i))?,
+                series_data(context, "y", &y).map_err(|error| group_error(error, i))?,
             ))
         })
         .collect()
@@ -648,6 +649,21 @@ impl Figure {
         let (categories, series) = (names(categories)?, Self::series(series)?);
         self.axes(row, col)?
             .grouped_bar(categories, series)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds aligned long-form bars with ordinary bar error context.
+    fn bar_by(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        series: SeriesArgs<'_>,
+    ) -> PyResult<()> {
+        let (categories, series) = (names(categories)?, Self::series(series)?);
+        self.axes(row, col)?
+            .bar_by(categories, series)
             .map(drop)
             .map_err(core_error)
     }
@@ -1619,7 +1635,14 @@ impl Figure {
     ) -> PyResult<()> {
         let groups = groups
             .into_iter()
-            .map(|(label, values)| Ok((label, series_data("Axes.ecdf()", "values", &values)?)))
+            .enumerate()
+            .map(|(i, (label, values))| {
+                Ok((
+                    label,
+                    series_data("Axes.ecdf()", "values", &values)
+                        .map_err(|error| group_error(error, i))?,
+                ))
+            })
             .collect::<PyResult<Vec<_>>>()?;
         let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
         self.axes(row, col)?

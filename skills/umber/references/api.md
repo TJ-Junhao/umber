@@ -145,11 +145,10 @@ Args:
     color: The area color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
-
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
-        a non-empty ``label`` or an explicit ``color``. Missing names and an
-        empty grouping column are refused. Column names are never read.
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
@@ -238,11 +237,10 @@ Args:
     heights: The bar heights, one per category.
     label: The name shown in the legend; an empty string leaves the bars out of it.
     color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
-
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
-        a non-empty ``label`` or an explicit ``color``. Missing names and an
-        empty grouping column are refused. Column names are never read.
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
         Categories may repeat across groups, but a (category, group) pair may
         not repeat. Missing pairs draw no bar.
 
@@ -511,11 +509,10 @@ Args:
     color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
-
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
-        a non-empty ``label`` or an explicit ``color``. Missing names and an
-        empty grouping column are refused. Column names are never read.
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
@@ -806,11 +803,10 @@ Args:
     label: The name shown in the legend; an empty string leaves the histogram out of
         it.
     color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
-
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
-        a non-empty ``label`` or an explicit ``color``. Missing names and an
-        empty grouping column are refused. Column names are never read.
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
         Groups share the bins. ``Hist.STEP`` normalizes each group separately;
         ``Hist.STACKED`` normalizes their total. ``Hist.BARS`` is refused.
 
@@ -984,11 +980,10 @@ Args:
     color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
-
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
-        a non-empty ``label`` or an explicit ``color``. Missing names and an
-        empty grouping column are refused. Column names are never read.
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
         Each group has its own density with area 1.
 
 Returns:
@@ -1074,11 +1069,10 @@ Args:
     color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
-
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
-        a non-empty ``label`` or an explicit ``color``. Missing names and an
-        empty grouping column are refused. Column names are never read.
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
@@ -1191,11 +1185,10 @@ Args:
         ``scale`` and ``center`` must match the other color-mapped marks of these axes.
     marker: The marker shape.
     size: The marker size. ``Size.AUTO`` is the marker size of the theme.
-
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
-        a non-empty ``label`` or an explicit ``color``. Missing names and an
-        empty grouping column are refused. Column names are never read.
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
@@ -1379,11 +1372,10 @@ Args:
     color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
-
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
-        a non-empty ``label`` or an explicit ``color``. Missing names and an
-        empty grouping column are refused. Column names are never read.
+        a non-empty ``label`` or an explicit ``color``. Missing or empty names
+        and an empty grouping column are refused. Column names are never read.
 
 Returns:
     These axes.
@@ -4993,10 +4985,10 @@ Args:
     label: The name shown in the legend; an empty string leaves the bars out of it.
     color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
     theme: The theme of the new figure.
-
     by: One group name per data row; ``AUTO`` draws one series. Groups follow first
         appearance, supplying their labels and palette colors. Do not pass an explicit
-        color or a non-empty label. Missing names and an empty grouping column are refused.
+        color or a non-empty label. Missing or empty names and an empty grouping column
+        are refused.
 
 Returns:
     The axes of the new figure, with a category x axis.
@@ -5043,10 +5035,10 @@ Args:
     label: The name shown in the legend; an empty string leaves the histogram out of it.
     color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
     theme: The theme of the new figure.
-
     by: One group name per data row; ``AUTO`` draws one series. Groups follow first
         appearance, supplying their labels and palette colors. Do not pass an explicit
-        color or a non-empty label. Missing names and an empty grouping column are refused.
+        color or a non-empty label. Missing or empty names and an empty grouping column
+        are refused.
 
 Returns:
     The axes of the new figure.
@@ -5089,10 +5081,10 @@ Args:
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
     theme: The theme of the new figure.
-
     by: One group name per data row; ``AUTO`` draws one series. Groups follow first
         appearance, supplying their labels and palette colors. Do not pass an explicit
-        color or a non-empty label. Missing names and an empty grouping column are refused.
+        color or a non-empty label. Missing or empty names and an empty grouping column
+        are refused.
 
 Returns:
     The axes of the new figure.
@@ -5135,10 +5127,10 @@ Args:
     marker: The marker shape.
     size: The marker size. ``Size.AUTO`` is the marker size of the theme.
     theme: The theme of the new figure.
-
     by: One group name per data row; ``AUTO`` draws one series. Groups follow first
         appearance, supplying their labels and palette colors. Do not pass an explicit
-        color or a non-empty label. Missing names and an empty grouping column are refused.
+        color or a non-empty label. Missing or empty names and an empty grouping column
+        are refused.
 
 Returns:
     The axes of the new figure.

@@ -51,41 +51,62 @@ fn check_numbers(
             continue;
         }
         if v.is_infinite() {
-            return Err(Error::data(
+            return Err(Error::at_input(
                 context,
-                format!("{name}[{i}] is {v}; values must be finite.", v = number(v)),
+                name,
+                vec![Some(i)],
+                vec![
+                    String::new(),
+                    format!(" is {v}; values must be finite.", v = number(v)),
+                ],
             )
             .with_parameter(parameter)
             .with_hint(infinite_hint));
         }
         if v.abs() > MAX_MAGNITUDE {
-            return Err(Error::data(
+            return Err(Error::at_input(
                 context,
-                format!(
-                    "{name}[{i}] is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
-                    v = number(v)
-                ),
+                name,
+                vec![Some(i)],
+                vec![
+                    String::new(),
+                    format!(
+                        " is {v}; magnitudes must not exceed {MAX_MAGNITUDE:e}.",
+                        v = number(v)
+                    ),
+                ],
             )
             .with_parameter(parameter));
         }
         if log {
             if v <= 0.0 {
-                return Err(Error::data(
+                return Err(Error::at_input(
                     context,
-                    format!(
-                        "{name}[{i}] is {v} on a log axis; values must be positive.",
-                        v = number(v)
-                    ),
+                    name,
+                    vec![Some(i)],
+                    vec![
+                        String::new(),
+                        format!(
+                            " is {v} on a log axis; values must be positive.",
+                            v = number(v)
+                        ),
+                    ],
                 )
                 .with_parameter(parameter)
                 .with_hint("use a linear axis, or remove values that are not positive."));
             }
             if v < MIN_LOG_VALUE {
-                return Err(Error::data(
+                return Err(Error::at_input(
                     context,
-                    format!(
-                        "{name}[{i}] is {v} on a log axis; values must be at least {MIN_LOG_VALUE:e}.", v = number(v),
-                    ),
+                    name,
+                    vec![Some(i)],
+                    vec![
+                        String::new(),
+                        format!(
+                            " is {v} on a log axis; values must be at least {MIN_LOG_VALUE:e}.",
+                            v = number(v),
+                        ),
+                    ],
                 )
                 .with_parameter(parameter)
                 .with_hint("use a linear axis, or rescale the values."));
@@ -241,13 +262,15 @@ fn check_sorted_times(context: &'static str, mark: &str, x: &[Option<Instant>]) 
         if let Some((j, u)) = previous
             && t < u
         {
-            return Err(Error::data(
+            return Err(Error::at_input(
                 context,
-                format!(
-                    "x[{i}] is {}, below x[{j}] = {}; {mark} needs x in non-decreasing order.",
-                    t.label(),
-                    u.label()
-                ),
+                "x",
+                vec![Some(i), Some(j)],
+                vec![
+                    String::new(),
+                    format!(" is {}, below ", t.label()),
+                    format!(" = {}; {mark} needs x in non-decreasing order.", u.label()),
+                ],
             )
             .with_parameter("x")
             .with_hint("sort the points by x first."));
@@ -277,13 +300,15 @@ fn check_sorted(context: &'static str, mark: &str, x: &[f64]) -> Result<()> {
         if let Some((j, u)) = previous
             && v < u
         {
-            return Err(Error::data(
+            return Err(Error::at_input(
                 context,
-                format!(
-                    "x[{i}] is {v}, below x[{j}] = {u}; {mark} needs x in non-decreasing order.",
-                    v = number(v),
-                    u = number(u)
-                ),
+                "x",
+                vec![Some(i), Some(j)],
+                vec![
+                    String::new(),
+                    format!(" is {}, below ", number(v)),
+                    format!(" = {}; {mark} needs x in non-decreasing order.", number(u)),
+                ],
             )
             .with_parameter("x")
             .with_hint("sort the points by x first."));
@@ -989,11 +1014,23 @@ pub(super) fn check_bar_group(
     for (i, s) in series.iter().enumerate() {
         check_numbers(
             context,
-            (&format!("series[{i}].values"), "series"),
+            (
+                &format!("series[{i}].values"),
+                if context == "Axes.bar()" {
+                    "heights"
+                } else {
+                    "series"
+                },
+            ),
             &s.values,
             y_transform,
-            "use NaN to omit that height.",
-        )?;
+            if context == "Axes.bar()" {
+                BAR_GAP_HINT
+            } else {
+                "use NaN to omit that height."
+            },
+        )
+        .map_err(|error| error.in_group(i))?;
     }
     if arrangement == Arrangement::Stacked {
         check_stacked_totals(context, categories, series)?;
@@ -1217,7 +1254,8 @@ pub(super) fn check_grouped_hist(
             &s.values,
             Transform::Linear,
             HIST_GAP_HINT,
-        )?;
+        )
+        .map_err(|error| error.in_group(i))?;
     }
     for (i, s) in series.iter().enumerate() {
         check_inside_edges(
@@ -1225,7 +1263,8 @@ pub(super) fn check_grouped_hist(
             &format!("series[{i}].values"),
             &s.values,
             binning.bins(),
-        )?;
+        )
+        .map_err(|error| error.in_group(i))?;
     }
     let values: Vec<&[f64]> = series.iter().map(|s| s.values.as_slice()).collect();
     check_heights(context, &binning, &values)?;
@@ -1365,14 +1404,19 @@ fn check_inside_edges(
         return Ok(());
     }
     let noun = if outside == 1 { "value" } else { "values" };
-    Err(Error::data(
+    Err(Error::at_input(
         context,
-        format!(
-            "{name} has {outside} finite {noun} outside the bin edges, which span {lo} to {hi}; \
+        name,
+        vec![None],
+        vec![
+            String::new(),
+            format!(
+                " has {outside} finite {noun} outside the bin edges, which span {lo} to {hi}; \
              every finite value must lie within the edges.",
-            lo = number(lo),
-            hi = number(hi),
-        ),
+                lo = number(lo),
+                hi = number(hi),
+            ),
+        ],
     )
     .with_parameter("values")
     .with_hint("widen the edges or filter the values first."))
@@ -1410,7 +1454,7 @@ fn check_heights(context: &'static str, binning: &HistBinning, groups: &[&[f64]]
         for g in 0..bins.groups() {
             let height = bins.heights(g)[i];
             if !drawable(height) {
-                return Err(refused(i, "height", height));
+                return Err(refused(i, "height", height).in_group(g));
             }
         }
         if stacked && !drawable(top) {
@@ -2076,9 +2120,14 @@ pub(super) fn check_kde_values(context: &'static str, name: &str, values: &[f64]
         "a density curve ignores NaN, so use it to leave a value out.",
     )?;
     if values.iter().all(|v| v.is_nan()) {
-        return Err(Error::data(
+        return Err(Error::at_input(
             context,
-            format!("{name} has no finite value; a density curve needs at least one."),
+            name,
+            vec![None],
+            vec![
+                String::new(),
+                " has no finite value; a density curve needs at least one.".into(),
+            ],
         )
         .with_parameter("values")
         .with_hint(NO_FINITE_HINT));

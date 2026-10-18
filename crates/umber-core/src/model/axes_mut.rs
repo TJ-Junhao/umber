@@ -1212,11 +1212,37 @@ impl<'a> AxesMut<'a> {
         categories: Vec<String>,
         series: Vec<Series>,
     ) -> Result<&mut Self> {
-        const CONTEXT: &str = "Axes.grouped_bar()";
+        self.bar_groups("Axes.grouped_bar()", categories, series)
+    }
+
+    /// Adds aligned long-form bars, reporting errors under the ordinary bar call.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, Series, ColorSpec};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// axes.bar_by(vec!["A".into()], vec![Series {
+    ///     label: "North".into(), values: vec![1.0], color: ColorSpec::AUTO,
+    /// }])?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn bar_by(&mut self, categories: Vec<String>, series: Vec<Series>) -> Result<&mut Self> {
+        self.bar_groups("Axes.bar()", categories, series)
+    }
+
+    /// Validates aligned bars with the caller's context before storing a mark.
+    fn bar_groups(
+        &mut self,
+        context: &'static str,
+        categories: Vec<String>,
+        series: Vec<Series>,
+    ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
+        let (along, values) = check_band_axes(context, axes.x, axes.y)?;
         let mark = BarGroupMark::new(
-            CONTEXT,
+            context,
             Arrangement::Grouped,
             along,
             values,
@@ -3002,6 +3028,7 @@ impl<'a> AxesMut<'a> {
                     (name.as_str(), &s.values),
                     options,
                 )
+                .map_err(|error| error.in_group(i))
             })
             .collect::<Result<Vec<_>>>()?;
         axes.marks.extend(marks.into_iter().map(Mark::Kde));
@@ -3033,21 +3060,17 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.line()";
         check_series_y(CONTEXT, self.y)?;
-        let series = self.xy_groups(CONTEXT, groups, LINE_GAP_HINT)?;
-        self.axes_mut()
-            .marks
-            .extend(series.into_iter().map(|(label, series)| {
-                Mark::line(
-                    series,
-                    LineOptions {
-                        label,
-                        dash,
-                        width,
-                        ..LineOptions::default()
-                    },
-                )
-            }));
-        Ok(self)
+        self.grouped_xy(CONTEXT, groups, LINE_GAP_HINT, |label, series| {
+            Ok(Mark::line(
+                series,
+                LineOptions {
+                    label,
+                    dash,
+                    width,
+                    ..LineOptions::default()
+                },
+            ))
+        })
     }
 
     /// Adds one filled area per named pair of columns, in order with palette colors.
@@ -3074,21 +3097,17 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.area()";
         check_series_y(CONTEXT, self.y)?;
-        let series = self.xy_groups(CONTEXT, groups, AREA_GAP_HINT)?;
-        self.axes_mut()
-            .marks
-            .extend(series.into_iter().map(|(label, series)| {
-                Mark::area(
-                    series,
-                    AreaOptions {
-                        label,
-                        dash,
-                        width,
-                        ..AreaOptions::default()
-                    },
-                )
-            }));
-        Ok(self)
+        self.grouped_xy(CONTEXT, groups, AREA_GAP_HINT, |label, series| {
+            Ok(Mark::area(
+                series,
+                AreaOptions {
+                    label,
+                    dash,
+                    width,
+                    ..AreaOptions::default()
+                },
+            ))
+        })
     }
 
     /// Adds one scatter per named pair of columns, in order with palette colors.
@@ -3115,21 +3134,17 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.scatter()";
         check_not_two_categories(CONTEXT, self.x, self.y)?;
-        let series = self.xy_groups(CONTEXT, groups, SCATTER_GAP_HINT)?;
-        self.axes_mut()
-            .marks
-            .extend(series.into_iter().map(|(label, series)| {
-                Mark::scatter(
-                    series,
-                    ScatterOptions {
-                        label,
-                        marker,
-                        size,
-                        ..ScatterOptions::default()
-                    },
-                )
-            }));
-        Ok(self)
+        self.grouped_xy(CONTEXT, groups, SCATTER_GAP_HINT, |label, series| {
+            Ok(Mark::scatter(
+                series,
+                ScatterOptions {
+                    label,
+                    marker,
+                    size,
+                    ..ScatterOptions::default()
+                },
+            ))
+        })
     }
 
     /// Adds one step line per named pair of columns, in order with palette colors.
@@ -3157,23 +3172,19 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.step()";
         check_series_y(CONTEXT, self.y)?;
-        let series = self.xy_groups(CONTEXT, groups, LINE_GAP_HINT)?;
-        let marks = series
-            .into_iter()
-            .map(|(label, series)| {
-                check_step_order(CONTEXT, series.x())?;
-                let options = StepOptions {
+        self.grouped_xy(CONTEXT, groups, LINE_GAP_HINT, |label, series| {
+            check_step_order(CONTEXT, series.x())?;
+            Ok(Mark::Step(StepMark::new(
+                series,
+                StepOptions {
                     label,
                     position,
                     dash,
                     width,
                     ..StepOptions::default()
-                };
-                Ok(Mark::Step(StepMark::new(series, options)))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        self.axes_mut().marks.extend(marks);
-        Ok(self)
+                },
+            )))
+        })
     }
 
     /// Adds one ECDF per named column, in order with palette colors.
@@ -3202,7 +3213,8 @@ impl<'a> AxesMut<'a> {
         check_groups_present(CONTEXT, groups.len())?;
         let marks = groups
             .into_iter()
-            .map(|(label, values)| {
+            .enumerate()
+            .map(|(i, (label, values))| {
                 let options = EcdfOptions {
                     label,
                     complementary,
@@ -3210,28 +3222,40 @@ impl<'a> AxesMut<'a> {
                     width,
                     ..EcdfOptions::default()
                 };
-                EcdfMark::new(CONTEXT, (self.x, self.y), values, options).map(Mark::Ecdf)
+                EcdfMark::new(CONTEXT, (self.x, self.y), values, options)
+                    .map(Mark::Ecdf)
+                    .map_err(|error| error.in_group(i))
             })
             .collect::<Result<Vec<_>>>()?;
         self.axes_mut().marks.extend(marks);
         Ok(self)
     }
 
-    /// Validates grouped coordinates without changing the axes or retaining input buffers.
-    fn xy_groups(
-        &self,
+    /// Builds all grouped marks before changing the axes.
+    fn grouped_xy(
+        &mut self,
         context: &'static str,
         groups: Vec<(String, AxisData, AxisData)>,
         gap_hint: &'static str,
-    ) -> Result<Vec<(String, XySeries)>> {
+        make_mark: impl Fn(String, XySeries) -> Result<Mark>,
+    ) -> Result<&mut Self> {
         check_groups_present(context, groups.len())?;
-        groups
+        let series = groups
             .into_iter()
-            .map(|(label, x, y)| {
+            .enumerate()
+            .map(|(i, (label, x, y))| {
                 XySeries::new(context, (self.x, self.y), x, y, gap_hint)
                     .map(|series| (label, series))
+                    .map_err(|error| error.in_group(i))
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        let marks = series
+            .into_iter()
+            .enumerate()
+            .map(|(i, (label, series))| make_mark(label, series).map_err(|error| error.in_group(i)))
+            .collect::<Result<Vec<_>>>()?;
+        self.axes_mut().marks.extend(marks);
+        Ok(self)
     }
 }
 

@@ -153,7 +153,7 @@ pub use binning::MAX_BINS;
 pub use cmap::Cmap;
 pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
-pub use error::{Error, Result};
+pub use error::{Error, ErrorMessage, InputLocation, Result};
 pub use figure::StackedAreaMark;
 pub use figure::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,

@@ -1,12 +1,13 @@
 """Split long-form columns into groups before making a single native call."""
 
-from typing import Any, Final, cast
+from collections.abc import Callable
+from typing import Any, Final, NamedTuple, cast
 
 import numpy as np
 import numpy.typing as npt
 
-from umber import _color
-from umber._args import short_repr
+from umber import _args, _color
+from umber._args import checked_text, short_repr
 from umber._color import Color
 from umber._enums import AUTO, Auto
 from umber._errors import DataError, UmberError, UsageError, details, new_error
@@ -17,23 +18,25 @@ from umber._values import (
     check_axis_type,
     check_names_type,
     check_one_dimensional,
+    is_missing,
     names,
 )
 
 type Coordinates = FloatArray | MicrosArray | list[str]
+type Rows = npt.NDArray[np.intp]
 type NativeSeries = tuple[str, FloatArray, tuple[int, int, float]]
 
 _STYLE_HINT: Final = "each group takes the next palette color and its name as the label."
 _LENGTH_HINT: Final = "pass one group name per data value."
 
 
-def check_type(context: str, by: Values[str] | Auto) -> None:
-    """Check the grouping column's container without converting its values."""
-    if by is not AUTO:
-        check_names_type(context, "by", by)
+class _Group(NamedTuple):
+    label: str
+    rows: Rows
+    columns: list[npt.NDArray[Any]]
 
 
-def check_style(context: str, label: str, color: object) -> None:
+def _check_style(context: str, label: str, color: object) -> None:
     """Refuse an explicit label or color when groups supply both."""
     if str.__str__(label):
         raise new_error(
@@ -53,6 +56,97 @@ def check_style(context: str, label: str, color: object) -> None:
         )
 
 
+def _name(context: str, index: int, value: object) -> str:
+    """Validate a name without coercing missing or non-string values."""
+    if not isinstance(value, str):
+        message = (
+            f"by[{index}] is missing; every row needs a group name."
+            if is_missing(value)
+            else f"by[{index}] is {short_repr(value)}, not a string; group names must be strings."
+        )
+        raise new_error(
+            DataError,
+            context,
+            message,
+            parameter="by",
+            hint="give every group a non-empty name."
+            if is_missing(value)
+            else "convert each name with str() first.",
+        )
+    if not str.__str__(value):
+        raise new_error(
+            DataError,
+            context,
+            f"by[{index}] is empty; group names must be non-empty.",
+            parameter="by",
+            hint="give every group a non-empty name.",
+        )
+    return checked_text(context, "by", f"by[{index}]", value, DataError)
+
+
+def _labels(context: str, by: Values[str]) -> npt.NDArray[Any]:
+    """Convert a type-checked column, preserving invalid mixed-list elements."""
+    if np.ma.isMaskedArray(by):
+        names(context, "by", by)
+    array = np.asarray(by) if hasattr(by, "__array__") else np.asarray(by, dtype=object)
+    check_one_dimensional(context, "by", array)
+    if not len(array):
+        raise new_error(
+            DataError,
+            context,
+            "by is empty; pass at least one group.",
+            parameter="by",
+            hint=_LENGTH_HINT,
+        )
+    if array.dtype.kind not in "UT":
+        # Object columns need element type checks before NumPy can compare their names.
+        array = np.asarray([_name(context, i, value) for i, value in enumerate(array.tolist())])
+    return array
+
+
+def _partition(labels: npt.NDArray[Any]) -> tuple[npt.NDArray[Any], Rows, Rows]:
+    """Factor names into first-seen order and return each row's category code."""
+    unique, first, inverse = np.unique(labels, return_index=True, return_inverse=True)
+    order = np.argsort(first)
+    codes = np.empty(len(order), dtype=np.intp)
+    codes[order] = np.arange(len(order))
+    return unique[order], first[order], codes[inverse]
+
+
+def _split(
+    context: str,
+    by: Values[str],
+    columns: dict[str, Coordinates],
+) -> list[_Group]:
+    labels = _labels(context, by)
+    arrays = [np.asarray(column) for column in columns.values()]
+    for name, array in zip(columns, arrays, strict=True):
+        check_one_dimensional(context, name, array)
+        if len(array) != len(labels):
+            raise new_error(
+                DataError,
+                context,
+                f"by has {len(labels)} values but {name} has {len(array)}; "
+                "by must have one name per data value.",
+                parameter="by",
+                hint=_LENGTH_HINT,
+            )
+    unique, first = np.unique(labels, return_index=True)
+    appearance = np.argsort(first)
+    checked = {int(i): _name(context, int(first[i]), str(unique[i])) for i in appearance}
+    if len(unique) <= 8:
+        # A few vectorized comparisons cost less than sorting another full row index.
+        rows_by_group = [np.flatnonzero(labels == name) for name in unique]
+    else:
+        inverse = np.searchsorted(unique, labels)
+        order = np.argsort(inverse, kind="stable")
+        rows_by_group = np.split(order, np.cumsum(np.bincount(inverse))[:-1])
+    return [
+        _Group(checked[int(i)], rows_by_group[i], [array[rows_by_group[i]] for array in arrays])
+        for i in appearance
+    ]
+
+
 def split_by(
     context: str, by: Values[str], *columns: Values[Any]
 ) -> list[tuple[str, list[npt.NDArray[Any]]]]:
@@ -60,7 +154,7 @@ def split_by(
 
     Args:
         context: The API call used in errors.
-        by: One string group name per row. Missing names are refused.
+        by: One non-empty string group name per row. Missing names are refused.
         *columns: One-dimensional columns of the same length as ``by``.
 
     Returns:
@@ -79,38 +173,8 @@ def split_by(
     check_names_type(context, "by", by)
     for index, column in enumerate(columns):
         check_axis_type(context, f"columns[{index}]", column)
-    # Object dtype preserves missing entries in mixed lists and numeric arrays, so errors
-    # name their original row. Masked arrays retain the normal names-conversion error.
-    if np.ma.isMaskedArray(by):
-        labels = names(context, "by", by)
-    elif hasattr(by, "__array__"):
-        labels = names(context, "by", np.asarray(by).astype(object, copy=False))
-    else:
-        labels = names(context, "by", np.asarray(by, dtype=object))
-    arrays = [np.asarray(column) for column in columns]
-    for index, array in enumerate(arrays):
-        check_one_dimensional(context, f"columns[{index}]", array)
-        if len(array) != len(labels):
-            raise new_error(
-                DataError,
-                context,
-                f"by has {len(labels)} values but column {index} has {len(array)}; "
-                "by must have one name per data value.",
-                parameter="by",
-                hint=_LENGTH_HINT,
-            )
-    if not labels:
-        raise new_error(
-            DataError,
-            context,
-            "by is empty; pass at least one group.",
-            parameter="by",
-            hint=_LENGTH_HINT,
-        )
-    indices: dict[str, list[int]] = {}
-    for index, label in enumerate(labels):
-        indices.setdefault(label, []).append(index)
-    return [(label, [array[rows] for array in arrays]) for label, rows in indices.items()]
+    data = {f"columns[{i}]": cast(Coordinates, column) for i, column in enumerate(columns)}
+    return [(group.label, group.columns) for group in _split(context, by, data)]
 
 
 def _coordinates(values: npt.NDArray[Any]) -> Coordinates:
@@ -120,68 +184,130 @@ def _coordinates(values: npt.NDArray[Any]) -> Coordinates:
     return cast(FloatArray | MicrosArray, values)
 
 
-def xy_arguments(
-    context: str, by: Values[str], x: Coordinates, y: Coordinates
-) -> list[tuple[str, Coordinates, Coordinates]]:
-    """Return labelled pairs of already-converted coordinate columns for the binding."""
-    return [
-        (label, _coordinates(columns[0]), _coordinates(columns[1]))
-        for label, columns in split_by(context, by, x, y)
-    ]
+def _bar_arguments(
+    context: str,
+    groups: list[_Group],
+    categories: Coordinates,
+) -> tuple[list[str], list[NativeSeries], list[_Group]]:
+    """Align bars and their input rows with vectorized category codes."""
+    unique, _, _ = _partition(np.asarray(categories))
+    sorted_order = np.argsort(unique)
+    sorted_names = unique[sorted_order]
+    series: list[NativeSeries] = []
+    aligned: list[_Group] = []
+    for group in groups:
+        positions = sorted_order[np.searchsorted(sorted_names, group.columns[0])]
+        order = np.argsort(positions, kind="stable")
+        repeated = positions[order[1:]] == positions[order[:-1]]
+        if np.any(repeated):
+            row = int(np.min(order[1:][repeated]))
+            name = str(group.columns[0][row])
+            raise new_error(
+                DataError,
+                context,
+                f"the pair ({short_repr(name)}, {short_repr(group.label)}) repeats at "
+                f"categories[{group.rows[row]}]; "
+                "each category and group pair must occur at most once.",
+                parameter="categories",
+                hint="aggregate first, for example with groupby().sum().",
+            )
+        values = np.full(len(unique), np.nan)
+        values[positions] = group.columns[1]
+        rows = np.full(len(unique), -1, dtype=np.intp)
+        rows[positions] = group.rows
+        series.append((group.label, values, _color.native(Color.AUTO)))
+        aligned.append(_Group(group.label, rows, []))
+    return cast(list[str], unique.tolist()), series, aligned
 
 
-def ecdf_arguments(
-    context: str, by: Values[str], values: FloatArray | MicrosArray
-) -> list[tuple[str, Coordinates]]:
-    """Return labelled value columns, preserving numeric and time dtypes."""
-    return [(label, _coordinates(columns[0])) for label, columns in split_by(context, by, values)]
-
-
-def series_arguments(context: str, by: Values[str], values: FloatArray) -> list[NativeSeries]:
-    """Return the native series for grouped histograms and densities."""
-    return [
-        (label, cast(FloatArray, columns[0]), _color.native(Color.AUTO))
-        for label, columns in split_by(context, by, values)
-    ]
-
-
-def bar_error(context: str, error: UmberError) -> UmberError:
-    """Keep native validation details while pointing at the public long-form arguments."""
+def _mapped_error(context: str, error: UmberError, groups: list[_Group]) -> UmberError:
+    """Render native input references once, using the original row map."""
     info = details(error)
-    if info is None:
+    group_index = cast(int | None, getattr(error, "_umber_group", None))
+    if info is None or group_index is None:
         return error
+    group = groups[group_index]
     parameter, hint = info
+    message = cast(str, getattr(error, "_umber_message", ""))
+    name, indices, fragments = cast(
+        tuple[str, list[int | None], list[str]], getattr(error, "_umber_input", None)
+    )
+    if indices:
+        name = parameter or name
+        parts = [fragments[0]]
+        for index, fragment in zip(indices, fragments[1:], strict=True):
+            parts.extend((name if index is None else f"{name}[{group.rows[index]}]", fragment))
+        message = "".join(parts)
     return new_error(
         type(error),
         context,
-        str(error).removeprefix("Axes.grouped_bar(): "),
-        parameter="heights" if parameter == "series" else parameter,
+        f"in group {short_repr(group.label)}: {message}",
+        parameter=parameter,
         hint=hint,
     )
 
 
-def bar_arguments(
-    context: str, by: Values[str], categories: list[str], heights: FloatArray
-) -> tuple[list[str], list[NativeSeries]]:
-    """Align long-form bars to first-seen categories, leaving missing pairs as NaN."""
-    groups = split_by(context, by, categories, heights)
-    positions = {name: index for index, name in enumerate(dict.fromkeys(categories))}
-    series: list[NativeSeries] = []
-    for label, columns in groups:
-        values = np.full(len(positions), np.nan)
-        seen: set[str] = set()
-        for category, height in zip(columns[0], columns[1], strict=True):
-            name = str(category)
-            if name in seen:
-                raise new_error(
-                    DataError,
-                    context,
-                    f"the pair ({short_repr(name)}, {short_repr(label)}) repeats; "
-                    "each category and group pair must occur at most once.",
-                    parameter="categories",
-                    hint="aggregate first, for example with groupby().sum().",
-                )
-            seen.add(name)
-            values[positions[name]] = height
-        series.append((label, values, _color.native(Color.AUTO)))
-    return list(positions), series
+def call(
+    context: str,
+    by: Values[str] | Auto,
+    label: str,
+    color: object,
+    convert: Callable[[], dict[str, Coordinates]],
+    plain: Callable[[tuple[Any, ...], str], None],
+    grouped: Callable[[tuple[Any, ...]], None],
+) -> None:
+    """Check grouping, convert once, and dispatch either ordinary or grouped data."""
+    if by is not AUTO:
+        check_names_type(context, "by", by)
+        _check_style(context, label, color)
+    try:
+        columns = convert()
+    except UmberError as error:
+        row = cast(int | None, getattr(error, "_umber_row", None))
+        info = details(error)
+        if by is AUTO or row is None or info is None:
+            raise
+        labels = _labels(context, by)
+        if row >= len(labels):
+            raise
+        group = _name(context, row, labels[row])
+        message = cast(str, getattr(error, "_umber_message", ""))
+        raise new_error(
+            type(error),
+            context,
+            f"in group {short_repr(group)}: {message}",
+            parameter=info[0],
+            hint=info[1],
+        ) from None
+    name = _args.text(context, "label", label)
+    if by is AUTO:
+        plain(tuple(columns.values()), name)
+        return
+    if len(columns) == 2:
+        (left, xs), (right, ys) = columns.items()
+        if len(xs) != len(ys):
+            raise new_error(
+                DataError,
+                context,
+                f"{left} has {len(xs)} values but {right} has {len(ys)}; "
+                f"{left} and {right} must have the same length.",
+                parameter=None,
+                hint=None,
+            )
+    groups = _split(context, by, columns)
+    if context == "Axes.bar()":
+        categories, series, groups = _bar_arguments(context, groups, columns["categories"])
+        arguments: tuple[Any, ...] = (categories, series)
+    elif len(columns) == 2:
+        arguments = ([(g.label, *(_coordinates(c) for c in g.columns)) for g in groups],)
+    else:
+        series_values = [(g.label, _coordinates(g.columns[0])) for g in groups]
+        arguments = (
+            series_values
+            if context == "Axes.ecdf()"
+            else [(*values, _color.native(Color.AUTO)) for values in series_values],
+        )
+    try:
+        grouped(arguments)
+    except UmberError as error:
+        raise _mapped_error(context, error, groups) from None

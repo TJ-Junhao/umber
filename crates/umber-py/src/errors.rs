@@ -35,8 +35,32 @@ pub(crate) fn core_error(err: umber_core::Error) -> PyErr {
         _ => return PyRuntimeError::new_err(format!("internal error: {err}")),
     };
     Python::attach(|py| {
-        reported(py, class, &err.to_string(), err.parameter(), err.hint())
-            .unwrap_or_else(|failure| failure)
+        let attach = || -> PyResult<PyErr> {
+            let reported = reported(py, class, &err.to_string(), err.parameter(), err.hint())?;
+            if let Error::Data { message, .. }
+            | Error::Style { message, .. }
+            | Error::Usage { message, .. } = &err
+                && let Some(location) = message.location()
+            {
+                let value = reported.value(py);
+                value.setattr("_umber_message", message.to_string())?;
+                value.setattr("_umber_group", location.group)?;
+                value.setattr(
+                    "_umber_input",
+                    (&location.name, &location.indices, &location.fragments),
+                )?;
+            }
+            Ok(reported)
+        };
+        attach().unwrap_or_else(|failure| failure)
+    })
+}
+
+/// Attaches a series position when conversion fails before the grouped core call.
+pub(crate) fn group_error(error: PyErr, index: usize) -> PyErr {
+    Python::attach(|py| match error.value(py).setattr("_umber_group", index) {
+        Ok(()) => error,
+        Err(failure) => failure,
     })
 }
 

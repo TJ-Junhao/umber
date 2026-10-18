@@ -18,7 +18,7 @@ import numpy as np
 import numpy.typing as npt
 
 from umber._args import checked_text, is_text_or_buffer, short_repr, type_name
-from umber._errors import DataError, new_error
+from umber._errors import DataError, UmberError, at_row, new_error
 
 type FloatArray = npt.NDArray[np.float64]
 """A one-dimensional ``float64`` array in native byte order, aligned, of any stride.
@@ -315,7 +315,9 @@ def _first_non_number(items: Iterable[object]) -> tuple[int, object] | None:
 
 def _element_error(context: str, name: str, index: int, value: object, *, mixed: bool) -> DataError:
     """The error for an element of numeric data that is not an int or a float."""
-    return _value_error(context, name, f"{name}[{index}]", value, mixed=mixed)
+    error = _value_error(context, name, f"{name}[{index}]", value, mixed=mixed)
+    at_row(error, index)
+    return error
 
 
 def _value_error(context: str, name: str, label: str, value: object, *, mixed: bool) -> DataError:
@@ -473,7 +475,9 @@ def _name_error(context: str, name: str, index: int, value: object, *, mixed: bo
         message, hint = f"{label} is {shown}; {name} mixes names and numbers.", _MIXED_HINT
     else:
         message, hint = f"{label} is {shown}; categories must be strings.", _NAME_HINT
-    return _data_error(context, name, message, hint)
+    error = _data_error(context, name, message, hint)
+    at_row(error, index)
+    return error
 
 
 def _names(
@@ -493,11 +497,15 @@ def _names(
     for index, value in enumerate(items):
         if not isinstance(value, str):
             raise _name_error(context, name, index, value, mixed=mixed)
-        result.append(
-            checked_text(
-                context, name, f"{name}[{index}]", value, DataError, check_length=check_length
+        try:
+            result.append(
+                checked_text(
+                    context, name, f"{name}[{index}]", value, DataError, check_length=check_length
+                )
             )
-        )
+        except UmberError as error:
+            at_row(error, index)
+            raise
     return result
 
 

@@ -1,5 +1,88 @@
 //! Error type shared by all of umber-core.
 
+/// Input references retained separately from an error's display text.
+///
+/// # Examples
+///
+/// ```
+/// let message: umber_core::ErrorMessage = "invalid data".into();
+/// assert!(message.location().is_none());
+/// ```
+#[derive(Debug, Default)]
+pub struct InputLocation {
+    /// The column used by each position.
+    pub name: String,
+    /// Local row positions; `None` refers to the column as a whole.
+    pub indices: Vec<Option<usize>>,
+    /// Text before, between and after the input references.
+    pub fragments: Vec<String>,
+    /// The series position in a grouped call, if known.
+    pub group: Option<usize>,
+}
+
+/// Error text with optional structured input positions for long-form data.
+/// It displays and dereferences to the same text as an ordinary message.
+///
+/// # Examples
+///
+/// ```
+/// let message: umber_core::ErrorMessage = "values must be finite.".into();
+/// assert_eq!(message.to_string(), "values must be finite.");
+/// ```
+#[derive(Debug)]
+pub struct ErrorMessage {
+    text: String,
+    location: Option<Box<InputLocation>>,
+}
+
+impl ErrorMessage {
+    /// The input references recorded during validation, if any.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let message: umber_core::ErrorMessage = "invalid data".into();
+    /// assert!(message.location().is_none());
+    /// ```
+    pub fn location(&self) -> Option<&InputLocation> {
+        self.location.as_deref()
+    }
+}
+
+impl From<String> for ErrorMessage {
+    fn from(text: String) -> Self {
+        Self {
+            text,
+            location: None,
+        }
+    }
+}
+
+impl From<&str> for ErrorMessage {
+    fn from(text: &str) -> Self {
+        text.to_owned().into()
+    }
+}
+
+impl std::fmt::Display for ErrorMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.text.fmt(f)
+    }
+}
+
+impl std::ops::Deref for ErrorMessage {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.text
+    }
+}
+
+impl<T: AsRef<str> + ?Sized> PartialEq<T> for ErrorMessage {
+    fn eq(&self, other: &T) -> bool {
+        self.text == other.as_ref()
+    }
+}
+
 /// Every failure umber-core can report.
 ///
 /// Each non-I/O variant carries the API call where the problem was detected (`context`,
@@ -31,7 +114,7 @@ pub enum Error {
         /// The API call where the problem was detected, e.g. `"Axes.line()"`.
         context: &'static str,
         /// What is wrong and what is required.
-        message: String,
+        message: ErrorMessage,
         /// The Python parameter the error is about, e.g. `"y"`; `None` when no single parameter
         /// is at fault. Nested data names its top-level parameter: `series[1].values[3]` is
         /// `"series"`.
@@ -45,7 +128,7 @@ pub enum Error {
         /// The API call where the problem was detected.
         context: &'static str,
         /// What is wrong and what is required.
-        message: String,
+        message: ErrorMessage,
         /// The Python parameter the error is about; `None` when no single parameter is at fault.
         parameter: Option<&'static str>,
         /// One sentence that suggests a likely fix; `None` when there is no likely fix.
@@ -57,7 +140,7 @@ pub enum Error {
         /// The API call where the problem was detected.
         context: &'static str,
         /// What is wrong and what is required.
-        message: String,
+        message: ErrorMessage,
         /// The Python parameter the error is about; `None` when no single parameter is at fault.
         parameter: Option<&'static str>,
         /// One sentence that suggests a likely fix; `None` when there is no likely fix.
@@ -111,8 +194,53 @@ pub(crate) fn quoted(text: &str) -> String {
 }
 
 impl Error {
+    /// Builds a data error from a column's positions and the text around them.
+    pub(crate) fn at_input(
+        context: &'static str,
+        name: &str,
+        indices: Vec<Option<usize>>,
+        fragments: Vec<String>,
+    ) -> Error {
+        let mut message = String::new();
+        for (i, fragment) in fragments.iter().enumerate() {
+            message.push_str(fragment);
+            if let Some(index) = indices.get(i) {
+                message.push_str(name);
+                if let Some(index) = index {
+                    use std::fmt::Write;
+                    let _ = write!(message, "[{index}]");
+                }
+            }
+        }
+        Error::Data {
+            context,
+            message: ErrorMessage {
+                text: message,
+                location: Some(Box::new(InputLocation {
+                    name: name.into(),
+                    indices,
+                    fragments,
+                    group: None,
+                })),
+            },
+            parameter: None,
+            hint: None,
+        }
+    }
+
+    /// Records which group's validation failed without changing core display text.
+    pub(crate) fn in_group(mut self, index: usize) -> Error {
+        if let Error::Data { message, .. }
+        | Error::Style { message, .. }
+        | Error::Usage { message, .. } = &mut self
+        {
+            message.location.get_or_insert_with(Default::default).group = Some(index);
+        }
+        self
+    }
+
     /// An [`Error::Data`] detected in `context`, without a parameter or a hint.
-    pub(crate) fn data(context: &'static str, message: impl Into<String>) -> Error {
+    pub(crate) fn data(context: &'static str, message: impl Into<ErrorMessage>) -> Error {
         Error::Data {
             context,
             message: message.into(),
@@ -122,7 +250,7 @@ impl Error {
     }
 
     /// An [`Error::Style`] detected in `context`, without a parameter or a hint.
-    pub(crate) fn style(context: &'static str, message: impl Into<String>) -> Error {
+    pub(crate) fn style(context: &'static str, message: impl Into<ErrorMessage>) -> Error {
         Error::Style {
             context,
             message: message.into(),
@@ -132,7 +260,7 @@ impl Error {
     }
 
     /// An [`Error::Usage`] detected in `context`, without a parameter or a hint.
-    pub(crate) fn usage(context: &'static str, message: impl Into<String>) -> Error {
+    pub(crate) fn usage(context: &'static str, message: impl Into<ErrorMessage>) -> Error {
         Error::Usage {
             context,
             message: message.into(),
@@ -214,7 +342,12 @@ impl Error {
         | Error::Style { message, .. }
         | Error::Usage { message, .. } = &mut self
         {
-            message.insert_str(0, prefix);
+            message.text.insert_str(0, prefix);
+            if let Some(location) = &mut message.location
+                && let Some(first) = location.fragments.first_mut()
+            {
+                first.insert_str(0, prefix);
+            }
         }
         self
     }
@@ -271,7 +404,7 @@ impl Error {
 /// fn parse_alpha(text: &str) -> umber_core::Result<f64> {
 ///     text.parse().map_err(|_| umber_core::Error::Style {
 ///         context: "Color.alpha()",
-///         message: format!("{text:?} is not a number; use a value from 0.0 to 1.0."),
+///         message: format!("{text:?} is not a number; use a value from 0.0 to 1.0.").into(),
 ///         parameter: Some("a"),
 ///         hint: None,
 ///     })

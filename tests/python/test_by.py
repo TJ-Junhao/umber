@@ -82,7 +82,7 @@ def test_data_columns_keep_values_without_reading_series_names(factory: Any) -> 
     assert _svg(actual) == _svg(expected)
 
 
-@pytest.mark.parametrize("groups", [["Only"] * 6, [""] * 6, GROUPS])
+@pytest.mark.parametrize("groups", [["Only"] * 6, GROUPS])
 def test_by_awkward_columns(groups: list[str]) -> None:
     ax = _axes("line")
     ax.line(X, Y, by=groups)
@@ -416,6 +416,186 @@ def test_by_bar_native_errors_keep_public_context_and_highlight(tmp_path: Path) 
     assert _details(caught.value)[0] == "heights"
     notes = cast(list[str], getattr(caught.value, "__notes__", []))
     assert "^" in notes[0]
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_by_awkward_columns_empty_names_are_refused(method: str) -> None:
+    ax = _axes(method)
+    before = _svg(ax)
+    with pytest.raises(ub.DataError, match=r"by\[1\] is empty") as caught:
+        _call(ax, method, by=["A", "", "A", "", "A", "B"])
+    assert _details(caught.value) == ("by", "give every group a non-empty name.")
+    assert _svg(ax) == before
+
+
+@pytest.mark.parametrize("value", [None, float("nan"), pd.NA, pd.NaT, 3, True])
+def test_by_name_errors_explain_missing_or_non_string(value: Any) -> None:
+    with pytest.raises(ub.DataError) as caught:
+        ub.line([0, 1], [1, 2], by=["A", value])
+    if value is None or value is pd.NA or value is pd.NaT or isinstance(value, float):
+        assert "by[1] is missing; every row needs a group name." in str(caught.value)
+    else:
+        assert f"by[1] is {value}, not a string; group names must be strings." in str(caught.value)
+        assert _details(caught.value)[1] == "convert each name with str() first."
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_by_value_error_names_original_row_and_group(method: str, tmp_path: Path) -> None:
+    parameter = "y" if method in XY else "heights" if method == "bar" else "values"
+    args = "[0, 1, 2, 3, 4, 5], " if method in XY else ""
+    if method == "bar":
+        args = '["C", "A", "B", "B", "A", "C"], '
+    args += '[1, 2, 3, 4, 5, float("inf")]'
+    options = ", style=ub.Hist.STEP" if method == "hist" else ""
+    setup = "x=ub.Scale.category()" if method == "bar" else ""
+    messages: list[ub.DataError] = []
+    for grouping in ("", ', by=["B", "A", "B", "A", "B", "A"]'):
+        path = tmp_path / ("grouped.py" if grouping else "plain.py")
+        line = f"ax.{method}({args}{options}{grouping})"
+        path.write_text(f"import umber as ub\nax = ub.Figure().add_axes({setup})\n{line}\n")
+        with pytest.raises(ub.DataError) as caught:
+            exec(compile(path.read_text(), str(path), "exec"), {})
+        messages.append(caught.value)
+        assert f"{parameter}[5] is inf" in str(caught.value) or (method == "bar" and not grouping)
+        assert _details(caught.value)[0] == parameter or (method == "bar" and not grouping)
+        assert "^" in caught.value.__notes__[0]
+    assert 'group "A"' in str(messages[1]) or "group 'A'" in str(messages[1])
+    if method != "bar":
+        assert _details(messages[0]) == _details(messages[1])
+    else:
+        with pytest.raises(ub.DataError) as plain:
+            ub.bar(["A"], [float("inf")])
+        assert _details(plain.value) == _details(messages[1])
+
+
+@pytest.mark.parametrize("method", ["ecdf", "kde"])
+def test_by_whole_group_error_names_group(method: str) -> None:
+    draw = cast(Callable[..., object], getattr(_axes(method), method))
+    with pytest.raises(ub.DataError, match=r"group ['\"]A['\"]"):
+        draw([1, 3, float("nan") if method == "ecdf" else 2], by=["B", "B", "A"])
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_by_length_error_uses_public_parameter(method: str) -> None:
+    parameter = "x" if method in XY else "categories" if method == "bar" else "values"
+    with pytest.raises(ub.DataError, match=f"by has 1 values but {parameter} has 6"):
+        _call(_axes(method), method, by=["A"])
+
+
+@pytest.mark.parametrize("method", XY + ("bar",))
+def test_by_data_length_error_matches_plain_call(method: str) -> None:
+    errors: list[ub.UmberError] = []
+    for kwargs in ({}, {"by": ["A"]}):
+        draw = cast(Callable[..., object], getattr(_axes(method), method))
+        with pytest.raises(ub.DataError) as caught:
+            draw(["A", "B"] if method == "bar" else [0, 1], [1], **kwargs)
+        errors.append(caught.value)
+    assert str(errors[0]) == str(errors[1])
+    assert _details(errors[0]) == _details(errors[1])
+
+
+def test_by_bar_two_category_axes_matches_plain_call() -> None:
+    errors: list[ub.UmberError] = []
+    for kwargs in ({}, {"by": ["A"]}):
+        ax: Axes = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+        with pytest.raises(ub.UsageError) as caught:
+            cast(Callable[..., object], ax.bar)(["A"], [1], **kwargs)
+        errors.append(caught.value)
+    assert str(errors[0]) == str(errors[1])
+    assert _details(errors[0]) == _details(errors[1])
+
+
+@pytest.mark.parametrize("time", [False, True])
+def test_by_step_error_maps_both_rows(time: bool) -> None:
+    x: Any = [0, 3, 1, 2]
+    ax: Axes = ub.Figure().add_axes(x=ub.Scale.time()) if time else ub.Figure().add_axes()
+    if time:
+        x = [dt.date(2026, 1, day + 1) for day in x]
+    with pytest.raises(ub.DataError) as caught:
+        ax.step(x, [1, 2, 3, 4], by=["B", "A", "B", "A"])
+    assert "x[3]" in str(caught.value) and "x[1]" in str(caught.value)
+    assert 'group "A"' in str(caught.value) or "group 'A'" in str(caught.value)
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_by_conversion_error_names_group(method: str) -> None:
+    draw = cast(Callable[..., object], getattr(_axes(method), method))
+    values = [1, 2, 3, None]
+    args: tuple[Any, ...] = (
+        ([0, 1, 2, 3], values)
+        if method in XY
+        else (["A", "A", "B", "B"], values)
+        if method == "bar"
+        else (values,)
+    )
+    with pytest.raises(ub.DataError) as caught:
+        draw(*args, by=["B", "A", "B", "A"])
+    assert "[3]" in str(caught.value)
+    assert 'group "A"' in str(caught.value) or "group 'A'" in str(caught.value)
+
+
+@pytest.mark.parametrize("method", XY + ("ecdf",))
+@pytest.mark.parametrize(
+    "bad", [None, np.datetime64("10000-01-01"), np.datetime64("1000000-01-01")]
+)
+def test_by_time_error_names_original_row(method: str, bad: Any) -> None:
+    ax = ub.Figure().add_axes(x=ub.Scale.time())
+    draw = cast(Callable[..., object], getattr(ax, method))
+    values = [dt.date(2026, 1, 1)] * 3 + [bad]
+    args = (values,) if method == "ecdf" else (values, [1, 2, 3, 4])
+    with pytest.raises(ub.DataError) as caught:
+        draw(*args, by=["B", "A", "B", "A"])
+    assert "[3]" in str(caught.value)
+    assert 'group "A"' in str(caught.value) or "group 'A'" in str(caught.value)
+
+
+@pytest.mark.parametrize("method", XY + ("bar", "ecdf"))
+@pytest.mark.parametrize("bad", [-1.0, 1e-301, 1e301])
+def test_by_log_error_names_original_row_and_keeps_hint(method: str, bad: float) -> None:
+    if method == "bar":
+        ax: Axes = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.log())
+    elif method == "ecdf":
+        ax = ub.Figure().add_axes(x=ub.Scale.log())
+    else:
+        ax = ub.Figure().add_axes(y=ub.Scale.log())
+    draw = cast(Callable[..., object], getattr(ax, method))
+    values = [1, 2, 3, bad]
+    args: tuple[Any, ...] = (
+        ([0, 1, 2, 3], values)
+        if method in XY
+        else (["A", "A", "B", "B"], values)
+        if method == "bar"
+        else (values,)
+    )
+    before = _svg(ax)
+    with pytest.raises(ub.DataError) as caught:
+        draw(*args, by=["B", "A", "B", "A"])
+    assert "[3]" in str(caught.value)
+    assert 'group "A"' in str(caught.value) or "group 'A'" in str(caught.value)
+    assert _svg(ax) == before
+
+
+def test_by_hist_outside_edges_names_group() -> None:
+    with pytest.raises(ub.DataError) as caught:
+        ub.hist([1, 2, 3, 9], by=["B", "A", "B", "A"], bins=[0, 4], style=ub.Hist.STEP)
+    assert "values has 1 finite value outside" in str(caught.value)
+    assert 'group "A"' in str(caught.value) or "group 'A'" in str(caught.value)
+    assert _details(caught.value) == ("values", "widen the edges or filter the values first.")
+
+
+def test_by_group_names_checked_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from umber import _group, _values
+
+    calls: list[str] = []
+    original = _values.check_names_type
+
+    def counted(context: str, name: str, values: object) -> None:
+        calls.append(name)
+        original(context, name, values)
+
+    monkeypatch.setattr(_group, "check_names_type", counted)
+    ub.line([0, 1], [1, 2], by=["B", "A"])
+    assert calls == ["by"]
 
 
 def test_by_label_checks_plain_string_content() -> None:

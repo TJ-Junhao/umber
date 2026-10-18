@@ -630,6 +630,13 @@ class Figure:
         dash: int,
         width: _SizeArg,
     ) -> None: ...
+    def bar_by(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        series: list[_SeriesArg],
+    ) -> None: ...
     def grouped_line(
         self,
         row: int,

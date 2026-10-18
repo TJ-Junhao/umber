@@ -48,10 +48,10 @@ def line(
         dash: How the line is stroked.
         width: The line width. ``Size.AUTO`` is the line width of the theme.
         theme: The theme of the new figure.
-
         by: One group name per data row; ``AUTO`` draws one series. Groups follow first
             appearance, supplying their labels and palette colors. Do not pass an explicit
-            color or a non-empty label. Missing names and an empty grouping column are refused.
+            color or a non-empty label. Missing or empty names and an empty grouping column
+            are refused.
 
     Returns:
         The axes of the new figure.
@@ -102,10 +102,10 @@ def scatter(
         marker: The marker shape.
         size: The marker size. ``Size.AUTO`` is the marker size of the theme.
         theme: The theme of the new figure.
-
         by: One group name per data row; ``AUTO`` draws one series. Groups follow first
             appearance, supplying their labels and palette colors. Do not pass an explicit
-            color or a non-empty label. Missing names and an empty grouping column are refused.
+            color or a non-empty label. Missing or empty names and an empty grouping column
+            are refused.
 
     Returns:
         The axes of the new figure.
@@ -154,10 +154,10 @@ def bar(
         label: The name shown in the legend; an empty string leaves the bars out of it.
         color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
         theme: The theme of the new figure.
-
         by: One group name per data row; ``AUTO`` draws one series. Groups follow first
             appearance, supplying their labels and palette colors. Do not pass an explicit
-            color or a non-empty label. Missing names and an empty grouping column are refused.
+            color or a non-empty label. Missing or empty names and an empty grouping column
+            are refused.
 
     Returns:
         The axes of the new figure, with a category x axis.
@@ -213,10 +213,10 @@ def hist(
         label: The name shown in the legend; an empty string leaves the histogram out of it.
         color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
         theme: The theme of the new figure.
-
         by: One group name per data row; ``AUTO`` draws one series. Groups follow first
             appearance, supplying their labels and palette colors. Do not pass an explicit
-            color or a non-empty label. Missing names and an empty grouping column are refused.
+            color or a non-empty label. Missing or empty names and an empty grouping column
+            are refused.
 
     Returns:
         The axes of the new figure.

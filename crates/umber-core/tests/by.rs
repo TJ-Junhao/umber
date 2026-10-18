@@ -1,7 +1,8 @@
 //! Grouped marks validate every group before adding any marks.
 
 use umber_core::{
-    AxisData, Dash, EcdfOptions, Figure, LineOptions, Marker, ScaleKind, SizeSpec, Step, Theme,
+    AxisData, Dash, EcdfOptions, Error, Figure, LineOptions, Marker, ScaleKind, SizeSpec, Step,
+    Theme,
 };
 
 fn groups(bad: bool) -> Vec<(String, AxisData, AxisData)> {
@@ -37,6 +38,21 @@ fn grouped_xy_calls_are_atomic() {
                 _ => unreachable!(),
             };
             assert_eq!(result.is_err(), bad, "{method}");
+            if let Err(error) = result {
+                assert_eq!(error.parameter(), Some("y"));
+                let Error::Data { message, .. } = error else {
+                    panic!("expected a Data error");
+                };
+                assert_eq!(message, "y[1] is inf; values must be finite.");
+                let location = message.location().unwrap();
+                assert_eq!(location.group, Some(1));
+                assert_eq!(location.name, "y");
+                assert_eq!(location.indices, vec![Some(1)]);
+                assert_eq!(
+                    location.fragments,
+                    vec!["", " is inf; values must be finite."]
+                );
+            }
             assert_eq!(axes.marks().len(), if bad { 1 } else { 3 }, "{method}");
         }
     }
