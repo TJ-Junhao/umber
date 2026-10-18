@@ -289,21 +289,18 @@ impl Figure {
     }
 
     /// Sets the figure title above every panel.
-    #[pyo3(signature = (text, size=(0, 0.0)), text_signature = "($self, text, size=(0, 0.0))")]
     fn figure_title(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
         self.0.title_sized(text, size_spec(size)?);
         Ok(())
     }
 
     /// Sets the figure subtitle below its title.
-    #[pyo3(signature = (text, size=(0, 0.0)), text_signature = "($self, text, size=(0, 0.0))")]
     fn figure_subtitle(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
         self.0.subtitle_sized(text, size_spec(size)?);
         Ok(())
     }
 
     /// Sets the title.
-    #[pyo3(signature = (row, col, text, size=(0, 0.0)), text_signature = "($self, row, col, text, size=(0, 0.0))")]
     fn title(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?.title_sized(text, size);
@@ -311,7 +308,6 @@ impl Figure {
     }
 
     /// Sets the subtitle.
-    #[pyo3(signature = (row, col, text, size=(0, 0.0)), text_signature = "($self, row, col, text, size=(0, 0.0))")]
     fn subtitle(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?.subtitle_sized(text, size);
@@ -319,7 +315,6 @@ impl Figure {
     }
 
     /// Sets the x axis label.
-    #[pyo3(signature = (row, col, text, size=(0, 0.0)), text_signature = "($self, row, col, text, size=(0, 0.0))")]
     fn xlabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?.xlabel_sized(text, size);
@@ -327,7 +322,6 @@ impl Figure {
     }
 
     /// Sets the y axis label.
-    #[pyo3(signature = (row, col, text, size=(0, 0.0)), text_signature = "($self, row, col, text, size=(0, 0.0))")]
     fn ylabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?.ylabel_sized(text, size);
@@ -431,7 +425,6 @@ impl Figure {
     }
 
     /// Sets the legend style (a `LegendStyle` value).
-    #[pyo3(signature = (row, col, style, size=(0, 0.0)), text_signature = "($self, row, col, style, size=(0, 0.0))")]
     fn legend(&mut self, row: i64, col: i64, style: i64, size: SizeArg) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
         let size = size_spec(size)?;
@@ -442,7 +435,6 @@ impl Figure {
     }
 
     /// Sets the legend style and position (`LegendStyle` and `LegendPosition` values).
-    #[pyo3(signature = (row, col, style, position, size=(0, 0.0)), text_signature = "($self, row, col, style, position, size=(0, 0.0))")]
     fn legend_at(
         &mut self,
         row: i64,
@@ -1125,7 +1117,7 @@ impl Figure {
     }
 
     /// Replaces the axes' colorbar label and optional overrides.
-    #[pyo3(signature = (row, col, label, position, format, size=(0, 0.0)), text_signature = "($self, row, col, label, position, format, size=(0, 0.0))")]
+    #[pyo3(signature = (row, col, label, position, format, size))]
     fn colorbar(
         &mut self,
         row: i64,
@@ -1150,7 +1142,7 @@ impl Figure {
     }
 
     /// Replaces the shared colorbars' label and optional overrides.
-    #[pyo3(signature = (label, position, format, size=(0, 0.0)), text_signature = "($self, label, position, format, size=(0, 0.0))")]
+    #[pyo3(signature = (label, position, format, size))]
     fn figure_colorbar(
         &mut self,
         label: String,
@@ -1419,7 +1411,6 @@ impl Figure {
             .map_err(core_error)
     }
     /// Sets the x tick label size.
-    #[pyo3(signature = (row, col, size=(0, 0.0)), text_signature = "($self, row, col, size=(0, 0.0))")]
     fn xtick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?
@@ -1429,7 +1420,6 @@ impl Figure {
     }
 
     /// Sets the y tick label size.
-    #[pyo3(signature = (row, col, size=(0, 0.0)), text_signature = "($self, row, col, size=(0, 0.0))")]
     fn ytick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?

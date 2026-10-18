@@ -51,8 +51,12 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                         },
                     )
                     .unwrap();
-                    ax.legend_at(LegendStyle::Header, legend_position, Default::default())
-                        .unwrap();
+                    ax.legend_at(
+                        LegendStyle::Header,
+                        legend_position,
+                        umber_core::SizeSpec::Auto,
+                    )
+                    .unwrap();
                 }
                 ax.colorbar(ColorbarOptions {
                     label: "Temperature".into(),

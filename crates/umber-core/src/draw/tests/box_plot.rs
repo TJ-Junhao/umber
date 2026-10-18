@@ -102,7 +102,7 @@ fn box_coverage_counts_fills_whiskers_medians_and_outliers() {
         axes.legend_at(
             LegendStyle::Header,
             crate::LegendPosition::Best,
-            Default::default(),
+            crate::SizeSpec::Auto,
         )
         .unwrap()
         .ylim(-2.0, 14.0)

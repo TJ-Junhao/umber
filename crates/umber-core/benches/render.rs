@@ -207,7 +207,7 @@ fn text_figure() -> Figure {
         .subtitle("Measured every fifteen minutes between January and December, after calibration")
         .xlabel("Elapsed time since the first measurement (days)")
         .ylabel("Output per station (megawatt hours)")
-        .legend(LegendStyle::Header, Default::default())
+        .legend(LegendStyle::Header, umber_core::SizeSpec::Auto)
         .unwrap();
     let positions: Vec<f64> = (0..24).map(f64::from).collect();
     let labels: Vec<String> = (0..24).map(|i| format!("Week {i:02} of the run")).collect();
@@ -306,7 +306,7 @@ fn benches(c: &mut Criterion) {
     axes.legend_at(
         LegendStyle::Header,
         LegendPosition::Best,
-        Default::default(),
+        umber_core::SizeSpec::Auto,
     )
     .unwrap();
     axes.stacked_area(
@@ -429,7 +429,7 @@ fn legend_benches(c: &mut Criterion) {
             let mut axes = figure
                 .add_axes(ScaleKind::Linear, ScaleKind::Linear)
                 .unwrap();
-            axes.legend_at(LegendStyle::Header, position, Default::default())
+            axes.legend_at(LegendStyle::Header, position, umber_core::SizeSpec::Auto)
                 .unwrap();
             match kind {
                 "line_1m" => {

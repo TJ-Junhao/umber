@@ -1,8 +1,6 @@
 //! Measurement and placement of colorbars beside and below a plot.
 
-use super::{
-    AXIS_LABEL_GAP, Area, Frame, Label, Styles, Y_LABEL_CENTER, measure, measure_ticks, metrics,
-};
+use super::{Area, Frame, Label, Styles, Y_LABEL_CENTER, measure, measure_ticks, metrics};
 use crate::color_scale::ResolvedColorScale;
 use crate::model::Axes;
 use crate::resolve::NormalizedPos;
@@ -151,7 +149,7 @@ impl MeasuredColorbar {
         let (label_ascent, label_descent) = metrics(lib, &styles.body);
         let label_height = if label.is_some() {
             match position {
-                ColorbarSide::Right => label_ascent + AXIS_LABEL_GAP,
+                ColorbarSide::Right => label_ascent + super::title_tick_gap(label_descent, descent),
                 ColorbarSide::Bottom => label_ascent + label_descent + LABEL_GAP,
             }
         } else {
@@ -275,7 +273,9 @@ impl MeasuredColorbar {
         if let Some(label) = &mut self.label {
             label.x = bar.x;
             label.y = match self.position {
-                ColorbarSide::Right => bar.y - rise - AXIS_LABEL_GAP,
+                ColorbarSide::Right => {
+                    bar.y - rise - super::title_tick_gap(self.label_descent, self.descent)
+                }
                 ColorbarSide::Bottom => bar.y - LABEL_GAP - self.label_descent,
             };
         }
@@ -462,7 +462,7 @@ mod tests {
         axes.legend_at(
             LegendStyle::Header,
             LegendPosition::Right,
-            Default::default(),
+            crate::SizeSpec::Auto,
         )
         .unwrap();
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
@@ -548,7 +548,7 @@ mod tests {
         ax.legend_at(
             LegendStyle::Header,
             LegendPosition::Bottom,
-            Default::default(),
+            crate::SizeSpec::Auto,
         )
         .unwrap();
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
@@ -571,7 +571,8 @@ mod tests {
             },
         )
         .unwrap();
-        ax.legend(LegendStyle::Direct, Default::default()).unwrap();
+        ax.legend(LegendStyle::Direct, crate::SizeSpec::Auto)
+            .unwrap();
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
         let bar = layout.colorbar.unwrap();
         for direct in layout.direct {

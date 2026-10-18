@@ -1181,7 +1181,7 @@ mod tests {
                     },
                 )
                 .unwrap()
-                .legend(crate::LegendStyle::Header, Default::default())
+                .legend(crate::LegendStyle::Header, crate::SizeSpec::Auto)
                 .unwrap();
             let (b, marks, legend) = swatch_and_items(&f);
             let Item::Stroke { style, .. } = &legend[0] else {

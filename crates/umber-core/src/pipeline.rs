@@ -41,7 +41,7 @@ fn panels<'a>(figure: &'a Figure, groups: &ShareGroups, lib: &FontLibrary) -> Ve
         .panels()
         .zip(resolve::resolve_figure_marks(figure))
         .map(|(axes, marks)| {
-            let legend = if has_merged_legend(figure) {
+            let legend = if figure.has_merged_legend() {
                 let style = axes.legend_style().unwrap_or(theme.legend_style());
                 MeasuredLegend::measure(
                     theme,
@@ -101,15 +101,9 @@ fn measure_legend<'a>(
     measured
 }
 
-/// Whether row legends belong to the figure rather than its individual panels.
-fn has_merged_legend(figure: &Figure) -> bool {
-    let grid = figure.grid();
-    grid.rows() * grid.cols() > 1 && grid.legend() == crate::LegendMode::Merged
-}
-
 /// Measures the figure title, subtitle and merged legend once, before the grid solve.
 fn figure_header(figure: &Figure, panels: &[Panel<'_>], lib: &FontLibrary) -> FigureHeader {
-    let legend = if has_merged_legend(figure) {
+    let legend = if figure.has_merged_legend() {
         let merged = Legend::merged(figure, panels.iter().map(|panel| panel.marks.as_slice()));
         MeasuredLegend::measure(figure.theme(), &merged, lib, figure.legend_size())
     } else {
@@ -204,11 +198,30 @@ impl Side {
 
     /// The tick room of this side of a plot area of `plot`.
     fn room<'a>(self, plot: PlotSize, theme: &Theme, lib: &'a FontLibrary) -> layout::TickRoom<'a> {
-        let (x, y) = layout::tick_rooms(plot, theme, lib, TickSpacing::LabelsApart);
+        self.sized_room(
+            plot,
+            theme,
+            lib,
+            TickSpacing::LabelsApart,
+            crate::SizeSpec::Auto,
+        )
+    }
+
+    /// Builds every axis and colorbar room with its resolved size and spacing policy.
+    fn sized_room<'a>(
+        self,
+        plot: PlotSize,
+        theme: &Theme,
+        lib: &'a FontLibrary,
+        spacing: TickSpacing,
+        size: crate::SizeSpec,
+    ) -> layout::TickRoom<'a> {
+        let (x, y) = layout::tick_rooms(plot, theme, lib, spacing);
         match self {
             Side::X => x,
             Side::Y => y,
         }
+        .with_size(size, theme)
     }
 
     /// The tick label size of this side, including shared settings.
@@ -227,8 +240,13 @@ impl Side {
         lib: &'a FontLibrary,
         axes: &Axes,
     ) -> layout::TickRoom<'a> {
-        self.room(plot, theme, lib)
-            .with_size(self.text_size(axes), theme)
+        self.sized_room(
+            plot,
+            theme,
+            lib,
+            TickSpacing::LabelsApart,
+            self.text_size(axes),
+        )
     }
 }
 
@@ -268,7 +286,18 @@ impl TickChoice {
 
     /// The tick room of `side`.
     fn room<'a>(&self, side: Side, theme: &Theme, lib: &'a FontLibrary) -> layout::TickRoom<'a> {
-        let room = side.room(self.plot, theme, lib);
+        self.sized_room(side, theme, lib, crate::SizeSpec::Auto)
+    }
+
+    /// The choice's tick room, using the same size as measurement and spacing checks.
+    fn sized_room<'a>(
+        &self,
+        side: Side,
+        theme: &Theme,
+        lib: &'a FontLibrary,
+        size: crate::SizeSpec,
+    ) -> layout::TickRoom<'a> {
+        let room = side.sized_room(self.plot, theme, lib, TickSpacing::LabelsApart, size);
         match self.most {
             Some(most) => room.at_most(most),
             None => room,
@@ -661,12 +690,12 @@ fn plan(
             .map(|i| {
                 let x = Side::X.group_plot(groups, i, plots, &show_labels);
                 let y = Side::Y.group_plot(groups, i, plots, &show_labels);
-                let (x, _) = layout::tick_rooms(x, theme, lib, spacing);
-                let (_, y) = layout::tick_rooms(y, theme, lib, spacing);
                 [
-                    x.with_size(panels[i].axes.xtick_size(), theme)
+                    Side::X
+                        .sized_room(x, theme, lib, spacing, panels[i].axes.xtick_size())
                         .with_labels(labels),
-                    y.with_size(panels[i].axes.ytick_size(), theme)
+                    Side::Y
+                        .sized_room(y, theme, lib, spacing, panels[i].axes.ytick_size())
                         .with_labels(labels),
                 ]
             })
@@ -733,11 +762,9 @@ fn plan(
             .zip(panels)
             .map(|(c, panel)| {
                 [
-                    c[0].room(Side::X, theme, lib)
-                        .with_size(panel.axes.xtick_size(), theme)
+                    c[0].sized_room(Side::X, theme, lib, panel.axes.xtick_size())
                         .with_labels(labels),
-                    c[1].room(Side::Y, theme, lib)
-                        .with_size(panel.axes.ytick_size(), theme)
+                    c[1].sized_room(Side::Y, theme, lib, panel.axes.ytick_size())
                         .with_labels(labels),
                 ]
             })
@@ -887,8 +914,7 @@ fn plan(
             // A choice that crowds even on the plot it was made for is the fallback.
             let choice = &mut next[i][side.index()];
             if choice
-                .room(side, theme, lib)
-                .with_size(side.text_size(panels[i].axes), theme)
+                .sized_room(side, theme, lib, side.text_size(panels[i].axes))
                 .slack(side.ticks(&tried_resolved[i]))
                 < 0.0
             {
@@ -1689,7 +1715,7 @@ mod tests {
     fn axes_none_hides_the_legend_under_a_header_theme() {
         let mut f = labelled_figure(Theme::pigment());
         f.single_axes_mut()
-            .legend(LegendStyle::None, Default::default())
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
             .unwrap();
         assert_eq!(legend_and_groups(&f), (0, 2));
         // Without a legend the figure draws as if its marks were unlabelled.
@@ -1718,7 +1744,7 @@ mod tests {
             .unwrap();
         let mut f = labelled_figure(none);
         f.single_axes_mut()
-            .legend(LegendStyle::Header, Default::default())
+            .legend(LegendStyle::Header, crate::SizeSpec::Auto)
             .unwrap();
         assert_eq!(legend_and_groups(&f), (2, 3));
         // The same scene as under a theme whose own style is the header row.
@@ -1736,13 +1762,13 @@ mod tests {
         assert_eq!(direct(&f), 2);
         // The axes ask for the header row.
         f.single_axes_mut()
-            .legend(LegendStyle::Header, Default::default())
+            .legend(LegendStyle::Header, crate::SizeSpec::Auto)
             .unwrap();
         assert_eq!(legend_and_groups(&f), (2, 3));
         assert_eq!(direct(&f), 0);
         // Calling it again replaces the style.
         f.single_axes_mut()
-            .legend(LegendStyle::None, Default::default())
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
             .unwrap();
         assert_eq!(legend_and_groups(&f), (0, 2));
         assert_eq!(direct(&f), 0);

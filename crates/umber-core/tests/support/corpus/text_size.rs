@@ -82,6 +82,68 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                 sink,
             );
         }
+        for (suffix, position) in [
+            ("right", ColorbarPosition::Right),
+            ("bottom", ColorbarPosition::Bottom),
+        ] {
+            for (scope, count, size) in [
+                ("panel", 1, SizeSpec::pt(72.0).unwrap()),
+                ("shared", 2, SizeSpec::pt(30.0).unwrap()),
+            ] {
+                let grid = Grid::new(count, count)
+                    .unwrap()
+                    .with_share_color(if count == 1 { Share::None } else { Share::All });
+                let mut f = Figure::with_grid(12.0, 8.0, theme.clone(), grid).unwrap();
+                for row in 0..count {
+                    for col in 0..count {
+                        let mut ax = f
+                            .add_axes_at(
+                                Placement {
+                                    row: GridIndex::At(row),
+                                    col: GridIndex::At(col),
+                                    ..Placement::default()
+                                },
+                                linear(),
+                                linear(),
+                            )
+                            .unwrap();
+                        ax.scatter(
+                            numbers(vec![0.0, 1.0, 2.0]),
+                            &[1.0, 3.0, 2.0],
+                            ScatterOptions {
+                                color: PointColor::By(ColorBy::new(vec![0.0, 5.0, 10.0])),
+                                ..ScatterOptions::default()
+                            },
+                        )
+                        .unwrap()
+                        .ylabel_sized("gypsy", size);
+                        if count == 1 {
+                            ax.colorbar(ColorbarOptions {
+                                label: "gypsy".into(),
+                                position: Some(position),
+                                size,
+                                ..ColorbarOptions::default()
+                            })
+                            .unwrap();
+                        }
+                    }
+                }
+                if count > 1 {
+                    f.colorbar(ColorbarOptions {
+                        label: "gypsy".into(),
+                        position: Some(position),
+                        size,
+                        ..ColorbarOptions::default()
+                    })
+                    .unwrap();
+                }
+                emit_scene(
+                    &format!("text-size-descenders-{scope}-{suffix}-{name}"),
+                    &f.to_scene(lib).unwrap(),
+                    sink,
+                );
+            }
+        }
         let grid = Grid::new(1, 2).unwrap().with_share_x(Share::All);
         let mut f = Figure::with_grid(12.0, 5.0, theme, grid).unwrap();
         f.title_sized("Shared labels", SizeSpec::pt(22.0).unwrap());

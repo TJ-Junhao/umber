@@ -91,7 +91,7 @@ fn best_avoids_bubble_area_when_its_center_is_outside() {
         .legend_at(
             LegendStyle::Header,
             LegendPosition::Best,
-            Default::default(),
+            crate::SizeSpec::Auto,
         )
         .unwrap()
         .xlim(0.0, 1.0)
@@ -136,7 +136,7 @@ fn size_legend_containment_errors_include_circle_height() {
         for position in [LegendPosition::Right, LegendPosition::Best] {
             let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
             let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-            axes.legend_at(style, position, Default::default())
+            axes.legend_at(style, position, crate::SizeSpec::Auto)
                 .unwrap()
                 .xlim(0.0, 1.0)
                 .unwrap()
@@ -337,7 +337,7 @@ fn size_legend_in_every_position() {
             ] {
                 let mut f = figure(theme.clone(), 870.0);
                 f.single_axes_mut()
-                    .legend_at(style, position, Default::default())
+                    .legend_at(style, position, crate::SizeSpec::Auto)
                     .unwrap();
                 let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
                 let entries = layout.legend.entries();
@@ -572,7 +572,7 @@ fn empty_zero_and_unlabelled_scales_have_no_reference_circles() {
     ] {
         let mut f = figure(Theme::pigment(), 1.0);
         f.single_axes_mut()
-            .legend(style, Default::default())
+            .legend(style, crate::SizeSpec::Auto)
             .unwrap();
         let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         assert_eq!(

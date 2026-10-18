@@ -2402,7 +2402,7 @@ mod tests {
             .legend_at(
                 crate::LegendStyle::Chips,
                 crate::LegendPosition::Right,
-                Default::default(),
+                crate::SizeSpec::Auto,
             )
             .unwrap();
         f

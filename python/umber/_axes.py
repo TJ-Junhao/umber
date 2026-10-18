@@ -32,6 +32,7 @@ from umber._errors import DataError, StyleError, UsageError, new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._series import Distribution, Series
+from umber._size import TEXT_SIZE_HINT as _SIZE_HINT
 from umber._size import Size
 from umber._ticks import TickFormat
 from umber._time import MicrosArray
@@ -85,7 +86,7 @@ def _members_hint(cls: type[Enum]) -> str:
 _DASH_HINT: Final = _members_hint(Dash)
 _MARKER_HINT: Final = _members_hint(Marker)
 _STEP_HINT: Final = _members_hint(Step)
-_SIZE_HINT: Final = (
+_MARK_SIZE_HINT: Final = (
     "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
 )
 _LEGEND_HINT: Final = _members_hint(LegendStyle)
@@ -636,9 +637,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 clears any previous override. ``LegendPosition.BEST`` instead chooses the
                 position inside the plot that covers the least data.
 
-            size: ``Size.AUTO`` follows the theme, ``Size.times(k)`` multiplies its
-                scaled size, and ``Size.pt(p)`` uses points without font scaling.
-                Explicit sizes must agree across panels in a merged legend.
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. In a merged legend, only these explicit
+                sizes must agree. ``Size.AUTO`` clears this panel's size setting and inherits
+                the agreed explicit size, or the theme's size when none is set. Panels with
+                ``LegendStyle.NONE`` do not take part in the agreement.
 
         Returns:
             These axes.
@@ -657,16 +660,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             member = instance("Axes.legend()", "style", style, LegendStyle, _LEGEND_HINT)
-            instance("Axes.legend()", "size", size, Size, _SIZE_HINT)
-            if position is AUTO:
-                self._native.legend(self._row, self._col, member.value, _size.native(size))
-            else:
-                placement = instance(
+            if position is not AUTO:
+                instance(
                     "Axes.legend()", "position", position, LegendPosition, _LEGEND_POSITION_HINT
                 )
+            instance("Axes.legend()", "size", size, Size, _SIZE_HINT)
+            if isinstance(position, LegendPosition):
                 self._native.legend_at(
-                    self._row, self._col, member.value, placement.value, _size.native(size)
+                    self._row, self._col, member.value, position.value, _size.native(size)
                 )
+            else:
+                self._native.legend(self._row, self._col, member.value, _size.native(size))
             return self
 
     def line(
@@ -2404,9 +2408,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Set the x tick label size without changing ticks or their format.
 
         Args:
-            size: ``Size.AUTO`` follows the theme, ``Size.times(k)`` multiplies its
-                scaled size, and ``Size.pt(p)`` uses points without font scaling.
-                Shared axes inherit this size; explicit calls must agree.
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. Only these explicit sizes must agree in
+                the shared axis group. ``Size.AUTO`` clears this panel's size setting and
+                inherits the group's agreed explicit size, or the theme's size when none
+                is set. Ticks and their format are unchanged.
 
         Returns:
             These axes.
@@ -2428,9 +2434,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Set the y tick label size without changing ticks or their format.
 
         Args:
-            size: ``Size.AUTO`` follows the theme, ``Size.times(k)`` multiplies its
-                scaled size, and ``Size.pt(p)`` uses points without font scaling.
-                Shared axes inherit this size; explicit calls must agree.
+            size: ``Size.times(k)`` multiplies the theme's scaled size; ``Size.pt(p)``
+                uses points without font scaling. Only these explicit sizes must agree in
+                the shared axis group. ``Size.AUTO`` clears this panel's size setting and
+                inherits the group's agreed explicit size, or the theme's size when none
+                is set. Ticks and their format are unchanged.
 
         Returns:
             These axes.
@@ -2471,7 +2479,7 @@ def _color_argument(context: str, value: object) -> tuple[int, int, float]:
 
 def _size_argument(context: str, name: str, value: object) -> tuple[int, float]:
     """Check a ``width`` or ``size`` argument and return its native form."""
-    return _size.native(instance(context, name, value, Size, _SIZE_HINT))
+    return _size.native(instance(context, name, value, Size, _MARK_SIZE_HINT))
 
 
 def _series_arguments(

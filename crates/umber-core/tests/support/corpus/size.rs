@@ -130,7 +130,7 @@ fn figures() -> Vec<(String, Figure)> {
         labelled(&mut f, "Emphasis, header legend");
         emphasis(&mut f);
         axes(&mut f)
-            .legend(LegendStyle::Header, Default::default())
+            .legend(LegendStyle::Header, umber_core::SizeSpec::Auto)
             .unwrap();
         out.push((format!("fig-size-header-{theme_name}"), f));
 
@@ -176,7 +176,8 @@ fn figures() -> Vec<(String, Figure)> {
             )
             .unwrap();
         }
-        a.legend(LegendStyle::Header, Default::default()).unwrap();
+        a.legend(LegendStyle::Header, umber_core::SizeSpec::Auto)
+            .unwrap();
         out.push((format!("fig-size-points-{theme_name}"), f));
     }
 
@@ -201,7 +202,7 @@ fn figures() -> Vec<(String, Figure)> {
             sized_line("Thin", Dash::Dashed, times(0.5)),
         )
         .unwrap()
-        .legend(LegendStyle::Header, Default::default())
+        .legend(LegendStyle::Header, umber_core::SizeSpec::Auto)
         .unwrap();
     out.push(("fig-size-wide-line-ends".to_owned(), f));
 
@@ -237,7 +238,7 @@ fn figures() -> Vec<(String, Figure)> {
             sized_scatter("Sites", Marker::Square, times(2.0)),
         )
         .unwrap()
-        .legend(LegendStyle::Chips, Default::default())
+        .legend(LegendStyle::Chips, umber_core::SizeSpec::Auto)
         .unwrap();
     out.push(("fig-size-category-chips".to_owned(), f));
 

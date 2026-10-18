@@ -775,29 +775,47 @@ impl Figure {
         self.subtitle_size
     }
 
-    /// The size of the merged legend; panels with no legend call inherit it.
+    /// Whether the grid shows one figure-wide legend instead of panel legends.
+    pub(crate) fn has_merged_legend(&self) -> bool {
+        self.grid.rows() * self.grid.cols() > 1 && self.grid.legend() == crate::LegendMode::Merged
+    }
+
+    /// Panels with a visible legend and an explicit size; AUTO contributes no setting.
+    fn sized_legends(&self) -> impl Iterator<Item = (usize, &Axes)> {
+        self.panels.iter().enumerate().filter(|(_, axes)| {
+            axes.legend_size != SizeSpec::Auto && axes.legend != Some(crate::LegendStyle::None)
+        })
+    }
+
+    /// The agreed explicit size of the merged legend, or the theme size when none is set.
     pub(crate) fn legend_size(&self) -> SizeSpec {
-        self.panels
-            .iter()
-            .find(|axes| axes.legend.is_some())
-            .map_or(SizeSpec::Auto, Axes::legend_size)
+        self.sized_legends()
+            .next()
+            .map_or(SizeSpec::Auto, |(_, axes)| axes.legend_size())
     }
 
     /// Checks a size before changing any part of a panel's legend settings.
-    pub(super) fn check_legend_size(&self, index: usize, size: SizeSpec) -> Result<()> {
-        if self.grid.rows() * self.grid.cols() > 1
-            && self.grid.legend() == crate::LegendMode::Merged
-            && let Some(other) = self.panels.iter().enumerate().find_map(|(i, axes)| {
-                (i != index && axes.legend.is_some() && axes.legend_size != size)
-                    .then_some(axes.legend_size)
-            })
+    pub(super) fn check_legend_size(
+        &self,
+        index: usize,
+        style: crate::LegendStyle,
+        size: SizeSpec,
+    ) -> Result<()> {
+        if self.has_merged_legend()
+            && style != crate::LegendStyle::None
+            && size != SizeSpec::Auto
+            && let Some((_, other)) = self
+                .sized_legends()
+                .find(|(i, axes)| *i != index && axes.legend_size != size)
         {
             return Err(Error::usage(
                 "Axes.legend()",
                 format!(
-                    "size is {}; another panel's legend uses {}, and the figure shows one legend.",
+                    "size is {}; row {}, col {} uses {}, and the figure shows one legend.",
                     super::axes::size_name(size),
-                    super::axes::size_name(other),
+                    other.cells().row(),
+                    other.cells().col(),
+                    super::axes::size_name(other.legend_size),
                 ),
             )
             .with_parameter("size")

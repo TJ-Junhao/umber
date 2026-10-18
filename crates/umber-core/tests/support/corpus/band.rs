@@ -118,7 +118,9 @@ fn figures() -> Vec<(String, Figure)> {
         ("direct", LegendStyle::Direct),
     ] {
         let mut f = mean_figure(Theme::graphite(), "Legend styles", false);
-        axes(&mut f).legend(style, Default::default()).unwrap();
+        axes(&mut f)
+            .legend(style, umber_core::SizeSpec::Auto)
+            .unwrap();
         out.push((format!("band-legend-{style_name}"), f));
     }
 

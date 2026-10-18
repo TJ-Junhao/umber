@@ -13,6 +13,7 @@ from umber._enums import AUTO, Auto, ColorbarPosition, Legend, Share, SvgText
 from umber._errors import new_error
 from umber._report import api_call
 from umber._scale import Scale
+from umber._size import TEXT_SIZE_HINT as _SIZE_HINT
 from umber._size import Size
 from umber._theme import Theme
 from umber._ticks import TickFormat
@@ -22,9 +23,6 @@ _SCALE_HINT: Final = "use Scale.linear(), Scale.log(), Scale.category() or Scale
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
 _SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
 _LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
-_SIZE_HINT: Final = (
-    "use Size.times(1.5) for a multiple of the theme's size, Size.pt(2.0) for points, or Size.AUTO."
-)
 
 
 def _inches(context: str, name: str, value: float | Auto) -> float | None:

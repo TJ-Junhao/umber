@@ -473,7 +473,7 @@ mod tests {
             axes.legend_at(
                 LegendStyle::Header,
                 LegendPosition::Best,
-                Default::default(),
+                crate::SizeSpec::Auto,
             )
             .unwrap();
             match kind {

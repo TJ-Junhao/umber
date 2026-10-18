@@ -13,6 +13,10 @@ _AUTO = 0
 _TIMES = 1
 _POINTS = 2
 
+TEXT_SIZE_HINT: Final = (
+    "use Size.times(1.5) for a multiple of the theme's size, Size.pt(12) for points, or Size.AUTO."
+)
+
 
 @final
 class Size:

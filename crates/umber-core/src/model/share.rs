@@ -149,7 +149,7 @@ pub(super) struct Group {
     ticks_by: Vec<Cell>,
     /// Members that set the format, including explicitly setting AUTO.
     format_by: Vec<Cell>,
-    /// Members that set the tick label size, including explicitly setting AUTO.
+    /// Members that set an explicit tick label size; AUTO removes a member's setting.
     tick_size_by: Vec<Cell>,
 }
 
@@ -161,9 +161,17 @@ impl Group {
         axis: SharedAxis,
         setting: Setting,
         cell: Cell,
-        proposed: AxisSettings,
+        mut proposed: AxisSettings,
         context: &'static str,
     ) -> Result<()> {
+        if matches!(setting, Setting::TickSize) && proposed.tick_size == SizeSpec::Auto {
+            self.tick_size_by.retain(|other| *other != cell);
+            if !self.tick_size_by.is_empty() {
+                proposed.tick_size = self.settings.tick_size;
+            }
+            self.settings = Arc::new(proposed);
+            return Ok(());
+        }
         let (same, by, what, previous, parameter) = match setting {
             Setting::Limits => {
                 let previous = self
@@ -206,8 +214,11 @@ impl Group {
                 return Err(Error::usage(
                     context,
                     format!(
-                        "size is {}; another panel's {} tick labels use {previous}, and the {} axis is shared.",
-                        size_name(proposed.tick_size), axis.name(), axis.name(),
+                        "size is {}; row {}, col {} uses {previous}, and the {} axis is shared.",
+                        size_name(proposed.tick_size),
+                        other.row,
+                        other.col,
+                        axis.name(),
                     ),
                 )
                 .with_parameter("size")

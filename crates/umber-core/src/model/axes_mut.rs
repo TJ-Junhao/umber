@@ -558,7 +558,10 @@ impl<'a> AxesMut<'a> {
     /// and bubble swatches show the marker fill at the theme's marker alpha. Lines, steps,
     /// reference lines and error bars keep the series color, as do direct labels and the
     /// outlines of box and violin swatches. Panel and merged figure legends use the same rule.
-    /// `size` resolves against the scaled body size; points ignore font scaling.
+    /// `size` resolves against the scaled body size; points ignore font scaling. Only
+    /// explicit sizes take part in a merged legend's agreement. [`SizeSpec::Auto`] clears
+    /// this panel's setting and inherits the agreed size, or the theme size when none is set.
+    /// Panels with [`LegendStyle::None`] do not take part in the agreement.
     ///
     /// # Errors
     ///
@@ -572,12 +575,12 @@ impl<'a> AxesMut<'a> {
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// axes.legend(LegendStyle::Chips, Default::default())?.legend(LegendStyle::None, Default::default())?;
+    /// axes.legend(LegendStyle::Chips, umber_core::SizeSpec::Auto)?.legend(LegendStyle::None, umber_core::SizeSpec::Auto)?;
     /// assert_eq!(axes.legend_style(), Some(LegendStyle::None));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn legend(&mut self, style: LegendStyle, size: SizeSpec) -> Result<&mut Self> {
-        self.figure.check_legend_size(self.index, size)?;
+        self.figure.check_legend_size(self.index, style, size)?;
         let axes = self.axes_mut();
         axes.legend = Some(style);
         axes.legend_position = None;
@@ -598,7 +601,7 @@ impl<'a> AxesMut<'a> {
     /// use umber_core::{Figure, LegendPosition, LegendStyle, ScaleKind, Theme};
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// axes.legend_at(LegendStyle::Header, LegendPosition::Bottom, Default::default())?;
+    /// axes.legend_at(LegendStyle::Header, LegendPosition::Bottom, umber_core::SizeSpec::Auto)?;
     /// assert_eq!(axes.legend_position(), Some(LegendPosition::Bottom));
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -614,7 +617,7 @@ impl<'a> AxesMut<'a> {
                 format!("position is {}; direct labels sit at the ends of their lines and take no position.", position.display()),
             ).with_parameter("position").with_hint("drop position=, or use another legend style."));
         }
-        self.figure.check_legend_size(self.index, size)?;
+        self.figure.check_legend_size(self.index, style, size)?;
         let axes = self.axes_mut();
         axes.legend = Some(style);
         axes.legend_position = Some(position);
@@ -2872,7 +2875,9 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Sets the x tick label size for the shared x group. A conflicting explicit call on
-    /// another member is `Error::Usage` and changes nothing.
+    /// another member is `Error::Usage` and changes nothing. [`SizeSpec::Auto`] removes this
+    /// member's setting: it inherits the remaining agreed explicit size, or the theme size
+    /// when none is set. Ticks and their format are unchanged.
     ///
     /// # Examples
     ///

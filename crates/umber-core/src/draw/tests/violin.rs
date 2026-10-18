@@ -367,7 +367,7 @@ fn violin_coverage_counts_density_and_quantile_lines() {
             .legend_at(
                 LegendStyle::Header,
                 crate::LegendPosition::Best,
-                Default::default(),
+                crate::SizeSpec::Auto,
             )
             .unwrap();
         let groups = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];

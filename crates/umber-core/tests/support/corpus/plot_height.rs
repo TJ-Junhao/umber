@@ -50,7 +50,7 @@ fn bare(width: f64, height: f64, [title, subtitle, legend]: [bool; 3]) -> Figure
         .unwrap()
         .yticks(&[])
         .unwrap()
-        .legend(LegendStyle::Header, Default::default())
+        .legend(LegendStyle::Header, umber_core::SizeSpec::Auto)
         .unwrap();
     if title {
         a.title("Load");

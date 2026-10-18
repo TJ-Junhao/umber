@@ -211,7 +211,7 @@ fn figures() -> Vec<(String, Figure)> {
         .unwrap()
         .xlim(0.0, 3.0)
         .unwrap()
-        .legend(LegendStyle::Direct, Default::default())
+        .legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
         .unwrap();
     out.push(("step-trailing-gap-limits".to_owned(), f));
 
@@ -296,7 +296,7 @@ fn figures() -> Vec<(String, Figure)> {
             },
         )
         .unwrap()
-        .legend(LegendStyle::Chips, Default::default())
+        .legend(LegendStyle::Chips, umber_core::SizeSpec::Auto)
         .unwrap();
     out.push(("step-with-line-and-area".to_owned(), f));
 

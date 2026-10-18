@@ -40,7 +40,7 @@ fn axes(f: &mut Figure, row: i64, col: i64) -> AxesMut<'_> {
         .unwrap()
         .yticks(&[])
         .unwrap()
-        .legend(LegendStyle::None, Default::default())
+        .legend(LegendStyle::None, umber_core::SizeSpec::Auto)
         .unwrap();
     ax
 }
@@ -282,7 +282,8 @@ fn legend_width_difference_suffices() {
                     |width| {
                         let mut f = figure(width, 288.0, 1, cols);
                         let mut ax = axes(&mut f, 0, 0);
-                        ax.legend_at(style, position, Default::default()).unwrap();
+                        ax.legend_at(style, position, umber_core::SizeSpec::Auto)
+                            .unwrap();
                         line(&mut ax, "WWWWWWWWWWWW");
                         f
                     },
@@ -311,7 +312,7 @@ fn figure_legend_difference_suffices() {
                 )
                 .unwrap();
                 let mut ax = axes(&mut f, 0, 0);
-                ax.legend(style, Default::default()).unwrap();
+                ax.legend(style, umber_core::SizeSpec::Auto).unwrap();
                 line(&mut ax, "WWWWWWWWWWWW");
                 f
             },
@@ -330,7 +331,7 @@ fn right_legend_with_colorbar_difference_suffices() {
             ax.legend_at(
                 LegendStyle::Header,
                 LegendPosition::Right,
-                Default::default(),
+                umber_core::SizeSpec::Auto,
             )
             .unwrap();
             line(&mut ax, &"W".repeat(32));
@@ -352,7 +353,7 @@ fn legend_height_difference_suffices() {
                 |height| {
                     let mut f = figure(432.0, height, rows, 1);
                     let mut ax = axes(&mut f, 0, 0);
-                    ax.legend_at(LegendStyle::Header, position, Default::default())
+                    ax.legend_at(LegendStyle::Header, position, umber_core::SizeSpec::Auto)
                         .unwrap();
                     for label in ["North", "South", "East"] {
                         line(&mut ax, label);
@@ -372,7 +373,8 @@ fn direct_label_difference_suffices() {
         |width| {
             let mut f = figure(width, 288.0, 1, 2);
             let mut ax = axes(&mut f, 0, 0);
-            ax.legend(LegendStyle::Direct, Default::default()).unwrap();
+            ax.legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
+                .unwrap();
             line(&mut ax, "WWWWWWWWWWWW");
             f
         },

@@ -370,7 +370,7 @@ fn figures() -> Vec<(String, Figure)> {
                 },
             )
             .unwrap()
-            .legend(style, Default::default())
+            .legend(style, umber_core::SizeSpec::Auto)
             .unwrap();
         out.push((format!("error-bars-legend-{style_name}"), f));
     }

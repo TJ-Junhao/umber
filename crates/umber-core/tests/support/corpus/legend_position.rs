@@ -84,7 +84,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                 .add_axes(ScaleKind::Linear, ScaleKind::Linear)
                 .unwrap()
                 .title("Observations")
-                .legend_at(style, LegendPosition::Best, Default::default())
+                .legend_at(style, LegendPosition::Best, umber_core::SizeSpec::Auto)
                 .unwrap()
                 .xlim(0.0, 1.0)
                 .unwrap()
@@ -132,7 +132,8 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                     ScaleKind::Linear,
                 )
                 .unwrap();
-            axes.legend_at(style, position, Default::default()).unwrap();
+            axes.legend_at(style, position, umber_core::SizeSpec::Auto)
+                .unwrap();
             lines(&mut axes);
         }
         emit_scene(
@@ -147,7 +148,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap();
         let error = axes
-            .legend_at(LegendStyle::Direct, position, Default::default())
+            .legend_at(LegendStyle::Direct, position, umber_core::SizeSpec::Auto)
             .unwrap_err();
         api.push_str(&format!("{}\n", record::error(&error)));
         api.push_str(&format!(
@@ -189,7 +190,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                         ScaleKind::Linear,
                     )
                     .unwrap();
-                axes.legend_at(style, position, Default::default())
+                axes.legend_at(style, position, umber_core::SizeSpec::Auto)
                     .unwrap()
                     .xlim(0.0, 1.0)
                     .unwrap()
