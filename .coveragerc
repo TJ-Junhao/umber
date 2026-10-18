@@ -1,0 +1,11 @@
+# Used by pytest-cov in .github/workflows/coverage.yml.
+[run]
+branch = True
+source = python/umber
+relative_files = True
+# The extension also runs in child processes; measure those too.
+patch = subprocess
+
+[report]
+precision = 2
+show_missing = True

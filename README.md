@@ -1,5 +1,7 @@
 # umber
 
+[![Coverage](https://codecov.io/gh/TJ-Junhao/umber/graph/badge.svg)](https://codecov.io/gh/TJ-Junhao/umber)
+
 umber is a plotting library for Python with a rendering core written in Rust. It draws line, step, scatter, area, stacked area, bar, histogram, box, violin, bubble, error bar, band, stem, reference-line, heatmap, mesh, 2-D histogram and hexbin charts on numeric, log, category and time axes, alone or on a grid of panels with shared axes. It has colormaps and colorbars, careful typography, three built-in themes, and PNG or SVG output.
 
 [简体中文](https://github.com/TJ-Junhao/umber/blob/main/README-ZH.md)

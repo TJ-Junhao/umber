@@ -38,6 +38,7 @@ Issues = "https://github.com/TJ-Junhao/umber/issues"
 dev = [
     "maturin>=1.15,<2",
     "pytest>=9.1",
+    "pytest-cov>=7.1",
     "ruff>=0.16.10",
     "pyright>=1.1.414",
     "mypy>=2.4",
