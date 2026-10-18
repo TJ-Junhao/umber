@@ -454,39 +454,54 @@ fn round_levels(z: &[f64], ask: Ask, scale: Transform) -> (Vec<Tick>, TickValues
         Ask::Auto => (AUTO_LEVELS, false),
         Ask::Count(count) => (count.saturating_add(2), true),
     };
-    match scale {
+    let (levels, values) = match scale {
         Transform::Linear => {
             let all = ticks::extended(lo, hi, target, TickCoverage::Free, &Fit::ANY);
-            let step = match all.as_slice() {
-                [first, second, ..] => second - first,
-                _ => return none,
-            };
-            let mut levels: Vec<f64> = ticks::snapped_to_zero(&all, step)
-                .into_iter()
-                .filter(|&v| inside(v))
-                .collect();
-            if levels.is_empty() && fallback {
-                levels.push(lo / 2.0 + hi / 2.0);
+            match all.as_slice() {
+                [first, second, ..] => {
+                    let step = second - first;
+                    let levels: Vec<f64> = ticks::snapped_to_zero(&all, step)
+                        .into_iter()
+                        .filter(|&v| inside(v))
+                        .collect();
+                    let labels = ticks::format_ticks(&levels, step);
+                    (paired(levels, labels), TickValues::Grid { step })
+                }
+                _ => none.clone(),
             }
-            let labels = ticks::format_ticks(&levels, step);
-            (paired(levels, labels), TickValues::Grid { step })
         }
         Transform::Log(_) => match ContinuousScale::new(scale, lo, hi, CONTEXT) {
-            Ok(axis) => {
-                let mut levels: Vec<Tick> = axis
-                    .ticks(target)
+            Ok(axis) => (
+                axis.ticks(target)
                     .into_iter()
                     .filter(|tick| inside(tick.value))
-                    .collect();
-                if levels.is_empty() && fallback {
-                    // The middle of the range on the log scale.
-                    let middle = (lo.ln() / 2.0 + hi.ln() / 2.0).exp().clamp(lo, hi);
-                    levels = paired(vec![middle], ticks::format_values(&[middle]));
-                }
-                (levels, TickValues::Exact)
-            }
-            Err(_) => none,
+                    .collect(),
+                TickValues::Exact,
+            ),
+            // A range too narrow for log ticks still has values inside it.
+            Err(_) => none.clone(),
         },
+    };
+    if !levels.is_empty() || !fallback {
+        return (levels, values);
+    }
+    // No round value lies inside: the middle of the range, on the scale's own terms.
+    let middle = match scale {
+        Transform::Linear => lo / 2.0 + hi / 2.0,
+        Transform::Log(_) => (lo.ln() / 2.0 + hi.ln() / 2.0).exp(),
+    };
+    if !inside(middle) {
+        return none;
+    }
+    match values {
+        TickValues::Grid { step } => (
+            paired(vec![middle], ticks::format_ticks(&[middle], step)),
+            values,
+        ),
+        TickValues::Exact => (
+            paired(vec![middle], ticks::format_values(&[middle])),
+            TickValues::Exact,
+        ),
     }
 }
 
@@ -991,6 +1006,37 @@ mod tests {
             given.labels_in(&TickFormat::default()),
             ["\u{2212}1.00", "0.25", "1.50", "9.00"]
         );
+    }
+
+    #[test]
+    fn a_count_always_finds_a_level_on_a_varying_field() {
+        let narrow = [1.0, 1.0 + 1e-10, 1.0, 1.0 + 1e-10];
+        for count in [1, 2, 3, 64] {
+            for scale in [Transform::Log(LogBase::TEN), Transform::Linear] {
+                let mut f = figure();
+                f.single_axes_mut()
+                    .contour(
+                        &[0.0, 1.0],
+                        &[0.0, 1.0],
+                        &narrow,
+                        ContourOptions {
+                            levels: ContourLevels::Count(count),
+                            scale,
+                            ..ContourOptions::default()
+                        },
+                    )
+                    .unwrap();
+                let [Mark::Contour(contour)] = f.single_axes().marks() else {
+                    unreachable!()
+                };
+                let levels = contour.levels();
+                assert!(!levels.is_empty(), "{count} on {scale:?}");
+                assert!(
+                    levels.iter().all(|&v| 1.0 < v && v < 1.0 + 1e-10),
+                    "{levels:?}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -2805,6 +2805,13 @@ impl<'a> AxesMut<'a> {
     /// outer coordinates, without padding, as for [`AxesMut::mesh`]; by default a contour
     /// alone draws no baseline.
     ///
+    /// A field that changes from cell to cell, such as noise or a checkerboard, makes many
+    /// short lines and many small bands: vector output then grows very large and slow to write
+    /// and to draw. Ask for fewer levels or [`ContourStyle::Filled`](crate::ContourStyle::Filled)
+    /// instead of [`ContourStyle::Both`](crate::ContourStyle::Both), smooth or aggregate the
+    /// data first, or draw it with [`AxesMut::mesh`] or [`AxesMut::heatmap`] when the cells
+    /// themselves are what matters. Contours never thin the data on their own.
+    ///
     /// # Errors
     ///
     /// Errors leave the axes unchanged; the checks run in the order of

@@ -59,22 +59,28 @@ fn panels<'a>(figure: &'a Figure, groups: &ShareGroups, lib: &FontLibrary) -> Ve
             }
         })
         .collect();
-    resolve_colors(&mut panels, groups, theme);
+    resolve_colors(figure, &mut panels, groups);
     panels
 }
 
-/// Resolves each color group's scale from its members' current mapped values.
-fn resolve_colors(panels: &mut [Panel<'_>], groups: &ShareGroups, theme: &Theme) {
+/// Resolves each color group's scale from its members' current mapped values, with the
+/// contour level labels in the format of the group's colorbar ticks.
+fn resolve_colors(figure: &Figure, panels: &mut [Panel<'_>], groups: &ShareGroups) {
     for i in 0..panels.len() {
         if groups.color[i] != Some(i) {
             continue;
         }
+        let format = color_tick_format(figure, &panels[i]).0.clone();
         let marks = panels
             .iter()
             .enumerate()
             .filter(|(j, _)| groups.color[*j] == Some(i))
             .flat_map(|(_, panel)| panel.marks.iter());
-        let color = ResolvedColorScale::resolve(marks, panels[i].axes.color_limits(), theme);
+        let color = ResolvedColorScale::resolve(
+            marks,
+            panels[i].axes.color_limits(),
+            (figure.theme(), &format),
+        );
         for (j, panel) in panels.iter_mut().enumerate() {
             if groups.color[j] == Some(i) {
                 panel.color = color.clone();
@@ -85,26 +91,33 @@ fn resolve_colors(panels: &mut [Panel<'_>], groups: &ShareGroups, theme: &Theme)
 
 /// Checks that the color-mapped contours of each color group, which share one colorbar, all
 /// have the same levels, so the bar explains every one of them: `Error::Style` under `context`
-/// naming the panels of the first two whose levels differ.
+/// naming the panels of the first two whose levels differ. It reads the levels the model
+/// resolved, before any contour geometry is built.
 fn check_contour_levels(
     figure: &Figure,
-    panels: &[Panel<'_>],
     groups: &ShareGroups,
     context: &'static str,
 ) -> Result<()> {
     const HINT: &str = "pass the same levels to every contour that shares a colorbar.";
+    let panels: Vec<&Axes> = figure.panels().collect();
     for source in 0..panels.len() {
-        if groups.color[source] != Some(source) {
+        if groups.color.get(source) != Some(&Some(source)) {
             continue;
         }
         let mut first: Option<(usize, Vec<f64>)> = None;
         let members = panels
             .iter()
             .enumerate()
-            .filter(|(i, _)| groups.color[*i] == Some(source));
-        for (i, panel) in members {
-            for levels in panel.marks.iter().filter_map(ResolvedMark::color_levels) {
-                let values: Vec<f64> = levels.ticks.iter().map(|tick| tick.value).collect();
+            .filter(|(i, _)| groups.color.get(*i) == Some(&Some(source)));
+        for (i, axes) in members {
+            let contours = axes.marks().iter().filter_map(|mark| match mark {
+                crate::model::Mark::Contour(contour) if contour.color_scale().is_some() => {
+                    Some(contour)
+                }
+                _ => None,
+            });
+            for contour in contours {
+                let values = contour.levels();
                 let Some((j, known)) = &first else {
                     first = Some((i, values));
                     continue;
@@ -119,9 +132,9 @@ fn check_contour_levels(
                         format!("two contours of these axes have different levels; {required}"),
                     )
                     .with_hint(HINT);
-                    return Err(in_cell(figure, panel.axes, error));
+                    return Err(in_cell(figure, axes, error));
                 }
-                let (a, b) = (panels[*j].axes.cells(), panel.axes.cells());
+                let (a, b) = (panels[*j].cells(), axes.cells());
                 return Err(Error::style(
                     context,
                     format!(
@@ -480,7 +493,6 @@ fn plan(
     context: &'static str,
     labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
-    check_contour_levels(figure, panels, groups, context)?;
     let theme = figure.theme();
     let header = figure_header(figure, panels, lib);
     let inputs: Vec<LayoutInput<'_>> = panels
@@ -1306,7 +1318,7 @@ fn plan_cells(
                 counting_aspects[i] = aspects[i];
             }
         }
-        resolve_colors(panels, groups, figure.theme());
+        resolve_colors(figure, panels, groups);
         planned = plan(figure, panels, groups, lib, context, labels)?;
         if planned
             .panels
@@ -1531,6 +1543,7 @@ fn scene_with_labels(
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
     let groups = ShareGroups::new(figure);
+    check_contour_levels(figure, &groups, context)?;
     let mut panels = panels(figure, &groups, library);
     if panels.is_empty() {
         let header = figure_header(figure, &panels, library);

@@ -2396,6 +2396,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         and as ticks on a smooth bar for lines. Automatic limits are the outer coordinates,
         without padding. By default a contour alone draws no baseline.
 
+        A field that changes from cell to cell, such as noise or a checkerboard, makes many short
+        lines and many small bands, so vector output grows very large and slow to write and to
+        draw. Use fewer levels, or ``Contour.FILLED`` instead of ``Contour.BOTH``; smooth or
+        aggregate the data first; or use ``mesh()`` or ``heatmap()`` when the cells themselves
+        are what matters. Contours never thin the data on their own.
+
         Args:
             x: The x coordinates of the grid's columns, strictly increasing, at least two.
             y: The y coordinates of the grid's rows, strictly increasing, at least two.

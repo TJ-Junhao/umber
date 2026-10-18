@@ -160,10 +160,18 @@ pub(super) fn contour_items(
             },
         ),
     };
+    // Without a format of its own, a contour on a colorbar writes its levels as the bar does.
+    let texts = match (&resolved.color, &mark.options().format) {
+        (Some(scale), None) if contour.mapped => scale
+            .levels
+            .as_ref()
+            .map_or(contour.labels, |levels| levels.labels.as_slice()),
+        _ => contour.labels,
+    };
     let label_color = context.theme.text_color();
     let mut labels = Vec::new();
     for (index, lines) in contour.shapes.lines.iter().enumerate() {
-        let (Some(&level), Some(text)) = (levels.get(index), contour.labels.get(index)) else {
+        let (Some(&level), Some(text)) = (levels.get(index), texts.get(index)) else {
             continue;
         };
         let Some(color) = line_color.at(level) else {

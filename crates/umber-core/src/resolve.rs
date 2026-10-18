@@ -3014,6 +3014,7 @@ impl<'a> ResolvedMark<'a> {
         };
         let (ticks, values) = mark.level_ticks();
         Some(ColorLevels {
+            labels: ticks.iter().map(|tick| tick.label.clone()).collect(),
             ticks: ticks.to_vec(),
             values,
             banded: mark.options().style != crate::ContourStyle::Lines,
