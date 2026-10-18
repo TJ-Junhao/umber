@@ -1411,9 +1411,9 @@ impl<'a> AxesMut<'a> {
     ///
     /// With `annotation.annotate`, each segment shows its value centred inside it, in black or
     /// white, whichever contrasts more with the segment, at the tick label size. Rendering a
-    /// finite, non-zero segment whose label does not fit inside it with 2 pt to spare on every
-    /// side is `Error::Style`, naming the series and the bar; NaN and 0 have no segment and no
-    /// label.
+    /// finite, non-zero value whose label does not fit inside its drawn segment with 2 pt to
+    /// spare on every side is `Error::Style`, naming the series and the bar; a value too small
+    /// to show a segment at all fits nowhere. NaN and 0 have no label.
     ///
     /// # Examples
     ///

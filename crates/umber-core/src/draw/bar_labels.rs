@@ -376,17 +376,20 @@ impl Drawing<'_> {
                 };
                 match stacks {
                     Some(stacks) => {
-                        let (Some(segment), Some(&fill)) = (stacks.segment(i, j), colors.get(j))
-                        else {
+                        // Only 0 has no segment and no label (NaN has no label at all).
+                        let Some(&fill) = colors.get(j) else {
                             continue;
                         };
-                        // A segment the stack gap leaves no height shows no room, so its label
-                        // does not fit; only NaN and 0, which have no segment, have no label.
-                        let ends =
-                            segment_ends(&bars, values, segment, half_gap).unwrap_or_else(|| {
-                                let top = axis_value(values, segment.top);
-                                (top, top)
-                            });
+                        if value.value == 0.0 {
+                            continue;
+                        }
+                        // A value too small to change its stack's total (`1e100 + 1.0`) has no
+                        // segment, and one the stack gap leaves no height has no drawn height:
+                        // either shows no room, so its label does not fit.
+                        let ends = stacks
+                            .segment(i, j)
+                            .and_then(|segment| segment_ends(&bars, values, segment, half_gap))
+                            .unwrap_or((bars.base(), bars.base()));
                         items.push(self.inside(value, &bar, span, ends, fill)?);
                     }
                     None => {

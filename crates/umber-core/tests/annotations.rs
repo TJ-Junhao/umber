@@ -997,3 +997,71 @@ fn tiny_stacked_segment_reports_the_room_error() {
         );
     }
 }
+
+#[test]
+fn values_lost_to_rounding_in_a_stack_report_the_room_error() {
+    for (x, y) in [
+        (ScaleKind::Category, ScaleKind::Linear),
+        (ScaleKind::Linear, ScaleKind::Category),
+    ] {
+        for sign in [1.0, -1.0] {
+            let mut f = figure(x, y);
+            let series = |label: &str, value: f64| Series {
+                label: label.into(),
+                values: vec![value],
+                color: ColorSpec::AUTO,
+            };
+            axes(&mut f)
+                .stacked_bar(
+                    names(&["A"]),
+                    vec![
+                        series("Large", sign * 100.0),
+                        series("Small", sign * 1e-15),
+                        series("Zero", 0.0),
+                    ],
+                    annotated(),
+                )
+                .unwrap();
+            let err = f.to_scene(FontLibrary::global()).unwrap_err();
+            assert!(matches!(err, Error::Style { .. }), "{err}");
+            let minus = if sign < 0.0 { "\u{2212}" } else { "" };
+            assert!(
+                err.to_string().starts_with(&format!(
+                    "Figure.to_scene(): the value label \"{minus}1e\u{2212}15\" of the series \
+                     \"Small\" in the bar \"A\" needs "
+                )),
+                "{x:?} {sign}: {err}"
+            );
+        }
+    }
+}
+
+#[test]
+fn zero_and_nan_in_a_stack_have_no_label() {
+    let zeros = |labels: ValueLabels| {
+        let mut f = figure(ScaleKind::Category, ScaleKind::Linear);
+        let series = |label: &str, value: f64| Series {
+            label: label.into(),
+            values: vec![value],
+            color: ColorSpec::AUTO,
+        };
+        axes(&mut f)
+            .stacked_bar(
+                names(&["A"]),
+                vec![
+                    series("Large", 100.0),
+                    series("Zero", 0.0),
+                    series("Gap", f64::NAN),
+                ],
+                labels,
+            )
+            .unwrap();
+        let scene = render(&f);
+        leaves(&scene.items)
+            .iter()
+            .filter(|item| matches!(item, Item::Text(t) if t.text == "0" || t.text == "NaN"))
+            .count()
+    };
+    // The only "0" is the tick label, with or without value labels.
+    assert_eq!(zeros(annotated()), zeros(ValueLabels::default()));
+}
