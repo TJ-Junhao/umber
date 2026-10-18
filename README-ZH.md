@@ -8,7 +8,7 @@ umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制
 
 ![Graphite 主题下两个站点的每日气温折线图](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
 
-- **大数据量也快。** 渲染在 Rust 中完成：100 万个点的折线渲染成 PNG 约 57 ms，10 万个点的散点图约 47 ms（见[性能](#性能)）。
+- **大数据量也快。** 渲染在 Rust 中完成：在标准的 GitHub Actions runner 上，100 万个点的折线渲染成 PNG 约 74 ms，10 万个点的散点图约 83 ms，分别比 matplotlib 快 2.8× 和 3.5×（见[性能](#性能)）。
 - **显式。** 每个选项都是有类型的值（`Color`、`Size`、`Dash`、`TickFormat` 等）。没有格式字符串，没有位置式的样式参数，也没有隐式转换。
 - **尽早报错，并指出问题所在。** 非法输入在引发它的那次调用处就报错，附带说明、提示，并在 traceback 中高亮出错的参数。
 - **静态类型。** 类别轴和数值轴是不同的类型：在数值轴上调用 `bar`，pyright 和 mypy 在运行前就会报错。
@@ -234,20 +234,25 @@ ax.bar(["a", "b"], [1, 2])  # pyright 和 mypy 报错：bar() 需要 Axes[str, f
 
 ## 性能
 
-以下是 `crates/umber-core/benches` 中 [criterion](https://github.com/criterion-rs/criterion.rs) 测试套件的中位数，图幅 6 × 4 英寸、200 dpi，运行于 Linux 下的 Intel Core Ultra 9 290HX：
+以下是与 matplotlib 3.11.2（Agg 后端、默认样式）对比的 Python 端到端耗时，从构建图形的调用开始，到得到编码后的字节为止。图幅 6 × 4 英寸，PNG 为 200 dpi，两者使用相同的输入数据。每个数值是预热一次后 8 次运行的中位数，两个库各在独立的进程中运行。测量环境为 umber 0.3.2，GitHub Actions `ubuntu-latest`（AMD EPYC 9V74，4 个 vCPU，Python 3.12，NumPy 2.5），由 [Python bench workflow](https://github.com/TJ-Junhao/umber/actions/workflows/python-bench.yml) 运行（[本次运行](https://github.com/TJ-Junhao/umber/actions/runs/39101279625)）；脚本为 `scripts/bench/python_vs_matplotlib.py`。同一个 runner 标签每次可能分到不同型号的 CPU，所以绝对耗时会随运行变化；在同一台机器上交替测得的加速比才是可比较的数字。
 
-| 场景 | 耗时 |
-| --- | ---: |
-| 100 万点折线 → PNG | 57 ms |
-| 时间轴上的 100 万点折线 → PNG | 52 ms |
-| 100 万点折线 → SVG | 18 ms |
-| 10 万点散点图 → PNG | 47 ms |
-| 100 万个值的直方图 → PNG | 20 ms |
-| 100 万个点的二维直方图，100 × 100 个 bin → PNG | 11 ms |
-| 100 万个点的六边形分箱图，grid size 50 → PNG | 67 ms |
-| 1,000 × 1,000 个格子的热力图 → PNG | 153 ms |
-| 1,000 × 1,000 个格子的热力图 → SVG | 196 ms |
-| 4 × 5 网格，每格一条 1 万个点的折线 → PNG | 103 ms |
+| 场景 | umber | matplotlib | 加速比 |
+| --- | ---: | ---: | ---: |
+| 100 万点折线 → PNG | 74 ms | 205 ms | 2.8× |
+| 时间轴上的 100 万点折线 → PNG | 91 ms | 220 ms | 2.4× |
+| 100 万点折线 → SVG | 24 ms | 65 ms | 2.7× |
+| 10 万点散点图 → PNG | 83 ms | 291 ms | 3.5× |
+| 100 万个值的直方图 → PNG | 32 ms | 64 ms | 2.0× |
+| 100 万个点的二维直方图，100 × 100 个 bin → PNG | 100 ms | 168 ms | 1.7× |
+| 100 万个点的六边形分箱图，grid size 50 → PNG | 127 ms | 141 ms | 1.1× |
+| 1,000 × 1,000 个格子的热力图 → PNG | 194 ms | 252 ms | 1.3× |
+| 1,000 × 1,000 个格子的热力图 → SVG | 175 ms | 443 ms | 2.5× |
+| 4 × 5 网格，每格一条 1 万个点的折线 → PNG | 180 ms | 552 ms | 3.1× |
+| 1,000 个点的折线加第二条序列、标题、坐标轴标签和图例 → PNG | 22 ms | 81 ms | 3.7× |
+| 5 根柱子的柱状图 → PNG | 12 ms | 44 ms | 3.6× |
+| 在新解释器中 `import` | 66 ms | 310 ms | 4.7× |
+
+绑定到单个 CPU 时，只有散点图明显变慢：125 ms（2.3×）。4 × 5 网格使用 12 × 8 英寸的图幅。两个库在哪些场景下做的工作不同（例如六边形分箱的网格构建方式不同），见脚本的 docstring。
 
 对于 x 值有序的数值或时间折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。
 
