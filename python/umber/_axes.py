@@ -3,6 +3,7 @@
 import numbers
 from collections.abc import Sequence
 from enum import Enum
+from functools import partial
 from operator import attrgetter
 from typing import Any, Final, Generic, Never, Self, cast, final
 
@@ -13,7 +14,7 @@ from typing_extensions import TypeVar
 # so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
 # ``umber.Figure`` through the package once it has loaded.
 import umber
-from umber import _args, _cmap, _color, _scale, _series, _size, _ticks, _time, _umber
+from umber import _args, _cmap, _color, _group, _scale, _series, _size, _ticks, _time, _umber
 from umber._args import instance, integer, is_text_or_buffer, real, type_name
 from umber._cmap import CMAP_HINT, Cmap
 from umber._color import Color
@@ -23,6 +24,7 @@ from umber._enums import (
     Align,
     Auto,
     ColorbarPosition,
+    Contour,
     Dash,
     Hist,
     LegendPosition,
@@ -103,6 +105,7 @@ _LEGEND_POSITION_HINT: Final = (
 _RENDER_HINT: Final = (
     "use ub.Render.VECTOR or ub.Render.RASTER, or ub.AUTO to choose by the number of cells."
 )
+_CONTOUR_HINT: Final = _members_hint(Contour)
 _FORMAT_HINT: Final = (
     "use TickFormat.fixed(2), TickFormat.percent(), TickFormat.scientific() or TickFormat.AUTO."
 )
@@ -112,6 +115,8 @@ _OFFSET_HINT: Final = "pass a tuple (dx, dy) of points, such as (0.0, 12.0)."
 
 
 @final
+# PEP 695 syntax on Python 3.12 cannot give type parameters defaults, so ``Axes``
+# could not mean ``Axes[float, float]``.
 class Axes(Generic[X, Y]):  # noqa: UP046
     """The plot area of a figure: marks, titles, axis labels, limits and the legend.
 
@@ -692,6 +697,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
+        by: Values[str] | Auto = AUTO,
     ) -> SY:
         """Add a line through the points ``(x[i], y[i])``, in order.
 
@@ -704,22 +710,30 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
+            by: One group name per data row, in first-appearance order; ``AUTO`` draws
+                one series. Names supply legend labels and palette colors; do not pass
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+            DataError: If ``by`` has invalid names or differs in length from the data; or if
+                the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, or names and numbers do not match the x
                 axis.
             StyleError: If ``label`` is too long.
-            UsageError: If the y axis is a category axis.
+            UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+                the y axis is a category axis.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.line([0, 1, 2, 3], [1.0, 3.0, float("nan"), 2.0], label="North")
+            >>> grouped = ub.Figure().add_axes()
+            >>> grouped = grouped.line([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
         """
         with api_call():
             context = "Axes.line()"
@@ -729,10 +743,31 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            xs = self._x_values(context, x)
-            ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
-            self._native.line(self._row, self._col, xs, ys, name, spec, style.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                _group.XY(
+                    x=partial(self._x_values, context, x),
+                    y=partial(self._y_values, context, y),
+                    draw=partial(
+                        self._native.line,
+                        self._row,
+                        self._col,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_line,
+                        self._row,
+                        self._col,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                ),
+            )
             return self
 
     def area(
@@ -744,6 +779,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
+        by: Values[str] | Auto = AUTO,
     ) -> SY:
         """Add a line through the points ``(x[i], y[i])``, in order, and fill the region below it.
 
@@ -759,22 +795,30 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The area color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
+            by: One group name per data row, in first-appearance order; ``AUTO`` draws
+                one series. Names supply legend labels and palette colors; do not pass
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+            DataError: If ``by`` has invalid names or differs in length from the data; or if
+                the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, or names and numbers do not match the x
                 axis.
             StyleError: If ``label`` is too long.
-            UsageError: If the y axis is a category axis.
+            UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+                the y axis is a category axis.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.area([0, 1, 2, 3], [1.0, 3.0, 2.0, 4.0], label="Visitors")
+            >>> grouped = ub.Figure().add_axes()
+            >>> grouped = grouped.area([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
         """
         with api_call():
             context = "Axes.area()"
@@ -784,10 +828,31 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            xs = self._x_values(context, x)
-            ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
-            self._native.area(self._row, self._col, xs, ys, name, spec, style.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                _group.XY(
+                    x=partial(self._x_values, context, x),
+                    y=partial(self._y_values, context, y),
+                    draw=partial(
+                        self._native.area,
+                        self._row,
+                        self._col,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_area,
+                        self._row,
+                        self._col,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                ),
+            )
             return self
 
     def scatter(
@@ -799,6 +864,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color | ColorBy = Color.AUTO,
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
+        by: Values[str] | Auto = AUTO,
     ) -> Self:
         """Add a marker at each point ``(x[i], y[i])``.
 
@@ -816,18 +882,24 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 ``scale`` and ``center`` must match the other color-mapped marks of these axes.
             marker: The marker shape.
             size: The marker size. ``Size.AUTO`` is the marker size of the theme.
+            by: One group name per data row, in first-appearance order; ``AUTO`` draws
+                one series. Names supply legend labels and palette colors; do not pass
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+            DataError: If ``by`` has invalid names or differs in length from the data; or if
+                the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, names and numbers do not match the
                 axes, or a ``ColorBy`` does not have one value per point.
             StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
                 range set by ``clim()``.
-            UsageError: If both axes are category axes (type checkers accept such axes, so
+            UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+                both axes are category axes (type checkers accept such axes, so
                 this is raised when the call runs), a ``ColorBy`` comes with a label, or its
                 ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
                 marks of these axes.
@@ -839,6 +911,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.scatter([1, 2, 3], [3.0, 2.5, 1.0], color=ub.ColorBy([0.2, 0.5, 0.9]))
             >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
             >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
+            >>> grouped = ub.scatter([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
         """
         with api_call():
             context = "Axes.scatter()"
@@ -848,10 +921,31 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             extent = _size_argument(context, "size", size)
-            xs = self._x_values(context, x)
-            ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
-            self._native.scatter(self._row, self._col, xs, ys, name, spec, shape.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                _group.XY(
+                    x=partial(self._x_values, context, x),
+                    y=partial(self._y_values, context, y),
+                    draw=partial(
+                        self._native.scatter,
+                        self._row,
+                        self._col,
+                        color=spec,
+                        marker=shape.value,
+                        size=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_scatter,
+                        self._row,
+                        self._col,
+                        marker=shape.value,
+                        size=extent,
+                    ),
+                ),
+            )
             return self
 
     def bubbles(
@@ -1009,6 +1103,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         annotate: bool = False,
         format: TickFormat | Auto = AUTO,
         size: Size = Size.AUTO,
+        by: Values[str] | Auto = AUTO,
     ) -> "Axes[X, Y]":
         """Add one bar per category, from the baseline to its height, along the category axis.
 
@@ -1020,13 +1115,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         even alongside other marks.
 
         Args:
-            categories: The category names, each at most once.
+            categories: The category names, each at most once per group.
             heights: The bar heights, one per category.
             label: The name shown in the legend; an empty string leaves the bars out of it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
             annotate: Whether each bar shows its value just beyond its end, 3 pt away, in
                 the theme's text color at the tick label size. Automatic limits grow, only
                 when a label does not fit in them, so that every label fits inside the plot.
+                With ``by``, every group's bars show their values, as in ``grouped_bar()``.
             format: The format of the values shown by ``annotate``. ``AUTO`` follows the tick
                 format of the value axis. ``TickFormat.AUTO``, also the axis's default, writes
                 each value on its own to six significant digits in the shortest form, like
@@ -1034,20 +1130,27 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             size: The size of the values shown by ``annotate``. ``Size.AUTO`` is the tick
                 label size, ``Size.times(k)`` multiplies it after font scaling, and
                 ``Size.pt(p)`` uses points without font scaling.
+            by: One group name per data row, in first-appearance order; ``AUTO`` draws
+                one series. Names supply legend labels and palette colors; do not pass
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
+                Categories may repeat across groups, but a (category, group) pair may
+                not repeat. Missing pairs draw no bar.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If the data cannot be plotted: lengths differ, a category repeats, a
+            DataError: If ``by`` has invalid names or differs in length from the data; or if
+                the data cannot be plotted: lengths differ, a category repeats, a
                 height is infinite or not positive on a log axis, or neither axis is a
                 category axis.
             StyleError: If ``label`` or a category name is too long, or ``format`` is
                 ``TickFormat.iso()``. Rendering raises it when a value label does not fit
                 inside the plot: under explicit limits, or on a plot too small for it.
-            UsageError: If both axes are category axes, or ``format`` or ``size`` is given
-                without ``annotate``.
+            UsageError: If ``by`` comes with an explicit color or a non-empty label, both axes
+                are category axes, or ``format`` or ``size`` is given without ``annotate``.
 
         Example:
             >>> import umber as ub
@@ -1055,6 +1158,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.bar(["North", "South", "East"], [3, 5, 2], label="2025")
             >>> rows = ub.Figure().add_axes(y=ub.Scale.category())
             >>> rows = rows.bar(["North", "South", "East"], [3.5, 5.0, 2.25], annotate=True)
+            >>> grouped = ub.bar(["Q1", "Q1", "Q2"], [3, 4, 5], by=["North", "South", "North"])
         """
         with api_call():
             context = "Axes.bar()"
@@ -1062,11 +1166,34 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_floats_type(context, "heights", heights)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
-            labels = _value_labels(context, annotate, format, size)
-            category_names = names(context, "categories", categories)
-            values = floats(context, "heights", heights)
-            name = _args.text(context, "label", label)
-            self._native.bar(self._row, self._col, category_names, values, name, spec, *labels)
+            shows, labelled, label_size = _value_labels(context, annotate, format, size)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                _group.Bars(
+                    categories=partial(names, context, "categories", categories),
+                    heights=partial(floats, context, "heights", heights),
+                    draw=partial(
+                        self._native.bar,
+                        self._row,
+                        self._col,
+                        color=spec,
+                        annotate=shows,
+                        format=labelled,
+                        size=label_size,
+                    ),
+                    draw_groups=partial(
+                        self._native.bar_by,
+                        self._row,
+                        self._col,
+                        annotate=shows,
+                        format=labelled,
+                        size=label_size,
+                    ),
+                ),
+            )
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -1343,6 +1470,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         stat: Stat = Stat.COUNT,
         label: str = "",
         color: Color = Color.AUTO,
+        by: Values[str] | Auto = AUTO,
     ) -> "Axes[float, float]":
         """Add a histogram: the values counted in bins, one bar per bin.
 
@@ -1367,17 +1495,25 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             label: The name shown in the legend; an empty string leaves the histogram out of
                 it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+            by: One group name per data row, in first-appearance order; ``AUTO`` draws
+                one series. Names supply legend labels and palette colors; do not pass
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
+                Groups share the bins. ``Hist.STEP`` normalizes each group separately;
+                ``Hist.STACKED`` normalizes their total. ``Hist.BARS`` is refused.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If a value is infinite, the edges are fewer than two, not finite or not
+            DataError: If ``by`` has invalid names or differs in length from the data; or if
+                a value is infinite, the edges are fewer than two, not finite or not
                 increasing, finite values lie outside the edges, or the x axis is a category
                 axis.
             StyleError: If the number of bins is out of range, or ``label`` is too long.
-            UsageError: If the x axis is a log axis, or ``cumulative=True`` comes with
+            UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+                the x axis is a log axis, or ``cumulative=True`` comes with
                 ``Stat.DENSITY``, whose densities do not add up.
 
         Example:
@@ -1389,6 +1525,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> runs = ub.Figure().add_axes()
             >>> runs = runs.hist([3.0, 1.0, 2.0], cumulative=True, stat=ub.Stat.FRACTION)
             >>> outline = ub.Figure().add_axes().hist([1.0, 2.0, 2.0], style=ub.Hist.STEP)
+            >>> grouped = ub.hist([1, 2, 3, 4], by=["B", "A", "B", "A"], style=ub.Hist.STEP)
         """
         with api_call():
             context = "Axes.hist()"
@@ -1404,19 +1541,41 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             shown = instance(context, "stat", stat, Stat, _STAT_HINT)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
-            data = floats(context, "values", values)
-            native_bins = floats(context, "bins", bins) if edges else count
-            name = _args.text(context, "label", label)
-            self._native.hist(
-                self._row,
-                self._col,
-                data,
-                native_bins,
-                drawn.value,
-                running,
-                shown.value,
-                name,
-                spec,
+
+            def draw(samples: FloatArray, *, label: str) -> None:
+                self._native.hist(
+                    self._row,
+                    self._col,
+                    samples,
+                    floats(context, "bins", bins) if edges else count,
+                    drawn.value,
+                    running,
+                    shown.value,
+                    label,
+                    spec,
+                )
+
+            def draw_groups(series: list[_group.NativeSeries]) -> None:
+                self._native.grouped_hist(
+                    self._row,
+                    self._col,
+                    series,
+                    floats(context, "bins", bins) if edges else count,
+                    drawn.value,
+                    running,
+                    shown.value,
+                )
+
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                _group.Samples(
+                    values=partial(floats, context, "values", values),
+                    draw=draw,
+                    draw_groups=draw_groups,
+                ),
             )
             return self
 
@@ -1427,7 +1586,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         values: object,
         *,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
         render: Render | Auto = AUTO,
     ) -> SXY:
@@ -1522,7 +1681,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         bins: int | tuple[int, int] = 30,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         render: Render | Auto = AUTO,
     ) -> "Axes[float, float]":
         """Count paired points in equal-width rectangular bins over their data ranges.
@@ -1578,7 +1737,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         gridsize: int = 30,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
     ) -> "Axes[float, float]":
         """Count paired points in pointy-top hexagons, regular in screen coordinates.
 
@@ -1633,6 +1792,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
+        by: Values[str] | Auto = AUTO,
     ) -> SY:
         """Add a step line through the points ``(x[i], y[i])``, in order.
 
@@ -1653,22 +1813,30 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
+            by: One group name per data row, in first-appearance order; ``AUTO`` draws
+                one series. Names supply legend labels and palette colors; do not pass
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
+            DataError: If ``by`` has invalid names or differs in length from the data; or if
+                the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, names and numbers do not match the x
                 axis, or x is not in non-decreasing order.
             StyleError: If ``label`` is too long.
-            UsageError: If the y axis is a category axis.
+            UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+                the y axis is a category axis.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.step([0, 1, 3, 4], [1.0, 2.0, float("nan"), 0.5], where=ub.Step.MID)
+            >>> grouped = ub.Figure().add_axes()
+            >>> grouped = grouped.step([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
         """
         with api_call():
             context = "Axes.step()"
@@ -1679,11 +1847,32 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            xs = self._x_values(context, x)
-            ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
-            self._native.step(
-                self._row, self._col, xs, ys, position.value, name, spec, style.value, extent
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                _group.XY(
+                    x=partial(self._x_values, context, x),
+                    y=partial(self._y_values, context, y),
+                    draw=partial(
+                        self._native.step,
+                        self._row,
+                        self._col,
+                        position=position.value,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_step,
+                        self._row,
+                        self._col,
+                        position=position.value,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                ),
             )
             return self
 
@@ -2391,7 +2580,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         values: object,
         *,
         cmap: Cmap | Auto = AUTO,
-        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
         annotate: bool = False,
         format: TickFormat | Auto = AUTO,
@@ -2478,7 +2667,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 )
             x_names = names(context, "x_categories", x_categories)
             y_names = names(context, "y_categories", y_categories)
-            cells = matrix(context, "values", values, (len(y_names), len(x_names)))
+            cells = matrix(
+                context,
+                "values",
+                values,
+                (len(y_names), len(x_names)),
+                lengths="(len(y_categories), len(x_categories))",
+                hint="pass one row per y category.",
+            )
             self._native.heatmap(
                 self._row,
                 self._col,
@@ -2726,6 +2922,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
+        by: Values[str] | Auto = AUTO,
     ) -> SXF:
         """Add the empirical cumulative distribution (ECDF) of ``values``, as a step line.
 
@@ -2743,16 +2940,22 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
+            by: One group name per data row, in first-appearance order; ``AUTO`` draws
+                one series. Names supply legend labels and palette colors; do not pass
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If no value is finite, a value is infinite or not positive on a log
+            DataError: If ``by`` has invalid names or differs in length from the data; or if
+                no value is finite, a value is infinite or not positive on a log
                 axis, or the values do not suit the x axis.
             StyleError: If ``label`` is too long.
-            UsageError: If the y axis is not linear.
+            UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+                the y axis is not linear.
 
         Example:
             >>> import umber as ub
@@ -2762,6 +2965,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> import datetime as dt
             >>> days = ub.Figure().add_axes(x=ub.Scale.time())
             >>> days = days.ecdf([dt.date(2026, 1, 3), dt.date(2026, 1, 1), dt.date(2026, 1, 9)])
+            >>> grouped = ub.Figure().add_axes().ecdf([1, 2, 3, 4], by=["B", "A", "B", "A"])
         """
         with api_call():
             context = "Axes.ecdf()"
@@ -2771,9 +2975,32 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            data = _limit_values(context, "values", values, self._x)
-            name = _args.text(context, "label", label)
-            self._native.ecdf(self._row, self._col, data, flag, name, spec, style.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                _group.Ecdf(
+                    values=partial(_limit_values, context, "values", values, self._x),
+                    draw=partial(
+                        self._native.ecdf,
+                        self._row,
+                        self._col,
+                        complementary=flag,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_ecdf,
+                        self._row,
+                        self._col,
+                        complementary=flag,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                ),
+            )
             return self
 
     def kde(
@@ -2785,6 +3012,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         color: Color = Color.AUTO,
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
+        by: Values[str] | Auto = AUTO,
     ) -> "Axes[float, float]":
         """Add the Gaussian kernel density estimate (KDE) of ``values``, as a line.
 
@@ -2804,24 +3032,32 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
+            by: One group name per data row, in first-appearance order; ``AUTO`` draws
+                one series. Names supply legend labels and palette colors; do not pass
+                a non-empty ``label`` or an explicit ``color``. Missing or empty names
+                and an empty grouping column are refused. Column names are never read.
+                Each group has its own density with area 1.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: If no value is finite, a value is infinite, ``AUTO`` finds fewer than
+            DataError: If ``by`` has invalid names or differs in length from the data; or if
+                no value is finite, a value is infinite, ``AUTO`` finds fewer than
                 two distinct values, the line would reach beyond 1e300, the density would
                 exceed 1e300, or the x axis is a category axis.
             StyleError: If ``bandwidth`` is not a finite number greater than 0, is so narrow
                 that the line would need more than 16,384 points, or ``label`` is too long.
-            UsageError: If the x axis is a log or time axis, or the y axis is not linear.
+            UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
+                the x axis is a log or time axis, or the y axis is not linear.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes()
             >>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], label="Sizes")
             >>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bandwidth=0.3, dash=ub.Dash.DOTTED)
+            >>> grouped = ub.Figure().add_axes().kde([1, 2, 3, 4], by=["B", "A", "B", "A"])
         """
         with api_call():
             context = "Axes.kde()"
@@ -2841,9 +3077,32 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            data = floats(context, "values", values)
-            name = _args.text(context, "label", label)
-            self._native.kde(self._row, self._col, data, width_of, name, spec, style.value, extent)
+            _group.call(
+                context,
+                by,
+                label,
+                color,
+                _group.Samples(
+                    values=partial(floats, context, "values", values),
+                    draw=partial(
+                        self._native.kde,
+                        self._row,
+                        self._col,
+                        bandwidth=width_of,
+                        color=spec,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                    draw_groups=partial(
+                        self._native.grouped_kde,
+                        self._row,
+                        self._col,
+                        bandwidth=width_of,
+                        dash=style.value,
+                        width=extent,
+                    ),
+                ),
+            )
             return self
 
     def text(
@@ -2990,6 +3249,167 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         x, y = pair
         return _coordinate(context, self._x, x), _coordinate(context, self._y, y)
+
+    def contour(
+        self: "Axes[float, float]",
+        x: Values[float],
+        y: Values[float],
+        z: object,
+        *,
+        levels: int | Values[float] | Auto = AUTO,
+        style: Contour = Contour.LINES,
+        cmap: Cmap | Auto = AUTO,
+        scale: Scale[float] = Scale.linear(),
+        center: float | Auto = AUTO,
+        color: Color = Color.AUTO,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+    ) -> "Axes[float, float]":
+        """Add a contour of a field sampled on a rectangular grid: lines, filled bands, or both.
+
+        ``z`` holds the field at the grid points, one row per y coordinate. Each cell of the
+        grid lies between four neighbouring points; along its sides the field is linear, and the
+        lines run straight across it between the points where the level crosses its sides. A
+        cell whose corners alternate above and below a level joins its high corners when the
+        mean of its four values is at or above the level, and separates them otherwise. A NaN
+        value leaves the four cells around it out of every line and band, as a hole.
+
+        Lines are colored by their level from the colormap, unless ``color`` gives them one
+        color. Bands take the color of the middle of their range, and the regions below the
+        first level and above the last the colors at the ends of the color range, as values
+        beyond ``clim()`` do. The colors come from the color scale of these axes, which every
+        color-mapped mark shares; the colorbar shows the levels, as bands for filled contours
+        and as ticks on a smooth bar for lines. Automatic limits are the outer coordinates,
+        without padding. By default a contour alone draws no baseline.
+
+        A field that changes from cell to cell, such as noise or a checkerboard, makes many short
+        lines and many small bands, so vector output grows very large and slow to write and to
+        draw. Use fewer levels, or ``Contour.FILLED`` instead of ``Contour.BOTH``; smooth or
+        aggregate the data first; or use ``mesh()`` or ``heatmap()`` when the cells themselves
+        are what matters. Contours never thin the data on their own.
+
+        Args:
+            x: The x coordinates of the grid's columns, strictly increasing, at least two.
+            y: The y coordinates of the grid's rows, strictly increasing, at least two.
+            z: The field as a two-dimensional array or a list of rows, shaped
+                ``(len(y), len(x))``: one row per y coordinate.
+            levels: ``AUTO`` for the round values strictly inside the range of the finite
+                values that a search for seven round ticks over the range finds (log ticks on a
+                log ``scale``); an int from 1 to 64 for about that many round values strictly
+                inside the range, and at least one, the middle of the range, on a field that is
+                not constant; or the levels themselves, strictly increasing. Levels outside the
+                range of the values draw no line. Contours that share a colorbar, on one axes
+                or through ``share_color``, need the same levels.
+            style: ``Contour.LINES``, ``Contour.FILLED`` or ``Contour.BOTH``.
+            cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center``
+                is given and its sequential colormap otherwise.
+            scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
+            center: The value at the middle of a diverging colormap, as for ``ColorBy``;
+                ``AUTO`` for a sequential mapping.
+            color: ``Color.AUTO`` colors each line by its level. Any other color draws every
+                line of ``Contour.LINES`` in it; the contour is then not color-mapped and draws
+                no colorbar.
+            annotate: Whether each line at least three times as long as its label carries its
+                level's value at its middle, along the line and upright, in the tick font, with
+                the line broken under it.
+            format: The format of the values that ``annotate`` writes. ``AUTO`` writes them as
+                the colorbar writes its ticks (its own format, else the y tick format), so a
+                level reads the same on its line and on the bar.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, or ``scale`` is not linear or log.
+            DataError: If ``z`` is not shaped ``(len(y), len(x))``, a coordinate is not finite,
+                not strictly increasing or not positive on a log axis, there are fewer than two
+                along an axis, or a value is infinite, beyond 1e300 in magnitude, or not
+                positive on a log scale.
+            StyleError: If a count of levels is not from 1 to 64, given levels are not finite
+                and strictly increasing, ``center`` is not finite or comes with a log scale,
+                ``format`` is ``TickFormat.iso()``, or the color range set by ``clim()`` does
+                not suit ``scale`` or ``center``.
+            UsageError: If an axis is not linear or log (type checkers refuse such axes),
+                ``color`` is given with filled bands or with ``cmap`` or ``center``,
+                ``annotate`` is ``True`` with ``Contour.FILLED``, ``format`` is given without
+                ``annotate``, or ``cmap``, ``scale`` or ``center`` differs from those of the
+                other color-mapped marks of these axes.
+
+        Example:
+            >>> import numpy as np
+            >>> import umber as ub
+            >>> x, y = np.linspace(-2, 2, 41), np.linspace(-1.5, 1.5, 31)
+            >>> z = np.exp(-(x[None, :] ** 2) - y[:, None] ** 2)
+            >>> ax = ub.Figure().add_axes().contour(x, y, z, annotate=True)
+            >>> filled = ub.Figure().add_axes().contour(x, y, z, style=ub.Contour.BOTH)
+            >>> few = ub.Figure().add_axes().contour(x, y, z, levels=[0.25, 0.5, 0.75])
+        """
+        with api_call():
+            context = "Axes.contour()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            counted = _is_count(levels)
+            if not counted and levels is not AUTO:
+                check_floats_type(context, "levels", levels)
+            drawn = instance(context, "style", style, Contour, _CONTOUR_HINT)
+            native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
+            spec = _color_argument(context, color)
+            shows = _args.boolean(context, "annotate", annotate)
+            checked = (
+                None
+                if format is AUTO
+                else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
+            )
+            count = _level_count(context, levels) if counted else None
+            _numeric_cells(context, self, time=False)
+            xs, ys = floats(context, "x", x), floats(context, "y", y)
+            values = matrix(
+                context,
+                "z",
+                z,
+                (len(ys), len(xs)),
+                lengths="(len(y), len(x))",
+                hint="pass one row of z per y coordinate, each with one value per x coordinate.",
+            )
+            given: int | FloatArray | None = count
+            if count is None and levels is not AUTO:
+                given = floats(context, "levels", levels)
+            self._native.contour(
+                self._row,
+                self._col,
+                xs,
+                ys,
+                values,
+                given,
+                drawn.value,
+                native_cmap,
+                kind,
+                base,
+                middle,
+                spec,
+                shows,
+                checked,
+            )
+            return self
+
+
+def _is_count(levels: object) -> bool:
+    """Return whether a ``levels`` argument is a count: an int or NumPy integer, not a ``bool``."""
+    return not isinstance(levels, bool | np.bool_) and isinstance(levels, int | np.integer)
+
+
+def _level_count(context: str, levels: object) -> int:
+    """Check a count of levels, from 1 to 64, and return it."""
+    count = integer(context, "levels", levels)
+    if not 1 <= count <= _umber.MAX_LEVELS:
+        raise new_error(
+            StyleError,
+            context,
+            f"levels is {count}; a count of levels must be between 1 and {_umber.MAX_LEVELS}.",
+            parameter="levels",
+            hint="ask for a few levels, such as levels=7, or pass the level values.",
+        )
+    return count
 
 
 def _render_argument(context: str, value: object) -> int | None:

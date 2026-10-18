@@ -153,3 +153,29 @@ def test_tiny_stacked_segment_reports_the_room_error() -> None:
     assert str(caught.value).startswith(
         'Figure.to_svg(): the value label "0.01" of the series "Small" in the bar "A" needs '
     )
+
+
+def test_bar_by_writes_values_as_grouped_bar_does() -> None:
+    categories = ["Q1", "Q1", "Q2", "Q2"]
+    heights = [24.5, 18.2, 31.2, 26.3]
+    groups = ["Online", "Retail", "Online", "Retail"]
+    long = vertical().bar(
+        categories, heights, by=groups, annotate=True, format=ub.TickFormat.fixed(2)
+    )
+    wide = vertical().grouped_bar(
+        ["Q1", "Q2"],
+        [ub.Series("Online", [24.5, 31.2]), ub.Series("Retail", [18.2, 26.3])],
+        annotate=True,
+        format=ub.TickFormat.fixed(2),
+    )
+    assert {"24.50", "18.20", "31.20", "26.30"} <= set(texts(long))
+    assert long.figure.to_svg() == wide.figure.to_svg()
+    sized = vertical().bar(categories, heights, by=groups, annotate=True, size=ub.Size.pt(11))
+    assert "11" in (texts(sized)["24.5"].get("font-size") or "")
+    ax = vertical()
+    with pytest.raises(ub.UsageError) as caught:
+        ax.bar(categories, heights, by=groups, size=ub.Size.pt(9))
+    info = details(caught.value)
+    assert info is not None and info[0] == "size"
+    assert ax.figure.to_svg() == vertical().figure.to_svg()
+    ub.bar(categories, heights, by=groups, annotate=True).figure.to_svg()

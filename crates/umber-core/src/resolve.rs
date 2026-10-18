@@ -44,7 +44,7 @@ use std::collections::BTreeMap;
 pub(crate) mod swarm;
 
 use crate::binning::HistBins;
-use crate::color_scale::{ColorScaleSpec, MappedColors, ResolvedColorScale};
+use crate::color_scale::{ColorLevels, ColorScaleSpec, MappedColors, ResolvedColorScale};
 use crate::error::quoted;
 use crate::layout::TickRoom;
 use crate::legend::{LegendEntry, Swatch, SwatchFill};
@@ -353,6 +353,7 @@ impl Resolved {
                 | Mark::HSpan(_)
                 | Mark::VSpan(_)
                 | Mark::Mesh(_)
+                | Mark::Contour(_)
                 | Mark::Hist2d(_)
                 | Mark::Hexbin(_)
                 | Mark::Heatmap(_)
@@ -950,7 +951,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Swarm(mark) => mark.categories(),
         Mark::Events(_) => &[],
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
-        Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) => &[],
+        Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) | Mark::Contour(_) => &[],
         Mark::Bubbles(_) => &[],
         Mark::Band(_) | Mark::StackedArea(_) => &[],
         Mark::ErrorBars(mark) => match mark.orientation() {
@@ -1031,7 +1032,10 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
     let is_cell = |mark: &&ResolvedMark<'_>| {
         matches!(
             mark,
-            ResolvedMark::Mesh { .. } | ResolvedMark::Hist2d { .. } | ResolvedMark::Hexbin { .. }
+            ResolvedMark::Mesh { .. }
+                | ResolvedMark::Hist2d { .. }
+                | ResolvedMark::Hexbin { .. }
+                | ResolvedMark::Contour { .. }
         )
     };
     let cells = extent(
@@ -1585,6 +1589,21 @@ pub(crate) enum ResolvedMark<'a> {
         /// Non-empty cells and their whole-cell bounds.
         bins: crate::bin2d::HexBins,
     },
+    /// A contour: its lines and bands, in grid index space, and the color of its values.
+    Contour {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated grid, values and levels.
+        mark: &'a crate::model::ContourMark,
+        /// The color mapping of its values; `None` for a contour whose lines take one color.
+        mapped: Option<MappedColors<'a>>,
+        /// The color of its lines when they take one color.
+        color: Rgba,
+        /// The labels of its levels, as `annotate` writes them.
+        labels: Vec<String>,
+        /// Its lines along each level and its bands, computed once per render.
+        shapes: std::sync::Arc<crate::contour::ContourShapes>,
+    },
     /// Bubbles sharing the largest size value across this axes.
     Bubbles {
         /// Drawn geometry for inside-legend scoring.
@@ -1943,6 +1962,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::StackedArea { geometry, .. }
             | ResolvedMark::Hist { geometry, .. }
             | ResolvedMark::Mesh { geometry, .. }
+            | ResolvedMark::Contour { geometry, .. }
             | ResolvedMark::Hist2d { geometry, .. }
             | ResolvedMark::Hexbin { geometry, .. }
             | ResolvedMark::Step { geometry, .. }
@@ -1981,6 +2001,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::StackedArea { geometry, .. }
             | ResolvedMark::Hist { geometry, .. }
             | ResolvedMark::Mesh { geometry, .. }
+            | ResolvedMark::Contour { geometry, .. }
             | ResolvedMark::Hist2d { geometry, .. }
             | ResolvedMark::Hexbin { geometry, .. }
             | ResolvedMark::Step { geometry, .. }
@@ -2013,6 +2034,7 @@ impl<'a> ResolvedMark<'a> {
     pub fn x_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
             ResolvedMark::Mesh { mark, .. } => mark.x_edges.numbers(),
+            ResolvedMark::Contour { mark, .. } => mark.x(),
             ResolvedMark::Hist2d { mark, .. } => &mark.bins.x_edges,
             ResolvedMark::Hexbin { mark, bins, .. } => match bins {
                 crate::bin2d::HexBins::Uncounted => &mark.extents[0],
@@ -2153,6 +2175,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Bubbles { mark, .. } => DomainTimes::gapped(mark.x_times()),
             ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Contour { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -2194,6 +2217,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Bubbles { mark, .. } => DomainTimes::gapped(mark.y_times()),
             ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Contour { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }
@@ -2216,7 +2240,8 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Line { mark, .. } => mark.x().categories(),
             ResolvedMark::Scatter { mark, .. } => mark.x().categories(),
-            ResolvedMark::Mesh { .. }
+            ResolvedMark::Contour { .. }
+            | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. } => &[],
@@ -2321,7 +2346,8 @@ impl<'a> ResolvedMark<'a> {
                 ErrorBarOrientation::Horizontal => mark.positions().categories(),
                 ErrorBarOrientation::Vertical => &[],
             },
-            ResolvedMark::Mesh { .. }
+            ResolvedMark::Contour { .. }
+            | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. }
@@ -2362,6 +2388,7 @@ impl<'a> ResolvedMark<'a> {
     pub fn y_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
             ResolvedMark::Mesh { mark, .. } => mark.y_edges.numbers(),
+            ResolvedMark::Contour { mark, .. } => mark.y(),
             ResolvedMark::Hist2d { mark, .. } => &mark.bins.y_edges,
             ResolvedMark::Hexbin { mark, bins, .. } => match bins {
                 crate::bin2d::HexBins::Uncounted => &mark.extents[1],
@@ -2474,7 +2501,8 @@ impl<'a> ResolvedMark<'a> {
         match self {
             // With no finite y value, a stem does not change the y domain or its padding,
             // even when explicit ticks are the only values on that axis.
-            ResolvedMark::Mesh { .. }
+            ResolvedMark::Contour { .. }
+            | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. } => false,
@@ -2509,6 +2537,8 @@ impl<'a> ResolvedMark<'a> {
     /// half their stroke.
     pub fn line_width(&self) -> Option<f32> {
         match *self {
+            // A contour's lines, drawn with lines or with both.
+            ResolvedMark::Contour { mark, .. } => crate::contour::line_width(mark.options().style),
             ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2543,7 +2573,8 @@ impl<'a> ResolvedMark<'a> {
     /// is padded (see [`resolve_axis`]).
     pub fn is_reference(&self) -> bool {
         match self {
-            ResolvedMark::Mesh { .. }
+            ResolvedMark::Contour { .. }
+            | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. } => false,
@@ -2610,6 +2641,8 @@ impl<'a> ResolvedMark<'a> {
             | Self::Box { .. }
             | Self::Violin { .. } => SwatchFill::Area,
             Self::Mesh { .. } | Self::Hist2d { .. } | Self::Hexbin { .. } => SwatchFill::Solid,
+            // A contour has no legend entry; the colorbar explains its colors.
+            Self::Contour { .. } => SwatchFill::Solid,
             Self::Hist {
                 style: HistStyle::Step,
                 ..
@@ -2745,7 +2778,8 @@ impl<'a> ResolvedMark<'a> {
                     )
                 })
                 .collect(),
-            ResolvedMark::Mesh { .. }
+            ResolvedMark::Contour { .. }
+            | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. } => Vec::new(),
             ResolvedMark::Hist {
@@ -2995,7 +3029,8 @@ impl<'a> ResolvedMark<'a> {
                     },
                 })
                 .collect(),
-            ResolvedMark::Mesh { .. }
+            ResolvedMark::Contour { .. }
+            | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. } => Vec::new(),
             // A step histogram is listed with a line swatch and, like a reference line, never takes
@@ -3103,7 +3138,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { orientation, .. }
             | ResolvedMark::Box { orientation, .. }
             | ResolvedMark::Violin { orientation, .. } => Some(orientation),
-            ResolvedMark::Mesh { .. }
+            ResolvedMark::Contour { .. }
+            | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. }
@@ -3176,7 +3212,8 @@ impl<'a> ResolvedMark<'a> {
                     .filter(|&height| height == 0.0);
                 return DomainValues::Computed(Box::new(stacks.ends().chain(zeros)));
             }
-            ResolvedMark::Mesh { .. }
+            ResolvedMark::Contour { .. }
+            | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. }
@@ -3212,6 +3249,9 @@ impl<'a> ResolvedMark<'a> {
                 mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
             }
             ResolvedMark::Heatmap { mapped, .. } => Some((&mapped.spec, mapped.values)),
+            ResolvedMark::Contour { mapped, .. } => {
+                mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
+            }
             ResolvedMark::Line { .. }
             | ResolvedMark::Area { .. }
             | ResolvedMark::Bar { .. }
@@ -3233,6 +3273,26 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Kde { .. } => None,
             ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => None,
         }
+    }
+
+    /// The levels that a colorbar marks for this mark: those of a color-mapped contour, drawn
+    /// as bands when it is filled; `None` for every other mark.
+    pub(crate) fn color_levels(&self) -> Option<ColorLevels> {
+        let ResolvedMark::Contour {
+            mark,
+            mapped: Some(_),
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let (ticks, values) = mark.level_ticks();
+        Some(ColorLevels {
+            labels: ticks.iter().map(|tick| tick.label.clone()).collect(),
+            ticks: ticks.to_vec(),
+            values,
+            banded: mark.options().style != crate::ContourStyle::Lines,
+        })
     }
 }
 
@@ -3732,27 +3792,47 @@ impl SeriesKind {
 #[cfg(test)]
 pub(crate) fn resolve_marks<'a>(marks: &'a [Mark], theme: &Theme) -> Vec<ResolvedMark<'a>> {
     let slots = label_slots(marks.iter());
-    resolve_panel_marks(marks, Orientation::Vertical, theme, &slots)
+    let format = TickFormat::default();
+    resolve_panel_marks(marks, Orientation::Vertical, (theme, &format), &slots)
 }
 
 /// Resolves the marks of `axes` as [`resolve_marks`] does, in the orientation of the axes.
 #[cfg(test)]
 pub(crate) fn resolve_axes_marks<'a>(axes: &'a Axes, theme: &Theme) -> Vec<ResolvedMark<'a>> {
     let slots = label_slots(axes.marks().iter());
-    resolve_panel_marks(axes.marks(), Limits::of(axes).orientation(), theme, &slots)
+    let format = axes
+        .colorbar_options()
+        .format
+        .as_ref()
+        .unwrap_or(axes.y_tick_format());
+    resolve_panel_marks(
+        axes.marks(),
+        Limits::of(axes).orientation(),
+        (theme, format),
+        &slots,
+    )
 }
 
 /// Resolves every panel in row-major order. Labels with automatic colors take slots in first
 /// appearance order across the figure. Each panel's unlabelled automatic series then count
 /// from the number of label slots. Explicit palette and fixed colors never register a label
-/// or consume a slot.
+/// or consume a slot. Contours without a format of their own write their levels in the format
+/// of the colorbar ticks: the colorbar's own format, the figure's under shared colors, or else
+/// the panel's y tick format.
 pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>> {
     let slots = label_slots(figure.panels().flat_map(|axes| axes.marks()));
+    let shared = figure.grid().share_color() != crate::Share::None;
     figure
         .panels()
         .map(|axes| {
             let orientation = Limits::of(axes).orientation();
-            resolve_panel_marks(axes.marks(), orientation, figure.theme(), &slots)
+            let colorbar = if shared {
+                figure.colorbar_options()
+            } else {
+                axes.colorbar_options()
+            };
+            let format = colorbar.format.as_ref().unwrap_or(axes.y_tick_format());
+            resolve_panel_marks(axes.marks(), orientation, (figure.theme(), format), &slots)
         })
         .collect()
 }
@@ -3776,7 +3856,8 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
             m.series().map(|s| (s.label(), s.color())).collect()
         }
         Mark::StackedArea(m) => m.series().map(|s| (s.label(), s.color())).collect(),
-        Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) => Vec::new(),
+        // A contour takes no palette color: it is color-mapped, or in a color of its own.
+        Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) | Mark::Contour(_) => Vec::new(),
         Mark::Hist(m) => vec![(m.label(), m.color())],
         Mark::Step(m) => vec![(&m.options().label, m.options().color)],
         Mark::HLine(m) => vec![(&m.options().label, m.options().color)],
@@ -3814,11 +3895,12 @@ fn label_slots<'a>(marks: impl Iterator<Item = &'a Mark>) -> BTreeMap<&'a str, u
     slots
 }
 
-/// Resolves a panel, whose axes have `orientation`, against the label slots of its figure.
+/// Resolves a panel, whose axes have `orientation`, against the label slots of its figure; its
+/// contours write their levels in `colorbar_format` unless they have a format of their own.
 fn resolve_panel_marks<'a>(
     marks: &'a [Mark],
     orientation: Orientation,
-    theme: &Theme,
+    (theme, colorbar_format): (&Theme, &TickFormat),
     slots: &BTreeMap<&str, usize>,
 ) -> Vec<ResolvedMark<'a>> {
     let bubble_maximum = marks
@@ -4013,6 +4095,21 @@ fn resolve_panel_marks<'a>(
                 geometry: None,
                 mark,
                 bins: crate::bin2d::HexBins::Uncounted,
+            },
+            Mark::Contour(mark) => ResolvedMark::Contour {
+                geometry: None,
+                mark,
+                mapped: mark.color_scale().map(|spec| MappedColors {
+                    spec,
+                    values: mark.z(),
+                }),
+                // A color-mapped contour takes no palette slot.
+                color: match mark.options().color {
+                    ColorSpec::Auto(_) => theme.text_color(),
+                    spec => color_of(spec, ""),
+                },
+                labels: mark.labels_in(colorbar_format),
+                shapes: std::sync::Arc::new(crate::contour::ContourShapes::of(mark)),
             },
             Mark::Hist(mark) => ResolvedMark::Hist {
                 geometry: None,

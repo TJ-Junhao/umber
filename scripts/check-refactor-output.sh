@@ -87,10 +87,12 @@ driver_files=(
   crates/umber-core/tests/support/corpus/baseline.rs
   crates/umber-core/tests/support/corpus/box.rs
   crates/umber-core/tests/support/corpus/bubbles.rs
+  crates/umber-core/tests/support/corpus/by.rs
   crates/umber-core/tests/support/corpus/category_labels.rs
   crates/umber-core/tests/support/corpus/cmap.rs
   crates/umber-core/tests/support/corpus/color_by.rs
   crates/umber-core/tests/support/corpus/colorbar.rs
+  crates/umber-core/tests/support/corpus/contour.rs
   crates/umber-core/tests/support/corpus/ecdf.rs
   crates/umber-core/tests/support/corpus/error_bars.rs
   crates/umber-core/tests/support/corpus/events.rs

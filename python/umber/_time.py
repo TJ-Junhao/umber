@@ -17,7 +17,7 @@ import numpy as np
 import numpy.typing as npt
 
 from umber._args import is_text_or_buffer, short_repr, type_name
-from umber._errors import DataError, new_error
+from umber._errors import DataError, at_row, new_error
 from umber._values import check_one_dimensional, check_times_type, is_missing
 
 type MicrosArray = npt.NDArray[np.int64]
@@ -114,7 +114,9 @@ def micros(context: str, name: str, values: object) -> MicrosArray:
     if nested is not None:
         message = f"{name}[{nested}] is a sequence; values must be times on a time axis."
         hint = "pass one time per point; nested sequences are not flattened."
-        raise new_error(DataError, context, message, parameter=name, hint=hint)
+        error = new_error(DataError, context, message, parameter=name, hint=hint)
+        at_row(error, nested)
+        raise error
     return _element_micros(context, name, list(items))
 
 
@@ -213,7 +215,11 @@ def _element_micros(context: str, name: str, items: list[object]) -> MicrosArray
     """Convert times one by one: those of a list, a tuple or an object array."""
     out = np.empty(len(items), dtype=np.int64)
     for index, value in enumerate(items):
-        out[index] = _one(context, name, f"{name}[{index}]", value)
+        try:
+            out[index] = _one(context, name, f"{name}[{index}]", value)
+        except DataError as error:
+            at_row(error, index)
+            raise
     return out
 
 
@@ -323,7 +329,9 @@ def _exact_micros(
             quotient += 1
         if not smallest <= quotient <= largest:
             at = label or f"{name}[{index}]"
-            raise _beyond_error(context, name, at, array[index : index + 1])
+            error = _beyond_error(context, name, at, array[index : index + 1])
+            at_row(error, index)
+            raise error
         out[index] = quotient
     return out
 
@@ -355,7 +363,9 @@ def _check_reach(
     found = np.flatnonzero(beyond)
     if found.size:
         at = int(found[0])
-        raise _beyond_error(context, name, label or f"{name}[{at}]", array[at : at + 1])
+        error = _beyond_error(context, name, label or f"{name}[{at}]", array[at : at + 1])
+        at_row(error, at)
+        raise error
 
 
 def _beyond_error(context: str, name: str, label: str, value: npt.NDArray[Any]) -> DataError:

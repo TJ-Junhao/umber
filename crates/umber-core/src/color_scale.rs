@@ -479,6 +479,22 @@ impl<'a> MappedColors<'a> {
     }
 }
 
+/// The levels of the contours that a colorbar marks: every color-mapped contour of its axes (or
+/// sharing group) has the same levels.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ColorLevels {
+    /// The levels, increasing, with their automatic labels.
+    pub ticks: Vec<Tick>,
+    /// Where the level values come from, for writing them in a tick format.
+    pub values: TickValues,
+    /// Every level as the colorbar writes it, in the format of its ticks: the labels that
+    /// every contour on the bar without a format of its own writes on its lines.
+    pub labels: Vec<String>,
+    /// Whether the bar is drawn as bands between the levels, as filled contours color their
+    /// bands, rather than as a smooth gradient: when any of the contours is filled.
+    pub banded: bool,
+}
+
 /// The color scale of an axes, resolved: its colormap, the norm of its range and the ticks of
 /// that range, in increasing position.
 #[derive(Debug, Clone, PartialEq)]
@@ -487,8 +503,11 @@ pub(crate) struct ResolvedColorScale {
     pub cmap: Cmap,
     /// How values map to positions on the colormap.
     pub norm: Norm,
-    /// The ticks of the range, positioned on `0..=1` along it.
+    /// The ticks of the range, positioned on `0..=1` along it: at the contour levels inside
+    /// the range when there are `levels` and one lies inside it, else automatic.
     pub ticks: Vec<AxisTick>,
+    /// The contour levels the colorbar marks; `None` without a color-mapped contour.
+    pub levels: Option<ColorLevels>,
 }
 
 impl ResolvedColorScale {
@@ -496,14 +515,27 @@ impl ResolvedColorScale {
     /// limits are `limits`, under `theme`: the spec of the first color-mapped mark, over the
     /// limits, or else over the extent of the finite mapped values (positive ones on a log
     /// scale). `None` when no mark is color-mapped or no mapped value is finite, even with
-    /// limits: then nothing color-mapped is drawn.
+    /// limits: then nothing color-mapped is drawn. The levels of the color-mapped contours among
+    /// the marks, if any, become the ticks ([`ColorLevels`]).
     pub fn resolve<'a, 'm: 'a>(
         marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
         limits: Option<(f64, f64)>,
-        theme: &Theme,
+        (theme, format): (&Theme, &TickFormat),
     ) -> Option<ResolvedColorScale> {
         let (spec, _) = marks.clone().find_map(ResolvedMark::color_values)?;
         let log = matches!(spec.scale, Transform::Log(_));
+        // Every contour of one scale has the same levels (the pipeline checks it); the bar is
+        // banded when any of them is filled.
+        let mut contours = marks.clone().filter_map(ResolvedMark::color_levels);
+        let levels = contours.next().map(|first| ColorLevels {
+            banded: first.banded || contours.any(|levels| levels.banded),
+            labels: format
+                .relabel(first.ticks.clone(), first.values)
+                .into_iter()
+                .map(|tick| tick.label)
+                .collect(),
+            ..first
+        });
         let extent = marks
             .filter_map(ResolvedMark::color_values)
             .flat_map(|(_, values)| values.iter().copied())
@@ -512,11 +544,83 @@ impl ResolvedColorScale {
                 Some(extent.map_or((v, v), |(lo, hi)| (lo.min(v), hi.max(v))))
             })?;
         let norm = Norm::new(spec, limits.unwrap_or(extent));
-        Some(ResolvedColorScale {
+        let mut scale = ResolvedColorScale {
             cmap: spec.cmap(theme).clone(),
-            ticks: norm.ticks(),
+            ticks: Vec::new(),
             norm,
-        })
+            levels,
+        };
+        scale.ticks = scale
+            .level_ticks(&TickFormat::default())
+            .map_or_else(|| scale.norm.ticks(), |(ticks, _)| ticks);
+        Some(scale)
+    }
+
+    /// The ticks at the contour levels inside the color range, labelled in `format`, and on a
+    /// centered norm the index of the center among them: the level within `2e-9` of the radius
+    /// of the center, or else the center itself, inserted and labelled as its own exact value.
+    /// `None` without levels or when none lies inside the range.
+    fn level_ticks(&self, format: &TickFormat) -> Option<(Vec<AxisTick>, Option<usize>)> {
+        let levels = self.levels.as_ref()?;
+        let (low, high) = self.norm.range();
+        let inside: Vec<Tick> = levels
+            .ticks
+            .iter()
+            .filter(|tick| low <= tick.value && tick.value <= high)
+            .cloned()
+            .collect();
+        if inside.is_empty() {
+            return None;
+        }
+        let mut ticks: Vec<Tick> = format.relabel(inside, levels.values);
+        let center = match self.norm {
+            Norm::Centered { center, radius } => Some(
+                match ticks
+                    .iter()
+                    .position(|tick| (tick.value - center).abs() <= 2e-9 * radius)
+                {
+                    Some(index) => index,
+                    None => {
+                        // The center is not a level: its label is its own value, written
+                        // exactly, whatever grid the levels were chosen on.
+                        let at = ticks.partition_point(|tick| tick.value < center);
+                        let label = format.relabel(labelled(vec![center]), TickValues::Exact);
+                        ticks.splice(at..at, label);
+                        at
+                    }
+                },
+            ),
+            Norm::Linear { .. } | Norm::Log { .. } => None,
+        };
+        let positioned: Option<Vec<AxisTick>> = ticks
+            .into_iter()
+            .map(|tick| {
+                Some(AxisTick {
+                    pos: NormalizedPos::new(self.norm.unit(tick.value)?),
+                    label: tick.label,
+                })
+            })
+            .collect();
+        // Every tick lies inside the range, so every one has a position.
+        Some((positioned?, center))
+    }
+
+    /// The color of the band of a filled contour between the levels `below` and `above`: the
+    /// color at the middle of their positions on the colormap. The band below the first level
+    /// (`below` is `None`) takes the color of the low end of the color range and the band above
+    /// the last (`above` is `None`) that of its high end, as values beyond the color limits do;
+    /// with no level at all, the one band takes the color of the middle of the range.
+    pub(crate) fn band_color(&self, below: Option<f64>, above: Option<f64>) -> Rgba {
+        let (low, high) = self.norm.range();
+        // A level that maps to no position (not positive on a log scale) lies below the range.
+        let position = |v: f64| self.norm.unit(v).unwrap_or(0.0);
+        let t = match (below, above) {
+            (Some(below), Some(above)) => (position(below) + position(above)) / 2.0,
+            (None, Some(_)) => position(low),
+            (Some(_), None) => position(high),
+            (None, None) => 0.5,
+        };
+        self.cmap.at(t)
     }
 
     /// Chooses colorbar ticks against the same measured room as axis ticks. Every candidate
@@ -526,6 +630,27 @@ impl ResolvedColorScale {
         room: &crate::layout::TickRoom<'_>,
         format: &crate::TickFormat,
     ) -> Self {
+        // Contour levels are ticks in their own right: every level is marked while the labels
+        // keep apart, and else every second, fifth or tenth one, as on a category axis, counted
+        // from the center on a centered scale so that the center stays.
+        if let Some((levels, center)) = self.level_ticks(format) {
+            let ticks = match center {
+                Some(center) => {
+                    let mut below: Vec<AxisTick> =
+                        levels[..=center].iter().rev().cloned().collect();
+                    below = room.category_ticks(below);
+                    below.reverse();
+                    let above = room.category_ticks(levels[center..].to_vec());
+                    below.extend(above.into_iter().skip(1));
+                    below
+                }
+                None => room.category_ticks(levels),
+            };
+            return Self {
+                ticks,
+                ..self.clone()
+            };
+        }
         let mut ticks = self.norm.ticks_for(room.target, format);
         if room.slack(&ticks) < 0.0 {
             for target in (2..room.target).rev() {

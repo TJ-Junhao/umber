@@ -134,7 +134,7 @@ pub(crate) fn concrete(
     };
     Err(Error::Style {
         context,
-        message: format!("{what} is {given}; {subject} colors must be concrete colors."),
+        message: format!("{what} is {given}; {subject} colors must be concrete colors.").into(),
         parameter: Some(parameter),
         hint: Some("use Color.hex(), Color.rgb() or a named color."),
     })

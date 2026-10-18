@@ -309,6 +309,15 @@ pub(super) enum Arrangement {
     Stacked,
 }
 
+/// The public input whose heights are represented by aligned series.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum BarInput {
+    /// Explicit series supplied to grouped or stacked bars.
+    Series,
+    /// A long-form heights column split by group.
+    Heights,
+}
+
 /// One stored series of a [`BarGroupMark`].
 #[derive(Debug, Clone, PartialEq)]
 struct StoredSeries {
@@ -368,21 +377,21 @@ pub struct BarGroupMark {
 }
 
 impl BarGroupMark {
-    /// Validates `categories` and `series` for axes with an x axis of scale kind `x_kind` and a
-    /// y axis of transform `y`, arranged as `arrangement` (see [`check_bar_group`] for the checks and their order), then
-    /// the value labels `annotation` ([`ValueLabels::check`]), then stores them unchanged, every
-    /// bit of the values included. The first failure is the error, under `context`.
+    /// Validates `categories` and `series`, given as `input`, for axes with an x axis of scale
+    /// kind `x_kind` and a y axis of transform `y`, arranged as `arrangement` (see
+    /// [`check_bar_group`] for the checks and their order), then stores them unchanged, every
+    /// bit of the values included, without value labels (see [`BarGroupMark::annotated`]). The
+    /// first failure is the error, under `context`.
     pub(super) fn new(
         context: &'static str,
         arrangement: Arrangement,
+        input: BarInput,
         x_kind: ScaleKind,
         y: Transform,
         categories: Vec<String>,
         series: Vec<Series>,
-        annotation: ValueLabels,
     ) -> Result<BarGroupMark> {
-        check_bar_group(context, arrangement, x_kind, y, &categories, &series)?;
-        annotation.check(context)?;
+        check_bar_group(context, arrangement, input, x_kind, y, &categories, &series)?;
         let series: Vec<StoredSeries> = series
             .into_iter()
             .map(|s| StoredSeries {
@@ -394,8 +403,19 @@ impl BarGroupMark {
         Ok(BarGroupMark {
             categories: Arc::from(categories),
             series: Arc::from(series),
-            annotation,
+            annotation: ValueLabels::default(),
         })
+    }
+
+    /// This mark writing its values as `annotation` says, checked under `context` first
+    /// ([`ValueLabels::check`]).
+    pub(super) fn annotated(
+        self,
+        context: &'static str,
+        annotation: ValueLabels,
+    ) -> Result<BarGroupMark> {
+        annotation.check(context)?;
+        Ok(BarGroupMark { annotation, ..self })
     }
 
     /// The values written on the bars.

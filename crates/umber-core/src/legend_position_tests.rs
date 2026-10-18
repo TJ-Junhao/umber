@@ -640,9 +640,15 @@ fn every_existing_mark_provides_drawn_coverage() {
             ..inside
         };
         for mark in crate::resolve::resolve_marks(f.single_axes().marks(), f.theme()) {
-            let item =
-                crate::draw::marks(f.theme(), &resolved, &layout, std::slice::from_ref(&mark))
-                    .unwrap();
+            let item = crate::draw::marks(
+                f.theme(),
+                &crate::test_support::figure_fonts(f.theme()),
+                &resolved,
+                &layout,
+                std::slice::from_ref(&mark),
+            )
+            .unwrap()
+            .unwrap();
             let prepared = mark.for_coverage(Some(crate::coverage::Geometry::of(&item)));
             assert!(prepared.coverage(&p, &inside) > 0.0, "{mark:?}");
             assert_eq!(prepared.coverage(&p, &outside), 0.0);

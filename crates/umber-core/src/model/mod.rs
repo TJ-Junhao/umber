@@ -17,6 +17,7 @@ mod bar;
 mod box_plot;
 mod bubbles;
 mod color_by;
+mod contour;
 mod ecdf;
 mod error_bars;
 mod events;
@@ -52,6 +53,7 @@ pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView, ValueLabels
 pub use box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use bubbles::{BubbleMark, BubbleOptions};
 pub use color_by::{CmapChoice, ColorBy, PointColor};
+pub use contour::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
 pub use ecdf::{EcdfMark, EcdfOptions};
 pub use error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use events::{EventsMark, EventsOptions};

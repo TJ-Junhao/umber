@@ -179,6 +179,76 @@ pub(super) fn crossing_offset_fast(a: (f64, f64), b: (f64, f64), edge: f64, r: f
     Some(h / (bx - ax) / sy)
 }
 
+/// The closed ring `ring` (its first point not repeated) clipped to `bounds`, one side of the
+/// rectangle at a time (Sutherland–Hodgman): the points inside are kept, and a point is added
+/// where an edge crosses the side, computed as [`crossing`] computes it. Inside `bounds` the
+/// result winds round every point as often as the ring does, so it fills the same part of the
+/// rectangle under either fill rule; where the ring leaves and comes back, the result runs along
+/// the rectangle's edge, enclosing nothing there. Empty when no part of the ring is inside.
+pub(super) fn clip_ring(ring: &[AxisPoint], bounds: &Bounds) -> Vec<AxisPoint> {
+    /// The side of the rectangle that one pass clips against.
+    #[derive(Clone, Copy)]
+    enum Edge {
+        Left,
+        Right,
+        Top,
+        Bottom,
+    }
+    let mid_x = bounds.left / 2.0 + bounds.right / 2.0;
+    let mid_y = bounds.top / 2.0 + bounds.bottom / 2.0;
+    let mut points = ring.to_vec();
+    for edge in [Edge::Left, Edge::Right, Edge::Top, Edge::Bottom] {
+        let inside = |p: AxisPoint| match edge {
+            Edge::Left => p.x >= bounds.left,
+            Edge::Right => p.x <= bounds.right,
+            Edge::Top => p.y >= bounds.top,
+            Edge::Bottom => p.y <= bounds.bottom,
+        };
+        // Where the edge from `a` to `b`, one end inside and one outside, crosses the side.
+        let cross = |a: AxisPoint, b: AxisPoint| match edge {
+            Edge::Left | Edge::Right => {
+                let x = if matches!(edge, Edge::Left) {
+                    bounds.left
+                } else {
+                    bounds.right
+                };
+                let y = crossing((a.x, a.y), (b.x, b.y), x, mid_y).unwrap_or(a.y);
+                AxisPoint::new(x, y)
+            }
+            Edge::Top | Edge::Bottom => {
+                let y = if matches!(edge, Edge::Top) {
+                    bounds.top
+                } else {
+                    bounds.bottom
+                };
+                let x = crossing((a.y, a.x), (b.y, b.x), y, mid_x).unwrap_or(a.x);
+                AxisPoint::new(x, y)
+            }
+        };
+        let n = points.len();
+        let mut kept = Vec::with_capacity(n + 4);
+        for (i, &current) in points.iter().enumerate() {
+            let Some(&previous) = points.get((i + n - 1) % n) else {
+                continue;
+            };
+            match (inside(previous), inside(current)) {
+                (true, true) => kept.push(current),
+                (true, false) => kept.push(cross(previous, current)),
+                (false, true) => {
+                    kept.push(cross(previous, current));
+                    kept.push(current);
+                }
+                (false, false) => {}
+            }
+        }
+        points = kept;
+        if points.is_empty() {
+            break;
+        }
+    }
+    points
+}
+
 /// Splits the polyline through `(xs[i], ys[i])` at NaN and clips it to `bounds`. Each returned
 /// subpath has at least one point; a single point is an isolated data point inside `bounds`.
 /// A segment that leaves `bounds` ends its subpath, and the part that re-enters starts a new

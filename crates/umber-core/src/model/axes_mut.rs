@@ -8,9 +8,10 @@ use super::annotation::{AnnotateOptions, Annotation, AnnotationPlacement, TextOp
 use super::axes::Axes;
 use super::axis_data::{AxisData, SharedValues, XySeries};
 use super::band::{BandMark, BandOptions};
-use super::bar::{Arrangement, BarGroupMark, BarMark, BarOptions, Series, ValueLabels};
+use super::bar::{Arrangement, BarGroupMark, BarInput, BarMark, BarOptions, Series, ValueLabels};
 use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
 use super::color_by::{check_point_color, check_scatter_label};
+use super::contour::{ContourMark, ContourOptions};
 use super::ecdf::{EcdfMark, EcdfOptions};
 use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 use super::figure::Figure;
@@ -1251,18 +1252,64 @@ impl<'a> AxesMut<'a> {
         series: Vec<Series>,
         annotation: ValueLabels,
     ) -> Result<&mut Self> {
-        const CONTEXT: &str = "Axes.grouped_bar()";
+        self.bar_groups(
+            "Axes.grouped_bar()",
+            BarInput::Series,
+            categories,
+            series,
+            annotation,
+        )
+    }
+
+    /// Adds aligned long-form bars, reporting errors under the ordinary bar call, with their
+    /// values written as `annotation` says, as for [`AxesMut::grouped_bar`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ColorSpec, Figure, ScaleKind, Series, Theme, ValueLabels};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let north = Series { label: "North".into(), values: vec![1.0], color: ColorSpec::AUTO };
+    /// axes.bar_by(vec!["A".into()], vec![north], ValueLabels::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn bar_by(
+        &mut self,
+        categories: Vec<String>,
+        series: Vec<Series>,
+        annotation: ValueLabels,
+    ) -> Result<&mut Self> {
+        self.bar_groups(
+            "Axes.bar()",
+            BarInput::Heights,
+            categories,
+            series,
+            annotation,
+        )
+    }
+
+    /// Validates aligned bars with the caller's context before storing a mark.
+    fn bar_groups(
+        &mut self,
+        context: &'static str,
+        input: BarInput,
+        categories: Vec<String>,
+        series: Vec<Series>,
+        annotation: ValueLabels,
+    ) -> Result<&mut Self> {
         let axes = self.axes_mut();
-        let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
+        let (along, values) = check_band_axes(context, axes.x, axes.y)?;
         let mark = BarGroupMark::new(
-            CONTEXT,
+            context,
             Arrangement::Grouped,
+            input,
             along,
             values,
             categories,
             series,
-            annotation,
-        )?;
+        )?
+        .annotated(context, annotation)?;
         axes.marks.push(Mark::GroupedBar(mark));
         Ok(self)
     }
@@ -1448,12 +1495,13 @@ impl<'a> AxesMut<'a> {
         let mark = BarGroupMark::new(
             CONTEXT,
             Arrangement::Stacked,
+            BarInput::Series,
             along,
             values,
             categories,
             series,
-            annotation,
-        )?;
+        )?
+        .annotated(CONTEXT, annotation)?;
         axes.marks.push(Mark::StackedBar(mark));
         Ok(self)
     }
@@ -3265,6 +3313,7 @@ impl<'a> AxesMut<'a> {
                     (name.as_str(), &s.values),
                     options,
                 )
+                .map_err(|error| error.in_group(i))
             })
             .collect::<Result<Vec<_>>>()?;
         axes.marks.extend(marks.into_iter().map(Mark::Kde));
@@ -3372,6 +3421,320 @@ impl<'a> AxesMut<'a> {
         axes.annotations.push(annotation);
         Ok(self)
     }
+
+    /// Adds a contour of the field `z`, sampled on the rectilinear grid of the strictly
+    /// increasing coordinates `x` and `y`: `z` holds one row per y coordinate, each with one
+    /// value per x coordinate. Both axes must be linear or log axes. The grid is a lattice of
+    /// cells, each between four neighbouring points; a NaN value leaves the four cells around
+    /// it out of every line and band, as a hole. Along each side of a cell the field is linear,
+    /// and inside a cell the lines run straight between the crossings of its sides; a cell whose
+    /// corners alternate above and below a level joins the high corners when the mean of its
+    /// four values is at or above the level, and separates them otherwise.
+    ///
+    /// `options.style` draws a line along each level
+    /// ([`ContourStyle::Lines`](crate::ContourStyle::Lines)), the bands between the levels
+    /// ([`ContourStyle::Filled`](crate::ContourStyle::Filled)), or the bands with thin lines
+    /// over them ([`ContourStyle::Both`](crate::ContourStyle::Both)). Lines are colored by
+    /// their level on the axes' color scale, which every color-mapped mark shares, unless
+    /// `options.color` gives them one color; the bands take the color of the middle of their
+    /// range on the color scale, and the regions below the first level and above the last the
+    /// colors at the ends of the color range. The colorbar shows the levels: bands for filled
+    /// contours, a smooth bar with a tick at each level for lines; every color-mapped contour
+    /// that shares the bar, on these axes or through shared colors, needs the same levels, and
+    /// rendering refuses different ones (`Error::Style`). With `options.annotate`, every line at
+    /// least three times as long as its label carries its level's value at its middle, along
+    /// the line and upright, in the colorbar's format unless it has its own, the line broken
+    /// under it. Points between grid coordinates are interpolated in the data, then placed on
+    /// the axes, so on a log axis too a line crosses a cell side where the data does. Automatic
+    /// limits are the
+    /// outer coordinates, without padding, as for [`AxesMut::mesh`]; by default a contour
+    /// alone draws no baseline.
+    ///
+    /// A field that changes from cell to cell, such as noise or a checkerboard, makes many
+    /// short lines and many small bands: vector output then grows very large and slow to write
+    /// and to draw. Ask for fewer levels or [`ContourStyle::Filled`](crate::ContourStyle::Filled)
+    /// instead of [`ContourStyle::Both`](crate::ContourStyle::Both), smooth or aggregate the
+    /// data first, or draw it with [`AxesMut::mesh`] or [`AxesMut::heatmap`] when the cells
+    /// themselves are what matters. Contours never thin the data on their own.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged; the checks run in the order of
+    /// [`crate::ContourMark`]'s rules: `Error::Usage` unless both axes are linear
+    /// or log axes; `Error::Data` for coordinates that are too few, not finite, not positive on
+    /// a log axis or not strictly increasing, for `z` of a length other than
+    /// `y.len() * x.len()`, and for a value that is infinite, beyond 1e300 in magnitude, or not
+    /// positive on a log color scale, named by row and column; `Error::Style` for a level count
+    /// outside `1..=MAX_LEVELS` or levels that are not finite and strictly increasing;
+    /// `Error::Usage` for one color with filled bands, a colormap or a center, for `annotate`
+    /// with [`ContourStyle::Filled`](crate::ContourStyle::Filled) and for a format without
+    /// `annotate`; `Error::Style` for [`TickFormat::iso`] and for an invalid center; and `Error::Usage` or `Error::Style` when
+    /// a color-mapped contour disagrees with the axes' color scale or its color limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ContourOptions, ContourStyle, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let (x, y) = ([0.0, 1.0, 2.0], [0.0, 1.0]);
+    /// let z = [0.0, 1.0, 2.0, 1.0, 2.0, 3.0];
+    /// axes.contour(&x, &y, &z, ContourOptions { style: ContourStyle::Filled, ..ContourOptions::default() })?;
+    /// assert_eq!(axes.marks().len(), 1);
+    ///
+    /// // Level labels need lines.
+    /// let labelled = ContourOptions { style: ContourStyle::Filled, annotate: true, ..ContourOptions::default() };
+    /// let err = axes.contour(&x, &y, &z, labelled).unwrap_err();
+    /// assert_eq!(err.parameter(), Some("annotate"));
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn contour(
+        &mut self,
+        x: &[f64],
+        y: &[f64],
+        z: &[f64],
+        options: ContourOptions,
+    ) -> Result<&mut Self> {
+        let mark = ContourMark::new(self.figure, self.index, (x, y, z), options)?;
+        self.axes_mut().marks.push(Mark::Contour(mark));
+        Ok(self)
+    }
+
+    /// Adds one line per named pair of coordinate columns, in the given order.
+    /// Each group takes the next palette color. The rules of [`AxesMut::line_shared`]
+    /// apply to every group; no mark is added unless all groups are valid.
+    /// An empty list of groups is `Error::Data`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]))];
+    /// axes.grouped_line(groups, Dash::Solid, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_line(
+        &mut self,
+        groups: Vec<(String, AxisData, AxisData)>,
+        dash: crate::Dash,
+        width: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.line()";
+        check_series_y(CONTEXT, self.y)?;
+        self.grouped_xy(CONTEXT, groups, LINE_GAP_HINT, |label, series| {
+            Ok(Mark::line(
+                series,
+                LineOptions {
+                    label,
+                    dash,
+                    width,
+                    ..LineOptions::default()
+                },
+            ))
+        })
+    }
+
+    /// Adds one filled area per named pair of columns, in order with palette colors.
+    /// The rules of [`AxesMut::area_shared`] apply to every group. Groups must not be empty;
+    /// a failed call adds nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]))];
+    /// axes.grouped_area(groups, Dash::Solid, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_area(
+        &mut self,
+        groups: Vec<(String, AxisData, AxisData)>,
+        dash: crate::Dash,
+        width: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.area()";
+        check_series_y(CONTEXT, self.y)?;
+        self.grouped_xy(CONTEXT, groups, AREA_GAP_HINT, |label, series| {
+            Ok(Mark::area(
+                series,
+                AreaOptions {
+                    label,
+                    dash,
+                    width,
+                    ..AreaOptions::default()
+                },
+            ))
+        })
+    }
+
+    /// Adds one scatter per named pair of columns, in order with palette colors.
+    /// Coordinates follow [`AxesMut::scatter_shared`]; groups must not be empty.
+    /// All groups use the same marker and size. A failed call adds nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Figure, Marker, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]))];
+    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_scatter(
+        &mut self,
+        groups: Vec<(String, AxisData, AxisData)>,
+        marker: crate::Marker,
+        size: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.scatter()";
+        check_not_two_categories(CONTEXT, self.x, self.y)?;
+        self.grouped_xy(CONTEXT, groups, SCATTER_GAP_HINT, |label, series| {
+            Ok(Mark::scatter(
+                series,
+                ScatterOptions {
+                    label,
+                    marker,
+                    size,
+                    ..ScatterOptions::default()
+                },
+            ))
+        })
+    }
+
+    /// Adds one step line per named pair of columns, in order with palette colors.
+    /// The rules of [`AxesMut::step_shared`], including the x order, apply within each group.
+    /// Groups must not be empty. A failed call adds nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Step, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]))];
+    /// axes.grouped_step(groups, Step::Post, Dash::Solid, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_step(
+        &mut self,
+        groups: Vec<(String, AxisData, AxisData)>,
+        position: crate::Step,
+        dash: crate::Dash,
+        width: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.step()";
+        check_series_y(CONTEXT, self.y)?;
+        self.grouped_xy(CONTEXT, groups, LINE_GAP_HINT, |label, series| {
+            check_step_order(CONTEXT, series.x())?;
+            Ok(Mark::Step(StepMark::new(
+                series,
+                StepOptions {
+                    label,
+                    position,
+                    dash,
+                    width,
+                    ..StepOptions::default()
+                },
+            )))
+        })
+    }
+
+    /// Adds one ECDF per named column, in order with palette colors.
+    /// Every group is normalized on its own and follows [`AxesMut::ecdf`]. Groups must not
+    /// be empty; no mark is added unless all groups are valid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.grouped_ecdf(vec![("North".into(), AxisData::Numbers(vec![2.0, 3.0]))],
+    ///     false, Dash::Solid, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_ecdf(
+        &mut self,
+        groups: Vec<(String, AxisData)>,
+        complementary: bool,
+        dash: crate::Dash,
+        width: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.ecdf()";
+        check_groups_present(CONTEXT, groups.len())?;
+        let marks = groups
+            .into_iter()
+            .enumerate()
+            .map(|(i, (label, values))| {
+                let options = EcdfOptions {
+                    label,
+                    complementary,
+                    dash,
+                    width,
+                    ..EcdfOptions::default()
+                };
+                EcdfMark::new(CONTEXT, (self.x, self.y), values, options)
+                    .map(Mark::Ecdf)
+                    .map_err(|error| error.in_group(i))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.axes_mut().marks.extend(marks);
+        Ok(self)
+    }
+
+    /// Builds all grouped marks before changing the axes.
+    fn grouped_xy(
+        &mut self,
+        context: &'static str,
+        groups: Vec<(String, AxisData, AxisData)>,
+        gap_hint: &'static str,
+        make_mark: impl Fn(String, XySeries) -> Result<Mark>,
+    ) -> Result<&mut Self> {
+        check_groups_present(context, groups.len())?;
+        let series = groups
+            .into_iter()
+            .enumerate()
+            .map(|(i, (label, x, y))| {
+                XySeries::new(context, (self.x, self.y), x, y, gap_hint)
+                    .map(|series| (label, series))
+                    .map_err(|error| error.in_group(i))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let marks = series
+            .into_iter()
+            .enumerate()
+            .map(|(i, (label, series))| make_mark(label, series).map_err(|error| error.in_group(i)))
+            .collect::<Result<Vec<_>>>()?;
+        self.axes_mut().marks.extend(marks);
+        Ok(self)
+    }
+}
+
+/// Refuses an empty collection of named data columns before building marks.
+fn check_groups_present(context: &'static str, count: usize) -> Result<()> {
+    if count == 0 {
+        return Err(
+            Error::data(context, "series is empty; pass at least one series.")
+                .with_parameter("series"),
+        );
+    }
+    Ok(())
 }
 
 /// Checks that `axis`, of scale kind `kind`, is a time axis for the span method `context`,

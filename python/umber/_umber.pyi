@@ -45,6 +45,7 @@ import numpy.typing
 
 __all__ = [
     "MAX_BINS",
+    "MAX_LEVELS",
     "Cmap",
     "ColorBy",
     "Figure",
@@ -73,6 +74,7 @@ __all__ = [
 
 __version__: str
 MAX_BINS: int
+MAX_LEVELS: int
 
 # A color argument: (kind, payload, alpha). Kind 0 is Color.AUTO (payload unused, 0), 1 is
 # Color.palette() (payload: the index), 2 is a fixed color (payload: 0xRRGGBBAA; alpha unused,
@@ -159,6 +161,7 @@ class Cmap:
     """An immutable colormap; ``colors()`` lists its stops as opaque ``0xRRGGBBAA`` integers."""
 
     def __eq__(self, other: object, /) -> bool: ...
+    # mypy does not infer that a class defining __eq__ is unhashable.
     __hash__: ClassVar[None]  # type: ignore[assignment]  # pyright: ignore[reportIncompatibleMethodOverride]
     @staticmethod
     def viridis() -> Cmap: ...
@@ -195,6 +198,7 @@ class Theme:
     """An immutable theme. Theme colors must be concrete (color kind 2)."""
 
     def __eq__(self, other: object, /) -> bool: ...
+    # mypy does not infer that a class defining __eq__ is unhashable.
     __hash__: ClassVar[None]  # type: ignore[assignment]  # pyright: ignore[reportIncompatibleMethodOverride]
     @staticmethod
     def pigment() -> Theme: ...
@@ -721,4 +725,73 @@ class Figure:
         arrow: bool,
         size: _SizeArg,
         color: _ColorArg,
+    ) -> None: ...
+    def bar_by(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        series: list[_SeriesArg],
+        annotate: bool,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
+    ) -> None: ...
+    def grouped_line(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_area(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_scatter(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        marker: int,
+        size: _SizeArg,
+    ) -> None: ...
+    def grouped_step(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        position: int,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_ecdf(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues]],
+        complementary: bool,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def contour(
+        self,
+        row: int,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        z: _FloatArray,
+        levels: int | _FloatArray | None,
+        style: int,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
+        color: _ColorArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
     ) -> None: ...

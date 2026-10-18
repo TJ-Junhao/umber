@@ -41,10 +41,11 @@ use umber_core::{
 use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };
+use umber_core::{ContourLevels, ContourOptions, ContourStyle};
 
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::{enum_value, render_choice};
-use crate::errors::{core_error, internal_value};
+use crate::errors::{core_error, group_error, internal_value};
 use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
@@ -59,6 +60,27 @@ type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
 
 /// Named sample groups and their color, in distribution order.
 type DistributionArgs<'py> = Vec<(String, Vec<Bound<'py, PyAny>>, ColorArg)>;
+
+/// Named coordinate pairs, already converted by the Python facade.
+type XyGroupArgs<'py> = Vec<(String, Bound<'py, PyAny>, Bound<'py, PyAny>)>;
+
+/// Copies grouped coordinates into the forms held by the core.
+fn xy_groups(
+    context: &'static str,
+    groups: XyGroupArgs<'_>,
+) -> PyResult<Vec<(String, umber_core::AxisData, umber_core::AxisData)>> {
+    groups
+        .into_iter()
+        .enumerate()
+        .map(|(i, (label, x, y))| {
+            Ok((
+                label,
+                series_data(context, "x", &x).map_err(|error| group_error(error, i))?,
+                series_data(context, "y", &y).map_err(|error| group_error(error, i))?,
+            ))
+        })
+        .collect()
+}
 
 /// The `kind` of a grid index argument that is `AUTO`.
 const AUTO_INDEX: i64 = 0;
@@ -673,6 +695,25 @@ impl Figure {
             .map_err(core_error)
     }
 
+    /// Adds aligned long-form bars with ordinary bar error context.
+    fn bar_by(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        series: SeriesArgs<'_>,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let (categories, series) = (names(categories)?, Self::series(series)?);
+        let labels = value_labels(annotate, format, size)?;
+        self.axes(row, col)?
+            .bar_by(categories, series, labels)
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Adds a box plot for each category.
     fn box_plot(
         &mut self,
@@ -1249,6 +1290,54 @@ impl Figure {
             .map_err(core_error)
     }
 
+    /// Adds a contour of the row-major values `z`, one row per y coordinate, on the grid of the
+    /// coordinates `x` and `y`. `levels` is `None` for `AUTO`, an `int` for a count of round
+    /// levels, or a float64 buffer of the levels; `style` is a `Contour` value; the colormap,
+    /// the scale argument `(scale, base)` and the center are converted as those of `heatmap`,
+    /// `color` as a color argument, and `format` as that of `heatmap` (`None` for the automatic
+    /// level labels).
+    #[pyo3(signature = (row, col, x, y, z, levels, style, cmap, scale, base, center, color, annotate, format))]
+    fn contour(
+        &mut self,
+        row: i64,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+        levels: Option<&Bound<'_, PyAny>>,
+        style: i64,
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+        center: Option<f64>,
+        color: ColorArg,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+    ) -> PyResult<()> {
+        let levels = match levels {
+            None => ContourLevels::Auto,
+            Some(count) if count.is_instance_of::<PyInt>() => {
+                ContourLevels::Count(count.extract::<usize>()?)
+            }
+            Some(values) => ContourLevels::Values(floats(values)?),
+        };
+        let options = ContourOptions {
+            levels,
+            style: enum_value::<ContourStyle>(style)?,
+            cmap: cmap_choice(cmap),
+            scale: color_transform(scale, base)?,
+            center,
+            color: color_spec(color)?,
+            annotate,
+            format: format.map(tick_format).transpose()?,
+        };
+        let (x, y, z) = (floats(x)?, floats(y)?, floats(z)?);
+        self.axes(row, col)?
+            .contour(&x, &y, &z, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Sets the color range of the axes' color-mapped marks.
     fn clim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
         self.axes(row, col)?
@@ -1719,6 +1808,104 @@ impl Figure {
         };
         self.axes(row, col)?
             .annotate(text, at, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named lines atomically, with palette colors in group order.
+    fn grouped_line(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: XyGroupArgs<'_>,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let groups = xy_groups("Axes.line()", groups)?;
+        let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        self.axes(row, col)?
+            .grouped_line(groups, dash, width)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named areas atomically, with palette colors in group order.
+    fn grouped_area(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: XyGroupArgs<'_>,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let groups = xy_groups("Axes.area()", groups)?;
+        let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        self.axes(row, col)?
+            .grouped_area(groups, dash, width)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named scatter series atomically, with palette colors in group order.
+    fn grouped_scatter(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: XyGroupArgs<'_>,
+        marker: i64,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let groups = xy_groups("Axes.scatter()", groups)?;
+        let (marker, size) = (enum_value::<Marker>(marker)?, size_spec(size)?);
+        self.axes(row, col)?
+            .grouped_scatter(groups, marker, size)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named step lines atomically, checking their order within each group.
+    fn grouped_step(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: XyGroupArgs<'_>,
+        position: i64,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let groups = xy_groups("Axes.step()", groups)?;
+        let position = enum_value::<Step>(position)?;
+        let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        self.axes(row, col)?
+            .grouped_step(groups, position, dash, width)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named ECDFs atomically, preserving numeric and time columns.
+    fn grouped_ecdf(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: Vec<(String, Bound<'_, PyAny>)>,
+        complementary: bool,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let groups = groups
+            .into_iter()
+            .enumerate()
+            .map(|(i, (label, values))| {
+                Ok((
+                    label,
+                    series_data("Axes.ecdf()", "values", &values)
+                        .map_err(|error| group_error(error, i))?,
+                ))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        self.axes(row, col)?
+            .grouped_ecdf(groups, complementary, dash, width)
             .map(drop)
             .map_err(core_error)
     }
