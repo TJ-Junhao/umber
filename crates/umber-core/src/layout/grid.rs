@@ -2809,13 +2809,14 @@ mod tests {
                 .unwrap();
         }
         let all = layouts(&f).unwrap();
+        let fonts = crate::test_support::figure_fonts(f.theme());
         assert_eq!(all.len(), 2);
         for (row, (_, layout)) in all.iter().enumerate() {
             assert!(layout.x_tick_labels.is_empty());
             assert!(layout.xlabel.is_none());
             assert_eq!(layout.y_tick_labels.len(), 2);
             let label = &layout.y_tick_labels[0];
-            let bottom = label.y + crate::layout::metrics(lib(), &label.style).1;
+            let bottom = label.y + crate::layout::metrics(&fonts, &label.style).unwrap().1;
             assert_eq!(layout.legend.entries().len(), 1);
             let entry = &layout.legend.entries()[0];
             // A single entry occupies one row, with its swatch centered in the band.
@@ -3060,15 +3061,20 @@ mod tests {
                     .map(|input| {
                         let marks = crate::resolve::resolve_marks(input.axes.marks(), input.theme);
                         let limits = crate::resolve::Limits::of(input.axes);
-                        let (x, y) = super::super::TickRoom::unlimited(3, 3, lib());
+                        let (x, y) = super::super::TickRoom::unlimited(
+                            3,
+                            3,
+                            crate::test_support::tick_font(input.theme),
+                        );
                         let resolved = crate::resolve::resolve(&marks, &limits, &x, &y);
                         super::super::measure_panel(
                             input,
                             &resolved,
                             grid.span(input.axes.cells()),
                             [true; 2],
-                            &super::super::LabelCache::new(lib()),
+                            &super::super::LabelCache::new(input.lib),
                         )
+                        .unwrap()
                     })
                     .collect();
                 let cells: Vec<CellRange> = grid.panels.iter().map(|p| p.axes.cells()).collect();

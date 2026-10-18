@@ -655,8 +655,7 @@ fn shared_x_ticks_fit_the_labeled_narrow_panels_above_a_wide_panel() {
     let ticks_for = |plot| {
         let (x, _) = crate::layout::tick_rooms(
             plot,
-            f.theme(),
-            &lib,
+            crate::test_support::tick_font(f.theme()),
             crate::layout::TickSpacing::LabelsApart,
         );
         let (axis, _) = crate::resolve::resolve_axis(
@@ -708,8 +707,7 @@ fn shared_automatic_ticks_fit_the_final_shortest_plot() {
         assert_eq!(r, &panels[0].0);
         let (x, y) = crate::layout::tick_rooms(
             l.plot.size(),
-            f.theme(),
-            &lib,
+            crate::test_support::tick_font(f.theme()),
             crate::layout::TickSpacing::LabelsApart,
         );
         assert!(x.slack(&r.x.ticks) >= -1e-9);

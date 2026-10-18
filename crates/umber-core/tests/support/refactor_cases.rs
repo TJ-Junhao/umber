@@ -78,9 +78,9 @@ use umber_core::scene::{
     Scene, StrokeStyle,
 };
 use umber_core::{
-    Alpha, ColorSpec, ContinuousScale, Dash, Figure, FillStyle, Font, FontLibrary, GridIndex,
-    GridLines, LegendStyle, LogBase, Marker, Path, Point, Rgba, ScaleKind, TextStyle, Theme,
-    Transform, Weight,
+    Alpha, BundledFont, ColorSpec, ContinuousScale, Dash, FaceId, Figure, FillStyle, Font,
+    FontLibrary, GridIndex, GridLines, LegendStyle, LogBase, Marker, Path, Point, Rgba, ScaleKind,
+    SceneFonts, TextStyle, Theme, Transform, Weight,
 };
 
 /// Cases of the newer features, one module each, so that a feature edits only its own file.
@@ -386,9 +386,9 @@ fn scene_cases(lib: &FontLibrary) -> Vec<(String, Scene)> {
             .unwrap()
             .with_legend_style(LegendStyle::Direct)
             .unwrap()
-            .with_title_font(Font::SourceSerif4)
+            .with_title_font(Font::SOURCE_SERIF_4)
             .unwrap()
-            .with_body_font(Font::Geist)
+            .with_body_font(Font::GEIST)
             .unwrap()
             .with_font_scale(1.4)
             .unwrap()
@@ -765,9 +765,22 @@ fn stroke(path: Path, width: f32, dash: Vec<f32>, cap: LineCap, join: LineJoin) 
     }
 }
 
-fn style(font: Font, weight: Weight, size: f32, tabular: bool) -> TextStyle {
+/// Every bundled font, in the order of `BundledFont::ALL`: the fonts whose faces [`style`]
+/// names.
+fn bundled_fonts() -> Vec<Font> {
+    BundledFont::ALL.into_iter().map(Font::Bundled).collect()
+}
+
+/// [`bundled_fonts`], laid out through `lib`.
+fn bundled(lib: &FontLibrary) -> SceneFonts<'_> {
+    lib.with_figure_fonts(&bundled_fonts()).unwrap()
+}
+
+/// A style in the bundled font `font`, as a face of [`bundled_fonts`].
+fn style(font: BundledFont, weight: Weight, size: f32, tabular: bool) -> TextStyle {
+    let index = BundledFont::ALL.iter().position(|&f| f == font).unwrap();
     TextStyle {
-        font,
+        face: FaceId::new(index),
         weight,
         size,
         tabular_figures: tabular,
@@ -851,35 +864,44 @@ fn primitives_scene(lib: &FontLibrary) -> Scene {
     let runs = [
         (
             "Revenue \u{2212}12.5%",
-            Font::Inter,
+            BundledFont::Inter,
             Weight::SemiBold,
             13.0,
             false,
         ),
         (
             "Q1 Q2 Q3 0123456789",
-            Font::SourceSerif4,
+            BundledFont::SourceSerif4,
             Weight::Regular,
             10.0,
             true,
         ),
-        ("Geist AV To", Font::Geist, Weight::Regular, 11.0, false),
+        (
+            "Geist AV To",
+            BundledFont::Geist,
+            Weight::Regular,
+            11.0,
+            false,
+        ),
         (
             "Fallback \u{E000}",
-            Font::Inter,
+            BundledFont::Inter,
             Weight::Regular,
             11.0,
             false,
         ),
     ];
+    let fonts = bundled(lib);
     for (i, (text, font, weight, size, tabular)) in runs.into_iter().enumerate() {
-        scene.push_text(
-            lib,
-            text,
-            style(font, weight, size, tabular),
-            pt(20.0, 185.0 + 14.0 * i as f32),
-            black,
-        );
+        scene
+            .push_text(
+                &fonts,
+                text,
+                style(font, weight, size, tabular),
+                pt(20.0, 185.0 + 14.0 * i as f32),
+                black,
+            )
+            .unwrap();
     }
     scene
 }
@@ -1289,6 +1311,8 @@ fn hostile_scene() -> Scene {
 fn hostile_text_scene(lib: &FontLibrary) -> Scene {
     use umber_core::scene::TextItem;
     let mut scene = Scene::new(120.0, 60.0, rgb(255, 255, 255));
+    scene.fonts = bundled_fonts();
+    let fonts = bundled(lib);
     let mut outline = Path::new();
     outline.move_to(pt(10.0, 10.0));
     outline.line_to(pt(30.0, 10.0));
@@ -1296,7 +1320,7 @@ fn hostile_text_scene(lib: &FontLibrary) -> Scene {
     outline.close();
     let base = TextItem {
         text: "hand <built> & \"quoted\"".into(),
-        style: style(Font::Inter, Weight::Regular, 12.0, false),
+        style: style(BundledFont::Inter, Weight::Regular, 12.0, false),
         origin: pt(10.0, 25.0),
         color: rgb(30, 30, 30),
         outline: outline.clone(),
@@ -1318,11 +1342,11 @@ fn hostile_text_scene(lib: &FontLibrary) -> Scene {
             ..base.clone()
         },
         TextItem {
-            style: style(Font::Geist, Weight::SemiBold, nan, true),
+            style: style(BundledFont::Geist, Weight::SemiBold, nan, true),
             ..base.clone()
         },
         TextItem {
-            style: style(Font::SourceSerif4, Weight::SemiBold, -3.0, false),
+            style: style(BundledFont::SourceSerif4, Weight::SemiBold, -3.0, false),
             ..base.clone()
         },
         TextItem {
@@ -1340,27 +1364,33 @@ fn hostile_text_scene(lib: &FontLibrary) -> Scene {
     ] {
         scene.push(Item::Text(variant));
     }
-    scene.push_text(
-        lib,
-        "",
-        style(Font::Inter, Weight::Regular, 10.0, false),
-        pt(0.0, 0.0),
-        rgb(0, 0, 0),
-    );
-    scene.push_text(
-        lib,
-        "pushed text",
-        style(Font::Inter, Weight::Regular, f32::INFINITY, false),
-        pt(0.0, 40.0),
-        rgb(0, 0, 0),
-    );
-    scene.push_text(
-        lib,
-        "pushed text \u{E000}",
-        style(Font::Geist, Weight::Regular, 9.0, false),
-        pt(f32::NAN, 40.0),
-        rgb(0, 0, 0),
-    );
+    scene
+        .push_text(
+            &fonts,
+            "",
+            style(BundledFont::Inter, Weight::Regular, 10.0, false),
+            pt(0.0, 0.0),
+            rgb(0, 0, 0),
+        )
+        .unwrap();
+    scene
+        .push_text(
+            &fonts,
+            "pushed text",
+            style(BundledFont::Inter, Weight::Regular, f32::INFINITY, false),
+            pt(0.0, 40.0),
+            rgb(0, 0, 0),
+        )
+        .unwrap();
+    scene
+        .push_text(
+            &fonts,
+            "pushed text \u{E000}",
+            style(BundledFont::Geist, Weight::Regular, 9.0, false),
+            pt(f32::NAN, 40.0),
+            rgb(0, 0, 0),
+        )
+        .unwrap();
     scene
 }
 
@@ -1416,16 +1446,19 @@ fn font_scale_figure(scale: f64, height: f64) -> Figure {
 fn font_weights_scene(lib: &FontLibrary) -> Scene {
     let mut scene = Scene::new(420.0, 330.0, rgb(255, 255, 255));
     let mut row = 0.0;
-    for font in Font::ALL {
+    let fonts = bundled(lib);
+    for font in BundledFont::ALL {
         for weight in Weight::ALL {
             for tabular in [false, true] {
-                scene.push_text(
-                    lib,
-                    "Revenue \u{2212}12.5% 0123456789 AV To fi \u{E000}",
-                    style(font, weight, 11.0, tabular),
-                    pt(10.0, 16.0 + 15.0 * row),
-                    rgb(20, 20, 20),
-                );
+                scene
+                    .push_text(
+                        &fonts,
+                        "Revenue \u{2212}12.5% 0123456789 AV To fi \u{E000}",
+                        style(font, weight, 11.0, tabular),
+                        pt(10.0, 16.0 + 15.0 * row),
+                        rgb(20, 20, 20),
+                    )
+                    .unwrap();
                 row += 1.0;
             }
         }
@@ -1446,8 +1479,9 @@ mod record {
         FillRule, Item, LineCap, LineJoin, Paint, Rect, Scene, StrokeStyle, TextItem,
     };
     use umber_core::{
-        Alpha, Axes, ColorSpec, Dash, Error, Figure, FillStyle, Font, GridLines, LegendStyle,
-        Marker, Path, PathVerb, Point, Rgba, ScaleKind, TextStyle, Theme, Transform, Weight,
+        Alpha, Axes, BundledFont, ColorSpec, Dash, Error, Figure, FillStyle, Font, GridLines,
+        LegendStyle, Marker, Path, PathVerb, Point, Rgba, ScaleKind, TextStyle, Theme, Transform,
+        Weight,
     };
 
     pub fn f32(v: f32) -> String {
@@ -1500,13 +1534,13 @@ mod record {
         )
     }
 
-    pub fn font(f: Font) -> &'static str {
+    pub fn font(f: &Font) -> &'static str {
         match f {
-            Font::SourceSerif4 => "source-serif-4",
-            Font::IbmPlexSans => "ibm-plex-sans",
-            Font::Geist => "geist",
-            Font::Inter => "inter",
-            Font::JetBrainsMono => "jetbrains-mono",
+            Font::Bundled(BundledFont::SourceSerif4) => "source-serif-4",
+            Font::Bundled(BundledFont::IbmPlexSans) => "ibm-plex-sans",
+            Font::Bundled(BundledFont::Geist) => "geist",
+            Font::Bundled(BundledFont::Inter) => "inter",
+            Font::Bundled(BundledFont::JetBrainsMono) => "jetbrains-mono",
         }
     }
 
@@ -1590,10 +1624,12 @@ mod record {
         }
     }
 
-    pub fn text_style(s: &TextStyle) -> String {
+    /// The style `s`, whose face is the font `face_font`; `None` for a face that names no
+    /// font.
+    pub fn text_style(face_font: Option<&Font>, s: &TextStyle) -> String {
         format!(
             "font={} weight={} size={} tabular={}",
-            font(s.font),
+            face_font.map_or("none", font),
             weight(s.weight),
             f32(s.size),
             s.tabular_figures
@@ -2067,7 +2103,11 @@ mod record {
 
     /// A line-oriented record of a scene. Each line is indented by its group depth.
     pub fn scene(s: &Scene) -> String {
-        let mut w = Writer::default();
+        let mut w = Writer {
+            out: String::new(),
+            depth: 0,
+            fonts: &s.fonts,
+        };
         w.line(&format!(
             "scene width={} height={} background={} items={}",
             f32(s.width),
@@ -2079,13 +2119,14 @@ mod record {
         w.out
     }
 
-    #[derive(Default)]
-    struct Writer {
+    struct Writer<'a> {
         out: String,
         depth: usize,
+        /// The fonts of the scene, which text items name by face.
+        fonts: &'a [Font],
     }
 
-    impl Writer {
+    impl Writer<'_> {
         fn line(&mut self, s: &str) {
             for _ in 0..self.depth {
                 self.out.push(' ');
@@ -2170,7 +2211,7 @@ mod record {
             self.line(&format!(
                 "text {} {} origin={} color={} width={}",
                 text(&t.text),
-                text_style(&t.style),
+                text_style(self.fonts.get(t.style.face.index()), &t.style),
                 point(t.origin),
                 rgba(t.color),
                 f32(t.width)
@@ -2942,8 +2983,11 @@ fn theme_errors(rec: &mut Log) {
             base.with_grid_lines(GridLines::Horizontal),
         ),
         ("with_grid_dash", base.with_grid_dash(Dash::Dashed)),
-        ("with_title_font", base.with_title_font(Font::JetBrainsMono)),
-        ("with_body_font", base.with_body_font(Font::IbmPlexSans)),
+        (
+            "with_title_font",
+            base.with_title_font(Font::JETBRAINS_MONO),
+        ),
+        ("with_body_font", base.with_body_font(Font::IBM_PLEX_SANS)),
         (
             "with_legend_style",
             base.with_legend_style(LegendStyle::Header),
@@ -3082,11 +3126,11 @@ fn constant_cases() -> String {
     );
     let _ = writeln!(out, "MAX_GROUP_DEPTH {MAX_GROUP_DEPTH}");
     let _ = writeln!(out, "DPIS {DPIS:?}");
-    for font in Font::ALL {
+    for font in bundled_fonts() {
         let _ = writeln!(
             out,
             "Font {} family={} generic={}",
-            record::font(font),
+            record::font(&font),
             record::text(font.family_name()),
             record::text(font.generic_family())
         );
@@ -3107,18 +3151,19 @@ fn text_layout_cases(lib: &FontLibrary) -> String {
         "\u{E000}\u{E000}",
         "caf\u{e9} \u{65e5}",
     ];
-    for font in Font::ALL {
+    let fonts = bundled(lib);
+    for font in BundledFont::ALL {
         for weight in Weight::ALL {
             for tabular in [false, true] {
                 for size in [11.0, 0.0, -1.0, f32::NAN, 1.0e4] {
                     for sample in samples {
                         let s = style(font, weight, size, tabular);
-                        let layout = lib.layout(sample, &s);
+                        let layout = fonts.layout(sample, &s).unwrap();
                         let outline = layout.outline(pt(0.0, 0.0));
                         let _ = writeln!(
                             out,
                             "{} {} width={} ascent={} descent={} empty={} verbs={}",
-                            record::text_style(&s),
+                            record::text_style(fonts.font(s.face), &s),
                             record::text(sample),
                             record::f32(layout.width()),
                             record::f32(layout.ascent()),

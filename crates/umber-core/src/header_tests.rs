@@ -548,14 +548,15 @@ fn merged_legend_follows_figure_title_alignment() {
         let mut f = figure(Theme::pigment().with_title_align(align).unwrap());
         f.title("Figure").subtitle("Summary");
         let groups = ShareGroups::new(&f);
-        let panels = panels(&f, &groups, &lib);
+        let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
+        let panels = panels(&f, &groups, &fonts).unwrap();
         let planned = plan(
             &f,
             &panels,
             &groups,
-            &lib,
+            &fonts,
             "Figure.to_scene()",
-            &layout::LabelCache::new(&lib),
+            &layout::LabelCache::new(&fonts),
         )
         .unwrap();
         let entries = planned.header.legend.entries();
@@ -588,14 +589,15 @@ fn figure_title_is_one_and_a_half_title_sizes() {
         let mut f = figure(theme.with_font_scale(1.4).unwrap());
         f.title("Figure");
         let groups = ShareGroups::new(&f);
-        let panels = panels(&f, &groups, &lib);
+        let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
+        let panels = panels(&f, &groups, &fonts).unwrap();
         let planned = plan(
             &f,
             &panels,
             &groups,
-            &lib,
+            &fonts,
             "Figure.to_scene()",
-            &layout::LabelCache::new(&lib),
+            &layout::LabelCache::new(&fonts),
         )
         .unwrap();
         let title = planned.header.title.unwrap();
@@ -745,13 +747,14 @@ fn merged_rows_wrap_and_align_independently_in_both_styles() {
                 .unwrap();
             }
             let groups = ShareGroups::new(&f);
+            let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
             let planned = plan(
                 &f,
-                &panels(&f, &groups, &lib),
+                &panels(&f, &groups, &fonts).unwrap(),
                 &groups,
-                &lib,
+                &fonts,
                 "Figure.to_scene()",
-                &layout::LabelCache::new(&lib),
+                &layout::LabelCache::new(&fonts),
             )
             .unwrap();
             let rows: Vec<_> = planned
@@ -835,13 +838,14 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
             .unwrap();
     }
     let groups = ShareGroups::new(&f);
+    let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
     let planned = plan(
         &f,
-        &panels(&f, &groups, &lib),
+        &panels(&f, &groups, &fonts).unwrap(),
         &groups,
-        &lib,
+        &fonts,
         "Figure.to_scene()",
-        &layout::LabelCache::new(&lib),
+        &layout::LabelCache::new(&fonts),
     )
     .unwrap();
     assert_eq!(planned.header.legend.entries().len(), 1);
@@ -856,13 +860,14 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
         .unwrap()
         .legend(LegendStyle::None);
     let groups = ShareGroups::new(&f);
+    let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
     let planned = plan(
         &f,
-        &panels(&f, &groups, &lib),
+        &panels(&f, &groups, &fonts).unwrap(),
         &groups,
-        &lib,
+        &fonts,
         "Figure.to_scene()",
-        &layout::LabelCache::new(&lib),
+        &layout::LabelCache::new(&fonts),
     )
     .unwrap();
     let labels: Vec<_> = planned
@@ -913,13 +918,14 @@ fn per_panel_legends_do_not_follow_title_alignment() {
             )
             .unwrap();
             let groups = ShareGroups::new(&f);
+            let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
             let planned = plan(
                 &f,
-                &panels(&f, &groups, &lib),
+                &panels(&f, &groups, &fonts).unwrap(),
                 &groups,
-                &lib,
+                &fonts,
                 "Figure.to_scene()",
-                &layout::LabelCache::new(&lib),
+                &layout::LabelCache::new(&fonts),
             )
             .unwrap();
             assert!(planned.header.legend.is_empty());
@@ -970,13 +976,14 @@ fn figure_header_joins_single_and_grid_height_needs() {
         assert!(err.to_string().contains("at least 62 pt"), "{err}");
         let f = make(62.0, "Figure");
         let groups = ShareGroups::new(&f);
+        let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
         let planned = plan(
             &f,
-            &panels(&f, &groups, &lib),
+            &panels(&f, &groups, &fonts).unwrap(),
             &groups,
-            &lib,
+            &fonts,
             "Figure.to_scene()",
-            &layout::LabelCache::new(&lib),
+            &layout::LabelCache::new(&fonts),
         )
         .unwrap();
         assert_eq!(planned.header.bottom, PADDING + 22.5 * 1.25 + 8.0);

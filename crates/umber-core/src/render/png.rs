@@ -1502,19 +1502,18 @@ mod tests {
     #[test]
     fn text_renders_ink() {
         let mut scene = Scene::new(60.0, 40.0, WHITE);
+        let fonts = FontLibrary::global()
+            .with_figure_fonts(&[Font::INTER])
+            .unwrap();
         let style = TextStyle {
-            font: Font::Inter,
+            face: crate::FaceId::new(0),
             weight: Weight::Regular,
             size: 24.0,
             tabular_figures: false,
         };
-        scene.push_text(
-            FontLibrary::global(),
-            "Hg",
-            style,
-            Point { x: 4.0, y: 24.0 },
-            BLACK,
-        );
+        scene
+            .push_text(&fonts, "Hg", style, Point { x: 4.0, y: 24.0 }, BLACK)
+            .unwrap();
         let image = decode(&render_png(&scene, 72).unwrap());
         let ink_in_rows = |mut rows: std::ops::Range<u32>| {
             rows.any(|y| (0..image.width).any(|x| image.is_ink(x, y)))

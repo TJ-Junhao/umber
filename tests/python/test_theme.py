@@ -30,13 +30,22 @@ COLOR_SETTERS = [
 ENUM_SETTERS: list[tuple[str, str, tuple[str, str], str]] = [
     ("with_grid_lines", "GridLines", ("HORIZONTAL", "BOTH"), "Dash.DASHED"),
     ("with_grid_dash", "Dash", ("SOLID", "DOTTED"), "GridLines.BOTH"),
-    ("with_title_font", "Font", ("SOURCE_SERIF_4", "INTER"), "Dash.DASHED"),
     ("with_title_align", "Align", ("LEFT", "CENTER"), "LegendPosition.RIGHT"),
-    ("with_body_font", "Font", ("IBM_PLEX_SANS", "GEIST"), "Dash.DASHED"),
     ("with_legend_style", "LegendStyle", ("HEADER", "CHIPS"), "Dash.DASHED"),
     ("with_legend_position", "LegendPosition", ("TOP_LEFT", "RIGHT"), "Align.RIGHT"),
     ("with_fill_style", "FillStyle", ("SOLID", "GRADIENT"), "Dash.DASHED"),
 ]
+FONT_SETTERS = ["with_title_font", "with_body_font"]
+FONTS = [
+    ub.Font.SOURCE_SERIF_4,
+    ub.Font.IBM_PLEX_SANS,
+    ub.Font.GEIST,
+    ub.Font.INTER,
+    ub.Font.JETBRAINS_MONO,
+]
+FONT_HINT = (
+    "use Font.SOURCE_SERIF_4, Font.IBM_PLEX_SANS, Font.GEIST, Font.INTER or Font.JETBRAINS_MONO."
+)
 # (setter, parameter name in the native message, two valid values, an invalid value, requirement)
 GREATER_THAN_0 = "a finite number greater than 0"
 AT_LEAST_0 = "a finite number of at least 0"
@@ -95,6 +104,7 @@ def test_every_native_setter_is_bound() -> None:
     expected = {"with_palette", *COLOR_SETTERS, *(f"with_{n}" for n, *_ in NUMERIC_SETTERS)}
     expected |= {"with_cmap", "with_diverging_cmap", "with_colorbar_position"}
     expected |= {name for name, *_ in ENUM_SETTERS}
+    expected |= set(FONT_SETTERS)
     assert bound == expected
 
 
@@ -404,6 +414,38 @@ def test_font_hint_lists_every_font() -> None:
         "use Font.SOURCE_SERIF_4, Font.IBM_PLEX_SANS, Font.GEIST, Font.INTER "
         "or Font.JETBRAINS_MONO.",
     )
+
+
+# Fonts
+
+
+@pytest.mark.parametrize("name", FONT_SETTERS)
+def test_theme_font_setters_accept_font(name: str) -> None:
+    themes = [_setter(BASE, name)(font) for font in FONTS]
+    for font, theme in zip(FONTS, themes, strict=True):
+        assert isinstance(theme, ub.Theme)
+        assert theme == _setter(BASE, name)(font)
+        assert native(theme) == getattr(native(BASE), name)(font._native)
+    assert all(a != b for i, a in enumerate(themes) for b in themes[i + 1 :])
+    assert BASE == ub.Theme.MIDNIGHT
+
+
+@pytest.mark.parametrize("name", FONT_SETTERS)
+def test_theme_font_setters_reject_other_types(name: str) -> None:
+    for value in ("Inter", 3, (0, 3), None, ub.Dash.DASHED):
+        with pytest.raises(TypeError) as caught:
+            _setter(BASE, name)(value)
+        assert str(caught.value) == (
+            f"Theme.{name}(): value is {_type_name(value)}; value must be of type Font."
+        )
+        assert details(caught.value) == ("value", FONT_HINT)
+
+
+def test_font_type_error_highlights_the_value(tmp_path: Path) -> None:
+    line = 'ub.Theme.PIGMENT.with_body_font("Inter")'
+    err = _raised(tmp_path, line)
+    assert isinstance(err, TypeError)
+    assert _notes(err) == [_marked(line, '"Inter"'), f"hint: {FONT_HINT}"]
 
 
 # Numbers
