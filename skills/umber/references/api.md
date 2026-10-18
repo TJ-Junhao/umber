@@ -519,6 +519,43 @@ Example:
 >>> days = days.ecdf([dt.date(2026, 1, 3), dt.date(2026, 1, 1), dt.date(2026, 1, 9)])
 ```
 
+### `umber.Axes.events`
+
+```text
+Axes.events(self: 'Axes[float, str] | Axes[Time, str]', rows: Values[str], positions: Sequence[Values[X]], *, length: float | Auto=AUTO, width: Size=Size.AUTO, color: Color=Color.AUTO) -> 'Axes[X, Y]'
+```
+
+Add short vertical ticks at event positions, one row per category.
+
+Rows run from top to bottom in first-appearance order. A numeric or time x axis
+supplies the positions. Empty groups keep their row; NaN and NaT draw no tick.
+Times are rounded to the nearest microsecond, as for other time-axis marks.
+Marks draw in call order. Input data is copied and a failed call changes nothing.
+
+Args:
+    rows: Unique row names.
+    positions: One group of numbers or times per row, matching the x axis.
+    length: Fraction of the row height, above 0 and at most 1; AUTO uses 0.8.
+    width: Tick stroke width. Size.AUTO draws 1 pt ticks.
+    color: Tick color; Color.AUTO takes the next palette color.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: If rows repeat, group counts differ, or a position is invalid.
+    StyleError: If length is non-finite or outside its permitted range.
+    UsageError: If x is not numeric or time, or y is not a category axis.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes(y=ub.Scale.category())
+>>> ax = ax.events(["North", "South"], [[1, 3, 5], [2, 4]])
+```
+
 ### `umber.Axes.figure`
 
 ```text
@@ -1347,6 +1384,48 @@ Example:
 >>> ax = ax.step([0, 1, 3, 4], [1.0, 2.0, float("nan"), 0.5], where=ub.Step.MID)
 ```
 
+### `umber.Axes.strip`
+
+```text
+Axes.strip(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], groups: Sequence[Values[float]], *, jitter: float | Auto=AUTO, size: Size=Size.AUTO, color: Color=Color.AUTO, label: str='') -> 'Axes[X, Y]'
+```
+
+Add individual circular samples within each category band.
+
+Jitter is uniform within the chosen fraction of each band, from a fixed
+SplitMix64 seed for each input category and strip on these axes. Repeated
+renders are byte-identical; unrelated marks do not change the jitter.
+A category x axis gives vertical groups; a category y axis gives horizontal
+groups. NaN is ignored and empty groups draw nothing. The numeric axis may be
+linear or log. Markers use the scatter opacity and outline. Marks draw in call
+order, so call this after box() or violin() to put points above them.
+Input data is copied and a failed call changes nothing.
+
+Args:
+    categories: Unique category names.
+    groups: One group of numeric samples per category.
+    jitter: Maximum displacement as a band fraction from 0 to 0.5; AUTO uses 0.4.
+    size: Marker diameter; Size.AUTO uses the theme's marker size.
+    color: Marker color; Color.AUTO takes the next palette color.
+    label: The legend label; empty for none. Points use a marker swatch.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: If categories repeat, group counts differ, or samples are invalid.
+    StyleError: If jitter is non-finite or outside 0 to 0.5, or label is too long.
+    UsageError: If the axes are not one category axis and one numeric axis.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+>>> ax = ax.strip(["North", "South"], [[1, 2, 3], [2, 3, 4]], label="Samples")
+```
+
 ### `umber.Axes.subtitle`
 
 ```text
@@ -1372,6 +1451,47 @@ Example:
 ```python
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().title("Revenue").subtitle("Per quarter")
+```
+
+### `umber.Axes.swarm`
+
+```text
+Axes.swarm(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], groups: Sequence[Values[float]], *, size: Size=Size.AUTO, color: Color=Color.AUTO, label: str='') -> 'Axes[X, Y]'
+```
+
+Add individual circular samples within each category band.
+
+Points are sorted by value, then placed at the free offset nearest the centre
+line. When circles do not fit in a category band at the final plot size,
+rendering raises StyleError naming the category; use strip() or violin().
+A category x axis gives vertical groups; a category y axis gives horizontal
+groups. NaN is ignored and empty groups draw nothing. The numeric axis may be
+linear or log. Markers use the scatter opacity and outline. Marks draw in call
+order, so call this after box() or violin() to put points above them.
+Input data is copied and a failed call changes nothing.
+
+Args:
+    categories: Unique category names.
+    groups: One group of numeric samples per category.
+    size: Marker diameter; Size.AUTO uses the theme's marker size.
+    color: Marker color; Color.AUTO takes the next palette color.
+    label: The legend label; empty for none. Points use a marker swatch.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: If categories repeat, group counts differ, or samples are invalid.
+    StyleError: If label is too long, or a category cannot fit its points at render.
+    UsageError: If the axes are not one category axis and one numeric axis.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+>>> ax = ax.swarm(["North", "South"], [[1, 2, 3], [2, 3, 4]], label="Samples")
 ```
 
 ### `umber.Axes.title`

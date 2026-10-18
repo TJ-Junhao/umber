@@ -1451,6 +1451,93 @@ impl Figure {
             .map(drop)
             .map_err(core_error)
     }
+
+    /// Adds event positions grouped into category rows.
+    #[pyo3(signature = (row, col, rows, positions, length, width, color))]
+    fn events(
+        &mut self,
+        row: i64,
+        col: i64,
+        rows: &Bound<'_, PyAny>,
+        positions: Vec<Bound<'_, PyAny>>,
+        length: Option<f64>,
+        width: SizeArg,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let rows = names(rows)?;
+        let positions = positions
+            .iter()
+            .map(|values| series_data("Axes.events()", "positions", values))
+            .collect::<PyResult<Vec<_>>>()?;
+        let mut options = umber_core::EventsOptions {
+            width: size_spec(width)?,
+            color: color_spec(color)?,
+            ..Default::default()
+        };
+        if let Some(length) = length {
+            options.length = length;
+        }
+        self.axes(row, col)?
+            .events(rows, positions, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds strip samples in category groups.
+    #[pyo3(signature = (row, col, categories, groups, label, color, size, jitter))]
+    fn strip(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        groups: Vec<Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+        size: SizeArg,
+        jitter: Option<f64>,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
+        let mut options = umber_core::StripOptions {
+            label,
+            color: color_spec(color)?,
+            size: size_spec(size)?,
+            ..Default::default()
+        };
+        if let Some(jitter) = jitter {
+            options.jitter = jitter;
+        }
+        self.axes(row, col)?
+            .strip(categories, groups, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds swarm samples in category groups.
+    fn swarm(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        groups: Vec<Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
+        let options = umber_core::SwarmOptions {
+            label,
+            color: color_spec(color)?,
+            size: size_spec(size)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .swarm(categories, groups, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Adds a histogram of several series sharing their `bins`, drawn in `style` (a `Hist`
     /// value) with the statistic `stat` (a `Stat` value).
     fn grouped_hist(

@@ -191,6 +191,8 @@ pub(super) fn span_layer(
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Heatmap { .. }
+            | ResolvedMark::Events { .. }
+            | ResolvedMark::Points { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => {}
         }
@@ -246,6 +248,8 @@ pub(super) fn rule_layer(
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Heatmap { .. }
+            | ResolvedMark::Events { .. }
+            | ResolvedMark::Points { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => {}
         }

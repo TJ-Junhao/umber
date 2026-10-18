@@ -41,6 +41,8 @@
 
 use std::collections::BTreeMap;
 
+pub(crate) mod swarm;
+
 use crate::binning::HistBins;
 use crate::color_scale::{ColorScaleSpec, MappedColors, ResolvedColorScale};
 use crate::error::quoted;
@@ -356,6 +358,7 @@ impl Resolved {
                 | Mark::Heatmap(_)
                 | Mark::Ecdf(_)
                 | Mark::Kde(_) => false,
+                Mark::Events(_) | Mark::Strip(_) | Mark::Swarm(_) => false,
             })
     }
 }
@@ -943,6 +946,9 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Box(mark) => mark.categories(),
         Mark::GroupedBox(mark) => mark.categories(),
         Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
+        Mark::Strip(mark) => mark.categories(),
+        Mark::Swarm(mark) => mark.categories(),
+        Mark::Events(_) => &[],
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
         Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) => &[],
         Mark::Bubbles(_) => &[],
@@ -1441,6 +1447,8 @@ pub(crate) enum DomainTimes<'a> {
     Whole(std::iter::Copied<std::slice::Iter<'a, Instant>>),
     /// Two series of times with gaps, one after the other, as the limits of error bars are.
     Pair(PairedTimes<'a>),
+    /// Times contributed by nested event rows.
+    Groups(Box<dyn Iterator<Item = Instant> + 'a>),
 }
 
 /// The times of two series with gaps, one after the other, gaps skipped.
@@ -1478,6 +1486,7 @@ impl Iterator for DomainTimes<'_> {
             DomainTimes::Gapped(times) => times.next(),
             DomainTimes::Whole(times) => times.next(),
             DomainTimes::Pair(times) => times.next(),
+            DomainTimes::Groups(times) => times.next(),
         }
     }
 
@@ -1489,6 +1498,7 @@ impl Iterator for DomainTimes<'_> {
             DomainTimes::Gapped(times) => times.fold(init, f),
             DomainTimes::Whole(times) => times.fold(init, f),
             DomainTimes::Pair(times) => times.fold(init, f),
+            DomainTimes::Groups(times) => times.fold(init, f),
         }
     }
 }
@@ -1814,6 +1824,36 @@ pub(crate) enum ResolvedMark<'a> {
         /// The spec the cells map their values with, and the values, row by row.
         mapped: MappedColors<'a>,
     },
+    /// Short vertical ticks in category rows.
+    Events {
+        /// Geometry used to choose an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// Validated event data.
+        mark: &'a crate::model::EventsMark,
+        /// Tick color.
+        color: Rgba,
+        /// Tick width in points.
+        width: f32,
+    },
+    /// Individual category samples, jittered or packed as a swarm.
+    Points {
+        /// Geometry used to choose an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// Categories in input order.
+        categories: &'a [String],
+        /// Samples in category order, including NaN gaps.
+        groups: &'a [std::sync::Arc<[f64]>],
+        /// The legend label.
+        label: &'a str,
+        /// Marker color before opacity.
+        color: Rgba,
+        /// Marker diameter in points.
+        size: f32,
+        /// Category and value axis order.
+        orientation: Orientation,
+        /// Offsets within each band.
+        placement: swarm::Placement,
+    },
     /// An ECDF, drawn as the step line of its steps ([`EcdfMark::steps`]).
     Ecdf {
         /// Drawn geometry, prepared only when choosing an inside legend position.
@@ -1919,6 +1959,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Violin { geometry, .. }
             | ResolvedMark::Ecdf { geometry, .. }
             | ResolvedMark::Kde { geometry, .. } => geometry,
+            ResolvedMark::Events { geometry, .. } | ResolvedMark::Points { geometry, .. } => {
+                geometry
+            }
         };
         *target = geometry;
         mark
@@ -1954,6 +1997,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Violin { geometry, .. }
             | ResolvedMark::Ecdf { geometry, .. }
             | ResolvedMark::Kde { geometry, .. } => geometry,
+            ResolvedMark::Events { geometry, .. } | ResolvedMark::Points { geometry, .. } => {
+                geometry
+            }
         };
         geometry.as_ref().map_or(0.0, |g| g.coverage(area, box_))
     }
@@ -2028,6 +2074,23 @@ impl<'a> ResolvedMark<'a> {
                     range.into_iter().flat_map(|(lo, hi)| [lo, hi]),
                 ));
             }
+            ResolvedMark::Points {
+                groups,
+                orientation: Orientation::Horizontal,
+                ..
+            } => {
+                return DomainValues::Computed(Box::new(
+                    groups.iter().flat_map(|g| g.iter().copied()),
+                ));
+            }
+            ResolvedMark::Points { .. } => &[],
+            ResolvedMark::Events { mark, .. } => {
+                return DomainValues::Computed(Box::new(
+                    mark.positions()
+                        .iter()
+                        .flat_map(|p| p.numbers().iter().copied()),
+                ));
+            }
             ResolvedMark::Ecdf { mark, .. } => mark.steps().x().numbers(),
             ResolvedMark::Kde { mark, .. } => mark.line().x().numbers(),
         };
@@ -2100,6 +2163,12 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Kde { .. } => DomainTimes::whole(&[]),
             ResolvedMark::Ecdf { mark, .. } => DomainTimes::gapped(mark.steps().x().times()),
+            ResolvedMark::Events { mark, .. } => DomainTimes::Groups(Box::new(
+                mark.positions()
+                    .iter()
+                    .flat_map(|p| p.times().iter().copied().flatten()),
+            )),
+            ResolvedMark::Points { .. } => DomainTimes::whole(&[]),
         }
     }
 
@@ -2137,6 +2206,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => DomainTimes::whole(&[]),
+            ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => DomainTimes::whole(&[]),
         }
     }
 
@@ -2200,6 +2270,13 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => &[],
+            ResolvedMark::Points {
+                categories,
+                orientation: Orientation::Vertical,
+                ..
+            } => categories,
+            ResolvedMark::Points { .. } => &[],
+            ResolvedMark::Events { .. } => &[],
         }
     }
 
@@ -2262,6 +2339,13 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => &[],
+            ResolvedMark::Points {
+                categories,
+                orientation: Orientation::Horizontal,
+                ..
+            } => categories,
+            ResolvedMark::Points { .. } => &[],
+            ResolvedMark::Events { mark, .. } => mark.rows(),
         }
     }
 
@@ -2348,6 +2432,17 @@ impl<'a> ResolvedMark<'a> {
             } => {
                 return DomainValues::Computed(Box::new(bins.tops().filter(|&top| top > 0.0)));
             }
+            ResolvedMark::Points {
+                groups,
+                orientation: Orientation::Vertical,
+                ..
+            } => {
+                return DomainValues::Computed(Box::new(
+                    groups.iter().flat_map(|g| g.iter().copied()),
+                ));
+            }
+            ResolvedMark::Points { .. } => &[],
+            ResolvedMark::Events { .. } => &[],
             ResolvedMark::Hist { bins, .. } => {
                 return DomainValues::Computed(Box::new(bins.iter().flat_map(|bins| {
                     (0..bins.groups())
@@ -2402,6 +2497,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::Hist { .. }
             | ResolvedMark::StackedArea { .. } => true,
+            ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => false,
             // Both run from 0, which a linear y domain then holds, though no baseline is drawn.
             ResolvedMark::Ecdf { .. } | ResolvedMark::Kde { .. } => true,
         }
@@ -2438,6 +2534,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. } => None,
+            ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => None,
         }
     }
 
@@ -2471,6 +2568,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => false,
+            ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => false,
         }
     }
 
@@ -2528,6 +2626,8 @@ impl<'a> ResolvedMark<'a> {
             | Self::ErrorBars { .. }
             | Self::Ecdf { .. }
             | Self::Kde { .. } => SwatchFill::Series,
+            Self::Events { .. } => SwatchFill::Series,
+            Self::Points { .. } => SwatchFill::Marker,
         }
     }
 
@@ -2682,6 +2782,10 @@ impl<'a> ResolvedMark<'a> {
                     width,
                 },
             ),
+            ResolvedMark::Events { .. } => Vec::new(),
+            ResolvedMark::Points {
+                label, color, size, ..
+            } => one(label, color, Swatch::Dot { diameter: size }),
             ResolvedMark::Ecdf {
                 mark, color, width, ..
             } => one(
@@ -2967,6 +3071,18 @@ impl<'a> ResolvedMark<'a> {
                 },
                 anchor: None,
             }],
+            ResolvedMark::Events { .. } => Vec::new(),
+            &ResolvedMark::Points {
+                label, color, size, ..
+            } => vec![SeriesKey {
+                label,
+                color,
+                kind: SeriesKind::Points {
+                    marker: Marker::Circle,
+                    size,
+                },
+                anchor: None,
+            }],
             // An ECDF is labelled as its step line, and a density as its line.
             &ResolvedMark::Ecdf {
                 mark, color, width, ..
@@ -2977,8 +3093,8 @@ impl<'a> ResolvedMark<'a> {
         }
     }
 
-    /// The orientation of a mark of the bar, box and violin families, which lie along the
-    /// category axis of their axes and grow along the other: horizontal on a category y axis.
+    /// The orientation of a category-band mark: bars, boxes, violins, events, strips and
+    /// swarms are horizontal on a category y axis. Events always have that orientation.
     /// `None` for every other mark, whose values have an axis of their own.
     pub fn band_orientation(&self) -> Option<Orientation> {
         match *self {
@@ -3007,6 +3123,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => None,
+            ResolvedMark::Events { .. } => Some(Orientation::Horizontal),
+            ResolvedMark::Points { orientation, .. } => Some(orientation),
         }
     }
 
@@ -3076,6 +3194,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stem { .. }
             | ResolvedMark::Heatmap { .. }
             | ResolvedMark::ErrorBars { .. }
+            | ResolvedMark::Events { .. }
+            | ResolvedMark::Points { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => &[],
         };
@@ -3111,6 +3231,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Ecdf { .. }
             | ResolvedMark::Kde { .. } => None,
+            ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => None,
         }
     }
 }
@@ -3663,6 +3784,9 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::HSpan(m) | Mark::VSpan(m) => vec![(&m.options().label, m.options().color)],
         Mark::Band(m) => vec![(&m.options().label, m.options().color)],
         Mark::ErrorBars(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Events(m) => vec![("", m.options().color)],
+        Mark::Strip(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Swarm(m) => vec![(&m.options().label, m.options().color)],
         Mark::GroupedHist(m) => m.series().map(|s| (s.label(), s.color())).collect(),
         Mark::Ecdf(m) => vec![(&m.options().label, m.options().color)],
         Mark::Kde(m) => vec![(&m.options().label, m.options().color)],
@@ -3725,6 +3849,7 @@ fn resolve_panel_marks<'a>(
         };
         spec.resolve(palette, slot)
     };
+    let mut next_strip = 0;
     marks
         .iter()
         .map(|mark| match mark {
@@ -3934,6 +4059,39 @@ fn resolve_panel_marks<'a>(
                 geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 width: theme.drawn_line_width(mark.options().width),
+            },
+            Mark::Events(mark) => ResolvedMark::Events {
+                mark,
+                geometry: None,
+                color: color_of(mark.options().color, ""),
+                width: mark.options().drawn_width(),
+            },
+            Mark::Strip(mark) => {
+                let strip = next_strip;
+                next_strip += 1;
+                ResolvedMark::Points {
+                    geometry: None,
+                    categories: mark.categories(),
+                    groups: mark.groups(),
+                    label: &mark.options().label,
+                    color: color_of(mark.options().color, &mark.options().label),
+                    size: theme.drawn_marker_size(mark.options().size),
+                    orientation,
+                    placement: swarm::Placement::Jitter {
+                        fraction: mark.options().jitter,
+                        strip,
+                    },
+                }
+            }
+            Mark::Swarm(mark) => ResolvedMark::Points {
+                geometry: None,
+                categories: mark.categories(),
+                groups: mark.groups(),
+                label: &mark.options().label,
+                color: color_of(mark.options().color, &mark.options().label),
+                size: theme.drawn_marker_size(mark.options().size),
+                orientation,
+                placement: swarm::Placement::Swarm,
             },
             Mark::GroupedHist(mark) => {
                 let values: Vec<&[f64]> = mark.series().map(|s| s.values()).collect();
