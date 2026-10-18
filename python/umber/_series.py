@@ -242,7 +242,7 @@ def _new_distribution(label: str, groups: tuple[FloatArray, ...], color: Color) 
     return distribution
 
 
-def _group_error(context: str, error: Exception) -> Exception:
+def _group_error(context: str, error: Exception, parameter: str = "groups") -> Exception:
     """Keep the indexed message but highlight the enclosing groups argument."""
     info = details(error)
     if info is None:
@@ -251,17 +251,21 @@ def _group_error(context: str, error: Exception) -> Exception:
         type(error),
         context,
         str(error).removeprefix(f"{context}: "),
-        parameter="groups",
+        parameter=parameter,
         hint=info[1],
     )
 
 
-def check_groups_type(context: str, value: object) -> None:
+def check_groups_type(
+    context: str, value: object, *, name: str = "groups", time: bool = False
+) -> None:
     """Check the groups container and every group's type without conversion.
 
     Args:
         context: The API call receiving the groups.
         value: The groups argument.
+        name: The enclosing parameter name used in messages and highlights.
+        time: Whether the groups contain times rather than numbers.
 
     Raises:
         TypeError: If the container or any group has the wrong type.
@@ -271,26 +275,34 @@ def check_groups_type(context: str, value: object) -> None:
         >>> check_groups_type("Axes.box()", [[1, 2], []])
     """
     if is_text_or_buffer(value) or not isinstance(value, Sequence):
+        kind = "time" if time else "numeric"
         raise new_error(
             TypeError,
             context,
-            f"groups is {type_name(value)}; groups must be a sequence of numeric groups.",
-            parameter="groups",
-            hint="pass a list of groups, e.g. [[1, 2], [3, 4]].",
+            f"{name} is {type_name(value)}; {name} must be a sequence of {kind} groups.",
+            parameter=name,
+            hint=(
+                "pass a list of groups of dates or times."
+                if time
+                else "pass a list of groups, e.g. [[1, 2], [3, 4]]."
+            ),
         )
     for index, group in enumerate(cast(Sequence[object], value)):
         try:
-            check_floats_type(context, f"groups[{index}]", group)
+            check_floats_type(context, f"{name}[{index}]", group)
         except (TypeError, UmberError) as error:
-            raise _group_error(context, error) from None
+            raise _group_error(context, error, name) from None
 
 
-def group_values(context: str, value: Sequence[object]) -> list[FloatArray]:
+def group_values(
+    context: str, value: Sequence[object], *, name: str = "groups"
+) -> list[FloatArray]:
     """Convert each group, preserving indexed messages and the groups highlight.
 
     Args:
         context: The API call receiving the groups.
         value: Groups whose container types have been checked.
+        name: The enclosing parameter name used in messages and highlights.
 
     Returns:
         One native float array per group.
@@ -306,9 +318,9 @@ def group_values(context: str, value: Sequence[object]) -> list[FloatArray]:
     result: list[FloatArray] = []
     for index, group in enumerate(value):
         try:
-            result.append(floats(context, f"groups[{index}]", group))
+            result.append(floats(context, f"{name}[{index}]", group))
         except (TypeError, UmberError) as error:
-            raise _group_error(context, error) from None
+            raise _group_error(context, error, name) from None
     return result
 
 

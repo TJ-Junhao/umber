@@ -598,6 +598,37 @@ class Figure:
         format: _TickFormatArg | None,
         render: int | None,
     ) -> None: ...
+    def events(
+        self,
+        row: int,
+        col: int,
+        rows: list[str],
+        positions: list[_FloatArray | _TimeArray],
+        length: float | None,
+        width: _SizeArg,
+        color: _ColorArg,
+    ) -> None: ...
+    def strip(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+        size: _SizeArg,
+        jitter: float | None,
+    ) -> None: ...
+    def swarm(
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        groups: list[_FloatArray],
+        label: str,
+        color: _ColorArg,
+        size: _SizeArg,
+    ) -> None: ...
     def grouped_hist(
         self,
         row: int,

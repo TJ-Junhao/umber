@@ -2803,6 +2803,88 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
+    /// Adds one row of short vertical ticks per category on a numeric or time x axis.
+    /// NaN and missing times leave events out; empty rows still get a category band.
+    /// Invalid axes, duplicate rows, mismatched groups and invalid lengths change nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, EventsOptions, Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Linear, ScaleKind::Category)?.events(
+    ///     vec!["A".into()], vec![AxisData::Numbers(vec![1.0, 2.0])], EventsOptions::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn events(
+        &mut self,
+        rows: Vec<String>,
+        positions: Vec<AxisData>,
+        options: super::EventsOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = super::EventsMark::new(axes.x, axes.y, rows, positions, options)?;
+        axes.marks.push(Mark::Events(mark));
+        Ok(self)
+    }
+
+    /// Adds circular samples jittered deterministically within each category band.
+    /// A category y axis makes the samples horizontal. NaN is ignored; empty groups draw
+    /// nothing. Data checks are the same as for boxes. A failed call changes nothing.
+    /// Jitter is a fraction from zero to one half, default 0.4, from SplitMix64 seeded
+    /// by the category index. Marker sizes and colors follow scatter styling.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{StripOptions, Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Category, ScaleKind::Linear)?.strip(
+    ///     vec!["A".into()], vec![vec![1.0, 2.0]], StripOptions::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn strip(
+        &mut self,
+        categories: Vec<String>,
+        groups: Vec<Vec<f64>>,
+        options: super::StripOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let (along, values) = check_band_axes("Axes.strip()", axes.x, axes.y)?;
+        super::check_text("Axes.strip()", "label", "label", &options.label)?;
+        let mark = super::StripMark::new(along, values, categories, groups, options)?;
+        axes.marks.push(Mark::Strip(mark));
+        Ok(self)
+    }
+
+    /// Adds circular samples packed without overlap within each category band.
+    /// A category y axis makes the samples horizontal. NaN is ignored; empty groups draw
+    /// nothing. Data checks are the same as for boxes. A failed call changes nothing.
+    /// Rendering returns `Error::Style` naming the category if its circles cannot fit
+    /// within its band at the final plot size. Use strip or violin for dense data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{SwarmOptions, Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Category, ScaleKind::Linear)?.swarm(
+    ///     vec!["A".into()], vec![vec![1.0, 2.0]], SwarmOptions::default())?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn swarm(
+        &mut self,
+        categories: Vec<String>,
+        groups: Vec<Vec<f64>>,
+        options: super::SwarmOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let (along, values) = check_band_axes("Axes.swarm()", axes.x, axes.y)?;
+        super::check_text("Axes.swarm()", "label", "label", &options.label)?;
+        let mark = super::SwarmMark::new(along, values, categories, groups, options)?;
+        axes.marks.push(Mark::Swarm(mark));
+        Ok(self)
+    }
     /// Adds a grouped histogram: the finite values of each of `series` counted in bins they
     /// share, each series in its own color and with its own legend entry, as
     /// [`AxesMut::hist`] counts one series.
