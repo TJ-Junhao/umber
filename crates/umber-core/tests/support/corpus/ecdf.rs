@@ -100,7 +100,8 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     let sizes: Vec<f64> = (0..200).map(|_| 10f64.powf(1.0 + 4.0 * next())).collect();
     let small: Vec<f64> = sizes.iter().map(|v| v / 10.0).collect();
     axes(&mut f)
-        .legend(LegendStyle::Direct)
+        .legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
+        .unwrap()
         .ecdf(numbers(sizes), labelled_ecdf("Images"))
         .unwrap()
         .ecdf(numbers(small), labelled_ecdf("Thumbnails"))

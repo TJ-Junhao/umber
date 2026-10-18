@@ -244,7 +244,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                     xlabel_baseline: plot.bottom()
                         + bands.x_band
                         + AXIS_LABEL_GAP
-                        + bands.body_ascent,
+                        + bands.xlabel_ascent,
                     frame: canvas,
                 })
             })
@@ -300,7 +300,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                     top: rows.row_top[cells.row()],
                 },
                 xlabel_baseline: bottom + (rows.below[last_row] - rows.legends[last_row])
-                    - bands.body_descent,
+                    - bands.xlabel_descent,
                 frame: Frame {
                     x: frame_left,
                     y: frame_top,
@@ -1409,9 +1409,9 @@ fn grid_too_narrow(context: &'static str, width: f64, needed: f64, cols: usize) 
         ),
     )
     .with_hint(if cols == 1 {
-        "widen the figure."
+        "widen the figure, use smaller text, or remove titles or legends."
     } else {
-        "widen the figure, or use fewer columns."
+        "widen the figure, use fewer columns, use smaller text, or remove titles or legends."
     })
 }
 
@@ -1427,9 +1427,9 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
         ),
     )
     .with_hint(if rows == 1 {
-        "make the figure taller, or remove titles or legends."
+        "make the figure taller, use smaller text, or remove titles or legends."
     } else {
-        "make the figure taller, use fewer rows, or remove titles or legends."
+        "make the figure taller, use fewer rows, use smaller text, or remove titles or legends."
     })
 }
 
@@ -1709,7 +1709,7 @@ mod tests {
                     LegendStyle::Direct,
                     LegendStyle::None,
                 ][rng.below(4)];
-                axes.legend(style);
+                axes.legend(style, crate::SizeSpec::Auto).unwrap();
                 if category {
                     let names: Vec<String> = (0..1 + rng.below(4))
                         .map(|i| format!("{i}{}", rng.text(1)))
@@ -1935,7 +1935,12 @@ mod tests {
             "Figure.to_scene(): the figure is 74 pt wide; at least 75 pt is needed for 3 \
              columns of plots."
         );
-        assert_eq!(err.hint(), Some("widen the figure, or use fewer columns."));
+        assert_eq!(
+            err.hint(),
+            Some(
+                "widen the figure, use fewer columns, use smaller text, or remove titles or legends."
+            )
+        );
         assert_eq!(named_width(&err), Some(75.0));
         assert!(columns(75.0).to_scene(lib()).is_ok());
 
@@ -2034,7 +2039,9 @@ mod tests {
         );
         assert_eq!(
             err.hint(),
-            Some("make the figure taller, use fewer rows, or remove titles or legends.")
+            Some(
+                "make the figure taller, use fewer rows, use smaller text, or remove titles or legends."
+            )
         );
         assert_eq!(named_height(&err), Some(50.0));
         assert!(two_rows(50.0).to_scene(lib()).is_ok());
@@ -2796,7 +2803,11 @@ mod tests {
                 .unwrap()
                 .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
                 .unwrap()
-                .legend_at(LegendStyle::Header, crate::LegendPosition::Bottom)
+                .legend_at(
+                    LegendStyle::Header,
+                    crate::LegendPosition::Bottom,
+                    crate::SizeSpec::Auto,
+                )
                 .unwrap()
                 .line(
                     AxisData::Numbers(vec![0.0, 1.0]),
@@ -2809,13 +2820,14 @@ mod tests {
                 .unwrap();
         }
         let all = layouts(&f).unwrap();
+        let fonts = crate::test_support::figure_fonts(f.theme());
         assert_eq!(all.len(), 2);
         for (row, (_, layout)) in all.iter().enumerate() {
             assert!(layout.x_tick_labels.is_empty());
             assert!(layout.xlabel.is_none());
             assert_eq!(layout.y_tick_labels.len(), 2);
             let label = &layout.y_tick_labels[0];
-            let bottom = label.y + crate::layout::metrics(lib(), &label.style).1;
+            let bottom = label.y + crate::layout::metrics(&fonts, &label.style).unwrap().1;
             assert_eq!(layout.legend.entries().len(), 1);
             let entry = &layout.legend.entries()[0];
             // A single entry occupies one row, with its swatch centered in the band.
@@ -3060,15 +3072,20 @@ mod tests {
                     .map(|input| {
                         let marks = crate::resolve::resolve_marks(input.axes.marks(), input.theme);
                         let limits = crate::resolve::Limits::of(input.axes);
-                        let (x, y) = super::super::TickRoom::unlimited(3, 3, lib());
+                        let (x, y) = super::super::TickRoom::unlimited(
+                            3,
+                            3,
+                            crate::test_support::tick_font(input.theme),
+                        );
                         let resolved = crate::resolve::resolve(&marks, &limits, &x, &y);
                         super::super::measure_panel(
                             input,
                             &resolved,
                             grid.span(input.axes.cells()),
                             [true; 2],
-                            &super::super::LabelCache::new(lib()),
+                            &super::super::LabelCache::new(input.lib),
                         )
+                        .unwrap()
                     })
                     .collect();
                 let cells: Vec<CellRange> = grid.panels.iter().map(|p| p.axes.cells()).collect();

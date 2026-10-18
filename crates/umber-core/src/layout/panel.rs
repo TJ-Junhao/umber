@@ -11,11 +11,12 @@ use super::inset::TickSpan;
 use super::legend::{self, LegendRow};
 use super::{
     AXIS_LABEL_GAP, Area, BODY_LINE, END_LABEL_SHARE, HEADER_GAP, Label, Layout, LayoutInput,
-    PADDING, PlacedBaseline, Styles, TITLE_GAP, TITLE_LINE, X_LABEL_GAP, Y_LABEL_CENTER,
-    Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, metrics,
+    PADDING, PlacedBaseline, StyleSizes, Styles, TITLE_GAP, TITLE_LINE, TextRole, X_LABEL_GAP,
+    Y_LABEL_CENTER, Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, metrics,
 };
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
-use crate::{Align, Figure, FontLibrary, Result};
+use crate::text::SceneFonts;
+use crate::{Align, Figure, Result};
 
 /// The figure title size as a multiple of the theme's panel title size.
 pub(crate) const FIGURE_TITLE_SCALE: f32 = 1.5;
@@ -132,36 +133,47 @@ struct PlacedHeader {
 
 impl Header {
     /// Measures the shared title, subtitle and legend stack for a panel or a figure.
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`], naming the title or subtitle: each text is measured before the
+    /// metrics of its style.
     fn measure(
         title: &str,
         subtitle: &str,
         styles: &Styles,
         row: &LegendRow,
-        lib: &FontLibrary,
-    ) -> Header {
-        let title = (!title.is_empty()).then(|| {
-            let (ascent, descent) = metrics(lib, &styles.title);
-            HeaderLine {
-                label: measure(lib, title, styles.title),
-                line: TITLE_LINE * f64::from(styles.title.size),
-                ascent,
-                descent,
-            }
-        });
-        let subtitle = (!subtitle.is_empty()).then(|| {
-            let (ascent, descent) = metrics(lib, &styles.body);
-            HeaderLine {
-                label: measure(lib, subtitle, styles.body),
-                line: BODY_LINE * f64::from(styles.body.size),
-                ascent,
-                descent,
-            }
-        });
-        Header {
+        lib: &SceneFonts<'_>,
+    ) -> Result<Header> {
+        let title = (!title.is_empty())
+            .then(|| -> Result<HeaderLine> {
+                let label = measure(lib, title, styles.title)?;
+                let (ascent, descent) = metrics(lib, &styles.title)?;
+                Ok(HeaderLine {
+                    label,
+                    line: TITLE_LINE * f64::from(styles.title.size),
+                    ascent,
+                    descent,
+                })
+            })
+            .transpose()?;
+        let subtitle = (!subtitle.is_empty())
+            .then(|| -> Result<HeaderLine> {
+                let label = measure(lib, subtitle, styles.body)?;
+                let (ascent, descent) = metrics(lib, &styles.body)?;
+                Ok(HeaderLine {
+                    label,
+                    line: BODY_LINE * f64::from(styles.body.size),
+                    ascent,
+                    descent,
+                })
+            })
+            .transpose()?;
+        Ok(Header {
             title,
             subtitle,
             row: (!row.is_empty()).then(|| row.height()),
-        }
+        })
     }
 
     /// The header parts stacked from `top` down: the title line, the title gap and the subtitle
@@ -268,15 +280,25 @@ pub(crate) struct FigureHeader {
 
 impl FigureHeader {
     /// Measures and places the header independently of the grid's columns.
+    ///
+    /// # Errors
+    ///
+    /// As [`Header::measure`].
     pub fn measure(
         figure: &Figure,
         legend: &super::MeasuredLegend<'_>,
-        lib: &FontLibrary,
-    ) -> FigureHeader {
+        lib: &SceneFonts<'_>,
+    ) -> Result<FigureHeader> {
         let theme = figure.theme();
-        let mut styles = Styles::new(theme);
-        styles.title.size =
-            super::scaled(theme.title_size() * FIGURE_TITLE_SCALE, theme.font_scale());
+        let styles = Styles::new(
+            theme,
+            TextRole::FigureTitle,
+            StyleSizes {
+                title: figure.title_size(),
+                body: figure.subtitle_size(),
+                ..StyleSizes::default()
+            },
+        );
         let box_ = HeaderBox {
             left: PADDING,
             right: figure.width_in() * 72.0 - PADDING,
@@ -289,17 +311,17 @@ impl FigureHeader {
             &styles,
             &row,
             lib,
-        );
+        )?;
         let row_height = (!row.is_empty()).then(|| row.height());
         let placed = header.place(box_, theme.title_align(), row_height);
-        FigureHeader {
+        Ok(FigureHeader {
             title: placed.title,
             subtitle: placed.subtitle,
             legend: row
                 .aligned(box_.left, box_.right, theme.title_align())
                 .placed(placed.row),
             bottom: placed.bottom,
-        }
+        })
     }
 
     /// Checks that every merged entry fits the inner canvas width. A figure without panels
@@ -333,6 +355,8 @@ impl FigureHeader {
 pub(crate) struct PanelBands {
     /// The y axis label above the top tick label row; 0 without one.
     pub y_label_band: f64,
+    /// The y label's baseline gap above the top tick label row.
+    y_label_gap: f64,
     /// How far the top y tick label rises above the plot; 0 without y tick labels.
     pub label_rise: f64,
     /// The widest y tick label and [`Y_LABEL_GAP`]; 0 without y tick labels.
@@ -372,17 +396,55 @@ pub(crate) struct PanelBands {
     xlabel: Option<Label>,
     /// The y axis label, not yet placed; `None` when it is empty.
     ylabel: Option<Label>,
-    /// The ascent of the tick label style's primary font.
+    /// The ascent of the x tick label style's primary font.
     tick_ascent: f64,
-    /// The tick label size.
-    tick_size: f64,
-    /// The ascent of the body style's primary font.
-    pub(super) body_ascent: f64,
-    /// The descent of the body style's primary font.
-    pub(super) body_descent: f64,
+    /// The y tick label size.
+    y_tick_size: f64,
+    /// The ascent of the x axis title's primary font.
+    pub(super) xlabel_ascent: f64,
+    /// The descent of the x axis title's primary font.
+    pub(super) xlabel_descent: f64,
 }
 
 impl PanelBands {
+    /// The text block that takes the most vertical room, independent of which size was set.
+    pub(super) fn largest_vertical_text(&self) -> (&'static str, &str, f64) {
+        let title = self.heading.title.as_ref();
+        let subtitle = self.heading.subtitle.as_ref();
+        let [first, rest @ ..] = [
+            (
+                "title",
+                title.map_or("", |t| t.label.text.as_str()),
+                title.map_or(0.0, |t| t.line),
+            ),
+            (
+                "subtitle",
+                subtitle.map_or("", |t| t.label.text.as_str()),
+                subtitle.map_or(0.0, |t| t.line),
+            ),
+            (
+                "x axis label",
+                self.xlabel.as_ref().map_or("", |t| t.text.as_str()),
+                self.x_title_band,
+            ),
+            (
+                "y axis label",
+                self.ylabel.as_ref().map_or("", |t| t.text.as_str()),
+                self.y_label_band,
+            ),
+            ("x tick labels", "", self.x_band),
+            ("y tick labels", "", self.label_rise + self.label_drop),
+            (
+                "legend",
+                "",
+                self.heading.row.unwrap_or(0.0).max(self.bottom_legend),
+            ),
+        ];
+        rest.into_iter().fold(first, |largest, candidate| {
+            std::cmp::max_by(largest, candidate, |a, b| a.2.total_cmp(&b.2))
+        })
+    }
+
     /// The widest horizontal colorbar tick.
     pub(super) fn colorbar_tick_width(&self) -> f64 {
         self.colorbar_tick_width
@@ -459,13 +521,17 @@ impl PanelBands {
 
 /// Measures the texts of the panel of `input` for the scales of `resolved`, and the bands they
 /// need around the plot area, for the widths in `span`.
+///
+/// # Errors
+///
+/// As [`measure`], for the first text that cannot be laid out.
 pub(crate) fn measure_panel(
     input: &LayoutInput<'_>,
     resolved: &Resolved,
     span: PanelSpan,
     show_labels: [bool; 2],
     labels: &super::LabelCache<'_>,
-) -> PanelBands {
+) -> Result<PanelBands> {
     let LayoutInput {
         theme,
         axes,
@@ -473,24 +539,36 @@ pub(crate) fn measure_panel(
         lib,
         ..
     } = *input;
-    let styles = Styles::new(theme);
+    let styles = Styles::new(
+        theme,
+        TextRole::Title,
+        StyleSizes {
+            title: axes.title_size(),
+            body: axes.subtitle_size(),
+            tick: axes.xtick_size(),
+        },
+    );
+    let ytick = styles.sized(theme, TextRole::Tick, axes.ytick_size());
+    let xaxis = styles.sized(theme, TextRole::Body, axes.xlabel_size());
+    let yaxis = styles.sized(theme, TextRole::Body, axes.ylabel_size());
 
     let row = legend.header_within(span.row_left, span.row_right);
-    let heading = Header::measure(axes.title_text(), axes.subtitle_text(), &styles, &row, lib);
+    let heading = Header::measure(axes.title_text(), axes.subtitle_text(), &styles, &row, lib)?;
 
     // Tick labels.
-    let (tick_ascent, tick_descent) = metrics(lib, &styles.tick);
-    let tick_size = f64::from(styles.tick.size);
+    let y_tick_size = f64::from(ytick.size);
     let y_labels = if show_labels[1] {
-        labels.ticks(&resolved.y.ticks, styles.tick)
+        labels.ticks(&resolved.y.ticks, ytick)?
     } else {
         Vec::new()
     };
     let x_labels = if show_labels[0] {
-        labels.ticks(&resolved.x.ticks, styles.tick)
+        labels.ticks(&resolved.x.ticks, styles.tick)?
     } else {
         Vec::new()
     };
+    let (tick_ascent, tick_descent) = metrics(lib, &styles.tick)?;
+    let (y_tick_ascent, y_tick_descent) = metrics(lib, &ytick)?;
     let y_label_width = y_labels
         .iter()
         .map(|(_, label)| label.width())
@@ -502,20 +580,24 @@ pub(crate) fn measure_panel(
         (0.0, 0.0)
     } else {
         (
-            (tick_ascent - Y_LABEL_CENTER * tick_size).max(0.0),
-            (Y_LABEL_CENTER * tick_size + tick_descent).max(0.0),
+            (y_tick_ascent - Y_LABEL_CENTER * y_tick_size).max(0.0),
+            (Y_LABEL_CENTER * y_tick_size + y_tick_descent).max(0.0),
         )
     };
 
-    let xlabel =
-        (!axes.xlabel_text().is_empty()).then(|| measure(lib, axes.xlabel_text(), styles.body));
-    let ylabel =
-        (!axes.ylabel_text().is_empty()).then(|| measure(lib, axes.ylabel_text(), styles.body));
-    let (body_ascent, body_descent) = metrics(lib, &styles.body);
+    let xlabel = (!axes.xlabel_text().is_empty())
+        .then(|| measure(lib, axes.xlabel_text(), xaxis))
+        .transpose()?;
+    let ylabel = (!axes.ylabel_text().is_empty())
+        .then(|| measure(lib, axes.ylabel_text(), yaxis))
+        .transpose()?;
+    let (xlabel_ascent, xlabel_descent) = metrics(lib, &xaxis)?;
+    let (y_ascent, y_descent) = metrics(lib, &yaxis)?;
+    let y_label_gap = super::title_tick_gap(y_descent, y_tick_descent);
 
     // The y label sits in the header region, above the top label row.
     let y_label_band = if ylabel.is_some() {
-        body_ascent + AXIS_LABEL_GAP
+        y_ascent + y_label_gap
     } else {
         0.0
     };
@@ -537,13 +619,13 @@ pub(crate) fn measure_panel(
         X_LABEL_GAP + tick_ascent + tick_descent
     };
     let x_title_band = if xlabel.is_some() {
-        AXIS_LABEL_GAP + body_ascent + body_descent
+        AXIS_LABEL_GAP + xlabel_ascent + xlabel_descent
     } else {
         0.0
     };
 
     let colorbar =
-        super::colorbar::MeasuredColorbar::measure(axes, resolved.color.as_ref(), theme, lib);
+        super::colorbar::MeasuredColorbar::measure(axes, resolved.color.as_ref(), theme, lib)?;
     let (mut right_colorbar, mut bottom_colorbar, mut colorbar_tick_width) = (0.0, 0.0, 0.0);
     if let Some(bar) = &colorbar {
         right_colorbar = bar.right_reserve();
@@ -554,12 +636,13 @@ pub(crate) fn measure_panel(
             .fold(0.0, f64::max);
         x_spans.extend(bar.x_spans());
     }
-    PanelBands {
+    Ok(PanelBands {
         colorbar_tick_width,
         right_colorbar,
         bottom_colorbar,
         colorbar,
         y_label_band,
+        y_label_gap,
         label_rise,
         y_tick_column,
         direct_reserve: legend.direct.reserve(if right_colorbar > 0.0 {
@@ -580,10 +663,10 @@ pub(crate) fn measure_panel(
         xlabel,
         ylabel,
         tick_ascent,
-        tick_size,
-        body_ascent,
-        body_descent,
-    }
+        y_tick_size,
+        xlabel_ascent,
+        xlabel_descent,
+    })
 }
 
 /// The most by which x tick labels may inset one side of the plot area on a canvas `width` pt
@@ -620,7 +703,7 @@ pub(crate) fn place_panel(
         mut xlabel,
         mut ylabel,
         tick_ascent,
-        tick_size,
+        y_tick_size,
         ..
     } = bands;
     let position = input.legend.position;
@@ -653,7 +736,7 @@ pub(crate) fn place_panel(
             .placed(plot.y),
         crate::LegendPosition::Bottom => {
             let axis_bottom = if xlabel.is_some() {
-                (xlabel_baseline + bands.body_descent).max(plot.bottom() + axis_below)
+                (xlabel_baseline + bands.xlabel_descent).max(plot.bottom() + axis_below)
             } else {
                 plot.bottom() + axis_below
             };
@@ -671,7 +754,7 @@ pub(crate) fn place_panel(
 
     for (pos, label) in &mut y_labels {
         label.x = plot.x - Y_LABEL_GAP - label.width();
-        label.y = plot.y_at(*pos) + Y_LABEL_CENTER * tick_size;
+        label.y = plot.y_at(*pos) + Y_LABEL_CENTER * y_tick_size;
     }
     for (pos, label) in &mut x_labels {
         label.x = plot.x_at(*pos) - label.width() / 2.0;
@@ -688,11 +771,11 @@ pub(crate) fn place_panel(
         } else {
             plot.x - Y_LABEL_GAP - y_label_width
         };
-        label.y = plot.y - label_rise - AXIS_LABEL_GAP;
+        label.y = plot.y - label_rise - bands.y_label_gap;
     }
 
     let axis_bottom = if xlabel.is_some() {
-        (xlabel_baseline + bands.body_descent).max(plot.bottom() + axis_below)
+        (xlabel_baseline + bands.xlabel_descent).max(plot.bottom() + axis_below)
     } else {
         plot.bottom() + axis_below
     };
@@ -782,7 +865,7 @@ mod tests {
             .xlabel(xlabel)
             .ylabel(ylabel);
         if let Some(style) = style {
-            axes.legend(style);
+            axes.legend(style, crate::SizeSpec::Auto).unwrap();
         }
         for (i, label) in ["North", "South", "East"].into_iter().enumerate() {
             axes.line(
@@ -1059,7 +1142,7 @@ mod tests {
     fn single_slot(grid: &GridInput<'_>, plot: Area, bands: &PanelBands) -> PanelSlot {
         PanelSlot {
             plot,
-            xlabel_baseline: plot.bottom() + bands.x_band + AXIS_LABEL_GAP + bands.body_ascent,
+            xlabel_baseline: plot.bottom() + bands.x_band + AXIS_LABEL_GAP + bands.xlabel_ascent,
             header: HeaderBox {
                 left: PADDING,
                 right: grid.width - PADDING,
@@ -1091,8 +1174,9 @@ mod tests {
                     &resolved,
                     grid.span(input.axes.cells()),
                     [true; 2],
-                    &super::super::LabelCache::new(lib),
-                );
+                    &super::super::LabelCache::new(input.lib),
+                )
+                .unwrap();
                 // A figure of one axes has the canvas as its frame.
                 let slot = single_slot(grid, layout.plot, &bands);
                 assert_eq!(layout.frame, slot.frame, "{name}");
@@ -1117,8 +1201,9 @@ mod tests {
                     &resolved,
                     grid.span(input.axes.cells()),
                     [true; 2],
-                    &super::super::LabelCache::new(lib),
-                );
+                    &super::super::LabelCache::new(input.lib),
+                )
+                .unwrap();
                 let header = bands.heading.bottom(0.0);
                 let plot = layout.plot;
                 assert!(
@@ -1160,8 +1245,9 @@ mod tests {
                 &resolved,
                 grid.span(input.axes.cells()),
                 [true; 2],
-                &super::super::LabelCache::new(lib),
-            );
+                &super::super::LabelCache::new(input.lib),
+            )
+            .unwrap();
             assert!(bands.y_tick_column > Y_LABEL_GAP);
             assert!(
                 close(layout.plot.x, PADDING + bands.y_tick_column),
@@ -1189,8 +1275,9 @@ mod tests {
                 &resolved,
                 grid.span(input.axes.cells()),
                 [true; 2],
-                &super::super::LabelCache::new(lib),
-            );
+                &super::super::LabelCache::new(input.lib),
+            )
+            .unwrap();
             let mut slot = single_slot(grid, layout.plot, &bands);
             slot.header.left += 30.0;
             slot.header.right += 30.0;

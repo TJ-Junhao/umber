@@ -12,6 +12,7 @@ mod chrome;
 mod clip;
 mod downsample;
 mod error_bars;
+mod events;
 mod hist;
 mod horizontal;
 mod line;
@@ -25,6 +26,7 @@ mod scatter;
 mod stacked_area;
 mod stem;
 mod step;
+mod strip;
 mod violin;
 
 use crate::geometry::{Path, PathVerb, Point};

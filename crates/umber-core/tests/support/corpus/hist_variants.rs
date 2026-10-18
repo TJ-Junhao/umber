@@ -153,7 +153,8 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     let mut f = figure(6.0, 4.0, Theme::midnight(), linear(), linear());
     labelled(&mut f, "Cut outlines");
     axes(&mut f)
-        .legend(LegendStyle::Direct)
+        .legend(LegendStyle::Direct, umber_core::SizeSpec::Auto)
+        .unwrap()
         .grouped_hist(
             vec![
                 series("Kept", bell(400, 17, 50.0, 10.0)),

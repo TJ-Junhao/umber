@@ -327,36 +327,42 @@ impl Figure {
     }
 
     /// Sets the figure title above every panel.
-    fn figure_title(&mut self, text: &str) {
-        self.0.title(text);
+    fn figure_title(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
+        self.0.title_sized(text, size_spec(size)?);
+        Ok(())
     }
 
     /// Sets the figure subtitle below its title.
-    fn figure_subtitle(&mut self, text: &str) {
-        self.0.subtitle(text);
+    fn figure_subtitle(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
+        self.0.subtitle_sized(text, size_spec(size)?);
+        Ok(())
     }
 
     /// Sets the title.
-    fn title(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.title(text);
+    fn title(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.title_sized(text, size);
         Ok(())
     }
 
     /// Sets the subtitle.
-    fn subtitle(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.subtitle(text);
+    fn subtitle(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.subtitle_sized(text, size);
         Ok(())
     }
 
     /// Sets the x axis label.
-    fn xlabel(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.xlabel(text);
+    fn xlabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.xlabel_sized(text, size);
         Ok(())
     }
 
     /// Sets the y axis label.
-    fn ylabel(&mut self, row: i64, col: i64, text: &str) -> PyResult<()> {
-        self.axes(row, col)?.ylabel(text);
+    fn ylabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.ylabel_sized(text, size);
         Ok(())
     }
 
@@ -457,18 +463,29 @@ impl Figure {
     }
 
     /// Sets the legend style (a `LegendStyle` value).
-    fn legend(&mut self, row: i64, col: i64, style: i64) -> PyResult<()> {
+    fn legend(&mut self, row: i64, col: i64, style: i64, size: SizeArg) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
-        self.axes(row, col)?.legend(style);
-        Ok(())
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .legend(style, size)
+            .map(drop)
+            .map_err(core_error)
     }
 
     /// Sets the legend style and position (`LegendStyle` and `LegendPosition` values).
-    fn legend_at(&mut self, row: i64, col: i64, style: i64, position: i64) -> PyResult<()> {
+    fn legend_at(
+        &mut self,
+        row: i64,
+        col: i64,
+        style: i64,
+        position: i64,
+        size: SizeArg,
+    ) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
         let position = enum_value::<LegendPosition>(position)?;
+        let size = size_spec(size)?;
         self.axes(row, col)?
-            .legend_at(style, position)
+            .legend_at(style, position, size)
             .map(drop)
             .map_err(core_error)
     }
@@ -1160,7 +1177,7 @@ impl Figure {
     }
 
     /// Replaces the axes' colorbar label and optional overrides.
-    #[pyo3(signature = (row, col, label, position, format))]
+    #[pyo3(signature = (row, col, label, position, format, size))]
     fn colorbar(
         &mut self,
         row: i64,
@@ -1168,6 +1185,7 @@ impl Figure {
         label: String,
         position: Option<i64>,
         format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let options = umber_core::ColorbarOptions {
             label,
@@ -1175,6 +1193,7 @@ impl Figure {
                 .map(enum_value::<umber_core::ColorbarPosition>)
                 .transpose()?,
             format: format.map(tick_format).transpose()?,
+            size: size_spec(size)?,
         };
         self.axes(row, col)?
             .colorbar(options)
@@ -1183,12 +1202,13 @@ impl Figure {
     }
 
     /// Replaces the shared colorbars' label and optional overrides.
-    #[pyo3(signature = (label, position, format))]
+    #[pyo3(signature = (label, position, format, size))]
     fn figure_colorbar(
         &mut self,
         label: String,
         position: Option<i64>,
         format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let options = umber_core::ColorbarOptions {
             label,
@@ -1196,6 +1216,7 @@ impl Figure {
                 .map(enum_value::<umber_core::ColorbarPosition>)
                 .transpose()?,
             format: format.map(tick_format).transpose()?,
+            size: size_spec(size)?,
         };
         self.0.colorbar(options).map(drop).map_err(core_error)
     }
@@ -1446,6 +1467,109 @@ impl Figure {
         let (x, series) = (times("Axes.stacked_area()", "x", x)?, Self::series(series)?);
         self.axes(row, col)?
             .stacked_area_time(x.into(), series)
+            .map(drop)
+            .map_err(core_error)
+    }
+    /// Sets the x tick label size.
+    fn xtick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .xtick_labels(size)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Sets the y tick label size.
+    fn ytick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?
+            .ytick_labels(size)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds event positions grouped into category rows.
+    #[pyo3(signature = (row, col, rows, positions, length, width, color))]
+    fn events(
+        &mut self,
+        row: i64,
+        col: i64,
+        rows: &Bound<'_, PyAny>,
+        positions: Vec<Bound<'_, PyAny>>,
+        length: Option<f64>,
+        width: SizeArg,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let rows = names(rows)?;
+        let positions = positions
+            .iter()
+            .map(|values| series_data("Axes.events()", "positions", values))
+            .collect::<PyResult<Vec<_>>>()?;
+        let mut options = umber_core::EventsOptions {
+            width: size_spec(width)?,
+            color: color_spec(color)?,
+            ..Default::default()
+        };
+        if let Some(length) = length {
+            options.length = length;
+        }
+        self.axes(row, col)?
+            .events(rows, positions, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds strip samples in category groups.
+    #[pyo3(signature = (row, col, categories, groups, label, color, size, jitter))]
+    fn strip(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        groups: Vec<Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+        size: SizeArg,
+        jitter: Option<f64>,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
+        let mut options = umber_core::StripOptions {
+            label,
+            color: color_spec(color)?,
+            size: size_spec(size)?,
+            ..Default::default()
+        };
+        if let Some(jitter) = jitter {
+            options.jitter = jitter;
+        }
+        self.axes(row, col)?
+            .strip(categories, groups, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds swarm samples in category groups.
+    fn swarm(
+        &mut self,
+        row: i64,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        groups: Vec<Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let categories = names(categories)?;
+        let groups = groups.iter().map(floats).collect::<PyResult<Vec<_>>>()?;
+        let options = umber_core::SwarmOptions {
+            label,
+            color: color_spec(color)?,
+            size: size_spec(size)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .swarm(categories, groups, options)
             .map(drop)
             .map_err(core_error)
     }

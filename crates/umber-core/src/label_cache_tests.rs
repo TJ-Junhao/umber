@@ -74,11 +74,12 @@ fn cached_category_scenes_svg_and_png_are_byte_identical() {
     let lib = FontLibrary::bundled();
     for (i, figure) in category_figures().iter().enumerate() {
         let cached = scene(figure, &lib, "Figure.to_scene()").unwrap();
+        let fonts = layout::figure_fonts(&lib, figure.theme()).unwrap();
         let uncached = scene_with_labels(
             figure,
-            &lib,
+            &fonts,
             "Figure.to_scene()",
-            &layout::LabelCache::uncached(&lib),
+            &layout::LabelCache::uncached(&fonts),
         )
         .unwrap();
         assert_eq!(cached, uncached, "scene {i}");

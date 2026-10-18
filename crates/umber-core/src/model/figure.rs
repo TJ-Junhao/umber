@@ -8,7 +8,7 @@ use super::axes_mut::AxesMut;
 use super::grid::{CellRange, Grid, GridIndex, Placement};
 use super::share::{self, AxisSettings, Group, Setting, SharedAxis};
 use super::validation::check_figure_size;
-use crate::{Error, Result, ScaleKind, Theme};
+use crate::{Error, Result, ScaleKind, SizeSpec, Theme};
 
 /// The context of the errors of [`Figure::add_axes`] and [`Figure::add_axes_at`].
 const ADD_AXES: &str = "Figure.add_axes()";
@@ -55,6 +55,9 @@ pub struct Figure {
     color_groups: BTreeMap<usize, share::ColorGroup>,
     /// Settings of every shared colorbar.
     colorbar: super::ColorbarOptions,
+    /// The figure title and subtitle's per-call sizes.
+    title_size: SizeSpec,
+    subtitle_size: SizeSpec,
 }
 
 impl Figure {
@@ -103,6 +106,8 @@ impl Figure {
             y_groups: BTreeMap::new(),
             color_groups: BTreeMap::new(),
             colorbar: super::ColorbarOptions::default(),
+            title_size: SizeSpec::Auto,
+            subtitle_size: SizeSpec::Auto,
         })
     }
 
@@ -182,8 +187,7 @@ impl Figure {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn title(&mut self, text: &str) -> &mut Self {
-        self.title = text.to_owned();
-        self
+        self.title_sized(text, SizeSpec::Auto)
     }
 
     /// Sets the figure subtitle, below its title and above the merged legend.
@@ -199,8 +203,7 @@ impl Figure {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn subtitle(&mut self, text: &str) -> &mut Self {
-        self.subtitle = text.to_owned();
-        self
+        self.subtitle_sized(text, SizeSpec::Auto)
     }
 
     /// The figure title; empty when none is set.
@@ -725,6 +728,100 @@ impl Figure {
             .with_hint("find a spanning axes at its top-left cell."));
         }
         Ok(index)
+    }
+
+    /// Sets the figure title and its size. Multiples use 1.5 times the theme's panel title
+    /// size, including font scale; points ignore both multipliers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.title_sized("Revenue", SizeSpec::pt(24.0)?);
+    /// assert_eq!(figure.title_text(), "Revenue");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn title_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
+        self.title = text.to_owned();
+        self.title_size = size;
+        self
+    }
+
+    /// Sets the figure subtitle and its size, relative to the theme's body size or in points.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.subtitle_sized("Per quarter", SizeSpec::times(1.2)?);
+    /// assert_eq!(figure.subtitle_text(), "Per quarter");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn subtitle_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
+        self.subtitle = text.to_owned();
+        self.subtitle_size = size;
+        self
+    }
+
+    /// The figure title's per-call size.
+    pub(crate) fn title_size(&self) -> SizeSpec {
+        self.title_size
+    }
+
+    /// The figure subtitle's per-call size.
+    pub(crate) fn subtitle_size(&self) -> SizeSpec {
+        self.subtitle_size
+    }
+
+    /// Whether the grid shows one figure-wide legend instead of panel legends.
+    pub(crate) fn has_merged_legend(&self) -> bool {
+        self.grid.rows() * self.grid.cols() > 1 && self.grid.legend() == crate::LegendMode::Merged
+    }
+
+    /// Panels with a visible legend and an explicit size; AUTO contributes no setting.
+    fn sized_legends(&self) -> impl Iterator<Item = (usize, &Axes)> {
+        self.panels.iter().enumerate().filter(|(_, axes)| {
+            axes.legend_size != SizeSpec::Auto && axes.legend != Some(crate::LegendStyle::None)
+        })
+    }
+
+    /// The agreed explicit size of the merged legend, or the theme size when none is set.
+    pub(crate) fn legend_size(&self) -> SizeSpec {
+        self.sized_legends()
+            .next()
+            .map_or(SizeSpec::Auto, |(_, axes)| axes.legend_size())
+    }
+
+    /// Checks a size before changing any part of a panel's legend settings.
+    pub(super) fn check_legend_size(
+        &self,
+        index: usize,
+        style: crate::LegendStyle,
+        size: SizeSpec,
+    ) -> Result<()> {
+        if self.has_merged_legend()
+            && style != crate::LegendStyle::None
+            && size != SizeSpec::Auto
+            && let Some((_, other)) = self
+                .sized_legends()
+                .find(|(i, axes)| *i != index && axes.legend_size != size)
+        {
+            return Err(Error::usage(
+                "Axes.legend()",
+                format!(
+                    "size is {}; row {}, col {} uses {}, and the figure shows one legend.",
+                    super::axes::size_name(size),
+                    other.cells().row(),
+                    other.cells().col(),
+                    super::axes::size_name(other.legend_size),
+                ),
+            )
+            .with_parameter("size")
+            .with_hint("set the same size on every panel."));
+        }
+        Ok(())
     }
 }
 

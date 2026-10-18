@@ -364,7 +364,8 @@ fn figures() -> Vec<(String, Figure)> {
             .unwrap()
             .vspan(40.0, 50.0, span("Window"))
             .unwrap()
-            .legend(style);
+            .legend(style, umber_core::SizeSpec::Auto)
+            .unwrap();
         out.push((format!("rules-legend-{name}"), f));
     }
 

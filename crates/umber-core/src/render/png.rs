@@ -370,18 +370,60 @@ impl ClipRect {
     }
 }
 
+/// The render target shared by every item draw: the pixmap, the device scale, the root
+/// transform, and the clip mask with the rectangle it was built from, when a clip is active.
+struct Surface<'a> {
+    pixmap: &'a mut sk::Pixmap,
+    scale: DeviceScale,
+    root: sk::Transform,
+    clip: Option<(&'a sk::Mask, ClipRect)>,
+}
+
+impl<'a> Surface<'a> {
+    fn mask(&self) -> Option<&'a sk::Mask> {
+        self.clip.map(|(mask, _)| mask)
+    }
+}
+
+/// A path filled with an opaque color gradient sampled from `cmap` between `endpoints`.
+#[derive(Clone, Copy)]
+struct SampledFill<'a> {
+    path: &'a sk::Path,
+    cmap: &'a crate::Cmap,
+    endpoints: (Point, Point),
+    rule: sk::FillRule,
+}
+
+/// An image of `size` pixels drawn over `rect`.
+#[derive(Clone, Copy)]
+struct ImageView<'a> {
+    rect: &'a Rect,
+    size: (u32, u32),
+    pixels: &'a [Rgba],
+}
+
+/// The fields of an [`Item::Markers`]: `shape` drawn at every one of `positions`.
+#[derive(Clone, Copy)]
+struct MarkersView<'a> {
+    shape: &'a crate::geometry::Path,
+    fill: Option<Rgba>,
+    stroke: Option<&'a StrokeStyle>,
+    positions: &'a [Point],
+}
+
 /// Samples an opaque color gradient at device-pixel centers with `Cmap::at`. The temporary
 /// texture covers only the visible path bounds; the normal fill path supplies antialiasing
 /// and the current clip. Other gradients retain the common linear paint path.
-fn sampled_fill(
-    pixmap: &mut sk::Pixmap,
-    path: &sk::Path,
-    cmap: &crate::Cmap,
-    endpoints: (Point, Point),
-    rule: sk::FillRule,
-    scale: DeviceScale,
-    mask: Option<&sk::Mask>,
-) {
+fn sampled_fill(surface: &mut Surface<'_>, fill: &SampledFill<'_>) {
+    let SampledFill {
+        path,
+        cmap,
+        endpoints,
+        rule,
+    } = *fill;
+    let scale = surface.scale;
+    let mask = surface.mask();
+    let pixmap = &mut *surface.pixmap;
     let gradient = normalize_gradient(&crate::LinearGradient::sampled(
         cmap,
         endpoints.0,
@@ -495,7 +537,7 @@ impl Canvas {
                 Item::Group { clip: own, items } => self.group(own.as_ref(), items, clip, depth),
                 leaf => {
                     if self.use_clip(clip) {
-                        self.leaf(leaf, clip);
+                        self.leaf(leaf);
                     }
                 }
             }
@@ -529,20 +571,16 @@ impl Canvas {
         self.items(items, effective, depth + 1);
     }
 
-    fn leaf(&mut self, item: &Item, clip: Option<ClipRect>) {
-        let Canvas {
-            pixmap,
-            scale,
-            root,
-            mask,
-            ..
-        } = self;
-        let mask = if clip.is_some() {
-            mask.as_ref().map(|(_, m)| m)
-        } else {
-            None
+    /// Draws one leaf item under the clip made live by [`Canvas::use_clip`].
+    fn leaf(&mut self, item: &Item) {
+        let mut surface = Surface {
+            pixmap: &mut self.pixmap,
+            scale: self.scale,
+            root: self.root,
+            clip: self.mask.as_ref().map(|(rect, mask)| (mask, *rect)),
         };
-        let root = *root;
+        let root = surface.root;
+        let mask = surface.mask();
         match item {
             Item::Fill { path, paint, rule } => {
                 let Some(normalized) = normalize_path(path) else {
@@ -555,20 +593,20 @@ impl Canvas {
                     Paint::Solid(c) => GradientKind::Solid(*c),
                     Paint::Linear(g) => normalize_gradient(g),
                     Paint::Sampled { cmap, from, to } => {
-                        sampled_fill(
-                            pixmap,
-                            &path,
+                        let fill = SampledFill {
+                            path: &path,
                             cmap,
-                            (*from, *to),
-                            fill_rule(*rule),
-                            *scale,
-                            mask,
-                        );
+                            endpoints: (*from, *to),
+                            rule: fill_rule(*rule),
+                        };
+                        sampled_fill(&mut surface, &fill);
                         return;
                     }
                 };
                 if let Some(paint) = fill_paint(gradient) {
-                    pixmap.fill_path(&path, &paint, fill_rule(*rule), root, mask);
+                    surface
+                        .pixmap
+                        .fill_path(&path, &paint, fill_rule(*rule), root, mask);
                 }
             }
             Item::Stroke { path, style } => {
@@ -579,7 +617,9 @@ impl Canvas {
                     return;
                 };
                 if let Some(s) = prepare_stroke(&normalized, &path, style, root) {
-                    pixmap.stroke_path(&s.path, &s.paint, &s.stroke, root, mask);
+                    surface
+                        .pixmap
+                        .stroke_path(&s.path, &s.paint, &s.stroke, root, mask);
                 }
             }
             Item::Markers {
@@ -588,14 +628,13 @@ impl Canvas {
                 stroke,
                 positions,
             } => draw_markers(
-                pixmap,
-                *scale,
-                root,
-                mask.zip(clip),
-                shape,
-                *fill,
-                stroke.as_ref(),
-                positions,
+                &mut surface,
+                &MarkersView {
+                    shape,
+                    fill: *fill,
+                    stroke: stroke.as_ref(),
+                    positions,
+                },
             ),
             Item::Text(text) => {
                 if !text_is_visible(text.color, text.origin) {
@@ -605,7 +644,7 @@ impl Canvas {
                     return;
                 };
                 if let Some(path) = convert_path(&normalized) {
-                    pixmap.fill_path(
+                    surface.pixmap.fill_path(
                         &path,
                         &solid_paint(text.color),
                         sk::FillRule::Winding,
@@ -619,7 +658,14 @@ impl Canvas {
                 width,
                 height,
                 pixels,
-            } => draw_image(pixmap, *scale, clip, rect, (*width, *height), pixels),
+            } => draw_image(
+                &mut surface,
+                &ImageView {
+                    rect,
+                    size: (*width, *height),
+                    pixels,
+                },
+            ),
             Item::Group { .. } => {}
         }
     }
@@ -631,14 +677,15 @@ impl Canvas {
 /// in integer arithmetic, one device row at a time. Every clip of a scene is a rectangle, so
 /// the clip enters the area weights exactly and no clip mask is applied on top. Only the device
 /// pixels inside both the image and the clip are resampled.
-fn draw_image(
-    pixmap: &mut sk::Pixmap,
-    scale: DeviceScale,
-    clip: Option<ClipRect>,
-    rect: &Rect,
-    (width, height): (u32, u32),
-    pixels: &[Rgba],
-) {
+fn draw_image(surface: &mut Surface<'_>, image: &ImageView<'_>) {
+    let ImageView {
+        rect,
+        size: (width, height),
+        pixels,
+    } = *image;
+    let clip = surface.clip.map(|(_, clip)| clip);
+    let scale = surface.scale;
+    let pixmap = &mut *surface.pixmap;
     if !image_is_drawable(rect, width, height, pixels) {
         return;
     }
@@ -1017,17 +1064,15 @@ fn split_phase(d: DevicePixels) -> (i32, usize) {
 /// sprite is a composited fill and stroke, which is only equal to masking fill and stroke
 /// separately where the mask is 255. Sprite placements are queued and composited in batches;
 /// the queue is flushed before every marker drawn as paths, so markers keep their order.
-#[allow(clippy::too_many_arguments)]
-fn draw_markers(
-    pixmap: &mut sk::Pixmap,
-    scale: DeviceScale,
-    root: sk::Transform,
-    clip: Option<(&sk::Mask, ClipRect)>,
-    shape: &crate::geometry::Path,
-    fill: Option<Rgba>,
-    stroke: Option<&StrokeStyle>,
-    positions: &[Point],
-) {
+fn draw_markers(surface: &mut Surface<'_>, markers: &MarkersView<'_>) {
+    let MarkersView {
+        shape,
+        fill,
+        stroke,
+        positions,
+    } = *markers;
+    let (scale, root, clip) = (surface.scale, surface.root, surface.clip);
+    let pixmap = &mut *surface.pixmap;
     let Some(normalized) = normalize_path(shape) else {
         return;
     };
@@ -1457,19 +1502,18 @@ mod tests {
     #[test]
     fn text_renders_ink() {
         let mut scene = Scene::new(60.0, 40.0, WHITE);
+        let fonts = FontLibrary::global()
+            .with_figure_fonts(&[Font::INTER])
+            .unwrap();
         let style = TextStyle {
-            font: Font::Inter,
+            face: crate::FaceId::new(0),
             weight: Weight::Regular,
             size: 24.0,
             tabular_figures: false,
         };
-        scene.push_text(
-            FontLibrary::global(),
-            "Hg",
-            style,
-            Point { x: 4.0, y: 24.0 },
-            BLACK,
-        );
+        scene
+            .push_text(&fonts, "Hg", style, Point { x: 4.0, y: 24.0 }, BLACK)
+            .unwrap();
         let image = decode(&render_png(&scene, 72).unwrap());
         let ink_in_rows = |mut rows: std::ops::Range<u32>| {
             rows.any(|y| (0..image.width).any(|x| image.is_ink(x, y)))
@@ -2081,17 +2125,15 @@ mod tests {
     /// queued loop must match byte for byte: each marker is composited as soon as it is reached,
     /// and every sprite pixel goes through the clip mask. Returns how many markers were drawn
     /// as paths because they reach the clip edge.
-    #[allow(clippy::too_many_arguments)]
-    fn reference_draw_markers(
-        pixmap: &mut sk::Pixmap,
-        scale: DeviceScale,
-        root: sk::Transform,
-        clip: Option<(&sk::Mask, ClipRect)>,
-        shape: &Path,
-        fill: Option<Rgba>,
-        stroke: Option<&StrokeStyle>,
-        positions: &[Point],
-    ) -> usize {
+    fn reference_draw_markers(surface: &mut Surface<'_>, markers: &MarkersView<'_>) -> usize {
+        let MarkersView {
+            shape,
+            fill,
+            stroke,
+            positions,
+        } = *markers;
+        let (scale, root, clip) = (surface.scale, surface.root, surface.clip);
+        let pixmap = &mut *surface.pixmap;
         let normalized = normalize_path(shape).unwrap();
         let path = convert_path(&normalized).unwrap();
         let marker = Marker {
@@ -2239,36 +2281,36 @@ mod tests {
             },
             ..stroke_style(1.2, vec![])
         };
+        let markers = MarkersView {
+            shape: &shape,
+            fill: Some(fill),
+            stroke: Some(&stroke),
+            positions,
+        };
         let queued = THREAD_COUNTS
             .iter()
             .map(|&threads| {
                 let mut queued = background.clone();
                 on_threads(threads, || {
-                    draw_markers(
-                        &mut queued,
+                    let mut surface = Surface {
+                        pixmap: &mut queued,
                         scale,
                         root,
                         clip,
-                        &shape,
-                        Some(fill),
-                        Some(&stroke),
-                        positions,
-                    );
+                    };
+                    draw_markers(&mut surface, &markers);
                 });
                 queued.take()
             })
             .collect();
         let mut reference = background;
-        let as_paths = reference_draw_markers(
-            &mut reference,
+        let mut surface = Surface {
+            pixmap: &mut reference,
             scale,
             root,
             clip,
-            &shape,
-            Some(fill),
-            Some(&stroke),
-            positions,
-        );
+        };
+        let as_paths = reference_draw_markers(&mut surface, &markers);
         (queued, reference.take(), as_paths)
     }
 

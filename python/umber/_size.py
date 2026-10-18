@@ -1,4 +1,4 @@
-"""``Size``: the width of a line or the size of a marker, relative to the theme or in points."""
+"""``Size``: line widths, marker sizes and text sizes, relative to the theme or in points."""
 
 from collections.abc import Callable
 from operator import attrgetter
@@ -13,15 +13,20 @@ _AUTO = 0
 _TIMES = 1
 _POINTS = 2
 
+TEXT_SIZE_HINT: Final = (
+    "use Size.times(1.5) for a multiple of the theme's size, Size.pt(12) for points, or Size.AUTO."
+)
+
 
 @final
 class Size:
-    """An immutable size for a line width or a marker size.
+    """An immutable size for a line width, marker or text.
 
     ``Size.AUTO`` is the size of the theme. ``Size.times()`` is a multiple of it, so an
     emphasized series stays emphasized under any theme. ``Size.pt()`` is a fixed size in
     points that ignores the theme. Sizes compare equal when they are the same kind with the
-    same value.
+    same value. Text sizes resolve against the role's size after font scaling; fixed
+    points ignore font scaling.
 
     Example:
         >>> import umber as ub
@@ -36,7 +41,7 @@ class Size:
     _value: float
 
     AUTO: ClassVar["Size"]
-    """The size of the theme: its line width or its marker size.
+    """The size of the theme: its line width, marker size or scaled text role size.
 
     Example:
         >>> import umber as ub

@@ -51,12 +51,18 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                         },
                     )
                     .unwrap();
-                    ax.legend_at(LegendStyle::Header, legend_position).unwrap();
+                    ax.legend_at(
+                        LegendStyle::Header,
+                        legend_position,
+                        umber_core::SizeSpec::Auto,
+                    )
+                    .unwrap();
                 }
                 ax.colorbar(ColorbarOptions {
                     label: "Temperature".into(),
                     position: Some(position),
                     format: Some(TickFormat::fixed(0).unwrap().affix("", " °C").unwrap()),
+                    ..ColorbarOptions::default()
                 })
                 .unwrap();
                 let suffix = if legend { "-legend" } else { "" };
