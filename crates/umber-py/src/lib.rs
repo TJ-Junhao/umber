@@ -56,5 +56,8 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ticks::check_tick_format, m)?)?;
     m.add_function(wrap_pyfunction!(test_support::box_stats, m)?)?;
     m.add_function(wrap_pyfunction!(test_support::kde_scott, m)?)?;
+    m.add_function(wrap_pyfunction!(test_support::scott_bandwidth, m)?)?;
+    m.add_function(wrap_pyfunction!(test_support::kde_curve, m)?)?;
+    m.add_function(wrap_pyfunction!(test_support::ecdf_steps, m)?)?;
     Ok(())
 }

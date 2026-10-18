@@ -22,6 +22,8 @@ ENUMS = [
     ub.Align,
     ub.Step,
     ub.Render,
+    ub.Hist,
+    ub.Stat,
 ]
 
 

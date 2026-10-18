@@ -41,16 +41,17 @@
 
 use std::collections::BTreeMap;
 
-use crate::binning::Histogram;
+use crate::binning::HistBins;
 use crate::color_scale::{ColorScaleSpec, MappedColors, ResolvedColorScale};
 use crate::error::quoted;
 use crate::layout::TickRoom;
 use crate::legend::{LegendEntry, Swatch, SwatchFill};
 use crate::model::{
-    AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, HistMark, LineMark,
-    Mark, ScatterMark, SeriesView, SharedValues, StepMark,
+    AreaMark, Axes, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, LineMark, Mark,
+    ScatterMark, SeriesView, SharedValues, StepMark,
 };
 use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
+use crate::model::{EcdfMark, HistStyle, KdeMark};
 use crate::model::{Edge, holds};
 use crate::model::{ErrorBarMark, ErrorBarOrientation};
 use crate::model::{HeatmapMark, PointColor, StackedAreaMark, StemMark};
@@ -333,7 +334,8 @@ impl Resolved {
                 | Mark::Hist(_)
                 | Mark::Area(_)
                 | Mark::StackedArea(_)
-                | Mark::Stem(_) => true,
+                | Mark::Stem(_)
+                | Mark::GroupedHist(_) => true,
                 Mark::Line(_)
                 | Mark::Step(_)
                 | Mark::Scatter(_)
@@ -351,7 +353,9 @@ impl Resolved {
                 | Mark::Mesh(_)
                 | Mark::Hist2d(_)
                 | Mark::Hexbin(_)
-                | Mark::Heatmap(_) => false,
+                | Mark::Heatmap(_)
+                | Mark::Ecdf(_)
+                | Mark::Kde(_) => false,
             })
     }
 }
@@ -947,6 +951,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
             ErrorBarOrientation::Vertical => mark.positions().categories(),
             ErrorBarOrientation::Horizontal => &[],
         },
+        Mark::GroupedHist(_) | Mark::Ecdf(_) | Mark::Kde(_) => &[],
     }
 }
 
@@ -1048,7 +1053,18 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
         }
         AutoLimits::Exact
     } else if role == AxisRole::Value {
-        if transform == Transform::Linear {
+        // An ECDF runs from 0 to 1: a value axis of ECDFs alone, references apart, shows exactly
+        // that range.
+        let unit_range = || {
+            let mut contributing = marks
+                .clone()
+                .filter(|mark| !mark.is_reference() && mark.numbers(which).any(f64::is_finite))
+                .peekable();
+            contributing.peek().is_some() && contributing.all(ResolvedMark::spans_unit_range)
+        };
+        if transform == Transform::Linear && unit_range() {
+            AutoLimits::Exact
+        } else if transform == Transform::Linear {
             AutoLimits::Padded(padding)
         } else {
             AutoLimits::LogBelowData(padding)
@@ -1665,16 +1681,19 @@ pub(crate) enum ResolvedMark<'a> {
         /// The width of every upper outline, in points.
         width: f32,
     },
-    /// A histogram mark.
+    /// A histogram mark, of one series or of several sharing their bins.
     Hist {
         /// Drawn geometry, prepared only when choosing an inside legend position.
         geometry: Option<Box<crate::coverage::Geometry>>,
-        /// The mark.
-        mark: &'a HistMark,
-        /// The mark's values binned; `None` when it has no finite value.
-        histogram: Option<Histogram>,
-        /// The bar color.
-        color: Rgba,
+        /// The bins and the heights of each series' bars; `None` for equal-width bins without a
+        /// finite value.
+        bins: Option<HistBins>,
+        /// The legend label and resolved color of each series, in order.
+        layers: Box<[(&'a str, Rgba)]>,
+        /// How the bins are drawn; [`HistStyle::Stacked`] with one series is drawn as bars are.
+        style: HistStyle,
+        /// The stroke width of [`HistStyle::Step`] outlines as drawn, in points.
+        width: f32,
     },
     /// A step mark.
     Step {
@@ -1795,6 +1814,28 @@ pub(crate) enum ResolvedMark<'a> {
         /// The spec the cells map their values with, and the values, row by row.
         mapped: MappedColors<'a>,
     },
+    /// An ECDF, drawn as the step line of its steps ([`EcdfMark::steps`]).
+    Ecdf {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The mark.
+        mark: &'a EcdfMark,
+        /// The line color.
+        color: Rgba,
+        /// The stroke width as drawn, in points.
+        width: f32,
+    },
+    /// A kernel density, drawn as the line of its density ([`KdeMark::line`]).
+    Kde {
+        /// Drawn geometry, prepared only when choosing an inside legend position.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The mark.
+        mark: &'a KdeMark,
+        /// The line color.
+        color: Rgba,
+        /// The stroke width as drawn, in points.
+        width: f32,
+    },
 }
 
 /// One distribution resolved once per render, before layout iterates over its domains.
@@ -1875,7 +1916,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
-            | ResolvedMark::Violin { geometry, .. } => geometry,
+            | ResolvedMark::Violin { geometry, .. }
+            | ResolvedMark::Ecdf { geometry, .. }
+            | ResolvedMark::Kde { geometry, .. } => geometry,
         };
         *target = geometry;
         mark
@@ -1908,7 +1951,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
-            | ResolvedMark::Violin { geometry, .. } => geometry,
+            | ResolvedMark::Violin { geometry, .. }
+            | ResolvedMark::Ecdf { geometry, .. }
+            | ResolvedMark::Kde { geometry, .. } => geometry,
         };
         geometry.as_ref().map_or(0.0, |g| g.coverage(area, box_))
     }
@@ -1917,7 +1962,8 @@ impl<'a> ResolvedMark<'a> {
     /// x values are categories. See [`ResolvedMark`] for the contract.
     ///
     /// A histogram yields the low and the high end of its binned range
-    /// ([`Histogram::range`]), and nothing when it has no finite value.
+    /// ([`HistBins::range`]), and nothing when it has no bins. An ECDF yields the x values of
+    /// its steps, and a density the x values of its line.
     pub fn x_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
             ResolvedMark::Mesh { mark, .. } => mark.x_edges.numbers(),
@@ -1976,12 +2022,14 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::HLine { .. }
             | ResolvedMark::HSpan { .. } => &[],
-            ResolvedMark::Hist { histogram, .. } => {
-                let range = histogram.as_ref().map(Histogram::range);
+            ResolvedMark::Hist { bins, .. } => {
+                let range = bins.as_ref().map(HistBins::range);
                 return DomainValues::Computed(Box::new(
                     range.into_iter().flat_map(|(lo, hi)| [lo, hi]),
                 ));
             }
+            ResolvedMark::Ecdf { mark, .. } => mark.steps().x().numbers(),
+            ResolvedMark::Kde { mark, .. } => mark.line().x().numbers(),
         };
         DomainValues::Data(values.iter().copied())
     }
@@ -2049,7 +2097,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::HLine { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::Box { .. }
-            | ResolvedMark::Violin { .. } => DomainTimes::whole(&[]),
+            | ResolvedMark::Violin { .. }
+            | ResolvedMark::Kde { .. } => DomainTimes::whole(&[]),
+            ResolvedMark::Ecdf { mark, .. } => DomainTimes::gapped(mark.steps().x().times()),
         }
     }
 
@@ -2084,7 +2134,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::VLine { .. }
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Box { .. }
-            | ResolvedMark::Violin { .. } => DomainTimes::whole(&[]),
+            | ResolvedMark::Violin { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => DomainTimes::whole(&[]),
         }
     }
 
@@ -2145,7 +2197,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Band { .. }
-            | ResolvedMark::StackedArea { .. } => &[],
+            | ResolvedMark::StackedArea { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => &[],
         }
     }
 
@@ -2205,7 +2259,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
             | ResolvedMark::Band { .. }
-            | ResolvedMark::StackedArea { .. } => &[],
+            | ResolvedMark::StackedArea { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => &[],
         }
     }
 
@@ -2215,8 +2271,10 @@ impl<'a> ResolvedMark<'a> {
     /// Lines, scatters and areas yield their y values in data order. Vertical bars, boxes and
     /// violins yield their values as [`band_values`](Self::band_values) says; horizontal ones
     /// yield nothing here, since their values are x values.
-    /// Histograms yield the count of every non-empty bin, in bin order, and so never 0 either: on a
-    /// log axis the domain spans the smallest positive count to the largest.
+    /// Histograms yield the height of every non-empty bar, in bin order and then series order, and
+    /// stacked histograms the top of every non-empty stack, and so never 0 either: on a log axis
+    /// the domain spans the smallest positive height to the largest. An ECDF yields the levels of
+    /// its steps, and a density the densities of its line.
     pub fn y_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
             ResolvedMark::Mesh { mark, .. } => mark.y_edges.numbers(),
@@ -2283,15 +2341,22 @@ impl<'a> ResolvedMark<'a> {
                         .flat_map(|curve| curve.iter().copied()),
                 ));
             }
-            ResolvedMark::Hist { histogram, .. } => {
-                let counts = histogram.as_ref().map_or(&[][..], Histogram::counts);
-                return DomainValues::Computed(Box::new(
-                    counts
-                        .iter()
-                        .filter(|&&count| count > 0)
-                        .map(|&count| count as f64),
-                ));
+            ResolvedMark::Hist {
+                bins: Some(bins),
+                style: HistStyle::Stacked,
+                ..
+            } => {
+                return DomainValues::Computed(Box::new(bins.tops().filter(|&top| top > 0.0)));
             }
+            ResolvedMark::Hist { bins, .. } => {
+                return DomainValues::Computed(Box::new(bins.iter().flat_map(|bins| {
+                    (0..bins.groups())
+                        .flat_map(|g| bins.heights(g).iter().copied())
+                        .filter(|&height| height > 0.0)
+                })));
+            }
+            ResolvedMark::Ecdf { mark, .. } => mark.steps().y().numbers(),
+            ResolvedMark::Kde { mark, .. } => mark.line().y().numbers(),
         };
         DomainValues::Data(values.iter().copied())
     }
@@ -2337,6 +2402,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stacked { .. }
             | ResolvedMark::Hist { .. }
             | ResolvedMark::StackedArea { .. } => true,
+            // Both run from 0, which a linear y domain then holds, though no baseline is drawn.
+            ResolvedMark::Ecdf { .. } | ResolvedMark::Kde { .. } => true,
         }
     }
 
@@ -2355,7 +2422,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { width, .. }
             | ResolvedMark::Area { width, .. }
             | ResolvedMark::Step { width, .. }
-            | ResolvedMark::StackedArea { width, .. } => Some(width),
+            | ResolvedMark::StackedArea { width, .. }
+            | ResolvedMark::Ecdf { width, .. }
+            | ResolvedMark::Kde { width, .. } => Some(width),
             ResolvedMark::Scatter { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
@@ -2399,7 +2468,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Band { .. }
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Box { .. }
-            | ResolvedMark::Violin { .. } => false,
+            | ResolvedMark::Violin { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => false,
         }
     }
 
@@ -2411,6 +2482,13 @@ impl<'a> ResolvedMark<'a> {
             ValueAxis::X => self.has_exact_x_extent(),
             ValueAxis::Y => false,
         }
+    }
+
+    /// Whether the mark's values along its value axis run exactly from 0 to 1, as an ECDF's do:
+    /// a value axis whose marks, references apart, all do, keeps that extent exactly (see
+    /// [`resolve_axis`]).
+    pub fn spans_unit_range(&self) -> bool {
+        matches!(self, ResolvedMark::Ecdf { .. })
     }
 
     /// Whether an x axis padded by the marks reads the exact extent of this mark: the marks
@@ -2434,6 +2512,10 @@ impl<'a> ResolvedMark<'a> {
             | Self::Box { .. }
             | Self::Violin { .. } => SwatchFill::Area,
             Self::Mesh { .. } | Self::Hist2d { .. } | Self::Hexbin { .. } => SwatchFill::Solid,
+            Self::Hist {
+                style: HistStyle::Step,
+                ..
+            } => SwatchFill::Series,
             Self::Hist { .. } => SwatchFill::Histogram,
             Self::Bar { .. } | Self::Grouped { .. } | Self::Stacked { .. } => SwatchFill::Solid,
             Self::Bubbles { .. } | Self::Scatter { .. } | Self::Stem { .. } => SwatchFill::Marker,
@@ -2443,7 +2525,9 @@ impl<'a> ResolvedMark<'a> {
             | Self::Step { .. }
             | Self::HLine { .. }
             | Self::VLine { .. }
-            | Self::ErrorBars { .. } => SwatchFill::Series,
+            | Self::ErrorBars { .. }
+            | Self::Ecdf { .. }
+            | Self::Kde { .. } => SwatchFill::Series,
         }
     }
 
@@ -2564,7 +2648,24 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. } => Vec::new(),
-            ResolvedMark::Hist { mark, color, .. } => one(mark.label(), color, Swatch::Square),
+            ResolvedMark::Hist {
+                ref layers,
+                style,
+                width,
+                ..
+            } => {
+                let swatch = match style {
+                    HistStyle::Step => Swatch::Line {
+                        dash: Dash::Solid,
+                        width,
+                    },
+                    HistStyle::Bars | HistStyle::Stacked => Swatch::Square,
+                };
+                layers
+                    .iter()
+                    .filter_map(|&(label, color)| LegendEntry::new(label, color, swatch, fill))
+                    .collect()
+            }
             ResolvedMark::HSpan { mark, color, .. } | ResolvedMark::VSpan { mark, color, .. } => {
                 one(&mark.options().label, color, Swatch::Square)
             }
@@ -2578,6 +2679,26 @@ impl<'a> ResolvedMark<'a> {
                 color,
                 Swatch::ErrorBar {
                     vertical: mark.orientation() == ErrorBarOrientation::Vertical,
+                    width,
+                },
+            ),
+            ResolvedMark::Ecdf {
+                mark, color, width, ..
+            } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: mark.options().dash,
+                    width,
+                },
+            ),
+            ResolvedMark::Kde {
+                mark, color, width, ..
+            } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: mark.options().dash,
                     width,
                 },
             ),
@@ -2773,12 +2894,31 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. } => Vec::new(),
-            &ResolvedMark::Hist { mark, color, .. } => vec![SeriesKey {
-                label: mark.label(),
-                color,
-                kind: SeriesKind::Bar,
-                anchor: None,
-            }],
+            // A step histogram is listed with a line swatch and, like a reference line, never takes
+            // a direct label: its outline has no end to attach one to.
+            ResolvedMark::Hist {
+                layers,
+                style,
+                width,
+                ..
+            } => {
+                let kind = match style {
+                    HistStyle::Step => SeriesKind::Rule {
+                        dash: Dash::Solid,
+                        width: *width,
+                    },
+                    HistStyle::Bars | HistStyle::Stacked => SeriesKind::Bar,
+                };
+                layers
+                    .iter()
+                    .map(|&(label, color)| SeriesKey {
+                        label,
+                        color,
+                        kind,
+                        anchor: None,
+                    })
+                    .collect()
+            }
             // A step line is labelled as a line is: the line's swatch, and a direct label at the
             // end of the line.
             &ResolvedMark::Step {
@@ -2827,6 +2967,13 @@ impl<'a> ResolvedMark<'a> {
                 },
                 anchor: None,
             }],
+            // An ECDF is labelled as its step line, and a density as its line.
+            &ResolvedMark::Ecdf {
+                mark, color, width, ..
+            } => vec![SeriesKey::of_step(mark.steps(), color, width, limits)],
+            &ResolvedMark::Kde {
+                mark, color, width, ..
+            } => vec![SeriesKey::of_line(mark.line(), color, width, limits)],
         }
     }
 
@@ -2857,7 +3004,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Band { .. }
             | ResolvedMark::Stem { .. }
             | ResolvedMark::Heatmap { .. }
-            | ResolvedMark::ErrorBars { .. } => None,
+            | ResolvedMark::ErrorBars { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => None,
         }
     }
 
@@ -2926,7 +3075,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Band { .. }
             | ResolvedMark::Stem { .. }
             | ResolvedMark::Heatmap { .. }
-            | ResolvedMark::ErrorBars { .. } => &[],
+            | ResolvedMark::ErrorBars { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => &[],
         };
         DomainValues::Data(values.iter().copied())
     }
@@ -2957,7 +3108,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Stem { .. }
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
-            | ResolvedMark::ErrorBars { .. } => None,
+            | ResolvedMark::ErrorBars { .. }
+            | ResolvedMark::Ecdf { .. }
+            | ResolvedMark::Kde { .. } => None,
         }
     }
 }
@@ -3510,6 +3663,9 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::HSpan(m) | Mark::VSpan(m) => vec![(&m.options().label, m.options().color)],
         Mark::Band(m) => vec![(&m.options().label, m.options().color)],
         Mark::ErrorBars(m) => vec![(&m.options().label, m.options().color)],
+        Mark::GroupedHist(m) => m.series().map(|s| (s.label(), s.color())).collect(),
+        Mark::Ecdf(m) => vec![(&m.options().label, m.options().color)],
+        Mark::Kde(m) => vec![(&m.options().label, m.options().color)],
     }
 }
 
@@ -3734,10 +3890,11 @@ fn resolve_panel_marks<'a>(
                 bins: crate::bin2d::HexBins::Uncounted,
             },
             Mark::Hist(mark) => ResolvedMark::Hist {
-                mark,
                 geometry: None,
-                histogram: Histogram::from_values(mark.values(), mark.bin_count()),
-                color: color_of(mark.color(), mark.label()),
+                bins: HistBins::new(mark.binning(), &[mark.values()]),
+                layers: Box::new([(mark.label(), color_of(mark.color(), mark.label()))]),
+                style: mark.binning().style(),
+                width: theme.drawn_line_width(crate::SizeSpec::Auto),
             },
             Mark::Step(mark) => ResolvedMark::Step {
                 mark,
@@ -3773,6 +3930,31 @@ fn resolve_panel_marks<'a>(
                 color: color_of(mark.options().color, &mark.options().label),
             },
             Mark::ErrorBars(mark) => ResolvedMark::ErrorBars {
+                mark,
+                geometry: None,
+                color: color_of(mark.options().color, &mark.options().label),
+                width: theme.drawn_line_width(mark.options().width),
+            },
+            Mark::GroupedHist(mark) => {
+                let values: Vec<&[f64]> = mark.series().map(|s| s.values()).collect();
+                ResolvedMark::Hist {
+                    geometry: None,
+                    bins: HistBins::new(mark.binning(), &values),
+                    layers: mark
+                        .series()
+                        .map(|s| (s.label(), color_of(s.color(), s.label())))
+                        .collect(),
+                    style: mark.binning().style(),
+                    width: theme.drawn_line_width(crate::SizeSpec::Auto),
+                }
+            }
+            Mark::Ecdf(mark) => ResolvedMark::Ecdf {
+                mark,
+                geometry: None,
+                color: color_of(mark.options().color, &mark.options().label),
+                width: theme.drawn_line_width(mark.options().width),
+            },
+            Mark::Kde(mark) => ResolvedMark::Kde {
                 mark,
                 geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
@@ -4979,7 +5161,7 @@ mod tests {
     fn hist_figure(y: ScaleKind, values: &[f64], bins: i64) -> Figure {
         let mut f = figure(LIN, y);
         let options = HistOptions {
-            bins,
+            bins: crate::Bins::Count(bins),
             ..HistOptions::default()
         };
         axes(&mut f).hist(values, options).unwrap();
@@ -5054,10 +5236,7 @@ mod tests {
             let marks = resolve_marks(f.single_axes().marks(), &Theme::pigment());
             assert!(matches!(
                 marks.as_slice(),
-                [ResolvedMark::Hist {
-                    histogram: None,
-                    ..
-                }]
+                [ResolvedMark::Hist { bins: None, .. }]
             ));
         }
     }
@@ -5072,7 +5251,7 @@ mod tests {
             .hist(
                 &[1.0, 2.0, 2.0, 3.0],
                 HistOptions {
-                    bins: 2,
+                    bins: crate::Bins::Count(2),
                     label: "sizes".into(),
                     ..HistOptions::default()
                 },
@@ -5086,13 +5265,12 @@ mod tests {
             [palette[1], palette[0], palette[2]]
         );
         let ResolvedMark::Hist {
-            histogram: Some(histogram),
-            ..
+            bins: Some(bins), ..
         } = &resolved[1]
         else {
             panic!("expected a binned histogram, got {:?}", resolved[1]);
         };
-        assert_eq!(histogram.counts(), &[1, 3]);
+        assert_eq!(bins.heights(0), [1.0, 3.0]);
         assert_eq!(
             resolved[1].keys(&Limits::of(f.single_axes())),
             [SeriesKey {

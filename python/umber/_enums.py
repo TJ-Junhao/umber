@@ -333,3 +333,45 @@ class Render(Enum):
     RASTER = 1
     """One image with one pixel per cell. A mesh needs edges evenly spaced on screen, and
     rendering fails when the image would not be exact on the final plot."""
+
+
+@unique
+class Hist(Enum):
+    """How a histogram draws its bins.
+
+    Example:
+        >>> import umber as ub
+        >>> ax = ub.Figure().add_axes().hist([1.2, 2.5, 2.7, 3.1], bins=3, style=ub.Hist.STEP)
+    """
+
+    BARS = 0
+    """One filled bar per bin, from the baseline to its height."""
+
+    STEP = 1
+    """The outline of the bars only, as one stepped line in the theme's line width: up the
+    first bin's low edge, along the top of every bin, and down the last bin's high edge. With
+    groups, each group's outline is normalized on its own."""
+
+    STACKED = 2
+    """The bars of the groups stacked in each bin, normalized together, so the stacks show the
+    whole. Without groups it draws the same bars as ``BARS``."""
+
+
+@unique
+class Stat(Enum):
+    """What the height of a histogram's bar shows.
+
+    Example:
+        >>> import umber as ub
+        >>> ax = ub.Figure().add_axes().hist([1.2, 2.5, 2.7, 3.1], stat=ub.Stat.DENSITY)
+    """
+
+    COUNT = 0
+    """The number of values in the bin."""
+
+    FRACTION = 1
+    """The share of the finite values in the bin: the heights sum to 1."""
+
+    DENSITY = 2
+    """The share of the finite values in the bin over the bin's width: the bars have an area
+    of 1."""

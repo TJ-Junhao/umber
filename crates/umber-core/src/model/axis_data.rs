@@ -434,7 +434,7 @@ mod tests {
         assert!(std::ptr::eq(hist.values(), &*values));
         assert_eq!(Arc::strong_count(&values), 2);
         let bad = HistOptions {
-            bins: 0,
+            bins: crate::Bins::Count(0),
             ..HistOptions::default()
         };
         assert!(axes.hist_shared(Arc::clone(&values), bad).is_err());
