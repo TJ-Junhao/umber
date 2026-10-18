@@ -1339,6 +1339,7 @@ fn hostile_text_scene(lib: &FontLibrary) -> Scene {
         color: rgb(30, 30, 30),
         outline: outline.clone(),
         width: 40.0,
+        glyphs: umber_core::TextGlyphs::default(),
     };
     let nan = f32::NAN;
     scene.push(Item::Text(base.clone()));

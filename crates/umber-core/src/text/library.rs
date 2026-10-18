@@ -53,14 +53,14 @@ const BUNDLED_COUNT: usize = BundledFont::ALL.len() * Weight::ALL.len();
 /// [`FontLibrary::global`], which shares lookup and shaping caches and reduces repeated reads.
 /// [`FontLibrary::with_fallbacks`] performs no system font lookup.
 ///
-/// System font files are read during discovery and coverage indexing, and later to confirm
-/// candidate glyphs, copy shaping tables, obtain glyph bounds during shaping and outline glyphs.
-/// The coverage index limits indexed faces and accepted file sizes, and layout calls limit
-/// candidate confirmations. These limits do not cover fontdb's initial discovery.
-///
-/// If a file disappears before outlining, its glyphs are omitted. If it changes, glyphs may
-/// come from the new file or be omitted. Parsing and outlining are guarded against unwinding
-/// panics, subject to the memory-mapping caveat above.
+/// System font files are read during discovery and coverage indexing, and to confirm candidate
+/// glyphs. The file of a face chosen to draw a character is then read into memory once and
+/// shared: shaping, glyph bounds, outlines and scenes use those bytes, so a file that changes or
+/// disappears afterwards changes nothing already drawn or still to be drawn with it. The
+/// coverage index limits indexed faces, accepted file sizes and the total size of the files it
+/// loads, and layout calls limit candidate confirmations. These limits do not cover fontdb's
+/// initial discovery. Parsing and outlining are guarded against unwinding panics, subject to
+/// the memory-mapping caveat above.
 ///
 /// # Examples
 ///

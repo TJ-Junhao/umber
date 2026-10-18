@@ -338,3 +338,23 @@ fn cmap_ranges_are_read_without_enumerating_code_points() {
         Err(system::CmapError::Unreadable)
     );
 }
+
+#[test]
+fn font_files_past_the_loaded_bytes_limit_are_not_used() {
+    let target = 0xF0060;
+    let font = fixture_font("Aaa Loaded", 400, false, &[target]);
+    let c = char::from_u32(target).unwrap().to_string();
+    let library = |max: usize| {
+        FontLibrary::with_test_system_fonts_and_limits(
+            vec![font.clone()],
+            Limits::DEFAULT.with_max_loaded_bytes(max),
+        )
+    };
+    assert_eq!(
+        system_picks(&library(font.len()), &c, Weight::Regular),
+        ["AaaLoaded-400"]
+    );
+    // The face is chosen, but its file cannot be loaded: the primary font draws `.notdef`.
+    let picks = system_picks(&library(font.len() - 1), &c, Weight::Regular);
+    assert!(!picks.contains(&"AaaLoaded-400".to_owned()), "{picks:?}");
+}
