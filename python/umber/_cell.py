@@ -67,7 +67,9 @@ class Cell:
     def add_axes(
         self,
         *,
+        # mypy rejects a concrete default for a TypeVar that has a default; pyright accepts it.
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]
+        # mypy rejects a concrete default for a TypeVar that has a default; pyright accepts it.
         y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]
     ) -> Axes[X, Y]:
         """Add axes at this cell of its figure and return them.

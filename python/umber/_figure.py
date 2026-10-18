@@ -271,9 +271,9 @@ class Figure:
         col: int | Auto = AUTO,
         row_span: int = 1,
         col_span: int = 1,
-        # mypy rejects ``Scale[float]`` as the default of ``Scale[X]`` and ``Scale[Y]``; pyright
-        # accepts it.
+        # mypy rejects a concrete default for a TypeVar that has a default; pyright accepts it.
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]
+        # mypy rejects a concrete default for a TypeVar that has a default; pyright accepts it.
         y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]
     ) -> Axes[X, Y]:
         """Add axes at a grid position and return them.
@@ -327,7 +327,9 @@ class Figure:
         *,
         row: int | Auto = AUTO,
         col: int | Auto = AUTO,
+        # mypy rejects a concrete default for a TypeVar that has a default; pyright accepts it.
         x: Scale[X] = Scale.linear(),  # type: ignore[assignment]
+        # mypy rejects a concrete default for a TypeVar that has a default; pyright accepts it.
         y: Scale[Y] = Scale.linear(),  # type: ignore[assignment]
     ) -> Axes[X, Y]:
         """Return existing axes with the given position and scales, including those of a copy.

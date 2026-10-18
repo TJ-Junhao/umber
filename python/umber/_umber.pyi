@@ -38,7 +38,7 @@ threads do overlap there, so any of them may raise PyO3's borrow error; the figu
 valid.
 """
 
-from typing import final
+from typing import ClassVar, final
 
 import numpy
 import numpy.typing
@@ -159,6 +159,8 @@ class Cmap:
     """An immutable colormap; ``colors()`` lists its stops as opaque ``0xRRGGBBAA`` integers."""
 
     def __eq__(self, other: object, /) -> bool: ...
+    # mypy does not infer that a class defining __eq__ is unhashable.
+    __hash__: ClassVar[None]  # type: ignore[assignment]  # pyright: ignore[reportIncompatibleMethodOverride]
     @staticmethod
     def viridis() -> Cmap: ...
     @staticmethod
@@ -194,6 +196,8 @@ class Theme:
     """An immutable theme. Theme colors must be concrete (color kind 2)."""
 
     def __eq__(self, other: object, /) -> bool: ...
+    # mypy does not infer that a class defining __eq__ is unhashable.
+    __hash__: ClassVar[None]  # type: ignore[assignment]  # pyright: ignore[reportIncompatibleMethodOverride]
     @staticmethod
     def pigment() -> Theme: ...
     @staticmethod

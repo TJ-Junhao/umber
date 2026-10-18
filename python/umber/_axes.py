@@ -107,6 +107,8 @@ _FORMAT_HINT: Final = (
 
 
 @final
+# PEP 695 syntax on Python 3.12 cannot give type parameters defaults, so ``Axes``
+# could not mean ``Axes[float, float]``.
 class Axes(Generic[X, Y]):  # noqa: UP046
     """The plot area of a figure: marks, titles, axis labels, limits and the legend.
 
