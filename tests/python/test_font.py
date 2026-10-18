@@ -283,7 +283,7 @@ def test_file_pickle_preserves_paths_without_reopening(tmp_path: Path, with_bold
     restored = pickle.loads(saved)
     assert restored == font
     assert repr(restored) == repr(font)
-    assert str(regular) in repr(restored)
+    assert repr(str(regular)) in repr(restored)
 
 
 def test_file_bytes_live_only_in_native_value(monkeypatch: pytest.MonkeyPatch) -> None:
