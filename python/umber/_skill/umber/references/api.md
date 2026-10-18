@@ -470,6 +470,51 @@ Example:
 >>> ax = ax.colorbar("Intensity", position=ub.ColorbarPosition.BOTTOM)
 ```
 
+### `umber.Axes.ecdf`
+
+```text
+Axes.ecdf(self: SXF, values: Values[X], *, complementary: bool=False, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> SXF
+```
+
+Add the empirical cumulative distribution (ECDF) of ``values``, as a step line.
+
+At each distinct value, from the smallest, the line steps up to the fraction of the
+values at or below it: from 0 at the smallest value to 1 at the largest. With
+``complementary=True`` it steps down to the fraction above each value instead, from 1
+to 0. NaN values and missing times (``NaT``) are left out. The y axis must be linear;
+when it holds only ECDFs, it runs exactly from 0 to 1. A labelled ECDF is listed and
+labelled as a step line is; a direct label goes to its end.
+
+Args:
+    values: The values: numbers on a linear or log x axis, times on a time x axis.
+    complementary: Whether to draw the fraction above each value, from 1 down to 0.
+    label: The name shown in the legend; an empty string leaves the line out of it.
+    color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+    dash: How the line is stroked.
+    width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: If no value is finite, a value is infinite or not positive on a log
+        axis, or the values do not suit the x axis.
+    StyleError: If ``label`` is too long.
+    UsageError: If the y axis is not linear.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes()
+>>> ax = ax.ecdf([12.0, 9.5, 30.1, 12.0, 14.2], label="Latency")
+>>> ax = ax.ecdf([10.0, 11.0, 25.0], complementary=True, dash=ub.Dash.DASHED)
+>>> import datetime as dt
+>>> days = ub.Figure().add_axes(x=ub.Scale.time())
+>>> days = days.ecdf([dt.date(2026, 1, 3), dt.date(2026, 1, 1), dt.date(2026, 1, 9)])
+```
+
 ### `umber.Axes.figure`
 
 ```text
@@ -708,18 +753,29 @@ Example:
 ### `umber.Axes.hist`
 
 ```text
-Axes.hist(self: 'Axes[float, float]', values: Values[float], *, bins: int=30, label: str='', color: Color=Color.AUTO) -> 'Axes[float, float]'
+Axes.hist(self: 'Axes[float, float]', values: Values[float], *, bins: int | Values[float]=30, style: Hist=Hist.BARS, cumulative: bool=False, stat: Stat=Stat.COUNT, label: str='', color: Color=Color.AUTO) -> 'Axes[float, float]'
 ```
 
-Add a histogram: the count of ``values`` in equal-width bins over their range.
+Add a histogram: the values counted in bins, one bar per bin.
 
-NaN values are left out of the counts. The x axis must be linear. The baseline is
-drawn at zero, or at the lower edge when zero is out of range, even alongside other
-marks.
+``bins`` is a number of equal-width bins over the range of the values, or the bin
+edges. Bins include their low edge; the last also includes its high edge. NaN values
+are left out of the counts. ``stat`` sets what each bar shows: the count of its bin,
+the fraction of all values (the bars sum to 1), or the density (the fraction over the
+bin's width, so the bars have an area of 1). With ``cumulative=True`` each bar adds up
+the bins up to its own, so the last shows the total, or 1 for fractions. The x axis must
+be linear. The baseline is drawn at zero, or at the lower edge when zero is out of
+range, even alongside other marks.
 
 Args:
     values: The values to count.
-    bins: The number of bins, from 1 to ``MAX_BINS``.
+    bins: The number of equal-width bins, from 1 to ``MAX_BINS``, or the bin edges: at
+        least two, increasing, holding every finite value.
+    style: How the bins are drawn: ``Hist.BARS`` fills one bar per bin, ``Hist.STEP``
+        draws only their outline, as one line. ``Hist.STACKED`` stacks the bars of
+        groups; for one set of values it draws the same bars as ``Hist.BARS``.
+    cumulative: Whether each bar adds up every bin up to its own, from the left.
+    stat: What each bar shows: ``Stat.COUNT``, ``Stat.FRACTION`` or ``Stat.DENSITY``.
     label: The name shown in the legend; an empty string leaves the histogram out of
         it.
     color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
@@ -729,9 +785,12 @@ Returns:
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If a value is infinite, or the x axis is a category axis.
-    StyleError: If ``bins`` is out of range, or ``label`` is too long.
-    UsageError: If the x axis is a log axis.
+    DataError: If a value is infinite, the edges are fewer than two, not finite or not
+        increasing, finite values lie outside the edges, or the x axis is a category
+        axis.
+    StyleError: If the number of bins is out of range, or ``label`` is too long.
+    UsageError: If the x axis is a log axis, or ``cumulative=True`` comes with
+        ``Stat.DENSITY``, whose densities do not add up.
 
 Example:
 
@@ -739,6 +798,11 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes()
 >>> ax = ax.hist([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bins=4, label="Sizes")
+>>> edges = ub.Figure().add_axes()
+>>> edges = edges.hist([0.2, 1.5, 1.7, 4.0], bins=[0, 1, 2, 5], stat=ub.Stat.DENSITY)
+>>> runs = ub.Figure().add_axes()
+>>> runs = runs.hist([3.0, 1.0, 2.0], cumulative=True, stat=ub.Stat.FRACTION)
+>>> outline = ub.Figure().add_axes().hist([1.0, 2.0, 2.0], style=ub.Hist.STEP)
 ```
 
 ### `umber.Axes.hist2d`
@@ -857,6 +921,52 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1.0, 3.0, 2.0])
 >>> ax = ax.hspan(1.5, 2.5, label="Normal range")
+```
+
+### `umber.Axes.kde`
+
+```text
+Axes.kde(self: 'Axes[float, float]', values: Values[float], *, bandwidth: float | Auto=AUTO, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> 'Axes[float, float]'
+```
+
+Add the Gaussian kernel density estimate (KDE) of ``values``, as a line.
+
+The line is the mean of Gaussian kernels placed at the values, in data units, so the
+area under it is 1. It runs from three bandwidths below the smallest value to three
+above the largest, through evenly spaced points at most a quarter bandwidth apart (at
+least 256, at most 16,384). NaN values are left out. The x axis must be linear, and so
+must the y axis, which includes zero. A labelled density is listed and labelled as a
+line is.
+
+Args:
+    values: The values.
+    bandwidth: The standard deviation of the kernels, in data units, greater than 0.
+        ``AUTO`` uses Scott's rule, as ``violin()`` does, so a violin and a density
+        line of the same values agree; it needs at least two distinct values.
+    label: The name shown in the legend; an empty string leaves the line out of it.
+    color: The line color. ``Color.AUTO`` takes the next color of the theme palette.
+    dash: How the line is stroked.
+    width: The line width. ``Size.AUTO`` is the line width of the theme.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: If no value is finite, a value is infinite, ``AUTO`` finds fewer than
+        two distinct values, the line would reach beyond 1e300, the density would
+        exceed 1e300, or the x axis is a category axis.
+    StyleError: If ``bandwidth`` is not a finite number greater than 0, is so narrow
+        that the line would need more than 16,384 points, or ``label`` is too long.
+    UsageError: If the x axis is a log or time axis, or the y axis is not linear.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes()
+>>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], label="Sizes")
+>>> ax = ax.kde([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bandwidth=0.3, dash=ub.Dash.DOTTED)
 ```
 
 ### `umber.Axes.legend`
@@ -3076,6 +3186,48 @@ GridLines.VERTICAL
 
 Lines at x ticks only.
 
+## `umber.Hist`
+
+```text
+class Hist(Enum)
+```
+
+How a histogram draws its bins.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes().hist([1.2, 2.5, 2.7, 3.1], bins=3, style=ub.Hist.STEP)
+```
+
+### `umber.Hist.BARS`
+
+```text
+Hist.BARS
+```
+
+One filled bar per bin, from the baseline to its height.
+
+### `umber.Hist.STACKED`
+
+```text
+Hist.STACKED
+```
+
+The bars of the groups stacked in each bin, normalized together, so the stacks show the
+whole. Without groups it draws the same bars as ``BARS``.
+
+### `umber.Hist.STEP`
+
+```text
+Hist.STEP
+```
+
+The outline of the bars only, as one stepped line in the theme's line width: up the
+first bin's low edge, along the top of every bin, and down the last bin's high edge. With
+groups, each group's outline is normalized on its own.
+
 ## `umber.Legend`
 
 ```text
@@ -3578,6 +3730,46 @@ Example:
 >>> ub.Size.times(1.5)
 Size.times(1.5)
 ```
+
+## `umber.Stat`
+
+```text
+class Stat(Enum)
+```
+
+What the height of a histogram's bar shows.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes().hist([1.2, 2.5, 2.7, 3.1], stat=ub.Stat.DENSITY)
+```
+
+### `umber.Stat.COUNT`
+
+```text
+Stat.COUNT
+```
+
+The number of values in the bin.
+
+### `umber.Stat.DENSITY`
+
+```text
+Stat.DENSITY
+```
+
+The share of the finite values in the bin over the bin's width: the bars have an area
+of 1.
+
+### `umber.Stat.FRACTION`
+
+```text
+Stat.FRACTION
+```
+
+The share of the finite values in the bin: the heights sum to 1.
 
 ## `umber.Step`
 
@@ -4749,7 +4941,7 @@ Example:
 ## `umber.hist`
 
 ```text
-hist(values: Values[float], *, bins: int=30, label: str='', color: Color=Color.AUTO, theme: Theme=Theme.PIGMENT) -> Axes[float, float]
+hist(values: Values[float], *, bins: int | Values[float]=30, style: Hist=Hist.BARS, cumulative: bool=False, stat: Stat=Stat.COUNT, label: str='', color: Color=Color.AUTO, theme: Theme=Theme.PIGMENT) -> Axes[float, float]
 ```
 
 Plot a histogram of ``values`` on a new figure and return its axes.
@@ -4759,7 +4951,12 @@ out of the counts.
 
 Args:
     values: The values to count.
-    bins: The number of equal-width bins, from 1 to ``MAX_BINS``.
+    bins: The number of equal-width bins, from 1 to ``MAX_BINS``, or the bin edges: at
+        least two, increasing, holding every finite value.
+    style: How the bins are drawn: ``Hist.BARS``, ``Hist.STEP`` (the outline only) or
+        ``Hist.STACKED``, which draws the same bars as ``Hist.BARS`` for one set of values.
+    cumulative: Whether each bar adds up every bin up to its own, from the left.
+    stat: What each bar shows: ``Stat.COUNT``, ``Stat.FRACTION`` or ``Stat.DENSITY``.
     label: The name shown in the legend; an empty string leaves the histogram out of it.
     color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
     theme: The theme of the new figure.
@@ -4769,8 +4966,10 @@ Returns:
 
 Raises:
     TypeError: If an argument has the wrong type.
-    DataError: If a value is infinite.
-    StyleError: If ``bins`` is out of range, or ``label`` is too long.
+    DataError: If a value is infinite, the edges are not valid, or finite values lie
+        outside them.
+    StyleError: If the number of bins is out of range, or ``label`` is too long.
+    UsageError: If ``cumulative=True`` comes with ``Stat.DENSITY``.
 
 Example:
 
@@ -4778,6 +4977,7 @@ Example:
 >>> import umber as ub
 >>> ax = ub.hist([1.2, 2.5, 2.7, 3.1, 4.8, 5.0], bins=4)
 >>> ax.figure.save_png("sizes.png", dpi=100)
+>>> share = ub.hist([1.2, 2.5, 2.7, 3.1], bins=[1, 2, 3, 4], stat=ub.Stat.FRACTION)
 ```
 
 ## `umber.line`

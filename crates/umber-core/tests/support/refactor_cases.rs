@@ -95,13 +95,16 @@ mod corpus {
     pub mod cmap;
     pub mod color_by;
     pub mod colorbar;
+    pub mod ecdf;
     pub mod error_bars;
     pub mod grid;
     pub mod header;
     pub mod heatmap;
     pub mod hist;
+    pub mod hist_variants;
     pub mod horizontal;
     pub mod inputs;
+    pub mod kde;
     pub mod legend;
     pub mod legend_position;
     pub mod mesh;
@@ -188,6 +191,9 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::mesh::cases(&lib, &mut sink);
     corpus::heatmap::cases(&lib, &mut sink);
     corpus::mesh::raster_cases(&lib, &mut sink);
+    corpus::hist_variants::cases(&lib, &mut sink);
+    corpus::ecdf::cases(&lib, &mut sink);
+    corpus::kde::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1737,11 +1743,16 @@ mod record {
             Mark::GroupedBar(group) => bar_group("grouped-bar", group),
             Mark::StackedBar(group) => bar_group("stacked-bar", group),
             Mark::Hist(hist) => format!(
-                "hist values={} bins={} label={} color={}",
+                "hist values={} bins={} label={} color={}{}",
                 floats64(hist.values()),
-                hist.options().bins,
+                bins(&hist.options().bins),
                 text(&hist.options().label),
-                color_spec(hist.options().color)
+                color_spec(hist.options().color),
+                hist_binning(
+                    hist.options().style,
+                    hist.options().cumulative,
+                    hist.options().stat
+                )
             ),
             Mark::Step(step) => format!(
                 "step x={} y={} position={} label={} color={} dash={}",
@@ -1889,8 +1900,74 @@ mod record {
                     .collect::<Vec<_>>()
                     .join("; ")
             ),
+            Mark::GroupedHist(mark) => format!(
+                "grouped-hist bins={}{} series=[{}]",
+                bins(&mark.options().bins),
+                hist_binning(
+                    mark.options().style,
+                    mark.options().cumulative,
+                    mark.options().stat
+                ),
+                mark.series()
+                    .map(|s| format!(
+                        "label={} values={} color={}",
+                        text(s.label()),
+                        floats64(s.values()),
+                        color_spec(s.color())
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+            Mark::Ecdf(ecdf) => format!(
+                "ecdf values={} complementary={} label={} color={} dash={}",
+                axis_data(ecdf.values()),
+                ecdf.options().complementary,
+                text(&ecdf.options().label),
+                color_spec(ecdf.options().color),
+                dash(ecdf.options().dash)
+            ),
+            Mark::Kde(kde) => format!(
+                "kde values={} bandwidth={} label={} color={} dash={}",
+                floats64(kde.values()),
+                f64(kde.bandwidth()),
+                text(&kde.options().label),
+                color_spec(kde.options().color),
+                dash(kde.options().dash)
+            ),
             _ => "unknown-mark".into(),
         }
+    }
+
+    /// The bin count as a number, the edges as their bits.
+    fn bins(bins: &umber_core::Bins) -> String {
+        match bins {
+            umber_core::Bins::Count(n) => n.to_string(),
+            umber_core::Bins::Edges(edges) => floats64(edges),
+        }
+    }
+
+    /// Nothing for the plain histogram, so its record is as it was before styles and
+    /// statistics; the style, accumulation and statistic otherwise.
+    fn hist_binning(
+        style: umber_core::HistStyle,
+        cumulative: bool,
+        stat: umber_core::HistStat,
+    ) -> String {
+        use umber_core::{HistStat, HistStyle};
+        if (style, cumulative, stat) == (HistStyle::Bars, false, HistStat::Count) {
+            return String::new();
+        }
+        let style = match style {
+            HistStyle::Bars => "bars",
+            HistStyle::Step => "step",
+            HistStyle::Stacked => "stacked",
+        };
+        let stat = match stat {
+            HistStat::Count => "count",
+            HistStat::Fraction => "fraction",
+            HistStat::Density => "density",
+        };
+        format!(" style={style} cumulative={cumulative} stat={stat}")
     }
 
     fn step_position(position: umber_core::Step) -> &'static str {

@@ -181,10 +181,12 @@ impl BarMark {
     }
 }
 
-/// One series of grouped bars, stacked bars or stacked areas, as given to
-/// [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar),
-/// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar) or
-/// [`AxesMut::stacked_area`](super::AxesMut::stacked_area): its label, values and color.
+/// One series of grouped bars, stacked bars, stacked areas, a grouped histogram or grouped
+/// density lines, as given to [`AxesMut::grouped_bar`](super::AxesMut::grouped_bar),
+/// [`AxesMut::stacked_bar`](super::AxesMut::stacked_bar),
+/// [`AxesMut::stacked_area`](super::AxesMut::stacked_area),
+/// [`AxesMut::grouped_hist`](super::AxesMut::grouped_hist) or
+/// [`AxesMut::grouped_kde`](super::AxesMut::grouped_kde): its label, values and color.
 ///
 /// # Examples
 ///
@@ -202,8 +204,9 @@ impl BarMark {
 pub struct Series {
     /// The legend label; empty for none.
     pub label: String,
-    /// One value per category for bars or per x value for areas, in the same order. NaN skips
-    /// a bar or breaks every stacked area layer.
+    /// One value per category for bars or per x value for areas, in the same order, or the
+    /// values to count or to estimate a density of. NaN skips a bar, breaks every stacked area
+    /// layer, or is left out of a histogram or a density.
     pub values: Vec<f64>,
     /// The series color.
     pub color: ColorSpec,
@@ -366,8 +369,9 @@ impl BarGroupMark {
     }
 }
 
-/// A read-only view of one series of a [`BarGroupMark`] or
-/// [`StackedAreaMark`](super::StackedAreaMark): its label, values and color as given.
+/// A read-only view of one series of a [`BarGroupMark`],
+/// [`StackedAreaMark`](super::StackedAreaMark) or [`HistGroupMark`](super::HistGroupMark): its
+/// label, values and color as given.
 ///
 /// # Examples
 ///

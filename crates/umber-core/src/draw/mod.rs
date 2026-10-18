@@ -41,11 +41,13 @@ mod cells;
 mod chrome;
 mod clip;
 pub(crate) mod colorbar;
+mod ecdf;
 mod error_bars;
 pub(crate) mod fill;
 mod heatmap;
 mod hexbin;
 mod hist;
+mod kde;
 pub(crate) mod legend;
 mod line;
 mod mapping;
@@ -240,17 +242,19 @@ pub(crate) fn marks(
                 }
             }
             ResolvedMark::Hist {
-                ref histogram,
-                color,
+                ref bins,
+                ref layers,
+                style,
+                width,
                 ..
             } => {
-                if let Some(histogram) = histogram {
+                if let Some(bins) = bins {
                     hist::hist_items(
                         &context,
-                        &resolved.x,
-                        &resolved.y,
-                        histogram,
-                        color,
+                        (&resolved.x, &resolved.y),
+                        bins,
+                        layers,
+                        (style, width),
                         &mut items,
                     );
                 }
@@ -352,6 +356,22 @@ pub(crate) fn marks(
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. } => {}
+            ResolvedMark::Ecdf {
+                mark: ecdf_mark,
+                color,
+                width,
+                ..
+            } => {
+                ecdf::ecdf_items(&context, resolved, ecdf_mark, (color, width), &mut items);
+            }
+            ResolvedMark::Kde {
+                mark: kde_mark,
+                color,
+                width,
+                ..
+            } => {
+                kde::kde_items(&context, resolved, kde_mark, (color, width), &mut items);
+            }
         }
     }
     rule::rule_layer(&context, resolved, marks, layer_clip, &mut items);

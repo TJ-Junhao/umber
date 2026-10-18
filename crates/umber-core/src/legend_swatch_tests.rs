@@ -148,7 +148,8 @@ fn filled(name: &str, theme: &Theme, color: Rgba) -> (Figure, Fill) {
                 HistOptions {
                     label,
                     color: spec,
-                    bins: 2,
+                    bins: crate::Bins::Count(2),
+                    ..HistOptions::default()
                 },
             )
             .unwrap();
