@@ -21,6 +21,7 @@ _TIME = 3
 
 
 @final
+# PEP 695 syntax would make the unused parameter covariant; ``Scale`` must stay invariant.
 class Scale(Generic[T]):  # noqa: UP046
     """An axis scale. The type parameter is the type of the values the axis holds.
 
