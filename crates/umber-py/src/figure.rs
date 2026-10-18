@@ -58,6 +58,26 @@ type SeriesArgs<'py> = Vec<(String, Bound<'py, PyAny>, ColorArg)>;
 /// Named sample groups and their color, in distribution order.
 type DistributionArgs<'py> = Vec<(String, Vec<Bound<'py, PyAny>>, ColorArg)>;
 
+/// Named coordinate pairs, already converted by the Python facade.
+type XyGroupArgs<'py> = Vec<(String, Bound<'py, PyAny>, Bound<'py, PyAny>)>;
+
+/// Copies grouped coordinates into the forms held by the core.
+fn xy_groups(
+    context: &'static str,
+    groups: XyGroupArgs<'_>,
+) -> PyResult<Vec<(String, umber_core::AxisData, umber_core::AxisData)>> {
+    groups
+        .into_iter()
+        .map(|(label, x, y)| {
+            Ok((
+                label,
+                series_data(context, "x", &x)?,
+                series_data(context, "y", &y)?,
+            ))
+        })
+        .collect()
+}
+
 /// The `kind` of a grid index argument that is `AUTO`.
 const AUTO_INDEX: i64 = 0;
 /// The `kind` of a grid index argument that is the index given.
@@ -1513,6 +1533,97 @@ impl Figure {
         let series = Self::series(series)?;
         self.axes(row, col)?
             .grouped_kde(series, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named lines atomically, with palette colors in group order.
+    fn grouped_line(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: XyGroupArgs<'_>,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let groups = xy_groups("Axes.line()", groups)?;
+        let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        self.axes(row, col)?
+            .grouped_line(groups, dash, width)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named areas atomically, with palette colors in group order.
+    fn grouped_area(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: XyGroupArgs<'_>,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let groups = xy_groups("Axes.area()", groups)?;
+        let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        self.axes(row, col)?
+            .grouped_area(groups, dash, width)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named scatter series atomically, with palette colors in group order.
+    fn grouped_scatter(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: XyGroupArgs<'_>,
+        marker: i64,
+        size: SizeArg,
+    ) -> PyResult<()> {
+        let groups = xy_groups("Axes.scatter()", groups)?;
+        let (marker, size) = (enum_value::<Marker>(marker)?, size_spec(size)?);
+        self.axes(row, col)?
+            .grouped_scatter(groups, marker, size)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named step lines atomically, checking their order within each group.
+    fn grouped_step(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: XyGroupArgs<'_>,
+        position: i64,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let groups = xy_groups("Axes.step()", groups)?;
+        let position = enum_value::<Step>(position)?;
+        let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        self.axes(row, col)?
+            .grouped_step(groups, position, dash, width)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds named ECDFs atomically, preserving numeric and time columns.
+    fn grouped_ecdf(
+        &mut self,
+        row: i64,
+        col: i64,
+        groups: Vec<(String, Bound<'_, PyAny>)>,
+        complementary: bool,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let groups = groups
+            .into_iter()
+            .map(|(label, values)| Ok((label, series_data("Axes.ecdf()", "values", &values)?)))
+            .collect::<PyResult<Vec<_>>>()?;
+        let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        self.axes(row, col)?
+            .grouped_ecdf(groups, complementary, dash, width)
             .map(drop)
             .map_err(core_error)
     }

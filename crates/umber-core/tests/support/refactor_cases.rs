@@ -91,6 +91,7 @@ mod corpus {
     pub mod baseline;
     pub mod r#box;
     pub mod bubbles;
+    pub mod by;
     pub mod category_labels;
     pub mod cmap;
     pub mod color_by;
@@ -194,6 +195,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::hist_variants::cases(&lib, &mut sink);
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);
+    corpus::by::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

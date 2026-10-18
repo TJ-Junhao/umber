@@ -630,3 +630,45 @@ class Figure:
         dash: int,
         width: _SizeArg,
     ) -> None: ...
+    def grouped_line(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_area(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_scatter(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        marker: int,
+        size: _SizeArg,
+    ) -> None: ...
+    def grouped_step(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        position: int,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def grouped_ecdf(
+        self,
+        row: int,
+        col: int,
+        groups: list[tuple[str, _SeriesValues]],
+        complementary: bool,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...

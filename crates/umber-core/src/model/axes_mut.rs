@@ -3007,6 +3007,243 @@ impl<'a> AxesMut<'a> {
         axes.marks.extend(marks.into_iter().map(Mark::Kde));
         Ok(self)
     }
+
+    /// Adds one line per named pair of coordinate columns, in the given order.
+    /// Each group takes the next palette color. The rules of [`AxesMut::line_shared`]
+    /// apply to every group; no mark is added unless all groups are valid.
+    /// An empty list of groups is `Error::Data`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]))];
+    /// axes.grouped_line(groups, Dash::Solid, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_line(
+        &mut self,
+        groups: Vec<(String, AxisData, AxisData)>,
+        dash: crate::Dash,
+        width: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.line()";
+        check_series_y(CONTEXT, self.y)?;
+        let series = self.xy_groups(CONTEXT, groups, LINE_GAP_HINT)?;
+        self.axes_mut()
+            .marks
+            .extend(series.into_iter().map(|(label, series)| {
+                Mark::line(
+                    series,
+                    LineOptions {
+                        label,
+                        dash,
+                        width,
+                        ..LineOptions::default()
+                    },
+                )
+            }));
+        Ok(self)
+    }
+
+    /// Adds one filled area per named pair of columns, in order with palette colors.
+    /// The rules of [`AxesMut::area_shared`] apply to every group. Groups must not be empty;
+    /// a failed call adds nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]))];
+    /// axes.grouped_area(groups, Dash::Solid, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_area(
+        &mut self,
+        groups: Vec<(String, AxisData, AxisData)>,
+        dash: crate::Dash,
+        width: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.area()";
+        check_series_y(CONTEXT, self.y)?;
+        let series = self.xy_groups(CONTEXT, groups, AREA_GAP_HINT)?;
+        self.axes_mut()
+            .marks
+            .extend(series.into_iter().map(|(label, series)| {
+                Mark::area(
+                    series,
+                    AreaOptions {
+                        label,
+                        dash,
+                        width,
+                        ..AreaOptions::default()
+                    },
+                )
+            }));
+        Ok(self)
+    }
+
+    /// Adds one scatter per named pair of columns, in order with palette colors.
+    /// Coordinates follow [`AxesMut::scatter_shared`]; groups must not be empty.
+    /// All groups use the same marker and size. A failed call adds nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Figure, Marker, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]))];
+    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_scatter(
+        &mut self,
+        groups: Vec<(String, AxisData, AxisData)>,
+        marker: crate::Marker,
+        size: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.scatter()";
+        check_not_two_categories(CONTEXT, self.x, self.y)?;
+        let series = self.xy_groups(CONTEXT, groups, SCATTER_GAP_HINT)?;
+        self.axes_mut()
+            .marks
+            .extend(series.into_iter().map(|(label, series)| {
+                Mark::scatter(
+                    series,
+                    ScatterOptions {
+                        label,
+                        marker,
+                        size,
+                        ..ScatterOptions::default()
+                    },
+                )
+            }));
+        Ok(self)
+    }
+
+    /// Adds one step line per named pair of columns, in order with palette colors.
+    /// The rules of [`AxesMut::step_shared`], including the x order, apply within each group.
+    /// Groups must not be empty. A failed call adds nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Step, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]))];
+    /// axes.grouped_step(groups, Step::Post, Dash::Solid, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_step(
+        &mut self,
+        groups: Vec<(String, AxisData, AxisData)>,
+        position: crate::Step,
+        dash: crate::Dash,
+        width: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.step()";
+        check_series_y(CONTEXT, self.y)?;
+        let series = self.xy_groups(CONTEXT, groups, LINE_GAP_HINT)?;
+        let marks = series
+            .into_iter()
+            .map(|(label, series)| {
+                check_step_order(CONTEXT, series.x())?;
+                let options = StepOptions {
+                    label,
+                    position,
+                    dash,
+                    width,
+                    ..StepOptions::default()
+                };
+                Ok(Mark::Step(StepMark::new(series, options)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.axes_mut().marks.extend(marks);
+        Ok(self)
+    }
+
+    /// Adds one ECDF per named column, in order with palette colors.
+    /// Every group is normalized on its own and follows [`AxesMut::ecdf`]. Groups must not
+    /// be empty; no mark is added unless all groups are valid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.grouped_ecdf(vec![("North".into(), AxisData::Numbers(vec![2.0, 3.0]))],
+    ///     false, Dash::Solid, SizeSpec::Auto)?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn grouped_ecdf(
+        &mut self,
+        groups: Vec<(String, AxisData)>,
+        complementary: bool,
+        dash: crate::Dash,
+        width: crate::SizeSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.ecdf()";
+        check_groups_present(CONTEXT, groups.len())?;
+        let marks = groups
+            .into_iter()
+            .map(|(label, values)| {
+                let options = EcdfOptions {
+                    label,
+                    complementary,
+                    dash,
+                    width,
+                    ..EcdfOptions::default()
+                };
+                EcdfMark::new(CONTEXT, (self.x, self.y), values, options).map(Mark::Ecdf)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.axes_mut().marks.extend(marks);
+        Ok(self)
+    }
+
+    /// Validates grouped coordinates without changing the axes or retaining input buffers.
+    fn xy_groups(
+        &self,
+        context: &'static str,
+        groups: Vec<(String, AxisData, AxisData)>,
+        gap_hint: &'static str,
+    ) -> Result<Vec<(String, XySeries)>> {
+        check_groups_present(context, groups.len())?;
+        groups
+            .into_iter()
+            .map(|(label, x, y)| {
+                XySeries::new(context, (self.x, self.y), x, y, gap_hint)
+                    .map(|series| (label, series))
+            })
+            .collect()
+    }
+}
+
+/// Refuses an empty collection of named data columns before building marks.
+fn check_groups_present(context: &'static str, count: usize) -> Result<()> {
+    if count == 0 {
+        return Err(
+            Error::data(context, "series is empty; pass at least one series.")
+                .with_parameter("series"),
+        );
+    }
+    Ok(())
 }
 
 /// Checks that `axis`, of scale kind `kind`, is a time axis for the span method `context`,
