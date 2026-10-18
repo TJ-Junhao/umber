@@ -16,10 +16,10 @@
 //! hook is left alone: in debug builds the default or host hook may print a message for a
 //! malformed fallback or system font.
 //!
-//! System fonts are memory-mapped by `fontdb` whenever they are read, including when a layout is
-//! outlined. A system font file that changes or disappears between layout and outline yields the
-//! new contents or nothing for those glyphs; the outline never panics. Shaping copies only the
-//! tables the shaper reads from a system font, never its outlines.
+//! A system font file is read into memory the first time one of its faces draws a character,
+//! once per process, and layouts, outlines and scenes share those bytes; a file that changes or
+//! disappears afterwards does not change them. Shaping copies only the tables the shaper reads
+//! from a system font, never its outlines.
 //!
 //! # Examples
 //!
@@ -62,7 +62,8 @@ mod system;
 mod tests;
 
 pub(crate) use font::OwnedFace;
-pub use layout::TextLayout;
+pub(crate) use layout::{GlyphRun, PlacedGlyph, ProgramId, RunFont};
+pub use layout::{TextGlyphs, TextLayout};
 pub(crate) use library::CheckedStyle;
 pub use library::{FontLibrary, SceneFonts};
 pub use style::{FaceId, TextStyle};

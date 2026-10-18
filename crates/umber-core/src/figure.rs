@@ -5,8 +5,9 @@
 //! that receives it, so a model that exists is always drawable. Marks hold copies of their data
 //! that never change, so clones of a figure share them.
 //! Colors stay as [`ColorSpec`](crate::ColorSpec)s until rendering resolves them against the
-//! theme's palette. [`Figure::to_scene`], [`Figure::to_png`] and [`Figure::to_svg`] run the
-//! render pipeline: resolve scales, ticks and mark colors, lay out the axes, then draw.
+//! theme's palette. [`Figure::to_scene`], [`Figure::to_png`], [`Figure::to_svg`] and
+//! [`Figure::to_pdf`] run the render pipeline: resolve scales, ticks and mark colors, lay out
+//! the axes, then draw.
 //!
 //! # Examples
 //!
@@ -51,7 +52,7 @@ pub use crate::model::{
 pub use crate::model::{StemMark, StemOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
 
-use crate::render::{SvgText, check_dpi, render_png, render_svg};
+use crate::render::{SvgText, check_dpi, render_pdf, render_png, render_svg};
 use crate::scene::Scene;
 use crate::{FontLibrary, Result, pipeline, resolve};
 
@@ -73,7 +74,9 @@ impl Figure {
     /// padding or mark geometry. A hidden baseline leaves its coincident gridline visible.
     /// A non-empty figure header follows as one unclipped group: the figure title,
     /// subtitle and merged legend. Without axes it holds the background and any figure
-    /// title or subtitle. The same figure always gives the same scene.
+    /// title or subtitle. The same figure always gives the same scene. The scene holds the
+    /// fonts its text was shaped with, system fonts included (see
+    /// [`TextGlyphs`](crate::TextGlyphs)), so it renders the same after font files change.
     ///
     /// Heatmaps, 2-D histograms and meshes draw their cells, as their options'
     /// [`Render`] says, either as one [`Item::Fill`](crate::Item::Fill) per
@@ -225,6 +228,33 @@ impl Figure {
     pub fn to_svg(&self, text: SvgText) -> Result<String> {
         let scene = self.scene(FontLibrary::global(), "Figure.to_svg()")?;
         Ok(render_svg(&scene, text))
+    }
+
+    /// Renders the figure as a one-page PDF document, with the global [`FontLibrary`].
+    ///
+    /// The page is the figure's size in points (72 per inch). Text is embedded as text in
+    /// subsets of its fonts, so it can be selected and searched; see [`render_pdf`].
+    ///
+    /// # Errors
+    ///
+    /// `Error::Style` with context `"Figure.to_pdf()"` when the plot area or its x tick labels
+    /// cannot fit (see [`Figure::to_scene`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Signal");
+    /// let pdf = figure.to_pdf()?;
+    /// assert!(pdf.starts_with(b"%PDF-"));
+    /// assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 432 288]"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn to_pdf(&self) -> Result<Vec<u8>> {
+        let scene = self.scene(FontLibrary::global(), "Figure.to_pdf()")?;
+        render_pdf(&scene)
     }
 }
 

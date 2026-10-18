@@ -1008,6 +1008,7 @@ mod tests {
             color: RED,
             outline: Path::new(),
             width: nan,
+            glyphs: crate::text::TextGlyphs::default(),
         }));
 
         for mode in [SvgText::Outlines, SvgText::Editable] {
