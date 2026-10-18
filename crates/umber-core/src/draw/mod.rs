@@ -54,13 +54,16 @@ mod mesh;
 mod rule;
 mod scatter;
 pub(crate) use scatter::{MARKER_OUTLINE, marker_reach};
+mod events;
 mod stacked_area;
 mod stem;
 mod step;
+mod strip;
 mod stroke;
 #[cfg(test)]
 mod tests;
 mod violin;
+pub(crate) use strip::check as check_points;
 
 pub(crate) use chrome::{baseline, chrome, figure_header};
 pub(crate) use heatmap::annotations as heatmap_annotations;
@@ -352,6 +355,29 @@ pub(crate) fn marks(
             | ResolvedMark::VLine { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. } => {}
+            ResolvedMark::Events {
+                mark, color, width, ..
+            } => {
+                events::items(&context, resolved, mark, (color, width), &mut items);
+            }
+            ResolvedMark::Points {
+                categories,
+                groups,
+                color,
+                size,
+                orientation,
+                placement,
+                ..
+            } => {
+                strip::items(
+                    &context.oriented(orientation),
+                    resolved.along_and_values(orientation),
+                    categories,
+                    groups,
+                    (color, size, placement),
+                    &mut items,
+                );
+            }
         }
     }
     rule::rule_layer(&context, resolved, marks, layer_clip, &mut items);

@@ -246,6 +246,12 @@ pub enum Mark {
     Hist2d(super::mesh::Hist2dMark),
     /// Paired numeric coordinates counted in regular pointy-top hexagons.
     Hexbin(super::mesh::HexbinMark),
+    /// Short vertical event ticks in category rows.
+    Events(super::EventsMark),
+    /// Circular samples jittered within their category bands.
+    Strip(super::StripMark),
+    /// Circular samples packed without overlap within their category bands.
+    Swarm(super::SwarmMark),
 }
 
 impl Mark {
@@ -295,6 +301,7 @@ impl Mark {
             | Mark::ErrorBars(_)
             | Mark::Stem(_) => return None,
             Mark::Heatmap(mark) => return Some(mark.color_scale()),
+            Mark::Events(_) | Mark::Strip(_) | Mark::Swarm(_) => return None,
         };
         match color {
             PointColor::Uniform(_) => None,

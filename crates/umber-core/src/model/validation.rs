@@ -727,6 +727,23 @@ pub(super) fn check_time_error_bars(
     Ok(())
 }
 
+/// Checks one event row, retaining its group index and the positions highlight.
+pub(super) fn check_event_positions(x: ScaleKind, index: usize, data: &AxisData) -> Result<()> {
+    const CONTEXT: &str = "Axes.events()";
+    match (data, x) {
+        (AxisData::Times(_), ScaleKind::Time) => Ok(()),
+        (AxisData::Numbers(values), ScaleKind::Linear | ScaleKind::Log { .. }) => {
+            let transform = match x {
+                ScaleKind::Log { base } => Transform::Log(base),
+                _ => Transform::Linear,
+            };
+            check_numbers(CONTEXT, (&format!("positions[{index}]"), "positions"), values, transform, "use NaN to leave an event out.")
+        }
+        _ => Err(Error::data(CONTEXT, format!("positions[{index}] does not match the x axis; pass numbers on numeric axes or times on a time axis."))
+            .with_parameter("positions").with_hint("use x=Scale.time() for dates and times, or a linear or log x axis for numbers.")),
+    }
+}
+
 /// The words that finish the message for a reference line whose value is not finite.
 pub(super) const REFERENCE_LINE: &str = "a reference line needs a finite value";
 

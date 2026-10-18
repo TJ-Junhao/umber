@@ -36,6 +36,9 @@ pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, Distribu
 pub use crate::model::{BubbleMark, BubbleOptions};
 pub use crate::model::{CmapChoice, ColorBy, PointColor};
 pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use crate::model::{
+    EventsMark, EventsOptions, StripMark, StripOptions, SwarmMark, SwarmOptions,
+};
 pub use crate::model::{HeatmapMark, HeatmapOptions};
 pub use crate::model::{
     HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,

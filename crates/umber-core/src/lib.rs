@@ -77,6 +77,8 @@
 //!   [`time_from_micros`], which read times given as microseconds, with [`MISSING_TIME`];
 //! - scales: [`ScaleKind`] and [`LogBase`];
 //! - output: [`SvgText`];
+//! - event rows: [`EventsMark`] and [`EventsOptions`]; category points: [`StripMark`],
+//!   [`StripOptions`], [`SwarmMark`] and [`SwarmOptions`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
 //!
 //! **Advanced Rust API.** Lower-level building blocks for direct Rust use. They are public and
@@ -164,6 +166,7 @@ pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionVi
 pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{CmapChoice, ColorBy, PointColor};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use figure::{EventsMark, EventsOptions, StripMark, StripOptions, SwarmMark, SwarmOptions};
 pub use figure::{HeatmapMark, HeatmapOptions};
 pub use figure::{
     HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,

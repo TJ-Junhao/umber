@@ -91,6 +91,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/color_by.rs
   crates/umber-core/tests/support/corpus/colorbar.rs
   crates/umber-core/tests/support/corpus/error_bars.rs
+  crates/umber-core/tests/support/corpus/events.rs
   crates/umber-core/tests/support/corpus/grid.rs
   crates/umber-core/tests/support/corpus/header.rs
   crates/umber-core/tests/support/corpus/heatmap.rs
@@ -108,6 +109,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/stacked_area.rs
   crates/umber-core/tests/support/corpus/stem.rs
   crates/umber-core/tests/support/corpus/step.rs
+  crates/umber-core/tests/support/corpus/strip.rs
   crates/umber-core/tests/support/corpus/ticks.rs
   crates/umber-core/tests/support/corpus/time.rs
   crates/umber-core/tests/support/corpus/violin.rs
