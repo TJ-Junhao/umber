@@ -147,7 +147,7 @@ impl Geometry {
                     });
                 }
             }
-            Item::Text(_) => {}
+            Item::Text(_) | Item::RotatedText { .. } => {}
         }
     }
 
@@ -536,6 +536,7 @@ mod tests {
             {
                 let item = crate::draw::marks(
                     figure.theme(),
+                    library,
                     &resolved,
                     &layout,
                     std::slice::from_ref(&mark),

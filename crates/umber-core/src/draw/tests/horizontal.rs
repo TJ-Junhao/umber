@@ -59,7 +59,13 @@ fn marks_on_square(figure: &Figure) -> Vec<Item> {
     layout.plot = SQUARE;
     layout.baseline = PlacedBaseline::on(&SQUARE, resolved.baseline);
     let marks = resolve_figure_marks(figure).swap_remove(0);
-    match crate::draw::marks(figure.theme(), &resolved, &layout, &marks) {
+    match crate::draw::marks(
+        figure.theme(),
+        crate::FontLibrary::global(),
+        &resolved,
+        &layout,
+        &marks,
+    ) {
         Some(Item::Group { items, .. }) => items,
         other => panic!("expected a marks group, got {other:?}"),
     }

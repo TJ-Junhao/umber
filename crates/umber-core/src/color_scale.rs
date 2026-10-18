@@ -479,6 +479,19 @@ impl<'a> MappedColors<'a> {
     }
 }
 
+/// The levels of a contour that a colorbar marks: the levels of the first contour among the
+/// color-mapped marks of its axes (or sharing group).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ColorLevels {
+    /// The levels, increasing, with their automatic labels.
+    pub ticks: Vec<Tick>,
+    /// Where the level values come from, for writing them in a tick format.
+    pub values: TickValues,
+    /// Whether the bar is drawn as bands between the levels, as a filled contour colors its
+    /// bands, rather than as a smooth gradient.
+    pub banded: bool,
+}
+
 /// The color scale of an axes, resolved: its colormap, the norm of its range and the ticks of
 /// that range, in increasing position.
 #[derive(Debug, Clone, PartialEq)]
@@ -487,8 +500,11 @@ pub(crate) struct ResolvedColorScale {
     pub cmap: Cmap,
     /// How values map to positions on the colormap.
     pub norm: Norm,
-    /// The ticks of the range, positioned on `0..=1` along it.
+    /// The ticks of the range, positioned on `0..=1` along it: at the contour levels inside
+    /// the range when there are `levels` and one lies inside it, else automatic.
     pub ticks: Vec<AxisTick>,
+    /// The contour levels the colorbar marks; `None` without a color-mapped contour.
+    pub levels: Option<ColorLevels>,
 }
 
 impl ResolvedColorScale {
@@ -496,7 +512,8 @@ impl ResolvedColorScale {
     /// limits are `limits`, under `theme`: the spec of the first color-mapped mark, over the
     /// limits, or else over the extent of the finite mapped values (positive ones on a log
     /// scale). `None` when no mark is color-mapped or no mapped value is finite, even with
-    /// limits: then nothing color-mapped is drawn.
+    /// limits: then nothing color-mapped is drawn. The levels of the first color-mapped contour
+    /// among the marks, if any, become the ticks ([`ColorLevels`]).
     pub fn resolve<'a, 'm: 'a>(
         marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
         limits: Option<(f64, f64)>,
@@ -504,6 +521,7 @@ impl ResolvedColorScale {
     ) -> Option<ResolvedColorScale> {
         let (spec, _) = marks.clone().find_map(ResolvedMark::color_values)?;
         let log = matches!(spec.scale, Transform::Log(_));
+        let levels = marks.clone().find_map(ResolvedMark::color_levels);
         let extent = marks
             .filter_map(ResolvedMark::color_values)
             .flat_map(|(_, values)| values.iter().copied())
@@ -512,11 +530,58 @@ impl ResolvedColorScale {
                 Some(extent.map_or((v, v), |(lo, hi)| (lo.min(v), hi.max(v))))
             })?;
         let norm = Norm::new(spec, limits.unwrap_or(extent));
-        Some(ResolvedColorScale {
+        let mut scale = ResolvedColorScale {
             cmap: spec.cmap(theme).clone(),
-            ticks: norm.ticks(),
+            ticks: Vec::new(),
             norm,
-        })
+            levels,
+        };
+        scale.ticks = scale
+            .level_ticks(&TickFormat::default())
+            .unwrap_or_else(|| scale.norm.ticks());
+        Some(scale)
+    }
+
+    /// The ticks at the contour levels inside the color range, labelled in `format`; `None`
+    /// without levels or when none lies inside the range.
+    fn level_ticks(&self, format: &TickFormat) -> Option<Vec<AxisTick>> {
+        let levels = self.levels.as_ref()?;
+        let (low, high) = self.norm.range();
+        let inside: Vec<Tick> = levels
+            .ticks
+            .iter()
+            .filter(|tick| low <= tick.value && tick.value <= high)
+            .cloned()
+            .collect();
+        let ticks: Vec<AxisTick> = format
+            .relabel(inside, levels.values)
+            .into_iter()
+            .filter_map(|tick| {
+                Some(AxisTick {
+                    pos: NormalizedPos::new(self.norm.unit(tick.value)?),
+                    label: tick.label,
+                })
+            })
+            .collect();
+        (!ticks.is_empty()).then_some(ticks)
+    }
+
+    /// The color of the band of a filled contour between the levels `below` and `above`: the
+    /// color at the middle of their positions on the colormap. The band below the first level
+    /// (`below` is `None`) takes the color of the low end of the color range and the band above
+    /// the last (`above` is `None`) that of its high end, as values beyond the color limits do;
+    /// with no level at all, the one band takes the color of the middle of the range.
+    pub(crate) fn band_color(&self, below: Option<f64>, above: Option<f64>) -> Rgba {
+        let (low, high) = self.norm.range();
+        // A level that maps to no position (not positive on a log scale) lies below the range.
+        let position = |v: f64| self.norm.unit(v).unwrap_or(0.0);
+        let t = match (below, above) {
+            (Some(below), Some(above)) => (position(below) + position(above)) / 2.0,
+            (None, Some(_)) => position(low),
+            (Some(_), None) => position(high),
+            (None, None) => 0.5,
+        };
+        self.cmap.at(t)
     }
 
     /// Chooses colorbar ticks against the same measured room as axis ticks. Every candidate
@@ -526,6 +591,14 @@ impl ResolvedColorScale {
         room: &crate::layout::TickRoom<'_>,
         format: &crate::TickFormat,
     ) -> Self {
+        // Contour levels are ticks in their own right: every level is marked while the labels
+        // keep apart, and else every second, fifth or tenth one, as on a category axis.
+        if let Some(levels) = self.level_ticks(format) {
+            return Self {
+                ticks: room.category_ticks(levels),
+                ..self.clone()
+            };
+        }
         let mut ticks = self.norm.ticks_for(room.target, format);
         if room.slack(&ticks) < 0.0 {
             for target in (2..room.target).rev() {

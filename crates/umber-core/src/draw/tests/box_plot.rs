@@ -130,7 +130,14 @@ fn box_coverage_counts_fills_whiskers_medians_and_outliers() {
         }
         let (resolved, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
         let marks = resolve_marks(f.single_axes().marks(), f.theme());
-        let item = crate::draw::marks(f.theme(), &resolved, &layout, &marks).unwrap();
+        let item = crate::draw::marks(
+            f.theme(),
+            crate::FontLibrary::global(),
+            &resolved,
+            &layout,
+            &marks,
+        )
+        .unwrap();
         let prepared = marks[0].for_coverage(Some(crate::coverage::Geometry::of(&item)));
         let score = |x, y| {
             let candidate = crate::layout::Frame {

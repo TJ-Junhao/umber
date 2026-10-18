@@ -597,7 +597,8 @@ impl Canvas {
                 stroke.as_ref(),
                 positions,
             ),
-            Item::Text(text) => {
+            // A turned text's outline is already turned.
+            Item::Text(text) | Item::RotatedText { text, .. } => {
                 if !text_is_visible(text.color, text.origin) {
                     return;
                 }

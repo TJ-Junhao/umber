@@ -75,9 +75,14 @@ fn overshoot(
         else {
             continue;
         };
-        let Item::Group { items, .. } =
-            crate::draw::marks(f.theme(), resolved, layout, std::slice::from_ref(mark)).unwrap()
-        else {
+        let Item::Group { items, .. } = crate::draw::marks(
+            f.theme(),
+            crate::FontLibrary::global(),
+            resolved,
+            layout,
+            std::slice::from_ref(mark),
+        )
+        .unwrap() else {
             panic!("a mark group")
         };
         let drawn = data
@@ -260,7 +265,7 @@ fn explicit_limits_are_kept_and_clip_the_bubbles() {
     let Item::Group {
         items,
         clip: Some(clip),
-    } = crate::draw::marks(f.theme(), &r, &layout, &marks).unwrap()
+    } = crate::draw::marks(f.theme(), crate::FontLibrary::global(), &r, &layout, &marks).unwrap()
     else {
         panic!("clipped marks")
     };

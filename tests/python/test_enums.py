@@ -19,6 +19,7 @@ ENUMS = [
     ub.Align,
     ub.Step,
     ub.Render,
+    ub.Contour,
 ]
 
 

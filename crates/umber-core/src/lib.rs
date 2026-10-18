@@ -66,6 +66,8 @@
 //!   read-only [`MeshMark`], [`Hist2dMark`] and [`HexbinMark`] payloads of [`Mark`], and
 //!   [`Render`], which draws the cells of heatmaps, 2-D histograms and meshes as vector shapes
 //!   or as one image;
+//! - contours: [`ContourOptions`] with its [`ContourLevels`], [`ContourStyle`] and level limit
+//!   [`MAX_LEVELS`], and the read-only [`ContourMark`] payload of [`Mark`];
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
@@ -112,6 +114,7 @@ pub mod color;
 #[cfg(test)]
 mod color_by_tests;
 mod color_scale;
+mod contour;
 mod coverage;
 pub mod downsample;
 mod draw;
@@ -163,6 +166,7 @@ pub use figure::{BandMark, BandOptions};
 pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{CmapChoice, ColorBy, PointColor};
+pub use figure::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
 pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
 pub use figure::{HeatmapMark, HeatmapOptions};
 pub use figure::{

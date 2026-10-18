@@ -35,6 +35,7 @@ use pyo3::prelude::*;
 fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", umber_core::VERSION)?;
     m.add("MAX_BINS", umber_core::MAX_BINS)?;
+    m.add("MAX_LEVELS", umber_core::MAX_LEVELS)?;
     m.add_class::<theme::Theme>()?;
     m.add_class::<cmap::Cmap>()?;
     m.add_class::<figure::Figure>()?;

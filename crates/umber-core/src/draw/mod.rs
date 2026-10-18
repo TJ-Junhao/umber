@@ -41,6 +41,7 @@ mod cells;
 mod chrome;
 mod clip;
 pub(crate) mod colorbar;
+mod contour;
 mod error_bars;
 pub(crate) mod fill;
 mod heatmap;
@@ -65,10 +66,10 @@ mod violin;
 pub(crate) use chrome::{baseline, chrome, figure_header};
 pub(crate) use heatmap::annotations as heatmap_annotations;
 
-use crate::Theme;
 use crate::layout::{Area, Layout};
 use crate::resolve::{Baseline, Orientation, Resolved, ResolvedMark};
 use crate::scene::{Item, Rect};
+use crate::{FontLibrary, Theme};
 use mapping::{AxisMaps, axis_values};
 
 /// What every mark implementation draws with: the theme, the axis maps and the plot geometry.
@@ -105,9 +106,11 @@ impl MarkContext<'_> {
 }
 
 /// The `marks` as one group clipped to [`marks_clip`], in the given order, each in its resolved
-/// color. `None` when nothing is visible.
+/// color, with the text they carry (the level labels of contours) shaped with `lib`. `None`
+/// when nothing is visible.
 pub(crate) fn marks(
     theme: &Theme,
+    lib: &FontLibrary,
     resolved: &Resolved,
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
@@ -346,6 +349,21 @@ pub(crate) fn marks(
                 mark: heatmap_mark, ..
             } => {
                 heatmap::heatmap_items(&context, resolved, heatmap_mark, &mut items);
+            }
+            ResolvedMark::Contour {
+                mark,
+                ref mapped,
+                color,
+                ref shapes,
+                ..
+            } => {
+                let contour = contour::Contour {
+                    mark,
+                    mapped: mapped.is_some(),
+                    color,
+                    shapes,
+                };
+                contour::contour_items(&context, lib, resolved, contour, &mut items);
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }

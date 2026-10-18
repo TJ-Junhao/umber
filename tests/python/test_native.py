@@ -17,6 +17,7 @@ def details(err: BaseException) -> tuple[object, object]:
 
 def test_constants() -> None:
     assert _umber.MAX_BINS == 10_000
+    assert _umber.MAX_LEVELS == 64
     assert isinstance(_umber.__version__, str)
 
 
@@ -48,6 +49,7 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
         "Step": [("POST", 0), ("PRE", 1), ("MID", 2)],
         "ColorbarPosition": [("RIGHT", 0), ("BOTTOM", 1), ("NONE", 2)],
         "Render": [("VECTOR", 0), ("RASTER", 1)],
+        "Contour": [("LINES", 0), ("FILLED", 1), ("BOTH", 2)],
     }
 
 
@@ -67,6 +69,7 @@ def test_enum_members_keys_are_the_bound_enum_names() -> None:
         "Step",
         "ColorbarPosition",
         "Render",
+        "Contour",
     }
 
 

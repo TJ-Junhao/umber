@@ -10,6 +10,7 @@ mod box_plot;
 mod cells;
 mod chrome;
 mod clip;
+mod contour;
 mod downsample;
 mod error_bars;
 mod hist;

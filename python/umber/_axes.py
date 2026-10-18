@@ -21,6 +21,7 @@ from umber._enums import (
     AUTO,
     Auto,
     ColorbarPosition,
+    Contour,
     Dash,
     LegendPosition,
     LegendStyle,
@@ -95,6 +96,7 @@ _LEGEND_POSITION_HINT: Final = (
 _RENDER_HINT: Final = (
     "use ub.Render.VECTOR or ub.Render.RASTER, or ub.AUTO to choose by the number of cells."
 )
+_CONTOUR_HINT: Final = _members_hint(Contour)
 _FORMAT_HINT: Final = (
     "use TickFormat.fixed(2), TickFormat.percent(), TickFormat.scientific() or TickFormat.AUTO."
 )
@@ -2338,7 +2340,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 )
             x_names = names(context, "x_categories", x_categories)
             y_names = names(context, "y_categories", y_categories)
-            cells = matrix(context, "values", values, (len(y_names), len(x_names)))
+            cells = matrix(
+                context,
+                "values",
+                values,
+                (len(y_names), len(x_names)),
+                lengths="(len(y_categories), len(x_categories))",
+                hint="pass one row per y category.",
+            )
             self._native.heatmap(
                 self._row,
                 self._col,
@@ -2354,6 +2363,157 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 drawn,
             )
             return self
+
+    def contour(
+        self: "Axes[float, float]",
+        x: Values[float],
+        y: Values[float],
+        z: object,
+        *,
+        levels: int | Values[float] | Auto = AUTO,
+        style: Contour = Contour.LINES,
+        cmap: Cmap | Auto = AUTO,
+        scale: Scale[float] = Scale.linear(),  # noqa: B008
+        center: float | Auto = AUTO,
+        color: Color = Color.AUTO,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+    ) -> "Axes[float, float]":
+        """Add a contour of a field sampled on a rectangular grid: lines, filled bands, or both.
+
+        ``z`` holds the field at the grid points, one row per y coordinate. Each cell of the
+        grid lies between four neighbouring points; along its sides the field is linear, and the
+        lines run straight across it between the points where the level crosses its sides. A
+        cell whose corners alternate above and below a level joins its high corners when the
+        mean of its four values is at or above the level, and separates them otherwise. A NaN
+        value leaves the four cells around it out of every line and band, as a hole.
+
+        Lines are colored by their level from the colormap, unless ``color`` gives them one
+        color. Bands take the color of the middle of their range, and the regions below the
+        first level and above the last the colors at the ends of the color range, as values
+        beyond ``clim()`` do. The colors come from the color scale of these axes, which every
+        color-mapped mark shares; the colorbar shows the levels, as bands for filled contours
+        and as ticks on a smooth bar for lines. Automatic limits are the outer coordinates,
+        without padding. By default a contour alone draws no baseline.
+
+        Args:
+            x: The x coordinates of the grid's columns, strictly increasing, at least two.
+            y: The y coordinates of the grid's rows, strictly increasing, at least two.
+            z: The field as a two-dimensional array or a list of rows, shaped
+                ``(len(y), len(x))``: one row per y coordinate.
+            levels: ``AUTO`` for about seven round values strictly inside the range of the
+                finite values, chosen as round ticks are (log ticks on a log ``scale``); an int
+                from 1 to 64 for about that many; or the levels themselves, strictly
+                increasing. Levels outside the range of the values draw no line.
+            style: ``Contour.LINES``, ``Contour.FILLED`` or ``Contour.BOTH``.
+            cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center``
+                is given and its sequential colormap otherwise.
+            scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
+            center: The value at the middle of a diverging colormap, as for ``ColorBy``;
+                ``AUTO`` for a sequential mapping.
+            color: ``Color.AUTO`` colors each line by its level. Any other color draws every
+                line of ``Contour.LINES`` in it; the contour is then not color-mapped and draws
+                no colorbar.
+            annotate: Whether each line at least three times as long as its label carries its
+                level's value at its middle, along the line and upright, in the tick font, with
+                the line broken under it.
+            format: The format of the values that ``annotate`` writes. ``AUTO`` writes them
+                with the decimals of the step between round levels, or the decimals that given
+                levels need.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, or ``scale`` is not linear or log.
+            DataError: If ``z`` is not shaped ``(len(y), len(x))``, a coordinate is not finite,
+                not strictly increasing or not positive on a log axis, there are fewer than two
+                along an axis, or a value is infinite, beyond 1e300 in magnitude, or not
+                positive on a log scale.
+            StyleError: If a count of levels is not from 1 to 64, given levels are not finite
+                and strictly increasing, ``center`` is not finite or comes with a log scale,
+                ``format`` is ``TickFormat.iso()``, or the color range set by ``clim()`` does
+                not suit ``scale`` or ``center``.
+            UsageError: If an axis is not linear or log (type checkers refuse such axes),
+                ``color`` is given with filled bands or with ``cmap`` or ``center``,
+                ``annotate`` is ``True`` with ``Contour.FILLED``, ``format`` is given without
+                ``annotate``, or ``cmap``, ``scale`` or ``center`` differs from those of the
+                other color-mapped marks of these axes.
+
+        Example:
+            >>> import numpy as np
+            >>> import umber as ub
+            >>> x, y = np.linspace(-2, 2, 41), np.linspace(-1.5, 1.5, 31)
+            >>> z = np.exp(-(x[None, :] ** 2) - y[:, None] ** 2)
+            >>> ax = ub.Figure().add_axes().contour(x, y, z, annotate=True)
+            >>> filled = ub.Figure().add_axes().contour(x, y, z, style=ub.Contour.BOTH)
+            >>> few = ub.Figure().add_axes().contour(x, y, z, levels=[0.25, 0.5, 0.75])
+        """
+        with api_call():
+            context = "Axes.contour()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            count = _contour_count(context, levels)
+            if count is None and levels is not AUTO:
+                check_floats_type(context, "levels", levels)
+            drawn = instance(context, "style", style, Contour, _CONTOUR_HINT)
+            native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
+            spec = _color_argument(context, color)
+            shows = _args.boolean(context, "annotate", annotate)
+            checked = (
+                None
+                if format is AUTO
+                else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
+            )
+            _numeric_cells(context, self, time=False)
+            xs, ys = floats(context, "x", x), floats(context, "y", y)
+            values = matrix(
+                context,
+                "z",
+                z,
+                (len(ys), len(xs)),
+                lengths="(len(y), len(x))",
+                hint="pass one row of z per y coordinate, each with one value per x coordinate.",
+            )
+            given: int | FloatArray | None = count
+            if count is None and levels is not AUTO:
+                given = floats(context, "levels", levels)
+            self._native.contour(
+                self._row,
+                self._col,
+                xs,
+                ys,
+                values,
+                given,
+                drawn.value,
+                native_cmap,
+                kind,
+                base,
+                middle,
+                spec,
+                shows,
+                checked,
+            )
+            return self
+
+
+def _contour_count(context: str, levels: object) -> int | None:
+    """Check a ``levels`` argument that is a count of levels and return it; ``None`` otherwise.
+
+    An int or NumPy integer, but not a ``bool``, is a count, from 1 to 64.
+    """
+    if isinstance(levels, bool | np.bool_) or not isinstance(levels, int | np.integer):
+        return None
+    count = integer(context, "levels", cast(object, levels))
+    if not 1 <= count <= _umber.MAX_LEVELS:
+        raise new_error(
+            StyleError,
+            context,
+            f"levels is {count}; a count of levels must be between 1 and {_umber.MAX_LEVELS}.",
+            parameter="levels",
+            hint="ask for a few levels, such as levels=7, or pass the level values.",
+        )
+    return count
 
 
 def _render_argument(context: str, value: object) -> int | None:

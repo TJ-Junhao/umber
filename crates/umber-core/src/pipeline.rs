@@ -1065,7 +1065,7 @@ fn plan(
                     .iter()
                     .map(|mark| {
                         let geometry =
-                            draw::marks(theme, &resolved, &layout, std::slice::from_ref(mark))
+                            draw::marks(theme, lib, &resolved, &layout, std::slice::from_ref(mark))
                                 .map(|item| crate::coverage::Geometry::of(&item));
                         mark.for_coverage(geometry)
                     })
@@ -1487,7 +1487,7 @@ fn scene_with_labels(
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
         scene.push(draw::chrome(theme, layout));
-        if let Some(marks) = draw::marks(theme, resolved, layout, &panel.marks) {
+        if let Some(marks) = draw::marks(theme, library, resolved, layout, &panel.marks) {
             scene.push(marks);
         }
         let notes = draw::heatmap_annotations(
