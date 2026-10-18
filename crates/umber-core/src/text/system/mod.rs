@@ -55,6 +55,7 @@ use crate::fonts::Weight;
 use crate::text::font::FontHandle;
 
 pub(super) use self::lookup::Budget;
+pub(crate) use self::lookup::find_family;
 pub(super) use self::shaping::{SHAPING_CACHE_BYTES, SystemShaping};
 
 #[cfg(test)]

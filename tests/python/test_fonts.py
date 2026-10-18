@@ -61,9 +61,12 @@ def test_fonts_copy_and_pickle_to_the_same_constant(protocol: int) -> None:
 def test_font_construction_is_refused_with_a_hint() -> None:
     with pytest.raises(TypeError) as caught:
         ub.Font()
-    assert str(caught.value) == "Font(): Font has no public constructor; use a bundled font."
+    assert str(caught.value) == (
+        "Font(): Font has no public constructor; "
+        "use a bundled font, Font.from_file() or Font.system()."
+    )
     assert details(caught.value) == (
         None,
-        "use Font.SOURCE_SERIF_4, Font.IBM_PLEX_SANS, Font.GEIST, Font.INTER or "
-        "Font.JETBRAINS_MONO.",
+        "use Font.SOURCE_SERIF_4, Font.IBM_PLEX_SANS, Font.GEIST, Font.INTER, "
+        "Font.JETBRAINS_MONO, Font.from_file() or Font.system().",
     )
