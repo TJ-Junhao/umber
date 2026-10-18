@@ -46,6 +46,10 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(figure::grid_cells, m)?)?;
     m.add_function(wrap_pyfunction!(color::named_colors, m)?)?;
     m.add_function(wrap_pyfunction!(font::bundled_fonts, m)?)?;
+    m.add_class::<font::FontValue>()?;
+    m.add_function(wrap_pyfunction!(font::font_from_files, m)?)?;
+    m.add_function(wrap_pyfunction!(font::font_system, m)?)?;
+    m.add_function(wrap_pyfunction!(font::check_file_bold_fallback, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_hex, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_rgb, m)?)?;
     m.add_function(wrap_pyfunction!(color::color_with_alpha, m)?)?;

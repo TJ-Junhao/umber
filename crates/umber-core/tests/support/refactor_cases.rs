@@ -100,6 +100,7 @@ mod corpus {
     pub mod ecdf;
     pub mod error_bars;
     pub mod events;
+    pub mod font_file;
     pub mod grid;
     pub mod header;
     pub mod heatmap;
@@ -204,6 +205,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);
     corpus::pie::cases(&lib, &mut sink);
+    corpus::font_file::cases(&lib, &mut sink);
     corpus::by::cases(&lib, &mut sink);
     corpus::contour::cases(&lib, &mut sink);
 }
@@ -1546,13 +1548,14 @@ mod record {
         )
     }
 
-    pub fn font(f: &Font) -> &'static str {
+    pub fn font(f: &Font) -> &str {
         match f {
             Font::Bundled(BundledFont::SourceSerif4) => "source-serif-4",
             Font::Bundled(BundledFont::IbmPlexSans) => "ibm-plex-sans",
             Font::Bundled(BundledFont::Geist) => "geist",
             Font::Bundled(BundledFont::Inter) => "inter",
             Font::Bundled(BundledFont::JetBrainsMono) => "jetbrains-mono",
+            Font::File(_) | Font::System(_) => f.family_name(),
         }
     }
 
