@@ -133,6 +133,8 @@ def test_horizontal_values_are_checked_on_the_x_axis() -> None:
         ("step", ([0.0, 1.0], [1.0, 2.0])),
         ("stem", ([0.0, 1.0], [1.0, 2.0])),
         ("hist", ([1.0, 2.0],)),
+        ("ecdf", ([1.0, 2.0],)),
+        ("kde", ([1.0, 2.0],)),
         ("hline", (1.0,)),
         ("hspan", (0.0, 1.0)),
         ("y_error_bars", ([0.0], [0.0], [1.0])),

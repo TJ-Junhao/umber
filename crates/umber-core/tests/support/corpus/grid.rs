@@ -137,7 +137,7 @@ fn spanning(theme: Theme) -> Figure {
         .hist(
             &values,
             HistOptions {
-                bins: 12,
+                bins: umber_core::Bins::Count(12),
                 ..HistOptions::default()
             },
         )

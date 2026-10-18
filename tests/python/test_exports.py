@@ -27,6 +27,7 @@ EXPECTED = [
     "Figure",
     "Font",
     "GridLines",
+    "Hist",
     "Legend",
     "LegendPosition",
     "LegendStyle",
@@ -35,6 +36,7 @@ EXPECTED = [
     "Scale",
     "Share",
     "Size",
+    "Stat",
     "Step",
     "StyleError",
     "SupportsArray",
@@ -102,6 +104,8 @@ def test_enums_are_exported_as_enums() -> None:
         "Step",
         "SvgText",
         "ColorbarPosition",
+        "Hist",
+        "Stat",
     }
 
 
