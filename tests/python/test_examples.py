@@ -28,3 +28,7 @@ def test_example_writes_png(script: Path, tmp_path: Path) -> None:
     assert images, "the example wrote no PNG"
     for image in images:
         assert image.read_bytes().startswith(PNG_SIGNATURE), image.name
+    if script.name == "pdf.py":
+        pdf = (tmp_path / "pdf.pdf").read_bytes()
+        assert pdf.startswith(b"%PDF-")
+        assert pdf.rstrip().endswith(b"%%EOF")

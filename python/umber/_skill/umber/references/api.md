@@ -3144,6 +3144,7 @@ A canvas with a size, a theme and a grid of axes.
 Create a figure, add panels with ``add_axes()``, draw on their axes, then render with
 ``to_png()`` or ``to_svg()``, or write with ``save_png()`` or ``save_svg()``. Empty cells
 show the background. Positions count from zero; an axes may span several cells.
+``to_pdf()`` and ``save_pdf()`` produce a vector PDF with embedded fonts.
 
 ``copy.copy()`` and ``copy.deepcopy()`` return an independent figure with the same size,
 theme, grid, axes and marks; changing one leaves the other unchanged. ``axes_at()``
@@ -3309,6 +3310,32 @@ Example:
 >>> ax = fig.add_axes(col=0).scatter([1, 2], [2, 3], color=ub.ColorBy([4, 8]))
 ```
 
+### `umber.Figure.save_pdf`
+
+```text
+Figure.save_pdf(self, path: str | os.PathLike[str]) -> None
+```
+
+Render the figure as a PDF document and write it to ``path``.
+
+Args:
+    path: The file to write; an existing file is replaced.
+
+Raises:
+    TypeError: If ``path`` is not a ``str`` or a path-like object returning a string.
+    StyleError: If the plot area or its x tick labels cannot fit the figure, or a
+        font cannot render the requested text.
+    OSError: If the file cannot be written.
+
+Example:
+
+```python
+>>> from pathlib import Path
+>>> import umber as ub
+>>> fig = ub.line([0, 1, 2], [1, 3, 2]).figure
+>>> fig.save_pdf(Path("signal.pdf"))
+```
+
 ### `umber.Figure.save_png`
 
 ```text
@@ -3421,6 +3448,33 @@ Example:
 >>> import umber as ub
 >>> fig = ub.Figure(cols=2).title("Revenue")
 >>> ax = fig.add_axes(col=0).title("North")
+```
+
+### `umber.Figure.to_pdf`
+
+```text
+Figure.to_pdf(self) -> bytes
+```
+
+Render the figure as a single-page PDF with embedded fonts.
+
+The page has the figure's size in points (72 points per inch). Lines, fills and text
+stay vector; raster cell grids remain images. Text can be selected and searched.
+
+Returns:
+    The PDF file contents.
+
+Raises:
+    StyleError: If the plot area or its x tick labels cannot fit the figure, or a
+        font cannot render the requested text.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> pdf = ub.line([0, 1, 2], [1, 3, 2]).figure.to_pdf()
+>>> pdf.startswith(b"%PDF-")
+True
 ```
 
 ### `umber.Figure.to_png`

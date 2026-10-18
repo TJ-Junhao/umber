@@ -193,6 +193,17 @@ impl Figure {
             .map_err(|err| core_error(err.with_context(context)))
     }
 
+    /// Renders the figure as a PDF with the interpreter released. Errors are reported in
+    /// `context`.
+    fn pdf<'py>(slf: &Bound<'py, Self>, context: &'static str) -> PyResult<Bound<'py, PyBytes>> {
+        let figure = Self::snapshot(slf)?;
+        let py = slf.py();
+        let pdf = py
+            .detach(move || figure.to_pdf())
+            .map_err(|err| core_error(err.with_context(context)))?;
+        Ok(PyBytes::new(py, &pdf))
+    }
+
     /// The tick positions `obj` of a time axis, an int64 buffer of microseconds, named
     /// `positions` in the messages of `context`. A missing time cannot be a tick, so the core
     /// refuses it as a time out of range.
@@ -1167,6 +1178,11 @@ impl Figure {
         Self::svg(slf, text, "Figure.to_svg()")
     }
 
+    /// Renders the figure as a PDF document.
+    fn to_pdf<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyBytes>> {
+        Self::pdf(slf, "Figure.to_pdf()")
+    }
+
     /// Renders the figure as a PNG at `dpi` for `Figure.save_png()`, which reports its errors.
     fn png_for_file<'py>(slf: &Bound<'py, Self>, dpi: i64) -> PyResult<Bound<'py, PyBytes>> {
         Self::png(slf, dpi, "Figure.save_png()")
@@ -1175,6 +1191,11 @@ impl Figure {
     /// Renders the figure as an SVG document for `Figure.save_svg()`, which reports its errors.
     fn svg_for_file(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
         Self::svg(slf, text, "Figure.save_svg()")
+    }
+
+    /// Renders the figure as a PDF document for `Figure.save_pdf()`, which reports its errors.
+    fn pdf_for_file<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyBytes>> {
+        Self::pdf(slf, "Figure.save_pdf()")
     }
 
     /// Replaces the axes' colorbar label and optional overrides.
