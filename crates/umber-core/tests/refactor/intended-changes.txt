@@ -1,6 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# Only raster SVG data URIs change; decoded pixels, scenes and final PNG bytes stay identical.
-fig-category-labels-heatmap-1000
-heatmap-raster
-hist2d-raster-limits
-mesh-log-raster
+# Cases whose committed outputs change on purpose in this change; none.
