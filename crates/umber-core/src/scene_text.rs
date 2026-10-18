@@ -14,8 +14,9 @@ use crate::text::{FaceId, SceneFonts, TextLayout, TextStyle};
 impl TextItem {
     /// The record for `text`, already shaped as `layout` with `style`, drawn at `origin`.
     ///
-    /// The outline is built from `layout` placed at `origin` and is owned by the record, so it
-    /// does not borrow `layout` or the library that shaped it.
+    /// The outline is built from `layout` placed at `origin`, and the glyphs are those of
+    /// `layout`. Both are owned by the record, so it does not borrow `layout` or the library
+    /// that shaped it.
     pub(crate) fn from_layout(
         text: String,
         style: TextStyle,
@@ -30,6 +31,7 @@ impl TextItem {
             color,
             outline: layout.outline(origin),
             width: layout.width(),
+            glyphs: layout.glyphs(),
         }
     }
 }
@@ -40,7 +42,9 @@ impl Scene {
     /// `origin` is the left end of the baseline. `style.face` names a font of `fonts`; the
     /// item names the same font by its index in this scene's [`fonts`](Scene::fonts), which
     /// gains the font when it does not hold it yet. Empty text still pushes an item, with an
-    /// empty outline and zero width.
+    /// empty outline and zero width. The item's [`glyphs`](TextItem::glyphs) share the bytes
+    /// of the fonts it was shaped with, system fonts included, so later changes to font files
+    /// do not change the scene.
     ///
     /// # Errors
     ///
@@ -265,5 +269,80 @@ mod tests {
         let mut scene = Scene::new(100.0, 50.0, BLACK);
         scene.push_text(&fonts, "Signal", s, origin, color).unwrap();
         assert_eq!(text_item(&scene), &item);
+    }
+
+    #[test]
+    fn pushed_text_keeps_the_glyphs_its_outline_was_drawn_from() {
+        let fonts = fonts();
+        let mut scene = Scene::new(200.0, 100.0, BLACK);
+        scene
+            .push_text(&fonts, "Revenue", style(), Point { x: 3.0, y: 40.0 }, BLACK)
+            .unwrap();
+        let item = text_item(&scene);
+        let layout = fonts.layout("Revenue", &style()).unwrap();
+        assert_eq!(item.glyphs, layout.glyphs());
+        assert_eq!(item.glyphs.glyph_count(), 7);
+        assert_eq!(item.glyphs.size(), 12.0);
+        // The glyphs are placed relative to the origin, as the layout placed them.
+        let run = &item.glyphs.runs()[0];
+        assert_eq!(run.glyphs()[0].x, 0.0);
+        assert!(run.glyphs().windows(2).all(|pair| pair[0].x < pair[1].x));
+    }
+
+    #[test]
+    fn glyph_texts_spell_the_source_text() {
+        let fonts = fonts();
+        for text in [
+            "Revenue 2024",
+            "office ffi",
+            "naïve café",
+            "a\u{301}b",
+            "x\u{301}\u{302}",
+        ] {
+            let glyphs = fonts.layout(text, &style()).unwrap().glyphs();
+            let spelled: String = glyphs
+                .runs()
+                .iter()
+                .flat_map(|run| run.glyph_texts())
+                .collect();
+            assert_eq!(spelled, text);
+            for run in glyphs.runs() {
+                assert_eq!(run.glyph_texts().len(), run.glyphs().len());
+            }
+        }
+    }
+
+    #[test]
+    fn runs_of_each_font_name_their_font() {
+        let library = FontLibrary::with_fallbacks(vec![
+            include_bytes!("../tests/fixtures/fallback-only.ttf").to_vec(),
+        ]);
+        let fonts = library.with_figure_fonts(&[Font::INTER]).unwrap();
+        let s = TextStyle {
+            face: FaceId::new(0),
+            ..style()
+        };
+        let text = format!("A{}B", crate::fonts::FALLBACK_TEST_CODEPOINT);
+        let glyphs = fonts.layout(&text, &s).unwrap().glyphs();
+        let runs = glyphs.runs();
+        assert_eq!(runs.len(), 3);
+        let program = |i: usize| runs[i].run_font().program().unwrap();
+        assert_eq!(program(0), program(2));
+        assert_ne!(program(0), program(1));
+        assert_eq!(
+            runs[1].glyph_texts(),
+            [crate::fonts::FALLBACK_TEST_CODEPOINT.to_string()]
+        );
+        // The fallback font's bytes can be read again for embedding.
+        let read = runs[1]
+            .run_font()
+            .with_data(|data, index| Some((data.len(), index)));
+        assert_eq!(read.map(|(_, index)| index), Some(0));
+    }
+
+    #[test]
+    fn hand_built_text_has_no_glyphs() {
+        assert!(crate::text::TextGlyphs::default().is_empty());
+        assert_eq!(crate::text::TextGlyphs::default().glyph_count(), 0);
     }
 }

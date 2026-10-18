@@ -1,7 +1,7 @@
 //! Renderers that turn a [`Scene`](crate::scene::Scene) into bytes.
 //!
-//! The PNG and SVG backends are pure functions of a scene. They share no state with each other
-//! or with layout. This module holds the options they have in common.
+//! The PNG, SVG and PDF backends are pure functions of a scene. They share no state with each
+//! other or with layout. This module holds the options they have in common.
 //!
 //! # Examples
 //!
@@ -13,8 +13,10 @@
 
 mod image;
 pub(crate) mod normalize;
+mod pdf;
 mod svg;
 
+pub use pdf::render_pdf;
 pub use svg::render_svg;
 
 /// How the SVG backend writes text. `Outlines` is the default.

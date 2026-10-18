@@ -40,11 +40,10 @@ pub(super) enum FontKey {
 enum FontData {
     /// A bundled font, embedded in the binary.
     Bundled(&'static [u8]),
-    /// A font passed to [`FontLibrary::with_fallbacks`](super::FontLibrary::with_fallbacks).
-    Extra(Arc<Vec<u8>>),
-    /// A system font. fontdb memory-maps the file each time it is read, and outlining copies
-    /// nothing. The `Arc` keeps the database alive for as long as a layout refers to it.
-    System(Arc<fontdb::Database>, fontdb::ID),
+    /// A font file loaded into memory once and shared, never changed: one passed to
+    /// [`FontLibrary::with_fallbacks`](super::FontLibrary::with_fallbacks), or a system font
+    /// file the system font index loaded.
+    Shared(Arc<Vec<u8>>),
 }
 
 /// A shared handle to the font a run was shaped with: its bytes and its face index.
@@ -65,34 +64,28 @@ impl FontHandle {
 
     /// A font file passed by the caller, face 0 of it.
     pub(super) fn extra(bytes: Arc<Vec<u8>>) -> FontHandle {
-        FontHandle {
-            data: FontData::Extra(bytes),
-            index: 0,
-        }
+        FontHandle::shared(bytes, 0)
     }
 
     /// An owned face, including a face selected from an installed collection.
     pub(super) fn owned(font: &OwnedFace) -> FontHandle {
-        FontHandle {
-            data: FontData::Extra(Arc::clone(&font.bytes)),
-            index: font.index,
-        }
+        FontHandle::shared(Arc::clone(&font.bytes), font.index)
     }
 
-    /// Face `index` of the system font `id` in `db`.
-    pub(super) fn system(db: Arc<fontdb::Database>, id: fontdb::ID, index: u32) -> FontHandle {
+    /// Face `index` of the font file `bytes`, loaded and shared.
+    pub(super) fn shared(bytes: Arc<Vec<u8>>, index: u32) -> FontHandle {
         FontHandle {
-            data: FontData::System(db, id),
+            data: FontData::Shared(bytes),
             index,
         }
     }
 
-    /// Runs `f` on the font bytes and face index; `None` if the bytes cannot be read.
+    /// Runs `f` on the font bytes and face index. The bytes of every font are in memory, so
+    /// this is always `Some`.
     pub(super) fn with_data<T>(&self, f: impl FnOnce(&[u8], u32) -> T) -> Option<T> {
         match &self.data {
             FontData::Bundled(bytes) => Some(f(bytes, self.index)),
-            FontData::Extra(bytes) => Some(f(bytes, self.index)),
-            FontData::System(db, id) => db.with_face_data(*id, f),
+            FontData::Shared(bytes) => Some(f(bytes, self.index)),
         }
     }
 
@@ -106,8 +99,7 @@ impl std::fmt::Debug for FontHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = match &self.data {
             FontData::Bundled(_) => "bundled",
-            FontData::Extra(_) => "fallback",
-            FontData::System(..) => "system",
+            FontData::Shared(_) => "shared",
         };
         f.debug_struct("FontHandle")
             .field("kind", &kind)

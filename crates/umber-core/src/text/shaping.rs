@@ -91,12 +91,17 @@ pub(super) struct ShapedGlyph {
     pub(super) advance: i32,
     pub(super) x_offset: i32,
     pub(super) y_offset: i32,
+    /// The byte offset in the run's text where the characters this glyph stands for start.
+    /// Glyphs that share a cluster stand for the same characters together.
+    pub(super) cluster: u32,
 }
 
-/// The shaped glyphs of one run, with the font's units per em.
+/// The shaped glyphs of one run, with the font's units per em and the text they were shaped
+/// from.
 pub(super) struct ShapedRun {
     pub(super) units_per_em: i32,
     pub(super) glyphs: Vec<ShapedGlyph>,
+    pub(super) text: String,
 }
 
 /// Shapes several runs of text with one font, reusing shape plans across runs.
@@ -156,11 +161,13 @@ impl<'f> Shaper<'f> {
                 advance: pos.x_advance,
                 x_offset: pos.x_offset,
                 y_offset: pos.y_offset,
+                cluster: info.cluster,
             })
             .collect();
         Some(ShapedRun {
             units_per_em: i32::from(self.font.units_per_em()),
             glyphs,
+            text: text.to_owned(),
         })
     }
 }
