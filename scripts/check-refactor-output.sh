@@ -108,6 +108,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/legend.rs
   crates/umber-core/tests/support/corpus/legend_position.rs
   crates/umber-core/tests/support/corpus/mesh.rs
+  crates/umber-core/tests/support/corpus/pie.rs
   crates/umber-core/tests/support/corpus/plot_height.rs
   crates/umber-core/tests/support/corpus/rules.rs
   crates/umber-core/tests/support/corpus/share.rs

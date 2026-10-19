@@ -317,6 +317,10 @@ impl<'a> Legend<'a> {
         let mut seen_bubbles = false;
         let mut row = Vec::new();
         for (axes, marks) in figure.panels().zip(marks) {
+            let axes = match axes {
+                crate::Panel::Cartesian(axes) => axes,
+                crate::Panel::Pie(_) => continue,
+            };
             let style = axes.legend_style().unwrap_or(figure.theme().legend_style());
             if style == LegendStyle::None {
                 continue;
@@ -347,6 +351,30 @@ impl<'a> Legend<'a> {
         Legend {
             row,
             row_style: if figure.theme().legend_style() == LegendStyle::Chips {
+                RowStyle::Chips
+            } else {
+                RowStyle::Plain
+            },
+            direct: Vec::new(),
+        }
+    }
+
+    /// Pie entries belong to their panel, including zero shares; direct names are laid out
+    /// against the slices rather than Cartesian series anchors.
+    pub(crate) fn pie(style: LegendStyle, pie: Option<&crate::model::pie::Pie>) -> Self {
+        let row = if matches!(style, LegendStyle::Header | LegendStyle::Chips) {
+            pie.into_iter()
+                .flat_map(|pie| pie.slices.iter())
+                .filter_map(|slice| {
+                    LegendEntry::new(&slice.name, slice.color, Swatch::Square, SwatchFill::Solid)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self {
+            row,
+            row_style: if style == LegendStyle::Chips {
                 RowStyle::Chips
             } else {
                 RowStyle::Plain

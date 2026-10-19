@@ -27,6 +27,7 @@ mod inset;
 mod legend;
 mod nudge;
 mod panel;
+pub(crate) mod pie;
 pub(crate) mod placement;
 mod program;
 
@@ -918,7 +919,7 @@ pub(crate) struct LayoutInput<'a> {
     /// The figure title size, for attributing vertical room errors.
     pub figure_title_size: SizeSpec,
     /// The axes, for their texts and cells.
-    pub axes: &'a Axes,
+    pub axes: crate::Panel<'a>,
     /// The legend, measured by [`MeasuredLegend::measure`].
     pub legend: &'a MeasuredLegend<'a>,
     /// The fonts.
@@ -1164,10 +1165,22 @@ fn solve_single(
             input.figure_title_size,
             input.axes.title_size(),
             input.axes.subtitle_size(),
-            input.axes.xlabel_size(),
-            input.axes.ylabel_size(),
-            input.axes.xtick_size(),
-            input.axes.ytick_size(),
+            input
+                .axes
+                .cartesian()
+                .map_or(SizeSpec::Auto, Axes::xlabel_size),
+            input
+                .axes
+                .cartesian()
+                .map_or(SizeSpec::Auto, Axes::ylabel_size),
+            input
+                .axes
+                .cartesian()
+                .map_or(SizeSpec::Auto, Axes::xtick_size),
+            input
+                .axes
+                .cartesian()
+                .map_or(SizeSpec::Auto, Axes::ytick_size),
             input.axes.legend_size(),
         ]
         .into_iter()

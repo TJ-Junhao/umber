@@ -84,6 +84,8 @@
 //! - output: [`SvgText`];
 //! - event rows: [`EventsMark`] and [`EventsOptions`]; category points: [`StripMark`],
 //!   [`StripOptions`], [`SwarmMark`] and [`SwarmOptions`];
+//! - panel kinds: [`Panel`] distinguishes Cartesian axes from [`PiePanel`]; circular panels
+//!   are edited with [`PieAxesMut`] and [`PieOptions`];
 //! - text at data positions: [`TextOptions`], [`AnnotateOptions`], the read-only
 //!   [`Annotation`] with its [`AnnotationPlacement`] that [`Axes::annotations`] returns, and the
 //!   [`ValueLabels`] written on bars;
@@ -188,6 +190,7 @@ pub use figure::{HeatmapMark, HeatmapOptions};
 pub use figure::{
     HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
 };
+pub use figure::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use figure::{StemMark, StemOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{BundledFont, Font, Weight};

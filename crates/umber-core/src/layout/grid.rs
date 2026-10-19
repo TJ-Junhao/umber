@@ -1591,12 +1591,10 @@ mod tests {
     fn layouts(f: &Figure) -> Result<Vec<(CellRange, Layout)>> {
         let planned = try_plan_panels(f, lib())?;
         Ok(f.panels()
-            .map(Axes::cells)
+            .map(crate::Panel::cells)
             .zip(planned.into_iter().map(|(_, layout)| layout))
             .collect())
     }
-
-    use crate::model::Axes;
 
     fn render_error(f: &Figure) -> Error {
         f.to_scene(lib()).expect_err("the figure does not lay out")
@@ -3070,7 +3068,10 @@ mod tests {
                     .panels
                     .iter()
                     .map(|input| {
-                        let marks = crate::resolve::resolve_marks(input.axes.marks(), input.theme);
+                        let marks = crate::resolve::resolve_marks(
+                            input.axes.cartesian().unwrap().marks(),
+                            input.theme,
+                        );
                         let limits = crate::resolve::Limits::of(input.axes);
                         let (x, y) = super::super::TickRoom::unlimited(
                             3,
