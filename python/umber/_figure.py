@@ -249,7 +249,8 @@ class Figure:
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long or holds a lone surrogate.
+            StyleError: If ``text`` is too long or holds a lone surrogate. Rendering raises
+                it if the text is wider than the figure's room inside its padding.
 
         Example:
             >>> import umber as ub
@@ -278,7 +279,8 @@ class Figure:
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long or holds a lone surrogate.
+            StyleError: If ``text`` is too long or holds a lone surrogate. Rendering raises
+                it if the text is wider than the figure's room inside its padding.
 
         Example:
             >>> import umber as ub
@@ -559,8 +561,8 @@ class Figure:
 
         Raises:
             TypeError: If ``dpi`` is not an int.
-            StyleError: If ``dpi`` is out of range, the plot area or its x tick labels cannot
-                fit the figure, or the image would be too large.
+            StyleError: If ``dpi`` is out of range, the plot area, titles, subtitles,
+                axis labels or x tick labels cannot fit their room, or the image would be too large.
 
         Example:
             >>> import umber as ub
@@ -584,7 +586,8 @@ class Figure:
 
         Raises:
             TypeError: If ``text`` is not an ``SvgText``.
-            StyleError: If the plot area or its x tick labels cannot fit the figure.
+            StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
+                cannot fit their room.
 
         Example:
             >>> import umber as ub
@@ -606,8 +609,8 @@ class Figure:
             The PDF file contents.
 
         Raises:
-            StyleError: If the plot area or its x tick labels cannot fit the figure, or a
-                font cannot render the requested text.
+            StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
+                cannot fit their room, or a font cannot render the requested text.
 
         Example:
             >>> import umber as ub
@@ -628,8 +631,8 @@ class Figure:
         Raises:
             TypeError: If ``path`` is not a ``str`` or path-like object, or ``dpi`` is not
                 an int.
-            StyleError: If ``dpi`` is out of range, the plot area or its x tick labels cannot
-                fit the figure, or the image would be too large.
+            StyleError: If ``dpi`` is out of range, the plot area, titles, subtitles,
+                axis labels or x tick labels cannot fit their room, or the image would be too large.
             OSError: If the file cannot be written.
 
         Example:
@@ -652,7 +655,8 @@ class Figure:
         Raises:
             TypeError: If ``path`` is not a ``str`` or path-like object, or ``text`` is not
                 an ``SvgText``.
-            StyleError: If the plot area or its x tick labels cannot fit the figure.
+            StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
+                cannot fit their room.
             OSError: If the file cannot be written.
 
         Example:
@@ -675,8 +679,8 @@ class Figure:
 
         Raises:
             TypeError: If ``path`` is not a ``str`` or a path-like object returning a string.
-            StyleError: If the plot area or its x tick labels cannot fit the figure, or a
-                font cannot render the requested text.
+            StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
+                cannot fit their room, or a font cannot render the requested text.
             OSError: If the file cannot be written.
 
         Example:

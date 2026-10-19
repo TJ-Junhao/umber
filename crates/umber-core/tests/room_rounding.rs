@@ -226,13 +226,18 @@ fn x_tick_label_difference_suffices() {
 }
 
 fn panel_text_difference_suffices(name: &str) {
+    let text = if name == "title" {
+        "WWWWWWW"
+    } else {
+        "WWWWWWWWWWWW"
+    };
+    let cause = format!("the {name} \"{text}\" is");
     stated_room_suffices(
         |width| {
             let mut f = figure(width, 288.0, 1, 2);
             let mut ax = axes(&mut f, 0, 0);
-            let text = "WWWWWWWWWWWW";
             match name {
-                "title" => ax.title("WWWWWWW"),
+                "title" => ax.title(text),
                 "subtitle" => ax.subtitle(text),
                 "x axis label" => ax.xlabel(text),
                 _ => ax.ylabel(text),
@@ -240,7 +245,7 @@ fn panel_text_difference_suffices(name: &str) {
             f
         },
         2.0,
-        &format!("the {name} is"),
+        &cause,
     );
 }
 

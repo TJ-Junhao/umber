@@ -146,11 +146,31 @@ def test_colorbar_room_errors_exact(
         .add_axes()
         .scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8], center=0.3))
     )
-    ax.xlabel("Distance").colorbar("Intensity", position=position)
+    if position == ub.ColorbarPosition.BOTTOM:
+        ax.xlabel("Distance")
+    ax.colorbar("Intensity", position=position)
     with pytest.raises(ub.StyleError) as caught:
         ax.figure.to_svg()
     assert str(caught.value) == message
     assert details(caught.value) == (None, hint)
+
+
+def test_colorbar_plot_area_error_includes_xlabel() -> None:
+    def render(width: float) -> str:
+        ax = (
+            ub.Figure(width, 4)
+            .add_axes()
+            .scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8], center=0.3))
+        )
+        return ax.xlabel("Distance").colorbar("Intensity").figure.to_svg()
+
+    with pytest.raises(ub.StyleError) as caught:
+        render(1)
+    assert str(caught.value) == (
+        "Figure.to_svg(): the figure is 72 pt wide; at least 120 pt is needed for the plot area."
+    )
+    assert details(caught.value) == (None, "widen the figure.")
+    assert "linearGradient" in render(120 / 72)
 
 
 @pytest.mark.parametrize("position", [ub.ColorbarPosition.RIGHT, ub.ColorbarPosition.BOTTOM])
@@ -214,11 +234,11 @@ def test_colorbar_preserves_unrelated_room_errors(case: str, position: ub.Colorb
         else:
             assert expected == (
                 'Figure.to_svg(): the legend label "A long legend label" is 73 pt wide; '
-                "the panel has 14 pt."
+                "the panel has 1 pt."
             )
             expected = (
                 "Figure.to_svg(): the figure is 86 pt wide; "
-                "at least 181 pt is needed for the plot area."
+                "at least 194 pt is needed for the plot area."
             )
             hint = (None, "widen the figure.")
     assert str(mapped.value) == expected
@@ -229,8 +249,8 @@ def test_colorbar_preserves_unrelated_room_errors(case: str, position: ub.Colorb
     ("case", "side", "minimum", "area"),
     [
         ("single_height", 0.9, 190, "the plot area"),
-        ("single_legend", 2.0, 254, "the plot area"),
-        ("single_narrow_legend", 1.2, 181, "the plot area"),
+        ("single_legend", 2.0, 267, "the plot area"),
+        ("single_narrow_legend", 1.2, 194, "the plot area"),
         ("grid_height", 1.6, 219, "2 rows of plots"),
         ("grid_width", 1.5, 193, "3 columns of plots"),
         ("grid_legend", 2.0, 326, "2 columns of plots"),
@@ -395,3 +415,24 @@ def test_colorbar_single_value_has_one_tick() -> None:
     ax = ub.Figure().add_axes().scatter([1], [1], color=ub.ColorBy([17]))
     doc = ElementTree.fromstring(ax.figure.to_svg(text=ub.SvgText.EDITABLE))
     assert [node.text for node in doc.iter() if node.tag.endswith("}text")].count("17") == 1
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_colorbar_minimum_width_includes_axis_label(axis: str) -> None:
+    def render(width: float) -> str:
+        fig = ub.Figure(width, 3)
+        ax = fig.add_axes().xticks([]).yticks([])
+        setter = ax.xlabel if axis == "x" else ax.ylabel
+        setter("Distance along the river")
+        ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+        ax.colorbar("A fairly long colorbar label")
+        ax.line([1, 2], [1, 2], label="A long legend label").legend(
+            ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
+        )
+        return fig.to_svg()
+
+    with pytest.raises(ub.StyleError) as caught:
+        render(2.0)
+    message = str(caught.value)
+    minimum = int(message.split("at least ")[1].split(" pt")[0])
+    assert "linearGradient" in render(minimum / 72)

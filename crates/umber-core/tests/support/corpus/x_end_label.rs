@@ -1,8 +1,5 @@
 //! Output-gate cases for x tick labels at the ends of the axis.
 //!
-//! The cases write only new output files, so no existing manifest entry changes. See
-//! `scripts/check-refactor-output.sh`.
-//!
 //! Covered, in every theme: wide labels given to the end ticks of a line's exact x extent, so
 //! the last label insets the plot's right edge; wide automatic labels from an affixed format on
 //! a scatter's padded x axis, whose last tick sits inside the plot; a wide last category label,
@@ -17,26 +14,25 @@
 //! x tick labels were clipped before rendering failed for them: `fig-category-crowded-log`,
 //! `fig-squeezed-layout` and `fig-text-truncated`. The last two covered more than their tick
 //! labels, so each is also drawn without ticks, as `fig-squeezed-layout-no-x-ticks` (without x
-//! ticks) and `fig-text-truncated-no-ticks` (without x or y ticks): a 1 in figure with every
-//! text far too wide, and a title,
-//! subtitle and axis labels far wider than any figure, cut to the longest prefix that fits on
-//! a character boundary (ASCII, two-byte characters, and characters drawn by the fallback
-//! font).
+//! ticks) and `fig-font-scale-max-mixed-glyphs-no-ticks` (without x or y ticks): a 1 in figure at font scale
+//! 3, and ASCII, two-byte characters and fallback-font glyphs at font scale 10. Their titles
+//! and axis labels are now short enough to fit. `errors/x-label-overflow.txt` records their original
+//! oversized texts and the original 6 in wide `fig-font-scale-max`, now drawn wider.
 //!
 //! The plot's minimum width, in `errors/x-label-min-width.txt`: y tick labels that leave no room
 //! for the plot, which name the widest y tick label whether there are x ticks or not; y tick
 //! labels that leave room for the plot but not for an end label on a plot at least 1 pt wide;
 //! figures too narrow for the plot whatever their labels; and `fig-text-truncated-no-x-ticks`,
-//! whose y tick labels at font scale 10 leave no room for the plot. Its long texts are drawn
-//! without ticks as `fig-text-truncated-no-ticks`. The figure whose end label just fits is also
-//! the scene `fig-x-end-label-min-width`.
+//! whose y tick labels at font scale 10 leave no room for the plot. Its shortened texts are
+//! drawn without ticks as `fig-font-scale-max-mixed-glyphs-no-ticks`. The figure whose end label
+//! just fits is also the scene `fig-x-end-label-min-width`.
 
 use umber_core::figure::{AxisData, BarOptions, LineOptions, ScatterOptions};
 use umber_core::{Figure, FontLibrary, LegendStyle, ScaleKind, Theme, TickFormat};
 
 use super::super::{
-    Log, Output, axes, emit_scene, figure, labelled, line as plain_line, linear, log, numbers,
-    record, themes,
+    Log, Output, axes, emit_scene, figure, font_scale_figure, labelled, line as plain_line, linear,
+    log, numbers, record, themes,
 };
 
 /// Passes every output of this area to `sink`, in a fixed order.
@@ -44,12 +40,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     for (name, figure) in figures() {
         emit_scene(&name, &figure.to_scene(lib).unwrap(), sink);
     }
-    let (errors, near_cap) = overflow_errors(lib);
-    sink(Output {
-        kind: "errors",
-        file: "x-label-overflow.txt".into(),
-        bytes: errors.into_bytes(),
-    });
+    let (mut errors, near_cap) = overflow_errors(lib);
     emit_scene(
         "fig-x-end-label-near-cap",
         &near_cap.to_scene(lib).unwrap(),
@@ -65,8 +56,22 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         &end_after_wide_y_labels(21).to_scene(lib).unwrap(),
         sink,
     );
+    let mut rec = Log::default();
+    rec.section("Figure::to_scene, titles that previously ran outside the figure");
+    render(
+        &mut rec,
+        "fig-font-scale-max, original 6 in width",
+        &font_scale_figure(10.0, 6.0, 12.0),
+        lib,
+    );
     let mut f = squeezed(SQUEEZED_NO_X_TICKS_HEIGHT);
     axes(&mut f).xticks(&[]).unwrap();
+    render(&mut rec, "fig-squeezed-layout-no-x-ticks", &f, lib);
+    axes(&mut f)
+        .title("I")
+        .subtitle("S")
+        .xlabel("i")
+        .ylabel("j");
     emit_scene(
         "fig-squeezed-layout-no-x-ticks",
         &f.to_scene(lib).unwrap(),
@@ -74,11 +79,24 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     );
     let mut f = truncated_text(false, TRUNCATED_NO_TICKS_HEIGHT);
     axes(&mut f).xticks(&[]).unwrap().yticks(&[]).unwrap();
+    render(&mut rec, "fig-text-truncated-no-ticks", &f, lib);
+    axes(&mut f)
+        .title("I")
+        .subtitle("ü")
+        .xlabel("\u{E000}")
+        .ylabel("y\u{2212}");
     emit_scene(
-        "fig-text-truncated-no-ticks",
+        "fig-font-scale-max-mixed-glyphs-no-ticks",
         &f.to_scene(lib).unwrap(),
         sink,
     );
+    errors.push_str(&rec.out);
+    errors.push_str(&super::legend::title_room_errors(lib));
+    sink(Output {
+        kind: "errors",
+        file: "x-label-overflow.txt".into(),
+        bytes: errors.into_bytes(),
+    });
 }
 
 /// Fourteen long category names on a 3 in figure with a log y axis, which crowd each other.
@@ -103,8 +121,8 @@ fn crowded_category() -> Figure {
 /// about 3 in.
 const SQUEEZED_NO_X_TICKS_HEIGHT: f64 = 3.5;
 
-/// The height, in inches, of `fig-text-truncated-no-ticks`: its header and axis labels take
-/// about 7.5 in.
+/// The height, in inches, of `fig-font-scale-max-mixed-glyphs-no-ticks`: its header and axis
+/// labels take about 7.5 in.
 const TRUNCATED_NO_TICKS_HEIGHT: f64 = 9.0;
 
 /// A 1 in wide figure `height` in tall at font scale 3 whose every text is far too wide.

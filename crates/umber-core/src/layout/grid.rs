@@ -30,8 +30,9 @@
 //! 4. Headers. A panel's header starts at its row's top; its title, subtitle and legend row
 //!    start at the plot's left edge, and the legend row wraps within the plot's width. The x
 //!    axis labels of a row sit at the bottom of its band below the plots, so they line up.
-//! 5. Containment. Once the final layout is placed, every panel's title, subtitle, legend row
-//!    entries and axis labels must fit its plot width, and its direct labels its frame (see
+//! 5. Containment. Once the final layout is placed, titles, subtitles and legends must fit
+//!    their header extent. Axis labels must fit their placement extent: the plot width, plus
+//!    the tick column for the left y label. Direct labels must fit the panel's frame (see
 //!    [`check_panel_contents`]).
 //!
 //! Each panel's frame, the part of the canvas that belongs to it, is its plot with its
@@ -40,7 +41,9 @@
 //! marks clip of a panel never reaches into the next cell.
 
 use super::inset::{CONTAINMENT_TOLERANCE, TickSpan};
-use super::panel::{HeaderBox, PanelBands, PanelSlot, PanelSpan, end_label_cap};
+use super::panel::{
+    HeaderBox, PanelBands, PanelSlot, PanelSpan, TextContainer, TextKind, end_label_cap,
+};
 use super::program;
 use super::{
     AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, LEGEND_HINT, Label, Layout, LayoutInput,
@@ -102,6 +105,24 @@ impl GridInput<'_> {
     /// Whether the grid is a single cell, laid out as one panel on the canvas.
     fn is_single(&self) -> bool {
         self.grid.rows() * self.grid.cols() == 1
+    }
+
+    /// The title and legend extent: the inner canvas for one cell, otherwise the plot span.
+    fn header_span(&self, left: f64, right: f64) -> (f64, f64) {
+        if self.is_single() {
+            (PADDING, self.width - PADDING)
+        } else {
+            (left, right)
+        }
+    }
+
+    /// Adds a cell location only when the figure has more than one cell.
+    fn panel_error(&self, cells: CellRange, error: Error) -> Error {
+        if self.is_single() {
+            error
+        } else {
+            in_panel(cells, error)
+        }
     }
 
     /// The gap between neighbouring cells.
@@ -257,7 +278,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
         });
     }
     let cells: Vec<CellRange> = input.panels.iter().map(|p| p.axes.cells()).collect();
-    let columns = Columns::measure(input, &cells, bands);
+    let mut columns = Columns::measure(input, &cells, bands);
     let open = columns.place(&columns.no_growth());
     if open.plot_width < MIN_PLOT {
         return Err(if input.colorbars.is_empty() {
@@ -266,6 +287,9 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             shared_width_error(input, &cells, bands)
         });
     }
+    // Let an axis label that already exceeds the open plot report its own containment error.
+    // Otherwise x tick insets must preserve the room that the axis labels need.
+    columns.keep_fitting_widths(&open);
     let mut bounds = columns.label_bounds(&cells, bands, f64::INFINITY);
     bounds.extend(columns.colorbar_bounds(input));
     let placed = match fit_columns(&columns, &bounds) {
@@ -289,6 +313,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             let last_row = cells.row() + cells.row_span() - 1;
             let (frame_left, frame_right) = placed.frame(*cells, columns.canvas);
             let (frame_top, frame_bottom) = rows.frame(*cells, input.height);
+            let (header_left, header_right) = input.header_span(left, right);
             PanelSlot {
                 plot: Area {
                     x: left,
@@ -297,8 +322,8 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                     height: bottom - top,
                 },
                 header: HeaderBox {
-                    left,
-                    right,
+                    left: header_left,
+                    right: header_right,
                     top: rows.row_top[cells.row()],
                 },
                 xlabel_baseline: bottom + (rows.below[last_row] - rows.legends[last_row])
@@ -366,6 +391,8 @@ struct Columns {
     left: Vec<f64>,
     /// `R[c]`: the band right of each column's plots.
     right: Vec<f64>,
+    /// The plot width needed by each panel's axis labels, over all its spanned columns.
+    min_widths: Vec<(CellRange, f64)>,
 }
 
 /// The columns placed for some growth of their bands.
@@ -463,12 +490,48 @@ impl Columns {
         for (right, bar) in right.iter_mut().zip(shared_right(input)) {
             *right += bar;
         }
+        let mut min_widths: Vec<_> = cells
+            .iter()
+            .zip(bands)
+            .map(|(cell, band)| (*cell, band.min_plot_width(band.y_tick_column)))
+            .collect();
+        for (i, panel) in input.panels.iter().enumerate() {
+            if let crate::model::Layer::Twin { parent, .. } = panel.axes {
+                min_widths[parent].1 =
+                    bands[parent].min_twin_plot_width(&bands[i], bands[parent].y_tick_column);
+            }
+        }
+        min_widths.retain(|(_, width)| *width > MIN_PLOT);
         Columns {
             canvas: input.width,
             gap: input.gap(),
             left,
             right,
+            min_widths,
         }
+    }
+
+    /// Keeps only axis labels that fit before x tick insets, as in the single-panel solve.
+    fn keep_fitting_widths(&mut self, open: &PlacedColumns) {
+        self.min_widths.retain_mut(|(cells, width)| {
+            let (left, right) = open.span(*cells);
+            if *width > right - left + CONTAINMENT_TOLERANCE {
+                return false;
+            }
+            *width = width.min(right - left);
+            true
+        });
+    }
+
+    /// The least spare width per column, counting every panel's axis labels as well as the
+    /// minimum plot size. A spanning panel may use the bands and gaps between its columns.
+    fn width_room(&self, placed: &PlacedColumns) -> f64 {
+        self.min_widths
+            .iter()
+            .fold(placed.plot_width - MIN_PLOT, |room, (cells, width)| {
+                let (left, right) = placed.span(*cells);
+                room.min((right - left - width) / cells.col_span() as f64)
+            })
     }
 
     /// Bottom colorbar tick labels obey the same edge and gap bounds as x tick labels.
@@ -704,6 +767,20 @@ impl Columns {
             coefficients: vec![-1.0; vars],
             bound: -(open.plot_width - MIN_PLOT) * cols as f64,
         });
+        for (cells, width) in &self.min_widths {
+            let first = cells.col();
+            let last = first + cells.col_span() - 1;
+            let (left, right) = open.span(*cells);
+            let mut coefficients = vec![-(cells.col_span() as f64) / cols as f64; vars];
+            for c in first..last {
+                coefficients[Columns::right_growth(c, cols)] += 1.0;
+                coefficients[Columns::left_growth(c + 1)] += 1.0;
+            }
+            rows.push(program::Row {
+                coefficients,
+                bound: width - (right - left),
+            });
+        }
         rows
     }
 
@@ -720,7 +797,7 @@ impl Columns {
             let placed = self.place(&growth);
             let within_caps = growth[0] <= cap_left + CONTAINMENT_TOLERANCE
                 && growth[1] <= cap_right + CONTAINMENT_TOLERANCE
-                && placed.plot_width >= MIN_PLOT - CONTAINMENT_TOLERANCE;
+                && self.width_room(&placed) >= -CONTAINMENT_TOLERANCE;
             if !within_caps {
                 return None;
             }
@@ -889,7 +966,9 @@ impl Rows {
         {
             let first = cells.row();
             let last = first + cells.row_span() - 1;
-            let row = panel.legend.header_within(left, right);
+            let header = input.header_span(left, right);
+            let row = panel.legend.header_for_plot(header, (left, right));
+            let (left, right) = header;
             above[first] = above[first].max(band.above_with_row(&row));
             below[last] = below[last]
                 .max(band.below() - band.bottom_legend - band.bottom_colorbar - band.bottom_offset);
@@ -1009,10 +1088,12 @@ fn rows_too_short(
         let first = cell.row();
         let last = first + cell.row_span() - 1;
         let legend = input.panels[i].legend;
-        let row = legend.header_within(spans[i].0, spans[i].1);
+        let header = input.header_span(spans[i].0, spans[i].1);
+        let row = legend.header_for_plot(header, spans[i]);
+        let (left, right) = header;
         let above = band.above_with_row(&row);
         let below = band.axis_below();
-        let bottom = legend.bottom_reserve(spans[i].0, spans[i].1) + band.bottom_colorbar;
+        let bottom = legend.bottom_reserve(left, right) + band.bottom_colorbar;
         // Only the panels defining an aligned band can be its cause. Equal colorbars share
         // that band, so removing just one of those panels would not shrink it.
         let excess = |value: f64, aligned: f64, plain: f64| {
@@ -1074,11 +1155,11 @@ impl PlacedRows {
 /// The error for columns whose plots are narrower than [`MIN_PLOT`] before x tick labels are
 /// fitted.
 ///
-/// The plots lack `deficit` pt in all. If the y tick labels of one column, narrower by the
-/// deficit, would leave room, they are the cause: the error names the widest y tick label of
-/// the widest such column, in the first panel whose labels are that wide (see
-/// [`y_labels_leave_no_room`]). Otherwise it names the width the figure needs (see
-/// [`grid_too_narrow`]).
+/// If narrower y tick labels of one column would leave room, including the axis titles
+/// without that tick column, the error names the widest y tick label of the widest such
+/// column, in the first panel whose labels are that wide (see [`y_labels_leave_no_room`]).
+/// A y title that cannot fit even with the largest usable tick column is named instead.
+/// Otherwise the error names the width the figure needs (see [`grid_too_narrow`]).
 fn columns_too_narrow(
     input: &GridInput<'_>,
     cells: &[CellRange],
@@ -1087,7 +1168,7 @@ fn columns_too_narrow(
 ) -> Error {
     let cols = columns.count();
     let placed = columns.place(&columns.no_growth());
-    let deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
+    let deficit = -columns.width_room(&placed) * cols as f64;
     let plain: Vec<_> = cells
         .iter()
         .zip(bands)
@@ -1129,20 +1210,59 @@ fn columns_too_narrow(
     let culprit = cells
         .iter()
         .zip(bands)
-        .filter(|(_, b)| !b.y_labels.is_empty() && b.y_label_width - deficit >= 0.0)
-        .filter(|(c, b)| b.y_tick_column == columns.left[c.col()])
+        .enumerate()
+        .filter(|(_, (c, b))| !b.y_labels.is_empty() && b.y_tick_column == columns.left[c.col()])
+        .filter_map(|(i, (c, b))| {
+            // Shorter ticks give the left y title less room outside the plot. Reserve its
+            // full width, including a twin's title and gap, before suggesting a tick width.
+            let mut min_width = b.min_plot_width(0.0);
+            for (j, panel) in input.panels.iter().enumerate() {
+                if matches!(panel.axes, crate::model::Layer::Twin { parent, .. } if parent == i) {
+                    min_width = b.min_twin_plot_width(&bands[j], 0.0);
+                }
+            }
+            let (left, right) = placed.span(*c);
+            let title_deficit = (min_width - (right - left)) * cols as f64 / c.col_span() as f64;
+            let fits = b.y_label_width - deficit.max(title_deficit);
+            (fits >= 0.0).then_some((c, b, fits))
+        })
         .fold(
             None,
-            |best: Option<(&CellRange, &PanelBands)>, (c, b)| match best {
-                Some((_, kept)) if kept.y_tick_column >= b.y_tick_column => best,
-                _ => Some((c, b)),
+            |best: Option<(&CellRange, &PanelBands, f64)>, (c, b, fits)| match best {
+                Some((_, kept, _)) if kept.y_tick_column >= b.y_tick_column => best,
+                _ => Some((c, b, fits)),
             },
         );
-    if let Some((cells, bands)) = culprit
+    if let Some((cells, bands, fits)) = culprit
         && let Some(label) = widest(&bands.y_labels)
     {
-        let err = y_labels_leave_no_room(input.context, label, bands.y_label_width - deficit);
-        return in_panel(*cells, err);
+        return in_panel(*cells, y_labels_leave_no_room(input.context, label, fits));
+    }
+    let plot_deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
+    for (i, ((cell, band), panel)) in cells.iter().zip(bands).zip(input.panels).enumerate() {
+        if band.y_labels.is_empty()
+            || band.y_tick_column != columns.left[cell.col()]
+            || band.y_label_width < plot_deficit
+        {
+            continue;
+        }
+        // The widest ticks that leave every plot MIN_PLOT wide give this left y title
+        // its most room: further shortening loses more tick column than its span gains.
+        let (left, right) = placed.span(*cell);
+        let room = right - left + band.y_tick_column
+            - plot_deficit * (1.0 - cell.col_span() as f64 / cols as f64);
+        let kind = if input.panels.iter().any(
+            |other| matches!(other.axes, crate::model::Layer::Twin { parent, .. } if parent == i),
+        ) {
+            TextKind::LeftYLabel
+        } else {
+            TextKind::YLabel
+        };
+        if let Some(axes) = panel.axes.cartesian()
+            && let Err(error) = band.check_y_title_width(axes, kind, room, input.context)
+        {
+            return input.panel_error(*cell, error);
+        }
     }
     grid_too_narrow(
         input.context,
@@ -1161,7 +1281,7 @@ fn shared_width_error(input: &GridInput<'_>, cells: &[CellRange], bands: &[Panel
             ..*input
         };
         let columns = Columns::measure(&input, cells, bands);
-        if columns.place(&columns.no_growth()).plot_width < MIN_PLOT {
+        if columns.width_room(&columns.place(&columns.no_growth())) < 0.0 {
             return false;
         }
         let mut bounds = columns.label_bounds(cells, bands, f64::INFINITY);
@@ -1228,7 +1348,9 @@ fn needed_width(
         if band.right_colorbar > 0.0 || !input.colorbars.is_empty() {
             band.right()
         } else {
-            panel.legend.direct.reserve(cap).max(band.right_legend)
+            band.right_offset
+                + panel.legend.direct.reserve(cap).max(band.right_legend)
+                + band.right_legend_offset
         }
     };
     // The columns of a canvas `width` pt wide: the same y tick label columns, and the direct
@@ -1250,7 +1372,10 @@ fn needed_width(
             ..columns.clone()
         }
     };
-    let room = |width: f64| at(width).place(&at(width).no_growth()).plot_width - MIN_PLOT;
+    let room = |width: f64| {
+        let columns = at(width);
+        columns.width_room(&columns.place(&columns.no_growth()))
+    };
     // The widths where a panel's cap equals the uncapped reserve of a panel ending in the same
     // column: cap = END_LABEL_SHARE × (cell × span + gap × (span - 1)), with
     // cell = (W - 2 × PADDING - gap × (cols - 1)) / cols.
@@ -1286,7 +1411,12 @@ fn needed_width(
         + widest_reserves
         + shared_right(input).iter().sum::<f64>()
         + gap * (cols - 1) as f64
-        + MIN_PLOT * cols as f64
+        + columns
+            .min_widths
+            .iter()
+            .map(|(_, width)| *width)
+            .fold(MIN_PLOT, f64::max)
+            * cols as f64
         + 2.0 * PADDING;
     points.push(last);
     let start = input.width;
@@ -1437,43 +1567,86 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
     })
 }
 
-/// Checks that the texts of every panel of `input`, placed as in `layouts` (in the same
-/// order), stay in the panel's cells, on a grid of more than one cell; a figure of one cell
-/// is not checked. Text that does not would run into a neighbouring cell. The final layout is
-/// checked, after the second pass of the layout, whose plots can be wider than the first's.
-///
-/// In panel order, then in this order: the title, the subtitle and every legend row entry must
-/// end within the plot width from the plot's left edge; the x axis label and the y axis label
-/// must be at most as wide as the plot; every direct label must end within the panel's frame.
+/// Checks the final texts of every panel of `input`, placed as in `layouts` and `slots`
+/// (in the same order). Titles and subtitles must fit their header box on every figure;
+/// axis labels must fit their placement extent. Twin y axis labels, colorbars and legends
+/// must also fit their room. On a grid of more than one cell, direct labels must end within
+/// the panel's frame, so that text cannot run into a neighbouring cell.
 ///
 /// # Errors
 ///
 /// `Error::Style` in `input.context` for the first text that does not, with the widths in
 /// whole points: the room rounded down, the text's width rounded up and at least one point more.
-/// - `row {r}, col {c}: the title is {w} pt wide; the panel has {p} pt.` (likewise
-///   `the subtitle`, `the x axis label` and `the y axis label`), hint
-///   `shorten the title or widen the figure.` (naming the text);
+/// - `the title "…" is {w} pt wide; the panel has {p} pt.` (likewise `the subtitle`),
+///   with the hint to widen the figure or reduce the font scale (fixed-point sizes instead
+///   suggest a smaller `size=`); on a grid, prefixed with `row {r}, col {c}: `;
+/// - `the x axis label "…" is {w} pt wide; the panel has {p} pt.` (likewise `the y axis label`),
+///   with the same size-dependent hint as titles; on a grid, prefixed
+///   with `row {r}, col {c}: `;
 /// - `row {r}, col {c}: the legend label "…" is {w} pt wide; the panel has {p} pt.`, with `p`
 ///   the room from the label's start to the plot's right edge;
 /// - `row {r}, col {c}: the direct label "…" is {w} pt wide; at most {m} pt fits beside the
 ///   plot.`, with `m` the room from the label's start to the frame's right edge.
 ///
 /// Both legend errors have the hint `shorten the label or widen the figure.`
-pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) -> Result<()> {
+pub(crate) fn check_panel_contents(
+    input: &GridInput<'_>,
+    layouts: &[Layout],
+    slots: &[PanelSlot],
+) -> Result<()> {
+    for ((panel, layout), slot) in input.panels.iter().zip(layouts).zip(slots) {
+        for (label, size, name) in [
+            (
+                layout.title.as_ref(),
+                panel.axes.title_size(),
+                TextKind::Title,
+            ),
+            (
+                layout.subtitle.as_ref(),
+                panel.axes.subtitle_size(),
+                TextKind::Subtitle,
+            ),
+        ] {
+            super::panel::check_text_width(
+                label,
+                size,
+                slot.header.right - slot.header.left,
+                name,
+                TextContainer::Panel,
+                input.context,
+            )
+            .map_err(|error| input.panel_error(panel.axes.cells(), error))?;
+        }
+    }
     for (panel, layout) in input.panels.iter().zip(layouts) {
         match panel.axes {
             crate::model::Layer::Primary(_) => {}
-            crate::model::Layer::Twin { parent, .. } => {
-                super::twin::check_titles(&layouts[parent], layout, input.context).map_err(
-                    |error| {
-                        if input.is_single() {
-                            error
-                        } else {
-                            in_panel(panel.axes.cells(), error)
-                        }
-                    },
-                )?;
+            crate::model::Layer::Twin { parent, axes, .. } => {
+                let left_size = input.panels[parent]
+                    .axes
+                    .cartesian()
+                    .map_or(crate::SizeSpec::Auto, crate::Axes::ylabel_size);
+                super::twin::check_titles(
+                    &layouts[parent],
+                    layout,
+                    [left_size, axes.ylabel_size()],
+                    input.context,
+                )
+                .map_err(|error| input.panel_error(panel.axes.cells(), error))?;
             }
+        }
+    }
+    for (i, (panel, layout)) in input.panels.iter().zip(layouts).enumerate() {
+        if let Some(axes) = panel.axes.cartesian() {
+            let y_kind = match panel.axes {
+                crate::model::Layer::Twin { .. } => TextKind::RightYLabel,
+                crate::model::Layer::Primary(_) if input.panels.iter().any(|other| {
+                    matches!(other.axes, crate::model::Layer::Twin { parent, .. } if parent == i)
+                }) => TextKind::LeftYLabel,
+                crate::model::Layer::Primary(_) => TextKind::YLabel,
+            };
+            super::panel::check_axis_titles(layout, axes, y_kind, input.context)
+                .map_err(|error| input.panel_error(panel.axes.cells(), error))?;
         }
     }
     for (panel, layout) in input.panels.iter().zip(layouts) {
@@ -1485,13 +1658,7 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
             ];
             colorbar
                 .check(input.context, layout.frame, outer_edges, panel.lib)
-                .map_err(|error| {
-                    if input.is_single() {
-                        error
-                    } else {
-                        in_panel(panel.axes.cells(), error)
-                    }
-                })?;
+                .map_err(|error| input.panel_error(panel.axes.cells(), error))?;
         }
     }
     if input.is_single() {
@@ -1505,50 +1672,7 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
     };
     for (panel, layout) in input.panels.iter().zip(layouts) {
         let cells = panel.axes.cells();
-        let plot = layout.plot;
-        let named: [(Option<&Label>, &str, &'static str); 2] = [
-            (
-                layout.title.as_ref(),
-                "the title",
-                "shorten the title or widen the figure.",
-            ),
-            (
-                layout.subtitle.as_ref(),
-                "the subtitle",
-                "shorten the subtitle or widen the figure.",
-            ),
-        ];
-        let axis: [(Option<&Label>, &str, &'static str); 2] = [
-            (
-                layout.xlabel.as_ref(),
-                "the x axis label",
-                "shorten the x axis label or widen the figure.",
-            ),
-            (
-                layout.ylabel.as_ref(),
-                "the y axis label",
-                "shorten the y axis label or widen the figure.",
-            ),
-        ];
-        for (label, name, hint) in named {
-            if let Some(label) = label
-                && label.width() > plot.width + CONTAINMENT_TOLERANCE
-            {
-                let (w, p) = widths(label.width(), plot.width);
-                let message = format!("{name} is {w} pt wide; the panel has {p} pt.");
-                return Err(too_wide(cells, message, hint));
-            }
-        }
         super::placement::check(panel, layout, false).map_err(|err| in_panel(cells, err))?;
-        for (label, name, hint) in axis {
-            if let Some(label) = label
-                && label.width() > plot.width + CONTAINMENT_TOLERANCE
-            {
-                let (w, p) = widths(label.width(), plot.width);
-                let message = format!("{name} is {w} pt wide; the panel has {p} pt.");
-                return Err(too_wide(cells, message, hint));
-            }
-        }
         for label in layout.direct.iter().filter_map(|d| d.label.as_ref()) {
             if label.x + label.width() > layout.frame.right() + CONTAINMENT_TOLERANCE {
                 let (w, m) = widths(label.width(), layout.frame.right() - label.x);
@@ -2098,21 +2222,25 @@ mod tests {
         };
         let text = "Station output";
         for (which, name, hint) in [
-            (0, "the title", "shorten the title or widen the figure."),
+            (
+                0,
+                "the title \"Station output\"",
+                "make the figure wider or lower the font scale with Theme.with_font_scale().",
+            ),
             (
                 1,
-                "the subtitle",
-                "shorten the subtitle or widen the figure.",
+                "the subtitle \"Station output\"",
+                "make the figure wider or lower the font scale with Theme.with_font_scale().",
             ),
             (
                 2,
-                "the x axis label",
-                "shorten the x axis label or widen the figure.",
+                "the x axis label \"Station output\"",
+                "make the figure wider or lower the font scale with Theme.with_font_scale().",
             ),
             (
                 3,
-                "the y axis label",
-                "shorten the y axis label or widen the figure.",
+                "the y axis label \"Station output\"",
+                "make the figure wider or lower the font scale with Theme.with_font_scale().",
             ),
         ] {
             let probe = titled_columns(864.0, text, which);
@@ -2349,6 +2477,7 @@ mod tests {
             gap,
             left,
             right,
+            min_widths: Vec::new(),
         }
     }
 

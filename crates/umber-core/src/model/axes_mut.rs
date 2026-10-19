@@ -181,6 +181,9 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the title.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    ///
     /// # Examples
     ///
     /// ```
@@ -197,6 +200,9 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Sets the subtitle.
+    ///
+    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
     ///
     /// # Examples
     ///
@@ -215,6 +221,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the x axis label.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the plot.
+    ///
     /// # Examples
     ///
     /// ```
@@ -230,7 +238,10 @@ impl<'a> AxesMut<'a> {
         self.xlabel_sized(text, SizeSpec::Auto)
     }
 
-    /// Sets the y axis label.
+    /// Sets the y axis label, drawn horizontally above the plot.
+    ///
+    /// Rendering returns `Error::Style` if the left label exceeds the plot and its y tick
+    /// column, or the right twin label exceeds the plot width.
     ///
     /// # Examples
     ///
@@ -2936,6 +2947,9 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the title and its size. Points ignore font scale; multiples follow it.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    ///
     /// # Examples
     ///
     /// ```
@@ -2955,6 +2969,9 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Sets the subtitle and its size, relative to the theme's body size or in points.
+    ///
+    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
     ///
     /// # Examples
     ///
@@ -2976,6 +2993,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the x axis label and its size, relative to the theme's body size or in points.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the plot.
+    ///
     /// # Examples
     ///
     /// ```
@@ -2995,6 +3014,9 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Sets the y axis label and its size, relative to the theme's body size or in points.
+    ///
+    /// Rendering returns `Error::Style` if the left label exceeds the plot and its y tick
+    /// column, or the right twin label exceeds the plot width.
     ///
     /// # Examples
     ///

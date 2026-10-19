@@ -1674,7 +1674,9 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long.
+    StyleError: If ``text`` is too long. Rendering raises it if the text is wider
+        than the panel's plot width (for a one-cell figure, than the figure inside
+        its padding, with or without a twin y axis).
 
 Example:
 
@@ -1787,7 +1789,9 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long.
+    StyleError: If ``text`` is too long. Rendering raises it if the text is wider
+        than the panel's plot width (for a one-cell figure, than the figure inside
+        its padding, with or without a twin y axis).
 
 Example:
 
@@ -2033,7 +2037,8 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long.
+    StyleError: If ``text`` is too long. Rendering raises it if the label is wider
+        than the plot.
 
 Example:
 
@@ -2273,7 +2278,7 @@ Example:
 Axes.ylabel(self, text: str, *, size: Size=Size.AUTO) -> Self
 ```
 
-Set the y axis label, shown left of the y tick labels.
+Set the y axis label, shown horizontally above the plot.
 
 Args:
     text: The label, at most 1,000 characters. An empty string removes it.
@@ -2285,7 +2290,9 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long.
+    StyleError: If ``text`` is too long. Rendering raises it if the label is wider
+        than the plot and its left y tick column, or the plot alone for a right twin
+        label.
 
 Example:
 
@@ -3545,8 +3552,8 @@ Args:
 
 Raises:
     TypeError: If ``path`` is not a ``str`` or a path-like object returning a string.
-    StyleError: If the plot area or its x tick labels cannot fit the figure, or a
-        font cannot render the requested text.
+    StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
+        cannot fit their room, or a font cannot render the requested text.
     OSError: If the file cannot be written.
 
 Example:
@@ -3573,8 +3580,8 @@ Args:
 Raises:
     TypeError: If ``path`` is not a ``str`` or path-like object, or ``dpi`` is not
         an int.
-    StyleError: If ``dpi`` is out of range, the plot area or its x tick labels cannot
-        fit the figure, or the image would be too large.
+    StyleError: If ``dpi`` is out of range, the plot area, titles, subtitles,
+        axis labels or x tick labels cannot fit their room, or the image would be too large.
     OSError: If the file cannot be written.
 
 Example:
@@ -3599,7 +3606,8 @@ Args:
 Raises:
     TypeError: If ``path`` is not a ``str`` or path-like object, or ``text`` is not
         an ``SvgText``.
-    StyleError: If the plot area or its x tick labels cannot fit the figure.
+    StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
+        cannot fit their room.
     OSError: If the file cannot be written.
 
 Example:
@@ -3629,7 +3637,8 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long or holds a lone surrogate.
+    StyleError: If ``text`` is too long or holds a lone surrogate. Rendering raises
+        it if the text is wider than the figure's room inside its padding.
 
 Example:
 
@@ -3662,7 +3671,8 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long or holds a lone surrogate.
+    StyleError: If ``text`` is too long or holds a lone surrogate. Rendering raises
+        it if the text is wider than the figure's room inside its padding.
 
 Example:
 
@@ -3687,8 +3697,8 @@ Returns:
     The PDF file contents.
 
 Raises:
-    StyleError: If the plot area or its x tick labels cannot fit the figure, or a
-        font cannot render the requested text.
+    StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
+        cannot fit their room, or a font cannot render the requested text.
 
 Example:
 
@@ -3716,8 +3726,8 @@ Returns:
 
 Raises:
     TypeError: If ``dpi`` is not an int.
-    StyleError: If ``dpi`` is out of range, the plot area or its x tick labels cannot
-        fit the figure, or the image would be too large.
+    StyleError: If ``dpi`` is out of range, the plot area, titles, subtitles,
+        axis labels or x tick labels cannot fit their room, or the image would be too large.
 
 Example:
 
@@ -3745,7 +3755,8 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not an ``SvgText``.
-    StyleError: If the plot area or its x tick labels cannot fit the figure.
+    StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
+        cannot fit their room.
 
 Example:
 
@@ -4422,7 +4433,9 @@ Returns:
 
 Raises:
     TypeError: If text or size has the wrong type.
-    StyleError: If text is too long or cannot be displayed.
+    StyleError: If text is too long or cannot be displayed. Rendering raises it if
+        the title is wider than its panel (for a one-cell figure, than the figure
+        inside its padding).
 
 Example:
 

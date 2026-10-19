@@ -119,7 +119,13 @@ impl Figure {
     /// # Errors
     ///
     /// `Error::Style` with context `"Figure.to_scene()"` when the plot area does not fit or its
-    /// x tick labels cannot fit. The plot area is at least 1 pt wide, with or without x tick
+    /// x tick labels, titles, subtitles or axis labels cannot fit their room. Figure titles and
+    /// subtitles must fit inside the canvas padding. Panel titles and subtitles must fit the
+    /// plot width, or the figure inside its padding for a one-cell figure, with or without a
+    /// twin y axis. The x and right y axis labels must fit the plot width; the left y axis label
+    /// can also use its tick column. Errors name the text and both widths in whole points,
+    /// suggesting a wider figure or a lower font scale (a smaller `size=` for fixed points).
+    /// The plot area is at least 1 pt wide, with or without x tick
     /// labels: when the y tick labels leave it less, the message names the widest y tick label
     /// and the hint suggests shortening the y tick labels or widening the figure; when even
     /// y tick labels of no width would, the message names the width the figure needs and the
@@ -144,8 +150,8 @@ impl Figure {
     /// (`… pt is needed for 2 rows of plots.`). Errors about one axes' texts start with
     /// `row {r}, col {c}: `, the axes' top-left cell: its y tick labels, its x tick labels,
     /// and texts that would run into the next cell: a title, subtitle, legend row entry or axis
-    /// label wider than its plot area (`row 0, col 1: the title is … pt wide; the panel has …
-    /// pt.`), or a direct label that would end past the axes' share of the canvas. A merged
+    /// label wider than its available width (`row 0, col 1: the title "…" is … pt wide; the panel
+    /// has … pt.`), or a direct label that would end past the axes' share of the canvas. A merged
     /// legend entry wider than the inner canvas also fails, naming its label and suggesting
     /// shortening the label or widening the figure.
     ///
@@ -196,8 +202,8 @@ impl Figure {
     ///
     /// `Error::Style` with context `"Figure.to_png()"` when `dpi` is outside `10..=2400` (the
     /// message names the value however large or negative it is), when the plot area or its x
-    /// tick labels cannot fit (see [`Figure::to_scene`]) or when the image would be too large
-    /// (see [`render_png`]).
+    /// tick labels, titles, subtitles or axis labels cannot fit (see [`Figure::to_scene`]),
+    /// or the image is too large (see [`render_png`]).
     ///
     /// # Examples
     ///
@@ -223,7 +229,8 @@ impl Figure {
     /// # Errors
     ///
     /// `Error::Style` with context `"Figure.to_svg()"` when the plot area or its x tick labels
-    /// cannot fit (see [`Figure::to_scene`]).
+    /// cannot fit, or titles, subtitles or axis labels are wider than their room
+    /// (see [`Figure::to_scene`]).
     ///
     /// # Examples
     ///
@@ -250,7 +257,8 @@ impl Figure {
     /// # Errors
     ///
     /// `Error::Style` with context `"Figure.to_pdf()"` when the plot area or its x tick labels
-    /// cannot fit (see [`Figure::to_scene`]).
+    /// cannot fit, or titles, subtitles or axis labels are wider than their room
+    /// (see [`Figure::to_scene`]).
     ///
     /// # Examples
     ///

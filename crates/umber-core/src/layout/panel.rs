@@ -266,6 +266,113 @@ impl Header {
     }
 }
 
+/// The size remedy for text that follows the font scale or uses fixed points.
+pub(super) fn text_size_hint(size: crate::SizeSpec) -> &'static str {
+    match size {
+        crate::SizeSpec::Auto | crate::SizeSpec::Times(_) => {
+            "make the figure wider or lower the font scale with Theme.with_font_scale()."
+        }
+        crate::SizeSpec::Points(_) => "make the figure wider or pass a smaller size=.",
+    }
+}
+
+/// The text named by a horizontal containment error.
+#[derive(Clone, Copy)]
+pub(super) enum TextKind {
+    Title,
+    Subtitle,
+    XLabel,
+    YLabel,
+    LeftYLabel,
+    RightYLabel,
+}
+
+impl TextKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Title => "title",
+            Self::Subtitle => "subtitle",
+            Self::XLabel => "x axis label",
+            Self::YLabel => "y axis label",
+            Self::LeftYLabel => "left y axis label",
+            Self::RightYLabel => "right y axis label",
+        }
+    }
+}
+
+/// The owner of the horizontal room available to a text.
+#[derive(Clone, Copy)]
+pub(super) enum TextContainer {
+    Figure,
+    Panel,
+}
+
+impl TextContainer {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Figure => "figure",
+            Self::Panel => "panel",
+        }
+    }
+}
+
+/// Checks a text against the horizontal extent in which it is placed.
+pub(super) fn check_text_width(
+    label: Option<&Label>,
+    size: crate::SizeSpec,
+    room: f64,
+    kind: TextKind,
+    container: TextContainer,
+    context: &'static str,
+) -> Result<()> {
+    if let Some(label) = label
+        && label.width() > room + super::inset::CONTAINMENT_TOLERANCE
+    {
+        let (width, room) = super::widths(label.width(), room);
+        let hint = text_size_hint(size);
+        let name = kind.name();
+        let container = container.name();
+        return Err(crate::Error::style(
+            context,
+            format!(
+                "the {name} {} is {width} pt wide; the {container} has {room} pt.",
+                crate::error::quoted(&label.text)
+            ),
+        )
+        .with_hint(hint));
+    }
+    Ok(())
+}
+
+/// The x label is centered on the plot; the right y label ends at its right edge.
+/// The left y label starts at the left edge of its tick column and may reach the plot's right.
+pub(super) fn check_axis_titles(
+    layout: &Layout,
+    axes: &crate::Axes,
+    y_kind: TextKind,
+    context: &'static str,
+) -> Result<()> {
+    let y_room = match y_kind {
+        TextKind::RightYLabel => layout.plot.width,
+        _ => layout
+            .ylabel
+            .as_ref()
+            .map_or(layout.plot.width, |label| layout.plot.right() - label.x),
+    };
+    for (label, size, room, kind) in [
+        (
+            layout.xlabel.as_ref(),
+            axes.xlabel_size(),
+            layout.plot.width,
+            TextKind::XLabel,
+        ),
+        (layout.ylabel.as_ref(), axes.ylabel_size(), y_room, y_kind),
+    ] {
+        check_text_width(label, size, room, kind, TextContainer::Panel, context)?;
+    }
+    Ok(())
+}
+
 /// The figure-wide header, placed inside the canvas padding above the grid.
 #[derive(Debug, Clone)]
 pub(crate) struct FigureHeader {
@@ -325,11 +432,21 @@ impl FigureHeader {
         })
     }
 
-    /// Checks that every merged entry fits the inner canvas width. A figure without panels
-    /// must still have room for its header and the bottom padding.
+    /// Checks that titles and merged entries fit the inner canvas width. A figure without
+    /// panels must still have room for its header and the bottom padding.
     pub fn check(&self, figure: &Figure, context: &'static str) -> Result<()> {
-        self.legend
-            .check_width(figure.width_in() * 72.0 - 2.0 * PADDING, context)?;
+        let room = figure.width_in() * 72.0 - 2.0 * PADDING;
+        for (label, size, name) in [
+            (self.title.as_ref(), figure.title_size(), TextKind::Title),
+            (
+                self.subtitle.as_ref(),
+                figure.subtitle_size(),
+                TextKind::Subtitle,
+            ),
+        ] {
+            check_text_width(label, size, room, name, TextContainer::Figure, context)?;
+        }
+        self.legend.check_width(room, context)?;
         if figure.panels().next().is_none()
             && self.bottom > PADDING
             && self.bottom + PADDING > figure.height_in() * 72.0
@@ -418,6 +535,43 @@ pub(crate) struct PanelBands {
 }
 
 impl PanelBands {
+    /// The plot width needed by the axis labels. The left y label can also use its own tick
+    /// column; the centered x label and the right y label cannot.
+    pub(super) fn min_plot_width(&self, y_column: f64) -> f64 {
+        super::MIN_PLOT
+            .max(self.xlabel.as_ref().map_or(0.0, Label::width))
+            .max(self.ylabel.as_ref().map_or(0.0, Label::width) - y_column)
+    }
+
+    /// The plot width needed to keep both y labels apart on their shared band.
+    pub(super) fn min_twin_plot_width(&self, right: &Self, y_column: f64) -> f64 {
+        let pair = match (&self.ylabel, &right.ylabel) {
+            (Some(left), Some(right)) => left.width() + AXIS_LABEL_GAP + right.width() - y_column,
+            _ => 0.0,
+        };
+        self.min_plot_width(y_column)
+            .max(right.min_plot_width(0.0))
+            .max(pair)
+    }
+
+    /// Checks the y title before a plot can be placed, using its greatest possible room.
+    pub(super) fn check_y_title_width(
+        &self,
+        axes: &crate::Axes,
+        kind: TextKind,
+        room: f64,
+        context: &'static str,
+    ) -> Result<()> {
+        check_text_width(
+            self.ylabel.as_ref(),
+            axes.ylabel_size(),
+            room,
+            kind,
+            TextContainer::Panel,
+            context,
+        )
+    }
+
     /// The text block that takes the most vertical room, independent of which size was set.
     pub(super) fn largest_vertical_text(&self) -> (&'static str, &str, f64) {
         let title = self.heading.title.as_ref();
@@ -762,16 +916,9 @@ pub(crate) fn place_panel(
         ..
     } = bands;
     let position = input.legend.position;
-    let row = if position == crate::LegendPosition::TopRight {
-        input
-            .legend
-            .header_within(plot.x, plot.right())
-            .aligned(plot.x, plot.right(), Align::Right)
-    } else {
-        input
-            .legend
-            .header_within(header_box.left, header_box.right)
-    };
+    let row = input
+        .legend
+        .header_for_plot((header_box.left, header_box.right), (plot.x, plot.right()));
     let row_height = (!row.is_empty()).then(|| row.height());
     let header = heading.place(header_box, input.theme.title_align(), row_height);
     let row = match position {

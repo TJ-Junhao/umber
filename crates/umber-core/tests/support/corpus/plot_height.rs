@@ -132,7 +132,7 @@ fn min_height_errors(lib: &FontLibrary) -> String {
 
     rec.section("Figure::to_scene, former scene cases");
     for (name, f) in [
-        ("fig-font-scale-max", font_scale_figure(10.0, 4.0)),
+        ("fig-font-scale-max", font_scale_figure(10.0, 6.0, 4.0)),
         (
             "fig-legend-tiny-50-entries",
             fifty_lines(Theme::pigment(), "Entry", 1.0),

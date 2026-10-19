@@ -440,6 +440,16 @@ impl<'a> MeasuredLegend<'a> {
         }
     }
 
+    /// The header row in its final span: top-right rows use the plot, other rows the header.
+    pub fn header_for_plot(&self, header: (f64, f64), plot: (f64, f64)) -> LegendRow {
+        if self.position == crate::LegendPosition::TopRight {
+            self.header_within(plot.0, plot.1)
+                .aligned(plot.0, plot.1, crate::Align::Right)
+        } else {
+            self.header_within(header.0, header.1)
+        }
+    }
+
     /// One entry per row, starting at `left`.
     pub fn column(&self, left: f64) -> LegendRow {
         self.row_within(left, left)
@@ -1372,13 +1382,12 @@ mod tests {
                     let build = |height: f64| {
                         let mut f = Figure::new(w, height, theme.clone()).ok()?;
                         let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-                        axes.title("Station output")
-                            .subtitle("Daily mean, MW")
-                            .ylabel("MW")
-                            .xticks(&[])
-                            .unwrap()
-                            .yticks(&[])
-                            .unwrap();
+                        axes.xticks(&[]).unwrap().yticks(&[]).unwrap();
+                        // At 1 in and scale 10 even a one-character title can be too wide.
+                        // Keep that legend stress case without unrelated title text.
+                        if w != 1.0 || scale != 10.0 {
+                            axes.title("I").subtitle("I").ylabel("I");
+                        }
                         for label in names(n) {
                             axes.line(
                                 AxisData::Numbers(vec![0.0, 1.0]),
@@ -1860,11 +1869,7 @@ mod tests {
                     // Without ticks: x tick labels too wide for these figures, and y tick labels
                     // that leave no room for the plot, fail the layout, which `layout::tests`
                     // covers.
-                    axes.title("Crowded")
-                        .xticks(&[])
-                        .unwrap()
-                        .yticks(&[])
-                        .unwrap();
+                    axes.title("I").xticks(&[]).unwrap().yticks(&[]).unwrap();
                     for k in 0..n {
                         axes.line(
                             AxisData::Numbers(vec![0.0, 1.0]),

@@ -74,21 +74,39 @@ fn twin_title_gap_and_room_error_rounding() {
     let width = left_title.width() + super::super::AXIS_LABEL_GAP + right_title.width();
     let room = right_title.x + right_title.width() - left_title.x;
     let (width, room) = super::super::widths(width, room);
-    let err = super::check_titles(left, &right, "Figure.to_scene()").unwrap_err();
+    let err = super::check_titles(
+        left,
+        &right,
+        [SizeSpec::Auto, SizeSpec::pt(18.).unwrap()],
+        "Figure.to_scene()",
+    )
+    .unwrap_err();
     assert_eq!(
         err.to_string(),
         format!(
-            "Figure.to_scene(): the y axis titles \"Left units\" and \"Right units\" are {width} pt wide with a gap; the panel has {room} pt."
+            "Figure.to_scene(): the left y axis label \"Left units\" and right y axis label \"Right units\" are {width} pt wide with a gap; the panel has {room} pt."
         )
     );
     assert_eq!(
         err.hint(),
-        Some("shorten a y axis title or widen the figure.")
+        Some("make the figure wider or pass a smaller size=.")
     );
     right.ylabel.as_mut().unwrap().x += 0.5;
-    super::check_titles(left, &right, "Figure.to_scene()").unwrap();
+    super::check_titles(
+        left,
+        &right,
+        [SizeSpec::Auto, SizeSpec::pt(18.).unwrap()],
+        "Figure.to_scene()",
+    )
+    .unwrap();
     right.ylabel = None;
-    super::check_titles(left, &right, "Figure.to_scene()").unwrap();
+    super::check_titles(
+        left,
+        &right,
+        [SizeSpec::Auto, SizeSpec::pt(18.).unwrap()],
+        "Figure.to_scene()",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -185,6 +203,153 @@ fn one_row_legend_and_right_reserve_clear_ticks() {
                     .iter()
                     .all(|entry| entry.swatch.x >= ticks)
             );
+        }
+    }
+}
+
+fn wrapped_legend(
+    theme: Theme,
+    position: LegendPosition,
+    twin: bool,
+    right_ticks: bool,
+    height: f64,
+) -> Figure {
+    let mut f = Figure::new(3.0, height, theme).unwrap();
+    let mut ax = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    ax.title("Series")
+        .subtitle("Eight lines")
+        .xlabel("Time")
+        .ylabel("Left")
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks(&[0.0, 1.0])
+        .unwrap()
+        .yticks_labeled(&[0.0, 1.0], vec!["Left".into(); 2])
+        .unwrap();
+    for i in 0..8 {
+        ax.line(
+            crate::AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: format!("S{i}"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    ax.legend_at(LegendStyle::Header, position, SizeSpec::Auto)
+        .unwrap();
+    if twin {
+        let mut right = ax.twin_y(ScaleKind::Linear).unwrap();
+        right.ylim(0.0, 1.0).unwrap();
+        if right_ticks {
+            right
+                .ylabel("Right")
+                .yticks_labeled(&[0.0, 1.0], vec!["Right".into(); 2])
+                .unwrap();
+        } else {
+            right.yticks(&[]).unwrap();
+        }
+    }
+    f
+}
+
+#[test]
+fn wrapped_twin_legends_stay_in_their_reserved_bands() {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        for position in [
+            LegendPosition::TopLeft,
+            LegendPosition::TopRight,
+            LegendPosition::Bottom,
+        ] {
+            let build = |height| wrapped_legend(theme.clone(), position, true, true, height);
+            let planned =
+                crate::pipeline::try_plan_panels(&build(3.0), FontLibrary::global()).unwrap();
+            let left = &planned[0].1;
+            let entries = left.legend.entries();
+            assert_eq!(entries.len(), 8);
+            assert!(entries.last().unwrap().label.y > entries[0].label.y);
+            assert!(planned[1].1.legend.is_empty());
+            let top = entries
+                .iter()
+                .map(|e| e.label.y - f64::from(e.label.layout.ascent()))
+                .fold(f64::INFINITY, f64::min);
+            let bottom = entries
+                .iter()
+                .map(|e| e.label.y + f64::from(e.label.layout.descent()))
+                .fold(0.0, f64::max);
+            if position == LegendPosition::Bottom {
+                let xlabel = left.xlabel.as_ref().unwrap();
+                assert!(top >= xlabel.y + f64::from(xlabel.layout.descent()));
+                assert!(top >= left.plot.bottom());
+                assert!(bottom <= 216.0 - super::super::PADDING + 1e-9);
+            } else {
+                assert!(bottom <= left.header_bottom);
+                for (_, layout) in &planned {
+                    let ylabel = layout.ylabel.as_ref().unwrap();
+                    assert!(
+                        left.header_bottom <= ylabel.y - f64::from(ylabel.layout.ascent()) + 1e-9
+                    );
+                    assert!(bottom < layout.plot.y);
+                    for tick in &layout.y_tick_labels {
+                        assert!(bottom < tick.y - f64::from(tick.layout.ascent()));
+                    }
+                }
+            }
+            // The height error must reserve the same wrapping as successful placement.
+            let error = build(0.5)
+                .to_scene(FontLibrary::global())
+                .unwrap_err()
+                .to_string();
+            let needed: f64 = error
+                .split_once("at least ")
+                .unwrap()
+                .1
+                .split_once(" pt")
+                .unwrap()
+                .0
+                .parse()
+                .unwrap();
+            build(needed / 72.0)
+                .to_scene(FontLibrary::global())
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn one_cell_twin_keeps_matching_wrapped_legend_placement() {
+    for position in [
+        LegendPosition::TopLeft,
+        LegendPosition::TopRight,
+        LegendPosition::Bottom,
+    ] {
+        let single = crate::pipeline::try_plan_panels(
+            &wrapped_legend(Theme::pigment(), position, false, false, 3.0),
+            FontLibrary::global(),
+        )
+        .unwrap();
+        for right_ticks in [false, true] {
+            if right_ticks && position == LegendPosition::TopRight {
+                continue; // Only top-right rows wrap to the narrower plot beside right ticks.
+            }
+            let twin = crate::pipeline::try_plan_panels(
+                &wrapped_legend(Theme::pigment(), position, true, right_ticks, 3.0),
+                FontLibrary::global(),
+            )
+            .unwrap();
+            for (a, b) in single[0]
+                .1
+                .legend
+                .entries()
+                .iter()
+                .zip(twin[0].1.legend.entries())
+            {
+                assert_eq!((a.label.x, a.label.y), (b.label.x, b.label.y));
+            }
+            assert_eq!(single[0].1.header_bottom, twin[0].1.header_bottom);
         }
     }
 }
@@ -343,4 +508,30 @@ fn category_direct_label_clears_right_tick_column() {
     );
     assert!(label.x + label.width() <= layout.frame.right());
     assert!(layout.direct[0].dot.unwrap().x < layout.plot.right());
+}
+
+#[test]
+fn overlapping_y_labels_choose_hint_from_both_sizes() {
+    let f = figure(Theme::pigment());
+    let planned = plan_panel_marks(&f, FontLibrary::global());
+    let left = &planned[0].1;
+    let mut right = planned[1].1.clone();
+    right.ylabel.as_mut().unwrap().x = left.ylabel.as_ref().unwrap().x;
+    let points = SizeSpec::pt(18.0).unwrap();
+    let times = SizeSpec::times(1.4).unwrap();
+    for sizes in [
+        [SizeSpec::Auto, times],
+        [times, SizeSpec::Auto],
+        [points, times],
+        [times, points],
+        [points, points],
+    ] {
+        let error = super::check_titles(left, &right, sizes, "Figure.to_scene()").unwrap_err();
+        let hint = if sizes.iter().any(|size| matches!(size, SizeSpec::Points(_))) {
+            "make the figure wider or pass a smaller size=."
+        } else {
+            "make the figure wider or lower the font scale with Theme.with_font_scale()."
+        };
+        assert_eq!(error.hint(), Some(hint));
+    }
 }

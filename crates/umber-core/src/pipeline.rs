@@ -589,6 +589,7 @@ fn plan(
 ) -> Result<FigurePlan> {
     let theme = figure.theme();
     let header = figure_header(figure, panels, lib)?;
+    header.check(figure, context)?;
     let tick = layout::TickFont::new(lib, theme)?;
     let axis_ticks: Vec<_> = panels
         .iter()
@@ -1309,8 +1310,7 @@ fn plan(
         planned[i].1.legend = layout::placement::best(input.legend, &layout.plot, &marks);
     }
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = planned.into_iter().unzip();
-    layout::check_panel_contents(&grid, &layouts)?;
-    header.check(figure, context)?;
+    layout::check_panel_contents(&grid, &layouts, &solution.panels)?;
     Ok(FigurePlan {
         header,
         panels: resolved.into_iter().zip(layouts).collect(),
@@ -2601,7 +2601,7 @@ mod tests {
                 layout::place_panel(input, resolved, bands, slot)
             })
             .collect();
-        layout::check_panel_contents(&grid, &layouts)?;
+        layout::check_panel_contents(&grid, &layouts, &solution.panels)?;
         Ok(resolved.into_iter().zip(layouts).collect())
     }
 

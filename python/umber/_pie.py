@@ -163,7 +163,9 @@ class PieAxes:
 
         Raises:
             TypeError: If text or size has the wrong type.
-            StyleError: If text is too long or cannot be displayed.
+            StyleError: If text is too long or cannot be displayed. Rendering raises it if
+                the title is wider than its panel (for a one-cell figure, than the figure
+                inside its padding).
 
         Example:
             >>> import umber as ub
