@@ -16,6 +16,101 @@ OUT = Path(__file__).resolve().parents[2] / "assets" / "readme"
 DPI = 144
 
 
+def gallery() -> None:
+    """Twelve kinds of chart on one 3 × 4 grid, the image at the top of the README."""
+    rng = np.random.default_rng(12)
+
+    fig = ub.Figure(13.5, 9, rows=3, cols=4, legend=ub.Legend.PER_PANEL, theme=ub.Theme.PIGMENT)
+    fig.title("umber").subtitle("Plotting for Python, rendered in Rust")
+
+    # Lines with a band.
+    x = np.linspace(0, 12, 200)
+    ax = fig.add_axes(row=0, col=0).title("Lines and bands")
+    ax.band(x, np.sin(x) - 0.3, np.sin(x) + 0.3).line(x, np.sin(x), label="mean").line(
+        x, np.cos(x) * 0.8, label="trend"
+    )
+    ax.legend(ub.LegendStyle.DIRECT)
+
+    # Grouped bars with values.
+    ax = fig.add_axes(row=0, col=1, x=ub.Scale.category()).title("Grouped bars")
+    ax.grouped_bar(
+        ["Q1", "Q2", "Q3"],
+        [ub.Series("North", [12.0, 18.0, 15.0]), ub.Series("South", [9.0, 11.0, 17.0])],
+        annotate=True,
+    )
+    ax.legend(ub.LegendStyle.NONE)
+
+    # Scatter coloured by value.
+    px = rng.normal(size=400)
+    py = 0.6 * px + rng.normal(scale=0.6, size=400)
+    ax = fig.add_axes(row=0, col=2).title("Color by value")
+    ax.scatter(px, py, color=ub.ColorBy(px * py, center=0.0)).colorbar("x · y")
+
+    # Donut.
+    ax = fig.add_pie_axes(row=0, col=3).title("Donut")
+    ax.pie(["Web", "App", "Shop"], [52.0, 30.0, 18.0], hole=0.45, annotate=True).legend(
+        ub.LegendStyle.CHIPS
+    )
+
+    # Histogram and KDE.
+    v = np.concatenate([rng.normal(40, 8, 3000), rng.normal(70, 6, 1500)])
+    ax = fig.add_axes(row=1, col=0).title("Histogram and KDE")
+    ax.hist(v, bins=40, stat=ub.Stat.DENSITY).kde(v)
+    ax.legend(ub.LegendStyle.NONE)
+
+    # Violin with swarm.
+    groups = [rng.normal(m, s, 60) for m, s in ((3.0, 0.8), (4.5, 1.1), (4.0, 0.6))]
+    ax = fig.add_axes(row=1, col=1, x=ub.Scale.category()).title("Violins and swarms")
+    ax.violin(["A", "B", "C"], groups).swarm(["A", "B", "C"], groups, size=ub.Size.pt(3))
+    ax.legend(ub.LegendStyle.NONE)
+
+    # Contour.
+    cx = np.linspace(-3, 3, 121)
+    cy = np.linspace(-2, 2, 81)
+    gx, gy = np.meshgrid(cx, cy)
+    z = 1.2 * np.exp(-((gx - 1) ** 2) - (gy - 0.4) ** 2) + 0.8 * np.exp(
+        -((gx + 1.2) ** 2) / 0.8 - (gy + 0.5) ** 2 / 0.6
+    )
+    ax = fig.add_axes(row=1, col=2).title("Contours")
+    ax.contour(cx, cy, z, style=ub.Contour.BOTH, annotate=True)
+
+    # Heatmap.
+    names = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+    hours = ["9", "12", "15", "18"]
+    m = rng.integers(10, 90, size=(len(hours), len(names))).astype(float)
+    ax = fig.add_axes(row=1, col=3, x=ub.Scale.category(), y=ub.Scale.category()).title("Heatmap")
+    ax.heatmap(names, hours, m, annotate=True, format=ub.TickFormat.fixed(0))
+
+    # Time series with annotation.
+    days = np.datetime64("2026-03-01") + np.arange(30)
+    load = 25 + np.cumsum(rng.normal(0, 1.5, 30))
+    ax = fig.add_axes(row=2, col=0, x=ub.Scale.time()).title("Time and annotations")
+    ax.line(days, load)
+    peak = int(np.argmax(load))
+    ax.annotate("peak", (days[peak], float(load[peak])), offset=(20.0, 12.0))
+
+    # Twin y.
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+    ax = fig.add_axes(row=2, col=1, x=ub.Scale.category()).title("Two y axes")
+    ax.bar(months, [52.0, 48.0, 55.0, 61.0, 72.0, 84.0], label="rain")
+    ax.twin_y().line(months, [4.0, 5.0, 9.0, 13.0, 18.0, 22.0], label="°C")
+    ax.legend(ub.LegendStyle.NONE)
+
+    # Hexbin.
+    hx = rng.normal(size=20000)
+    hy = 0.6 * hx + rng.normal(scale=0.7, size=hx.size)
+    ax = fig.add_axes(row=2, col=2).title("Hexbin, log color")
+    ax.hexbin(hx, hy, gridsize=25, scale=ub.Scale.log()).colorbar("count")
+
+    # ECDF by group.
+    vals = np.concatenate([rng.lognormal(3.0, 0.4, 400), rng.lognormal(2.7, 0.3, 400)])
+    grp = ["before"] * 400 + ["after"] * 400
+    ax = fig.add_axes(row=2, col=3).title("ECDF, grouped by=")
+    ax.ecdf(vals, by=grp).legend(ub.LegendStyle.DIRECT)
+
+    fig.save_png(OUT / "gallery.png", dpi=160)
+
+
 def temperature() -> None:
     """Two noisy station series as lines, in the Graphite theme."""
     rng = np.random.default_rng(7)
@@ -170,6 +265,7 @@ def requests() -> None:
 def main() -> None:
     """Render every README image."""
     OUT.mkdir(parents=True, exist_ok=True)
+    gallery()
     temperature()
     sales()
     signals()
