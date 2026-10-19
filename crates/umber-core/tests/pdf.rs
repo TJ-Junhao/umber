@@ -471,6 +471,24 @@ fn one_line(path: &FsPath) -> String {
         .to_owned()
 }
 
+/// Whether the installed MuPDF is 1.27 or later, the first release these tests found to use
+/// `/ActualText` when it extracts text.
+fn mupdf_reads_actual_text() -> bool {
+    let out = Command::new("mutool").arg("-v").output().unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    let Some(version) = text
+        .split_whitespace()
+        .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
+    else {
+        return false;
+    };
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0));
+    (parts.next().unwrap_or(0), parts.next().unwrap_or(0)) >= (1, 27)
+}
+
 /// MuPDF's text of a one-line page, without the line ends it adds.
 fn mupdf_line(path: &FsPath) -> String {
     let out = Command::new("mutool")
@@ -558,7 +576,9 @@ fn pdf_text_extracts_each_occurrence() {
         if have("pdftotext") {
             assert_eq!(words(&one_line(&path)), words(text), "{name}");
         }
-        if have("mutool") {
+        // MuPDF before 1.27 does not read /ActualText, as pdf.js does not; the marked cases are
+        // checked only where the reader honours it.
+        if have("mutool") && (!marked || mupdf_reads_actual_text()) {
             assert_eq!(words(&mupdf_line(&path)), words(text), "{name} (MuPDF)");
         }
         if pdfjs && let Some(extracted) = pdfjs_text(&path) {
