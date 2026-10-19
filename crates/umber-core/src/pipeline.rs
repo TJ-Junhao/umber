@@ -81,7 +81,10 @@ fn panels<'a>(
                     }
                 }
             };
-            let labels = BarLabels::measure(theme, lib, axes, &marks)?;
+            let labels = match axes {
+                crate::Panel::Cartesian(axes) => BarLabels::measure(theme, lib, axes, &marks)?,
+                crate::Panel::Pie(_) => BarLabels::default(),
+            };
             Ok(Panel {
                 axes,
                 marks,
@@ -684,7 +687,10 @@ fn plan(
         panels.iter().map(|panel| panel.marks.as_slice()).collect();
     let ends: Vec<_> = panels
         .iter()
-        .map(|panel| panel.labels.end_reaches())
+        .map(|panel| match panel.axes {
+            crate::Panel::Cartesian(_) => panel.labels.end_reaches(),
+            crate::Panel::Pie(_) => Vec::new(),
+        })
         .collect();
     let mut fits = BubbleFits::new(&marks, &ends, &limits, groups);
     let show_labels: Vec<_> = panels
@@ -1748,7 +1754,7 @@ fn scene_with_labels(
             theme,
             resolved,
             layout,
-            panel.axes,
+            axes,
             &panel.marks,
             &panel.labels,
             context,
@@ -1771,7 +1777,7 @@ fn scene_with_labels(
             fonts,
             resolved,
             layout,
-            panel.axes.annotations(),
+            axes.annotations(),
             (width, height),
             context,
         )
