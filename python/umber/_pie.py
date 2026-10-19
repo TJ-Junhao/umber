@@ -4,7 +4,7 @@ from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Never, Self, final
 
 import umber
-from umber import _args, _color, _size, _ticks, _umber, _values
+from umber import _args, _color, _display, _size, _ticks, _umber, _values
 from umber._axes import Axes
 from umber._color import Color
 from umber._display import Bundle
@@ -83,18 +83,16 @@ class PieAxes:
             >>> sorted(data)
             ['image/png', 'text/plain']
         """
-        from umber._figure import display_bundle
-
         with api_call():
-            data, metadata = display_bundle(self.figure, include, exclude)
-            if "text/plain" in data:
-                data["text/plain"] = repr(self)
-            return data, metadata
+            return _display.mimebundle(
+                self.figure, self._native.size_in, self.__repr__, include, exclude
+            )
 
     def show(self) -> None:
         """Display the whole figure in Jupyter or the system's default viewer.
 
-        Delegates to ``Figure.show()``; the same kernel detection and temporary PNG rules apply.
+        Uses the same kernel detection, temporary PNG and best-effort startup check as
+        ``Figure.show()``.
 
         Returns:
             None.
@@ -114,7 +112,7 @@ class PieAxes:
             True
         """
         with api_call():
-            self.figure.show()
+            _display.show(self.figure, "PieAxes.show()")
 
     # Static callers see no Cartesian methods; dynamic callers get a chart-specific error.
     if not TYPE_CHECKING:

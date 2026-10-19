@@ -5,6 +5,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Callable, Collection
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,12 +28,22 @@ type Displayable = ub.Figure | ub.Axes[float, float] | ub.PieAxes
 class _Process:
     def __init__(self) -> None:
         self.code: int | None = 0
-        self.timeouts: list[float] = []
+        self.timeouts: list[float | None] = []
+        self.waiting = threading.Event()
+        self.exited = threading.Event()
+        self.reaped = threading.Event()
+        self.waiter: threading.Thread | None = None
 
-    def wait(self, *, timeout: float) -> int:
+    def wait(self, *, timeout: float | None = None) -> int:
         self.timeouts.append(timeout)
+        if timeout is None:
+            self.waiter = threading.current_thread()
+            self.waiting.set()
+            self.exited.wait()
         if self.code is None:
+            assert timeout is not None
             raise subprocess.TimeoutExpired("viewer", timeout)
+        self.reaped.set()
         return self.code
 
 
@@ -123,7 +134,8 @@ def _saved_png(tmp_path: Path) -> Path:
     return path
 
 
-def _assert_viewer_error(error: ub.UsageError, path: Path) -> None:
+def _assert_viewer_error(error: ub.UsageError, path: Path, target: Displayable) -> None:
+    assert str(error).startswith(f"{type(target).__name__}.show(): ")
     assert str(path) in str(error)
     assert details(error) == (None, VIEWER_HINT)
     assert f"hint: {VIEWER_HINT}" in getattr(error, "__notes__", [])
@@ -217,10 +229,21 @@ def test_mimebundle_filters(
 ) -> None:
     target = _target(kind, ub.Figure())
     renders = _count_renders(monkeypatch)
+    representations: list[object] = []
+
+    def text_repr(value: object) -> str:
+        representations.append(value)
+        return "text repr"
+
+    for cls in (ub.Figure, ub.Axes, ub.PieAxes):
+        monkeypatch.setattr(cls, "__repr__", text_repr)
     data, metadata = target._repr_mimebundle_(include=include, exclude=exclude)
     assert set(data) == expected
     assert set(metadata) == ({"image/png"} if "image/png" in expected else set())
     assert renders == ([144] if "image/png" in expected else [])
+    assert representations == ([target] if "text/plain" in expected else [])
+    if "text/plain" in expected:
+        assert data["text/plain"] == "text repr"
 
 
 @pytest.mark.parametrize("kind", ["figure", "axes", "pie"])
@@ -352,51 +375,91 @@ def test_show_without_ipython(
     _saved_png(tmp_path)
 
 
-def test_show_does_not_wait_for_viewer_to_close(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, viewer: _Viewer
+@pytest.mark.parametrize("platform", ["darwin", "linux", "freebsd14"])
+@pytest.mark.parametrize("code", [0, 3])
+def test_show_reaps_viewer_without_waiting_for_it_to_close(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, viewer: _Viewer, platform: str, code: int
 ) -> None:
-    monkeypatch.setattr(sys, "platform", "darwin")
-    viewer.process.code = None
-    assert cast(Callable[[], object], ub.Figure().show)() is None
-    assert viewer.process.timeouts == [0.1]
-    _saved_png(tmp_path)
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setenv("DISPLAY", ":0")
+    process = viewer.process
+    process.code = None
+    try:
+        assert cast(Callable[[], object], ub.Figure().show)() is None
+        assert process.waiting.wait(timeout=5)
+        assert process.timeouts == [0.1, None]
+        assert process.waiter is not None
+        assert process.waiter.daemon
+        assert not process.reaped.is_set()
+        _saved_png(tmp_path)
+    finally:
+        process.code = code
+        process.exited.set()
+        assert process.reaped.wait(timeout=5)
+        if process.waiter is not None:
+            process.waiter.join(timeout=5)
+            assert not process.waiter.is_alive()
 
 
+@pytest.mark.parametrize("kind", ["figure", "axes", "pie"])
 @pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
 @pytest.mark.parametrize("error_type", [FileNotFoundError, PermissionError, NotImplementedError])
 def test_show_missing_viewer_raises_usage_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     viewer: _Viewer,
+    kind: str,
     platform: str,
     error_type: type[Exception],
 ) -> None:
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setenv("DISPLAY", ":0")
     viewer.error = error_type("viewer missing")
+    target = _target(kind, ub.Figure())
     with pytest.raises(ub.UsageError) as caught:
-        ub.Figure().show()
-    _assert_viewer_error(caught.value, _saved_png(tmp_path))
+        target.show()
+    _assert_viewer_error(caught.value, _saved_png(tmp_path), target)
     assert "viewer missing" in str(caught.value)
 
 
+@pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
+def test_show_viewer_attribute_error_propagates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, viewer: _Viewer, platform: str
+) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setenv("DISPLAY", ":0")
+    viewer.error = AttributeError("viewer attribute failure")
+    with pytest.raises(AttributeError, match="viewer attribute failure"):
+        ub.Figure().show()
+    _saved_png(tmp_path)
+
+
+@pytest.mark.parametrize("kind", ["figure", "axes", "pie"])
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
 @pytest.mark.parametrize("code", [1, 3, -9])
 def test_show_immediate_viewer_failure_raises_usage_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, viewer: _Viewer, platform: str, code: int
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    viewer: _Viewer,
+    kind: str,
+    platform: str,
+    code: int,
 ) -> None:
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setenv("DISPLAY", ":0")
     viewer.process.code = code
+    target = _target(kind, ub.Figure())
     with pytest.raises(ub.UsageError) as caught:
-        ub.Figure().show()
-    _assert_viewer_error(caught.value, _saved_png(tmp_path))
+        target.show()
+    _assert_viewer_error(caught.value, _saved_png(tmp_path), target)
     assert f"exited with status {code}" in str(caught.value)
+    assert viewer.process.reaped.is_set()
 
 
+@pytest.mark.parametrize("kind", ["figure", "axes", "pie"])
 @pytest.mark.parametrize("empty", [False, True])
 def test_show_linux_without_display_raises_usage_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, empty: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, empty: bool
 ) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     for name in ("DISPLAY", "WAYLAND_DISPLAY"):
@@ -404,9 +467,10 @@ def test_show_linux_without_display_raises_usage_error(
             monkeypatch.setenv(name, "")
         else:
             monkeypatch.delenv(name, raising=False)
+    target = _target(kind, ub.Figure())
     with pytest.raises(ub.UsageError) as caught:
-        ub.Figure().show()
-    _assert_viewer_error(caught.value, _saved_png(tmp_path))
+        target.show()
+    _assert_viewer_error(caught.value, _saved_png(tmp_path), target)
     assert "neither DISPLAY nor WAYLAND_DISPLAY is set" in str(caught.value)
 
 

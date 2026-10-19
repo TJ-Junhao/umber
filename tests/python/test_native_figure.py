@@ -311,6 +311,31 @@ def test_figure_sizes_are_validated(
     )
 
 
+@pytest.mark.parametrize(
+    ("width", "height", "rows", "cols", "size"),
+    [
+        (None, None, 1, 1, (6.0, 4.0)),
+        (None, None, 2, 3, (18.0, 8.0)),
+        (None, 2.5, 2, 3, (18.0, 2.5)),
+        (3.5, None, 2, 3, (3.5, 8.0)),
+        (3.5, 2.5, 2, 3, (3.5, 2.5)),
+    ],
+)
+def test_native_figure_resolved_size_is_read_only(
+    width: float | None,
+    height: float | None,
+    rows: int,
+    cols: int,
+    size: tuple[float, float],
+) -> None:
+    fig = _umber.Figure(width, height, _umber.Theme.pigment(), rows, cols, 0, 0, 0, 0)
+    assert fig.size_in == size
+    assert fig.clone().size_in == size
+    with pytest.raises(AttributeError):
+        fig.__setattr__("size_in", (1.0, 1.0))
+    assert fig.size_in == size
+
+
 def test_a_figure_of_one_cell_has_one_axes() -> None:
     fig = figure()
     assert_reported(

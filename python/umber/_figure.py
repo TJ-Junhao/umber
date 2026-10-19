@@ -2,7 +2,6 @@
 
 import os
 from collections.abc import Collection, Iterator
-from operator import attrgetter
 from pathlib import Path
 from typing import Any, Final, Never, Self, cast, final
 
@@ -25,15 +24,6 @@ _SCALE_HINT: Final = "use Scale.linear(), Scale.log(), Scale.category() or Scale
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
 _SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
 _LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
-_SIZE_IN: Final = attrgetter("_size_in")
-
-
-def display_bundle(
-    figure: "Figure", include: Collection[str] | None, exclude: Collection[str] | None
-) -> _display.Bundle:
-    """Return a figure's bundle for the notebook hooks on figures and their panels."""
-    size_in = cast(tuple[float, float], _SIZE_IN(figure))
-    return _display.mimebundle(figure, size_in, include, exclude)
 
 
 def _inches(context: str, name: str, value: float | Auto) -> float | None:
@@ -90,14 +80,13 @@ class Figure:
     """
 
     # Python state is stored only after the native call succeeds.
-    __slots__ = ("_axes", "_cols", "_native", "_pies", "_rows", "_size_in", "_twins")
+    __slots__ = ("_axes", "_cols", "_native", "_pies", "_rows", "_twins")
     _twins: dict[tuple[int, int], Axes[Any, float]]
     _pies: dict[tuple[int, int], PieAxes]
     _native: _umber.Figure
     _axes: dict[tuple[int, int], Axes[Any, Any]]
     _rows: int
     _cols: int
-    _size_in: tuple[float, float]
 
     def __init__(
         self,
@@ -160,11 +149,6 @@ class Figure:
                 share_y.value,
                 legend.value,
                 share_color.value,
-            )
-            auto_width, auto_height = _umber.grid_auto_size(row_count, col_count)
-            self._size_in = (
-                auto_width if inches_wide is None else inches_wide,
-                auto_height if inches_high is None else inches_high,
             )
             self._rows = row_count
             self._cols = col_count
@@ -606,7 +590,7 @@ class Figure:
             {'image/png': {'width': 432, 'height': 288}}
         """
         with api_call():
-            return display_bundle(self, include, exclude)
+            return _display.mimebundle(self, self._native.size_in, self.__repr__, include, exclude)
 
     def show(self) -> None:
         """Display the figure in Jupyter, or open it in the system's default viewer.
@@ -615,7 +599,9 @@ class Figure:
         Jupyter kernel. There, display uses the same PNG bundle as a figure at the end of
         a cell. Terminal IPython and plain Python open a 144 dpi PNG named ``figure.png``
         in a fresh temporary directory. The file is left for the viewer; this method does
-        not wait for the viewer to close. IPython is optional.
+        not wait for the viewer to close. The 0.1 second startup check is best effort: a viewer
+        that fails later, or an ``xdg-open`` that hands off and exits 0, is not detected.
+        IPython is optional.
 
         Returns:
             None.
@@ -636,7 +622,7 @@ class Figure:
             True
         """
         with api_call():
-            _display.show(self)
+            _display.show(self, "Figure.show()")
 
     def to_png(self, *, dpi: int = 200) -> bytes:
         """Render the figure as a PNG image.
@@ -806,7 +792,6 @@ class Figure:
         clone._native = self._native.clone()
         clone._rows = self._rows
         clone._cols = self._cols
-        clone._size_in = self._size_in
         clone._axes = {}
         clone._pies = {
             position: _pie.attach(clone, clone._native, *position) for position in self._pies

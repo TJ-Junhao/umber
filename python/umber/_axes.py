@@ -14,7 +14,19 @@ from typing_extensions import TypeVar
 # so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
 # ``umber.Figure`` through the package once it has loaded.
 import umber
-from umber import _args, _cmap, _color, _group, _scale, _series, _size, _ticks, _time, _umber
+from umber import (
+    _args,
+    _cmap,
+    _color,
+    _display,
+    _group,
+    _scale,
+    _series,
+    _size,
+    _ticks,
+    _time,
+    _umber,
+)
 from umber._args import instance, integer, is_text_or_buffer, real, type_name
 from umber._cmap import CMAP_HINT, Cmap
 from umber._color import Color
@@ -198,18 +210,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> sorted(data)
             ['image/png', 'text/plain']
         """
-        from umber._figure import display_bundle
-
         with api_call():
-            data, metadata = display_bundle(self.figure, include, exclude)
-            if "text/plain" in data:
-                data["text/plain"] = repr(self)
-            return data, metadata
+            return _display.mimebundle(
+                self.figure, self._native.size_in, self.__repr__, include, exclude
+            )
 
     def show(self) -> None:
         """Display the whole figure in Jupyter or the system's default viewer.
 
-        Delegates to ``Figure.show()``; the same kernel detection and temporary PNG rules apply.
+        Uses the same kernel detection, temporary PNG and best-effort startup check as
+        ``Figure.show()``.
 
         Returns:
             None.
@@ -229,7 +239,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             True
         """
         with api_call():
-            self.figure.show()
+            _display.show(self.figure, "Axes.show()")
 
     def twin_y(self: "Axes[X, float]", *, scale: Scale[float] = Scale.linear()) -> "Axes[X, float]":
         """Add a numeric y axis on the right, sharing this panel's x axis.

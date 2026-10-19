@@ -1,6 +1,6 @@
 # Coming from matplotlib
 
-umber has no global state: there is no `plt`, no current figure and no `show()`. Build a figure, draw on its axes, then write it out.
+umber has no global state: there is no `plt` and no current figure; `fig.show()` displays a figure.
 
 | matplotlib | umber |
 |---|---|

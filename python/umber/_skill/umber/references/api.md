@@ -1455,7 +1455,8 @@ Axes.show(self) -> None
 
 Display the whole figure in Jupyter or the system's default viewer.
 
-Delegates to ``Figure.show()``; the same kernel detection and temporary PNG rules apply.
+Uses the same kernel detection, temporary PNG and best-effort startup check as
+``Figure.show()``.
 
 Returns:
     None.
@@ -3709,7 +3710,9 @@ A shell returned by IPython's ``get_ipython()`` with a ``kernel`` attribute is a
 Jupyter kernel. There, display uses the same PNG bundle as a figure at the end of
 a cell. Terminal IPython and plain Python open a 144 dpi PNG named ``figure.png``
 in a fresh temporary directory. The file is left for the viewer; this method does
-not wait for the viewer to close. IPython is optional.
+not wait for the viewer to close. The 0.1 second startup check is best effort: a viewer
+that fails later, or an ``xdg-open`` that hands off and exits 0, is not detected.
+IPython is optional.
 
 Returns:
     None.
@@ -4551,7 +4554,8 @@ PieAxes.show(self) -> None
 
 Display the whole figure in Jupyter or the system's default viewer.
 
-Delegates to ``Figure.show()``; the same kernel detection and temporary PNG rules apply.
+Uses the same kernel detection, temporary PNG and best-effort startup check as
+``Figure.show()``.
 
 Returns:
     None.
