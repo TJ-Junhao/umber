@@ -8,7 +8,7 @@ import threading
 from collections.abc import Callable, Collection
 from contextvars import ContextVar
 from importlib import import_module
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Final, cast
 
 from umber._errors import UsageError, new_error
@@ -89,12 +89,12 @@ def _kernel_display() -> Callable[[object], None] | None:
     return cast(Callable[[object], None], import_module("IPython.display").display)
 
 
-def _viewer_error(path: Path, context: str, reason: str) -> UsageError:
+def _viewer_error(path: PurePath, context: str, reason: str) -> UsageError:
     """Name the saved file and how to open an image when no viewer can be started."""
     return new_error(
         UsageError,
         context,
-        f"could not open a viewer for {str(path)!r}: {reason}.",
+        f"could not open a viewer: {reason}; the PNG was saved to {path}.",
         parameter=None,
         hint=_VIEWER_HINT,
     )

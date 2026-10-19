@@ -7,17 +7,15 @@ import sys
 import tempfile
 import threading
 from collections.abc import Callable, Collection
-from pathlib import Path
+from importlib import import_module
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from typing import cast
 
-import IPython
-import IPython.display
 import pytest
-from IPython.core.formatters import DisplayFormatter
 
 import umber as ub
-from umber._display import Bundle
+from umber._display import Bundle, _viewer_error
 from umber._errors import details
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -75,7 +73,12 @@ def no_real_viewer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(subprocess, "Popen", refuse)
     monkeypatch.setattr(os, "startfile", refuse, raising=False)
-    monkeypatch.setattr(IPython, "get_ipython", lambda: None)
+    try:
+        ipython = import_module("IPython")
+    except ImportError:
+        pass
+    else:
+        monkeypatch.setattr(ipython, "get_ipython", lambda: None)
     monkeypatch.setenv("NO_COLOR", "1")
     mkdtemp = tempfile.mkdtemp
 
@@ -109,6 +112,9 @@ def _pixels(png: bytes) -> tuple[int, int]:
 
 
 def _format(value: object) -> Bundle:
+    pytest.importorskip("IPython")
+    from IPython.core.formatters import DisplayFormatter
+
     formatter = DisplayFormatter()
     format_value = cast(Callable[[object], Bundle], formatter.format)  # pyright: ignore[reportUnknownMemberType]
     return format_value(value)
@@ -136,7 +142,7 @@ def _saved_png(tmp_path: Path) -> Path:
 
 def _assert_viewer_error(error: ub.UsageError, path: Path, target: Displayable) -> None:
     assert str(error).startswith(f"{type(target).__name__}.show(): ")
-    assert str(path) in str(error)
+    assert str(error).endswith(f"; the PNG was saved to {path}.")
     assert details(error) == (None, VIEWER_HINT)
     assert f"hint: {VIEWER_HINT}" in getattr(error, "__notes__", [])
 
@@ -273,6 +279,8 @@ def test_mimebundle_render_error_propagates(kind: str) -> None:
 
 @pytest.mark.parametrize("kind", ["figure", "axes", "pie"])
 def test_show_kernel_displays_figure_once(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    ipython = pytest.importorskip("IPython")
+    ipython_display = pytest.importorskip("IPython.display")
     figure = ub.Figure()
     target = _target(kind, figure)
     calls: list[object] = []
@@ -281,8 +289,8 @@ def test_show_kernel_displays_figure_once(monkeypatch: pytest.MonkeyPatch, kind:
         calls.append(value)
         _format(value)
 
-    monkeypatch.setattr(IPython, "get_ipython", lambda: SimpleNamespace(kernel=object()))
-    monkeypatch.setattr(IPython.display, "display", display)
+    monkeypatch.setattr(ipython, "get_ipython", lambda: SimpleNamespace(kernel=object()))
+    monkeypatch.setattr(ipython_display, "display", display)
     renders = _count_renders(monkeypatch)
     assert target.show() is None
     assert calls == [figure]
@@ -300,10 +308,12 @@ def test_show_render_error_propagates(
 ) -> None:
     figure = ub.Figure().title("W" * 200)
     target = _target(kind, figure)
-    if kernel:
-        monkeypatch.setattr(IPython, "get_ipython", lambda: SimpleNamespace(kernel=object()))
     calls: list[object] = []
-    monkeypatch.setattr(IPython.display, "display", calls.append)
+    if kernel:
+        ipython = pytest.importorskip("IPython")
+        ipython_display = pytest.importorskip("IPython.display")
+        monkeypatch.setattr(ipython, "get_ipython", lambda: SimpleNamespace(kernel=object()))
+        monkeypatch.setattr(ipython_display, "display", calls.append)
     with pytest.raises(ub.StyleError):
         target.show()
     assert calls == []
@@ -311,13 +321,15 @@ def test_show_render_error_propagates(
 
 
 def test_show_kernel_failure_does_not_cache_png(monkeypatch: pytest.MonkeyPatch) -> None:
+    ipython = pytest.importorskip("IPython")
+    ipython_display = pytest.importorskip("IPython.display")
     figure = ub.Figure()
 
     def display(value: object) -> None:
         raise RuntimeError("display failed")
 
-    monkeypatch.setattr(IPython, "get_ipython", lambda: SimpleNamespace(kernel=object()))
-    monkeypatch.setattr(IPython.display, "display", display)
+    monkeypatch.setattr(ipython, "get_ipython", lambda: SimpleNamespace(kernel=object()))
+    monkeypatch.setattr(ipython_display, "display", display)
     renders = _count_renders(monkeypatch)
     with pytest.raises(RuntimeError, match="display failed"):
         figure.show()
@@ -356,10 +368,12 @@ def test_show_system_viewer(
 def test_show_plain_python_and_terminal_ipython_use_viewer(
     monkeypatch: pytest.MonkeyPatch, viewer: _Viewer, shell: object
 ) -> None:
-    monkeypatch.setattr(IPython, "get_ipython", lambda: shell)
+    ipython = pytest.importorskip("IPython")
+    ipython_display = pytest.importorskip("IPython.display")
+    monkeypatch.setattr(ipython, "get_ipython", lambda: shell)
     monkeypatch.setattr(sys, "platform", "darwin")
     calls: list[object] = []
-    monkeypatch.setattr(IPython.display, "display", calls.append)
+    monkeypatch.setattr(ipython_display, "display", calls.append)
     ub.Figure().show()
     assert len(viewer.commands) == 1
     assert calls == []
@@ -399,6 +413,23 @@ def test_show_reaps_viewer_without_waiting_for_it_to_close(
         if process.waiter is not None:
             process.waiter.join(timeout=5)
             assert not process.waiter.is_alive()
+
+
+@pytest.mark.parametrize("context", ["Figure.show()", "Axes.show()", "PieAxes.show()"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        PureWindowsPath(r"C:\Users\Example User\AppData\Local\Temp\umber-test\figure.png"),
+        PureWindowsPath(r"\\server\shared images\umber-test\figure.png"),
+    ],
+)
+def test_viewer_error_preserves_windows_path(context: str, path: PureWindowsPath) -> None:
+    error = _viewer_error(path, context, "viewer missing")
+    assert str(error) == (
+        f"{context}: could not open a viewer: viewer missing; the PNG was saved to {path}."
+    )
+    assert str(path) in str(error)
+    assert details(error) == (None, VIEWER_HINT)
 
 
 @pytest.mark.parametrize("kind", ["figure", "axes", "pie"])
