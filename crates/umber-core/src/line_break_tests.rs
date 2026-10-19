@@ -353,9 +353,10 @@ fn one_line_texts_refuse_line_breaks_when_rendered() {
          index 2; text cannot hold control characters."
     );
 
-    // A series name the core does not check when the mark is added is refused when drawn.
+    // A series name is refused when the mark is added, before anything is drawn.
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
-    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+    let err = f
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .line(
             AxisData::Numbers(vec![0.0, 1.0]),
@@ -365,12 +366,10 @@ fn one_line_texts_refuse_line_breaks_when_rendered() {
                 ..LineOptions::default()
             },
         )
-        .unwrap();
-    let err = render_error(&f);
+        .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "Figure.to_scene(): the text \"North\\nSouth\" holds a line break at index 5; labels \
-         and names are one line."
+        "Axes.line(): label holds a line break at index 5; legend labels are one line."
     );
     assert_eq!(err.hint(), Some(line_breaks));
 }
@@ -653,4 +652,263 @@ fn editable_svg_writes_one_text_element_per_line() {
         .unwrap();
     let one = render_svg(&one.to_scene(&lib()).unwrap(), SvgText::Outlines);
     assert_eq!(paths(&outlines), paths(&one) + 4);
+}
+
+#[test]
+fn legend_labels_are_checked_when_added_even_with_the_legend_hidden() {
+    use crate::{
+        BoxOptions, Distribution, LegendStyle, RuleOptions, Series, SizeSpec, ValueLabels,
+    };
+    let refused = [
+        (
+            "bad\tlabel",
+            "U+0009 (a tab) at index 3",
+            "text cannot hold control characters.",
+        ),
+        (
+            "a\nb",
+            "a line break at index 1",
+            "legend labels are one line.",
+        ),
+        (
+            "nul\0",
+            "U+0000 at index 3",
+            "text cannot hold control characters.",
+        ),
+        (
+            "x\u{85}",
+            "U+0085 at index 1",
+            "text cannot hold control characters.",
+        ),
+        (
+            "\u{2028}",
+            "U+2028 (a line separator) at index 0",
+            "text cannot hold line or paragraph separators.",
+        ),
+    ];
+    for (label, what, reason) in refused {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        a.legend(LegendStyle::None, SizeSpec::Auto).unwrap();
+        let err = a
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1.0, 2.0],
+                LineOptions {
+                    label: label.into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.line(): label holds {what}; {reason}")
+        );
+        assert_eq!(err.parameter(), Some("label"));
+        let err = a
+            .hline(
+                1.5,
+                RuleOptions {
+                    label: label.into(),
+                    ..RuleOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.hline(): label holds {what}; {reason}")
+        );
+        assert!(a.marks().is_empty(), "{label:?}");
+        f.to_scene(&lib()).unwrap();
+
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        a.legend(LegendStyle::None, SizeSpec::Auto).unwrap();
+        let series = |second: &str| {
+            vec![
+                Series {
+                    label: "North".into(),
+                    values: vec![1.0, 2.0],
+                    ..Series::default()
+                },
+                Series {
+                    label: second.into(),
+                    values: vec![2.0, 1.0],
+                    ..Series::default()
+                },
+            ]
+        };
+        let categories = || vec!["A".to_owned(), "B".to_owned()];
+        let err = a
+            .grouped_bar(categories(), series(label), ValueLabels::default())
+            .unwrap_err();
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.grouped_bar(): series[1].label holds {what}; {reason}")
+        );
+        assert_eq!(err.parameter(), Some("series"));
+        let err = a
+            .stacked_bar(categories(), series(label), ValueLabels::default())
+            .unwrap_err();
+        assert!(err.to_string().contains("series[1].label holds"), "{err}");
+        let distributions = vec![Distribution {
+            label: label.into(),
+            groups: vec![vec![1.0, 2.0], vec![2.0, 3.0]],
+            ..Distribution::default()
+        }];
+        let err = a.grouped_box_plot(categories(), distributions).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.grouped_box(): distributions[0].label holds {what}; {reason}")
+        );
+        let err = a
+            .box_plot(
+                categories(),
+                vec![vec![1.0, 2.0], vec![2.0, 3.0]],
+                BoxOptions {
+                    label: label.into(),
+                    ..BoxOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("label holds"), "{err}");
+        assert!(a.marks().is_empty(), "{label:?}");
+
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        a.legend(LegendStyle::None, SizeSpec::Auto).unwrap();
+        let x = || AxisData::Numbers(vec![0.0, 1.0]);
+        let y = || AxisData::Numbers(vec![1.0, 2.0]);
+        let err = a
+            .grouped_line(
+                vec![("North".into(), x(), y()), (label.into(), x(), y())],
+                crate::Dash::Solid,
+                SizeSpec::Auto,
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.line(): groups[1] holds {what}; {reason}")
+        );
+        assert_eq!(err.parameter(), Some("groups"));
+        assert!(a.marks().is_empty(), "{label:?}");
+    }
+}
+
+#[test]
+fn a_system_family_name_is_one_line() {
+    for (family, message, hint) in [
+        (
+            "DejaVu Sans\n",
+            "Font.system(): family holds a line break at index 11; font family names are one \
+             line.",
+            "line breaks are supported in titles, subtitles, text() and annotate().",
+        ),
+        (
+            "Inter\t",
+            "Font.system(): family holds U+0009 (a tab) at index 5; text cannot hold control \
+             characters.",
+            "use spaces instead of tabs.",
+        ),
+        (
+            "\0",
+            "Font.system(): family holds U+0000 at index 0; text cannot hold control characters.",
+            "remove the character.",
+        ),
+    ] {
+        let err = crate::Font::system(family).unwrap_err();
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        assert_eq!(err.to_string(), message);
+        assert_eq!((err.parameter(), err.hint()), (Some("family"), Some(hint)));
+    }
+    // An empty name is still a usage error.
+    assert!(matches!(
+        crate::Font::system("").unwrap_err(),
+        Error::Usage { .. }
+    ));
+}
+
+/// The height named by a `the figure is … pt tall; at least … pt is needed …` error.
+fn named_height(err: &Error) -> f64 {
+    let message = err.to_string();
+    message
+        .split_once(" pt tall; at least ")
+        .and_then(|(_, rest)| rest.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{message}"))
+}
+
+#[test]
+fn the_height_named_for_a_short_figure_leaves_room_for_a_right_or_inside_legend() {
+    use crate::{LegendPosition, LegendStyle, SizeSpec};
+    let labels = ["North", "South", "East", "West"];
+    for position in [LegendPosition::Right, LegendPosition::Best] {
+        for count in [1, 4] {
+            // One panel.
+            let single = |height: f64| {
+                let mut f = Figure::new(6.0, height, Theme::pigment()).unwrap();
+                let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                a.title("One\nTwo")
+                    .legend_at(LegendStyle::Header, position, SizeSpec::Auto)
+                    .unwrap();
+                for label in &labels[..count] {
+                    a.line(
+                        AxisData::Numbers(vec![0.0, 1.0]),
+                        &[0.0, 1.0],
+                        LineOptions {
+                            label: (*label).into(),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                f
+            };
+            let needed = named_height(&single(0.5).to_scene(&lib()).unwrap_err());
+            single(needed / 72.0)
+                .to_scene(&lib())
+                .unwrap_or_else(|err| panic!("{position:?} {count}: {needed} pt: {err}"));
+            // A grid of two rows, one panel spanning both.
+            let grid = |height: f64| {
+                let mut f =
+                    Figure::with_grid(8.0, height, Theme::pigment(), Grid::new(2, 2).unwrap())
+                        .unwrap();
+                for (row, col, row_span) in [(0, 0, 2), (0, 1, 1), (1, 1, 1)] {
+                    let mut a = f
+                        .add_axes_at(
+                            Placement {
+                                row: GridIndex::At(row),
+                                col: GridIndex::At(col),
+                                row_span,
+                                ..Placement::default()
+                            },
+                            ScaleKind::Linear,
+                            ScaleKind::Linear,
+                        )
+                        .unwrap();
+                    a.title("One\nTwo")
+                        .legend_at(LegendStyle::Header, position, SizeSpec::Auto)
+                        .unwrap();
+                    for label in &labels[..count] {
+                        a.line(
+                            AxisData::Numbers(vec![0.0, 1.0]),
+                            &[0.0, 1.0],
+                            LineOptions {
+                                label: (*label).into(),
+                                ..LineOptions::default()
+                            },
+                        )
+                        .unwrap();
+                    }
+                }
+                f
+            };
+            let needed = named_height(&grid(0.5).to_scene(&lib()).unwrap_err());
+            grid(needed / 72.0)
+                .to_scene(&lib())
+                .unwrap_or_else(|err| panic!("grid {position:?} {count}: {needed} pt: {err}"));
+        }
+    }
 }

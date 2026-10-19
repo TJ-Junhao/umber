@@ -930,6 +930,9 @@ struct Rows {
     below: Vec<f64>,
     /// The part of each bottom band occupied by legends, after the aligned x axis labels.
     legends: Vec<f64>,
+    /// The least `Q` that leaves every panel's legend beside or inside its plot room, at
+    /// least [`MIN_PLOT`]; the heights named in errors use it.
+    least_plot: f64,
 }
 
 /// The rows placed.
@@ -990,11 +993,26 @@ impl Rows {
         for (below, legend) in below.iter_mut().zip(&legends) {
             *below += legend;
         }
+        let gap = input.gap();
+        // A panel spanning rows has their plots, and the bands and gaps between them.
+        let least_plot = cells
+            .iter()
+            .zip(input.panels)
+            .map(|(cells, panel)| {
+                let first = cells.row();
+                let span = cells.row_span();
+                let between: f64 = (first..first + span - 1)
+                    .map(|r| below[r] + gap + above[r + 1])
+                    .sum();
+                (super::placement::least_plot_height(panel.legend) - between) / span as f64
+            })
+            .fold(MIN_PLOT, f64::max);
         Rows {
-            gap: input.gap(),
+            gap,
             above,
             below,
             legends,
+            least_plot,
         }
     }
 
@@ -1003,7 +1021,8 @@ impl Rows {
     /// # Errors
     ///
     /// `Error::Style` in `input.context` when the plots of the rows are shorter than
-    /// [`MIN_PLOT`].
+    /// [`MIN_PLOT`]. The height it names also leaves every panel's legend beside or inside its
+    /// plot room (see [`Rows::least_plot`]).
     fn place(self, input: &GridInput<'_>) -> Result<PlacedRows> {
         let rows = self.above.len();
         let bands = self.above.iter().sum::<f64>() + self.below.iter().sum::<f64>();
@@ -1011,14 +1030,16 @@ impl Rows {
         let padding = input.top + PADDING;
         let plot_height = |height: f64| (height - padding - bands - gaps) / rows as f64;
         if plot_height(input.height) < MIN_PLOT {
-            // The least whole height that the check accepts.
-            let needed = padding + bands + gaps + MIN_PLOT * rows as f64;
+            // The least whole height that the check accepts and that leaves every legend
+            // beside or inside its plot room.
+            let least_plot = self.least_plot;
+            let needed = padding + bands + gaps + least_plot * rows as f64;
             let least = input.height.floor() + 1.0;
             let mut whole = needed.ceil().max(least);
-            while plot_height(whole) < MIN_PLOT {
+            while plot_height(whole) < least_plot {
                 whole += 1.0;
             }
-            while whole > least && plot_height(whole - 1.0) >= MIN_PLOT {
+            while whole > least && plot_height(whole - 1.0) >= least_plot {
                 whole -= 1.0;
             }
             return Err(grid_too_short(input.context, input.height, whole, rows));
@@ -3275,6 +3296,7 @@ mod tests {
                 above: (0..rows).map(|_| rng.unit() * 300.0).collect(),
                 below: (0..rows).map(|_| rng.unit() * 100.0).collect(),
                 legends: vec![0.0; rows],
+                least_plot: MIN_PLOT,
             };
             let grid = Grid::new(rows as i64, 2).unwrap();
             let input = GridInput {

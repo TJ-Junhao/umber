@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 0d35ba9921e917eee37083dad40ea4753593cd38
+# revision: b57bcec0cb28eb573776b70c8075f678eaa7467c
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 af10b9e8d0c96cc7d716f99ca46cde4e34a86ef0adaf415e43c55ff3a0fb1800  api/cmaps.txt
@@ -36,7 +36,7 @@ d838e3aa6c2977398d2f8670c5bc1c0c43485f541ae747c9115e49de4f37b004  errors/hist-va
 68c88012613aa73c8361c3350f5b18d859fbcac8286a86260461b74abe8cbeba  errors/inputs.txt
 b50264827751251008681093fcfe7d14e3e34d8d47b7607fb71931cf239bcca2  errors/kde.txt
 f08618b143abfb449f06e16487279207666a4c1bd3cda8f2cf0551ed28ffbc94  errors/legend_position.txt
-54e6ca33e9aa4aae5fbf726b1be9adbde8d7114f3eef89091228602c42cc3fa7  errors/line-breaks.txt
+7be37b0d48f317b7a03fa179dfe1d4b666071fa7c809d4a0c23c28d1af1c5ec6  errors/line-breaks.txt
 d925dadbc893020c21c0aed6e42ec62df2765632a2190f426378eb64cc50b0f6  errors/mesh-raster.txt
 560205641c3c60adb3072225f55b4e1d3474d07056cd59f1f72a9cdf22e72ee7  errors/plot-min-height.txt
 dcf413fcfbf313202bed9ff83ed258443e0de35e904995286ee81859be73902a  errors/rules.txt

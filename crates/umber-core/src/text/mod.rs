@@ -46,7 +46,7 @@
 // - `layout` owns placed glyphs and `TextLayout` (uses `font`, `shaping`, `runs`, `outline`,
 //   `guard`);
 // - `system` owns system font discovery, lookup and shaping tables (uses `font`, `cmap`,
-//   `guard`);
+//   `guard`, `lines`);
 // - `library` coordinates one layout call over all of them, and resolves the fonts of a scene.
 mod cmap;
 mod font;

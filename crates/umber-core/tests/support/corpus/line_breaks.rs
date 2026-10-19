@@ -4,8 +4,9 @@
 use std::fmt::Write as _;
 
 use umber_core::{
-    Align, AnnotateOptions, AxisData, AxisValue, Figure, FontLibrary, Grid, GridIndex, LineOptions,
-    PieOptions, Placement, ScaleKind, ScatterOptions, TextOptions, Theme, TickFormat,
+    Align, AnnotateOptions, AxisData, AxisValue, Figure, Font, FontLibrary, Grid, GridIndex,
+    LegendStyle, LineOptions, PieOptions, Placement, ScaleKind, ScatterOptions, Series, SizeSpec,
+    TextOptions, Theme, TickFormat, ValueLabels,
 };
 
 use super::super::{Output, axes, emit_scene, figure, linear, record};
@@ -209,20 +210,40 @@ fn error_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             f.title("a\u{85}b");
         }),
     );
+    let mut f = figure(6.0, 4.0, Theme::pigment(), linear(), linear());
+    let mut hidden = axes(&mut f);
+    hidden.legend(LegendStyle::None, SizeSpec::Auto).unwrap();
     push(
-        "legend label line break",
-        render(&|f| {
-            axes(f)
-                .line(
-                    AxisData::Numbers(vec![0.0, 1.0]),
-                    &[1.0, 2.0],
-                    LineOptions {
-                        label: "North\nSouth".into(),
-                        ..LineOptions::default()
-                    },
-                )
-                .unwrap();
-        }),
+        "legend label line break, legend hidden",
+        hidden
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1.0, 2.0],
+                LineOptions {
+                    label: "North\nSouth".into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap_err(),
+    );
+    let mut f = figure(6.0, 4.0, Theme::pigment(), ScaleKind::Category, linear());
+    push(
+        "series label tab",
+        axes(&mut f)
+            .grouped_bar(
+                vec!["A".into()],
+                vec![Series {
+                    label: "North\tSouth".into(),
+                    values: vec![1.0],
+                    ..Series::default()
+                }],
+                ValueLabels::default(),
+            )
+            .unwrap_err(),
+    );
+    push(
+        "font family line break",
+        Font::system("DejaVu Sans\n").unwrap_err(),
     );
     let mut f = figure(6.0, 4.0, Theme::pigment(), linear(), linear());
     let at = (number(0.5), number(0.5));

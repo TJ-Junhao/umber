@@ -1170,7 +1170,9 @@ fn figure_height_hint(
 ///   label rising above the top tick, and the bottom bands is shorter than [`MIN_PLOT`]. The
 ///   bottom bands include the x tick labels, the x label and the bottom padding; with a Bottom
 ///   legend they also reserve the lowest y tick label's drop when it reaches further, then the
-///   legend's gap and height. The message names the height the canvas needs, and the hint names
+///   legend's gap and height. The message names the height the canvas needs, a plot tall enough
+///   for a legend beside or inside it included (see [`placement::least_plot_height`]), and the
+///   hint names
 ///   the figure header, when present, the header parts the axes have and any Bottom legend (see
 ///   [`figure_too_short`]).
 fn solve_single(
@@ -1281,6 +1283,8 @@ fn solve_single(
     let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {
+        // The height named in the errors leaves room for a legend beside or inside the plot too.
+        let least = placement::least_plot_height(legend);
         let without = bands.without_colorbar(cap);
         let plain_top = if legend.position == crate::LegendPosition::TopRight {
             top + without.above_with_row(&legend.header_within(plot_left, plot_right))
@@ -1334,7 +1338,7 @@ fn solve_single(
             if header_band > band {
                 (role, text, band) = ("figure header", "", header_band);
             }
-            let deficit = MIN_PLOT - plot_height;
+            let deficit = least - plot_height;
             let (needed, available) = widths(band, (band - deficit).max(0.0));
             let name = if text.is_empty() {
                 role.to_owned()
@@ -1352,7 +1356,7 @@ fn solve_single(
         return Err(figure_too_short(
             context,
             frame.height,
-            plot_top - frame.y + MIN_PLOT + below,
+            plot_top - frame.y + least + below,
             bands
                 .heading
                 .height_hint(top > frame.y + PADDING, bands.bottom_legend > 0.0),

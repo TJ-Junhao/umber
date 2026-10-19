@@ -381,8 +381,9 @@ impl Font {
     ///
     /// # Errors
     ///
-    /// `Error::Usage` if the family is not installed, with the closest installed names in the
-    /// message, or if a selected font file cannot be read or parsed.
+    /// `Error::Style` if `family` holds a line break, another control character or a line or
+    /// paragraph separator; `Error::Usage` if the family is not installed, with the closest
+    /// installed names in the message, or if a selected font file cannot be read or parsed.
     ///
     /// # Examples
     ///

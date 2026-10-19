@@ -1,5 +1,6 @@
 """Line breaks in titles, subtitles, text() and annotate(), and their refusal elsewhere."""
 
+import re
 from collections.abc import Callable
 from xml.etree import ElementTree as ET
 
@@ -345,3 +346,19 @@ def test_blank_lines_are_kept_and_an_empty_title_draws_nothing() -> None:
     ax.title("")
     root = ET.fromstring(fig.to_svg(text=ub.SvgText.EDITABLE))
     assert not [node for node in root.iter(f"{SVG}text") if node.text == "Middle"]
+
+
+@pytest.mark.parametrize("position", [ub.LegendPosition.RIGHT, ub.LegendPosition.BEST])
+def test_the_height_named_for_a_short_figure_leaves_room_for_the_legend(
+    position: ub.LegendPosition,
+) -> None:
+    def build(height: float) -> ub.Figure:
+        fig = ub.Figure(6, height)
+        ax = fig.add_axes().title("One\nTwo").line([0, 1], [0, 1], label="S")
+        ax.legend(ub.LegendStyle.HEADER, position=position)
+        return fig
+
+    err = _raised(ub.StyleError, lambda: build(0.5).to_png())
+    found = re.search(r"at least (\d+) pt", str(err))
+    assert found is not None, err
+    assert build(int(found.group(1)) / 72).to_png().startswith(b"\x89PNG")
