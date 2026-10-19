@@ -274,12 +274,26 @@ pub fn raster_difference(a: &Raster, b: &Raster) -> (f64, f64) {
 
 /// The largest mean absolute channel difference between the Poppler raster of a PDF and the PNG
 /// of the same scene; antialiasing and glyph rasterization differ between the two rasterizers.
+/// These focused tests use 144 dpi. The corpus includes smaller canvases and denser edges at
+/// 72/200 dpi, so pdf_corpus uses 4.5 / 2.5% instead of these tighter 2.0 / 1% defaults.
 pub const MAX_MEAN_DIFFERENCE: f64 = 2.0;
 /// The largest share of pixels with a channel more than 64 apart.
 pub const MAX_FAR_SHARE: f64 = 0.01;
 
+/// Compares the rasters, then removes the case's scratch directory only on success.
 pub fn assert_matches_png(pdf_path: &FsPath, png: &[u8], dpi: u32) {
-    let (mean, far) = raster_difference(&poppler_raster(pdf_path, dpi), &png_raster(png));
+    let dir = pdf_path.parent().unwrap();
+    write(dir, "reference.png", png);
+    let (mean, far) = std::panic::catch_unwind(|| {
+        raster_difference(&poppler_raster(pdf_path, dpi), &png_raster(png))
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "{}: raster comparison failed; scratch files retained at {}",
+            pdf_path.display(),
+            dir.display()
+        )
+    });
     eprintln!(
         "{}: mean difference {mean:.4}, far share {far:.5}",
         pdf_path.display()
@@ -287,9 +301,11 @@ pub fn assert_matches_png(pdf_path: &FsPath, png: &[u8], dpi: u32) {
     assert!(
         mean <= MAX_MEAN_DIFFERENCE && far <= MAX_FAR_SHARE,
         "{}: mean difference {mean:.4} (at most {MAX_MEAN_DIFFERENCE}), far share {far:.5} \
-         (at most {MAX_FAR_SHARE})",
-        pdf_path.display()
+         (at most {MAX_FAR_SHARE}); scratch files retained at {}",
+        pdf_path.display(),
+        dir.display()
     );
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// The page content stream, object 4 of every document the backend writes, as text.

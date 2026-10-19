@@ -28,7 +28,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # Font subsetting over the full corpus is much faster with the release build below.
-      - run: cargo test -p umber-core -- --skip every_corpus_pdf_opens_and_matches_png
+      - run: cargo test -p umber-core
       - run: cargo test -p umber-core --example refactor_outputs --locked
       - run: scripts/test-check-refactor-output.sh
       - run: scripts/check-refactor-output.sh check

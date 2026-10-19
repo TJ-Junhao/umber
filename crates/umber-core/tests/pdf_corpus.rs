@@ -14,50 +14,50 @@ mod refactor_cases;
 use std::collections::BTreeSet;
 
 // Both corpus resolutions: 4.0 mean / 2.20% far were the largest ordinary differences.
-// Keep margin for rasterizer versions without raising the limits for every scene to the
-// much larger differences of the densely packed, subpixel-sized stress cases.
+// The corpus includes smaller canvases and denser edges at 72/200 dpi than the focused
+// tests at 144 dpi, so it needs 4.5 / 2.5% rather than pdf_check's 2.0 / 1% defaults.
+// Keep margin for rasterizer versions without raising every scene's limits to those of
+// the densely packed, subpixel-sized stress cases.
 const MAX_MEAN_DIFFERENCE: f64 = 4.5;
 const MAX_FAR_SHARE: f64 = 0.025;
 
-fn tolerance(name: &str) -> (f64, f64) {
-    match name {
-        // Poppler snaps dense, subpixel-width bars more opaquely than tiny-skia or MuPDF.
-        // These exceptions are also bounded against MuPDF below; a broad Poppler limit
-        // must not conceal a change shared by both PDF rasterizers.
-        "fig-hist-max-bins-graphite" => (32.0, 0.24),
-        "fig-hist-max-bins-midnight" => (12.0, 0.11),
-        "fig-category-labels-bars-200-horizontal" => (21.0, 0.22),
-        "fig-category-labels-bars-200-vertical" => (17.0, 0.17),
-        // Dense overlapping markers amplify differences at their antialiased borders.
-        "fig-huge-data" => (12.0, 0.05),
-        // Text and line edges occupy a large fraction of these very small canvases.
-        "fig-direct-tiny-50-lines" => (11.0, 0.075),
-        "fig-squeezed-layout-no-x-ticks" => (7.0, 0.04),
-        "fig-legend-narrow-50-entries" | "fig-legend-chips-narrow-50-entries" => (6.0, 0.03),
-        _ => (MAX_MEAN_DIFFERENCE, MAX_FAR_SHARE),
-    }
-}
-
-// The same nine scenes, independently rasterized. The largest MuPDF differences at
+// Poppler and MuPDF limits for the same nine scenes. The largest MuPDF differences at
 // 72/200 dpi are 13.08 mean and 12.60% far; most are much closer than Poppler.
 // Both rasterizers agree on the geometry, but not on coverage at tiny edges. The generated
 // three-way table records both PNG comparisons and the PDF rasterizers' disagreement.
-fn mupdf_tolerance(name: &str) -> Option<(f64, f64)> {
+fn exceptional_tolerances(name: &str) -> Option<((f64, f64), (f64, f64))> {
     Some(match name {
-        "fig-hist-max-bins-graphite" => (16.0, 0.16),
-        "fig-hist-max-bins-midnight" => (5.0, 0.008),
-        "fig-category-labels-bars-200-horizontal" => (6.0, 0.002),
-        "fig-category-labels-bars-200-vertical" => (4.5, 0.002),
-        "fig-huge-data" => (6.0, 0.01),
-        "fig-direct-tiny-50-lines" => (6.0, 0.016),
-        "fig-squeezed-layout-no-x-ticks" => (3.0, 0.013),
-        "fig-legend-narrow-50-entries" => (4.0, 0.008),
-        "fig-legend-chips-narrow-50-entries" => (5.0, 0.008),
+        // Poppler snaps dense, subpixel-width bars more opaquely than tiny-skia or MuPDF.
+        // A broad Poppler limit must not conceal a change shared by both PDF rasterizers.
+        "fig-hist-max-bins-graphite" => ((32.0, 0.24), (16.0, 0.16)),
+        "fig-hist-max-bins-midnight" => ((12.0, 0.11), (5.0, 0.008)),
+        "fig-category-labels-bars-200-horizontal" => ((21.0, 0.22), (6.0, 0.0001)),
+        "fig-category-labels-bars-200-vertical" => ((17.0, 0.17), (4.5, 0.0001)),
+        // Dense overlapping markers amplify differences at their antialiased borders.
+        "fig-huge-data" => ((12.0, 0.05), (6.0, 0.01)),
+        // Text and line edges occupy a large fraction of these very small canvases.
+        "fig-direct-tiny-50-lines" => ((11.0, 0.075), (6.0, 0.016)),
+        "fig-squeezed-layout-no-x-ticks" => ((7.0, 0.04), (3.0, 0.013)),
+        "fig-legend-narrow-50-entries" => ((6.0, 0.03), (4.0, 0.008)),
+        "fig-legend-chips-narrow-50-entries" => ((6.0, 0.03), (5.0, 0.008)),
         _ => return None,
     })
 }
 
+fn tolerance(name: &str) -> (f64, f64) {
+    exceptional_tolerances(name)
+        .map_or((MAX_MEAN_DIFFERENCE, MAX_FAR_SHARE), |(poppler, _)| poppler)
+}
+
+fn mupdf_tolerance(name: &str) -> Option<(f64, f64)> {
+    exceptional_tolerances(name).map(|(_, mupdf)| mupdf)
+}
+
 #[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "runs the full corpus; needs the release build"
+)]
 fn every_corpus_pdf_opens_and_matches_png() {
     let qpdf = pdf_check::have("qpdf");
     let poppler = pdf_check::have("pdftoppm");

@@ -595,5 +595,5 @@ class Figure:
                 "Figure",
                 "a Figure cannot be pickled.",
                 parameter=None,
-                hint="save it with save_png() or save_svg(), or build it again.",
+                hint="save it with save_png(), save_svg() or save_pdf(), or build it again.",
             )

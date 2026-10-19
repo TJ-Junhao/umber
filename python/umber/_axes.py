@@ -77,7 +77,9 @@ _CATEGORY: Final = Scale.category()
 _TIME: Final = Scale.time()
 _COLOR_HINT: Final = 'use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.'
 _COPY_HINT: Final = "copy the figure instead: copy.copy(ax.figure)."
-_PICKLE_HINT: Final = "save the figure with save_png() or save_svg(), or build it again."
+_PICKLE_HINT: Final = (
+    "save the figure with save_png(), save_svg() or save_pdf(), or build it again."
+)
 _SERIES_HINT: Final = 'pass a list of series, e.g. [Series("North", [3, 5])].'
 _SERIES_ITEM_HINT: Final = 'make each series with Series(), e.g. Series("North", [3, 5]).'
 
