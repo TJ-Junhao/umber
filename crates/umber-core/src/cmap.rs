@@ -29,7 +29,7 @@ const MIN_COLORS: usize = 2;
 const MAX_COLORS: usize = 16;
 
 /// A color in Oklab: lightness, then the green-red and blue-yellow axes.
-type Oklab = [f64; 3];
+pub(crate) type Oklab = [f64; 3];
 
 /// The blue, near-white and red stops of [`Cmap::blue_red`].
 const BLUE_RED: [u32; 3] = [0x2B5C8A, 0xF4F1EC, 0xB23A2E];
@@ -278,7 +278,7 @@ fn encode(linear: f64) -> u8 {
 }
 
 /// The Oklab coordinates of the sRGB color `color`; its alpha is ignored.
-fn to_oklab(color: Rgba) -> Oklab {
+pub(crate) fn to_oklab(color: Rgba) -> Oklab {
     let (r, g, b) = (decode(color.r), decode(color.g), decode(color.b));
     let l = (0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b).cbrt();
     let m = (0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b).cbrt();
@@ -291,7 +291,7 @@ fn to_oklab(color: Rgba) -> Oklab {
 }
 
 /// The opaque sRGB color at the Oklab coordinates `lab`, clamped to the gamut.
-fn from_oklab([lightness, a, b]: Oklab) -> Rgba {
+pub(crate) fn from_oklab([lightness, a, b]: Oklab) -> Rgba {
     let l = (lightness + 0.396_337_777_4 * a + 0.215_803_757_3 * b).powi(3);
     let m = (lightness - 0.105_561_345_8 * a - 0.063_854_172_8 * b).powi(3);
     let s = (lightness - 0.089_484_177_5 * a - 1.291_485_548_0 * b).powi(3);

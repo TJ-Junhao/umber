@@ -31,6 +31,13 @@ class ColorBy:
     smallest to the largest finite value unless ``Axes.clim()`` sets it. Values outside the
     range take the colormap's end colors.
 
+    Mapped fills are opaque and keep the colormap's colors. Points have an opaque 0.5 pt
+    outline that contrasts with the background when the fill is close to it, fading to the
+    background color for more distant fills. Closeness is measured in Oklab; the outline
+    darkens against a light background and lightens against a dark one. The colorbar is
+    unchanged. A mapped scatter has no legend entry; bubble legend swatches and size
+    references stay neutral, with their usual background-colored outline.
+
     With a ``center`` the mapping is diverging and symmetric: the color range is
     ``center ± d``, where ``d`` is the larger distance from ``center`` to either end of the
     values (or of the range set by ``Axes.clim()``), so ``center`` maps to the middle of the

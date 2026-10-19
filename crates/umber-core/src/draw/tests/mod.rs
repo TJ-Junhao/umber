@@ -18,6 +18,7 @@ mod events;
 mod hist;
 mod horizontal;
 mod line;
+mod mapped_points;
 mod mapping;
 mod marker;
 mod marks;

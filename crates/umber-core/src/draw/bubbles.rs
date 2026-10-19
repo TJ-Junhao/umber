@@ -9,6 +9,8 @@ use crate::{FillRule, Item, Paint};
 
 /// Appends each bubble's fill and outline together, each bubble filled as `fill` says (a mapped
 /// color opaque, see [`PointFill::at`]); a bubble whose value maps to no color is not drawn.
+/// Mapped fills use the scatter's contrasting 0.5 pt outline; uniform fills keep the 0.8 pt
+/// background outline. Neutral legend swatches and size references are not color-mapped.
 /// Individual paths also let inside-legend placement measure the visible area of a bubble,
 /// rather than only its centre.
 pub(super) fn bubble_items(
@@ -43,6 +45,7 @@ pub(super) fn bubble_items(
             color,
             mark.options().marker,
             diameter,
+            matches!(fill, PointFill::Mapped { .. }),
         )
         else {
             continue;

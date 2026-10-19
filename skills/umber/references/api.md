@@ -433,7 +433,10 @@ Add markers whose areas are proportional to non-negative size values.
 Bubble marks on these axes share one size scale. The largest size among points with
 finite x and y coordinates has a radius of 18 points. Zero sizes and NaN coordinates
 draw nothing; a zero-size point's position still counts in the axis domains like any
-point. Markers draw in data order, without downsampling, with the theme's marker outline.
+point. Markers draw in data order, without downsampling. ``ColorBy`` fills stay opaque
+and use the scatter's 0.5 pt outline: contrasting for fills close to the background in
+Oklab, fading to the background color for more distant fills. Single-color markers keep
+the theme's marker alpha and a 0.8 pt background-colored outline.
 Automatic limits fit each whole marker and its outline on the final plot, along each
 axis by the marker shape's own extent, in log space on a log axis and in seconds on a
 time axis, before padding (and rounding on a log axis). Shared axes fit bubbles from
@@ -465,7 +468,7 @@ Args:
     color: The marker color. ``Color.AUTO`` takes the next palette color.
         ``ColorBy(values)`` colors each bubble by its value instead, as for
         ``scatter()``; the label entry and size references are then drawn in the
-        theme's text color.
+        theme's text color, keeping their usual background-colored outline.
     marker: The marker shape; size references are always circles.
 
 Returns:
@@ -1397,7 +1400,10 @@ Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | 
 Add a marker at each point ``(x[i], y[i])``.
 
 A point with a NaN coordinate is left out. On a category y axis the scatter is a dot
-plot: each point sits at the centre of its category's band.
+plot: each point sits at the centre of its category's band. ``ColorBy`` fills stay
+opaque and get a 0.5 pt outline that contrasts with the background for nearby fill
+colors, fading to the background color as the Oklab distance grows. Single-color
+markers keep the theme's marker alpha and a 0.8 pt background-colored outline.
 
 Args:
     x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -3116,6 +3122,13 @@ position still counts in the axis limits. All color-mapped marks of an axes shar
 color scale: the same ``cmap``, ``scale`` and ``center``, and one color range, from the
 smallest to the largest finite value unless ``Axes.clim()`` sets it. Values outside the
 range take the colormap's end colors.
+
+Mapped fills are opaque and keep the colormap's colors. Points have an opaque 0.5 pt
+outline that contrasts with the background when the fill is close to it, fading to the
+background color for more distant fills. Closeness is measured in Oklab; the outline
+darkens against a light background and lightens against a dark one. The colorbar is
+unchanged. A mapped scatter has no legend entry; bubble legend swatches and size
+references stay neutral, with their usual background-colored outline.
 
 With a ``center`` the mapping is diverging and symmetric: the color range is
 ``center ± d``, where ``d`` is the larger distance from ``center`` to either end of the

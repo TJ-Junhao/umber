@@ -10,8 +10,14 @@ use crate::geometry::Point;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
 use crate::{Marker, Rgba, Theme};
 
-/// The scatter outline width, in points.
+/// The uniform-color scatter outline width, in points.
 pub(crate) const MARKER_OUTLINE: f32 = 0.8;
+/// The color-mapped scatter and bubble outline width, in points.
+pub(super) const MAPPED_MARKER_OUTLINE: f32 = 0.5;
+/// The Oklab distance at which a mapped outline becomes the background color.
+const MAPPED_OUTLINE_DISTANCE: f64 = 0.25;
+/// The Oklab lightness shift of a mapped outline away from the background.
+const MAPPED_OUTLINE_LIGHTNESS: f64 = 0.25;
 /// Scatter points whose marker (shape extent plus outline) lies further than this many points
 /// outside the plot area are dropped.
 const MARKER_SLACK: f64 = 1.0;
@@ -43,26 +49,67 @@ pub(super) fn scatter_item(
     size: f32,
 ) -> Option<Item> {
     let fill = color.scale_alpha(marker_alpha(context.theme));
-    markers_item(context, (xs, ys), fill, shape, size)
+    markers_item(context, (xs, ys), fill, shape, size, false)
+}
+
+/// The opaque outline color for a mapped point, computed from its fill before marker alpha.
+/// In Oklab, let `d` be the Euclidean distance from `fill` to the background `bg`, and
+/// `w = clamp(1 - d / T, 0, 1)`, where `T = MAPPED_OUTLINE_DISTANCE = 0.25`. Move the fill's
+/// L by `MAPPED_OUTLINE_LIGHTNESS = 0.25`, down when the background's L is at least 0.5 and
+/// up otherwise, leaving a and b unchanged, to get `ring`. Mix `(1 - w) * bg + w * ring`
+/// in Oklab, then clamp to the sRGB gamut as colormaps do. Far fills use exactly `bg`.
+/// Scatter and bubbles use this color with `MAPPED_MARKER_OUTLINE = 0.5` pt; their fills
+/// and the colorbar are unchanged.
+pub(super) fn mapped_outline_color(theme: &Theme, fill: Rgba) -> Rgba {
+    let bg = crate::cmap::to_oklab(theme.background());
+    let mut ring = crate::cmap::to_oklab(fill);
+    let distance = ring
+        .iter()
+        .zip(bg)
+        .map(|(fill, background)| (fill - background).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let weight = (1.0 - distance / MAPPED_OUTLINE_DISTANCE).clamp(0.0, 1.0);
+    if weight == 0.0 {
+        return Rgba {
+            a: 255,
+            ..theme.background()
+        };
+    }
+    ring[0] += if bg[0] >= 0.5 {
+        -MAPPED_OUTLINE_LIGHTNESS
+    } else {
+        MAPPED_OUTLINE_LIGHTNESS
+    };
+    crate::cmap::from_oklab(std::array::from_fn(|i| {
+        (1.0 - weight) * bg[i] + weight * ring[i]
+    }))
 }
 
 /// The scene item of one batch of `shape` markers of diameter `size`, filled with `fill` as
-/// given and outlined as [`scatter_item`] outlines them, with the same culling.
+/// given. Mapped fills get a 0.5 pt [`mapped_outline_color`]; uniform fills keep the 0.8 pt
+/// background outline. Culling includes the outline's width.
 pub(super) fn markers_item(
     context: &MarkContext<'_>,
     (xs, ys): (&[f64], &[f64]),
     fill: Rgba,
     shape: Marker,
     size: f32,
+    mapped: bool,
 ) -> Option<Item> {
     let MarkContext { theme, maps, .. } = *context;
+    let outline = if mapped {
+        MAPPED_MARKER_OUTLINE
+    } else {
+        MARKER_OUTLINE
+    };
     let shape_path = marker_shape(shape, size);
     // Cull in axis space by the shape's own extent on each axis, plus the outline (whose miter
     // joins reach at most its width beyond the path for these shapes) and the slack. The maps
     // may be in the frame of horizontal marks, as for the outliers of horizontal boxes, whose
     // first axis is the plot's y axis.
     let (half_w, half_h) = extent(&shape_path);
-    let reach = f64::from(MARKER_OUTLINE) + MARKER_SLACK;
+    let reach = f64::from(outline) + MARKER_SLACK;
     let (half_first, half_second) = maps.in_frame((half_w, half_h));
     let ((left, right), (top, bottom)) = (
         maps.x.expanded(half_first + reach),
@@ -88,8 +135,12 @@ pub(super) fn markers_item(
         shape: shape_path,
         fill: Some(fill),
         stroke: Some(StrokeStyle {
-            color: theme.background(),
-            width: MARKER_OUTLINE,
+            color: if mapped {
+                mapped_outline_color(theme, fill)
+            } else {
+                theme.background()
+            },
+            width: outline,
             dash: Vec::new(),
             cap: LineCap::Butt,
             join: LineJoin::Miter,
@@ -128,8 +179,9 @@ impl PointFill<'_> {
     }
 }
 
-/// The scene items of one scatter whose points are filled by `fill`: as [`scatter_item`]
-/// draws them, one batch per run of consecutive points of one fill, in data order, so later
+/// The scene items of one scatter whose points are filled by `fill`: uniform colors use
+/// [`scatter_item`], mapped colors use a 0.5 pt [`mapped_outline_color`]. One batch per run of
+/// consecutive points of one fill also shares one outline color, keeping data order so later
 /// points still cover earlier ones. Points whose value maps to no color are not drawn.
 pub(super) fn scatter_items(
     context: &MarkContext<'_>,
@@ -161,6 +213,7 @@ pub(super) fn scatter_items(
                         color,
                         shape,
                         size,
+                        true,
                     ));
                 }
                 run = Some((color, vec![x], vec![y]));
@@ -174,6 +227,7 @@ pub(super) fn scatter_items(
             color,
             shape,
             size,
+            true,
         ));
     }
 }
