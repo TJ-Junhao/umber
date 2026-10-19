@@ -406,6 +406,28 @@ impl<'a> MeasuredLegend<'a> {
         })
     }
 
+    /// Moves the other y axis's row into this panel's single legend, retaining its direct
+    /// labels so that their anchors are placed with their own y scale.
+    pub fn join_row(&mut self, other: &mut Self) {
+        let Some(row) = other.row.take() else {
+            return;
+        };
+        if let Some(own) = &mut self.row {
+            own.row_height = own.row_height.max(row.row_height);
+            own.ascent = own.ascent.max(row.ascent);
+            own.descent = own.descent.max(row.descent);
+            for entry in row.entries {
+                if !own.entries.iter().any(|known| {
+                    known.label.text == entry.label.text && known.swatch == entry.swatch
+                }) {
+                    own.entries.push(entry);
+                }
+            }
+        } else {
+            self.row = Some(row);
+        }
+    }
+
     /// The header row, absent when the entries sit beside, below or inside the plot.
     pub fn header_within(&self, left: f64, right: f64) -> LegendRow {
         match self.position {
@@ -534,6 +556,44 @@ impl<'a> DirectLabels<'a> {
             .map(|e| e.label.width())
             .reduce(f64::max);
         widest.map_or(0.0, |w| (self.dot / 2.0 + DIRECT_GAP + w).min(cap))
+    }
+
+    /// Separates both y axes' labels in their shared column, leaving end dots on their lines.
+    pub(crate) fn separate_twins(&self, left: &mut super::Layout, right: &mut super::Layout) {
+        if left.direct.is_empty() || right.direct.is_empty() {
+            return;
+        }
+        let line = BODY_LINE * self.size;
+        let offset = baseline_in_line(-line / 2.0, line, self.ascent, self.descent);
+        let mut labels: Vec<_> = left
+            .direct
+            .iter_mut()
+            .chain(&mut right.direct)
+            .filter_map(|entry| entry.label.as_mut())
+            .collect();
+        let targets: Vec<_> = labels.iter().map(|label| label.y - offset).collect();
+        let centers = separate(
+            &targets,
+            DIRECT_SPACING * self.size,
+            left.plot.y,
+            left.plot.bottom(),
+        );
+        for (label, center) in labels.iter_mut().zip(centers) {
+            label.y = center + offset;
+        }
+        for direct in [&mut left.direct, &mut right.direct] {
+            for entry in direct.iter_mut() {
+                if let Some(label) = &entry.label {
+                    let center = label.y - offset;
+                    if center + line / 2.0 <= left.frame.y
+                        || center - line / 2.0 >= left.frame.bottom()
+                    {
+                        entry.label = None;
+                    }
+                }
+            }
+            direct.retain(|entry| entry.label.is_some() || entry.dot.is_some());
+        }
     }
 
     /// The labels placed for the axes `resolved` on the plot area `plot` in `frame`, the canvas

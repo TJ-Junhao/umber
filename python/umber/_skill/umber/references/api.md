@@ -342,7 +342,9 @@ Each call replaces the setting for these axes alone; panels sharing an axis do n
 inherit it. Copies of the figure keep the setting. Only drawing changes: the baseline
 stays at zero on the value axis, or at its lower edge when zero is out of range. Limits,
 padding, bar bases, area fills and reference-line clipping stay unchanged. A gridline
-at the baseline tick is kept when the baseline is hidden.
+at the baseline tick is kept when the baseline is hidden. In a panel with a twin y
+axis, only the left axes draw a baseline. The twin accepts ``AUTO`` and ``False``;
+``True`` raises ``UsageError`` instead of being ignored.
 
 Args:
     shown: ``True`` draws the baseline; ``False`` hides it. ``AUTO`` restores the
@@ -354,7 +356,8 @@ Returns:
 
 Raises:
     TypeError: If ``shown`` is neither a bool nor ``AUTO``. Integers are not accepted.
-    UsageError: If ``shown=True`` on two category axes, which have no value axis.
+    UsageError: If ``shown=True`` on two category axes, which have no value axis, or
+        on a twin y axes; set the baseline on the left axes instead.
 
 Example:
 
@@ -1791,6 +1794,43 @@ Example:
 ```python
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().title("Revenue")
+```
+
+### `umber.Axes.twin_y`
+
+```text
+Axes.twin_y(self: 'Axes[X, float]', *, scale: Scale[float]=Scale.linear()) -> 'Axes[X, float]'
+```
+
+Add a numeric y axis on the right, sharing this panel's x axis.
+
+The two axes have independent y scales, limits, ticks and labels. Their x settings
+are shared in both directions. Marks use one palette and legend; grid lines and the
+baseline come from the left axis. Retrieve the right axes again with
+``Figure.twin_axes_at()``.
+
+Args:
+    scale: The right y scale, ``Scale.linear()`` or ``Scale.log()``.
+
+Returns:
+    New axes in this panel, with the same x value type and numeric y values.
+
+Raises:
+    TypeError: If ``scale`` is not a ``Scale``.
+    UsageError: If either y scale is not numeric, these axes already have a twin,
+        these axes are a twin, or the grid shares x.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> fig = ub.Figure()
+>>> left = fig.add_axes(x=ub.Scale.category())
+>>> _ = left.bar(["Jan", "Feb"], [40, 55], label="Rainfall")
+>>> right = left.twin_y()
+>>> _ = right.line(["Jan", "Feb"], [7, 9], label="Temperature")
+>>> right.figure is fig
+True
 ```
 
 ### `umber.Axes.violin`
@@ -3269,7 +3309,8 @@ show the background. Positions count from zero; an axes may span several cells.
 ``copy.copy()`` and ``copy.deepcopy()`` return an independent figure with the same size,
 theme, grid, axes and marks; changing one leaves the other unchanged. ``axes_at()``
 reaches a panel, including one in a copy, with the scales used to create it as a type
-witness. Figures cannot be pickled.
+witness. ``twin_axes_at()`` reaches its right y axes with their own scales.
+Figures cannot be pickled.
 
 Example:
 
@@ -3712,6 +3753,42 @@ Example:
 >>> import umber as ub
 >>> svg = ub.Figure().to_svg(text=ub.SvgText.EDITABLE)
 >>> svg.startswith("<svg")
+True
+```
+
+### `umber.Figure.twin_axes_at`
+
+```text
+Figure.twin_axes_at(self, *, row: int | Auto=AUTO, col: int | Auto=AUTO, x: Scale[X] | Scale[float]=Scale.linear(), y: Scale[float]=Scale.linear()) -> Axes[X, float]
+```
+
+Return a panel's existing right y axes, including those of a copied figure.
+
+Args:
+    row: The zero-based top row; ``AUTO`` means 0 only on a one-row figure.
+    col: The zero-based left column; ``AUTO`` means 0 only on a one-column figure.
+    x: The panel's shared x scale, including its log base; a type witness for x values.
+    y: The right y scale used at creation, including its log base.
+
+Returns:
+    The right axes at this top-left cell, with numeric y values.
+
+Raises:
+    TypeError: If an index or scale has the wrong type.
+    UsageError: If the position is missing, not a panel's top-left cell, has no twin,
+        or either scale differs from the one used at creation.
+
+Example:
+
+```python
+>>> import copy
+>>> import umber as ub
+>>> fig = ub.Figure()
+>>> right = fig.add_axes().twin_y(scale=ub.Scale.log())
+>>> fig.twin_axes_at(y=ub.Scale.log()) is right
+True
+>>> copied = copy.copy(fig)
+>>> copied.twin_axes_at(y=ub.Scale.log()).ylabel("Rate").figure is copied
 True
 ```
 

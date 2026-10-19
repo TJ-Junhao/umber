@@ -66,6 +66,19 @@ pub struct Axes {
     pub(super) legend_size: SizeSpec,
     /// The text written at data positions, in the order it was added.
     pub(super) annotations: Vec<Annotation>,
+    /// The other numeric y axes in this Cartesian panel, when present.
+    pub(super) twin: TwinLink,
+}
+
+/// Stable storage indices connect the two axes without adding a grid cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum TwinLink {
+    #[default]
+    None,
+    /// Stored on the primary axes; points to their right-hand twin.
+    Primary(usize),
+    /// Stored on the twin; points to its primary axes.
+    Twin(usize),
 }
 
 impl Axes {
@@ -100,6 +113,7 @@ impl Axes {
             ylabel_size: SizeSpec::Auto,
             legend_size: SizeSpec::Auto,
             annotations: Vec::new(),
+            twin: TwinLink::None,
         }
     }
 
@@ -180,10 +194,24 @@ impl Axes {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn check_scales(&self, x: ScaleKind, y: ScaleKind) -> Result<()> {
+        let (context, hint) = match self.twin {
+            TwinLink::None => (
+                "Figure.axes_at()",
+                "pass the scales the axes was created with.",
+            ),
+            TwinLink::Primary(_) => (
+                "Figure.axes_at()",
+                "pass the scales the axes was created with, or use Figure.twin_axes_at() for the right y axes.",
+            ),
+            TwinLink::Twin(_) => (
+                "Figure.twin_axes_at()",
+                "pass the scales the axes was created with.",
+            ),
+        };
         for (name, given, actual) in [("x", x, self.x), ("y", y, self.y)] {
             if given != actual {
                 return Err(Error::usage(
-                    "Figure.axes_at()",
+                    context,
                     format!(
                         "{name} is {}; the axes at row {}, col {} has {name} {}.",
                         scale_name(given),
@@ -193,7 +221,7 @@ impl Axes {
                     ),
                 )
                 .with_parameter(name)
-                .with_hint("pass the scales the axes was created with."));
+                .with_hint(hint));
             }
         }
         Ok(())

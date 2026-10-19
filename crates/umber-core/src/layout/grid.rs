@@ -221,7 +221,9 @@ fn in_panel(cells: CellRange, err: Error) -> Error {
 ///
 /// Texts that span a panel are checked against the final layout by [`check_panel_contents`].
 pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<GridSolution> {
-    if input.is_single() && input.colorbars.is_empty() {
+    let aligned = super::twin::aligned(input.panels, bands);
+    let bands = aligned.as_ref();
+    if input.is_single() && input.panels.len() <= 1 && input.colorbars.is_empty() {
         let canvas = Frame {
             x: 0.0,
             y: 0.0,
@@ -882,17 +884,19 @@ impl Rows {
         let mut above = vec![0.0_f64; rows];
         let mut below = vec![0.0_f64; rows];
         let mut legends = vec![0.0_f64; rows];
-        for (((cells, bands), panel), &(left, right)) in
+        for (((cells, band), panel), &(left, right)) in
             cells.iter().zip(bands).zip(input.panels).zip(spans)
         {
             let first = cells.row();
             let last = first + cells.row_span() - 1;
             let row = panel.legend.header_within(left, right);
-            above[first] = above[first].max(bands.above_with_row(&row));
-            below[last] =
-                below[last].max(bands.below() - bands.bottom_legend - bands.bottom_colorbar);
-            legends[last] =
-                legends[last].max(panel.legend.bottom_reserve(left, right) + bands.bottom_colorbar);
+            above[first] = above[first].max(band.above_with_row(&row));
+            below[last] = below[last]
+                .max(band.below() - band.bottom_legend - band.bottom_colorbar - band.bottom_offset);
+            let offset =
+                super::twin::bottom_offset(panel.axes, input.panels, bands, Some((left, right)));
+            legends[last] = legends[last]
+                .max(panel.legend.bottom_reserve(left, right) + band.bottom_colorbar + offset);
         }
         for shared in input.colorbars {
             let first = shared.cells.row();
@@ -1456,6 +1460,22 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 ///
 /// Both legend errors have the hint `shorten the label or widen the figure.`
 pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) -> Result<()> {
+    for (panel, layout) in input.panels.iter().zip(layouts) {
+        match panel.axes {
+            crate::model::Layer::Primary(_) => {}
+            crate::model::Layer::Twin { parent, .. } => {
+                super::twin::check_titles(&layouts[parent], layout, input.context).map_err(
+                    |error| {
+                        if input.is_single() {
+                            error
+                        } else {
+                            in_panel(panel.axes.cells(), error)
+                        }
+                    },
+                )?;
+            }
+        }
+    }
     for (panel, layout) in input.panels.iter().zip(layouts) {
         if let Some(colorbar) = &layout.colorbar {
             let cells = panel.axes.cells();

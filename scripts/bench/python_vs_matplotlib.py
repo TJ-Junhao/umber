@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """End-to-end Python timings of umber next to matplotlib.
 
-Each case times the Python call that builds a figure through the encoded bytes: ``to_png()`` or
-``to_svg()`` for umber, ``savefig`` to a ``BytesIO`` for matplotlib (Agg backend, default style,
-``plt.close`` included). Figures are 6 x 4 in, PNG at 200 dpi, both libraries with identical
-deterministic input data that is built outside the timed region. Every case runs once as a
-warm-up, then ``--runs`` times (at least 7 are meant); the table shows the median with the
-interquartile range (IQR) and the raw samples stay in the JSON. Each library runs in its own
+Each case times the Python call that builds a figure through the encoded bytes: ``to_png()``,
+``to_svg()`` or ``to_pdf()`` for umber, ``savefig`` to a ``BytesIO`` for matplotlib (Agg backend,
+default style, ``plt.close`` included). Figures are 6 x 4 in, PNG at 200 dpi, both libraries
+with identical deterministic input data that is built outside the timed region. Every case runs
+once as a warm-up, then ``--runs`` times (at least 7 are meant); the table shows the median with
+the interquartile range (IQR) and the raw samples stay in the JSON. Each library runs in its own
 process, so they share no caches. The samples come in two interleaved batches, the libraries
 alternating per case and swapping order in the second batch, so changing host load affects both.
 The import time of each is measured in fresh interpreters.
@@ -39,8 +39,14 @@ What the two libraries do differently, with both left at their defaults as users
   the PNG heatmap keeps the default, since both libraries then resample to the output pixels.
 * matplotlib's default text is paths in SVG (``svg.fonttype = "path"``), as umber's default
   ``SvgText.OUTLINES`` is, so SVG sizes and times compare like with like.
-* The hexbin input is the normal sample clamped to [-3, 3] on both axes for both libraries:
-  umber refuses the unclipped sample at grid size 50 (its hexagon bounds do not settle).
+* The PDF cases compare like with like on fonts: matplotlib's ``pdf.fonttype`` defaults to 3
+  (Type 3 glyph procedures), so its backend setup here sets ``pdf.fonttype = 42``, which embeds
+  TrueType subsets as umber does. Nothing else in matplotlib's PDF settings is changed
+  (``pdf.compression`` stays at its default of 6). The PDF heatmap uses ``interpolation="none"``
+  like the SVG one, so the image holds one pixel per cell.
+* The hexbin input is the normal sample clamped to [-3, 3] on both axes for both libraries,
+  so the two grids cover the same extent. umber also draws the unclamped sample at grid size 50
+  (earlier versions refused it); the clamp is kept so the rows stay comparable between runs.
 * The 4 x 5 grid uses a 12 x 8 in figure, because 6 x 4 in leaves no room for 20 panels.
 * The heatmap names its 1,000 columns and rows with strings for umber, whose heatmap is
   category based; matplotlib's ``imshow`` labels the axes with indices.
@@ -70,6 +76,7 @@ GRID_WIDTH, GRID_HEIGHT = 12.0, 8.0
 CASES: dict[str, str] = {
     "line_1m_png": "1M-point line, PNG",
     "line_1m_svg": "1M-point line, SVG",
+    "line_1m_pdf": "1M-point line, PDF",
     "line_time_1m_png": "1M-point line on a time axis, PNG",
     "scatter_100k_png": "100k-point scatter, PNG",
     "hist_1m_png": "Histogram of 1M values (30 bins), PNG",
@@ -77,8 +84,10 @@ CASES: dict[str, str] = {
     "hexbin_1m_png": "Hexbin of 1M points (grid size 50), PNG",
     "heatmap_1000_png": "Heatmap of 1,000 x 1,000 cells, PNG",
     "heatmap_1000_svg": "Heatmap of 1,000 x 1,000 cells, SVG",
+    "heatmap_1000_pdf": "Heatmap of 1,000 x 1,000 cells, PDF",
     "grid_4x5_png": "4 x 5 panels of a 10k-point line, PNG",
     "small_line_png": "Small figure: 1k-point line x 2, title, labels, legend, PNG",
+    "small_line_pdf": "Small figure: 1k-point line x 2, title, labels, legend, PDF",
     "bar_5_png": "5-bar chart, PNG",
 }
 
@@ -130,6 +139,10 @@ def _umber_cases() -> dict[str, Callable[[], Callable[[], int]]]:
         x, y = _line_data(1_000_000)
         return lambda: len(ub.line(x, y).figure.to_svg())
 
+    def line_pdf() -> Callable[[], int]:
+        x, y = _line_data(1_000_000)
+        return lambda: len(ub.line(x, y).figure.to_pdf())
+
     def line_time() -> Callable[[], int]:
         x, (_, y) = _times(1_000_000), _line_data(1_000_000)
 
@@ -168,14 +181,16 @@ def _umber_cases() -> dict[str, Callable[[], Callable[[], int]]]:
 
         return build
 
-    def heatmap(svg: bool) -> Callable[[], int]:
+    def heatmap(fmt: str) -> Callable[[], int]:
         values = _cells()
         names = [str(i) for i in range(1000)]
 
         def build() -> int:
             fig = ub.Figure()
             fig.add_axes(x=ub.Scale.category(), y=ub.Scale.category()).heatmap(names, names, values)
-            return len(fig.to_svg()) if svg else png(fig)
+            if fmt == "svg":
+                return len(fig.to_svg())
+            return len(fig.to_pdf()) if fmt == "pdf" else png(fig)
 
         return build
 
@@ -190,7 +205,7 @@ def _umber_cases() -> dict[str, Callable[[], Callable[[], int]]]:
 
         return build
 
-    def small() -> Callable[[], int]:
+    def small(pdf: bool) -> Callable[[], int]:
         x, y = _line_data(1000)
         y2 = np.cos(x) * 8.0
 
@@ -198,7 +213,7 @@ def _umber_cases() -> dict[str, Callable[[], Callable[[], int]]]:
             ax = ub.line(x, y, label="signal")
             ax.line(x, y2, label="reference")
             ax.title("Signal and reference").xlabel("time (s)").ylabel("amplitude")
-            return png(ax.figure)
+            return len(ax.figure.to_pdf()) if pdf else png(ax.figure)
 
         return build
 
@@ -210,15 +225,18 @@ def _umber_cases() -> dict[str, Callable[[], Callable[[], int]]]:
     return {
         "line_1m_png": line_png,
         "line_1m_svg": line_svg,
+        "line_1m_pdf": line_pdf,
         "line_time_1m_png": line_time,
         "scatter_100k_png": scatter,
         "hist_1m_png": hist,
         "hist2d_1m_png": hist2d,
         "hexbin_1m_png": hexbin,
-        "heatmap_1000_png": lambda: heatmap(False),
-        "heatmap_1000_svg": lambda: heatmap(True),
+        "heatmap_1000_png": lambda: heatmap("png"),
+        "heatmap_1000_svg": lambda: heatmap("svg"),
+        "heatmap_1000_pdf": lambda: heatmap("pdf"),
         "grid_4x5_png": grid,
-        "small_line_png": small,
+        "small_line_png": lambda: small(False),
+        "small_line_pdf": lambda: small(True),
         "bar_5_png": bars,
     }
 
@@ -229,6 +247,10 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    # matplotlib's PDF backend defaults to Type 3 fonts; Type 42 embeds TrueType subsets, as
+    # umber does. It only affects the PDF cases.
+    matplotlib.rcParams["pdf.fonttype"] = 42
 
     def save(fig: Any, fmt: str) -> int:
         buffer = io.BytesIO()
@@ -313,7 +335,7 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
                 # An SVG embeds the image pixels; without interpolation it holds one pixel
                 # per cell, as umber's does, instead of a resampled copy at plot size.
                 image = ax.imshow(
-                    values, aspect="auto", interpolation="none" if fmt == "svg" else None
+                    values, aspect="auto", interpolation="none" if fmt != "png" else None
                 )
                 fig.colorbar(image, ax=ax)
                 return save(fig, fmt)
@@ -333,7 +355,7 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
 
         return build
 
-    def small() -> Callable[[], int]:
+    def small(fmt: str) -> Callable[[], int]:
         x, y = _line_data(1000)
         y2 = np.cos(x) * 8.0
 
@@ -345,7 +367,7 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
             ax.set_xlabel("time (s)")
             ax.set_ylabel("amplitude")
             ax.legend()
-            return save(fig, "png")
+            return save(fig, fmt)
 
         return build
 
@@ -363,6 +385,7 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
     return {
         "line_1m_png": line("png"),
         "line_1m_svg": line("svg"),
+        "line_1m_pdf": line("pdf"),
         "line_time_1m_png": line_time,
         "scatter_100k_png": scatter,
         "hist_1m_png": hist,
@@ -370,8 +393,10 @@ def _matplotlib_cases() -> dict[str, Callable[[], Callable[[], int]]]:
         "hexbin_1m_png": hexbin,
         "heatmap_1000_png": heatmap("png"),
         "heatmap_1000_svg": heatmap("svg"),
+        "heatmap_1000_pdf": heatmap("pdf"),
         "grid_4x5_png": grid,
-        "small_line_png": small,
+        "small_line_png": lambda: small("png"),
+        "small_line_pdf": lambda: small("pdf"),
         "bar_5_png": bars,
     }
 
@@ -551,12 +576,14 @@ def combine(directory: Path) -> None:
         "Ratio is matplotlib's time divided by umber's: above 1, umber is faster.",
         "",
         "Each time is the Python call that builds the figure through the encoded bytes, "
-        "6 x 4 in, PNG at 200 dpi, identical data for both. Both libraries run with their "
+        "6 x 4 in, PNG at 200 dpi (SVG and PDF are vector, so the dpi does not apply), identical "
+        "data for both. Both libraries run with their "
         "defaults: umber downsamples dense sorted lines and draws large cell grids as one "
         "image; matplotlib simplifies line paths and the heatmap uses `imshow`. matplotlib's "
         "`hist2d` and `hexbin` count their bins in NumPy, and the hexbin row is an approximate "
         "workload because the hexagon grids are built differently. All three colored charts "
-        "draw a colorbar. The 4 x 5 grid is 12 x 8 in.",
+        "draw a colorbar. The 4 x 5 grid is 12 x 8 in. The PDF rows set matplotlib's "
+        "`pdf.fonttype` to 42 (TrueType subsets) instead of its default 3.",
         "",
     ]
     for tag in ("multi", "single"):
