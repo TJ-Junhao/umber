@@ -5,6 +5,7 @@
 //! row reads [`ResolvedMark::legend_swatch`] without computing anchors. Resolve owns both
 //! descriptions, so the legend model never inspects raw mark data.
 
+use crate::model::Layer;
 use std::collections::HashSet;
 
 use crate::draw::fill::{AREA_ALPHA, HISTOGRAM_TOP_ALPHA, marker_alpha};
@@ -316,10 +317,12 @@ impl<'a> Legend<'a> {
         let mut seen = HashSet::new();
         let mut seen_bubbles = false;
         let mut row = Vec::new();
-        for (axes, marks) in figure.panels().zip(marks) {
+        for (axes, marks) in figure.layers().zip(marks) {
             let axes = match axes {
-                crate::Panel::Cartesian(axes) => axes,
-                crate::Panel::Pie(_) => continue,
+                Layer::Primary(crate::Panel::Cartesian { axes, .. }) | Layer::Twin { axes, .. } => {
+                    axes
+                }
+                Layer::Primary(crate::Panel::Pie(_)) => continue,
             };
             let style = axes.legend_style().unwrap_or(figure.theme().legend_style());
             if style == LegendStyle::None {

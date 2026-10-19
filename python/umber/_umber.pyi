@@ -54,6 +54,7 @@ __all__ = [
     "font_system",
     "check_file_bold_fallback",
     "Theme",
+    "TwinAxes",
     "__version__",
     "box_stats",
     "bundled_fonts",
@@ -255,6 +256,15 @@ class Theme:
     def with_colorbar_position(self, position: int) -> Theme: ...
 
 @final
+class TwinAxes:
+    """An internal handle to the right-hand y axis of a Cartesian panel."""
+
+    @property
+    def row(self) -> int: ...
+    @property
+    def col(self) -> int: ...
+
+@final
 class Figure:
     """A figure with a grid of axes. Every axes method takes the axes' top-left cell first.
 
@@ -301,6 +311,17 @@ class Figure:
         y_kind: int,
         y_base: float,
     ) -> tuple[int, int]: ...
+    def twin_axes_at(
+        self,
+        row_kind: int,
+        row: int,
+        col_kind: int,
+        col: int,
+        x_kind: int,
+        x_base: float,
+        y_kind: int,
+        y_base: float,
+    ) -> TwinAxes: ...
     def add_pie_axes(
         self, row_kind: int, row: int, col_kind: int, col: int, row_span: int, col_span: int
     ) -> tuple[int, int]: ...
@@ -321,30 +342,33 @@ class Figure:
     def pie_legend(
         self, row: int, col: int, style: int, position: int | None, size: _SizeArg
     ) -> None: ...
+    def twin_y(self, row: int | TwinAxes, col: int, kind: int, base: float) -> TwinAxes: ...
     def figure_title(self, text: str, size: _SizeArg) -> None: ...
     def figure_subtitle(self, text: str, size: _SizeArg) -> None: ...
-    def title(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
-    def subtitle(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
-    def xlabel(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
-    def ylabel(self, row: int, col: int, text: str, size: _SizeArg) -> None: ...
-    def xlim(self, row: int, col: int, low: float, high: float) -> None: ...
-    def ylim(self, row: int, col: int, low: float, high: float) -> None: ...
-    def xticks(self, row: int, col: int, positions: _FloatArray) -> None: ...
-    def yticks(self, row: int, col: int, positions: _FloatArray) -> None: ...
+    def title(self, row: int | TwinAxes, col: int, text: str, size: _SizeArg) -> None: ...
+    def subtitle(self, row: int | TwinAxes, col: int, text: str, size: _SizeArg) -> None: ...
+    def xlabel(self, row: int | TwinAxes, col: int, text: str, size: _SizeArg) -> None: ...
+    def ylabel(self, row: int | TwinAxes, col: int, text: str, size: _SizeArg) -> None: ...
+    def xlim(self, row: int | TwinAxes, col: int, low: float, high: float) -> None: ...
+    def ylim(self, row: int | TwinAxes, col: int, low: float, high: float) -> None: ...
+    def xticks(self, row: int | TwinAxes, col: int, positions: _FloatArray) -> None: ...
+    def yticks(self, row: int | TwinAxes, col: int, positions: _FloatArray) -> None: ...
     def xticks_labeled(
-        self, row: int, col: int, positions: _FloatArray, labels: list[str]
+        self, row: int | TwinAxes, col: int, positions: _FloatArray, labels: list[str]
     ) -> None: ...
     def yticks_labeled(
-        self, row: int, col: int, positions: _FloatArray, labels: list[str]
+        self, row: int | TwinAxes, col: int, positions: _FloatArray, labels: list[str]
     ) -> None: ...
-    def xtick_format(self, row: int, col: int, format: _TickFormatArg) -> None: ...
-    def ytick_format(self, row: int, col: int, format: _TickFormatArg) -> None: ...
-    def baseline(self, row: int, col: int, shown: bool | None) -> None: ...
-    def legend(self, row: int, col: int, style: int, size: _SizeArg) -> None: ...
-    def legend_at(self, row: int, col: int, style: int, position: int, size: _SizeArg) -> None: ...
+    def xtick_format(self, row: int | TwinAxes, col: int, format: _TickFormatArg) -> None: ...
+    def ytick_format(self, row: int | TwinAxes, col: int, format: _TickFormatArg) -> None: ...
+    def baseline(self, row: int | TwinAxes, col: int, shown: bool | None) -> None: ...
+    def legend(self, row: int | TwinAxes, col: int, style: int, size: _SizeArg) -> None: ...
+    def legend_at(
+        self, row: int | TwinAxes, col: int, style: int, position: int, size: _SizeArg
+    ) -> None: ...
     def line(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _SeriesValues,
         y: _SeriesValues,
@@ -355,7 +379,7 @@ class Figure:
     ) -> None: ...
     def area(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _SeriesValues,
         y: _SeriesValues,
@@ -366,7 +390,7 @@ class Figure:
     ) -> None: ...
     def scatter(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _SeriesValues,
         y: _SeriesValues,
@@ -377,7 +401,7 @@ class Figure:
     ) -> None: ...
     def bubbles(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _FloatArray | _TimeArray,
         y: _FloatArray | _TimeArray,
@@ -388,7 +412,7 @@ class Figure:
     ) -> None: ...
     def stem(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _SeriesValues,
         y: _SeriesValues,
@@ -399,7 +423,7 @@ class Figure:
     ) -> None: ...
     def bar(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         heights: _FloatArray,
@@ -411,7 +435,7 @@ class Figure:
     ) -> None: ...
     def box_plot(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         groups: list[_FloatArray],
@@ -420,14 +444,14 @@ class Figure:
     ) -> None: ...
     def grouped_box_plot(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         distributions: list[_DistributionArg],
     ) -> None: ...
     def violin(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         groups: list[_FloatArray],
@@ -436,14 +460,14 @@ class Figure:
     ) -> None: ...
     def grouped_violin(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         distributions: list[_DistributionArg],
     ) -> None: ...
     def grouped_bar(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         series: list[_SeriesArg],
@@ -453,7 +477,7 @@ class Figure:
     ) -> None: ...
     def stacked_bar(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         series: list[_SeriesArg],
@@ -462,11 +486,11 @@ class Figure:
         size: _SizeArg,
     ) -> None: ...
     def stacked_area(
-        self, row: int, col: int, x: _FloatArray, series: list[_SeriesArg]
+        self, row: int | TwinAxes, col: int, x: _FloatArray, series: list[_SeriesArg]
     ) -> None: ...
     def hist(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         values: _FloatArray,
         bins: int | _FloatArray,
@@ -478,7 +502,7 @@ class Figure:
     ) -> None: ...
     def mesh(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x_edges: _FloatArray | _TimeArray,
         y_edges: _FloatArray | _TimeArray,
@@ -491,7 +515,7 @@ class Figure:
     ) -> None: ...
     def hist2d(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _FloatArray,
         y: _FloatArray,
@@ -503,7 +527,7 @@ class Figure:
     ) -> None: ...
     def hexbin(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _FloatArray,
         y: _FloatArray,
@@ -514,7 +538,7 @@ class Figure:
     ) -> None: ...
     def step(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _SeriesValues,
         y: _SeriesValues,
@@ -526,7 +550,7 @@ class Figure:
     ) -> None: ...
     def hline(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         y: float,
         label: str,
@@ -536,7 +560,7 @@ class Figure:
     ) -> None: ...
     def vline(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: float | str,
         label: str,
@@ -545,14 +569,14 @@ class Figure:
         width: _SizeArg,
     ) -> None: ...
     def hspan(
-        self, row: int, col: int, low: float, high: float, label: str, color: _ColorArg
+        self, row: int | TwinAxes, col: int, low: float, high: float, label: str, color: _ColorArg
     ) -> None: ...
     def vspan(
-        self, row: int, col: int, low: float, high: float, label: str, color: _ColorArg
+        self, row: int | TwinAxes, col: int, low: float, high: float, label: str, color: _ColorArg
     ) -> None: ...
     def band(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _FloatArray,
         low: _FloatArray,
@@ -562,7 +586,7 @@ class Figure:
     ) -> None: ...
     def y_error_bars(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _SeriesValues,
         low: _FloatArray | _TimeArray,
@@ -574,7 +598,7 @@ class Figure:
     ) -> None: ...
     def x_error_bars(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         y: _SeriesValues,
         low: _FloatArray | _TimeArray,
@@ -594,19 +618,19 @@ class Figure:
     # The PDF file variant uses the Figure.save_pdf() error context.
     def pdf_for_file(self) -> bytes: ...
     # Time axes: times travel as int64 microseconds, scalars as int.
-    def xlim_time(self, row: int, col: int, low: int, high: int) -> None: ...
-    def ylim_time(self, row: int, col: int, low: int, high: int) -> None: ...
-    def xticks_time(self, row: int, col: int, positions: _TimeArray) -> None: ...
-    def yticks_time(self, row: int, col: int, positions: _TimeArray) -> None: ...
+    def xlim_time(self, row: int | TwinAxes, col: int, low: int, high: int) -> None: ...
+    def ylim_time(self, row: int | TwinAxes, col: int, low: int, high: int) -> None: ...
+    def xticks_time(self, row: int | TwinAxes, col: int, positions: _TimeArray) -> None: ...
+    def yticks_time(self, row: int | TwinAxes, col: int, positions: _TimeArray) -> None: ...
     def xticks_labeled_time(
-        self, row: int, col: int, positions: _TimeArray, labels: list[str]
+        self, row: int | TwinAxes, col: int, positions: _TimeArray, labels: list[str]
     ) -> None: ...
     def yticks_labeled_time(
-        self, row: int, col: int, positions: _TimeArray, labels: list[str]
+        self, row: int | TwinAxes, col: int, positions: _TimeArray, labels: list[str]
     ) -> None: ...
     def vline_time(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: int,
         label: str,
@@ -616,7 +640,7 @@ class Figure:
     ) -> None: ...
     def hline_time(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         y: int,
         label: str,
@@ -625,14 +649,14 @@ class Figure:
         width: _SizeArg,
     ) -> None: ...
     def hspan_time(
-        self, row: int, col: int, low: int, high: int, label: str, color: _ColorArg
+        self, row: int | TwinAxes, col: int, low: int, high: int, label: str, color: _ColorArg
     ) -> None: ...
     def vspan_time(
-        self, row: int, col: int, low: int, high: int, label: str, color: _ColorArg
+        self, row: int | TwinAxes, col: int, low: int, high: int, label: str, color: _ColorArg
     ) -> None: ...
     def band_time(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _TimeArray,
         low: _FloatArray,
@@ -641,7 +665,7 @@ class Figure:
         color: _ColorArg,
     ) -> None: ...
     def stacked_area_time(
-        self, row: int, col: int, x: _TimeArray, series: list[_SeriesArg]
+        self, row: int | TwinAxes, col: int, x: _TimeArray, series: list[_SeriesArg]
     ) -> None: ...
     def figure_colorbar(
         self,
@@ -650,10 +674,10 @@ class Figure:
         format: _TickFormatArg | None,
         size: _SizeArg,
     ) -> None: ...
-    def clim(self, row: int, col: int, low: float, high: float) -> None: ...
+    def clim(self, row: int | TwinAxes, col: int, low: float, high: float) -> None: ...
     def colorbar(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         label: str,
         position: int | None,
@@ -662,7 +686,7 @@ class Figure:
     ) -> None: ...
     def heatmap(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x_categories: list[str],
         y_categories: list[str],
@@ -675,11 +699,11 @@ class Figure:
         format: _TickFormatArg | None,
         render: int | None,
     ) -> None: ...
-    def xtick_labels(self, row: int, col: int, size: _SizeArg) -> None: ...
-    def ytick_labels(self, row: int, col: int, size: _SizeArg) -> None: ...
+    def xtick_labels(self, row: int | TwinAxes, col: int, size: _SizeArg) -> None: ...
+    def ytick_labels(self, row: int | TwinAxes, col: int, size: _SizeArg) -> None: ...
     def events(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         rows: list[str],
         positions: list[_FloatArray | _TimeArray],
@@ -689,7 +713,7 @@ class Figure:
     ) -> None: ...
     def strip(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         groups: list[_FloatArray],
@@ -700,7 +724,7 @@ class Figure:
     ) -> None: ...
     def swarm(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         groups: list[_FloatArray],
@@ -710,7 +734,7 @@ class Figure:
     ) -> None: ...
     def grouped_hist(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         series: list[_SeriesArg],
         bins: int | _FloatArray,
@@ -720,7 +744,7 @@ class Figure:
     ) -> None: ...
     def ecdf(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         values: _FloatArray | _TimeArray,
         complementary: bool,
@@ -731,7 +755,7 @@ class Figure:
     ) -> None: ...
     def kde(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         values: _FloatArray,
         bandwidth: float | None,
@@ -742,7 +766,7 @@ class Figure:
     ) -> None: ...
     def grouped_kde(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         series: list[_SeriesArg],
         bandwidth: float | None,
@@ -753,7 +777,7 @@ class Figure:
     # (microseconds since 1970-01-01T00:00) on a time axis.
     def text(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         text: str,
         at: tuple[float | str | int, float | str | int],
@@ -763,7 +787,7 @@ class Figure:
     ) -> None: ...
     def annotate(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         text: str,
         at: tuple[float | str | int, float | str | int],
@@ -774,7 +798,7 @@ class Figure:
     ) -> None: ...
     def bar_by(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         categories: list[str],
         series: list[_SeriesArg],
@@ -784,7 +808,7 @@ class Figure:
     ) -> None: ...
     def grouped_line(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         groups: list[tuple[str, _SeriesValues, _SeriesValues]],
         dash: int,
@@ -792,7 +816,7 @@ class Figure:
     ) -> None: ...
     def grouped_area(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         groups: list[tuple[str, _SeriesValues, _SeriesValues]],
         dash: int,
@@ -800,7 +824,7 @@ class Figure:
     ) -> None: ...
     def grouped_scatter(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         groups: list[tuple[str, _SeriesValues, _SeriesValues]],
         marker: int,
@@ -808,7 +832,7 @@ class Figure:
     ) -> None: ...
     def grouped_step(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         groups: list[tuple[str, _SeriesValues, _SeriesValues]],
         position: int,
@@ -817,7 +841,7 @@ class Figure:
     ) -> None: ...
     def grouped_ecdf(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         groups: list[tuple[str, _SeriesValues]],
         complementary: bool,
@@ -826,7 +850,7 @@ class Figure:
     ) -> None: ...
     def contour(
         self,
-        row: int,
+        row: int | TwinAxes,
         col: int,
         x: _FloatArray,
         y: _FloatArray,

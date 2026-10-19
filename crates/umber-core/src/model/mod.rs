@@ -29,6 +29,7 @@ mod kde;
 mod mark;
 mod mesh;
 mod panel;
+pub(crate) use panel::Layer;
 pub use panel::Panel;
 pub(crate) mod pie;
 pub use pie::{PieAxesMut, PieOptions, PiePanel};
@@ -352,7 +353,7 @@ mod tests {
             ),
             other => panic!("expected Usage error, got {other:?}"),
         }
-        let scales: Vec<ScaleKind> = f.cartesian_panels().map(Axes::y_scale).collect();
+        let scales: Vec<ScaleKind> = f.primary_cartesian_axes().map(Axes::y_scale).collect();
         assert_eq!(scales, [log_kind()]);
     }
 
@@ -909,8 +910,8 @@ mod tests {
             .unwrap();
         let copy = f.clone();
         let (Some([_, Mark::Bar(bar)]), Some([_, Mark::Bar(cloned)])) = (
-            f.cartesian_panels().next().map(Axes::marks),
-            copy.cartesian_panels().next().map(Axes::marks),
+            f.primary_cartesian_axes().next().map(Axes::marks),
+            copy.primary_cartesian_axes().next().map(Axes::marks),
         ) else {
             panic!("expected two bar marks");
         };
@@ -1115,8 +1116,8 @@ mod tests {
             Some([Mark::GroupedBar(group), Mark::StackedBar(stack)]),
             Some([Mark::GroupedBar(cloned), _]),
         ) = (
-            f.cartesian_panels().next().map(Axes::marks),
-            copy.cartesian_panels().next().map(Axes::marks),
+            f.primary_cartesian_axes().next().map(Axes::marks),
+            copy.primary_cartesian_axes().next().map(Axes::marks),
         )
         else {
             panic!("expected a grouped and a stacked mark");
@@ -1285,8 +1286,8 @@ mod tests {
             .unwrap();
         let copy = f.clone();
         let (Some([_, _, Mark::Hist(hist)]), Some([_, _, Mark::Hist(cloned)])) = (
-            f.cartesian_panels().next().map(Axes::marks),
-            copy.cartesian_panels().next().map(Axes::marks),
+            f.primary_cartesian_axes().next().map(Axes::marks),
+            copy.primary_cartesian_axes().next().map(Axes::marks),
         ) else {
             panic!("expected three histogram marks");
         };

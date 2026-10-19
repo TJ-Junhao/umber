@@ -165,6 +165,23 @@ pub(crate) fn grid_cells(rows: i64, cols: i64, count: i64) -> PyResult<Vec<(usiz
     Ok(cells.into_iter().map(|cell| (cell.row, cell.col)).collect())
 }
 
+/// An explicit handle to the right-hand y axis at a panel's top-left cell.
+#[derive(Clone, Copy)]
+#[pyclass(frozen, from_py_object, module = "umber._umber")]
+pub(crate) struct TwinAxes {
+    #[pyo3(get)]
+    row: i64,
+    #[pyo3(get)]
+    col: i64,
+}
+
+/// The original axes' row or an explicit right-hand axes handle.
+#[derive(Clone, Copy, FromPyObject)]
+pub(crate) enum AxesRow {
+    Original(i64),
+    Twin(TwinAxes),
+}
+
 /// A figure: a size in inches, a theme, a grid and the axes placed on it with their marks.
 #[pyclass(module = "umber._umber")]
 pub(crate) struct Figure(umber_core::Figure);
@@ -172,10 +189,14 @@ pub(crate) struct Figure(umber_core::Figure);
 impl Figure {
     /// The axes whose top-left cell is at `row`, `col`; the core's `UsageError` when no axes
     /// starts there.
-    fn axes(&mut self, row: i64, col: i64) -> PyResult<AxesMut<'_>> {
-        self.0
-            .axes_at_mut(GridIndex::At(row), GridIndex::At(col))
-            .map_err(core_error)
+    fn axes(&mut self, row: AxesRow, col: i64) -> PyResult<AxesMut<'_>> {
+        match row {
+            AxesRow::Original(row) => self.0.axes_at_mut(GridIndex::At(row), GridIndex::At(col)),
+            AxesRow::Twin(twin) => self
+                .0
+                .twin_axes_at_mut(GridIndex::At(twin.row), GridIndex::At(twin.col)),
+        }
+        .map_err(core_error)
     }
 
     /// A copy of the core figure, taken under a short borrow that ends before the copy is
@@ -354,6 +375,29 @@ impl Figure {
         Ok((axes.cells().row(), axes.cells().col()))
     }
 
+    /// Finds the right-hand axes and checks both scale witnesses in core.
+    fn twin_axes_at(
+        &self,
+        row_kind: i64,
+        row: i64,
+        col_kind: i64,
+        col: i64,
+        x_kind: i64,
+        x_base: f64,
+        y_kind: i64,
+        y_base: f64,
+    ) -> PyResult<TwinAxes> {
+        let (row, col) = (grid_index(row_kind, row)?, grid_index(col_kind, col)?);
+        let x = scale_kind(x_kind, x_base)?;
+        let y = scale_kind(y_kind, y_base)?;
+        let axes = self.0.twin_axes_at(row, col).map_err(core_error)?;
+        axes.check_scales(x, y).map_err(core_error)?;
+        Ok(TwinAxes {
+            row: axes.cells().row() as i64,
+            col: axes.cells().col() as i64,
+        })
+    }
+
     /// Adds a circular panel without Cartesian axes.
     fn add_pie_axes(
         &mut self,
@@ -466,36 +510,47 @@ impl Figure {
         Ok(())
     }
 
+    /// Adds the numeric right-hand y axes without occupying another grid cell.
+    fn twin_y(&mut self, row: AxesRow, col: i64, kind: i64, base: f64) -> PyResult<TwinAxes> {
+        let scale = scale_kind(kind, base)?;
+        let mut axes = self.axes(row, col)?;
+        let twin = axes.twin_y(scale).map_err(core_error)?;
+        Ok(TwinAxes {
+            row: twin.cells().row() as i64,
+            col: twin.cells().col() as i64,
+        })
+    }
+
     /// Sets the title.
-    fn title(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+    fn title(&mut self, row: AxesRow, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?.title_sized(text, size);
         Ok(())
     }
 
     /// Sets the subtitle.
-    fn subtitle(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+    fn subtitle(&mut self, row: AxesRow, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?.subtitle_sized(text, size);
         Ok(())
     }
 
     /// Sets the x axis label.
-    fn xlabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+    fn xlabel(&mut self, row: AxesRow, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?.xlabel_sized(text, size);
         Ok(())
     }
 
     /// Sets the y axis label.
-    fn ylabel(&mut self, row: i64, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
+    fn ylabel(&mut self, row: AxesRow, col: i64, text: &str, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?.ylabel_sized(text, size);
         Ok(())
     }
 
     /// Sets the x limits.
-    fn xlim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
+    fn xlim(&mut self, row: AxesRow, col: i64, low: f64, high: f64) -> PyResult<()> {
         self.axes(row, col)?
             .xlim(low, high)
             .map(drop)
@@ -503,7 +558,7 @@ impl Figure {
     }
 
     /// Sets the y limits.
-    fn ylim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
+    fn ylim(&mut self, row: AxesRow, col: i64, low: f64, high: f64) -> PyResult<()> {
         self.axes(row, col)?
             .ylim(low, high)
             .map(drop)
@@ -511,7 +566,7 @@ impl Figure {
     }
 
     /// Replaces the x ticks with ticks at `positions`.
-    fn xticks(&mut self, row: i64, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn xticks(&mut self, row: AxesRow, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
         let positions = floats(positions)?;
         self.axes(row, col)?
             .xticks(&positions)
@@ -520,7 +575,7 @@ impl Figure {
     }
 
     /// Replaces the y ticks with ticks at `positions`.
-    fn yticks(&mut self, row: i64, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn yticks(&mut self, row: AxesRow, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
         let positions = floats(positions)?;
         self.axes(row, col)?
             .yticks(&positions)
@@ -531,7 +586,7 @@ impl Figure {
     /// Replaces the x ticks with ticks at `positions`, each with the label at its index.
     fn xticks_labeled(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         positions: &Bound<'_, PyAny>,
         labels: &Bound<'_, PyAny>,
@@ -546,7 +601,7 @@ impl Figure {
     /// Replaces the y ticks with ticks at `positions`, each with the label at its index.
     fn yticks_labeled(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         positions: &Bound<'_, PyAny>,
         labels: &Bound<'_, PyAny>,
@@ -559,7 +614,7 @@ impl Figure {
     }
 
     /// Sets the format of the x tick labels.
-    fn xtick_format(&mut self, row: i64, col: i64, format: TickFormatArg) -> PyResult<()> {
+    fn xtick_format(&mut self, row: AxesRow, col: i64, format: TickFormatArg) -> PyResult<()> {
         let format = tick_format(format)?;
         self.axes(row, col)?
             .xtick_format(format)
@@ -568,7 +623,7 @@ impl Figure {
     }
 
     /// Sets the format of the y tick labels.
-    fn ytick_format(&mut self, row: i64, col: i64, format: TickFormatArg) -> PyResult<()> {
+    fn ytick_format(&mut self, row: AxesRow, col: i64, format: TickFormatArg) -> PyResult<()> {
         let format = tick_format(format)?;
         self.axes(row, col)?
             .ytick_format(format)
@@ -578,7 +633,7 @@ impl Figure {
 
     /// Sets baseline visibility: `None` follows the marks, otherwise the given boolean.
     #[pyo3(signature = (row, col, shown))]
-    fn baseline(&mut self, row: i64, col: i64, shown: Option<bool>) -> PyResult<()> {
+    fn baseline(&mut self, row: AxesRow, col: i64, shown: Option<bool>) -> PyResult<()> {
         let shown = match shown {
             None => umber_core::BaselineVisibility::Auto,
             Some(true) => umber_core::BaselineVisibility::Shown,
@@ -591,7 +646,7 @@ impl Figure {
     }
 
     /// Sets the legend style (a `LegendStyle` value).
-    fn legend(&mut self, row: i64, col: i64, style: i64, size: SizeArg) -> PyResult<()> {
+    fn legend(&mut self, row: AxesRow, col: i64, style: i64, size: SizeArg) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;
         let size = size_spec(size)?;
         self.axes(row, col)?
@@ -603,7 +658,7 @@ impl Figure {
     /// Sets the legend style and position (`LegendStyle` and `LegendPosition` values).
     fn legend_at(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         style: i64,
         position: i64,
@@ -621,7 +676,7 @@ impl Figure {
     /// Adds a line.
     fn line(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -648,7 +703,7 @@ impl Figure {
     /// Adds an area: a line with the region down to the baseline filled.
     fn area(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -675,7 +730,7 @@ impl Figure {
     /// Adds a scatter series; `x` and `y` each hold numbers, or names on a category axis.
     fn scatter(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -702,7 +757,7 @@ impl Figure {
     /// Adds bubbles sharing an area scale on these axes.
     fn bubbles(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -737,7 +792,7 @@ impl Figure {
     /// Adds stems from the baseline with a marker at each value.
     fn stem(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -764,7 +819,7 @@ impl Figure {
     /// Adds bars, one per category.
     fn bar(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         heights: &Bound<'_, PyAny>,
@@ -790,7 +845,7 @@ impl Figure {
     /// Adds grouped bars: in each category, one bar per series.
     fn grouped_bar(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
@@ -809,7 +864,7 @@ impl Figure {
     /// Adds aligned long-form bars with ordinary bar error context.
     fn bar_by(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
@@ -828,7 +883,7 @@ impl Figure {
     /// Adds a box plot for each category.
     fn box_plot(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         groups: Vec<Bound<'_, PyAny>>,
@@ -851,7 +906,7 @@ impl Figure {
     /// Adds distributions side by side in each category.
     fn grouped_box_plot(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         distributions: DistributionArgs<'_>,
@@ -877,7 +932,7 @@ impl Figure {
     /// Adds a violin for each category.
     fn violin(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         groups: Vec<Bound<'_, PyAny>>,
@@ -900,7 +955,7 @@ impl Figure {
     /// Adds distributions side by side in each category.
     fn grouped_violin(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         distributions: DistributionArgs<'_>,
@@ -926,7 +981,7 @@ impl Figure {
     /// Adds stacked bars: in each category, one stack of the series.
     fn stacked_bar(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
@@ -945,7 +1000,7 @@ impl Figure {
     /// Adds non-negative area series stacked over shared x values.
     fn stacked_area(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
@@ -961,7 +1016,7 @@ impl Figure {
     /// drawn in `style` (a `Hist` value) with the statistic `stat` (a `Stat` value).
     fn hist(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         values: &Bound<'_, PyAny>,
         bins: &Bound<'_, PyAny>,
@@ -992,7 +1047,7 @@ impl Figure {
     #[pyo3(signature = (row, col, x_edges, y_edges, values, cmap, scale, base, center, render))]
     fn mesh(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x_edges: &Bound<'_, PyAny>,
         y_edges: &Bound<'_, PyAny>,
@@ -1031,7 +1086,7 @@ impl Figure {
     #[pyo3(signature = (row, col, x, y, bins, cmap, scale, base, render))]
     fn hist2d(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -1062,7 +1117,7 @@ impl Figure {
     #[pyo3(signature = (row, col, x, y, gridsize, cmap, scale, base))]
     fn hexbin(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -1091,7 +1146,7 @@ impl Figure {
     /// Adds a step line; `position` is a `Step` value.
     fn step(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -1119,7 +1174,7 @@ impl Figure {
     /// Adds a horizontal reference line at `y`.
     fn hline(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         y: f64,
         label: String,
@@ -1142,7 +1197,7 @@ impl Figure {
     /// Adds a vertical reference line at `x`, a `float` or, on a category x axis, a `str`.
     fn vline(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         label: String,
@@ -1166,7 +1221,7 @@ impl Figure {
     /// Adds a horizontal reference span between the y values `low` and `high`.
     fn hspan(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         low: f64,
         high: f64,
@@ -1186,7 +1241,7 @@ impl Figure {
     /// Adds a vertical reference span between the x values `low` and `high`.
     fn vspan(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         low: f64,
         high: f64,
@@ -1206,7 +1261,7 @@ impl Figure {
     /// Adds a band between the curves `low` and `high` over `x`.
     fn band(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         low: &Bound<'_, PyAny>,
@@ -1228,7 +1283,7 @@ impl Figure {
     /// Adds vertical error bars at `x` between the limits `low` and `high`.
     fn y_error_bars(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         low: &Bound<'_, PyAny>,
@@ -1266,7 +1321,7 @@ impl Figure {
     /// limits `low` and `high`.
     fn x_error_bars(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         y: &Bound<'_, PyAny>,
         low: &Bound<'_, PyAny>,
@@ -1334,7 +1389,7 @@ impl Figure {
     #[pyo3(signature = (row, col, label, position, format, size))]
     fn colorbar(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         label: String,
         position: Option<i64>,
@@ -1383,7 +1438,7 @@ impl Figure {
     #[pyo3(signature = (row, col, x_categories, y_categories, values, cmap, scale, base, center, annotate, format, render))]
     fn heatmap(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x_categories: &Bound<'_, PyAny>,
         y_categories: &Bound<'_, PyAny>,
@@ -1420,7 +1475,7 @@ impl Figure {
     #[pyo3(signature = (row, col, x, y, z, levels, style, cmap, scale, base, center, color, annotate, format))]
     fn contour(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
@@ -1460,7 +1515,7 @@ impl Figure {
     }
 
     /// Sets the color range of the axes' color-mapped marks.
-    fn clim(&mut self, row: i64, col: i64, low: f64, high: f64) -> PyResult<()> {
+    fn clim(&mut self, row: AxesRow, col: i64, low: f64, high: f64) -> PyResult<()> {
         self.axes(row, col)?
             .clim(low, high)
             .map(drop)
@@ -1468,7 +1523,7 @@ impl Figure {
     }
 
     /// Sets the limits of a time x axis to the times `low` and `high`, in microseconds.
-    fn xlim_time(&mut self, row: i64, col: i64, low: i64, high: i64) -> PyResult<()> {
+    fn xlim_time(&mut self, row: AxesRow, col: i64, low: i64, high: i64) -> PyResult<()> {
         const CONTEXT: &str = "Axes.xlim()";
         let low = time_from_micros(CONTEXT, "low", low).map_err(core_error)?;
         let high = time_from_micros(CONTEXT, "high", high).map_err(core_error)?;
@@ -1479,7 +1534,7 @@ impl Figure {
     }
 
     /// Sets the limits of a time y axis to the times `low` and `high`, in microseconds.
-    fn ylim_time(&mut self, row: i64, col: i64, low: i64, high: i64) -> PyResult<()> {
+    fn ylim_time(&mut self, row: AxesRow, col: i64, low: i64, high: i64) -> PyResult<()> {
         const CONTEXT: &str = "Axes.ylim()";
         let low = time_from_micros(CONTEXT, "low", low).map_err(core_error)?;
         let high = time_from_micros(CONTEXT, "high", high).map_err(core_error)?;
@@ -1490,7 +1545,12 @@ impl Figure {
     }
 
     /// Replaces the ticks of a time x axis with ticks at the times `positions`.
-    fn xticks_time(&mut self, row: i64, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn xticks_time(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        positions: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let positions = Self::tick_times("Axes.xticks()", positions)?;
         self.axes(row, col)?
             .xticks_time(&positions)
@@ -1499,7 +1559,12 @@ impl Figure {
     }
 
     /// Replaces the ticks of a time y axis with ticks at the times `positions`.
-    fn yticks_time(&mut self, row: i64, col: i64, positions: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn yticks_time(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        positions: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let positions = Self::tick_times("Axes.yticks()", positions)?;
         self.axes(row, col)?
             .yticks_time(&positions)
@@ -1511,7 +1576,7 @@ impl Figure {
     /// label at its index.
     fn xticks_labeled_time(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         positions: &Bound<'_, PyAny>,
         labels: &Bound<'_, PyAny>,
@@ -1528,7 +1593,7 @@ impl Figure {
     /// label at its index.
     fn yticks_labeled_time(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         positions: &Bound<'_, PyAny>,
         labels: &Bound<'_, PyAny>,
@@ -1544,7 +1609,7 @@ impl Figure {
     /// Adds a vertical reference line at the time `x`, in microseconds.
     fn vline_time(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: i64,
         label: String,
@@ -1568,7 +1633,7 @@ impl Figure {
     /// Adds a horizontal reference line at the time `y`, in microseconds.
     fn hline_time(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         y: i64,
         label: String,
@@ -1592,7 +1657,7 @@ impl Figure {
     /// Adds a horizontal reference span between the times `low` and `high`, in microseconds.
     fn hspan_time(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         low: i64,
         high: i64,
@@ -1615,7 +1680,7 @@ impl Figure {
     /// Adds a vertical reference span between the times `low` and `high`, in microseconds.
     fn vspan_time(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         low: i64,
         high: i64,
@@ -1638,7 +1703,7 @@ impl Figure {
     /// Adds a band between the curves `low` and `high` over the times `x`.
     fn band_time(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         low: &Bound<'_, PyAny>,
@@ -1661,7 +1726,7 @@ impl Figure {
     /// Adds non-negative area series stacked over the times `x`.
     fn stacked_area_time(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         x: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
@@ -1673,7 +1738,7 @@ impl Figure {
             .map_err(core_error)
     }
     /// Sets the x tick label size.
-    fn xtick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
+    fn xtick_labels(&mut self, row: AxesRow, col: i64, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?
             .xtick_labels(size)
@@ -1682,7 +1747,7 @@ impl Figure {
     }
 
     /// Sets the y tick label size.
-    fn ytick_labels(&mut self, row: i64, col: i64, size: SizeArg) -> PyResult<()> {
+    fn ytick_labels(&mut self, row: AxesRow, col: i64, size: SizeArg) -> PyResult<()> {
         let size = size_spec(size)?;
         self.axes(row, col)?
             .ytick_labels(size)
@@ -1694,7 +1759,7 @@ impl Figure {
     #[pyo3(signature = (row, col, rows, positions, length, width, color))]
     fn events(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         rows: &Bound<'_, PyAny>,
         positions: Vec<Bound<'_, PyAny>>,
@@ -1725,7 +1790,7 @@ impl Figure {
     #[pyo3(signature = (row, col, categories, groups, label, color, size, jitter))]
     fn strip(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         groups: Vec<Bound<'_, PyAny>>,
@@ -1754,7 +1819,7 @@ impl Figure {
     /// Adds swarm samples in category groups.
     fn swarm(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         categories: &Bound<'_, PyAny>,
         groups: Vec<Bound<'_, PyAny>>,
@@ -1780,7 +1845,7 @@ impl Figure {
     /// value) with the statistic `stat` (a `Stat` value).
     fn grouped_hist(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         series: SeriesArgs<'_>,
         bins: &Bound<'_, PyAny>,
@@ -1805,7 +1870,7 @@ impl Figure {
     /// Adds the ECDF of `values`: a float64 buffer of numbers, or an int64 buffer of times.
     fn ecdf(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         values: &Bound<'_, PyAny>,
         complementary: bool,
@@ -1832,7 +1897,7 @@ impl Figure {
     /// Adds the kernel density line of `values`; a `bandwidth` of `None` is Scott's rule.
     fn kde(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         values: &Bound<'_, PyAny>,
         bandwidth: Option<f64>,
@@ -1859,7 +1924,7 @@ impl Figure {
     /// Adds one kernel density line per series; a `bandwidth` of `None` is Scott's rule.
     fn grouped_kde(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         series: SeriesArgs<'_>,
         bandwidth: Option<f64>,
@@ -1883,7 +1948,7 @@ impl Figure {
     /// an `int` time in microseconds, as its axis takes.
     fn text(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         text: &str,
         at: (Bound<'_, PyAny>, Bound<'_, PyAny>),
@@ -1909,7 +1974,7 @@ impl Figure {
     /// arrow to the point when `arrow` holds.
     fn annotate(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         text: &str,
         at: (Bound<'_, PyAny>, Bound<'_, PyAny>),
@@ -1936,7 +2001,7 @@ impl Figure {
     /// Adds named lines atomically, with palette colors in group order.
     fn grouped_line(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         groups: XyGroupArgs<'_>,
         dash: i64,
@@ -1953,7 +2018,7 @@ impl Figure {
     /// Adds named areas atomically, with palette colors in group order.
     fn grouped_area(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         groups: XyGroupArgs<'_>,
         dash: i64,
@@ -1970,7 +2035,7 @@ impl Figure {
     /// Adds named scatter series atomically, with palette colors in group order.
     fn grouped_scatter(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         groups: XyGroupArgs<'_>,
         marker: i64,
@@ -1987,7 +2052,7 @@ impl Figure {
     /// Adds named step lines atomically, checking their order within each group.
     fn grouped_step(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         groups: XyGroupArgs<'_>,
         position: i64,
@@ -2006,7 +2071,7 @@ impl Figure {
     /// Adds named ECDFs atomically, preserving numeric and time columns.
     fn grouped_ecdf(
         &mut self,
-        row: i64,
+        row: AxesRow,
         col: i64,
         groups: Vec<(String, Bound<'_, PyAny>)>,
         complementary: bool,

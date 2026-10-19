@@ -30,6 +30,7 @@ mod panel;
 pub(crate) mod pie;
 pub(crate) mod placement;
 mod program;
+pub(crate) mod twin;
 
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
 pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};
@@ -232,6 +233,7 @@ impl Layout {
         let edge = self
             .y_tick_labels
             .iter()
+            .filter(|label| label.x < self.plot.x)
             .map(|label| label.x + label.width())
             .fold(self.frame.x, f64::max);
         (self.plot.x - edge).max(0.0)
@@ -919,7 +921,7 @@ pub(crate) struct LayoutInput<'a> {
     /// The figure title size, for attributing vertical room errors.
     pub figure_title_size: SizeSpec,
     /// The axes, for their texts and cells.
-    pub axes: crate::Panel<'a>,
+    pub axes: crate::model::Layer<'a>,
     /// The legend, measured by [`MeasuredLegend::measure`].
     pub legend: &'a MeasuredLegend<'a>,
     /// The fonts.

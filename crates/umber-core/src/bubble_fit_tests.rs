@@ -51,7 +51,7 @@ fn plans(f: &Figure) -> Vec<((Resolved, Layout), Vec<ResolvedMark<'_>>)> {
     let planned = try_plan_panels(f, FontLibrary::global()).unwrap();
     planned
         .into_iter()
-        .zip(f.cartesian_panels())
+        .zip(f.primary_cartesian_axes())
         .map(|(plan, axes)| (plan, resolve_marks(axes.marks(), f.theme())))
         .collect()
 }
