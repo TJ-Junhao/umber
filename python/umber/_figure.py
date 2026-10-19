@@ -1,11 +1,12 @@
 """``Figure``: a canvas with a grid of axes, rendered to PNG and SVG."""
 
 import os
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
+from operator import attrgetter
 from pathlib import Path
 from typing import Any, Final, Never, Self, cast, final
 
-from umber import _args, _axes, _cell, _pie, _scale, _size, _theme, _ticks, _umber
+from umber import _args, _axes, _cell, _display, _pie, _scale, _size, _theme, _ticks, _umber
 from umber._args import instance, integer, real
 from umber._axes import Axes, X, Y
 from umber._cell import Cell
@@ -24,6 +25,15 @@ _SCALE_HINT: Final = "use Scale.linear(), Scale.log(), Scale.category() or Scale
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
 _SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
 _LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
+_SIZE_IN: Final = attrgetter("_size_in")
+
+
+def display_bundle(
+    figure: "Figure", include: Collection[str] | None, exclude: Collection[str] | None
+) -> _display.Bundle:
+    """Return a figure's bundle for the notebook hooks on figures and their panels."""
+    size_in = cast(tuple[float, float], _SIZE_IN(figure))
+    return _display.mimebundle(figure, size_in, include, exclude)
 
 
 def _inches(context: str, name: str, value: float | Auto) -> float | None:
@@ -62,7 +72,9 @@ class Figure:
     Create a figure, add panels with ``add_axes()``, draw on their axes, then render with
     ``to_png()`` or ``to_svg()``, or write with ``save_png()`` or ``save_svg()``. Empty cells
     show the background. Positions count from zero; an axes may span several cells.
-    ``to_pdf()`` and ``save_pdf()`` produce a vector PDF with embedded fonts.
+    ``to_pdf()`` and ``save_pdf()`` produce a vector PDF with embedded fonts. A figure or axes
+    at the end of a Jupyter cell displays the whole figure as a PNG; ``show()`` displays it
+    explicitly in Jupyter or opens the system's default viewer elsewhere.
 
     ``copy.copy()`` and ``copy.deepcopy()`` return an independent figure with the same size,
     theme, grid, axes and marks; changing one leaves the other unchanged. ``axes_at()``
@@ -78,13 +90,14 @@ class Figure:
     """
 
     # Python state is stored only after the native call succeeds.
-    __slots__ = ("_axes", "_cols", "_native", "_pies", "_rows", "_twins")
+    __slots__ = ("_axes", "_cols", "_native", "_pies", "_rows", "_size_in", "_twins")
     _twins: dict[tuple[int, int], Axes[Any, float]]
     _pies: dict[tuple[int, int], PieAxes]
     _native: _umber.Figure
     _axes: dict[tuple[int, int], Axes[Any, Any]]
     _rows: int
     _cols: int
+    _size_in: tuple[float, float]
 
     def __init__(
         self,
@@ -147,6 +160,11 @@ class Figure:
                 share_y.value,
                 legend.value,
                 share_color.value,
+            )
+            auto_width, auto_height = _umber.grid_auto_size(row_count, col_count)
+            self._size_in = (
+                auto_width if inches_wide is None else inches_wide,
+                auto_height if inches_high is None else inches_high,
             )
             self._rows = row_count
             self._cols = col_count
@@ -563,6 +581,63 @@ class Figure:
             positions = _umber.grid_cells(self._rows, self._cols, total)
             return (_cell.at(self, row, col) for row, col in positions)
 
+    def _repr_mimebundle_(
+        self, include: Collection[str] | None = None, exclude: Collection[str] | None = None
+    ) -> _display.Bundle:
+        """Return the PNG and text representations requested by a notebook frontend.
+
+        Args:
+            include: MIME types to include; ``None`` includes PNG and plain text.
+            exclude: MIME types to omit, even when included.
+
+        Returns:
+            The MIME data and metadata. PNG is rendered at 144 dpi, with display width and
+            height at 72 CSS pixels per inch, rounded to the nearest integer.
+
+        Raises:
+            StyleError: If the figure cannot be rendered, as in ``to_png()``.
+
+        Example:
+            >>> import umber as ub
+            >>> data, metadata = ub.Figure(6, 4)._repr_mimebundle_()
+            >>> sorted(data)
+            ['image/png', 'text/plain']
+            >>> metadata
+            {'image/png': {'width': 432, 'height': 288}}
+        """
+        with api_call():
+            return display_bundle(self, include, exclude)
+
+    def show(self) -> None:
+        """Display the figure in Jupyter, or open it in the system's default viewer.
+
+        A shell returned by IPython's ``get_ipython()`` with a ``kernel`` attribute is a
+        Jupyter kernel. There, display uses the same PNG bundle as a figure at the end of
+        a cell. Terminal IPython and plain Python open a 144 dpi PNG named ``figure.png``
+        in a fresh temporary directory. The file is left for the viewer; this method does
+        not wait for the viewer to close. IPython is optional.
+
+        Returns:
+            None.
+
+        Raises:
+            StyleError: If the figure cannot be rendered, as in ``to_png()``.
+            UsageError: If no viewer can be started, including Linux without ``DISPLAY``
+                or ``WAYLAND_DISPLAY``. The error names the saved PNG.
+            OSError: If the temporary directory or PNG cannot be written.
+
+        Example:
+            Prepare a display action without opening a viewer; call ``show_chart()`` to show it.
+
+            >>> import umber as ub
+            >>> fig = ub.line([0, 1], [1, 3]).figure
+            >>> show_chart = fig.show
+            >>> callable(show_chart)
+            True
+        """
+        with api_call():
+            _display.show(self)
+
     def to_png(self, *, dpi: int = 200) -> bytes:
         """Render the figure as a PNG image.
 
@@ -731,6 +806,7 @@ class Figure:
         clone._native = self._native.clone()
         clone._rows = self._rows
         clone._cols = self._cols
+        clone._size_in = self._size_in
         clone._axes = {}
         clone._pies = {
             position: _pie.attach(clone, clone._native, *position) for position in self._pies

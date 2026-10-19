@@ -92,6 +92,8 @@ svg = ax.figure.title("Serif title").to_svg()
 
 ## Saving
 
+A figure or axes at the end of a Jupyter cell displays its whole figure as a PNG; `fig.show()` or `ax.show()` displays it explicitly in Jupyter or opens a temporary PNG in the system's default viewer elsewhere.
+
 `fig.save_png(path, dpi=200)`, `fig.save_svg(path)` (text as outlines by default; `text=ub.SvgText.EDITABLE` keeps real text, and the viewer then needs the font), `fig.save_pdf(path)` (vector; fonts are embedded as subsets so text stays selectable, and text whose font cannot be embedded is drawn as outlines). `to_png()`, `to_svg()` and `to_pdf()` return the bytes or text instead.
 
 ```python

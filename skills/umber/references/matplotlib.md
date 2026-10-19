@@ -44,7 +44,7 @@ umber has no global state: there is no `plt`, no current figure and no `show()`.
 | `plt.rcParams["font.family"] = "serif"` | `theme=ub.Theme.PIGMENT.with_body_font(ub.Font.SOURCE_SERIF_4)` |
 | `sns.lineplot(data=df, x="day", y="temp", hue="station", estimator=None, errorbar=None, sort=False)` | `ax.line(df["day"], df["temp"], by=df["station"])` (umber draws each group's rows as given; aggregate and sort first to match seaborn's defaults) |
 | `plt.savefig("f.png", dpi=200)` / `"f.svg"` / `"f.pdf"` | `fig.save_png("f.png", dpi=200)` / `fig.save_svg("f.svg")` / `fig.save_pdf("f.pdf")` |
-| `plt.show()` | none: write the figure to a file, or show its SVG in Jupyter with `IPython.display.SVG(fig.to_svg())` |
+| `plt.show()` | `fig.show()` (or `ax.show()`); a figure or axes at the end of a Jupyter cell displays its whole figure as a PNG automatically |
 
 Things that work differently:
 
