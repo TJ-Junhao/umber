@@ -330,6 +330,10 @@ Titles and direct legend labels are set in bold. A font without a bold face rais
 
 `fig.save_png(path, dpi=...)`, `fig.save_svg(path)` and `fig.save_pdf(path)` write a file; `to_png()`, `to_svg()` and `to_pdf()` return the bytes or text instead. PNG output is antialiased at the chosen resolution. SVG text is drawn as outlines by default, so it looks the same everywhere; `text=ub.SvgText.EDITABLE` keeps it as text, which the viewer then draws with its own copy of the font. PDF output is vector, one page at the figure's size, with the fonts it uses embedded as subsets, so its text can be selected and searched; large cell grids stay images, as in SVG.
 
+### Jupyter and `show()`
+
+A figure or axes at the end of a Jupyter cell displays the whole figure as a PNG. Use `fig.show()` or `ax.show()` to display it explicitly. Both render at 144 dpi and display at 72 CSS pixels per inch (a 6 × 4 in figure is 432 × 288 CSS pixels). Outside a Jupyter kernel, including terminal IPython, `show()` opens a PNG in the system's default viewer without waiting for it to close; the file is left in a fresh temporary directory. If no viewer can be started, `UsageError` names the saved file. Rendering errors propagate, and IPython is optional.
+
 ## Errors
 
 An error is raised by the call that caused it: `umber.DataError` for invalid data, `umber.StyleError` for an invalid option value, `umber.UsageError` for a call that is not allowed in the current state, and `TypeError` for a value of the wrong type. The three umber errors derive from `umber.UmberError`. The traceback points at the argument:

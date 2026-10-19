@@ -277,6 +277,9 @@ impl TextBlock {
 pub(crate) struct Layout {
     /// The plot area.
     pub plot: Area,
+    /// The plot area the axes' cells have where the grid lines up the plots of its panels (see
+    /// [`PanelSlot::aligned`](panel::PanelSlot::aligned)).
+    pub aligned: Area,
     /// Where the header ends, gap included, as an absolute canvas y; the header's top when the
     /// header is empty.
     #[cfg(test)]

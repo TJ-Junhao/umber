@@ -37,7 +37,13 @@ fn layout(pie: &Pie, area: Area) -> Result<PieLayout> {
     let theme = Theme::pigment();
     let library = FontLibrary::bundled();
     let fonts = super::super::figure_fonts(&library, &theme).unwrap();
-    place(pie, LegendStyle::Direct, area, &theme, &fonts)
+    place(
+        pie,
+        LegendStyle::Direct,
+        PieRoom::new(area, area),
+        &theme,
+        &fonts,
+    )
 }
 
 #[test]
@@ -180,9 +186,15 @@ fn small_slices_above_and_below_the_circle_fit() {
                 let mut pie = pie(names, &shares, hole, true);
                 pie.options.size = size;
                 let area = area(408.0, 264.0);
-                let result = place(&pie, LegendStyle::Direct, area, &theme, &fonts)
-                    .unwrap_or_else(|error| panic!("{names:?} hole={hole}: {error}"));
-                super::property_tests::assert_disjoint(&result, area);
+                let result = place(
+                    &pie,
+                    LegendStyle::Direct,
+                    PieRoom::new(area, area),
+                    &theme,
+                    &fonts,
+                )
+                .unwrap_or_else(|error| panic!("{names:?} hole={hole}: {error}"));
+                super::property_tests::assert_disjoint(&result, PieRoom::new(area, area));
             }
         }
     }
@@ -310,4 +322,27 @@ fn inside_fit_uses_ink_height_not_line_height() {
         line
     ));
     assert!(line_angle > half_angle, "the old full-line box cannot fit");
+}
+
+#[test]
+fn opposite_radial_leaders_on_one_line_do_not_cross() {
+    // The shares of a 30/70 pie sit outside at opposite angles, so their radial leaders lie on
+    // one line through the centre; moving the panel must not make them count as crossing.
+    let theme = Theme::pigment();
+    let library = FontLibrary::bundled();
+    let fonts = super::super::figure_fonts(&library, &theme).unwrap();
+    let mut pie = pie(&["A rather long slice name", "B"], &[0.7, 0.3], 0.0, true);
+    pie.options.size = crate::SizeSpec::pt(14.0).unwrap();
+    for width in (250..=400).step_by(5).map(f64::from) {
+        let area = area(width, 60.0);
+        let layout = place(
+            &pie,
+            LegendStyle::Chips,
+            PieRoom::new(area, area),
+            &theme,
+            &fonts,
+        )
+        .unwrap_or_else(|error| panic!("{width}: {error}"));
+        assert_eq!(layout.labels.iter().filter(|l| l.fill.is_none()).count(), 2);
+    }
 }

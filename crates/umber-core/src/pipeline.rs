@@ -1756,9 +1756,14 @@ fn scene_with_labels(
             Layer::Primary(crate::Panel::Pie(pie_panel)) => {
                 scene.push(draw::chrome(theme, layout));
                 if let Some(pie) = &pie_panel.pie {
-                    let placed =
-                        layout::pie::place(pie, pie_panel.legend, layout.plot, theme, fonts)
-                            .map_err(|err| in_cell(figure, panel.axes, err))?;
+                    let placed = layout::pie::place(
+                        pie,
+                        pie_panel.legend,
+                        layout::pie::PieRoom::new(layout.plot, layout.aligned),
+                        theme,
+                        fonts,
+                    )
+                    .map_err(|err| in_cell(figure, panel.axes, err))?;
                     scene.push(draw::pie::draw(theme, &placed));
                 }
                 if let Some(legend) = draw::legend::legend(theme, layout) {
@@ -1889,6 +1894,10 @@ mod font_error_tests;
 #[cfg(test)]
 #[path = "line_break_tests.rs"]
 mod line_break_tests;
+
+#[cfg(test)]
+#[path = "pie_grid_tests.rs"]
+mod pie_grid_tests;
 
 #[cfg(test)]
 mod tests {

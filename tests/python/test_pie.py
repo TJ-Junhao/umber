@@ -141,6 +141,74 @@ def test_unplaceable_labels_name_slices() -> None:
     assert ax.figure.to_svg()
 
 
+def test_donut_renders_in_a_crowded_grid() -> None:
+    rng = np.random.default_rng(12)
+    fig = ub.Figure(13.5, 9, rows=3, cols=4, legend=ub.Legend.PER_PANEL, theme=ub.Theme.PIGMENT)
+    fig.title("umber").subtitle("Plotting for Python, rendered in Rust")
+    x = np.linspace(0, 12, 200)
+    lines = fig.add_axes(row=0, col=0).title("Lines and bands")
+    lines.band(x, np.sin(x) - 0.3, np.sin(x) + 0.3).line(x, np.sin(x), label="mean")
+    lines.line(x, np.cos(x) * 0.8, label="trend").legend(ub.LegendStyle.DIRECT)
+    bars = fig.add_axes(row=0, col=1, x=ub.Scale.category()).title("Grouped bars")
+    series = [ub.Series("North", [12.0, 18.0, 15.0]), ub.Series("South", [9.0, 11.0, 17.0])]
+    bars.grouped_bar(["Q1", "Q2", "Q3"], series, annotate=True).legend(ub.LegendStyle.NONE)
+    px = rng.normal(size=400)
+    py = 0.6 * px + rng.normal(scale=0.6, size=400)
+    colors = fig.add_axes(row=0, col=2).title("Color by value")
+    colors.scatter(px, py, color=ub.ColorBy(px * py, center=0.0)).colorbar("x · y")
+    v = np.concatenate([rng.normal(40, 8, 3000), rng.normal(70, 6, 1500)])
+    hist = fig.add_axes(row=1, col=0).title("Histogram and KDE")
+    hist.hist(v, bins=40, stat=ub.Stat.DENSITY).kde(v).legend(ub.LegendStyle.NONE)
+    groups = [rng.normal(m, s, 60) for m, s in ((3.0, 0.8), (4.5, 1.1), (4.0, 0.6))]
+    violins = fig.add_axes(row=1, col=1, x=ub.Scale.category()).title("Violins and swarms")
+    violins.violin(["A", "B", "C"], groups).swarm(["A", "B", "C"], groups, size=ub.Size.pt(3))
+    violins.legend(ub.LegendStyle.NONE)
+    cx = np.linspace(-3, 3, 121)
+    cy = np.linspace(-2, 2, 81)
+    gx, gy = np.meshgrid(cx, cy)
+    z = 1.2 * np.exp(-((gx - 1) ** 2) - (gy - 0.4) ** 2) + 0.8 * np.exp(
+        -((gx + 1.2) ** 2) / 0.8 - (gy + 0.5) ** 2 / 0.6
+    )
+    contours = fig.add_axes(row=1, col=2).title("Contours")
+    contours.contour(cx, cy, z, style=ub.Contour.BOTH, annotate=True)
+    names = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+    hours = ["9", "12", "15", "18"]
+    m = rng.integers(10, 90, size=(len(hours), len(names))).astype(float)
+    heat = fig.add_axes(row=1, col=3, x=ub.Scale.category(), y=ub.Scale.category())
+    heat.title("Heatmap").heatmap(names, hours, m, annotate=True, format=ub.TickFormat.fixed(0))
+    days = np.datetime64("2026-03-01") + np.arange(30)
+    load = 25 + np.cumsum(rng.normal(0, 1.5, 30))
+    times = fig.add_axes(row=2, col=0, x=ub.Scale.time()).title("Time and annotations")
+    peak = int(np.argmax(load))
+    times.line(days, load).annotate("peak", (days[peak], float(load[peak])), offset=(20.0, 12.0))
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+    twin = fig.add_axes(row=2, col=1, x=ub.Scale.category()).title("Two y axes")
+    twin.bar(months, [52.0, 48.0, 55.0, 61.0, 72.0, 84.0], label="rain")
+    twin.twin_y().line(months, [4.0, 5.0, 9.0, 13.0, 18.0, 22.0], label="°C")
+    twin.legend(ub.LegendStyle.NONE)
+    hx = rng.normal(size=20000)
+    hy = 0.6 * hx + rng.normal(scale=0.7, size=hx.size)
+    hexes = fig.add_axes(row=2, col=2).title("Hexbin, log color")
+    hexes.hexbin(hx, hy, gridsize=25, scale=ub.Scale.log()).colorbar("count")
+    vals = np.concatenate([rng.lognormal(3.0, 0.4, 400), rng.lognormal(2.7, 0.3, 400)])
+    grp = ["before"] * 400 + ["after"] * 400
+    ecdf = fig.add_axes(row=2, col=3).title("ECDF, grouped by=")
+    ecdf.ecdf(vals, by=grp).legend(ub.LegendStyle.DIRECT)
+    donut = fig.add_pie_axes(row=0, col=3).title("Donut")
+    donut.pie(["Web", "App", "Shop"], [52.0, 30.0, 18.0], hole=0.55, annotate=True)
+    assert fig.to_png(dpi=72).startswith(b"\x89PNG")
+    labels = {t.text for t in texts(fig)}
+    for name in ["Web", "App", "Shop"]:
+        assert any(text is not None and text.split(" ")[0] == name for text in labels)
+
+
+def test_donut_that_fits_beside_axes_titles_renders() -> None:
+    fig = ub.Figure(5, 1.8, cols=2, theme=ub.Theme.PIGMENT)
+    fig.add_pie_axes(col=0).pie(["Web", "App", "Shop"], [52, 30, 18], hole=0.55, annotate=True)
+    fig.add_axes(col=1).line([0, 1], [0, 1]).xlabel("Distance").ylabel("Volume")
+    assert fig.to_svg().startswith("<svg")
+
+
 def test_too_many_slices_rejected() -> None:
     ax = ub.Figure().add_pie_axes()
     with pytest.raises(ub.StyleError, match="colors"):

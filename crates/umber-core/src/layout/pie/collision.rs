@@ -33,6 +33,7 @@ fn distance(point: Point, a: Point, b: Point) -> f64 {
     (f64::from(point.x - a.x) - t * dx).hypot(f64::from(point.y - a.y) - t * dy)
 }
 
+/// Whether the segments `a`–`b` and `c`–`d` cross or come closer than `gap`.
 fn close(a: Point, b: Point, c: Point, d: Point, gap: f64) -> bool {
     let cross = |p: Point, q: Point, r: Point| {
         f64::from(q.x - p.x) * f64::from(r.y - p.y) - f64::from(q.y - p.y) * f64::from(r.x - p.x)
@@ -41,7 +42,14 @@ fn close(a: Point, b: Point, c: Point, d: Point, gap: f64) -> bool {
     let ad = cross(a, b, d);
     let ca = cross(c, d, a);
     let cb = cross(c, d, b);
-    if ac * ad < 0.0 && ca * cb < 0.0 {
+    // Segments that cross have overlapping bounding boxes. Without this check, two disjoint
+    // segments on one line, such as the radial leaders of opposite slices, could pass the sign
+    // test on the rounding noise of their cross products.
+    let boxes_meet = a.x.min(b.x) <= c.x.max(d.x)
+        && c.x.min(d.x) <= a.x.max(b.x)
+        && a.y.min(b.y) <= c.y.max(d.y)
+        && c.y.min(d.y) <= a.y.max(b.y);
+    if boxes_meet && ac * ad < 0.0 && ca * cb < 0.0 {
         return true;
     }
     [

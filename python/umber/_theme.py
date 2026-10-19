@@ -575,7 +575,7 @@ class Theme:
 
         Example:
             >>> import umber as ub
-            >>> theme = ub.Theme.PIGMENT.with_hist_gap(1.0)
+            >>> theme = ub.Theme.PIGMENT.with_hist_gap(2.0)
             >>> theme == ub.Theme.PIGMENT
             False
         """
