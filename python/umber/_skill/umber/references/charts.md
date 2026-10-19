@@ -17,7 +17,7 @@ rng = np.random.default_rng(0)
 | Filled area, stacked shares | `ax.area(x, y)`, `ax.stacked_area(x, [ub.Series(...), ...])` |
 | A range around a line | `ax.band(x, low, high)` |
 | Points | `ax.scatter(x, y)`; colored by a third value with `color=ub.ColorBy(values)` |
-| Points sized by a value | `ax.bubbles(x, y, sizes)` |
+| Points sized by a value | `ax.bubbles(x, y, sizes)`: areas relative to the largest size |
 | Discrete samples | `ax.stem(x, y)` |
 | Uncertainty | `ax.y_error_bars(x, low, high)`, `ax.x_error_bars(y, low, high)` |
 | Reference lines and regions | `ax.hline(y)`, `ax.vline(x)`, `ax.hspan(low, high)`, `ax.vspan(low, high)` |
@@ -77,7 +77,7 @@ svg = ax.figure.to_svg()
 
 | Data | Method |
 |---|---|
-| Histogram | `ax.hist(values, bins=30)`; `style=ub.Hist.STEP` or `ub.Hist.STACKED` (with `by=`), `stat=ub.Stat.DENSITY`, `cumulative=True` |
+| Histogram | `ax.hist(values, bins=30)` on a linear x axis; `style=ub.Hist.STEP` or `ub.Hist.STACKED` (with `by=`); `stat=ub.Stat.FRACTION` or `ub.Stat.DENSITY`; `cumulative=True` (with counts or fractions, not density) |
 | Smooth density | `ax.kde(values)` |
 | Cumulative distribution | `ax.ecdf(values)`; `complementary=True` for 1 − F |
 | Events on rows (spike trains, logs) | `ax.events(rows, positions)` on a category y axis |

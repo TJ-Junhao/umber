@@ -4,7 +4,7 @@ umber checks every call when it is made and raises at once. Each error message r
 
 | Class | Meaning | Typical fix |
 |---|---|---|
-| `TypeError` | An argument has the wrong type: a string for a `Color`, a float for a `Size`, `None` anywhere. Type checkers (pyright, mypy) also reject marks on the wrong kind of axes before the code runs. | Pass the typed value the signature names: `ub.Color.hex("#…")`, `ub.Size.pt(2)`, an enum member, `ub.AUTO`. |
+| `TypeError` | An argument has the wrong type: a string for a `Color`, a float for a `Size`, `None` where a typed value is required. (`None` or NaN inside data or a `by=` column is a `DataError`.) Type checkers (pyright, mypy) also reject marks on the wrong kind of axes before the code runs. | Pass the typed value the signature names: `ub.Color.hex("#…")`, `ub.Size.pt(2)`, an enum member, `ub.AUTO`. |
 | `ub.UsageError` | The API is used in a way it does not support: conflicting options, `by=` together with `label=`, a Cartesian method on a pie panel, a missing font file. | Read the hint; it names the supported way. |
 | `ub.DataError` | The data cannot be drawn as asked: NaN or infinite values where they matter, lengths that differ, zero or negative values on a log axis, category names on an axis that is not a category axis, duplicate categories, a file that is not a font. | Clean or reshape the data, or choose another axis scale. |
 | `ub.StyleError` | The figure cannot be laid out or styled as asked: labels that do not fit, too many slices for the palette, a font without the needed bold face. Raised when the figure is rendered if it depends on the final layout. | Make the figure larger, use fewer or shorter labels, pass explicit colors, or change the font. |

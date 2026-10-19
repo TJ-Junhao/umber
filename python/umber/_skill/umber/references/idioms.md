@@ -21,7 +21,7 @@ Retrieve an axes later with `fig.axes_at(row=, col=, x=..., y=...)` using the sa
 
 ## Typing: the axis types follow the scales
 
-`add_axes()` returns `Axes[float, float]`. `add_axes(x=ub.Scale.category())` returns `Axes[str, float]`, `y=ub.Scale.category()` gives `Axes[float, str]`, `x=ub.Scale.time()` gives `Axes[ub.Time, float]`. Positions and limits use those types: `xlim(low, high)`, `text("…", (x, y))` and `annotate` take values of the axis type — a category name on a category axis, a `datetime` on a time axis. Methods that need a certain kind of axes are typed to it, so pyright and mypy reject, for example, `bar` on two numeric axes before the code runs.
+`add_axes()` returns `Axes[float, float]`. `add_axes(x=ub.Scale.category())` returns `Axes[str, float]`, `y=ub.Scale.category()` gives `Axes[float, str]`, `x=ub.Scale.time()` gives `Axes[ub.Time, float]`. Positions use those types: `text("…", (x, y))` and `annotate` take values of each axis' type — a category name on a category axis, a `datetime` on a time axis. `xlim` and `ylim` apply to numeric and time axes only (numbers or times); category axes have no limits. Methods that need a certain kind of axes are typed to it, so pyright and mypy reject, for example, `bar` on two numeric axes before the code runs.
 
 ```python
 ax = ub.Figure(6, 4).add_axes(x=ub.Scale.category())
@@ -32,7 +32,7 @@ svg = ax.figure.to_svg()
 
 ## AUTO, never None
 
-Optional arguments default to `ub.AUTO` (or a typed `AUTO` member such as `ub.Color.AUTO`, `ub.Size.AUTO`, `ub.TickFormat.AUTO`). Passing `None` is a `TypeError`. Leave an argument out, or pass `ub.AUTO`, to let umber choose.
+Omit an optional argument to use its documented default. Where automatic selection is supported, the signature names the exact value: `ub.AUTO`, `ub.Color.AUTO`, `ub.Size.AUTO` or `ub.TickFormat.AUTO`. They are not interchangeable (`color=ub.AUTO` is a `TypeError`), and `None` is never accepted.
 
 ## Long-form data with `by=`
 
@@ -51,11 +51,11 @@ With `by=`, give no `color=` or `label=` (each group takes its own); `hist` need
 
 ## Legends
 
-Marks with a non-empty `label=` appear in the legend. `ax.legend(ub.LegendStyle.HEADER | CHIPS | DIRECT | NONE, position=ub.LegendPosition.TOP_RIGHT | ...)`. In a grid the panels share one legend (`ub.Legend.MERGED`, the default); pass `legend=ub.Legend.PER_PANEL` to `Figure` for one per panel.
+Marks with a non-empty `label=` appear in the legend. Choose the style with `ax.legend(ub.LegendStyle.HEADER | CHIPS | DIRECT | NONE)`; `position=ub.LegendPosition.TOP_LEFT | TOP_RIGHT | RIGHT | BOTTOM | BEST` applies to `HEADER` and `CHIPS` (omit it with `DIRECT`, which labels each line at its end). In a grid the Cartesian panels share one legend under the figure title (`ub.Legend.MERGED`, the default), so positions apply to single-panel figures and to `legend=ub.Legend.PER_PANEL`. A pie's legend always belongs to its own panel.
 
 ## Colors, colormaps and color scales
 
-`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`/`bubbles` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`), `scale=ub.Scale.log()`, `center=0.0` for a diverging map, and `ax.clim(low, high)` for a fixed range. `ax.colorbar("Label")` shows it.
+`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`/`bubbles` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter` and `bubbles` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
 
 ```python
 values = np.arange(12.0).reshape(3, 4) - 5.0
@@ -71,7 +71,7 @@ svg = ax.figure.to_svg()
 
 ## Text sizes
 
-Every call that writes text takes `size=`: `ub.Size.AUTO` (the theme's size), `ub.Size.times(1.5)` (relative to the theme, following its font scale) or `ub.Size.pt(14)` (fixed points). Tick labels are sized per axis with `ax.xtick_labels(size=...)` and `ax.ytick_labels(size=...)`.
+Titles, subtitles, axis labels, legends, colorbar titles, `text`, `annotate`, bar value labels and pie labels take `size=`: `ub.Size.AUTO` (the theme's size), `ub.Size.times(1.5)` (relative to the theme, following its font scale) or `ub.Size.pt(14)` (fixed points). Tick labels are sized per axis with `ax.xtick_labels(size=...)` and `ax.ytick_labels(size=...)`. Heatmap and contour value labels use the theme's tick label size.
 
 ```python
 ax = ub.Figure(6, 4).add_axes().line([0, 1], [0.0, 1.0])
@@ -92,7 +92,7 @@ svg = ax.figure.title("Serif title").to_svg()
 
 ## Saving
 
-`fig.save_png(path, dpi=200)`, `fig.save_svg(path)` (text as outlines by default; `text=ub.SvgText.EDITABLE` keeps real text, and the viewer then needs the font), `fig.save_pdf(path)` (vector, with the fonts embedded as subsets so text is selectable). `to_png()`, `to_svg()` and `to_pdf()` return the bytes or text instead.
+`fig.save_png(path, dpi=200)`, `fig.save_svg(path)` (text as outlines by default; `text=ub.SvgText.EDITABLE` keeps real text, and the viewer then needs the font), `fig.save_pdf(path)` (vector; fonts are embedded as subsets so text stays selectable, and text whose font cannot be embedded is drawn as outlines). `to_png()`, `to_svg()` and `to_pdf()` return the bytes or text instead.
 
 ```python
 fig = ub.Figure(4, 3)
