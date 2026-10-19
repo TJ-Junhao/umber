@@ -14,7 +14,7 @@
 //! x tick labels were clipped before rendering failed for them: `fig-category-crowded-log`,
 //! `fig-squeezed-layout` and `fig-text-truncated`. The last two covered more than their tick
 //! labels, so each is also drawn without ticks, as `fig-squeezed-layout-no-x-ticks` (without x
-//! ticks) and `fig-text-truncated-no-ticks` (without x or y ticks): a 1 in figure at font scale
+//! ticks) and `fig-font-scale-max-mixed-glyphs-no-ticks` (without x or y ticks): a 1 in figure at font scale
 //! 3, and ASCII, two-byte characters and fallback-font glyphs at font scale 10. Their titles
 //! and axis labels are now short enough to fit. `errors/x-label-overflow.txt` records their original
 //! oversized texts and the original 6 in wide `fig-font-scale-max`, now drawn wider.
@@ -24,8 +24,8 @@
 //! labels that leave room for the plot but not for an end label on a plot at least 1 pt wide;
 //! figures too narrow for the plot whatever their labels; and `fig-text-truncated-no-x-ticks`,
 //! whose y tick labels at font scale 10 leave no room for the plot. Its shortened texts are
-//! drawn without ticks as `fig-text-truncated-no-ticks`. The figure whose end label just fits is also
-//! the scene `fig-x-end-label-min-width`.
+//! drawn without ticks as `fig-font-scale-max-mixed-glyphs-no-ticks`. The figure whose end label
+//! just fits is also the scene `fig-x-end-label-min-width`.
 
 use umber_core::figure::{AxisData, BarOptions, LineOptions, ScatterOptions};
 use umber_core::{Figure, FontLibrary, LegendStyle, ScaleKind, Theme, TickFormat};
@@ -86,7 +86,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .xlabel("\u{E000}")
         .ylabel("y\u{2212}");
     emit_scene(
-        "fig-text-truncated-no-ticks",
+        "fig-font-scale-max-mixed-glyphs-no-ticks",
         &f.to_scene(lib).unwrap(),
         sink,
     );
@@ -121,8 +121,8 @@ fn crowded_category() -> Figure {
 /// about 3 in.
 const SQUEEZED_NO_X_TICKS_HEIGHT: f64 = 3.5;
 
-/// The height, in inches, of `fig-text-truncated-no-ticks`: its header and axis labels take
-/// about 7.5 in.
+/// The height, in inches, of `fig-font-scale-max-mixed-glyphs-no-ticks`: its header and axis
+/// labels take about 7.5 in.
 const TRUNCATED_NO_TICKS_HEIGHT: f64 = 9.0;
 
 /// A 1 in wide figure `height` in tall at font scale 3 whose every text is far too wide.

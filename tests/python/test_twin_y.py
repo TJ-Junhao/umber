@@ -300,7 +300,10 @@ def test_overlapping_y_titles_raise(cols: int, theme: ub.Theme) -> None:
         fig.to_svg()
     assert "Left axis title with many units" in str(caught.value)
     assert "Right axis title with many units" in str(caught.value)
-    assert details(caught.value) == (None, "shorten a y axis title or widen the figure.")
+    assert details(caught.value) == (
+        None,
+        "make the figure wider or lower the font scale with Theme.with_font_scale().",
+    )
     if cols > 1:
         assert "row 0, col 0" in str(caught.value)
 

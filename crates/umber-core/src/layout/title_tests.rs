@@ -294,6 +294,14 @@ fn axis_figure(
     size: SizeSpec,
 ) -> Figure {
     let mut f = figure(kind, width, "", SizeSpec::Auto, Align::Left);
+    if right && !matches!(kind, Kind::TwinTitle) {
+        f.axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+            .unwrap()
+            .twin_y(ScaleKind::Linear)
+            .unwrap()
+            .yticks(&[])
+            .unwrap();
+    }
     let mut axes = if right {
         f.twin_axes_at_mut(GridIndex::At(0), GridIndex::At(0))
     } else {
@@ -324,10 +332,16 @@ fn axis_refuses(kind: Kind, right: bool) {
             } else {
                 ""
             };
+            let side = if axis == "y" && matches!(kind, Kind::TwinTitle) {
+                if right { "right " } else { "left " }
+            } else {
+                ""
+            };
             assert_eq!(
                 error.to_string(),
                 format!(
-                    "Figure.to_scene(): {prefix}the {axis} axis label is {} pt wide; the panel has {} pt.",
+                    "Figure.to_scene(): {prefix}the {side}{axis} axis label {} is {} pt wide; the panel has {} pt.",
+                    quoted(TEXT),
                     text_width(Kind::AxesSubtitle, TEXT, size).ceil(),
                     kind.room(432.0).floor(),
                 )
@@ -415,4 +429,239 @@ fn title_error_quotes_escaped_text() {
         .to_scene(FontLibrary::global())
         .unwrap_err();
     assert!(error.to_string().contains(&quoted(text)));
+}
+
+#[test]
+fn one_cell_twin_keeps_title_alignment_and_room_with_ticks() {
+    let text = "Station output across the whole figure";
+    let size = SizeSpec::pt(18.0).unwrap();
+    let width = text_width(Kind::AxesTitle, text, size) + 2.0 * PADDING;
+    for align in [Align::Left, Align::Center, Align::Right] {
+        for subtitle in [false, true] {
+            let build = |width, twin| {
+                let theme = Theme::pigment().with_title_align(align).unwrap();
+                let mut f = Figure::new(width / 72.0, 4.0, theme).unwrap();
+                let mut ax = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                ax.xticks(&[0.0, 1.0])
+                    .unwrap()
+                    .yticks_labeled(&[0.0, 1.0], vec!["Wide ticks".into(); 2])
+                    .unwrap();
+                if subtitle {
+                    ax.subtitle_sized(text, size);
+                } else {
+                    ax.title_sized(text, size);
+                }
+                if twin {
+                    ax.twin_y(ScaleKind::Linear)
+                        .unwrap()
+                        .yticks_labeled(&[0.0, 1.0], vec!["Right ticks".into(); 2])
+                        .unwrap();
+                }
+                f
+            };
+            let needed = text_width(
+                if subtitle {
+                    Kind::AxesSubtitle
+                } else {
+                    Kind::AxesTitle
+                },
+                text,
+                size,
+            );
+            let width = if subtitle {
+                needed + 2.0 * PADDING
+            } else {
+                width
+            };
+            let single =
+                crate::pipeline::try_plan_panels(&build(width, false), FontLibrary::global())
+                    .unwrap();
+            let twin = crate::pipeline::try_plan_panels(&build(width, true), FontLibrary::global())
+                .unwrap();
+            let label = |layout: &Layout| {
+                let label = if subtitle {
+                    &layout.subtitle
+                } else {
+                    &layout.title
+                };
+                let label = label.as_ref().unwrap();
+                (label.x, label.y, label.width())
+            };
+            assert_eq!(label(&single[0].1), label(&twin[0].1));
+            assert!(!twin[0].1.y_tick_labels.is_empty());
+            assert!(!twin[1].1.y_tick_labels.is_empty());
+            assert!(label(&twin[0].1).2 > twin[0].1.plot.width);
+            for has_twin in [false, true] {
+                let error = build(width - 0.25, has_twin)
+                    .to_scene(FontLibrary::global())
+                    .unwrap_err();
+                assert!(error.to_string().contains(if subtitle {
+                    "the subtitle"
+                } else {
+                    "the title"
+                }));
+                assert_eq!(error.hint(), Some(POINTS_HINT));
+            }
+        }
+    }
+}
+
+#[test]
+fn axis_title_limits_follow_placement_with_ticks() {
+    for (kind, right) in [
+        (Kind::AxesTitle, false),
+        (Kind::GridTitle, false),
+        (Kind::SpanningTitle, false),
+        (Kind::TwinTitle, false),
+        (Kind::TwinTitle, true),
+        (Kind::GridTitle, true),
+        (Kind::SpanningTitle, true),
+    ] {
+        for axis in ["x", "y"] {
+            let text = "Station output";
+            let size = SizeSpec::pt(18.0).unwrap();
+            let twin = right || matches!(kind, Kind::TwinTitle);
+            let build = |width| {
+                let mut f = axis_figure(kind, right, axis, width, text, size);
+                f.axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+                    .unwrap()
+                    .xlim(0.0, 1.0)
+                    .unwrap()
+                    .xticks(&[0.5])
+                    .unwrap()
+                    .yticks_labeled(&[0.0, 1.0], vec!["Wide ticks".into(); 2])
+                    .unwrap();
+                if twin {
+                    f.twin_axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+                        .unwrap()
+                        .yticks_labeled(&[0.0, 1.0], vec!["Right ticks".into(); 2])
+                        .unwrap();
+                }
+                f
+            };
+            let index = usize::from(right && axis == "y");
+            let layouts =
+                crate::pipeline::try_plan_panels(&build(864.0), FontLibrary::global()).unwrap();
+            let layout = &layouts[index].1;
+            let label = if axis == "x" {
+                layout.xlabel.as_ref()
+            } else {
+                layout.ylabel.as_ref()
+            }
+            .unwrap();
+            let room = if axis == "y" && !right {
+                layout.plot.right() - label.x
+            } else {
+                layout.plot.width
+            };
+            let scale = kind.cols() as f64 / kind.span() as f64;
+            let width = 864.0 - (room - label.width()) * scale;
+            for deficit in [0.0, inset::CONTAINMENT_TOLERANCE / 2.0] {
+                let f = build(width - deficit * scale);
+                f.to_scene(FontLibrary::global()).unwrap();
+                let layouts = crate::pipeline::try_plan_panels(&f, FontLibrary::global()).unwrap();
+                let at = &layouts[index].1;
+                let label = if axis == "x" { &at.xlabel } else { &at.ylabel }
+                    .as_ref()
+                    .unwrap();
+                assert!(!at.y_tick_labels.is_empty());
+                let left = if axis == "y" && !right {
+                    at.y_tick_labels
+                        .iter()
+                        .map(|tick| tick.x)
+                        .fold(f64::INFINITY, f64::min)
+                } else {
+                    at.plot.x
+                };
+                assert!(label.x >= left - inset::CONTAINMENT_TOLERANCE);
+                assert!(label.x + label.width() <= at.plot.right() + inset::CONTAINMENT_TOLERANCE);
+                if axis == "y" && !right {
+                    assert!(label.width() > at.plot.width);
+                }
+            }
+            let error = build(width - 0.25 * scale)
+                .to_scene(FontLibrary::global())
+                .unwrap_err();
+            let side = if axis == "y" && twin {
+                if right { "right " } else { "left " }
+            } else {
+                ""
+            };
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("the {side}{axis} axis label {}", quoted(text))),
+                "{error}"
+            );
+            assert_eq!(error.hint(), Some(POINTS_HINT));
+        }
+    }
+}
+
+#[test]
+fn figure_titles_are_checked_before_panel_errors() {
+    let mut f = figure(Kind::AxesTitle, 432.0, TEXT, SizeSpec::Auto, Align::Left);
+    f.title(TEXT).subtitle(TEXT);
+    let error = f.to_scene(FontLibrary::global()).unwrap_err();
+    assert!(error.to_string().contains("the title"));
+    assert!(error.to_string().contains("the figure has"));
+    f.title("");
+    let error = f.to_scene(FontLibrary::global()).unwrap_err();
+    assert!(error.to_string().contains("the subtitle"));
+    assert!(error.to_string().contains("the figure has"));
+}
+
+#[test]
+fn axis_title_error_quotes_escaped_text() {
+    let text = "\"quoted\" \\ axis";
+    let size = SizeSpec::pt(18.0).unwrap();
+    let width = text_width(Kind::AxesSubtitle, text, size) + 2.0 * PADDING - 1.0;
+    for axis in ["x", "y"] {
+        let error = axis_figure(Kind::AxesTitle, false, axis, width, text, size)
+            .to_scene(FontLibrary::global())
+            .unwrap_err();
+        assert!(error.to_string().contains(&quoted(text)));
+    }
+}
+
+#[test]
+fn reported_x_tick_width_keeps_room_for_axis_titles() {
+    for axis in ["x", "y"] {
+        let build = |tick: &str| {
+            let mut f = Figure::new(2.0, 4.0, Theme::midnight()).unwrap();
+            let mut ax = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+            ax.xlim(0.0, 1.0)
+                .unwrap()
+                .xticks_labeled(&[1.0], vec![tick.into()])
+                .unwrap()
+                .yticks_labeled(&[0.0, 1.0], vec!["W".repeat(19); 2])
+                .unwrap();
+            if axis == "x" {
+                ax.xlabel("WWW");
+            } else {
+                ax.ylabel(&"W".repeat(23));
+            }
+            f
+        };
+        let sample = crate::pipeline::try_plan_panels(&build("W"), FontLibrary::global()).unwrap();
+        let char_width = sample[0].1.x_tick_labels[0].width();
+        let error = build(&"W".repeat(20))
+            .to_scene(FontLibrary::global())
+            .unwrap_err();
+        let message = error.to_string();
+        let fits: f64 = message
+            .split_once("at most ")
+            .unwrap()
+            .1
+            .split_once(" pt fits")
+            .unwrap()
+            .0
+            .parse()
+            .unwrap();
+        let count = (fits / char_width).floor() as usize;
+        assert!(count > 0, "{message}");
+        build(&"W".repeat(count))
+            .to_scene(FontLibrary::global())
+            .unwrap();
+    }
 }

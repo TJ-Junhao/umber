@@ -267,7 +267,7 @@ impl Header {
 }
 
 /// The size remedy for text that follows the font scale or uses fixed points.
-fn text_size_hint(size: crate::SizeSpec) -> &'static str {
+pub(super) fn text_size_hint(size: crate::SizeSpec) -> &'static str {
     match size {
         crate::SizeSpec::Auto | crate::SizeSpec::Times(_) => {
             "make the figure wider or lower the font scale with Theme.with_font_scale()."
@@ -276,13 +276,53 @@ fn text_size_hint(size: crate::SizeSpec) -> &'static str {
     }
 }
 
-/// Checks a header line against the width of the box used to align it.
-pub(super) fn check_title_width(
+/// The text named by a horizontal containment error.
+#[derive(Clone, Copy)]
+pub(super) enum TextKind {
+    Title,
+    Subtitle,
+    XLabel,
+    YLabel,
+    LeftYLabel,
+    RightYLabel,
+}
+
+impl TextKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Title => "title",
+            Self::Subtitle => "subtitle",
+            Self::XLabel => "x axis label",
+            Self::YLabel => "y axis label",
+            Self::LeftYLabel => "left y axis label",
+            Self::RightYLabel => "right y axis label",
+        }
+    }
+}
+
+/// The owner of the horizontal room available to a text.
+#[derive(Clone, Copy)]
+pub(super) enum TextContainer {
+    Figure,
+    Panel,
+}
+
+impl TextContainer {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Figure => "figure",
+            Self::Panel => "panel",
+        }
+    }
+}
+
+/// Checks a text against the horizontal extent in which it is placed.
+pub(super) fn check_text_width(
     label: Option<&Label>,
     size: crate::SizeSpec,
     room: f64,
-    name: &str,
-    container: &str,
+    kind: TextKind,
+    container: TextContainer,
     context: &'static str,
 ) -> Result<()> {
     if let Some(label) = label
@@ -290,6 +330,8 @@ pub(super) fn check_title_width(
     {
         let (width, room) = super::widths(label.width(), room);
         let hint = text_size_hint(size);
+        let name = kind.name();
+        let container = container.name();
         return Err(crate::Error::style(
             context,
             format!(
@@ -302,26 +344,31 @@ pub(super) fn check_title_width(
     Ok(())
 }
 
-/// Both axis titles are horizontal and must fit the plot width, on single panels and grids.
+/// The x label is centered on the plot; the right y label ends at its right edge.
+/// The left y label starts at the left edge of its tick column and may reach the plot's right.
 pub(super) fn check_axis_titles(
     layout: &Layout,
     axes: &crate::Axes,
+    y_kind: TextKind,
     context: &'static str,
 ) -> Result<()> {
-    for (label, size, axis) in [
-        (layout.xlabel.as_ref(), axes.xlabel_size(), "x"),
-        (layout.ylabel.as_ref(), axes.ylabel_size(), "y"),
+    let y_room = match y_kind {
+        TextKind::RightYLabel => layout.plot.width,
+        _ => layout
+            .ylabel
+            .as_ref()
+            .map_or(layout.plot.width, |label| layout.plot.right() - label.x),
+    };
+    for (label, size, room, kind) in [
+        (
+            layout.xlabel.as_ref(),
+            axes.xlabel_size(),
+            layout.plot.width,
+            TextKind::XLabel,
+        ),
+        (layout.ylabel.as_ref(), axes.ylabel_size(), y_room, y_kind),
     ] {
-        if let Some(label) = label
-            && label.width() > layout.plot.width + super::inset::CONTAINMENT_TOLERANCE
-        {
-            let (width, room) = super::widths(label.width(), layout.plot.width);
-            return Err(crate::Error::style(
-                context,
-                format!("the {axis} axis label is {width} pt wide; the panel has {room} pt."),
-            )
-            .with_hint(text_size_hint(size)));
-        }
+        check_text_width(label, size, room, kind, TextContainer::Panel, context)?;
     }
     Ok(())
 }
@@ -390,10 +437,14 @@ impl FigureHeader {
     pub fn check(&self, figure: &Figure, context: &'static str) -> Result<()> {
         let room = figure.width_in() * 72.0 - 2.0 * PADDING;
         for (label, size, name) in [
-            (self.title.as_ref(), figure.title_size(), "title"),
-            (self.subtitle.as_ref(), figure.subtitle_size(), "subtitle"),
+            (self.title.as_ref(), figure.title_size(), TextKind::Title),
+            (
+                self.subtitle.as_ref(),
+                figure.subtitle_size(),
+                TextKind::Subtitle,
+            ),
         ] {
-            check_title_width(label, size, room, name, "figure", context)?;
+            check_text_width(label, size, room, name, TextContainer::Figure, context)?;
         }
         self.legend.check_width(room, context)?;
         if figure.panels().next().is_none()
@@ -484,6 +535,14 @@ pub(crate) struct PanelBands {
 }
 
 impl PanelBands {
+    /// The plot width needed by the axis labels of a single panel. The left y label can
+    /// also use its tick column; the centered x label cannot.
+    pub(super) fn min_plot_width(&self, y_column: f64) -> f64 {
+        super::MIN_PLOT
+            .max(self.xlabel.as_ref().map_or(0.0, Label::width))
+            .max(self.ylabel.as_ref().map_or(0.0, Label::width) - y_column)
+    }
+
     /// The text block that takes the most vertical room, independent of which size was set.
     pub(super) fn largest_vertical_text(&self) -> (&'static str, &str, f64) {
         let title = self.heading.title.as_ref();

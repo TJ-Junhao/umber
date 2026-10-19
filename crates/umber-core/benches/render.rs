@@ -203,8 +203,8 @@ fn text_figure() -> Figure {
     let mut axes = figure
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap();
-    axes.title("Quarterly station output across the northern and southern grids")
-        .subtitle("Measured every fifteen minutes between January and December, after calibration")
+    axes.title("Quarterly output across the northern and southern grids")
+        .subtitle("Measured every fifteen minutes from January to December")
         .xlabel("Elapsed time since the first measurement (days)")
         .ylabel("Output per station (megawatt hours)")
         .legend(LegendStyle::Header, umber_core::SizeSpec::Auto)

@@ -266,8 +266,14 @@ def test_axis_titles_fit_their_own_room(render: str, kind: str, axis: str, size:
         call()
     prefix = "row 0, col 0: " if cols > 1 else ""
     room = 264 if kind == "span" else 192 if kind == "grid" else 408
+    side = (
+        ("right " if kind == "twin-right" else "left ")
+        if axis == "y" and kind.startswith("twin")
+        else ""
+    )
+    shown = '"' + "W" * 38 + "…"
     match = re.fullmatch(
-        re.escape(f"Figure.{render}(): {prefix}the {axis} axis label is ")
+        re.escape(f"Figure.{render}(): {prefix}the {side}{axis} axis label {shown} is ")
         + r"(\d+)"
         + re.escape(f" pt wide; the panel has {room} pt."),
         str(caught.value),
@@ -292,5 +298,32 @@ def test_long_axis_title_reproduction_raises_at_render(render: str, axis: str) -
     setter = ax.xlabel if axis == "x" else ax.ylabel
     setter("W" * 100)
     call = cast(Callable[[], bytes | str], getattr(fig, render))
-    with pytest.raises(ub.StyleError, match=f"the {axis} axis label is"):
+    with pytest.raises(ub.StyleError, match=f'the {axis} axis label "W'):
         call()
+
+
+@pytest.mark.parametrize("align", [ub.Align.LEFT, ub.Align.CENTER, ub.Align.RIGHT])
+@pytest.mark.parametrize("subtitle", [False, True])
+def test_twin_keeps_single_panel_title_room_with_ticks(align: ub.Align, subtitle: bool) -> None:
+    fig = ub.Figure(6, 4, theme=ub.Theme.PIGMENT.with_title_align(align))
+    ax = fig.add_axes().xticks([0, 1]).yticks_labeled([0, 1], ["Wide ticks"] * 2)
+    text = "W" * 38
+    setter = ax.subtitle if subtitle else ax.title
+    setter(text, size=ub.Size.pt(10))
+    before = _texts(fig)[text]
+    ax.twin_y().yticks_labeled([0, 1], ["Right ticks"] * 2)
+    after = _texts(fig)[text]
+    assert (before.attrib["x"], before.attrib["y"]) == (after.attrib["x"], after.attrib["y"])
+    setter("W" * 50, size=ub.Size.pt(10))
+    with pytest.raises(ub.StyleError, match="the panel has 408 pt"):
+        fig.to_svg()
+
+
+@pytest.mark.parametrize("kind", ["title", "subtitle"])
+def test_figure_text_errors_precede_panel_errors(kind: str) -> None:
+    fig = ub.Figure()
+    fig.add_axes().title("W" * 100)
+    setter = fig.title if kind == "title" else fig.subtitle
+    setter("W" * 100)
+    with pytest.raises(ub.StyleError, match=f"the {kind} .*the figure has 408 pt"):
+        fig.to_svg()

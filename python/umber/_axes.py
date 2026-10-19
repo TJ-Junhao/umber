@@ -222,7 +222,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long. Rendering raises it if the text is wider
-                than this panel's title room.
+                than the panel's plot width (for a one-cell figure, than the figure inside
+                its padding, with or without a twin y axis).
 
         Example:
             >>> import umber as ub
@@ -251,7 +252,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long. Rendering raises it if the text is wider
-                than this panel's title room.
+                than the panel's plot width (for a one-cell figure, than the figure inside
+                its padding, with or without a twin y axis).
 
         Example:
             >>> import umber as ub
@@ -296,7 +298,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self
 
     def ylabel(self, text: str, *, size: Size = Size.AUTO) -> Self:
-        """Set the y axis label, shown left of the y tick labels.
+        """Set the y axis label, shown horizontally above the plot.
 
         Args:
             text: The label, at most 1,000 characters. An empty string removes it.
@@ -309,7 +311,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long. Rendering raises it if the label is wider
-                than the plot.
+                than the plot and its left y tick column, or the plot alone for a right twin
+                label.
 
         Example:
             >>> import umber as ub

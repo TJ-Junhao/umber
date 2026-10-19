@@ -589,6 +589,7 @@ fn plan(
 ) -> Result<FigurePlan> {
     let theme = figure.theme();
     let header = figure_header(figure, panels, lib)?;
+    header.check(figure, context)?;
     let tick = layout::TickFont::new(lib, theme)?;
     let axis_ticks: Vec<_> = panels
         .iter()
@@ -1310,7 +1311,6 @@ fn plan(
     }
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = planned.into_iter().unzip();
     layout::check_panel_contents(&grid, &layouts, &solution.panels)?;
-    header.check(figure, context)?;
     Ok(FigurePlan {
         header,
         panels: resolved.into_iter().zip(layouts).collect(),

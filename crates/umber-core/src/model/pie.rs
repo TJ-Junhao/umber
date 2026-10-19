@@ -187,7 +187,8 @@ impl<'a> PieAxesMut<'a> {
 
     /// Sets the panel title at the theme's title size.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's header box.
+    /// Rendering returns `Error::Style` if the text is wider than its panel, or the figure
+    /// inside its padding for a one-cell figure.
     ///
     /// # Examples
     ///
@@ -203,7 +204,8 @@ impl<'a> PieAxesMut<'a> {
 
     /// Sets the title and its per-call size.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's header box.
+    /// Rendering returns `Error::Style` if the text is wider than its panel, or the figure
+    /// inside its padding for a one-cell figure.
     ///
     /// # Examples
     ///

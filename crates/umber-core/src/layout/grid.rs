@@ -30,8 +30,9 @@
 //! 4. Headers. A panel's header starts at its row's top; its title, subtitle and legend row
 //!    start at the plot's left edge, and the legend row wraps within the plot's width. The x
 //!    axis labels of a row sit at the bottom of its band below the plots, so they line up.
-//! 5. Containment. Once the final layout is placed, every panel's title, subtitle, legend row
-//!    entries and axis labels must fit its plot width, and its direct labels its frame (see
+//! 5. Containment. Once the final layout is placed, titles, subtitles and legends must fit
+//!    their header extent. Axis labels must fit their placement extent: the plot width, plus
+//!    the tick column for the left y label. Direct labels must fit the panel's frame (see
 //!    [`check_panel_contents`]).
 //!
 //! Each panel's frame, the part of the canvas that belongs to it, is its plot with its
@@ -40,7 +41,9 @@
 //! marks clip of a panel never reaches into the next cell.
 
 use super::inset::{CONTAINMENT_TOLERANCE, TickSpan};
-use super::panel::{HeaderBox, PanelBands, PanelSlot, PanelSpan, end_label_cap};
+use super::panel::{
+    HeaderBox, PanelBands, PanelSlot, PanelSpan, TextContainer, TextKind, end_label_cap,
+};
 use super::program;
 use super::{
     AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, LEGEND_HINT, Label, Layout, LayoutInput,
@@ -102,6 +105,24 @@ impl GridInput<'_> {
     /// Whether the grid is a single cell, laid out as one panel on the canvas.
     fn is_single(&self) -> bool {
         self.grid.rows() * self.grid.cols() == 1
+    }
+
+    /// The title and legend extent: the inner canvas for one cell, otherwise the plot span.
+    fn header_span(&self, left: f64, right: f64) -> (f64, f64) {
+        if self.is_single() {
+            (PADDING, self.width - PADDING)
+        } else {
+            (left, right)
+        }
+    }
+
+    /// Adds a cell location only when the figure has more than one cell.
+    fn panel_error(&self, cells: CellRange, error: Error) -> Error {
+        if self.is_single() {
+            error
+        } else {
+            in_panel(cells, error)
+        }
     }
 
     /// The gap between neighbouring cells.
@@ -289,6 +310,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             let last_row = cells.row() + cells.row_span() - 1;
             let (frame_left, frame_right) = placed.frame(*cells, columns.canvas);
             let (frame_top, frame_bottom) = rows.frame(*cells, input.height);
+            let (header_left, header_right) = input.header_span(left, right);
             PanelSlot {
                 plot: Area {
                     x: left,
@@ -297,8 +319,8 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                     height: bottom - top,
                 },
                 header: HeaderBox {
-                    left,
-                    right,
+                    left: header_left,
+                    right: header_right,
                     top: rows.row_top[cells.row()],
                 },
                 xlabel_baseline: bottom + (rows.below[last_row] - rows.legends[last_row])
@@ -889,6 +911,7 @@ impl Rows {
         {
             let first = cells.row();
             let last = first + cells.row_span() - 1;
+            let (left, right) = input.header_span(left, right);
             let row = panel.legend.header_within(left, right);
             above[first] = above[first].max(band.above_with_row(&row));
             below[last] = below[last]
@@ -1009,10 +1032,11 @@ fn rows_too_short(
         let first = cell.row();
         let last = first + cell.row_span() - 1;
         let legend = input.panels[i].legend;
-        let row = legend.header_within(spans[i].0, spans[i].1);
+        let (left, right) = input.header_span(spans[i].0, spans[i].1);
+        let row = legend.header_within(left, right);
         let above = band.above_with_row(&row);
         let below = band.axis_below();
-        let bottom = legend.bottom_reserve(spans[i].0, spans[i].1) + band.bottom_colorbar;
+        let bottom = legend.bottom_reserve(left, right) + band.bottom_colorbar;
         // Only the panels defining an aligned band can be its cause. Equal colorbars share
         // that band, so removing just one of those panels would not shrink it.
         let excess = |value: f64, aligned: f64, plain: f64| {
@@ -1439,7 +1463,7 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 
 /// Checks the final texts of every panel of `input`, placed as in `layouts` and `slots`
 /// (in the same order). Titles and subtitles must fit their header box on every figure;
-/// axis labels must be at most as wide as the plot. Twin y axis titles, colorbars and legends
+/// axis labels must fit their placement extent. Twin y axis labels, colorbars and legends
 /// must also fit their room. On a grid of more than one cell, direct labels must end within
 /// the panel's frame, so that text cannot run into a neighbouring cell.
 ///
@@ -1450,7 +1474,7 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 /// - `the title "…" is {w} pt wide; the panel has {p} pt.` (likewise `the subtitle`),
 ///   with the hint to widen the figure or reduce the font scale (fixed-point sizes instead
 ///   suggest a smaller `size=`); on a grid, prefixed with `row {r}, col {c}: `;
-/// - `the x axis label is {w} pt wide; the panel has {p} pt.` (likewise `the y axis label`),
+/// - `the x axis label "…" is {w} pt wide; the panel has {p} pt.` (likewise `the y axis label`),
 ///   with the same size-dependent hint as titles; on a grid, prefixed
 ///   with `row {r}, col {c}: `;
 /// - `row {r}, col {c}: the legend label "…" is {w} pt wide; the panel has {p} pt.`, with `p`
@@ -1466,55 +1490,57 @@ pub(crate) fn check_panel_contents(
 ) -> Result<()> {
     for ((panel, layout), slot) in input.panels.iter().zip(layouts).zip(slots) {
         for (label, size, name) in [
-            (layout.title.as_ref(), panel.axes.title_size(), "title"),
+            (
+                layout.title.as_ref(),
+                panel.axes.title_size(),
+                TextKind::Title,
+            ),
             (
                 layout.subtitle.as_ref(),
                 panel.axes.subtitle_size(),
-                "subtitle",
+                TextKind::Subtitle,
             ),
         ] {
-            super::panel::check_title_width(
+            super::panel::check_text_width(
                 label,
                 size,
                 slot.header.right - slot.header.left,
                 name,
-                "panel",
+                TextContainer::Panel,
                 input.context,
             )
-            .map_err(|error| {
-                if input.is_single() {
-                    error
-                } else {
-                    in_panel(panel.axes.cells(), error)
-                }
-            })?;
+            .map_err(|error| input.panel_error(panel.axes.cells(), error))?;
         }
     }
     for (panel, layout) in input.panels.iter().zip(layouts) {
         match panel.axes {
             crate::model::Layer::Primary(_) => {}
-            crate::model::Layer::Twin { parent, .. } => {
-                super::twin::check_titles(&layouts[parent], layout, input.context).map_err(
-                    |error| {
-                        if input.is_single() {
-                            error
-                        } else {
-                            in_panel(panel.axes.cells(), error)
-                        }
-                    },
-                )?;
+            crate::model::Layer::Twin { parent, axes, .. } => {
+                let left_size = input.panels[parent]
+                    .axes
+                    .cartesian()
+                    .map_or(crate::SizeSpec::Auto, crate::Axes::ylabel_size);
+                super::twin::check_titles(
+                    &layouts[parent],
+                    layout,
+                    [left_size, axes.ylabel_size()],
+                    input.context,
+                )
+                .map_err(|error| input.panel_error(panel.axes.cells(), error))?;
             }
         }
     }
-    for (panel, layout) in input.panels.iter().zip(layouts) {
+    for (i, (panel, layout)) in input.panels.iter().zip(layouts).enumerate() {
         if let Some(axes) = panel.axes.cartesian() {
-            super::panel::check_axis_titles(layout, axes, input.context).map_err(|error| {
-                if input.is_single() {
-                    error
-                } else {
-                    in_panel(panel.axes.cells(), error)
-                }
-            })?;
+            let y_kind = match panel.axes {
+                crate::model::Layer::Twin { .. } => TextKind::RightYLabel,
+                crate::model::Layer::Primary(_) if input.panels.iter().any(|other| {
+                    matches!(other.axes, crate::model::Layer::Twin { parent, .. } if parent == i)
+                }) => TextKind::LeftYLabel,
+                crate::model::Layer::Primary(_) => TextKind::YLabel,
+            };
+            super::panel::check_axis_titles(layout, axes, y_kind, input.context)
+                .map_err(|error| input.panel_error(panel.axes.cells(), error))?;
         }
     }
     for (panel, layout) in input.panels.iter().zip(layouts) {
@@ -1526,13 +1552,7 @@ pub(crate) fn check_panel_contents(
             ];
             colorbar
                 .check(input.context, layout.frame, outer_edges, panel.lib)
-                .map_err(|error| {
-                    if input.is_single() {
-                        error
-                    } else {
-                        in_panel(panel.axes.cells(), error)
-                    }
-                })?;
+                .map_err(|error| input.panel_error(panel.axes.cells(), error))?;
         }
     }
     if input.is_single() {
@@ -2108,12 +2128,12 @@ mod tests {
             ),
             (
                 2,
-                "the x axis label",
+                "the x axis label \"Station output\"",
                 "make the figure wider or lower the font scale with Theme.with_font_scale().",
             ),
             (
                 3,
-                "the y axis label",
+                "the y axis label \"Station output\"",
                 "make the figure wider or lower the font scale with Theme.with_font_scale().",
             ),
         ] {

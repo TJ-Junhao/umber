@@ -4,8 +4,8 @@
 //!
 //! Every derived value is finite: font sizes are clamped, text wider than
 //! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least [`MIN_PLOT`]
-//! by [`MIN_PLOT`] and lies on the canvas. Text that does not fit, such as a title wider than
-//! the figure, is clipped by the canvas.
+//! by [`MIN_PLOT`] and lies on the canvas. Titles, subtitles and axis labels that do not fit
+//! their horizontal extent fail layout with `Error::Style` rather than being clipped.
 //! A figure whose y tick labels and padding leave the plot less than [`MIN_PLOT`] wide fails the
 //! layout with `Error::Style`. Every x tick label keeps [`X_LABEL_EDGE_GAP`] from the canvas
 //! edges; x tick labels that would need a larger plot inset than [`END_LABEL_SHARE`] allows, or
@@ -1031,10 +1031,12 @@ fn figure_height_hint(
 /// - the room between the y tick labels and the right padding (less what direct labels
 ///   reserve) is narrower than [`MIN_PLOT`], with or without x tick labels: the message names
 ///   the widest y tick label when narrower ones would leave room, and otherwise the width the
-///   canvas needs (see [`no_room_for_plot`]);
+///   canvas needs (see [`no_room_for_plot`]). Both suggestions also leave room for axis labels;
 /// - the x tick labels cannot all keep within their bounds on a plot at least [`MIN_PLOT`]
 ///   wide, with each side of the plot inset by at most [`END_LABEL_SHARE`] of the inner width:
-///   the message names the widest x tick label, its width and the width up to which labels fit;
+///   the message names the widest x tick label, its width and the width up to which labels fit.
+///   Insets preserve room for axis labels that fit before the insets; an axis label wider than
+///   that span is reported separately by its containment check;
 /// - the room between the header (title, subtitle and legend row), the y label and the y tick
 ///   label rising above the top tick, and the bottom bands is shorter than [`MIN_PLOT`]. The
 ///   bottom bands include the x tick labels, the x label and the bottom padding; with a Bottom
@@ -1061,7 +1063,8 @@ fn solve_single(
         frame.x + PADDING + bands.y_label_width + Y_LABEL_GAP
     };
     let right = frame.right() - PADDING - bands.right();
-    let room = inset::Room {
+    let min_width = bands.min_plot_width(bands.y_tick_column);
+    let mut room = inset::Room {
         left,
         right,
         left_max: left.max(frame.x + PADDING + cap),
@@ -1073,12 +1076,13 @@ fn solve_single(
     // Every layout first needs a plot at least `MIN_PLOT` wide between the y tick labels and
     // the right padding, x tick labels or not; only then are the x tick labels fitted.
     if matches!(inset::fit_x_labels(&room, &[]), inset::XInset::Overflowing) {
+        room.min_width = min_width;
         let direct = legend.direct.reserve(f64::INFINITY);
-        if bands.right_colorbar > 0.0 && right - left + bands.right_colorbar >= MIN_PLOT {
+        if bands.right_colorbar > 0.0 && right - left + bands.right_colorbar >= min_width {
             let available = frame.right()
                 - PADDING
                 - left
-                - MIN_PLOT
+                - min_width
                 - bands.direct_reserve
                 - bands.right_legend;
             return Err(colorbar::room_error(
@@ -1090,10 +1094,10 @@ fn solve_single(
         }
         if bands.right_legend > 0.0 || bands.right_colorbar > 0.0 {
             if bands.right_legend > 0.0 {
-                let available = right - left - MIN_PLOT + bands.right_legend;
+                let available = right - left - min_width + bands.right_legend;
                 placement::check_right_width(context, &legend.column(0.0), available)?;
             }
-            let y_room = right - MIN_PLOT - (frame.x + PADDING) - Y_LABEL_GAP;
+            let y_room = right - bands.min_plot_width(0.0) - (frame.x + PADDING) - Y_LABEL_GAP;
             if let Some(label) = widest(&bands.y_labels)
                 && y_room >= 0.0
             {
@@ -1103,7 +1107,7 @@ fn solve_single(
                 context,
                 Direction::Width,
                 frame.width,
-                2.0 * PADDING + bands.y_tick_column + bands.right() + MIN_PLOT,
+                2.0 * PADDING + bands.y_tick_column + bands.right() + min_width,
                 FIGURE_WIDTH_HINT,
             ));
         }
@@ -1113,7 +1117,13 @@ fn solve_single(
             &bands.y_labels,
             &room,
             direct,
+            bands.min_plot_width(0.0),
         ));
+    }
+    // Do not let tick insets consume room needed by axis labels. If a label already exceeds
+    // the open span, leave its own containment check to report that text and its actual room.
+    if min_width <= right - left + inset::CONTAINMENT_TOLERANCE {
+        room.min_width = min_width.min(right - left);
     }
     let (plot_left, plot_right) = match inset::fit_x_labels(&room, &bands.x_spans) {
         inset::XInset::Contained { left, right } => (left, right),
@@ -1263,35 +1273,43 @@ fn widest(labels: &[(NormalizedPos, Label)]) -> Option<&Label> {
 /// The error for a `room` that leaves the plot less than [`MIN_PLOT`] in `frame`, the canvas
 /// for a figure of one axes, whose direct labels would reserve `direct` pt without the cap.
 ///
-/// If y tick labels no wider than some width would leave the plot [`MIN_PLOT`], they are the
-/// cause: the error names the widest y tick label (see [`y_labels_leave_no_room`]). Otherwise
-/// the canvas is too narrow even for y tick labels of no width, or without y tick labels, and
-/// the error names the width the frame needs (see [`figure_too_narrow`]).
+/// If shorter y tick labels would leave room for the plot and axis labels, they are the cause:
+/// the error names the widest y tick label (see [`y_labels_leave_no_room`]). `label_width` is
+/// the plot width needed when the y tick column has no width. Otherwise the error names the
+/// canvas width needed with the current tick column and `room.min_width` (see
+/// [`figure_too_narrow`]).
 fn no_room_for_plot(
     context: &'static str,
     frame: Frame,
     y_labels: &[(NormalizedPos, Label)],
     room: &inset::Room,
     direct: f64,
+    label_width: f64,
 ) -> Error {
     let inner_left = frame.x + PADDING;
-    // The widest y tick label column that leaves the plot `MIN_PLOT` wide.
-    let y_room = room.right - MIN_PLOT - inner_left - Y_LABEL_GAP;
+    // Shortening the y ticks must still leave room for the axis labels.
+    let y_room = room.right - label_width - inner_left - Y_LABEL_GAP;
     match widest(y_labels) {
         Some(label) if y_room >= 0.0 => y_labels_leave_no_room(context, label, y_room),
-        _ => figure_too_narrow(context, frame.width, room.left - inner_left, direct),
+        _ => figure_too_narrow(
+            context,
+            frame.width,
+            room.left - inner_left,
+            direct,
+            room.min_width,
+        ),
     }
 }
 
-/// The narrowest canvas, in points, that leaves the plot [`MIN_PLOT`] wide next to a y tick
+/// The narrowest canvas, in points, that leaves the plot `min_width` wide next to a y tick
 /// label column `column` pt wide (its gap included) and direct labels that would reserve
-/// `direct` pt without the cap.
+/// `direct` pt without the cap. `min_width` includes the room needed by axis labels.
 ///
 /// The plot gets the inner width `I` (the canvas inside the outer padding) less the column and
 /// the reserve, which is capped at [`END_LABEL_SHARE`] of `I`. That is increasing in `I`, so the
-/// narrowest canvas solves `I - column - min(direct, END_LABEL_SHARE × I) = MIN_PLOT`.
-fn min_canvas_width(column: f64, direct: f64) -> f64 {
-    let need = MIN_PLOT + column;
+/// narrowest canvas solves `I - column - min(direct, END_LABEL_SHARE × I) = min_width`.
+fn min_canvas_width(column: f64, direct: f64, min_width: f64) -> f64 {
+    let need = min_width + column;
     // With the reserve capped: (1 - share) I = need, valid when the cap is at most `direct`.
     let capped = need / (1.0 - END_LABEL_SHARE);
     let inner = if END_LABEL_SHARE * capped <= direct {
@@ -1305,12 +1323,18 @@ fn min_canvas_width(column: f64, direct: f64) -> f64 {
 /// The error for a canvas `width` pt wide that leaves no room for the plot area next to a y
 /// tick label column `column` pt wide (0 without y tick labels) and direct labels that would
 /// reserve `direct` pt (see [`figure_too_small`]).
-fn figure_too_narrow(context: &'static str, width: f64, column: f64, direct: f64) -> Error {
+fn figure_too_narrow(
+    context: &'static str,
+    width: f64,
+    column: f64,
+    direct: f64,
+    min_width: f64,
+) -> Error {
     figure_too_small(
         context,
         Direction::Width,
         width,
-        min_canvas_width(column, direct),
+        min_canvas_width(column, direct, min_width),
         FIGURE_WIDTH_HINT,
     )
 }
@@ -2405,14 +2429,17 @@ mod tests {
     fn the_narrowest_canvas_counts_the_capped_direct_label_reserve() {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
         // Without a reserve: the padding, the column and the plot.
-        assert!(close(min_canvas_width(0.0, 0.0), 25.0));
-        assert!(close(min_canvas_width(11.1, 0.0), 36.1));
+        assert!(close(min_canvas_width(0.0, 0.0, MIN_PLOT), 25.0));
+        assert!(close(min_canvas_width(11.1, 0.0, MIN_PLOT), 36.1));
         // A small reserve is taken whole: 1 + 0.1 inside the padding.
-        assert!(close(min_canvas_width(0.0, 0.1), 25.1));
+        assert!(close(min_canvas_width(0.0, 0.1, MIN_PLOT), 25.1));
         // A large one is capped at a quarter of the inner width: 0.75 I = 1.
-        assert!(close(min_canvas_width(0.0, 100.0), 24.0 + 4.0 / 3.0));
+        assert!(close(
+            min_canvas_width(0.0, 100.0, MIN_PLOT),
+            24.0 + 4.0 / 3.0
+        ));
         // At the boundary both readings agree.
-        assert!(close(min_canvas_width(2.0, 1.0), 28.0));
+        assert!(close(min_canvas_width(2.0, 1.0, MIN_PLOT), 28.0));
     }
 
     #[test]

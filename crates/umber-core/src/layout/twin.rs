@@ -109,16 +109,25 @@ pub(crate) fn align(inputs: &[LayoutInput<'_>], bands: &mut [PanelBands]) {
 }
 
 /// Both y titles must fit on their shared band, including a gap between them.
-pub(super) fn check_titles(left: &Layout, right: &Layout, context: &'static str) -> Result<()> {
+pub(super) fn check_titles(
+    left: &Layout,
+    right: &Layout,
+    sizes: [crate::SizeSpec; 2],
+    context: &'static str,
+) -> Result<()> {
     if let (Some(left), Some(right)) = (&left.ylabel, &right.ylabel) {
         let width = left.width() + super::AXIS_LABEL_GAP + right.width();
         let room = right.x + right.width() - left.x;
         if width > room + super::inset::CONTAINMENT_TOLERANCE {
             let (width, room) = super::widths(width, room);
+            let size = sizes
+                .into_iter()
+                .find(|size| matches!(size, crate::SizeSpec::Points(_)))
+                .unwrap_or(crate::SizeSpec::Auto);
             return Err(Error::style(context, format!(
-                "the y axis titles {} and {} are {width} pt wide with a gap; the panel has {room} pt.",
+                "the left y axis label {} and right y axis label {} are {width} pt wide with a gap; the panel has {room} pt.",
                 quoted(&left.text), quoted(&right.text),
-            )).with_hint("shorten a y axis title or widen the figure."));
+            )).with_hint(super::panel::text_size_hint(size)));
         }
     }
     Ok(())

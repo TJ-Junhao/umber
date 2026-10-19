@@ -231,11 +231,7 @@ fn panel_text_difference_suffices(name: &str) {
     } else {
         "WWWWWWWWWWWW"
     };
-    let cause = if matches!(name, "title" | "subtitle") {
-        format!("the {name} \"{text}\" is")
-    } else {
-        format!("the {name} is")
-    };
+    let cause = format!("the {name} \"{text}\" is");
     stated_room_suffices(
         |width| {
             let mut f = figure(width, 288.0, 1, 2);

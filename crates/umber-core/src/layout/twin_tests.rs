@@ -74,21 +74,39 @@ fn twin_title_gap_and_room_error_rounding() {
     let width = left_title.width() + super::super::AXIS_LABEL_GAP + right_title.width();
     let room = right_title.x + right_title.width() - left_title.x;
     let (width, room) = super::super::widths(width, room);
-    let err = super::check_titles(left, &right, "Figure.to_scene()").unwrap_err();
+    let err = super::check_titles(
+        left,
+        &right,
+        [SizeSpec::Auto, SizeSpec::pt(18.).unwrap()],
+        "Figure.to_scene()",
+    )
+    .unwrap_err();
     assert_eq!(
         err.to_string(),
         format!(
-            "Figure.to_scene(): the y axis titles \"Left units\" and \"Right units\" are {width} pt wide with a gap; the panel has {room} pt."
+            "Figure.to_scene(): the left y axis label \"Left units\" and right y axis label \"Right units\" are {width} pt wide with a gap; the panel has {room} pt."
         )
     );
     assert_eq!(
         err.hint(),
-        Some("shorten a y axis title or widen the figure.")
+        Some("make the figure wider or pass a smaller size=.")
     );
     right.ylabel.as_mut().unwrap().x += 0.5;
-    super::check_titles(left, &right, "Figure.to_scene()").unwrap();
+    super::check_titles(
+        left,
+        &right,
+        [SizeSpec::Auto, SizeSpec::pt(18.).unwrap()],
+        "Figure.to_scene()",
+    )
+    .unwrap();
     right.ylabel = None;
-    super::check_titles(left, &right, "Figure.to_scene()").unwrap();
+    super::check_titles(
+        left,
+        &right,
+        [SizeSpec::Auto, SizeSpec::pt(18.).unwrap()],
+        "Figure.to_scene()",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -343,4 +361,30 @@ fn category_direct_label_clears_right_tick_column() {
     );
     assert!(label.x + label.width() <= layout.frame.right());
     assert!(layout.direct[0].dot.unwrap().x < layout.plot.right());
+}
+
+#[test]
+fn overlapping_y_labels_choose_hint_from_both_sizes() {
+    let f = figure(Theme::pigment());
+    let planned = plan_panel_marks(&f, FontLibrary::global());
+    let left = &planned[0].1;
+    let mut right = planned[1].1.clone();
+    right.ylabel.as_mut().unwrap().x = left.ylabel.as_ref().unwrap().x;
+    let points = SizeSpec::pt(18.0).unwrap();
+    let times = SizeSpec::times(1.4).unwrap();
+    for sizes in [
+        [SizeSpec::Auto, times],
+        [times, SizeSpec::Auto],
+        [points, times],
+        [times, points],
+        [points, points],
+    ] {
+        let error = super::check_titles(left, &right, sizes, "Figure.to_scene()").unwrap_err();
+        let hint = if sizes.iter().any(|size| matches!(size, SizeSpec::Points(_))) {
+            "make the figure wider or pass a smaller size=."
+        } else {
+            "make the figure wider or lower the font scale with Theme.with_font_scale()."
+        };
+        assert_eq!(error.hint(), Some(hint));
+    }
 }
