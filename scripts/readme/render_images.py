@@ -40,11 +40,18 @@ def gallery() -> None:
     )
     ax.legend(ub.LegendStyle.NONE)
 
-    # Scatter coloured by value.
-    px = rng.normal(size=400)
-    py = 0.6 * px + rng.normal(scale=0.6, size=400)
-    ax = fig.add_axes(row=0, col=2).title("Color by value")
-    ax.scatter(px, py, color=ub.ColorBy(px * py, center=0.0)).colorbar("x · y")
+    # Stacked areas.
+    years = np.arange(2016, 2027)
+    ax = fig.add_axes(row=0, col=2).title("Stacked areas")
+    ax.stacked_area(
+        years,
+        [
+            ub.Series("Solar", 2.0 + 1.1 * (years - 2016) ** 1.3),
+            ub.Series("Wind", 6.0 + 0.9 * (years - 2016)),
+            ub.Series("Hydro", np.full(years.size, 8.0)),
+        ],
+    )
+    ax.legend(ub.LegendStyle.NONE)
 
     # Donut.
     ax = fig.add_pie_axes(row=0, col=3).title("Donut")
@@ -55,7 +62,7 @@ def gallery() -> None:
     # Histogram and KDE.
     v = np.concatenate([rng.normal(40, 8, 3000), rng.normal(70, 6, 1500)])
     ax = fig.add_axes(row=1, col=0).title("Histogram and KDE")
-    ax.hist(v, bins=40, stat=ub.Stat.DENSITY).kde(v)
+    ax.hist(v, bins=24, stat=ub.Stat.DENSITY).kde(v)
     ax.legend(ub.LegendStyle.NONE)
 
     # Violin with swarm.
