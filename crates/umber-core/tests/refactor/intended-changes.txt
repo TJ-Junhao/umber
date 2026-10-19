@@ -1,18 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# Pigment histograms separate their bars by 1 pt.
-by-hist-stacked-pigment
-fig-hist-cumulative-pigment
-fig-hist-edges-pigment
-fig-hist-gradient-pigment
-fig-hist-narrow-xlim-pigment
-fig-hist-pigment
-fig-hist-stacked-gradient
-fig-hist-stacked-pigment
-fig-kde-pigment
-fig-legend-chips-hist
-fig-legend-direct-hist
-fig-legend-header-hist
-grid-2x2-span-pigment
-api/legend
-api/themes
-errors/api
+# Cases whose committed outputs change on purpose in this change; none.

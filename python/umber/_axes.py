@@ -1,7 +1,7 @@
 """``Axes``: the plot area of a figure, with its marks, texts, limits and legend."""
 
 import numbers
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from enum import Enum
 from functools import partial
 from operator import attrgetter
@@ -14,11 +14,24 @@ from typing_extensions import TypeVar
 # so ``Figure`` cannot be imported from it here, but ``typing.get_type_hints`` resolves
 # ``umber.Figure`` through the package once it has loaded.
 import umber
-from umber import _args, _cmap, _color, _group, _scale, _series, _size, _ticks, _time, _umber
+from umber import (
+    _args,
+    _cmap,
+    _color,
+    _display,
+    _group,
+    _scale,
+    _series,
+    _size,
+    _ticks,
+    _time,
+    _umber,
+)
 from umber._args import instance, integer, is_text_or_buffer, real, type_name
 from umber._cmap import CMAP_HINT, Cmap
 from umber._color import Color
 from umber._color_by import ColorBy, native_color_scale, native_point_color
+from umber._display import Bundle
 from umber._enums import (
     AUTO,
     Align,
@@ -128,8 +141,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     axes, ``Axes[str, float]`` for a category x axis, ``Axes[float, str]`` for a category y
     axis, on which bars, boxes and violins are horizontal and a scatter is a dot plot,
     ``Axes[str, str]`` for two category axes, which take a ``heatmap()``, and
-    ``Axes[Time, float]`` for a time x axis. Every method validates its arguments at the call
-    and returns the axes, so calls chain. A failed call changes nothing.
+    ``Axes[Time, float]`` for a time x axis. Drawing and styling methods validate arguments
+    at the call and return the axes, so calls chain. A failed call changes nothing.
+    At the end of a Jupyter cell, axes display their whole figure; ``show()`` displays it
+    explicitly in Jupyter or opens the system's default viewer elsewhere.
 
     Example:
         >>> import umber as ub
@@ -172,6 +187,59 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             True
         """
         return self._figure
+
+    def _repr_mimebundle_(
+        self, include: Collection[str] | None = None, exclude: Collection[str] | None = None
+    ) -> Bundle:
+        """Return the whole figure's PNG and these axes' plain text representation.
+
+        Args:
+            include: MIME types to include; ``None`` includes PNG and plain text.
+            exclude: MIME types to omit, even when included.
+
+        Returns:
+            MIME data and metadata, with the resolution and size of ``Figure``'s bundle.
+
+        Raises:
+            StyleError: If the figure cannot be rendered.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.line([0, 1], [1, 3])
+            >>> data, metadata = ax._repr_mimebundle_()
+            >>> sorted(data)
+            ['image/png', 'text/plain']
+        """
+        with api_call():
+            return _display.mimebundle(
+                self.figure, self._native.size_in, self.__repr__, include, exclude
+            )
+
+    def show(self) -> None:
+        """Display the whole figure in Jupyter or the system's default viewer.
+
+        Uses the same kernel detection, temporary PNG and best-effort startup check as
+        ``Figure.show()``.
+
+        Returns:
+            None.
+
+        Raises:
+            StyleError: If the figure cannot be rendered.
+            UsageError: If no viewer can be started; the error names the saved PNG.
+            OSError: If the temporary directory or PNG cannot be written.
+
+        Example:
+            Prepare a display action without opening a viewer; call ``show_chart()`` to show it.
+
+            >>> import umber as ub
+            >>> ax = ub.line([0, 1], [1, 3])
+            >>> show_chart = ax.show
+            >>> callable(show_chart)
+            True
+        """
+        with api_call():
+            _display.show(self.figure, "Axes.show()")
 
     def twin_y(self: "Axes[X, float]", *, scale: Scale[float] = Scale.linear()) -> "Axes[X, float]":
         """Add a numeric y axis on the right, sharing this panel's x axis.

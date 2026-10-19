@@ -113,8 +113,10 @@ The type parameters are the types of the x and y values: ``Axes[float, float]`` 
 axes, ``Axes[str, float]`` for a category x axis, ``Axes[float, str]`` for a category y
 axis, on which bars, boxes and violins are horizontal and a scatter is a dot plot,
 ``Axes[str, str]`` for two category axes, which take a ``heatmap()``, and
-``Axes[Time, float]`` for a time x axis. Every method validates its arguments at the call
-and returns the axes, so calls chain. A failed call changes nothing.
+``Axes[Time, float]`` for a time x axis. Drawing and styling methods validate arguments
+at the call and return the axes, so calls chain. A failed call changes nothing.
+At the end of a Jupyter cell, axes display their whole figure; ``show()`` displays it
+explicitly in Jupyter or opens the system's default viewer elsewhere.
 
 Example:
 
@@ -1443,6 +1445,36 @@ Example:
 >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
 >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
 >>> grouped = ub.scatter([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
+```
+
+### `umber.Axes.show`
+
+```text
+Axes.show(self) -> None
+```
+
+Display the whole figure in Jupyter or the system's default viewer.
+
+Uses the same kernel detection, temporary PNG and best-effort startup check as
+``Figure.show()``.
+
+Returns:
+    None.
+
+Raises:
+    StyleError: If the figure cannot be rendered.
+    UsageError: If no viewer can be started; the error names the saved PNG.
+    OSError: If the temporary directory or PNG cannot be written.
+
+Example:
+    Prepare a display action without opening a viewer; call ``show_chart()`` to show it.
+
+```python
+>>> import umber as ub
+>>> ax = ub.line([0, 1], [1, 3])
+>>> show_chart = ax.show
+>>> callable(show_chart)
+True
 ```
 
 ### `umber.Axes.stacked_area`
@@ -3358,7 +3390,9 @@ A canvas with a size, a theme and a grid of axes.
 Create a figure, add panels with ``add_axes()``, draw on their axes, then render with
 ``to_png()`` or ``to_svg()``, or write with ``save_png()`` or ``save_svg()``. Empty cells
 show the background. Positions count from zero; an axes may span several cells.
-``to_pdf()`` and ``save_pdf()`` produce a vector PDF with embedded fonts.
+``to_pdf()`` and ``save_pdf()`` produce a vector PDF with embedded fonts. A figure or axes
+at the end of a Jupyter cell displays the whole figure as a PNG; ``show()`` displays it
+explicitly in Jupyter or opens the system's default viewer elsewhere.
 
 ``copy.copy()`` and ``copy.deepcopy()`` return an independent figure with the same size,
 theme, grid, axes and marks; changing one leaves the other unchanged. ``axes_at()``
@@ -3662,6 +3696,42 @@ Example:
 ```python
 >>> import umber as ub
 >>> ub.Figure(3, 2).save_svg("empty.svg")
+```
+
+### `umber.Figure.show`
+
+```text
+Figure.show(self) -> None
+```
+
+Display the figure in Jupyter, or open it in the system's default viewer.
+
+A shell returned by IPython's ``get_ipython()`` with a ``kernel`` attribute is a
+Jupyter kernel. There, display uses the same PNG bundle as a figure at the end of
+a cell. Terminal IPython and plain Python open a 144 dpi PNG named ``figure.png``
+in a fresh temporary directory. The file is left for the viewer; this method does
+not wait for the viewer to close. The 0.1 second startup check is best effort: a viewer
+that fails later, or an ``xdg-open`` that hands off and exits 0, is not detected.
+IPython is optional.
+
+Returns:
+    None.
+
+Raises:
+    StyleError: If the figure cannot be rendered, as in ``to_png()``.
+    UsageError: If no viewer can be started, including Linux without ``DISPLAY``
+        or ``WAYLAND_DISPLAY``. The error names the saved PNG.
+    OSError: If the temporary directory or PNG cannot be written.
+
+Example:
+    Prepare a display action without opening a viewer; call ``show_chart()`` to show it.
+
+```python
+>>> import umber as ub
+>>> fig = ub.line([0, 1], [1, 3]).figure
+>>> show_chart = fig.show
+>>> callable(show_chart)
+True
 ```
 
 ### `umber.Figure.subtitle`
@@ -4370,11 +4440,13 @@ A filled triangle pointing up.
 class PieAxes
 ```
 
-A circular panel with ``pie``, ``title`` and ``legend`` methods only.
+A circular panel with ``pie``, ``title``, ``legend`` and ``show`` methods.
 
 Create it with ``Figure.add_pie_axes()`` or ``ub.pie()``. The panel belongs to its
 ``figure``, which renders and saves it. A panel holds at most one pie. Failed calls
-leave it unchanged. Cartesian methods are unavailable.
+leave it unchanged. Cartesian methods are unavailable. At the end of a Jupyter cell,
+the panel displays its whole figure; ``show()`` displays it explicitly in Jupyter or
+opens the system's default viewer elsewhere.
 
 Example:
 
@@ -4472,6 +4544,36 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_pie_axes()
 >>> ax = ax.pie(["Web", "App", "Other"], [50, 35, 15], hole=0.5, annotate=True)
+```
+
+### `umber.PieAxes.show`
+
+```text
+PieAxes.show(self) -> None
+```
+
+Display the whole figure in Jupyter or the system's default viewer.
+
+Uses the same kernel detection, temporary PNG and best-effort startup check as
+``Figure.show()``.
+
+Returns:
+    None.
+
+Raises:
+    StyleError: If the figure cannot be rendered.
+    UsageError: If no viewer can be started; the error names the saved PNG.
+    OSError: If the temporary directory or PNG cannot be written.
+
+Example:
+    Prepare a display action without opening a viewer; call ``show_chart()`` to show it.
+
+```python
+>>> import umber as ub
+>>> ax = ub.pie(["North", "South"], [3, 1])
+>>> show_chart = ax.show
+>>> callable(show_chart)
+True
 ```
 
 ### `umber.PieAxes.title`

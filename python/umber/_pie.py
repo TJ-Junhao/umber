@@ -1,12 +1,13 @@
 """Pie panels: circular parts of a whole, without Cartesian axes."""
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Never, Self, final
 
 import umber
-from umber import _args, _color, _size, _ticks, _umber, _values
+from umber import _args, _color, _display, _size, _ticks, _umber, _values
 from umber._axes import Axes
 from umber._color import Color
+from umber._display import Bundle
 from umber._enums import AUTO, Auto, LegendPosition, LegendStyle
 from umber._errors import UsageError, new_error
 from umber._report import api_call
@@ -17,11 +18,13 @@ from umber._types import Values
 
 @final
 class PieAxes:
-    """A circular panel with ``pie``, ``title`` and ``legend`` methods only.
+    """A circular panel with ``pie``, ``title``, ``legend`` and ``show`` methods.
 
     Create it with ``Figure.add_pie_axes()`` or ``ub.pie()``. The panel belongs to its
     ``figure``, which renders and saves it. A panel holds at most one pie. Failed calls
-    leave it unchanged. Cartesian methods are unavailable.
+    leave it unchanged. Cartesian methods are unavailable. At the end of a Jupyter cell,
+    the panel displays its whole figure; ``show()`` displays it explicitly in Jupyter or
+    opens the system's default viewer elsewhere.
 
     Example:
         >>> import umber as ub
@@ -57,6 +60,59 @@ class PieAxes:
             True
         """
         return self._figure
+
+    def _repr_mimebundle_(
+        self, include: Collection[str] | None = None, exclude: Collection[str] | None = None
+    ) -> Bundle:
+        """Return the whole figure's PNG and this panel's plain text representation.
+
+        Args:
+            include: MIME types to include; ``None`` includes PNG and plain text.
+            exclude: MIME types to omit, even when included.
+
+        Returns:
+            MIME data and metadata, with the resolution and size of ``Figure``'s bundle.
+
+        Raises:
+            StyleError: If the figure cannot be rendered.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.pie(["North", "South"], [3, 1])
+            >>> data, metadata = ax._repr_mimebundle_()
+            >>> sorted(data)
+            ['image/png', 'text/plain']
+        """
+        with api_call():
+            return _display.mimebundle(
+                self.figure, self._native.size_in, self.__repr__, include, exclude
+            )
+
+    def show(self) -> None:
+        """Display the whole figure in Jupyter or the system's default viewer.
+
+        Uses the same kernel detection, temporary PNG and best-effort startup check as
+        ``Figure.show()``.
+
+        Returns:
+            None.
+
+        Raises:
+            StyleError: If the figure cannot be rendered.
+            UsageError: If no viewer can be started; the error names the saved PNG.
+            OSError: If the temporary directory or PNG cannot be written.
+
+        Example:
+            Prepare a display action without opening a viewer; call ``show_chart()`` to show it.
+
+            >>> import umber as ub
+            >>> ax = ub.pie(["North", "South"], [3, 1])
+            >>> show_chart = ax.show
+            >>> callable(show_chart)
+            True
+        """
+        with api_call():
+            _display.show(self.figure, "PieAxes.show()")
 
     # Static callers see no Cartesian methods; dynamic callers get a chart-specific error.
     if not TYPE_CHECKING:

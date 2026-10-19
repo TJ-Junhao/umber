@@ -316,6 +316,12 @@ impl Figure {
         .map_err(core_error)
     }
 
+    /// The resolved width and height in inches, including the grid's automatic size.
+    #[getter]
+    fn size_in(&self) -> (f64, f64) {
+        (self.0.width_in(), self.0.height_in())
+    }
+
     /// An independent copy of this figure. Marks share their data, which never changes, so the
     /// copy is cheap.
     #[pyo3(name = "clone")]
