@@ -625,6 +625,102 @@ fn axis_title_error_quotes_escaped_text() {
 }
 
 #[test]
+fn reported_grid_width_keeps_room_for_axis_titles() {
+    for kind in [Kind::GridTitle, Kind::SpanningTitle, Kind::TwinTitle] {
+        for axis in ["x", "y", "right", "both"] {
+            if matches!(axis, "right" | "both") && !matches!(kind, Kind::TwinTitle) {
+                continue;
+            }
+            let build = |width| {
+                let mut f = figure(kind, width, "", SizeSpec::Auto, Align::Left);
+                let mut ax = f.axes_at_mut(GridIndex::At(0), GridIndex::At(0)).unwrap();
+                if axis == "x" {
+                    ax.xlabel("Distance travelled");
+                } else if axis != "right" {
+                    ax.ylabel("Height above ground");
+                }
+                if matches!(kind, Kind::TwinTitle) {
+                    let mut right = f
+                        .twin_axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+                        .unwrap();
+                    right
+                        .yticks_labeled(&[0.0, 1.0], vec!["Right ticks".into(); 2])
+                        .unwrap();
+                    if matches!(axis, "right" | "both") {
+                        right.ylabel("Right height");
+                    }
+                }
+                f
+            };
+            let error = build(1.0)
+                .to_scene(FontLibrary::global())
+                .unwrap_err()
+                .to_string();
+            let needed: f64 = error
+                .split_once("at least ")
+                .unwrap()
+                .1
+                .split_once(" pt")
+                .unwrap()
+                .0
+                .parse()
+                .unwrap();
+            build(needed).to_scene(FontLibrary::global()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn reported_grid_x_tick_width_keeps_room_for_axis_titles() {
+    for kind in [Kind::GridTitle, Kind::SpanningTitle, Kind::TwinTitle] {
+        for axis in ["x", "y"] {
+            let width = match kind {
+                Kind::TwinTitle => 200.0,
+                Kind::GridTitle => 260.0,
+                _ => 280.0,
+            };
+            let build = |tick: &str| {
+                let mut f = figure(kind, width, "", SizeSpec::Auto, Align::Left);
+                let mut ax = f.axes_at_mut(GridIndex::At(0), GridIndex::At(0)).unwrap();
+                ax.xlim(0.0, 1.0)
+                    .unwrap()
+                    .xticks_labeled(&[1.0], vec![tick.into()])
+                    .unwrap()
+                    .yticks_labeled(&[0.0, 1.0], vec!["W".repeat(19); 2])
+                    .unwrap();
+                if axis == "x" {
+                    ax.xlabel("WWW");
+                } else {
+                    ax.ylabel(&"W".repeat(23));
+                }
+                f
+            };
+            let sample =
+                crate::pipeline::try_plan_panels(&build("W"), FontLibrary::global()).unwrap();
+            let char_width = sample[0].1.x_tick_labels[0].width();
+            let error = build(&"W".repeat(50))
+                .to_scene(FontLibrary::global())
+                .unwrap_err()
+                .to_string();
+            let fits: f64 = error
+                .split_once("at most ")
+                .unwrap()
+                .1
+                .split_once(" pt fits")
+                .unwrap()
+                .0
+                .parse()
+                .unwrap();
+            let count = (fits / char_width).floor() as usize;
+            assert!(count > 0, "{error}");
+            build(&"W".repeat(count))
+                .to_scene(FontLibrary::global())
+                .unwrap();
+        }
+    }
+}
+
+#[test]
 fn reported_x_tick_width_keeps_room_for_axis_titles() {
     for axis in ["x", "y"] {
         let build = |tick: &str| {

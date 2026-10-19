@@ -207,6 +207,153 @@ fn one_row_legend_and_right_reserve_clear_ticks() {
     }
 }
 
+fn wrapped_legend(
+    theme: Theme,
+    position: LegendPosition,
+    twin: bool,
+    right_ticks: bool,
+    height: f64,
+) -> Figure {
+    let mut f = Figure::new(3.0, height, theme).unwrap();
+    let mut ax = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    ax.title("Series")
+        .subtitle("Eight lines")
+        .xlabel("Time")
+        .ylabel("Left")
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks(&[0.0, 1.0])
+        .unwrap()
+        .yticks_labeled(&[0.0, 1.0], vec!["Left".into(); 2])
+        .unwrap();
+    for i in 0..8 {
+        ax.line(
+            crate::AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: format!("S{i}"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    ax.legend_at(LegendStyle::Header, position, SizeSpec::Auto)
+        .unwrap();
+    if twin {
+        let mut right = ax.twin_y(ScaleKind::Linear).unwrap();
+        right.ylim(0.0, 1.0).unwrap();
+        if right_ticks {
+            right
+                .ylabel("Right")
+                .yticks_labeled(&[0.0, 1.0], vec!["Right".into(); 2])
+                .unwrap();
+        } else {
+            right.yticks(&[]).unwrap();
+        }
+    }
+    f
+}
+
+#[test]
+fn wrapped_twin_legends_stay_in_their_reserved_bands() {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        for position in [
+            LegendPosition::TopLeft,
+            LegendPosition::TopRight,
+            LegendPosition::Bottom,
+        ] {
+            let build = |height| wrapped_legend(theme.clone(), position, true, true, height);
+            let planned =
+                crate::pipeline::try_plan_panels(&build(3.0), FontLibrary::global()).unwrap();
+            let left = &planned[0].1;
+            let entries = left.legend.entries();
+            assert_eq!(entries.len(), 8);
+            assert!(entries.last().unwrap().label.y > entries[0].label.y);
+            assert!(planned[1].1.legend.is_empty());
+            let top = entries
+                .iter()
+                .map(|e| e.label.y - f64::from(e.label.layout.ascent()))
+                .fold(f64::INFINITY, f64::min);
+            let bottom = entries
+                .iter()
+                .map(|e| e.label.y + f64::from(e.label.layout.descent()))
+                .fold(0.0, f64::max);
+            if position == LegendPosition::Bottom {
+                let xlabel = left.xlabel.as_ref().unwrap();
+                assert!(top >= xlabel.y + f64::from(xlabel.layout.descent()));
+                assert!(top >= left.plot.bottom());
+                assert!(bottom <= 216.0 - super::super::PADDING + 1e-9);
+            } else {
+                assert!(bottom <= left.header_bottom);
+                for (_, layout) in &planned {
+                    let ylabel = layout.ylabel.as_ref().unwrap();
+                    assert!(
+                        left.header_bottom <= ylabel.y - f64::from(ylabel.layout.ascent()) + 1e-9
+                    );
+                    assert!(bottom < layout.plot.y);
+                    for tick in &layout.y_tick_labels {
+                        assert!(bottom < tick.y - f64::from(tick.layout.ascent()));
+                    }
+                }
+            }
+            // The height error must reserve the same wrapping as successful placement.
+            let error = build(0.5)
+                .to_scene(FontLibrary::global())
+                .unwrap_err()
+                .to_string();
+            let needed: f64 = error
+                .split_once("at least ")
+                .unwrap()
+                .1
+                .split_once(" pt")
+                .unwrap()
+                .0
+                .parse()
+                .unwrap();
+            build(needed / 72.0)
+                .to_scene(FontLibrary::global())
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn one_cell_twin_keeps_matching_wrapped_legend_placement() {
+    for position in [
+        LegendPosition::TopLeft,
+        LegendPosition::TopRight,
+        LegendPosition::Bottom,
+    ] {
+        let single = crate::pipeline::try_plan_panels(
+            &wrapped_legend(Theme::pigment(), position, false, false, 3.0),
+            FontLibrary::global(),
+        )
+        .unwrap();
+        for right_ticks in [false, true] {
+            if right_ticks && position == LegendPosition::TopRight {
+                continue; // Only top-right rows wrap to the narrower plot beside right ticks.
+            }
+            let twin = crate::pipeline::try_plan_panels(
+                &wrapped_legend(Theme::pigment(), position, true, right_ticks, 3.0),
+                FontLibrary::global(),
+            )
+            .unwrap();
+            for (a, b) in single[0]
+                .1
+                .legend
+                .entries()
+                .iter()
+                .zip(twin[0].1.legend.entries())
+            {
+                assert_eq!((a.label.x, a.label.y), (b.label.x, b.label.y));
+            }
+            assert_eq!(single[0].1.header_bottom, twin[0].1.header_bottom);
+        }
+    }
+}
+
 #[test]
 fn category_union_keeps_the_same_order_on_both_axes() {
     let mut f = Figure::new(8., 5., Theme::pigment()).unwrap();

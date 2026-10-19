@@ -535,12 +535,25 @@ pub(crate) struct PanelBands {
 }
 
 impl PanelBands {
-    /// The plot width needed by the axis labels of a single panel. The left y label can
-    /// also use its tick column; the centered x label cannot.
+    /// The plot width needed by the axis labels. The left y label can also use its own tick
+    /// column; the centered x label and the right y label cannot.
     pub(super) fn min_plot_width(&self, y_column: f64) -> f64 {
         super::MIN_PLOT
             .max(self.xlabel.as_ref().map_or(0.0, Label::width))
             .max(self.ylabel.as_ref().map_or(0.0, Label::width) - y_column)
+    }
+
+    /// The plot width needed to keep both y labels apart on their shared band.
+    pub(super) fn min_twin_plot_width(&self, right: &Self) -> f64 {
+        let pair = match (&self.ylabel, &right.ylabel) {
+            (Some(left), Some(right)) => {
+                left.width() + AXIS_LABEL_GAP + right.width() - self.y_tick_column
+            }
+            _ => 0.0,
+        };
+        self.min_plot_width(self.y_tick_column)
+            .max(right.min_plot_width(0.0))
+            .max(pair)
     }
 
     /// The text block that takes the most vertical room, independent of which size was set.
@@ -887,16 +900,9 @@ pub(crate) fn place_panel(
         ..
     } = bands;
     let position = input.legend.position;
-    let row = if position == crate::LegendPosition::TopRight {
-        input
-            .legend
-            .header_within(plot.x, plot.right())
-            .aligned(plot.x, plot.right(), Align::Right)
-    } else {
-        input
-            .legend
-            .header_within(header_box.left, header_box.right)
-    };
+    let row = input
+        .legend
+        .header_for_plot((header_box.left, header_box.right), (plot.x, plot.right()));
     let row_height = (!row.is_empty()).then(|| row.height());
     let header = heading.place(header_box, input.theme.title_align(), row_height);
     let row = match position {

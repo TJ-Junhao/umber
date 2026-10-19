@@ -126,9 +126,8 @@ def test_colorbar_label_failure_keeps_previous_settings() -> None:
             ub.ColorbarPosition.RIGHT,
             1,
             4,
-            "Figure.to_svg(): the figure is 72 pt wide; "
-            "at least 120 pt is needed for the plot area.",
-            "widen the figure.",
+            "Figure.to_svg(): the colorbar needs 45 pt; the panel has 28 pt.",
+            "shorten the label or widen the figure.",
         ),
         (
             ub.ColorbarPosition.BOTTOM,
@@ -147,11 +146,31 @@ def test_colorbar_room_errors_exact(
         .add_axes()
         .scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8], center=0.3))
     )
-    ax.xlabel("Distance").colorbar("Intensity", position=position)
+    if position == ub.ColorbarPosition.BOTTOM:
+        ax.xlabel("Distance")
+    ax.colorbar("Intensity", position=position)
     with pytest.raises(ub.StyleError) as caught:
         ax.figure.to_svg()
     assert str(caught.value) == message
     assert details(caught.value) == (None, hint)
+
+
+def test_colorbar_plot_area_error_includes_xlabel() -> None:
+    def render(width: float) -> str:
+        ax = (
+            ub.Figure(width, 4)
+            .add_axes()
+            .scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8], center=0.3))
+        )
+        return ax.xlabel("Distance").colorbar("Intensity").figure.to_svg()
+
+    with pytest.raises(ub.StyleError) as caught:
+        render(1)
+    assert str(caught.value) == (
+        "Figure.to_svg(): the figure is 72 pt wide; at least 120 pt is needed for the plot area."
+    )
+    assert details(caught.value) == (None, "widen the figure.")
+    assert "linearGradient" in render(120 / 72)
 
 
 @pytest.mark.parametrize("position", [ub.ColorbarPosition.RIGHT, ub.ColorbarPosition.BOTTOM])

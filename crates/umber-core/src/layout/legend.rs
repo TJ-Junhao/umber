@@ -440,6 +440,16 @@ impl<'a> MeasuredLegend<'a> {
         }
     }
 
+    /// The header row in its final span: top-right rows use the plot, other rows the header.
+    pub fn header_for_plot(&self, header: (f64, f64), plot: (f64, f64)) -> LegendRow {
+        if self.position == crate::LegendPosition::TopRight {
+            self.header_within(plot.0, plot.1)
+                .aligned(plot.0, plot.1, crate::Align::Right)
+        } else {
+            self.header_within(header.0, header.1)
+        }
+    }
+
     /// One entry per row, starting at `left`.
     pub fn column(&self, left: f64) -> LegendRow {
         self.row_within(left, left)

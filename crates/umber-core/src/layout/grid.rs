@@ -278,7 +278,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
         });
     }
     let cells: Vec<CellRange> = input.panels.iter().map(|p| p.axes.cells()).collect();
-    let columns = Columns::measure(input, &cells, bands);
+    let mut columns = Columns::measure(input, &cells, bands);
     let open = columns.place(&columns.no_growth());
     if open.plot_width < MIN_PLOT {
         return Err(if input.colorbars.is_empty() {
@@ -287,6 +287,9 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             shared_width_error(input, &cells, bands)
         });
     }
+    // Let an axis label that already exceeds the open plot report its own containment error.
+    // Otherwise x tick insets must preserve the room that the axis labels need.
+    columns.keep_fitting_widths(&open);
     let mut bounds = columns.label_bounds(&cells, bands, f64::INFINITY);
     bounds.extend(columns.colorbar_bounds(input));
     let placed = match fit_columns(&columns, &bounds) {
@@ -388,6 +391,8 @@ struct Columns {
     left: Vec<f64>,
     /// `R[c]`: the band right of each column's plots.
     right: Vec<f64>,
+    /// The plot width needed by each panel's axis labels, over all its spanned columns.
+    min_widths: Vec<(CellRange, f64)>,
 }
 
 /// The columns placed for some growth of their bands.
@@ -485,12 +490,47 @@ impl Columns {
         for (right, bar) in right.iter_mut().zip(shared_right(input)) {
             *right += bar;
         }
+        let mut min_widths: Vec<_> = cells
+            .iter()
+            .zip(bands)
+            .map(|(cell, band)| (*cell, band.min_plot_width(band.y_tick_column)))
+            .collect();
+        for (i, panel) in input.panels.iter().enumerate() {
+            if let crate::model::Layer::Twin { parent, .. } = panel.axes {
+                min_widths[parent].1 = bands[parent].min_twin_plot_width(&bands[i]);
+            }
+        }
+        min_widths.retain(|(_, width)| *width > MIN_PLOT);
         Columns {
             canvas: input.width,
             gap: input.gap(),
             left,
             right,
+            min_widths,
         }
+    }
+
+    /// Keeps only axis labels that fit before x tick insets, as in the single-panel solve.
+    fn keep_fitting_widths(&mut self, open: &PlacedColumns) {
+        self.min_widths.retain_mut(|(cells, width)| {
+            let (left, right) = open.span(*cells);
+            if *width > right - left + CONTAINMENT_TOLERANCE {
+                return false;
+            }
+            *width = width.min(right - left);
+            true
+        });
+    }
+
+    /// The least spare width per column, counting every panel's axis labels as well as the
+    /// minimum plot size. A spanning panel may use the bands and gaps between its columns.
+    fn width_room(&self, placed: &PlacedColumns) -> f64 {
+        self.min_widths
+            .iter()
+            .fold(placed.plot_width - MIN_PLOT, |room, (cells, width)| {
+                let (left, right) = placed.span(*cells);
+                room.min((right - left - width) / cells.col_span() as f64)
+            })
     }
 
     /// Bottom colorbar tick labels obey the same edge and gap bounds as x tick labels.
@@ -726,6 +766,20 @@ impl Columns {
             coefficients: vec![-1.0; vars],
             bound: -(open.plot_width - MIN_PLOT) * cols as f64,
         });
+        for (cells, width) in &self.min_widths {
+            let first = cells.col();
+            let last = first + cells.col_span() - 1;
+            let (left, right) = open.span(*cells);
+            let mut coefficients = vec![-(cells.col_span() as f64) / cols as f64; vars];
+            for c in first..last {
+                coefficients[Columns::right_growth(c, cols)] += 1.0;
+                coefficients[Columns::left_growth(c + 1)] += 1.0;
+            }
+            rows.push(program::Row {
+                coefficients,
+                bound: width - (right - left),
+            });
+        }
         rows
     }
 
@@ -742,7 +796,7 @@ impl Columns {
             let placed = self.place(&growth);
             let within_caps = growth[0] <= cap_left + CONTAINMENT_TOLERANCE
                 && growth[1] <= cap_right + CONTAINMENT_TOLERANCE
-                && placed.plot_width >= MIN_PLOT - CONTAINMENT_TOLERANCE;
+                && self.width_room(&placed) >= -CONTAINMENT_TOLERANCE;
             if !within_caps {
                 return None;
             }
@@ -911,8 +965,9 @@ impl Rows {
         {
             let first = cells.row();
             let last = first + cells.row_span() - 1;
-            let (left, right) = input.header_span(left, right);
-            let row = panel.legend.header_within(left, right);
+            let header = input.header_span(left, right);
+            let row = panel.legend.header_for_plot(header, (left, right));
+            let (left, right) = header;
             above[first] = above[first].max(band.above_with_row(&row));
             below[last] = below[last]
                 .max(band.below() - band.bottom_legend - band.bottom_colorbar - band.bottom_offset);
@@ -1032,8 +1087,9 @@ fn rows_too_short(
         let first = cell.row();
         let last = first + cell.row_span() - 1;
         let legend = input.panels[i].legend;
-        let (left, right) = input.header_span(spans[i].0, spans[i].1);
-        let row = legend.header_within(left, right);
+        let header = input.header_span(spans[i].0, spans[i].1);
+        let row = legend.header_for_plot(header, spans[i]);
+        let (left, right) = header;
         let above = band.above_with_row(&row);
         let below = band.axis_below();
         let bottom = legend.bottom_reserve(left, right) + band.bottom_colorbar;
@@ -1111,7 +1167,7 @@ fn columns_too_narrow(
 ) -> Error {
     let cols = columns.count();
     let placed = columns.place(&columns.no_growth());
-    let deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
+    let deficit = -columns.width_room(&placed) * cols as f64;
     let plain: Vec<_> = cells
         .iter()
         .zip(bands)
@@ -1185,7 +1241,7 @@ fn shared_width_error(input: &GridInput<'_>, cells: &[CellRange], bands: &[Panel
             ..*input
         };
         let columns = Columns::measure(&input, cells, bands);
-        if columns.place(&columns.no_growth()).plot_width < MIN_PLOT {
+        if columns.width_room(&columns.place(&columns.no_growth())) < 0.0 {
             return false;
         }
         let mut bounds = columns.label_bounds(cells, bands, f64::INFINITY);
@@ -1252,7 +1308,9 @@ fn needed_width(
         if band.right_colorbar > 0.0 || !input.colorbars.is_empty() {
             band.right()
         } else {
-            panel.legend.direct.reserve(cap).max(band.right_legend)
+            band.right_offset
+                + panel.legend.direct.reserve(cap).max(band.right_legend)
+                + band.right_legend_offset
         }
     };
     // The columns of a canvas `width` pt wide: the same y tick label columns, and the direct
@@ -1274,7 +1332,10 @@ fn needed_width(
             ..columns.clone()
         }
     };
-    let room = |width: f64| at(width).place(&at(width).no_growth()).plot_width - MIN_PLOT;
+    let room = |width: f64| {
+        let columns = at(width);
+        columns.width_room(&columns.place(&columns.no_growth()))
+    };
     // The widths where a panel's cap equals the uncapped reserve of a panel ending in the same
     // column: cap = END_LABEL_SHARE × (cell × span + gap × (span - 1)), with
     // cell = (W - 2 × PADDING - gap × (cols - 1)) / cols.
@@ -1310,7 +1371,12 @@ fn needed_width(
         + widest_reserves
         + shared_right(input).iter().sum::<f64>()
         + gap * (cols - 1) as f64
-        + MIN_PLOT * cols as f64
+        + columns
+            .min_widths
+            .iter()
+            .map(|(_, width)| *width)
+            .fold(MIN_PLOT, f64::max)
+            * cols as f64
         + 2.0 * PADDING;
     points.push(last);
     let start = input.width;
@@ -2371,6 +2437,7 @@ mod tests {
             gap,
             left,
             right,
+            min_widths: Vec::new(),
         }
     }
 
