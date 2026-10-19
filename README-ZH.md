@@ -6,7 +6,7 @@ umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制
 
 [English](https://github.com/TJ-Junhao/umber/blob/main/README.md)
 
-![Graphite 主题下两个站点的每日气温折线图](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
+![umber 在一张 grid 上画出的十二种图：折线与区间带、分组柱状图、按值着色的散点、环形图、直方图与密度曲线、小提琴图与蜂群图、等值线图、热力图、带标注的时间序列、双 y 轴、六边形分箱图和分组 ECDF](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/gallery.png)
 
 - **大数据量也快。** 渲染在 Rust 中完成：在标准的 GitHub Actions runner 上，100 万个点的折线渲染成 PNG 约 77 ms，渲染成 PDF 约 36 ms，分别比 matplotlib 快 2.7× 和 4.5×（见[性能](#性能)）。
 - **显式。** 每个选项都是有类型的值（`Color`、`Size`、`Dash`、`TickFormat` 等）。没有格式字符串，没有位置式的样式参数，也没有隐式转换。
@@ -58,7 +58,9 @@ fig.save_svg("temperature.svg")
 fig.save_pdf("temperature.pdf")
 ```
 
-这段代码画出的就是本页顶部那张图。数据可以是 list、tuple、NumPy 数组，或 pandas、polars 的 Series。缺失值（`NaN`，或 pandas、polars 可空列中的 null）会在图中留出空隙。
+![Graphite 主题下两个站点的每日气温折线图](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
+
+数据可以是 list、tuple、NumPy 数组，或 pandas、polars 的 Series。缺失值（`NaN`，或 pandas、polars 可空列中的 null）会在图中留出空隙。
 
 | 图表 | 方法 |
 | --- | --- |
