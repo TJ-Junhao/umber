@@ -119,6 +119,18 @@ ax = ub.pie(["Web", "App", "Shop"], [50.0, 30.0, 20.0], hole=0.5, annotate=True)
 svg = ax.figure.to_svg()
 ```
 
+## Two quantities on one x axis
+
+`ax.twin_y()` adds a y axis on the right that shares the x axis; draw the second quantity on the axes it returns. Both share one legend and the palette continues across them. Retrieve the twin later with `fig.twin_axes_at(row=, col=)`.
+
+```python
+months = ["Jan", "Feb", "Mar", "Apr"]
+ax = ub.Figure(6, 4).add_axes(x=ub.Scale.category())
+ax.bar(months, [84.0, 71.0, 66.0, 49.0], label="Rainfall").ylabel("Rainfall (mm)")
+ax.twin_y().line(months, [7.0, 8.0, 11.0, 14.0], label="Temperature").ylabel("°C")
+svg = ax.figure.to_svg()
+```
+
 ## Words on the chart
 
 `ax.text(text, (x, y))` places text at a data position; `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a few points away with an arrow. They never change the limits.

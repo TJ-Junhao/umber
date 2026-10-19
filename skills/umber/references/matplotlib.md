@@ -32,7 +32,7 @@ umber has no global state: there is no `plt`, no current figure and no `show()`.
 | `fig.colorbar(im, label="v")` | `ax.colorbar("v")` (or `fig.colorbar("v")` for a shared color scale) |
 | `ax.text(x, y, "s")` | `ax.text("s", (x, y))` |
 | `ax.annotate("s", xy=(x, y), xytext=(0, 12), textcoords="offset points", arrowprops={...})` | `ax.annotate("s", (x, y), offset=(0.0, 12.0))` |
-| `ax.twinx()` | not available in this version: draw on a second panel, or use one axis |
+| `ax2 = ax.twinx()` | `ax2 = ax.twin_y()`: shares the x axis, its own y axis on the right; one legend for both |
 | `ax.set_title(...)`, `set_xlabel`, `set_ylabel` | `ax.title(...)`, `xlabel`, `ylabel` (chainable) |
 | `ax.legend(loc="upper right")` | `ax.legend(ub.LegendStyle.HEADER, position=ub.LegendPosition.TOP_RIGHT)` |
 | `ax.set_xticks(positions, labels)` | `ax.xticks_labeled(positions, labels)` (numeric or time axes) |
