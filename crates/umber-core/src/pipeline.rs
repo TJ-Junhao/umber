@@ -1891,6 +1891,10 @@ mod font_error_tests;
 mod line_break_tests;
 
 #[cfg(test)]
+#[path = "pie_grid_tests.rs"]
+mod pie_grid_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{AxisData, Grid, GridIndex, LineOptions, Placement};

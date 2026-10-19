@@ -166,8 +166,10 @@ impl MeasuredSlice {
     }
 }
 
-/// Measures and places a pie within the grid's available plot rectangle. Room for outside
-/// text is reserved before choosing the final circular plot; the radius only decreases.
+/// Measures and places a pie within its plot area `area`: below its header, the canvas inside
+/// the padding in a figure of one panel and its cell on a grid, less a legend beside or below
+/// it. Room for outside text is reserved before choosing the final circular plot; the radius
+/// only decreases.
 pub(crate) fn place(
     pie: &Pie,
     style: LegendStyle,

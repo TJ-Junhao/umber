@@ -41,7 +41,9 @@ def pie(
     """Draw a pie or donut on a new figure and return its circular panel.
 
     The same as ``Figure(theme=theme).add_pie_axes().pie(categories, values, ...)``.
-    Slices run clockwise from twelve o'clock in input order.
+    Slices run clockwise from twelve o'clock in input order. Direct labels need room around
+    the circle; in small panels, ``legend(LegendStyle.CHIPS)`` or ``HEADER`` moves the names
+    into a legend while the shares stay on the slices.
 
     Args:
         categories: Unique slice names, one per value.
