@@ -340,7 +340,12 @@ fn grouped_bar_figure(theme_name: &str) -> Figure {
         .add_axes(ScaleKind::Category, ScaleKind::Linear)
         .unwrap();
     axes.title("Revenue by quarter").subtitle("USD, millions");
-    axes.grouped_bar(quarters(), revenue_series()).unwrap();
+    axes.grouped_bar(
+        quarters(),
+        revenue_series(),
+        umber_core::ValueLabels::default(),
+    )
+    .unwrap();
     figure
 }
 
@@ -490,7 +495,8 @@ fn pigment_stacked_bar() {
         color: ColorSpec::AUTO,
     })
     .to_vec();
-    axes.stacked_bar(quarters(), series).unwrap();
+    axes.stacked_bar(quarters(), series, umber_core::ValueLabels::default())
+        .unwrap();
     check("pigment_stacked_bar", &figure);
 }
 

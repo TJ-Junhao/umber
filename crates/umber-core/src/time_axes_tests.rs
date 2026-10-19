@@ -403,11 +403,17 @@ fn bar_on_time_axis_rejected() {
         ),
         (
             "Axes.grouped_bar()",
-            Box::new(move |a| a.grouped_bar(names(), vec![series("s")]).map(drop)),
+            Box::new(move |a| {
+                a.grouped_bar(names(), vec![series("s")], crate::ValueLabels::default())
+                    .map(drop)
+            }),
         ),
         (
             "Axes.stacked_bar()",
-            Box::new(move |a| a.stacked_bar(names(), vec![series("s")]).map(drop)),
+            Box::new(move |a| {
+                a.stacked_bar(names(), vec![series("s")], crate::ValueLabels::default())
+                    .map(drop)
+            }),
         ),
         (
             "Axes.box()",

@@ -125,6 +125,55 @@ Example:
 True
 ```
 
+### `umber.Axes.annotate`
+
+```text
+Axes.annotate(self, text: str, at: tuple[X, Y], *, offset: tuple[float, float]=(0.0, 12.0), arrow: bool=True, size: Size=Size.AUTO, color: Color=Color.AUTO) -> Self
+```
+
+Write text a fixed distance from a data position, with an arrow to it.
+
+The text sits ``offset`` points from the point, so it looks the same at any data range
+or figure size. The direction of the offset, in eight sectors of 45°, decides which
+part of the text is at the offset point: going round from above, the bottom centre,
+bottom left, middle left, top left, top centre, top right, middle right and bottom
+right, so the text stays on that side and never covers the point. The arrow runs from
+2 pt beyond the text to 3 pt short of the point, with a filled head, in the color of
+the text. The annotation changes neither the limits nor the layout.
+
+Args:
+    text: The text, at least one and at most 1,000 characters.
+    at: The point ``(x, y)``, given as for ``text()``.
+    offset: Where the text is from the point, in points: x to the right, y upwards.
+        It must not be ``(0, 0)``.
+    arrow: Whether an arrow runs from the text to the point; it needs at least 10 pt
+        between them.
+    size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
+        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
+    color: The color of the text and the arrow. ``Color.AUTO`` is the theme's text
+        color.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type, as for ``text()``, or ``offset`` is
+        not a pair of numbers.
+    DataError: As for ``text()``.
+    StyleError: If ``text`` is too long, or ``offset`` is not finite or is zero.
+        Rendering raises it as for ``text()``, and when less than 10 pt lie between
+        the text and the point for an arrow.
+    UsageError: If ``text`` is empty.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes().line([0, 1, 2, 3], [2, 5, 3, 4])
+>>> ax = ax.annotate("Peak", (1, 5), offset=(24, 12))
+>>> ax = ax.annotate("Dip", (2, 3), offset=(18, -22), arrow=False)
+```
+
 ### `umber.Axes.area`
 
 ```text
@@ -220,7 +269,7 @@ Example:
 ### `umber.Axes.bar`
 
 ```text
-Axes.bar(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], heights: Values[float], *, label: str='', color: Color=Color.AUTO, by: Values[str] | Auto=AUTO) -> 'Axes[X, Y]'
+Axes.bar(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], heights: Values[float], *, label: str='', color: Color=Color.AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> 'Axes[X, Y]'
 ```
 
 Add one bar per category, from the baseline to its height, along the category axis.
@@ -237,6 +286,17 @@ Args:
     heights: The bar heights, one per category.
     label: The name shown in the legend; an empty string leaves the bars out of it.
     color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+    annotate: Whether each bar shows its value just beyond its end, 3 pt away, in
+        the theme's text color at the tick label size. Automatic limits grow, only
+        when a label does not fit in them, so that every label fits inside the plot.
+        With ``by``, every group's bars show their values, as in ``grouped_bar()``.
+    format: The format of the values shown by ``annotate``. ``AUTO`` follows the tick
+        format of the value axis. ``TickFormat.AUTO``, also the axis's default, writes
+        each value on its own to six significant digits in the shortest form, like
+        ``%g``: ``42``, ``28.4``, ``0.12345``, in scientific form outside 1e-4 to 1e6.
+    size: The size of the values shown by ``annotate``. ``Size.AUTO`` is the tick
+        label size, ``Size.times(k)`` multiplies it after font scaling, and
+        ``Size.pt(p)`` uses points without font scaling.
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
         a non-empty ``label`` or an explicit ``color``. Missing or empty names
@@ -253,9 +313,11 @@ Raises:
         the data cannot be plotted: lengths differ, a category repeats, a
         height is infinite or not positive on a log axis, or neither axis is a
         category axis.
-    StyleError: If ``label`` or a category name is too long.
-    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
-        both axes are category axes.
+    StyleError: If ``label`` or a category name is too long, or ``format`` is
+        ``TickFormat.iso()``. Rendering raises it when a value label does not fit
+        inside the plot: under explicit limits, or on a plot too small for it.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label, both axes
+        are category axes, or ``format`` or ``size`` is given without ``annotate``.
 
 Example:
 
@@ -264,7 +326,7 @@ Example:
 >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
 >>> ax = ax.bar(["North", "South", "East"], [3, 5, 2], label="2025")
 >>> rows = ub.Figure().add_axes(y=ub.Scale.category())
->>> rows = rows.bar(["North", "South", "East"], [3, 5, 2])
+>>> rows = rows.bar(["North", "South", "East"], [3.5, 5.0, 2.25], annotate=True)
 >>> grouped = ub.bar(["Q1", "Q1", "Q2"], [3, 4, 5], by=["North", "South", "North"])
 ```
 
@@ -688,7 +750,7 @@ True
 ### `umber.Axes.grouped_bar`
 
 ```text
-Axes.grouped_bar(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], series: Sequence[Series]) -> 'Axes[X, Y]'
+Axes.grouped_bar(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], series: Sequence[Series], *, annotate: bool=False, format: TickFormat | Auto=AUTO, size: Size=Size.AUTO) -> 'Axes[X, Y]'
 ```
 
 Add grouped bars: in each category, one bar per series, side by side.
@@ -701,18 +763,24 @@ Args:
     categories: The category names, each at most once.
     series: One or more ``Series``, each with one value per category. The series
         take their places in the group in this order.
+    annotate: Whether each bar shows its value just beyond its end, as in ``bar()``.
+    format: The format of the values shown by ``annotate``, as in ``bar()``.
+    size: The size of the values shown by ``annotate``, as in ``bar()``.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If ``series`` is not a sequence of ``Series``, or ``categories`` has
+    TypeError: If ``series`` is not a sequence of ``Series``, or another argument has
         the wrong type.
     DataError: If the data cannot be plotted: ``series`` is empty, a series has a
         different length, a category repeats, a height is infinite or not positive on
         a log axis, or neither axis is a category axis.
-    StyleError: If a category name is too long.
-    UsageError: If both axes are category axes.
+    StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
+        Rendering raises it when a value label does not fit inside the plot, as in
+        ``bar()``.
+    UsageError: If both axes are category axes, or ``format`` or ``size`` is given
+        without ``annotate``.
 
 Example:
 
@@ -1403,7 +1471,7 @@ Example:
 ### `umber.Axes.stacked_bar`
 
 ```text
-Axes.stacked_bar(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], series: Sequence[Series]) -> 'Axes[X, Y]'
+Axes.stacked_bar(self: 'Axes[str, float] | Axes[float, str]', categories: Values[str], series: Sequence[Series], *, annotate: bool=False, format: TickFormat | Auto=AUTO, size: Size=Size.AUTO) -> 'Axes[X, Y]'
 ```
 
 Add stacked bars: in each category, the series stacked on one another.
@@ -1416,19 +1484,26 @@ Args:
     categories: The category names, each at most once.
     series: One or more ``Series``, each with one value per category. The first
         series sits on the baseline.
+    annotate: Whether each segment shows its value, centred inside it, in black or
+        white, whichever contrasts more with the segment, at the tick label size.
+    format: The format of the values shown by ``annotate``, as in ``bar()``.
+    size: The size of the values shown by ``annotate``, as in ``bar()``.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If ``series`` is not a sequence of ``Series``, or ``categories`` has
+    TypeError: If ``series`` is not a sequence of ``Series``, or another argument has
         the wrong type.
     DataError: If the data cannot be plotted: ``series`` is empty, a series has a
         different length, a category repeats, a height is infinite or not positive on
         a log axis, a stack exceeds the supported magnitude, or neither axis is a
         category axis.
-    StyleError: If a category name is too long.
-    UsageError: If both axes are category axes.
+    StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
+        Rendering raises it when a value label does not fit inside its segment with
+        2 pt to spare on every side.
+    UsageError: If both axes are category axes, or ``format`` or ``size`` is given
+        without ``annotate``.
 
 Example:
 
@@ -1644,6 +1719,51 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
 >>> ax = ax.swarm(["North", "South"], [[1, 2, 3], [2, 3, 4]], label="Samples")
+```
+
+### `umber.Axes.text`
+
+```text
+Axes.text(self, text: str, at: tuple[X, Y], *, align: Align=Align.LEFT, size: Size=Size.AUTO, color: Color=Color.AUTO) -> Self
+```
+
+Write text at a data position.
+
+The aligned edge of the text, or its centre, is at the point, and so is the vertical
+centre of the text. The text is drawn over the marks and changes neither the limits nor
+the layout; overlap with other elements is not checked.
+
+Args:
+    text: The text, at least one and at most 1,000 characters.
+    at: The point ``(x, y)``, each in the values of its axis: a number on a linear or
+        log axis, a category name (the category's centre) on a category axis, a time
+        on a time axis.
+    align: Which edge of the text, or its centre, is at the point.
+    size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
+        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
+    color: The text color. ``Color.AUTO`` is the theme's text color.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type, including ``at`` when it is not a
+        pair or a coordinate does not suit its axis.
+    DataError: If a coordinate is not finite, beyond 1e300 in magnitude or not
+        positive on a log axis. Rendering raises it when no mark of these axes has the
+        category of the point.
+    StyleError: If ``text`` is too long. Rendering raises it when the point lies
+        outside the limits or the text reaches past the figure.
+    UsageError: If ``text`` is empty.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes().xlim(0, 10).ylim(0, 10)
+>>> ax = ax.text("Target", (5, 5), align=ub.Align.CENTER)
+>>> bars = ub.Figure().add_axes(x=ub.Scale.category()).bar(["Q1", "Q2"], [3, 5])
+>>> bars = bars.text("Best", ("Q2", 5.5))
 ```
 
 ### `umber.Axes.title`
@@ -5520,7 +5640,7 @@ The installed package version.
 ## `umber.bar`
 
 ```text
-bar(categories: Values[str], heights: Values[float], *, label: str='', color: Color=Color.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO) -> Axes[str, float]
+bar(categories: Values[str], heights: Values[float], *, label: str='', color: Color=Color.AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO) -> Axes[str, float]
 ```
 
 Plot one bar per category on a new figure and return its axes.
@@ -5535,6 +5655,9 @@ Args:
     heights: The bar heights, one per category.
     label: The name shown in the legend; an empty string leaves the bars out of it.
     color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
+    annotate: Whether each bar shows its value just beyond its end, as in ``Axes.bar()``.
+    format: The format of the values shown by ``annotate``, as in ``Axes.bar()``.
+    size: The size of the values shown by ``annotate``, as in ``Axes.bar()``.
     theme: The theme of the new figure.
     by: One group name per data row; ``AUTO`` draws one series. Groups follow first
         appearance, supplying their labels and palette colors. Do not pass an explicit
@@ -5549,9 +5672,10 @@ Raises:
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a category repeats, or a
         height is infinite.
-    StyleError: If ``label`` or a category name is too long.
-
-    UsageError: If ``by`` comes with an explicit color or a non-empty label.
+    StyleError: If ``label`` or a category name is too long, or ``format`` is
+        ``TickFormat.iso()``.
+    UsageError: If ``format`` or ``size`` is given without ``annotate``, or ``by`` comes
+        with an explicit color or a non-empty label.
 
 Example:
 
@@ -5559,6 +5683,7 @@ Example:
 >>> import umber as ub
 >>> ax = ub.bar(["North", "South", "East"], [3, 5, 2], theme=ub.Theme.GRAPHITE)
 >>> ax.figure.save_svg("regions.svg")
+>>> labelled = ub.bar(["North", "South"], [3.5, 5.25], annotate=True)
 >>> grouped = ub.bar(["Q1", "Q1", "Q2"], [3, 4, 5], by=["North", "South", "North"])
 ```
 

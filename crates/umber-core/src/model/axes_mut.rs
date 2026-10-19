@@ -4,10 +4,11 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use super::annotation::{AnnotateOptions, Annotation, AnnotationPlacement, TextOptions};
 use super::axes::Axes;
 use super::axis_data::{AxisData, SharedValues, XySeries};
 use super::band::{BandMark, BandOptions};
-use super::bar::{Arrangement, BarGroupMark, BarInput, BarMark, BarOptions, Series};
+use super::bar::{Arrangement, BarGroupMark, BarInput, BarMark, BarOptions, Series, ValueLabels};
 use super::box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution};
 use super::color_by::{check_point_color, check_scatter_label};
 use super::contour::{ContourMark, ContourOptions};
@@ -1123,7 +1124,11 @@ impl<'a> AxesMut<'a> {
     /// others are `Error::Data`, checked in this order: `categories` and `heights` of different
     /// lengths; two numeric axes, whose x axis is not a category axis; a category that appears
     /// twice; a height that is infinite, beyond [`MAX_MAGNITUDE`], or outside the log range on
-    /// a log value axis. NaN is allowed and draws no bar.
+    /// a log value axis. NaN is allowed and draws no bar. Then the value labels of `options`
+    /// are checked as for [`AxesMut::grouped_bar`].
+    ///
+    /// With `options.annotation`, each bar shows its value just beyond its end, placed and
+    /// checked as [`AxesMut::grouped_bar`] describes.
     ///
     /// The mark stores its own copy of `heights`, made once. To store heights already held in
     /// an `Arc<[f64]>` without copying them, use [`AxesMut::bar_shared`].
@@ -1205,13 +1210,21 @@ impl<'a> AxesMut<'a> {
     /// Errors leave the axes unchanged. Two category axes are `Error::Usage`, naming `x`. The
     /// others are `Error::Data`, checked in this order: an empty `series`; a series whose values
     /// are not one per category (the message names the series' index); then the categories and
-    /// each series' values as in [`AxesMut::bar`]. NaN is allowed and draws no bar.
+    /// each series' values as in [`AxesMut::bar`]. NaN is allowed and draws no bar. Then a
+    /// format or a size in `annotation` without `annotate` is `Error::Usage`, and
+    /// [`TickFormat::iso`] is `Error::Style`, both naming the parameter.
+    ///
+    /// With `annotation.annotate`, each bar shows its value (see [`ValueLabels`]) 3 pt beyond its
+    /// end, in the theme's text color at the tick label size. Automatic limits grow, only when a
+    /// label does not fit in them, so that every label fits inside the plot. Rendering a label
+    /// that still does not fit, under explicit limits or on a plot too small for it, is
+    /// `Error::Style`, naming the bar.
     ///
     /// # Examples
     ///
     /// ```
     /// use umber_core::figure::Series;
-    /// use umber_core::{Figure, ScaleKind, Theme};
+    /// use umber_core::{Figure, ScaleKind, Theme, ValueLabels};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
@@ -1220,13 +1233,16 @@ impl<'a> AxesMut<'a> {
     ///     values: values.to_vec(),
     ///     ..Series::default()
     /// };
+    /// let labels = ValueLabels { annotate: true, ..ValueLabels::default() };
     /// axes.grouped_bar(
     ///     vec!["2025".into(), "2026".into()],
     ///     vec![series("north", &[3.0, 4.0]), series("south", &[2.5, f64::NAN])],
+    ///     labels,
     /// )?;
     /// assert_eq!(axes.marks().len(), 1);
     /// // A series with a height missing is an error, and the axes keep their one mark.
-    /// assert!(axes.grouped_bar(vec!["a".into()], vec![series("x", &[])]).is_err());
+    /// let plain = ValueLabels::default();
+    /// assert!(axes.grouped_bar(vec!["a".into()], vec![series("x", &[])], plain).is_err());
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -1234,25 +1250,43 @@ impl<'a> AxesMut<'a> {
         &mut self,
         categories: Vec<String>,
         series: Vec<Series>,
+        annotation: ValueLabels,
     ) -> Result<&mut Self> {
-        self.bar_groups("Axes.grouped_bar()", BarInput::Series, categories, series)
+        self.bar_groups(
+            "Axes.grouped_bar()",
+            BarInput::Series,
+            categories,
+            series,
+            annotation,
+        )
     }
 
-    /// Adds aligned long-form bars, reporting errors under the ordinary bar call.
+    /// Adds aligned long-form bars, reporting errors under the ordinary bar call, with their
+    /// values written as `annotation` says, as for [`AxesMut::grouped_bar`].
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Figure, ScaleKind, Theme, Series, ColorSpec};
+    /// use umber_core::{ColorSpec, Figure, ScaleKind, Series, Theme, ValueLabels};
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
-    /// axes.bar_by(vec!["A".into()], vec![Series {
-    ///     label: "North".into(), values: vec![1.0], color: ColorSpec::AUTO,
-    /// }])?;
+    /// let north = Series { label: "North".into(), values: vec![1.0], color: ColorSpec::AUTO };
+    /// axes.bar_by(vec!["A".into()], vec![north], ValueLabels::default())?;
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn bar_by(&mut self, categories: Vec<String>, series: Vec<Series>) -> Result<&mut Self> {
-        self.bar_groups("Axes.bar()", BarInput::Heights, categories, series)
+    pub fn bar_by(
+        &mut self,
+        categories: Vec<String>,
+        series: Vec<Series>,
+        annotation: ValueLabels,
+    ) -> Result<&mut Self> {
+        self.bar_groups(
+            "Axes.bar()",
+            BarInput::Heights,
+            categories,
+            series,
+            annotation,
+        )
     }
 
     /// Validates aligned bars with the caller's context before storing a mark.
@@ -1262,6 +1296,7 @@ impl<'a> AxesMut<'a> {
         input: BarInput,
         categories: Vec<String>,
         series: Vec<Series>,
+        annotation: ValueLabels,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes(context, axes.x, axes.y)?;
@@ -1273,7 +1308,8 @@ impl<'a> AxesMut<'a> {
             values,
             categories,
             series,
-        )?;
+        )?
+        .annotated(context, annotation)?;
         axes.marks.push(Mark::GroupedBar(mark));
         Ok(self)
     }
@@ -1417,21 +1453,31 @@ impl<'a> AxesMut<'a> {
     /// Errors leave the axes unchanged. They are `Error::Data`, checked in the order of
     /// [`AxesMut::grouped_bar`], with one more check at the end: in each category, the positive
     /// values and the negative values must each add up to at most
-    /// [`MAX_MAGNITUDE`] in magnitude (the message names the category).
+    /// [`MAX_MAGNITUDE`] in magnitude (the message names the category). Then the checks of
+    /// `annotation` as in [`AxesMut::grouped_bar`].
+    ///
+    /// With `annotation.annotate`, each segment shows its value centred inside it, in black or
+    /// white, whichever contrasts more with the segment, at the tick label size. Rendering a
+    /// finite, non-zero value whose label does not fit inside its drawn segment with 2 pt to
+    /// spare on every side is `Error::Style`, naming the series and the bar; a value too small
+    /// to show a segment at all fits nowhere. NaN and 0 have no label.
     ///
     /// # Examples
     ///
     /// ```
     /// use umber_core::figure::Series;
-    /// use umber_core::{Figure, ScaleKind, Theme};
+    /// use umber_core::{Figure, ScaleKind, Theme, ValueLabels};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
     /// let series = |values: &[f64]| Series { values: values.to_vec(), ..Series::default() };
-    /// axes.stacked_bar(vec!["a".into(), "b".into()], vec![series(&[3.0, -1.0]), series(&[2.0, 4.0])])?;
+    /// let plain = ValueLabels::default();
+    /// let pair = vec![series(&[3.0, -1.0]), series(&[2.0, 4.0])];
+    /// axes.stacked_bar(vec!["a".into(), "b".into()], pair, plain.clone())?;
     /// assert_eq!(axes.marks().len(), 1);
     /// // Totals beyond the supported magnitudes are an error.
-    /// assert!(axes.stacked_bar(vec!["a".into()], vec![series(&[1e300]), series(&[1e300])]).is_err());
+    /// let huge = vec![series(&[1e300]), series(&[1e300])];
+    /// assert!(axes.stacked_bar(vec!["a".into()], huge, plain).is_err());
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -1441,6 +1487,7 @@ impl<'a> AxesMut<'a> {
         &mut self,
         categories: Vec<String>,
         series: Vec<Series>,
+        annotation: ValueLabels,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.stacked_bar()";
         let axes = self.axes_mut();
@@ -1453,7 +1500,8 @@ impl<'a> AxesMut<'a> {
             values,
             categories,
             series,
-        )?;
+        )?
+        .annotated(CONTEXT, annotation)?;
         axes.marks.push(Mark::StackedBar(mark));
         Ok(self)
     }
@@ -3269,6 +3317,108 @@ impl<'a> AxesMut<'a> {
             })
             .collect::<Result<Vec<_>>>()?;
         axes.marks.extend(marks.into_iter().map(Mark::Kde));
+        Ok(self)
+    }
+
+    /// Writes `text` at the point `at`, x then y, each in the values of its axis: a number on a
+    /// linear or log axis, a category name (at the category's centre) on a category axis, a
+    /// time on a time axis. The aligned edge of the text, or its centre, is at the point, and so
+    /// is the vertical centre of the text. The text is drawn over the marks in the theme's text
+    /// color at its body size unless `options` say otherwise, and changes neither the limits nor
+    /// the layout; overlap with other elements is not checked.
+    ///
+    /// Errors leave the axes unchanged: an empty `text` is `Error::Usage`; a coordinate that does
+    /// not suit its axis, or is not finite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not
+    /// positive on a log axis, is `Error::Data`, naming `at`. Rendering fails with
+    /// `Error::Style` when the point lies outside the limits or the text reaches past the
+    /// figure, and with `Error::Data` when no mark of the axes has the category of the point.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Align, AxisValue, Figure, ScaleKind, TextOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let options = TextOptions { align: Align::Center, ..TextOptions::default() };
+    /// axes.text("centre", (AxisValue::Number(0.5), AxisValue::Number(0.5)), options)?;
+    /// assert_eq!(axes.annotations().len(), 1);
+    /// assert!(axes.text("", (AxisValue::Number(0.5), AxisValue::Number(0.5)), options).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn text(
+        &mut self,
+        text: &str,
+        at: (AxisValue, AxisValue),
+        options: TextOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let annotation = Annotation::new(
+            "Axes.text()",
+            (axes.x, axes.y),
+            text,
+            at,
+            AnnotationPlacement::At(options.align),
+            options.size,
+            options.color,
+        )?;
+        axes.annotations.push(annotation);
+        Ok(self)
+    }
+
+    /// Writes `text` `options.offset` points away from the point `at` (x to the right, y
+    /// upwards), on the side the offset points to, and with `options.arrow` an arrow from the
+    /// text to the point. The point is given as for [`AxesMut::text`].
+    ///
+    /// The direction of the offset, in eight sectors of 45°, decides which part of the text is
+    /// at the offset point: going round from above, the bottom centre, bottom left, middle left,
+    /// top left, top centre, top right, middle right and bottom right, so the text stays on that
+    /// side and never covers the point. The arrow runs from 2 pt beyond the edge of the text
+    /// towards the point and stops 3 pt short of it: a 0.75 pt shaft and a filled head 5 pt long
+    /// and 3.5 pt wide, in the color of the text. The annotation changes neither the limits nor
+    /// the layout.
+    ///
+    /// Errors leave the axes unchanged: those of [`AxesMut::text`], then an offset that is not
+    /// finite or is zero is `Error::Style`, naming `offset`. Rendering fails as for
+    /// [`AxesMut::text`], and with `Error::Style` when less than 10 pt lie between the text and
+    /// the point for an arrow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AnnotateOptions, AxisValue, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let at = (AxisValue::Number(0.5), AxisValue::Number(0.5));
+    /// let options = AnnotateOptions { offset: (24.0, 18.0), ..AnnotateOptions::default() };
+    /// axes.annotate("Peak", at.clone(), options)?;
+    /// let still = AnnotateOptions { offset: (0.0, 0.0), ..options };
+    /// assert!(axes.annotate("Peak", at, still).is_err());
+    /// assert_eq!(axes.annotations().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn annotate(
+        &mut self,
+        text: &str,
+        at: (AxisValue, AxisValue),
+        options: AnnotateOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let placement = AnnotationPlacement::Offset {
+            offset: options.offset,
+            arrow: options.arrow,
+        };
+        let annotation = Annotation::new(
+            "Axes.annotate()",
+            (axes.x, axes.y),
+            text,
+            at,
+            placement,
+            options.size,
+            options.color,
+        )?;
+        axes.annotations.push(annotation);
         Ok(self)
     }
 

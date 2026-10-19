@@ -120,6 +120,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                             ..Series::default()
                         },
                     ],
+                    umber_core::ValueLabels::default(),
                 )
                 .unwrap();
             emit_scene(

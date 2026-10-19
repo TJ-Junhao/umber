@@ -85,8 +85,10 @@ use umber_core::{
 
 /// Cases of the newer features, one module each, so that a feature edits only its own file.
 mod corpus {
+    pub mod annotation;
     pub mod area;
     pub mod band;
+    pub mod bar_labels;
     pub mod bars;
     pub mod baseline;
     pub mod r#box;
@@ -203,6 +205,8 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::hist_variants::cases(&lib, &mut sink);
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);
+    corpus::annotation::cases(&lib, &mut sink);
+    corpus::bar_labels::cases(&lib, &mut sink);
     corpus::font_file::cases(&lib, &mut sink);
     corpus::by::cases(&lib, &mut sink);
     corpus::contour::cases(&lib, &mut sink);

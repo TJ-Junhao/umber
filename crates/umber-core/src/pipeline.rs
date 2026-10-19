@@ -7,6 +7,7 @@
 
 use crate::bubble_fit::BubbleFits;
 use crate::color_scale::ResolvedColorScale;
+use crate::draw::bar_labels::{self, BarLabels};
 use crate::layout::{
     self, FigureHeader, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize,
     TickSpacing,
@@ -32,6 +33,8 @@ struct Panel<'a> {
     legend: MeasuredLegend<'a>,
     /// The color scale shared by the axes' color group.
     color: Option<ResolvedColorScale>,
+    /// The values written on the axes' bars, measured.
+    labels: BarLabels,
 }
 
 /// The records of every panel of `figure`, in the order of [`Figure::panels`]. The legend uses
@@ -61,11 +64,13 @@ fn panels<'a>(
             } else {
                 measure_legend(theme, axes, &marks, lib)?
             };
+            let labels = BarLabels::measure(theme, lib, axes, &marks)?;
             Ok(Panel {
                 axes,
                 marks,
                 legend,
                 color: None,
+                labels,
             })
         })
         .collect::<Result<_>>()?;
@@ -606,7 +611,11 @@ fn plan(
     let limits: Vec<Limits> = panels.iter().map(|panel| Limits::of(panel.axes)).collect();
     let marks: Vec<&[ResolvedMark<'_>]> =
         panels.iter().map(|panel| panel.marks.as_slice()).collect();
-    let mut fits = BubbleFits::new(&marks, &limits, groups);
+    let ends: Vec<_> = panels
+        .iter()
+        .map(|panel| panel.labels.end_reaches())
+        .collect();
+    let mut fits = BubbleFits::new(&marks, &ends, &limits, groups);
     let show_labels: Vec<_> = panels
         .iter()
         .map(|panel| label_visibility(figure, panel.axes.cells()))
@@ -1564,9 +1573,17 @@ pub(crate) fn with_layout_input<R>(
 ///   horizontally for line ends, see `draw::marks_clip`);
 /// - the values written on annotated heatmap cells, when there are any, as one group clipped
 ///   to the plot area;
+/// - the values written on annotated bars, when there are any, as one unclipped group
+///   ([`bar_labels::items`]);
 /// - the legend, when it has row entries or direct labels, as one unclipped group;
 /// - the baseline, as an unclipped group of its own, when the axes hold a mark that grows
-///   from zero, unless overridden by `AxesMut::baseline` (see [`Resolved::draws_baseline`]).
+///   from zero, unless overridden by `AxesMut::baseline` (see [`Resolved::draws_baseline`]);
+/// - the colorbar of the axes, when it has one of its own.
+///
+/// The shared colorbars and the figure header follow the panels. Last, over everything else,
+/// comes the text each axes writes at data positions, with its arrows, as one unclipped group
+/// per axes that has any, in the order of the axes ([`draw::annotations`]): it may reach past
+/// its cells, and no later panel, colorbar or header covers it.
 ///
 /// The scene's fonts are the figure's ([`layout::figure_fonts`]): the theme's title font, then
 /// its body font.
@@ -1613,6 +1630,7 @@ fn scene_with_labels(
         return Ok(scene);
     }
     let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
+    let mut annotations = Vec::new();
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
@@ -1636,6 +1654,19 @@ fn scene_with_labels(
         if let Some(notes) = notes {
             scene.push(notes);
         }
+        let values = bar_labels::items(
+            theme,
+            resolved,
+            layout,
+            panel.axes,
+            &panel.marks,
+            &panel.labels,
+            context,
+        )
+        .map_err(|err| in_cell(figure, panel.axes, err))?;
+        if let Some(values) = values {
+            scene.push(values);
+        }
         if let Some(legend) = draw::legend::legend(theme, layout) {
             scene.push(legend);
         }
@@ -1645,6 +1676,17 @@ fn scene_with_labels(
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
             scene.push(draw::colorbar::draw(theme, color, bar));
         }
+        let notes = draw::annotations(
+            theme,
+            fonts,
+            resolved,
+            layout,
+            panel.axes.annotations(),
+            (width, height),
+            context,
+        )
+        .map_err(|err| in_cell(figure, panel.axes, err))?;
+        annotations.extend(notes);
     }
     for (source, bar) in &planned.colorbars {
         if let Some(color) = &planned.panels[*source].0.color {
@@ -1653,6 +1695,10 @@ fn scene_with_labels(
     }
     if let Some(header) = draw::figure_header(theme, &planned.header) {
         scene.push(header);
+    }
+    // Text at data positions may reach past its cell: it goes over everything else.
+    for notes in annotations {
+        scene.push(notes);
     }
     Ok(scene)
 }

@@ -491,7 +491,7 @@ def test_a_category_vline_matches_the_native_figure() -> None:
     fig.add_axes(x=ub.Scale.category()).bar(["Q1", "Q2", "Q3"], [3, 1, 2]).vline("Q2", label="Go")
     native = _umber.Figure(4.0, 3.0, _umber.Theme.midnight(), *ONE_CELL)
     native.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
-    native.bar(0, 0, ["Q1", "Q2", "Q3"], floats(3, 1, 2), "", AUTO)
+    native.bar(0, 0, ["Q1", "Q2", "Q3"], floats(3, 1, 2), "", AUTO, False, None, NO_SIZE)
     native.vline(0, 0, "Q2", "Go", AUTO, 0, NO_SIZE)
     assert fig.to_svg() == native.to_svg(OUTLINES)
     assert fig.to_png(dpi=60) == native.to_png(60)

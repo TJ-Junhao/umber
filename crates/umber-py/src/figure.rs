@@ -27,6 +27,7 @@ use crate::cmap::Cmap;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyInt};
 use umber_core::HeatmapOptions;
+use umber_core::{Align, AnnotateOptions, TextOptions, ValueLabels};
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
@@ -50,7 +51,8 @@ use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
 use crate::ticks::{TickFormatArg, tick_format};
 use crate::values::{
-    axis_value, floats, is_int64_buffer, micros, names, series_data, shared_floats, times,
+    axis_value, coordinate, floats, is_int64_buffer, micros, names, series_data, shared_floats,
+    times,
 };
 
 /// The series of a grouped or stacked bar chart: `(label, values, color)` for each series.
@@ -124,6 +126,20 @@ fn bins_arg(bins: &Bound<'_, PyAny>) -> PyResult<Bins> {
         return Ok(Bins::Count(bins.extract()?));
     }
     Ok(Bins::Edges(floats(bins)?))
+}
+
+/// The values written on bars: `annotate`, and a `format` of `None` for the Python facade's
+/// `AUTO`, the value axis's tick format.
+fn value_labels(
+    annotate: bool,
+    format: Option<TickFormatArg>,
+    size: SizeArg,
+) -> PyResult<ValueLabels> {
+    Ok(ValueLabels {
+        annotate,
+        format: format.map(tick_format).transpose()?,
+        size: size_spec(size)?,
+    })
 }
 
 /// The bandwidth of a kernel density: `None` is the Python facade's `AUTO`, Scott's rule.
@@ -654,11 +670,15 @@ impl Figure {
         heights: &Bound<'_, PyAny>,
         label: String,
         color: ColorArg,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let (categories, heights) = (names(categories)?, shared_floats(heights)?);
         let options = BarOptions {
             label,
             color: color_spec(color)?,
+            annotation: value_labels(annotate, format, size)?,
             ..Default::default()
         };
         self.axes(row, col)?
@@ -674,10 +694,14 @@ impl Figure {
         col: i64,
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let (categories, series) = (names(categories)?, Self::series(series)?);
+        let labels = value_labels(annotate, format, size)?;
         self.axes(row, col)?
-            .grouped_bar(categories, series)
+            .grouped_bar(categories, series, labels)
             .map(drop)
             .map_err(core_error)
     }
@@ -689,10 +713,14 @@ impl Figure {
         col: i64,
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let (categories, series) = (names(categories)?, Self::series(series)?);
+        let labels = value_labels(annotate, format, size)?;
         self.axes(row, col)?
-            .bar_by(categories, series)
+            .bar_by(categories, series, labels)
             .map(drop)
             .map_err(core_error)
     }
@@ -802,10 +830,14 @@ impl Figure {
         col: i64,
         categories: &Bound<'_, PyAny>,
         series: SeriesArgs<'_>,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+        size: SizeArg,
     ) -> PyResult<()> {
         let (categories, series) = (names(categories)?, Self::series(series)?);
+        let labels = value_labels(annotate, format, size)?;
         self.axes(row, col)?
-            .stacked_bar(categories, series)
+            .stacked_bar(categories, series, labels)
             .map(drop)
             .map_err(core_error)
     }
@@ -1743,6 +1775,60 @@ impl Figure {
         let series = Self::series(series)?;
         self.axes(row, col)?
             .grouped_kde(series, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Writes `text` at the point `(x, y)`, each coordinate a `float`, a `str` category name or
+    /// an `int` time in microseconds, as its axis takes.
+    fn text(
+        &mut self,
+        row: i64,
+        col: i64,
+        text: &str,
+        at: (Bound<'_, PyAny>, Bound<'_, PyAny>),
+        align: i64,
+        size: SizeArg,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        const CONTEXT: &str = "Axes.text()";
+        let at = (coordinate(CONTEXT, &at.0)?, coordinate(CONTEXT, &at.1)?);
+        let options = TextOptions {
+            align: enum_value::<Align>(align)?,
+            size: size_spec(size)?,
+            color: color_spec(color)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .text(text, at, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Writes `text` `offset` points away from the point `(x, y)`, given as for `text`, with an
+    /// arrow to the point when `arrow` holds.
+    fn annotate(
+        &mut self,
+        row: i64,
+        col: i64,
+        text: &str,
+        at: (Bound<'_, PyAny>, Bound<'_, PyAny>),
+        offset: (f64, f64),
+        arrow: bool,
+        size: SizeArg,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        const CONTEXT: &str = "Axes.annotate()";
+        let at = (coordinate(CONTEXT, &at.0)?, coordinate(CONTEXT, &at.1)?);
+        let options = AnnotateOptions {
+            offset,
+            arrow,
+            size: size_spec(size)?,
+            color: color_spec(color)?,
+            ..Default::default()
+        };
+        self.axes(row, col)?
+            .annotate(text, at, options)
             .map(drop)
             .map_err(core_error)
     }

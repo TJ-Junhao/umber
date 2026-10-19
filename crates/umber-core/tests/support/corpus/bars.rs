@@ -69,8 +69,12 @@ impl Group {
         series: Vec<Series>,
     ) -> umber_core::Result<&'b mut umber_core::AxesMut<'f>> {
         match self {
-            Group::Grouped => axes.grouped_bar(categories, series),
-            Group::Stacked => axes.stacked_bar(categories, series),
+            Group::Grouped => {
+                axes.grouped_bar(categories, series, umber_core::ValueLabels::default())
+            }
+            Group::Stacked => {
+                axes.stacked_bar(categories, series, umber_core::ValueLabels::default())
+            }
         }
     }
 }
@@ -372,6 +376,7 @@ fn group_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         .stacked_bar(
             names(&["a", "b"]),
             vec![series(&[6e299, -7.5e299]), series(&[4e299, -2.5e299])],
+            umber_core::ValueLabels::default(),
         )
         .unwrap();
     emit_scene(
@@ -547,6 +552,7 @@ fn bar_errors() -> String {
             BarOptions {
                 label: "kept".into(),
                 color: ColorSpec::Fixed(umber_core::Rgba::opaque(1, 2, 3)),
+                ..BarOptions::default()
             },
         )
         .map(drop)
