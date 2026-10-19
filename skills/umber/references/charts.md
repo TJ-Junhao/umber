@@ -133,7 +133,7 @@ svg = ax.figure.to_svg()
 
 ## Words on the chart
 
-`ax.text(text, (x, y))` places text at a data position; `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a few points away with an arrow. They never change the limits.
+`ax.text(text, (x, y))` places text at a data position; `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a few points away with an arrow. They never change the limits. `"\n"` starts a new line here and in titles and subtitles; every other text is one line.
 
 ```python
 ax = ub.Figure(6, 4).add_axes()
