@@ -258,10 +258,12 @@ mod tests {
                     .unwrap();
             }),
             ("GroupedBar", Category, Linear, true, |a| {
-                a.grouped_bar(categories(), series()).unwrap();
+                a.grouped_bar(categories(), series(), crate::ValueLabels::default())
+                    .unwrap();
             }),
             ("StackedBar", Category, Linear, true, |a| {
-                a.stacked_bar(categories(), series()).unwrap();
+                a.stacked_bar(categories(), series(), crate::ValueLabels::default())
+                    .unwrap();
             }),
             ("Hist", Linear, Linear, true, |a| {
                 a.hist(&[0.0, 1.0, 2.0], Default::default()).unwrap();
@@ -280,10 +282,12 @@ mod tests {
                     .unwrap();
             }),
             ("horizontal GroupedBar", Linear, Category, true, |a| {
-                a.grouped_bar(categories(), series()).unwrap();
+                a.grouped_bar(categories(), series(), crate::ValueLabels::default())
+                    .unwrap();
             }),
             ("horizontal StackedBar", Linear, Category, true, |a| {
-                a.stacked_bar(categories(), series()).unwrap();
+                a.stacked_bar(categories(), series(), crate::ValueLabels::default())
+                    .unwrap();
             }),
             ("dot plot", Category, Linear, false, |a| {
                 a.scatter(

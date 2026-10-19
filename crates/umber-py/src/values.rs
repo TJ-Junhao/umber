@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use pyo3::buffer::PyBuffer;
 use pyo3::prelude::*;
-use pyo3::types::{PyFloat, PyList, PyString};
+use pyo3::types::{PyFloat, PyInt, PyList, PyString};
 use umber_core::{AxisData, AxisValue, Instant, times_from_micros};
 
 use crate::errors::{core_error, internal_state, internal_type};
@@ -175,6 +175,21 @@ pub(crate) fn axis_value(obj: &Bound<'_, PyAny>) -> PyResult<AxisValue> {
     obj.cast::<PyFloat>()
         .map(|number| AxisValue::Number(number.value()))
         .map_err(|_| internal_type(format!("expected a str or a float, got {}", type_name(obj))))
+}
+
+/// Converts one coordinate of a point given to `text` or `annotate` in `context`: a `str` becomes
+/// [`AxisValue::Category`], a `float` [`AxisValue::Number`], and an `int`, microseconds since
+/// 1970-01-01T00:00, [`AxisValue::Time`]. The Python layer passes the one that matches the axis;
+/// any other object is an internal `TypeError`, and a time beyond the supported range the core's
+/// error.
+pub(crate) fn coordinate(context: &'static str, obj: &Bound<'_, PyAny>) -> PyResult<AxisValue> {
+    if obj.is_instance_of::<PyInt>() {
+        let micros: i64 = obj.extract()?;
+        return umber_core::time_from_micros(context, "at", micros)
+            .map(AxisValue::Time)
+            .map_err(core_error);
+    }
+    axis_value(obj)
 }
 
 /// Whether a buffer format string is `d`, `@d` or `=d`: one `f64` in native byte order, with no
@@ -448,6 +463,26 @@ mod tests {
                     "{expression}: {message}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn coordinates_read_ints_as_times() {
+        with_python(|py| {
+            assert_eq!(
+                coordinate("Axes.text()", &eval(py, "86400000000")).unwrap(),
+                AxisValue::Time(Instant::from_micros(86_400_000_000).unwrap())
+            );
+            assert_eq!(
+                coordinate("Axes.text()", &eval(py, "'Q3'")).unwrap(),
+                AxisValue::Category("Q3".into())
+            );
+            assert_eq!(
+                coordinate("Axes.text()", &eval(py, "2.5")).unwrap(),
+                AxisValue::Number(2.5)
+            );
+            let err = coordinate("Axes.text()", &eval(py, "None")).unwrap_err();
+            internal_type_message(&err, py);
         });
     }
 

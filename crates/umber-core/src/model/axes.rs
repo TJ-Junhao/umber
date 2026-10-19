@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use super::annotation::Annotation;
 use super::grid::CellRange;
 use super::mark::Mark;
 use super::share::{AxisSettings, ExplicitLimits};
@@ -63,6 +64,8 @@ pub struct Axes {
     pub(super) xlabel_size: SizeSpec,
     pub(super) ylabel_size: SizeSpec,
     pub(super) legend_size: SizeSpec,
+    /// The text written at data positions, in the order it was added.
+    pub(super) annotations: Vec<Annotation>,
 }
 
 impl Axes {
@@ -96,6 +99,7 @@ impl Axes {
             xlabel_size: SizeSpec::Auto,
             ylabel_size: SizeSpec::Auto,
             legend_size: SizeSpec::Auto,
+            annotations: Vec::new(),
         }
     }
 
@@ -553,6 +557,26 @@ impl Axes {
     /// The y tick label size, inherited by every member of the shared group.
     pub(crate) fn ytick_size(&self) -> SizeSpec {
         self.y_settings.tick_size
+    }
+
+    /// The text written at data positions by [`AxesMut::text`](super::AxesMut::text) and
+    /// [`AxesMut::annotate`](super::AxesMut::annotate), in the order it was added.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisValue, Figure, ScaleKind, TextOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert!(axes.annotations().is_empty());
+    /// axes.text("x", (AxisValue::Number(1.0), AxisValue::Number(2.0)), TextOptions::default())?;
+    /// assert_eq!(axes.annotations().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn annotations(&self) -> &[Annotation] {
+        &self.annotations
     }
 }
 

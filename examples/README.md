@@ -24,6 +24,7 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `ecdf.py`: empirical cumulative distributions of response times, and the complementary share on a log axis.
 - `kde.py`: kernel density lines with Scott's bandwidth and a narrower one, over a density histogram.
 - `density.py`: rectangular and hexagonal density counts with log colors, and a numeric mesh centered on zero.
+- `annotations.py`: annotations with and without arrows on a time series, text at a point, and values written on plain and stacked bars.
 - `heatmap.py`: an annotated correlation matrix on a diverging colormap centered at zero, and visits by day and hour with an empty cell.
 - `contour.py`: a filled elevation map with labelled lines over its bands, and a wave field drawn as labelled lines in one color.
 - `themes.py`: the same chart in the Pigment, Graphite and Midnight themes.

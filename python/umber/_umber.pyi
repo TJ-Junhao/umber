@@ -385,6 +385,9 @@ class Figure:
         heights: _FloatArray,
         label: str,
         color: _ColorArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
     ) -> None: ...
     def box_plot(
         self,
@@ -419,10 +422,24 @@ class Figure:
         distributions: list[_DistributionArg],
     ) -> None: ...
     def grouped_bar(
-        self, row: int, col: int, categories: list[str], series: list[_SeriesArg]
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        series: list[_SeriesArg],
+        annotate: bool,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
     ) -> None: ...
     def stacked_bar(
-        self, row: int, col: int, categories: list[str], series: list[_SeriesArg]
+        self,
+        row: int,
+        col: int,
+        categories: list[str],
+        series: list[_SeriesArg],
+        annotate: bool,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
     ) -> None: ...
     def stacked_area(
         self, row: int, col: int, x: _FloatArray, series: list[_SeriesArg]
@@ -709,12 +726,38 @@ class Figure:
         dash: int,
         width: _SizeArg,
     ) -> None: ...
+    # A coordinate of `at` is a float on a numeric axis, a str on a category axis and an int
+    # (microseconds since 1970-01-01T00:00) on a time axis.
+    def text(
+        self,
+        row: int,
+        col: int,
+        text: str,
+        at: tuple[float | str | int, float | str | int],
+        align: int,
+        size: _SizeArg,
+        color: _ColorArg,
+    ) -> None: ...
+    def annotate(
+        self,
+        row: int,
+        col: int,
+        text: str,
+        at: tuple[float | str | int, float | str | int],
+        offset: tuple[float, float],
+        arrow: bool,
+        size: _SizeArg,
+        color: _ColorArg,
+    ) -> None: ...
     def bar_by(
         self,
         row: int,
         col: int,
         categories: list[str],
         series: list[_SeriesArg],
+        annotate: bool,
+        format: _TickFormatArg | None,
+        size: _SizeArg,
     ) -> None: ...
     def grouped_line(
         self,

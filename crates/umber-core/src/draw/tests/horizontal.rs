@@ -190,6 +190,7 @@ fn horizontal_bar_mirrors_vertical() {
                         series("2025", &[1.0, 2.0, -3.0, 4.0]),
                         series("2026", &[2.0, f64::NAN, 3.0, 5.0]),
                     ],
+                    crate::ValueLabels::default(),
                 )
                 .unwrap()
                 .stacked_bar(
@@ -199,6 +200,7 @@ fn horizontal_bar_mirrors_vertical() {
                         series("Wind", &[1.0, -2.0, 4.0, 0.0]),
                         series("Solar", &[3.0, 1.0, 2.0, 2.0]),
                     ],
+                    crate::ValueLabels::default(),
                 )
                 .unwrap();
             });
@@ -374,6 +376,7 @@ fn grouped_slots_follow_legend_order() {
                 series("South", &[2.0, 5.0]),
                 series("East", &[1.0, 2.0]),
             ],
+            crate::ValueLabels::default(),
         )
         .unwrap();
     let marks = resolve_figure_marks(&f).swap_remove(0);

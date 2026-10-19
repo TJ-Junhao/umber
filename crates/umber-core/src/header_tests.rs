@@ -178,8 +178,10 @@ fn every_existing_mark_exposes_its_legend_swatch() {
         },
     )
     .unwrap();
-    a.grouped_bar(categories(), series()).unwrap();
-    a.stacked_bar(categories(), series()).unwrap();
+    a.grouped_bar(categories(), series(), crate::ValueLabels::default())
+        .unwrap();
+    a.stacked_bar(categories(), series(), crate::ValueLabels::default())
+        .unwrap();
     let marks = resolve::resolve_figure_marks(&f);
     for (axes, marks) in f.panels().zip(&marks) {
         let entries: Vec<_> = marks.iter().flat_map(ResolvedMark::legend_swatch).collect();

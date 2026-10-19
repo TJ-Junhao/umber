@@ -647,9 +647,17 @@ mod tests {
         let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
         f.add_axes(ScaleKind::Category, ScaleKind::Linear)
             .unwrap()
-            .stacked_bar(categories(), series(["2024", "", "2026"]))
+            .stacked_bar(
+                categories(),
+                series(["2024", "", "2026"]),
+                crate::ValueLabels::default(),
+            )
             .unwrap()
-            .grouped_bar(categories(), series(["North", "South", "East"]))
+            .grouped_bar(
+                categories(),
+                series(["North", "South", "East"]),
+                crate::ValueLabels::default(),
+            )
             .unwrap();
         let legend = legend_of(&f, LegendStyle::Header);
         let labels: Vec<&str> = legend.row().iter().map(LegendEntry::label).collect();
@@ -729,6 +737,7 @@ mod tests {
                     values: vec![1.0, 2.0],
                     color: ColorSpec::AUTO,
                 }],
+                crate::ValueLabels::default(),
             )
             .unwrap();
         let legend = legend_of(&f, LegendStyle::Direct);
