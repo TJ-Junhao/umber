@@ -497,7 +497,8 @@ impl Columns {
             .collect();
         for (i, panel) in input.panels.iter().enumerate() {
             if let crate::model::Layer::Twin { parent, .. } = panel.axes {
-                min_widths[parent].1 = bands[parent].min_twin_plot_width(&bands[i]);
+                min_widths[parent].1 =
+                    bands[parent].min_twin_plot_width(&bands[i], bands[parent].y_tick_column);
             }
         }
         min_widths.retain(|(_, width)| *width > MIN_PLOT);
@@ -1154,11 +1155,11 @@ impl PlacedRows {
 /// The error for columns whose plots are narrower than [`MIN_PLOT`] before x tick labels are
 /// fitted.
 ///
-/// The plots lack `deficit` pt in all. If the y tick labels of one column, narrower by the
-/// deficit, would leave room, they are the cause: the error names the widest y tick label of
-/// the widest such column, in the first panel whose labels are that wide (see
-/// [`y_labels_leave_no_room`]). Otherwise it names the width the figure needs (see
-/// [`grid_too_narrow`]).
+/// If narrower y tick labels of one column would leave room, including the axis titles
+/// without that tick column, the error names the widest y tick label of the widest such
+/// column, in the first panel whose labels are that wide (see [`y_labels_leave_no_room`]).
+/// A y title that cannot fit even with the largest usable tick column is named instead.
+/// Otherwise the error names the width the figure needs (see [`grid_too_narrow`]).
 fn columns_too_narrow(
     input: &GridInput<'_>,
     cells: &[CellRange],
@@ -1209,20 +1210,59 @@ fn columns_too_narrow(
     let culprit = cells
         .iter()
         .zip(bands)
-        .filter(|(_, b)| !b.y_labels.is_empty() && b.y_label_width - deficit >= 0.0)
-        .filter(|(c, b)| b.y_tick_column == columns.left[c.col()])
+        .enumerate()
+        .filter(|(_, (c, b))| !b.y_labels.is_empty() && b.y_tick_column == columns.left[c.col()])
+        .filter_map(|(i, (c, b))| {
+            // Shorter ticks give the left y title less room outside the plot. Reserve its
+            // full width, including a twin's title and gap, before suggesting a tick width.
+            let mut min_width = b.min_plot_width(0.0);
+            for (j, panel) in input.panels.iter().enumerate() {
+                if matches!(panel.axes, crate::model::Layer::Twin { parent, .. } if parent == i) {
+                    min_width = b.min_twin_plot_width(&bands[j], 0.0);
+                }
+            }
+            let (left, right) = placed.span(*c);
+            let title_deficit = (min_width - (right - left)) * cols as f64 / c.col_span() as f64;
+            let fits = b.y_label_width - deficit.max(title_deficit);
+            (fits >= 0.0).then_some((c, b, fits))
+        })
         .fold(
             None,
-            |best: Option<(&CellRange, &PanelBands)>, (c, b)| match best {
-                Some((_, kept)) if kept.y_tick_column >= b.y_tick_column => best,
-                _ => Some((c, b)),
+            |best: Option<(&CellRange, &PanelBands, f64)>, (c, b, fits)| match best {
+                Some((_, kept, _)) if kept.y_tick_column >= b.y_tick_column => best,
+                _ => Some((c, b, fits)),
             },
         );
-    if let Some((cells, bands)) = culprit
+    if let Some((cells, bands, fits)) = culprit
         && let Some(label) = widest(&bands.y_labels)
     {
-        let err = y_labels_leave_no_room(input.context, label, bands.y_label_width - deficit);
-        return in_panel(*cells, err);
+        return in_panel(*cells, y_labels_leave_no_room(input.context, label, fits));
+    }
+    let plot_deficit = (MIN_PLOT - placed.plot_width) * cols as f64;
+    for (i, ((cell, band), panel)) in cells.iter().zip(bands).zip(input.panels).enumerate() {
+        if band.y_labels.is_empty()
+            || band.y_tick_column != columns.left[cell.col()]
+            || band.y_label_width < plot_deficit
+        {
+            continue;
+        }
+        // The widest ticks that leave every plot MIN_PLOT wide give this left y title
+        // its most room: further shortening loses more tick column than its span gains.
+        let (left, right) = placed.span(*cell);
+        let room = right - left + band.y_tick_column
+            - plot_deficit * (1.0 - cell.col_span() as f64 / cols as f64);
+        let kind = if input.panels.iter().any(
+            |other| matches!(other.axes, crate::model::Layer::Twin { parent, .. } if parent == i),
+        ) {
+            TextKind::LeftYLabel
+        } else {
+            TextKind::YLabel
+        };
+        if let Some(axes) = panel.axes.cartesian()
+            && let Err(error) = band.check_y_title_width(axes, kind, room, input.context)
+        {
+            return input.panel_error(*cell, error);
+        }
     }
     grid_too_narrow(
         input.context,

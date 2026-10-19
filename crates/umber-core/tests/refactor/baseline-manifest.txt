@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: a274aa46c5426deef1abe6c2d597cc7bf7c0d3f8
+# revision: 392db27eb05c47828be23d28c3096be843836418
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 af10b9e8d0c96cc7d716f99ca46cde4e34a86ef0adaf415e43c55ff3a0fb1800  api/cmaps.txt
@@ -26,7 +26,7 @@ a2591a3b5f637b265ab5e543f411f68d7ec5a0ca500e8cd29921f7dc237568ea  errors/color-b
 b05871ed85b38d8d8348b8d46804f8f72c8944b88fb53a39b055a30a3ee07dec  errors/contour.txt
 ecf50fa26396839fbe7191e22476962c34522171e995d9e715994772a93b3300  errors/ecdf.txt
 7bc514a8616c59bbf613966fe1de0b5fadf01e79b8efc6c0eb79af7c8453c8fc  errors/error_bars.txt
-9f154ba1fa012118c135ddf9321c4c52be8948bca4cd4c58695acf88c4997f2a  errors/grid-room.txt
+850cd9c55f9c75034f2a126c1560f889b90e226ef96bb942198ec20aeff24968  errors/grid-room.txt
 00aa4ed4c25f12383a266759aeb293b80946eaaf2f1509f79466fcad60d498f7  errors/grid.txt
 75944e29782aed4640fd627728a7fa89dcbfcdcc00c142e7777b2a5cf4eee097  errors/grouped-bars.txt
 d08c543633e71c233e0ddfd7bb349d1b1a7711b1788443bfcc3337d9690dac22  errors/heatmap.txt

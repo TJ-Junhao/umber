@@ -721,6 +721,88 @@ fn reported_grid_x_tick_width_keeps_room_for_axis_titles() {
 }
 
 #[test]
+fn reported_grid_y_tick_width_keeps_room_for_axis_titles() {
+    let text = "W".repeat(12);
+    let size = SizeSpec::pt(12.0).unwrap();
+    let label_width = text_width(Kind::AxesSubtitle, &text, size);
+    for kind in [Kind::TwinTitle, Kind::GridTitle] {
+        let cols = kind.cols() as f64;
+        let width = 2.0 * PADDING + 24.0 * (cols - 1.0) + cols * (label_width + 30.0);
+        let build = |tick_size| {
+            let mut f = figure(kind, width, "", SizeSpec::Auto, Align::Left);
+            f.axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+                .unwrap()
+                .ylabel_sized(&text, size)
+                .yticks_labeled(&[0.0, 1.0], vec!["W".repeat(100); 2])
+                .unwrap()
+                .ytick_labels(SizeSpec::pt(tick_size).unwrap())
+                .unwrap();
+            f
+        };
+        let sample = crate::pipeline::try_plan_panels(&build(0.1), FontLibrary::global()).unwrap();
+        let tick_width = sample[0].1.y_tick_labels[0].width();
+        let error = build(12.0)
+            .to_scene(FontLibrary::global())
+            .unwrap_err()
+            .to_string();
+        let fits: f64 = error
+            .split_once("at most ")
+            .unwrap()
+            .1
+            .split_once(" pt leaves room")
+            .unwrap()
+            .0
+            .parse()
+            .unwrap();
+        assert!(fits > 0.0, "{error}");
+        // The suggestion must preserve the label's width even without the tick column.
+        assert!(fits <= cols * 30.0 - Y_LABEL_GAP, "{error}");
+        let fitted = build(0.1 * fits / tick_width);
+        fitted.to_scene(FontLibrary::global()).unwrap();
+        let layout = crate::pipeline::try_plan_panels(&fitted, FontLibrary::global()).unwrap();
+        // Text sizes and advances are f32, so use their precision at the requested width.
+        assert!((layout[0].1.y_tick_labels[0].width() - fits).abs() < 1e-4);
+        assert!(layout[0].1.plot.width + 1e-4 >= label_width);
+    }
+}
+
+#[test]
+fn grid_y_tick_error_names_axis_title_when_shorter_ticks_cannot_help() {
+    for kind in [Kind::TwinTitle, Kind::GridTitle] {
+        for size in [SizeSpec::Auto, SizeSpec::pt(12.0).unwrap()] {
+            let text = "W".repeat(30);
+            let label_width = text_width(Kind::AxesSubtitle, &text, size);
+            let cols = kind.cols() as f64;
+            let width = 2.0 * PADDING + 24.0 * (cols - 1.0) + label_width - 10.0;
+            let mut f = figure(kind, width, "", SizeSpec::Auto, Align::Left);
+            f.axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+                .unwrap()
+                .ylabel_sized(&text, size)
+                .yticks_labeled(&[0.0, 1.0], vec!["W".repeat(100); 2])
+                .unwrap();
+            let error = f.to_scene(FontLibrary::global()).unwrap_err();
+            let side = if matches!(kind, Kind::TwinTitle) {
+                "left "
+            } else {
+                ""
+            };
+            let prefix = if cols > 1.0 { "row 0, col 0: " } else { "" };
+            let room = label_width - 10.0 - (cols - 1.0) * MIN_PLOT;
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "Figure.to_scene(): {prefix}the {side}y axis label {} is {} pt wide; the panel has {} pt.",
+                    quoted(&text),
+                    label_width.ceil(),
+                    room.floor(),
+                )
+            );
+            assert_eq!(error.hint(), Some(panel::text_size_hint(size)));
+        }
+    }
+}
+
+#[test]
 fn reported_x_tick_width_keeps_room_for_axis_titles() {
     for axis in ["x", "y"] {
         let build = |tick: &str| {

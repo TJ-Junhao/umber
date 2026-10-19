@@ -544,16 +544,32 @@ impl PanelBands {
     }
 
     /// The plot width needed to keep both y labels apart on their shared band.
-    pub(super) fn min_twin_plot_width(&self, right: &Self) -> f64 {
+    pub(super) fn min_twin_plot_width(&self, right: &Self, y_column: f64) -> f64 {
         let pair = match (&self.ylabel, &right.ylabel) {
-            (Some(left), Some(right)) => {
-                left.width() + AXIS_LABEL_GAP + right.width() - self.y_tick_column
-            }
+            (Some(left), Some(right)) => left.width() + AXIS_LABEL_GAP + right.width() - y_column,
             _ => 0.0,
         };
-        self.min_plot_width(self.y_tick_column)
+        self.min_plot_width(y_column)
             .max(right.min_plot_width(0.0))
             .max(pair)
+    }
+
+    /// Checks the y title before a plot can be placed, using its greatest possible room.
+    pub(super) fn check_y_title_width(
+        &self,
+        axes: &crate::Axes,
+        kind: TextKind,
+        room: f64,
+        context: &'static str,
+    ) -> Result<()> {
+        check_text_width(
+            self.ylabel.as_ref(),
+            axes.ylabel_size(),
+            room,
+            kind,
+            TextContainer::Panel,
+            context,
+        )
     }
 
     /// The text block that takes the most vertical room, independent of which size was set.
