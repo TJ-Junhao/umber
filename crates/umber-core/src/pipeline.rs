@@ -1271,6 +1271,13 @@ fn plan(
         })
         .collect();
     for (i, input) in inputs.iter().enumerate() {
+        if let Layer::Twin { parent, .. } = input.axes {
+            let (before, after) = planned.split_at_mut(i);
+            inputs[parent]
+                .legend
+                .direct
+                .separate_twins(&mut before[parent].1, &mut after[0].1);
+        }
         let layout = &planned[i].1;
         if input.legend.position != crate::LegendPosition::Best
             || layout.legend.is_empty()

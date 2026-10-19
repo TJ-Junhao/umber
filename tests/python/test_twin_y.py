@@ -397,7 +397,97 @@ def test_twin_never_draws_a_second_baseline(theme: ub.Theme) -> None:
     left = fig.add_axes(x=ub.Scale.category()).bar(["A", "B"], [2, 3])
     right = left.twin_y(scale=ub.Scale.log()).bar(["A", "B"], [10, 100])
     before = fig.to_svg()
-    right.baseline(shown=False)
+    for shown in (False, ub.AUTO):
+        assert right.baseline(shown=shown) is right
+        assert fig.to_svg() == before
+        with pytest.raises(ub.UsageError, match=r"Axes\.baseline\(\)") as caught:
+            right.baseline(shown=True)
+        assert details(caught.value) == (
+            "shown",
+            "the left axes draws the baseline; set it there.",
+        )
+        assert fig.to_svg() == before
+    left.baseline(shown=False)
+    assert fig.to_svg() != before
+    left.baseline(shown=True)
     assert fig.to_svg() == before
-    right.baseline(shown=True)
+
+
+@pytest.mark.parametrize(
+    "row, col, pie, parameter", [(0, 0, True, "row"), (1, 0, False, "row"), (0, 1, False, "col")]
+)
+def test_twin_axes_at_errors_name_twin_context(
+    row: int, col: int, pie: bool, parameter: str
+) -> None:
+    fig = ub.Figure()
+    if pie:
+        fig.add_pie_axes()
+    else:
+        fig.add_axes().twin_y()
+    before = fig.to_svg()
+    with pytest.raises(ub.UsageError, match=r"^Figure\.twin_axes_at\(\):") as caught:
+        fig.twin_axes_at(row=row, col=col)
+    detail = details(caught.value)
+    assert detail is not None and detail[0] == parameter and detail[1] is not None
     assert fig.to_svg() == before
+
+
+@pytest.mark.parametrize("theme", [ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT])
+@pytest.mark.parametrize("bars", [(True, True), (True, False), (False, True), (False, False)])
+def test_both_direct_labels_precede_right_colorbars(
+    theme: ub.Theme, bars: tuple[bool, bool]
+) -> None:
+    fig = ub.Figure(12, 6, theme=theme)
+    left = fig.add_axes().line([0, 1], [1, 2], label="Left line").xlim(0, 1)
+    right = left.twin_y().line([0, 1], [200, 100], label="Right line")
+    for axes, enabled, label, ys in (
+        (left, bars[0], "Left colors", [1, 2]),
+        (right, bars[1], "Right colors", [100, 200]),
+    ):
+        if enabled:
+            axes.scatter([0.2, 0.8], ys, color=ub.ColorBy([0, 10]))
+            axes.colorbar(label, position=ub.ColorbarPosition.RIGHT)
+    left.legend(ub.LegendStyle.DIRECT)
+    right.yticks_labeled([100, 200], ["R100", "R200"])
+    labels = [named(fig, label) for label in ("Left line", "Right line")]
+    xs = [float(label.attrib["x"]) for label in labels]
+    assert xs[0] == pytest.approx(xs[1])
+    assert xs[0] > float(named(fig, "R100").attrib["x"])
+    assert float(labels[0].attrib["y"]) < float(labels[1].attrib["y"])
+    colorbars = [
+        float(named(fig, label).attrib["x"])
+        for label, enabled in zip(("Left colors", "Right colors"), bars, strict=True)
+        if enabled
+    ]
+    assert all(xs[0] < x for x in colorbars)
+    assert colorbars == sorted(colorbars)
+
+
+@pytest.mark.parametrize("clone", [copy.copy, copy.deepcopy])
+def test_new_twins_register_only_with_their_copied_figure(clone: Any) -> None:
+    fig = ub.Figure(12, 5, cols=2)
+    for col in range(2):
+        fig.add_axes(col=col).line([0, 1], [1, 2])
+    before = fig.to_svg()
+    copied = clone(fig)
+    for col in range(2):
+        right = copied.axes_at(col=col).twin_y().line([0, 1], [100, 200])
+        assert right.figure is copied
+        assert copied.twin_axes_at(col=col) is right
+        with pytest.raises(ub.UsageError, match="no right-hand y axis"):
+            fig.twin_axes_at(col=col)
+    assert fig.to_svg() == before
+
+
+@pytest.mark.parametrize("theme", [ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT])
+def test_shared_direct_column_separates_matching_y_positions(theme: ub.Theme) -> None:
+    fig = ub.Figure(8, 5, theme=theme)
+    left = fig.add_axes().line([0, 1], [1, 2], label="Left").xlim(0, 1).ylim(0, 2)
+    left.twin_y().line([0, 1], [100, 200], label="Right").ylim(0, 200)
+    left.legend(ub.LegendStyle.DIRECT)
+    labels = [named(fig, label) for label in ("Left", "Right")]
+    assert labels[0].attrib["x"] == labels[1].attrib["x"]
+    assert (
+        abs(float(labels[0].attrib["y"]) - float(labels[1].attrib["y"]))
+        >= 1.2 * float(labels[0].attrib["font-size"]) - 0.001
+    )

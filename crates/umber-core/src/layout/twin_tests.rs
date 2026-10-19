@@ -222,6 +222,91 @@ fn category_union_keeps_the_same_order_on_both_axes() {
 }
 
 #[test]
+fn shared_direct_column_clears_ticks_and_precedes_both_colorbars() {
+    use crate::{AxisData, ColorBy, ColorbarOptions, ColorbarPosition, PointColor, ScatterOptions};
+
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        for bars in [[true, true], [true, false], [false, true], [false, false]] {
+            let mut f = Figure::new(12., 6., theme.clone()).unwrap();
+            f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .twin_y(ScaleKind::Linear)
+                .unwrap();
+            for (i, shown) in bars.into_iter().enumerate() {
+                let mut axes = if i == 0 {
+                    f.axes_at_mut(GridIndex::Auto, GridIndex::Auto).unwrap()
+                } else {
+                    f.twin_axes_at_mut(GridIndex::Auto, GridIndex::Auto)
+                        .unwrap()
+                };
+                let (label, ys) = if i == 0 {
+                    ("Left", [1., 2.])
+                } else {
+                    ("Right line with a wider label", [200., 100.])
+                };
+                axes.xlim(0., 1.).unwrap();
+                axes.line(
+                    AxisData::Numbers(vec![0., 1.]),
+                    &ys,
+                    LineOptions {
+                        label: label.into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                axes.legend(LegendStyle::Direct, SizeSpec::Auto).unwrap();
+                if shown {
+                    axes.scatter(
+                        AxisData::Numbers(vec![0.2, 0.8]),
+                        &ys,
+                        ScatterOptions {
+                            color: PointColor::By(ColorBy::new(vec![0., 10.])),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    axes.colorbar(ColorbarOptions {
+                        label: label.into(),
+                        position: Some(ColorbarPosition::Right),
+                        ..Default::default()
+                    })
+                    .unwrap();
+                }
+            }
+            let planned = plan_panel_marks(&f, FontLibrary::global());
+            let (left, right) = (&planned[0].1, &planned[1].1);
+            let a = left.direct[0].label.as_ref().unwrap();
+            let b = right.direct[0].label.as_ref().unwrap();
+            assert_eq!(a.x, b.x);
+            assert!(a.y < b.y);
+            let ticks_right = right
+                .y_tick_labels
+                .iter()
+                .map(|label| label.x + label.width())
+                .fold(0., f64::max);
+            assert!(a.x >= ticks_right + super::super::Y_LABEL_GAP);
+            let bars: Vec<_> = [left, right]
+                .into_iter()
+                .filter_map(|layout| layout.colorbar.as_ref())
+                .collect();
+            for label in [a, b] {
+                assert!(label.x + label.width() <= left.frame.right());
+                assert!(bars.iter().all(|bar| label.x + label.width() < bar.bar.x));
+            }
+            if bars.len() == 2 {
+                assert!(bars[0].bar.right() < bars[1].bar.x);
+                assert!(
+                    bars[0]
+                        .ticks
+                        .iter()
+                        .all(|(_, label)| label.x + label.width() < bars[1].bar.x)
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn category_direct_label_clears_right_tick_column() {
     let mut f = Figure::new(8., 5., Theme::graphite()).unwrap();
     let categories: Vec<String> = (1..=12).map(|i| i.to_string()).collect();

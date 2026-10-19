@@ -1,8 +1,9 @@
 //! Two y axes in one panel: category bars and a line, numeric grids, and a logarithmic right axis.
 
 use umber_core::{
-    BarOptions, Figure, FontLibrary, Grid, GridIndex, LineOptions, Placement, ScaleKind, SizeSpec,
-    ValueLabels,
+    AxisData, BarOptions, ColorBy, ColorbarOptions, ColorbarPosition, Figure, FontLibrary, Grid,
+    GridIndex, LegendStyle, LineOptions, Placement, PointColor, ScaleKind, ScatterOptions,
+    SizeSpec, ValueLabels,
 };
 
 use super::super::{Output, axes, emit_scene, figure, linear, log, themes};
@@ -79,6 +80,50 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("twin-y-log-bars-{name}"),
+            &f.to_scene(lib).unwrap(),
+            sink,
+        );
+
+        let mut f = figure(10.0, 6.0, theme.clone(), linear(), linear());
+        axes(&mut f).twin_y(linear()).unwrap();
+        for (twin, label, values) in [
+            (false, "Left line", [1., 2.]),
+            (true, "Right line", [200., 100.]),
+        ] {
+            let mut ax = if twin {
+                f.twin_axes_at_mut(GridIndex::Auto, GridIndex::Auto)
+                    .unwrap()
+            } else {
+                axes(&mut f)
+            };
+            ax.line(
+                AxisData::Numbers(vec![0., 1.]),
+                &values,
+                LineOptions {
+                    label: label.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            ax.scatter(
+                AxisData::Numbers(vec![0.2, 0.8]),
+                &values,
+                ScatterOptions {
+                    color: PointColor::By(ColorBy::new(vec![0., 10.])),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            ax.colorbar(ColorbarOptions {
+                label: if twin { "Right colors" } else { "Left colors" }.into(),
+                position: Some(ColorbarPosition::Right),
+                ..Default::default()
+            })
+            .unwrap();
+            ax.legend(LegendStyle::Direct, SizeSpec::Auto).unwrap();
+        }
+        emit_scene(
+            &format!("twin-y-direct-colorbars-{name}"),
             &f.to_scene(lib).unwrap(),
             sink,
         );

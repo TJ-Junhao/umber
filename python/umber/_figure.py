@@ -346,7 +346,7 @@ class Figure:
             top, left = self._native.add_axes(
                 *row_index, *col_index, rows, cols, *_scale.native(x), *_scale.native(y)
             )
-            axes = _axes.attach(self, self._native, x, y, top, left)
+            axes = _axes.attach(self, self._native, x, y, top, left, self._register_twin)
             self._axes[top, left] = axes
             return axes
 
@@ -652,6 +652,15 @@ class Figure:
         with api_call():
             return self._clone()
 
+    def _register_twin(
+        self, target: _umber.TwinAxes, x: Scale[X], y: Scale[float]
+    ) -> Axes[X, float]:
+        """Attach a native twin to this figure and keep its Python handle."""
+        axes = _axes.attach(self, self._native, x, y, target.row, target.col, self._register_twin)
+        object.__setattr__(axes, "_target", target)
+        self._twins[target.row, target.col] = axes
+        return axes
+
     def _clone(self) -> Self:
         """Return an independent figure: the native clone, with axes of its own."""
         clone = object.__new__(type(self))
@@ -664,16 +673,18 @@ class Figure:
         }
         for (row, col), axes in self._axes.items():
             x, y = _axes.scales(axes)
-            clone._axes[row, col] = _axes.attach(clone, clone._native, x, y, row, col)
+            clone._axes[row, col] = _axes.attach(
+                clone, clone._native, x, y, row, col, clone._register_twin
+            )
         clone._twins = {}
         for (row, col), axes in self._twins.items():
             x, y = _axes.scales(axes)
+            row_index = _index("Figure.twin_axes_at()", "row", row)
+            col_index = _index("Figure.twin_axes_at()", "col", col)
             target = clone._native.twin_axes_at(
-                1, row, 1, col, *_scale.native(x), *_scale.native(y)
+                *row_index, *col_index, *_scale.native(x), *_scale.native(y)
             )
-            twin = _axes.attach(clone, clone._native, x, y, row, col)
-            object.__setattr__(twin, "_target", target)
-            clone._twins[row, col] = twin
+            clone._register_twin(target, x, y)
         return clone
 
     def __reduce__(self) -> Never:

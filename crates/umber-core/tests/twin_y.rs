@@ -51,6 +51,57 @@ fn twin_settings_share_x_and_keep_y_independent() {
 }
 
 #[test]
+fn twin_lookup_errors_keep_their_context_and_details() {
+    for (row, col, pie, parameter) in [
+        (0, 0, true, "row"),
+        (1, 0, false, "row"),
+        (0, 1, false, "col"),
+    ] {
+        let mut f = Figure::new(8.0, 5.0, Theme::pigment()).unwrap();
+        if pie {
+            f.add_pie_axes().unwrap();
+        } else {
+            f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .twin_y(ScaleKind::Linear)
+                .unwrap();
+        }
+        let (row, col) = (GridIndex::At(row), GridIndex::At(col));
+        let original = f.axes_at(row, col).unwrap_err();
+        for error in [
+            f.twin_axes_at(row, col).unwrap_err(),
+            f.twin_axes_at_mut(row, col).unwrap_err(),
+        ] {
+            assert!(error.to_string().starts_with("Figure.twin_axes_at():"));
+            assert_eq!(error.parameter(), Some(parameter));
+            assert_eq!(error.hint(), original.hint());
+        }
+    }
+}
+
+#[test]
+fn twin_baseline_rejects_shown_without_changing_either_axes() {
+    use umber_core::BaselineVisibility::{Auto, Hidden, Shown};
+
+    let mut f = figure().unwrap();
+    let row = GridIndex::Auto;
+    f.axes_at_mut(row, row).unwrap().baseline(Shown).unwrap();
+    for accepted in [Hidden, Auto] {
+        let mut right = f.twin_axes_at_mut(row, row).unwrap();
+        right.baseline(accepted).unwrap();
+        let error = right.baseline(Shown).unwrap_err();
+        assert!(error.to_string().starts_with("Axes.baseline():"));
+        assert_eq!(error.parameter(), Some("shown"));
+        assert_eq!(
+            error.hint(),
+            Some("the left axes draws the baseline; set it there.")
+        );
+        assert_eq!(right.baseline_visibility(), accepted);
+        assert_eq!(f.axes_at(row, row).unwrap().baseline_visibility(), Shown);
+    }
+}
+
+#[test]
 fn twin_pdf_is_valid_and_matches_png() {
     let f = figure().unwrap();
     let pdf = f.to_pdf().unwrap();

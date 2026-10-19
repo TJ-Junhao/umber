@@ -343,7 +343,8 @@ inherit it. Copies of the figure keep the setting. Only drawing changes: the bas
 stays at zero on the value axis, or at its lower edge when zero is out of range. Limits,
 padding, bar bases, area fills and reference-line clipping stay unchanged. A gridline
 at the baseline tick is kept when the baseline is hidden. In a panel with a twin y
-axis, only the left axes draw a baseline, regardless of the twin's setting.
+axis, only the left axes draw a baseline. The twin accepts ``AUTO`` and ``False``;
+``True`` raises ``UsageError`` instead of being ignored.
 
 Args:
     shown: ``True`` draws the baseline; ``False`` hides it. ``AUTO`` restores the
@@ -355,7 +356,8 @@ Returns:
 
 Raises:
     TypeError: If ``shown`` is neither a bool nor ``AUTO``. Integers are not accepted.
-    UsageError: If ``shown=True`` on two category axes, which have no value axis.
+    UsageError: If ``shown=True`` on two category axes, which have no value axis, or
+        on a twin y axes; set the baseline on the left axes instead.
 
 Example:
 

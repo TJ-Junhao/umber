@@ -371,7 +371,9 @@ pub(crate) struct PanelBands {
     pub bottom_legend: f64,
     /// The right tick column, before legends and colorbars.
     pub(super) right_axis: f64,
-    /// Space occupied by the other y axis before this axis's right-hand decorations.
+    /// The right tick column before either y axis's direct labels.
+    pub(super) direct_offset: f64,
+    /// Space occupied before this axis's right colorbar and legend.
     pub(super) right_offset: f64,
     /// The twin's decorations before the panel's right legend.
     pub(super) right_legend_offset: f64,
@@ -694,6 +696,7 @@ pub(crate) fn measure_panel(
             Layer::Primary(_) => 0.0,
             Layer::Twin { .. } => y_tick_column,
         },
+        direct_offset: 0.0,
         right_offset: 0.0,
         right_legend_offset: 0.0,
         bottom_offset: 0.0,
@@ -856,8 +859,8 @@ pub(crate) fn place_panel(
     });
     let mut direct = input.legend.direct.placed(resolved, plot, frame);
     for label in direct.iter_mut().filter_map(|entry| entry.label.as_mut()) {
-        if bands.right_offset > 0.0 && label.x + label.width() > plot.right() {
-            label.x = label.x.max(plot.right() + Y_LABEL_GAP) + bands.right_offset;
+        if bands.direct_offset > 0.0 && label.x + label.width() > plot.right() {
+            label.x = label.x.max(plot.right() + Y_LABEL_GAP) + bands.direct_offset;
         }
     }
     let baseline = resolved.baseline;

@@ -558,6 +558,44 @@ impl<'a> DirectLabels<'a> {
         widest.map_or(0.0, |w| (self.dot / 2.0 + DIRECT_GAP + w).min(cap))
     }
 
+    /// Separates both y axes' labels in their shared column, leaving end dots on their lines.
+    pub(crate) fn separate_twins(&self, left: &mut super::Layout, right: &mut super::Layout) {
+        if left.direct.is_empty() || right.direct.is_empty() {
+            return;
+        }
+        let line = BODY_LINE * self.size;
+        let offset = baseline_in_line(-line / 2.0, line, self.ascent, self.descent);
+        let mut labels: Vec<_> = left
+            .direct
+            .iter_mut()
+            .chain(&mut right.direct)
+            .filter_map(|entry| entry.label.as_mut())
+            .collect();
+        let targets: Vec<_> = labels.iter().map(|label| label.y - offset).collect();
+        let centers = separate(
+            &targets,
+            DIRECT_SPACING * self.size,
+            left.plot.y,
+            left.plot.bottom(),
+        );
+        for (label, center) in labels.iter_mut().zip(centers) {
+            label.y = center + offset;
+        }
+        for direct in [&mut left.direct, &mut right.direct] {
+            for entry in direct.iter_mut() {
+                if let Some(label) = &entry.label {
+                    let center = label.y - offset;
+                    if center + line / 2.0 <= left.frame.y
+                        || center - line / 2.0 >= left.frame.bottom()
+                    {
+                        entry.label = None;
+                    }
+                }
+            }
+            direct.retain(|entry| entry.label.is_some() || entry.dot.is_some());
+        }
+    }
+
     /// The labels placed for the axes `resolved` on the plot area `plot` in `frame`, the canvas
     /// for a single axes, in series order.
     ///

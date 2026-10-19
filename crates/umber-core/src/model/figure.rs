@@ -666,7 +666,10 @@ impl Figure {
 
     /// Finds the right-hand axes of a Cartesian panel.
     fn twin_index_at(&self, row: GridIndex, col: GridIndex) -> Result<usize> {
-        let index = self.cartesian_index(self.index_at(row, col)?)?;
+        let index = self
+            .index_at(row, col)
+            .and_then(|index| self.cartesian_index(index))
+            .map_err(|err| err.with_context("Figure.twin_axes_at()"))?;
         match self.axes[index].twin {
             super::axes::TwinLink::Primary(right) => Ok(right),
             super::axes::TwinLink::None | super::axes::TwinLink::Twin(_) => Err(Error::usage(

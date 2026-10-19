@@ -1,7 +1,7 @@
 """``Axes``: the plot area of a figure, with its marks, texts, limits and legend."""
 
 import numbers
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import partial
 from operator import attrgetter
@@ -138,7 +138,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
     # The native figure is the one the axes' figure owns; it holds every mark and text. The
     # axes are found there by the row and column of their top-left cell.
-    __slots__ = ("_col", "_figure", "_native", "_row", "_target", "_x", "_y")
+    __slots__ = ("_col", "_figure", "_native", "_register_twin", "_row", "_target", "_x", "_y")
+    _register_twin: "Callable[[_umber.TwinAxes, Scale[X], Scale[float]], Axes[X, float]]"
     _figure: "umber.Figure"
     _native: _umber.Figure
     _row: int
@@ -203,11 +204,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             context = "Axes.twin_y()"
             instance(context, "scale", scale, Scale, "pass Scale.linear() or Scale.log().")
             target = self._native.twin_y(self._target, self._col, *_scale.native(scale))
-            axes = attach(self._figure, self._native, self._x, scale, self._row, self._col)
-            object.__setattr__(axes, "_target", target)
-            twins = cast(dict[tuple[int, int], Axes[Any, float]], _TWINS(self._figure))
-            twins[self._row, self._col] = axes
-            return axes
+            return self._register_twin(target, self._x, scale)
 
     def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the title, shown above the plot.
@@ -635,7 +632,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         stays at zero on the value axis, or at its lower edge when zero is out of range. Limits,
         padding, bar bases, area fills and reference-line clipping stay unchanged. A gridline
         at the baseline tick is kept when the baseline is hidden. In a panel with a twin y
-        axis, only the left axes draw a baseline, regardless of the twin's setting.
+        axis, only the left axes draw a baseline. The twin accepts ``AUTO`` and ``False``;
+        ``True`` raises ``UsageError`` instead of being ignored.
 
         Args:
             shown: ``True`` draws the baseline; ``False`` hides it. ``AUTO`` restores the
@@ -647,7 +645,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``shown`` is neither a bool nor ``AUTO``. Integers are not accepted.
-            UsageError: If ``shown=True`` on two category axes, which have no value axis.
+            UsageError: If ``shown=True`` on two category axes, which have no value axis, or
+                on a twin y axes; set the baseline on the left axes instead.
 
         Example:
             >>> import umber as ub
@@ -3759,6 +3758,7 @@ def attach(
     y: Scale[Y],
     row: int,
     col: int,
+    register_twin: Callable[[_umber.TwinAxes, Scale[X], Scale[float]], Axes[X, float]],
 ) -> Axes[X, Y]:
     """Return new axes of ``figure`` with the scales ``x`` and ``y``.
 
@@ -3773,6 +3773,7 @@ def attach(
         y: The y scale.
         row: The row of the axes' top-left cell.
         col: The column of the axes' top-left cell.
+        register_twin: The figure-owned method that attaches and registers a native twin.
 
     Returns:
         The axes.
@@ -3787,6 +3788,7 @@ def attach(
     axes = cast(Axes[X, Y], object.__new__(Axes))
     object.__setattr__(axes, "_figure", figure)
     object.__setattr__(axes, "_native", native)
+    object.__setattr__(axes, "_register_twin", register_twin)
     object.__setattr__(axes, "_row", row)
     object.__setattr__(axes, "_target", row)
     object.__setattr__(axes, "_col", col)
@@ -3796,7 +3798,6 @@ def attach(
 
 
 _CELL: Final = attrgetter("_row", "_col")
-_TWINS: Final = attrgetter("_twins")
 
 
 def cell(axes: Axes[Any, Any]) -> tuple[int, int]:

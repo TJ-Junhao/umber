@@ -542,8 +542,10 @@ impl<'a> AxesMut<'a> {
     ///
     /// # Errors
     ///
-    /// `Error::Usage`, naming `shown`, for [`BaselineVisibility::Shown`] on two category axes:
-    /// they have no value axis. A failed call changes nothing.
+    /// `Error::Usage`, naming `shown`, for [`BaselineVisibility::Shown`] on two category axes
+    /// (no value axis), or on a twin (the left axes draws the baseline). Twins accept
+    /// [`BaselineVisibility::Auto`] and [`BaselineVisibility::Hidden`]. A failed call changes
+    /// nothing.
     ///
     /// # Examples
     ///
@@ -556,6 +558,15 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn baseline(&mut self, shown: BaselineVisibility) -> Result<&mut Self> {
+        if shown == BaselineVisibility::Shown && matches!(self.twin, super::axes::TwinLink::Twin(_))
+        {
+            return Err(Error::usage(
+                "Axes.baseline()",
+                "these axes are a twin; only the left axes can show a baseline.",
+            )
+            .with_parameter("shown")
+            .with_hint("the left axes draws the baseline; set it there."));
+        }
         if shown == BaselineVisibility::Shown
             && self.x == ScaleKind::Category
             && self.y == ScaleKind::Category
