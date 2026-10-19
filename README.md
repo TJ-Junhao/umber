@@ -241,7 +241,7 @@ left.figure.save_png("weather.png")
 
 ## Text and annotations
 
-`ax.text(text, (x, y))` writes text at a data position, and `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a distance away in points, with an arrow to the position unless `arrow=False`. Positions use each axis' own values: numbers, times, or category names. Text and annotations never change the axis limits.
+`ax.text(text, (x, y))` writes text at a data position, and `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a distance away in points, with an arrow to the position unless `arrow=False`. Positions use each axis' own values: numbers, times, or category names. Text and annotations never change the axis limits. `"\n"` breaks them into lines: the first line sits where a single line would, and the others follow below it.
 
 `annotate=True` on `bar`, `grouped_bar` and `stacked_bar` writes each bar's value; automatic limits grow so that every value fits, and `format=` chooses how values are written. With explicit limits, a value that does not fit raises `StyleError` naming the bar.
 
@@ -266,7 +266,7 @@ ax.text("Target", (days[0], 32.0), color=ub.Color.GRAY)
 
 ## Titles and legends
 
-`fig.title(text)` and `fig.subtitle(text)` set text above the whole grid; `ax.title(text)` and `ax.subtitle(text)` belong to one panel. Each returns the same object for chaining, and an empty string removes the text. The figure title is 1.5 times the panel title size.
+`fig.title(text)` and `fig.subtitle(text)` set text above the whole grid; `ax.title(text)` and `ax.subtitle(text)` belong to one panel. Each returns the same object for chaining, and an empty string removes the text. The figure title is 1.5 times the panel title size. `"\n"` breaks a title or subtitle into lines, each aligned like the title; other labels are one line, and text with a line break or another control character where it is not supported raises an error at the call. A title, subtitle or axis label wider than its room raises `StyleError` when the figure is rendered, with the width it needs; make the figure wider or lower the font scale.
 
 `Theme.with_title_align(ub.Align.LEFT)` sets title alignment; `CENTER` and `RIGHT` are also available. Subtitles follow their title. On a multi-panel figure, the merged legend stays below the figure title and subtitle and follows their alignment, without a separate position setting. To place legends by panel, use `Legend.PER_PANEL`.
 

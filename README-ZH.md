@@ -241,7 +241,7 @@ left.figure.save_png("weather.png")
 
 ## 文字与标注
 
-`ax.text(text, (x, y))` 在数据位置写文字，`ax.annotate(text, (x, y), offset=(dx, dy))` 把文字写在离该位置一段距离（单位为 pt）的地方，并画箭头指向它，除非传入 `arrow=False`。位置使用各轴自己的值：数值、时间或类别名。文字和标注从不改变坐标轴范围。
+`ax.text(text, (x, y))` 在数据位置写文字，`ax.annotate(text, (x, y), offset=(dx, dy))` 把文字写在离该位置一段距离（单位为 pt）的地方，并画箭头指向它，除非传入 `arrow=False`。位置使用各轴自己的值：数值、时间或类别名。文字和标注从不改变坐标轴范围。`"\n"` 把它们分成多行：第一行的位置与单行时相同，其余各行依次排在下方。
 
 在 `bar`、`grouped_bar` 和 `stacked_bar` 上传入 `annotate=True` 会写出每根柱子的数值；自动 limits 会扩展到能放下所有数值，`format=` 选择数值的写法。使用显式 limits 时，放不下的数值会抛出指明该柱子的 `StyleError`。
 
@@ -266,7 +266,7 @@ ax.text("Target", (days[0], 32.0), color=ub.Color.GRAY)
 
 ## 标题与 legend
 
-`fig.title(text)` 和 `fig.subtitle(text)` 设置整个 grid 上方的文字；`ax.title(text)` 和 `ax.subtitle(text)` 只属于一个 panel。每个方法都返回原对象，支持链式调用；空字符串可移除文字。figure title 的字号是 panel title 的 1.5 倍。
+`fig.title(text)` 和 `fig.subtitle(text)` 设置整个 grid 上方的文字；`ax.title(text)` 和 `ax.subtitle(text)` 只属于一个 panel。每个方法都返回原对象，支持链式调用；空字符串可移除文字。figure title 的字号是 panel title 的 1.5 倍。`"\n"` 把标题或副标题分成多行，每行按标题的对齐方式对齐；其他标签只能是一行，在不支持的地方写入换行或其他控制字符，调用时就会报错。标题、副标题或坐标轴标签比可用空间宽时，渲染时抛出 `StyleError`，并给出所需宽度；请加宽图片或降低字体缩放。
 
 `Theme.with_title_align(ub.Align.LEFT)` 设置标题对齐方式，也可使用 `CENTER` 和 `RIGHT`。subtitle 跟随对应 title 对齐。多 panel figure 的 merged legend 固定放在 figure title 和 subtitle 下方，跟随它们对齐，没有独立的位置设置。若要按 panel 放置 legend，请使用 `Legend.PER_PANEL`。
 

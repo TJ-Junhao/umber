@@ -41,7 +41,8 @@ Common cases:
 - **"the x axis is not a category axis".** Create the axes with `add_axes(x=ub.Scale.category())` (or `y=` for horizontal bars) before calling `bar`, `box`, `violin`, `strip`, `swarm`; `heatmap` needs both axes to be category axes.
 - **Values that must be finite.** Drop or fill NaN and infinite values first, unless the method documents NaN as a gap (lines and areas break at NaN; points with NaN are left out).
 - **Log axes.** Every value on a log axis must be positive.
-- **Labels or legends that do not fit.** The error names the text and the room it needs; make the figure larger, shorten the text, use a smaller `size=`, or move the legend.
+- **Labels or legends that do not fit.** The error names the text and the room it needs, titles and axis labels included; make the figure larger, shorten the text, use a smaller `size=` or font scale, or move the legend.
+- **Line breaks and control characters.** `"\n"` is allowed only in titles, subtitles, `text` and `annotate`; elsewhere, and for `\t`, `\r` and other control characters anywhere, the call raises. Split the text into a title and a subtitle, or use spaces.
 - **Pie slices.** More slices than palette colors need `colors=`; small slices whose labels cannot be placed should be merged into "Other" or shown with `legend(ub.LegendStyle.HEADER)`.
 - **Fonts without bold.** Titles and direct legend labels are bold. Pass `bold=` to `ub.Font.from_file`, choose a family with a bold face, or create the font with `bold_fallback=True`.
 - **`by=` with `color=` or `label=`.** Each group already takes the next palette color and its name as the label; drop those arguments.
