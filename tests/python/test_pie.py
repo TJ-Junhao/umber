@@ -202,6 +202,13 @@ def test_donut_renders_in_a_crowded_grid() -> None:
         assert any(text is not None and text.split(" ")[0] == name for text in labels)
 
 
+def test_donut_that_fits_beside_axes_titles_renders() -> None:
+    fig = ub.Figure(5, 1.8, cols=2, theme=ub.Theme.PIGMENT)
+    fig.add_pie_axes(col=0).pie(["Web", "App", "Shop"], [52, 30, 18], hole=0.55, annotate=True)
+    fig.add_axes(col=1).line([0, 1], [0, 1]).xlabel("Distance").ylabel("Volume")
+    assert fig.to_svg().startswith("<svg")
+
+
 def test_too_many_slices_rejected() -> None:
     ax = ub.Figure().add_pie_axes()
     with pytest.raises(ub.StyleError, match="colors"):

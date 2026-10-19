@@ -40,11 +40,13 @@
 //! canvas edge on the grid's outer sides. Neighbouring frames touch and never overlap, so the
 //! marks clip of a panel never reaches into the next cell.
 //!
-//! A pie panel has no axes to line up. Its bands take part in the solve as any panel's do, but
-//! it is laid out in its whole cell: its columns and rows with their bands, inside the gaps and
-//! the canvas padding, less any shared colorbar there. Its header starts at its row's top and
-//! spans the cell, and its plot area is the rest of the cell, less a legend beside or below
-//! it (see [`pie_slot`]).
+//! A pie panel has no axes to line up. Its bands take part in the solve as any panel's do,
+//! measured on its aligned plots, so it never moves the other panels' plots; but it is laid out
+//! in its whole cell: its columns and rows with their bands, inside the gaps and the canvas
+//! padding, less any shared colorbar there. Its header starts at its row's top and spans the
+//! cell, and its plot area is the rest of the cell, less a legend beside or below it (see
+//! [`pie_slot`]). Its circle may shrink for its outside labels only as far as in its aligned
+//! plot area (see [`super::pie::PieRoom`]).
 
 use super::inset::{CONTAINMENT_TOLERANCE, TickSpan};
 use super::panel::{
@@ -302,16 +304,21 @@ fn pie_rows(input: &GridInput<'_>, rows: &PlacedRows, cells: CellRange) -> (f64,
 }
 
 /// The slot of the pie panel of `panel`, measured in `bands`, in its cell `left..right` across
-/// and `top..bottom` down. Its header box spans the cell from the top of its row, so that its
-/// title lines up with the row's other titles; its plot area is the rest of the cell, less a
-/// legend beside or below it. A pie has no axes to line up, so its plot area does not follow
-/// the grid's aligned plots: its outside labels may use the room that the other panels' tick
-/// labels, direct labels and colorbars take in their own cells.
+/// and `top..bottom` down, with `aligned` the plot area its cells have where the grid lines up
+/// the plots. Its header box spans the cell from the top of its row, so that its title lines
+/// up with the row's other titles; its plot area is the rest of the cell, less a legend beside
+/// or below it. A pie has no axes to line up, so its plot area does not follow the grid's
+/// aligned plots: its outside labels may use the room that the other panels' tick labels,
+/// direct labels and colorbars take in their own cells.
+///
+/// The row bands are measured for the aligned plots, and a header or legend row wraps in no
+/// more lines across the wider cell, so the pie's header and legends fit the bands reserved
+/// for them.
 fn pie_slot(
     panel: &LayoutInput<'_>,
     bands: &PanelBands,
-    (left, right): (f64, f64),
-    (top, bottom): (f64, f64),
+    ((left, right), (top, bottom)): ((f64, f64), (f64, f64)),
+    aligned: Area,
     frame: Frame,
 ) -> PanelSlot {
     let plot_right = right - bands.right();
@@ -327,6 +334,7 @@ fn pie_slot(
             width: plot_right - left,
             height: plot_bottom - plot_top,
         },
+        aligned,
         header: HeaderBox { left, right, top },
         xlabel_baseline: plot_bottom,
         frame,
@@ -375,6 +383,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             .map(|(panel, bands)| {
                 solve_single(panel, bands, canvas, input.top).map(|plot| PanelSlot {
                     plot,
+                    aligned: plot,
                     header,
                     xlabel_baseline: plot.bottom()
                         + bands.x_band
@@ -411,18 +420,9 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
         }
         Err(stuck) => return Err(x_labels_do_not_fit(input, &cells, bands, &columns, &stuck)),
     };
-    // A pie panel's header and legends span its whole cell rather than the aligned plots.
-    let spans: Vec<(f64, f64)> = cells
-        .iter()
-        .zip(input.panels)
-        .map(|(cells, panel)| {
-            if is_pie(panel) {
-                pie_columns(input, &columns, &placed, *cells)
-            } else {
-                placed.span(*cells)
-            }
-        })
-        .collect();
+    // The row bands are measured with every panel on its aligned plots, a pie panel too, so
+    // that a pie's header and legends never move the other panels' plots.
+    let spans: Vec<(f64, f64)> = cells.iter().map(|c| placed.span(*c)).collect();
     let rows = Rows::measure(input, &cells, bands, &spans);
     let rows = rows
         .place(input)
@@ -433,6 +433,13 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
         .zip(input.panels)
         .zip(&spans)
         .map(|(((cells, bands), panel), &(left, right))| {
+            let (top, bottom) = rows.span(*cells);
+            let aligned = Area {
+                x: left,
+                y: top,
+                width: right - left,
+                height: bottom - top,
+            };
             let (frame_left, frame_right) = placed.frame(*cells, columns.canvas);
             let (frame_top, frame_bottom) = rows.frame(*cells, input.height);
             let frame = Frame {
@@ -442,19 +449,17 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                 height: frame_bottom - frame_top,
             };
             if is_pie(panel) {
-                let (top, bottom) = pie_rows(input, &rows, *cells);
-                return pie_slot(panel, bands, (left, right), (top, bottom), frame);
+                let cell = (
+                    pie_columns(input, &columns, &placed, *cells),
+                    pie_rows(input, &rows, *cells),
+                );
+                return pie_slot(panel, bands, cell, aligned, frame);
             }
-            let (top, bottom) = rows.span(*cells);
             let last_row = cells.row() + cells.row_span() - 1;
             let (header_left, header_right) = input.header_span(left, right);
             PanelSlot {
-                plot: Area {
-                    x: left,
-                    y: top,
-                    width: right - left,
-                    height: bottom - top,
-                },
+                plot: aligned,
+                aligned,
                 header: HeaderBox {
                     left: header_left,
                     right: header_right,
@@ -1082,8 +1087,7 @@ struct PlacedRows {
 impl Rows {
     /// The bands of the rows of `input`'s grid, from the panels covering `cells` with the texts
     /// measured in `bands` and their plots running from left to right as in `spans`, which
-    /// their legend rows wrap within; for a pie panel, `spans` holds its cell (see
-    /// [`pie_columns`]).
+    /// their legend rows wrap within.
     fn measure(
         input: &GridInput<'_>,
         cells: &[CellRange],

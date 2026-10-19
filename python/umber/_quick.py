@@ -43,7 +43,7 @@ def pie(
     The same as ``Figure(theme=theme).add_pie_axes().pie(categories, values, ...)``.
     Slices run clockwise from twelve o'clock in input order. Direct labels need room around
     the circle; in small panels, ``legend(LegendStyle.CHIPS)`` or ``HEADER`` moves the names
-    into a legend while the shares stay on the slices.
+    into a legend and keeps the shares annotated.
 
     Args:
         categories: Unique slice names, one per value.

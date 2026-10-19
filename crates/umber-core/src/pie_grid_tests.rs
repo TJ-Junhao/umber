@@ -204,7 +204,8 @@ fn pie_of(f: &Figure, plan: &FigurePlan) -> (CellRange, Layout, layout::pie::Pie
     let layout = plan.panels[index].1.clone();
     let fonts = crate::test_support::figure_fonts(f.theme());
     let pie = panel.pie.as_ref().expect("the panel holds a pie");
-    let placed = layout::pie::place(pie, panel.legend, layout.plot, f.theme(), &fonts)
+    let room = layout::pie::PieRoom::new(layout.plot, layout.aligned);
+    let placed = layout::pie::place(pie, panel.legend, room, f.theme(), &fonts)
         .expect("the pie fits its plot area");
     (panel.cells, layout, placed)
 }
@@ -311,8 +312,10 @@ fn grid_pies_get_the_circle_of_a_figure_of_their_cell_size() {
         (LegendStyle::Header, Some(LegendPosition::Bottom)),
     ];
     let cells = [(0, 0), (0, 1), (1, 0), (1, 1)];
-    for (k, &pie) in cells.iter().enumerate() {
-        let (style, position) = legends[k % legends.len()];
+    for (&pie, (style, position)) in cells
+        .iter()
+        .flat_map(|c| legends.iter().map(move |l| (c, *l)))
+    {
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
             let grid = Grid::new(2, 2).unwrap().with_legend(LegendMode::PerPanel);
             let mut f = Figure::with_grid(11.0, 7.0, theme.clone(), grid).unwrap();
@@ -327,6 +330,8 @@ fn grid_pies_get_the_circle_of_a_figure_of_their_cell_size() {
             donut(&mut f, pie, style, position);
             let plan = planned(&f).unwrap();
             let (cells, layout, placed) = pie_of(&f, &plan);
+            // The pie's header fits the band the row reserved above the aligned plots.
+            assert!(layout.header_bottom <= layout.aligned.y + 1e-9);
             let cell = cell(&f, cells, layout.frame);
             let expected = alone(&theme, cell, style, position);
             assert!(
@@ -513,4 +518,88 @@ fn too_small_pie_cells_fail_and_name_sizes_that_suffice() {
     let need = named_width(&wide(100.0).to_scene(lib()).unwrap_err()).unwrap();
     wide(need).to_scene(lib()).unwrap();
     wide(need - 1.0).to_scene(lib()).unwrap_err();
+}
+
+#[test]
+fn a_donut_that_fits_its_aligned_plot_also_fits_its_cell() {
+    // The cell is taller than the aligned plot; the circle the labels need is smaller than
+    // half the largest circle in the cell, but not than half the one in the aligned plot.
+    let mut f = Figure::with_grid(5.0, 1.8, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
+    f.add_pie_axes_at(at(0, 0))
+        .unwrap()
+        .pie(
+            ["Web", "App", "Shop"].map(String::from).to_vec(),
+            &[52.0, 30.0, 18.0],
+            PieOptions {
+                hole: 0.55,
+                annotate: true,
+                ..PieOptions::default()
+            },
+        )
+        .unwrap();
+    f.add_axes_at(at(0, 1), ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .xlabel("Distance")
+        .ylabel("Volume");
+    let plan = planned(&f).unwrap();
+    let (_, layout, placed) = pie_of(&f, &plan);
+    let least = |area: Area| area.width.min(area.height) / 4.0;
+    assert!(layout.plot.height > layout.aligned.height);
+    assert!(placed.circle.radius < least(layout.plot));
+    assert!(placed.circle.radius >= least(layout.aligned));
+    f.to_scene(lib()).unwrap();
+}
+
+#[test]
+fn pie_legends_leave_the_cartesian_plots_where_they_were() {
+    let grid = Grid::new(2, 2).unwrap().with_legend(LegendMode::PerPanel);
+    let mut f = Figure::with_grid(8.0, 5.0, Theme::pigment(), grid).unwrap();
+    f.add_pie_axes_at(at(0, 0))
+        .unwrap()
+        .title("Pie")
+        .pie(
+            ["North", "South", "East", "West", "Other"]
+                .map(String::from)
+                .to_vec(),
+            &[60.0, 20.0, 10.0, 5.0, 5.0],
+            PieOptions {
+                hole: 0.55,
+                ..PieOptions::default()
+            },
+        )
+        .unwrap()
+        .legend(LegendStyle::Header, None, SizeSpec::Auto)
+        .unwrap();
+    for (row, col) in [(0, 1), (1, 0), (1, 1)] {
+        f.add_axes_at(at(row, col), ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .title(&format!("Line {row}{col}"))
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1_000_000.0, 2_000_000.0],
+                labelled("Many outputs"),
+            )
+            .unwrap()
+            .legend(LegendStyle::Direct, SizeSpec::Auto)
+            .unwrap();
+    }
+    let plan = planned(&f).unwrap();
+    let (_, pie, _) = pie_of(&f, &plan);
+    assert!(pie.header_bottom <= pie.aligned.y + 1e-9);
+    // The plot of (0, 1) where the pie's legend row is measured across the aligned plot.
+    let line = f
+        .layers()
+        .zip(&plan.panels)
+        .find(|(layer, _)| layer.cells().row() == 0 && layer.cells().col() == 1)
+        .map(|(_, (_, layout))| layout.plot)
+        .unwrap();
+    assert!((line.y - 71.700).abs() < 5e-4, "{line:?}");
+    assert!((line.height - 94.856).abs() < 5e-4, "{line:?}");
+    f.to_scene(lib()).unwrap();
 }

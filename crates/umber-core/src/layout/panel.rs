@@ -83,6 +83,10 @@ pub(crate) struct HeaderBox {
 pub(crate) struct PanelSlot {
     /// The plot area.
     pub plot: Area,
+    /// The plot area the panel's cells have where the grid lines up the plots of its panels:
+    /// the plot area itself, except for a pie panel on a grid, whose plot area is its whole
+    /// cell below its header.
+    pub aligned: Area,
     /// The header box.
     pub header: HeaderBox,
     /// The baseline of the x axis label: under the panel's own x tick labels for a figure of
@@ -947,6 +951,7 @@ pub(crate) fn place_panel(
 ) -> Layout {
     let PanelSlot {
         plot,
+        aligned,
         header: header_box,
         xlabel_baseline,
         frame,
@@ -1104,6 +1109,7 @@ pub(crate) fn place_panel(
 
     Layout {
         plot,
+        aligned,
         #[cfg(test)]
         header_bottom: header.bottom,
         title: header.title,
@@ -1360,6 +1366,7 @@ mod tests {
         fn of(layout: &Layout) -> Vec<String> {
             let mut bits = Bits::default();
             bits.area("plot", &layout.plot);
+            bits.area("aligned", &layout.aligned);
             bits.num("header_bottom", layout.header_bottom);
             bits.labels("title", layout.title.iter().flat_map(TextBlock::lines));
             bits.labels(
@@ -1427,6 +1434,7 @@ mod tests {
     fn single_slot(grid: &GridInput<'_>, plot: Area, bands: &PanelBands) -> PanelSlot {
         PanelSlot {
             plot,
+            aligned: plot,
             xlabel_baseline: plot.bottom() + bands.x_band + AXIS_LABEL_GAP + bands.xlabel_ascent,
             header: HeaderBox {
                 left: PADDING,

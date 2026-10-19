@@ -91,7 +91,7 @@ class PieAxes:
         The default legend style is ``DIRECT``, regardless of the theme. ``HEADER`` and
         ``CHIPS`` replace direct names with a panel legend; ``NONE`` hides names. Direct
         labels need room around the circle; in small panels, ``legend(LegendStyle.CHIPS)``
-        or ``HEADER`` moves the names into a legend while the shares stay on the slices.
+        or ``HEADER`` moves the names into a legend and keeps the shares annotated.
 
         Args:
             categories: Unique slice names, one per value.
