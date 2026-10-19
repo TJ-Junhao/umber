@@ -260,6 +260,84 @@ fn pdf_text_extractable() {
 }
 
 #[test]
+fn pdf_text_of_several_lines_extracts_line_by_line() {
+    use umber_core::{AnnotateOptions, AxisValue};
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title("Station output\nDaily mean\nMW")
+        .subtitle("Measured hourly\n2026")
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap()
+        .annotate(
+            "Peak\nof the season",
+            (AxisValue::Number(0.5), AxisValue::Number(0.3)),
+            AnnotateOptions {
+                offset: (40.0, 30.0),
+                ..AnnotateOptions::default()
+            },
+        )
+        .unwrap();
+    let pdf = figure.to_pdf().unwrap();
+    let dir = scratch("lines");
+    let path = write(&dir, "lines.pdf", &pdf);
+    assert_readers_parse(&path);
+    let expected = [
+        "Station output",
+        "Daily mean",
+        "MW",
+        "Measured hourly",
+        "2026",
+        "Peak",
+        "of the season",
+    ];
+    // Each line of the texts is a line of the extracted text, in order.
+    let check = |reader: &str, text: &str| {
+        let lines: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        let found: Vec<usize> = expected
+            .iter()
+            .map(|want| {
+                lines
+                    .iter()
+                    .position(|line| line == want)
+                    .unwrap_or_else(|| panic!("{reader}: no line {want:?} in {lines:?}"))
+            })
+            .collect();
+        assert!(
+            found.windows(2).all(|pair| pair[0] < pair[1]),
+            "{reader}: {lines:?}"
+        );
+    };
+    if have("pdftotext") {
+        check("pdftotext", &extracted_text(&path));
+    }
+    if have("mutool") && mupdf_reads_actual_text() {
+        let out = Command::new("mutool")
+            .args(["draw", "-q", "-F", "txt", "-o", "-"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        check("MuPDF", &String::from_utf8(out.stdout).unwrap());
+    }
+}
+
+#[test]
 fn pdf_embeds_only_used_glyphs() {
     let library = FontLibrary::with_fallbacks(Vec::new());
     let pdf = render_pdf(&text_scene(&library, &[Font::INTER], "abcab")).unwrap();

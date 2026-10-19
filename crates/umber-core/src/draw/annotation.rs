@@ -1,17 +1,22 @@
 //! Text at data positions: where [`Annotation`]s sit, their arrows, and the checks that keep
 //! them on their axes and on the figure.
 //!
-//! An annotation's text box is its advance width by the ascent and descent of its font. Text
-//! of [`AnnotationPlacement::At`] has its aligned edge, or its centre, and its vertical centre at
-//! the point. Text of [`AnnotationPlacement::Offset`] has the part of its box that faces the
-//! point at the offset point (see [`anchor`]), and its arrow runs from [`TEXT_GAP`] beyond the
-//! box edge to [`POINT_GAP`] short of the point.
+//! An annotation's first line is placed by its line box, its advance width by the ascent and
+//! descent of its font. Text of [`AnnotationPlacement::At`] has the line's aligned edge, or its
+//! centre, and its vertical centre at the point. Text of [`AnnotationPlacement::Offset`] has
+//! the part of the line box that faces the point at the offset point (see [`anchor`]). Further
+//! lines go below the first, [`LINE_PITCH`](crate::layout::LINE_PITCH) sizes apart. The text
+//! box spans every line: the widest line's width, from the first line's top to the last line's
+//! descent. Each line is aligned within it: on the point by `align` for `At`, and towards the
+//! point for `Offset` (left-aligned when the offset points right, right-aligned when it points
+//! left, centred when it points straight up or down). The arrow runs from [`TEXT_GAP`] beyond
+//! the text box's edge to [`POINT_GAP`] short of the point.
 
-use super::chrome::{segment, text};
+use super::chrome::{block_items, segment};
 use super::mapping::{AxisMap, AxisMaps, axis_position, point};
 use crate::error::{number, quoted};
 use crate::geometry::Path;
-use crate::layout::{Label, Layout, PlotText, plot_text};
+use crate::layout::{Layout, TextBlock, annotation_text};
 use crate::model::{Annotation, AnnotationPlacement, AxisValue};
 use crate::resolve::{AxisScale, Resolved, ResolvedAxis};
 use crate::scene::{FillRule, Item, LineCap, LineJoin, Paint, StrokeStyle};
@@ -46,7 +51,7 @@ const LIMITS_HINT: &str = "set xlim/ylim to include it, or move the point.";
 /// - `Error::Style` when its point lies outside the limits of either axis, when its text
 ///   reaches past an edge of the canvas, or when less than [`ARROW_ROOM`] lies between its
 ///   text and its point for an arrow;
-/// - as [`plot_text`] when its text cannot be laid out.
+/// - as [`annotation_text`] when its text cannot be laid out.
 pub(crate) fn items(
     theme: &Theme,
     lib: &SceneFonts<'_>,
@@ -67,20 +72,20 @@ pub(crate) fn items(
             position(annotation, "x", &resolved.x, maps.x, x, context)?,
             position(annotation, "y", &resolved.y, maps.y, y, context)?,
         );
-        let label = plot_text(
+        let block = annotation_text(
             lib,
             theme,
+            &name(annotation),
             annotation.text(),
-            PlotText::Annotation,
             annotation.size(),
         )?;
-        let placed = place(annotation.placement(), label, at);
+        let placed = place(annotation.placement(), block, at);
         check_canvas(annotation, &placed, canvas, context)?;
         let color = text_color(theme, annotation.color());
         if let AnnotationPlacement::Offset { arrow: true, .. } = annotation.placement() {
             arrow(annotation, &placed, at, color, context, &mut items)?;
         }
-        items.push(text(&placed.label, color));
+        items.extend(block_items(&placed.block, color));
     }
     Ok(Some(Item::Group { clip: None, items }))
 }
@@ -135,36 +140,48 @@ fn position(
 
 /// An annotation's text, placed, with its box.
 struct Placed {
-    /// The text, its baseline origin set.
-    label: Label,
+    /// The text, each line's baseline origin set.
+    block: TextBlock,
     /// The left, top, right and bottom edges of its box.
     bounds: [f64; 4],
 }
 
-/// The text `label` of an annotation placed as `placement` for its point `(x, y)`, in plot
-/// points.
-fn place(placement: AnnotationPlacement, mut label: Label, (x, y): (f64, f64)) -> Placed {
-    let width = label.width();
+/// The text `block` of an annotation placed as `placement` for its point `(x, y)`, in plot
+/// points: its first line where a text of one line would be, further lines below it.
+fn place(placement: AnnotationPlacement, mut block: TextBlock, (x, y): (f64, f64)) -> Placed {
+    let width = block.width();
+    let first = block.first();
     let (ascent, descent) = (
-        f64::from(label.layout.ascent()),
-        f64::from(label.layout.descent()),
+        f64::from(first.layout.ascent()),
+        f64::from(first.layout.descent()),
     );
     let height = ascent + descent;
     let (left, top) = match placement {
-        AnnotationPlacement::At(align) => (align.position(width, x, x), y - height / 2.0),
+        AnnotationPlacement::At(align) => {
+            let top = y - height / 2.0;
+            block.place(top + ascent, |line| align.position(line, x, x));
+            (align.position(width, x, x), top)
+        }
         AnnotationPlacement::Offset { offset, .. } => {
             let (share_x, share_y) = anchor(offset);
-            (
-                x + offset.0 - share_x * width,
-                y - offset.1 - share_y * height,
-            )
+            let left = x + offset.0 - share_x * width;
+            let top = y - offset.1 - share_y * height;
+            // Each line is aligned on the side of the box that faces the point.
+            block.place(top + ascent, |line| {
+                let slack = width - line;
+                if slack > 0.0 {
+                    left + share_x * slack
+                } else {
+                    left
+                }
+            });
+            (left, top)
         }
     };
-    label.x = left;
-    label.y = top + ascent;
+    let bottom = top + height + block.below_first();
     Placed {
-        label,
-        bounds: [left, top, left + width, top + height],
+        block,
+        bounds: [left, top, left + width, bottom],
     }
 }
 

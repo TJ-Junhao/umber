@@ -171,7 +171,7 @@ impl Figure {
             .with_parameter("position")
             .with_hint("use AUTO for the shared colorbar position, or share colors with ALL."));
         }
-        super::check_text(CONTEXT, "label", "label", &options.label)?;
+        super::check_text(CONTEXT, "label", "label", &options.label, "colorbar labels")?;
         self.colorbar = options;
         Ok(self)
     }
@@ -183,7 +183,12 @@ impl Figure {
 
     /// Sets the figure title, above the panels and the merged legend.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the figure inside its padding.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
+    /// padding, and if the text holds a control character other than `"\n"` or a line or
+    /// paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -201,7 +206,12 @@ impl Figure {
 
     /// Sets the figure subtitle, below its title and above the merged legend.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the figure inside its padding.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
+    /// padding, and if the text holds a control character other than `"\n"` or a line or
+    /// paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -1034,7 +1044,12 @@ impl Figure {
     /// Sets the figure title and its size. Multiples use 1.5 times the theme's panel title
     /// size, including font scale; points ignore both multipliers.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the figure inside its padding.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
+    /// padding, and if the text holds a control character other than `"\n"` or a line or
+    /// paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -1053,7 +1068,12 @@ impl Figure {
 
     /// Sets the figure subtitle and its size, relative to the theme's body size or in points.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the figure inside its padding.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
+    /// padding, and if the text holds a control character other than `"\n"` or a line or
+    /// paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///

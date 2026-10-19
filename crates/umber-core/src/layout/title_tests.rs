@@ -484,7 +484,7 @@ fn one_cell_twin_keeps_title_alignment_and_room_with_ticks() {
                 } else {
                     &layout.title
                 };
-                let label = label.as_ref().unwrap();
+                let label = label.as_ref().unwrap().first();
                 (label.x, label.y, label.width())
             };
             assert_eq!(label(&single[0].1), label(&twin[0].1));

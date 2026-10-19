@@ -1,0 +1,1094 @@
+//! Titles and subtitles of several lines, and the characters text may hold.
+
+use super::*;
+use crate::layout::{LINE_PITCH, PADDING, TextBlock};
+use crate::scene::{Item, TextItem};
+use crate::{Align, AxisData, Grid, GridIndex, LineOptions, PieOptions, Placement, ScaleKind};
+
+/// The library of these tests: the bundled fonts and no system fonts.
+fn lib() -> FontLibrary {
+    FontLibrary::with_fallbacks(Vec::new())
+}
+
+/// Lays out every panel and the figure header of `f`.
+fn plan_of(f: &Figure) -> Result<FigurePlan> {
+    let lib = lib();
+    let groups = ShareGroups::new(f);
+    let fonts = layout::figure_fonts(&lib, f.theme())?.in_context("Figure.to_scene()");
+    let panels = panels(f, &groups, &fonts)?;
+    plan(
+        f,
+        &panels,
+        &groups,
+        &fonts,
+        "Figure.to_scene()",
+        &layout::LabelCache::new(&fonts),
+    )
+}
+
+/// A 6 by 4 in figure of one line chart in pigment with `align` for titles, its title and
+/// subtitle `title` and `subtitle`.
+fn single(align: Align, title: &str, subtitle: &str) -> Figure {
+    let theme = Theme::pigment().with_title_align(align).unwrap();
+    let mut f = Figure::new(6.0, 4.0, theme).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title(title)
+        .subtitle(subtitle)
+        .line(
+            AxisData::Numbers(vec![0.0, 1.0, 2.0]),
+            &[1.0, 3.0, 2.0],
+            LineOptions::default(),
+        )
+        .unwrap();
+    f
+}
+
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-9
+}
+
+/// Checks that the lines of `block` are `LINE_PITCH` sizes apart and each aligned by `align`
+/// within `left..right`, and that they spell `text`.
+#[track_caller]
+fn assert_lines(block: &TextBlock, text: &str, align: Align, (left, right): (f64, f64)) {
+    let lines: Vec<_> = block.lines().collect();
+    assert_eq!(
+        lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+        text.split('\n').collect::<Vec<_>>()
+    );
+    let pitch = LINE_PITCH * f64::from(lines[0].style.size);
+    assert!(close(block.pitch(), pitch));
+    for (i, line) in lines.iter().enumerate() {
+        assert!(
+            close(line.y - lines[0].y, i as f64 * pitch),
+            "{text:?} line {i}"
+        );
+        assert_eq!(
+            line.x,
+            align.position(line.width(), left, right),
+            "{text:?} line {i}"
+        );
+    }
+    let widest = lines.iter().map(|l| l.width()).fold(0.0, f64::max);
+    assert_eq!(block.width(), widest);
+}
+
+#[test]
+fn title_and_subtitle_lines_start_where_one_line_does() {
+    const TITLE: &str = "Station output\nDaily mean across the network\nMW";
+    const SUBTITLE: &str = "Measured hourly\n2026";
+    for align in [Align::Left, Align::Center, Align::Right] {
+        let one = plan_of(&single(align, "Station output", "Measured hourly")).unwrap();
+        let many = plan_of(&single(align, TITLE, SUBTITLE)).unwrap();
+        let (one, many) = (&one.panels[0].1, &many.panels[0].1);
+        let room = (PADDING, 6.0 * 72.0 - PADDING);
+        let (title, subtitle) = (
+            many.title.as_ref().unwrap(),
+            many.subtitle.as_ref().unwrap(),
+        );
+        assert_lines(title, TITLE, align, room);
+        assert_lines(subtitle, SUBTITLE, align, room);
+        // The first line is where the text of one line is; the subtitle moves down by the two
+        // further title lines.
+        let (one_title, one_subtitle) =
+            (one.title.as_ref().unwrap(), one.subtitle.as_ref().unwrap());
+        assert_eq!(
+            (title.first().x, title.first().y),
+            (one_title.first().x, one_title.first().y)
+        );
+        assert_eq!(subtitle.first().x, one_subtitle.first().x);
+        assert!(close(
+            subtitle.first().y - one_subtitle.first().y,
+            2.0 * title.pitch()
+        ));
+        // The header grows by every further line, and the plot moves down with it.
+        let grown = 2.0 * title.pitch() + subtitle.pitch();
+        assert!(close(many.header_bottom - one.header_bottom, grown));
+        assert!(close(many.plot.y - one.plot.y, grown));
+        assert!(close(many.plot.bottom(), one.plot.bottom()));
+    }
+}
+
+#[test]
+fn blank_lines_are_kept_and_an_empty_text_removes_the_title() {
+    let f = single(Align::Left, "\nMiddle\n\n", "");
+    let plan = plan_of(&f).unwrap();
+    let layout = &plan.panels[0].1;
+    let title = layout.title.as_ref().unwrap();
+    let texts: Vec<_> = title.lines().map(|l| l.text.as_str()).collect();
+    assert_eq!(texts, ["", "Middle", "", ""]);
+    assert!(close(title.below_first(), 3.0 * title.pitch()));
+    let none = plan_of(&single(Align::Left, "", "")).unwrap();
+    assert!(none.panels[0].1.title.is_none());
+    // Every line, blank ones too, is a text item of the scene.
+    let scene = f.to_scene(&lib()).unwrap();
+    let mut texts = Vec::new();
+    collect_texts(&scene.items, &mut texts);
+    assert_eq!(texts.iter().filter(|t| t.text.is_empty()).count(), 3);
+    assert!(texts.iter().all(|t| !t.text.contains('\n')));
+}
+
+fn collect_texts<'a>(items: &'a [Item], out: &mut Vec<&'a TextItem>) {
+    for item in items {
+        match item {
+            Item::Group { items, .. } => collect_texts(items, out),
+            Item::Text(text) => out.push(text),
+            _ => {}
+        }
+    }
+}
+
+/// A 9 by 4 in figure of two panels with the figure title `title`.
+fn grid(title: &str) -> Figure {
+    let mut f = Figure::with_grid(9.0, 4.0, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
+    f.title(title).subtitle("Weekly totals");
+    for col in 0..2 {
+        f.add_axes_at(
+            Placement {
+                col: GridIndex::At(col),
+                ..Placement::default()
+            },
+            ScaleKind::Linear,
+            ScaleKind::Linear,
+        )
+        .unwrap()
+        .title("Panel")
+        .line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[1.0, 2.0],
+            LineOptions::default(),
+        )
+        .unwrap();
+    }
+    f
+}
+
+#[test]
+fn a_figure_title_of_two_lines_pushes_the_grid_down() {
+    let one = plan_of(&grid("Regional growth")).unwrap();
+    let two = plan_of(&grid("Regional growth\nacross both regions")).unwrap();
+    let title = two.header.title.as_ref().unwrap();
+    assert_lines(
+        title,
+        "Regional growth\nacross both regions",
+        Align::Left,
+        (PADDING, 9.0 * 72.0 - PADDING),
+    );
+    let first = one.header.title.as_ref().unwrap().first();
+    assert_eq!((title.first().x, title.first().y), (first.x, first.y));
+    let pitch = title.pitch();
+    assert!(close(two.header.bottom - one.header.bottom, pitch));
+    let subtitle = |plan: &FigurePlan| plan.header.subtitle.as_ref().unwrap().first().y;
+    assert!(close(subtitle(&two) - subtitle(&one), pitch));
+    for ((_, a), (_, b)) in one.panels.iter().zip(&two.panels) {
+        assert!(close(b.plot.y - a.plot.y, pitch));
+        let (ta, tb) = (a.title.as_ref().unwrap(), b.title.as_ref().unwrap());
+        assert!(close(tb.first().y - ta.first().y, pitch));
+    }
+}
+
+#[test]
+fn a_pie_title_breaks_into_lines() {
+    let pie = |title: &str| {
+        let mut f = Figure::new(5.0, 4.0, Theme::pigment()).unwrap();
+        f.add_pie_axes()
+            .unwrap()
+            .title(title)
+            .pie(
+                vec!["A".into(), "B".into()],
+                &[1.0, 2.0],
+                PieOptions::default(),
+            )
+            .unwrap();
+        plan_of(&f).unwrap()
+    };
+    let one = pie("Orders");
+    let two = pie("Orders\nby region");
+    let title = two.panels[0].1.title.as_ref().unwrap();
+    assert_lines(
+        title,
+        "Orders\nby region",
+        Align::Left,
+        (PADDING, 5.0 * 72.0 - PADDING),
+    );
+    let first = one.panels[0].1.title.as_ref().unwrap().first();
+    assert_eq!((title.first().x, title.first().y), (first.x, first.y));
+    assert!(close(
+        two.panels[0].1.header_bottom - one.panels[0].1.header_bottom,
+        title.pitch()
+    ));
+}
+
+#[test]
+fn the_width_check_measures_the_widest_line() {
+    let wide = "W".repeat(60);
+    let width = plan_text_width(&wide);
+    assert!(width > 408.0, "{width}");
+    for title in [format!("Short\n{wide}"), format!("{wide}\nShort")] {
+        let message = single(Align::Left, &title, "")
+            .to_scene(&lib())
+            .unwrap_err()
+            .to_string();
+        let prefix = format!(
+            "Figure.to_scene(): the title {} is ",
+            crate::error::quoted(&title)
+        );
+        let reported: f64 = message
+            .strip_prefix(&prefix)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{message}"));
+        assert_eq!(reported, width.ceil(), "{message}");
+    }
+    single(Align::Left, "Short\nlines\nonly", "")
+        .to_scene(&lib())
+        .unwrap();
+}
+
+/// The width of `text` in pigment's title style.
+fn plan_text_width(text: &str) -> f64 {
+    let f = single(Align::Left, text, "");
+    let lib = lib();
+    let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
+    let style = crate::TextStyle {
+        face: layout::TITLE_FACE,
+        weight: crate::Weight::SemiBold,
+        size: f.theme().title_size() * f.theme().font_scale(),
+        tabular_figures: false,
+    };
+    f64::from(fonts.layout(text, &style).unwrap().width())
+}
+
+#[test]
+fn further_lines_raise_the_height_room_error_with_a_height_that_suffices() {
+    let title = vec!["Line"; 14].join("\n");
+    let short = |height: f64| {
+        let mut f = Figure::new(4.0, height, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .title(&title)
+            .xticks(&[])
+            .unwrap()
+            .yticks(&[])
+            .unwrap();
+        f
+    };
+    let err = short(3.0).to_scene(&lib()).unwrap_err();
+    let message = err.to_string();
+    let needed: f64 = message
+        .split("at least ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{message}"));
+    assert!(message.contains("pt tall"), "{message}");
+    assert_eq!(
+        err.hint(),
+        Some("make the figure taller, or remove the title.")
+    );
+    // The title's 14 lines alone need more than 3 in.
+    let title_height = 1.25 * 15.0 + 13.0 * LINE_PITCH * 15.0;
+    assert!(needed > title_height, "{needed} vs {title_height}");
+    short(needed / 72.0).to_scene(&lib()).unwrap();
+    // Each further line takes room: without the last line the error needs one pitch less.
+    let fewer = vec!["Line"; 13].join("\n");
+    let mut f = Figure::new(4.0, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title(&fewer)
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap();
+    let less = f.to_scene(&lib()).unwrap_err().to_string();
+    let needed_less: f64 = less
+        .split("at least ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{less}"));
+    let pitch = LINE_PITCH * f64::from(Theme::pigment().title_size());
+    assert!(
+        (needed - needed_less - pitch).abs() <= 1.0,
+        "{needed} {needed_less}"
+    );
+}
+
+#[test]
+fn a_figure_header_without_panels_needs_room_for_every_line() {
+    let mut f = Figure::new(4.0, 0.6, Theme::pigment()).unwrap();
+    f.title("One\nTwo\nThree");
+    let err = f.to_scene(&lib()).unwrap_err();
+    assert!(err.to_string().contains("pt tall; at least"), "{err}");
+    let mut fits = Figure::new(4.0, 2.0, Theme::pigment()).unwrap();
+    fits.title("One\nTwo\nThree");
+    fits.to_scene(&lib()).unwrap();
+}
+
+/// The error of rendering `f`.
+fn render_error(f: &Figure) -> Error {
+    f.to_scene(&lib()).unwrap_err()
+}
+
+#[test]
+fn one_line_texts_refuse_line_breaks_when_rendered() {
+    let line_breaks = "line breaks are supported in titles, subtitles, text() and annotate().";
+    let mut f = single(Align::Left, "Title", "");
+    f.single_axes_mut().xlabel("Hours\nUTC");
+    let err = render_error(&f);
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "Figure.to_scene(): the x axis label \"Hours\\nUTC\" holds a line break at index 5; \
+         axis labels are one line."
+    );
+    assert_eq!(err.hint(), Some(line_breaks));
+
+    let mut f = single(Align::Left, "Title", "");
+    f.single_axes_mut().ylabel("MW\r");
+    assert_eq!(
+        render_error(&f).to_string(),
+        "Figure.to_scene(): the y axis label \"MW\\r\" holds U+000D (a carriage return) at \
+         index 2; text cannot hold control characters."
+    );
+
+    // A series name is refused when the mark is added, before anything is drawn.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let err = f
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[1.0, 2.0],
+            LineOptions {
+                label: "North\nSouth".into(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Axes.line(): label holds a line break at index 5; legend labels are one line."
+    );
+    assert_eq!(err.hint(), Some(line_breaks));
+}
+
+#[test]
+fn titles_refuse_other_control_characters_when_rendered() {
+    for (text, shown, index, name) in [
+        ("Tab\there", "\"Tab\\there\"", 3, "U+0009 (a tab)"),
+        ("a\r\nb", "\"a\\r\\nb\"", 1, "U+000D (a carriage return)"),
+        ("nul\0", "\"nul\\0\"", 3, "U+0000"),
+        ("next\u{85}", "\"next\\u{85}\"", 4, "U+0085"),
+    ] {
+        let f = single(Align::Left, text, "");
+        let err = render_error(&f);
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Figure.to_scene(): the title {shown} holds {name} at index {index}; text \
+                 cannot hold control characters."
+            )
+        );
+        let f = single(Align::Left, "Title", text);
+        assert!(
+            render_error(&f).to_string().contains("the subtitle"),
+            "{text:?}"
+        );
+        let mut f = single(Align::Left, "", "");
+        f.title(text);
+        assert!(
+            render_error(&f).to_string().contains("the title"),
+            "{text:?}"
+        );
+    }
+    let f = single(Align::Left, "a\u{2028}b", "");
+    let err = render_error(&f);
+    assert_eq!(
+        err.to_string(),
+        "Figure.to_scene(): the title \"a\\u{2028}b\" holds U+2028 (a line separator) at index \
+         1; text cannot hold line or paragraph separators."
+    );
+    assert_eq!(err.hint(), Some("use \"\\n\" for a line break."));
+    let mut f = Figure::new(5.0, 4.0, Theme::pigment()).unwrap();
+    f.add_pie_axes()
+        .unwrap()
+        .title("Orders\u{2029}")
+        .pie(vec!["A".into()], &[1.0], PieOptions::default())
+        .unwrap();
+    assert!(
+        render_error(&f)
+            .to_string()
+            .contains("U+2029 (a paragraph separator) at index 6"),
+    );
+}
+
+#[test]
+fn checked_arguments_refuse_line_breaks_at_the_call() {
+    let line_breaks = "line breaks are supported in titles, subtitles, text() and annotate().";
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+    let err = axes
+        .bar(
+            vec!["North".into(), "South\nEast".into()],
+            &[1.0, 2.0],
+            crate::BarOptions::default(),
+        )
+        .unwrap_err();
+    assert!(matches!(err, Error::Data { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "Axes.bar(): categories[1] holds a line break at index 5; category names are one line."
+    );
+    assert_eq!(
+        (err.parameter(), err.hint()),
+        (Some("categories"), Some(line_breaks))
+    );
+    let err = axes
+        .line(
+            AxisData::Categories(vec!["a\tb".into()]),
+            &[1.0],
+            LineOptions::default(),
+        )
+        .unwrap_err();
+    assert!(matches!(err, Error::Data { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "Axes.line(): x[0] holds U+0009 (a tab) at index 1; text cannot hold control characters."
+    );
+    assert_eq!(err.hint(), Some("use spaces instead of tabs."));
+    assert!(axes.marks().is_empty());
+
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    let err = axes
+        .xticks_labeled(&[0.0, 1.0], vec!["low".into(), "high\n".into()])
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Axes.xticks_labeled(): labels[1] holds a line break at index 4; tick labels are one \
+         line."
+    );
+    assert_eq!(err.parameter(), Some("labels"));
+    let err = crate::TickFormat::AUTO.affix("\n", "").unwrap_err();
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "TickFormat.affix(): prefix holds a line break at index 0; tick labels are one line."
+    );
+
+    let mut f = Figure::new(5.0, 4.0, Theme::pigment()).unwrap();
+    let err = f
+        .add_pie_axes()
+        .unwrap()
+        .pie(
+            vec!["A".into(), "B\u{2028}".into()],
+            &[1.0, 2.0],
+            PieOptions::default(),
+        )
+        .unwrap_err();
+    assert!(matches!(err, Error::Data { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "PieAxes.pie(): categories[1] holds U+2028 (a line separator) at index 1; text cannot \
+         hold line or paragraph separators."
+    );
+}
+
+#[test]
+fn text_and_annotate_take_lines_and_refuse_other_control_characters() {
+    use crate::{AnnotateOptions, AxisValue, TextOptions};
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    let at = (AxisValue::Number(0.5), AxisValue::Number(0.5));
+    axes.text("Peak\nseason", at.clone(), TextOptions::default())
+        .unwrap();
+    axes.annotate("Dip\n\nlow", at.clone(), AnnotateOptions::default())
+        .unwrap();
+    let err = axes
+        .text("Tab\tbed", at.clone(), TextOptions::default())
+        .unwrap_err();
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "Axes.text(): text holds U+0009 (a tab) at index 3; text cannot hold control characters."
+    );
+    assert_eq!(
+        (err.parameter(), err.hint()),
+        (
+            Some("text"),
+            Some("use spaces instead of tabs, and \"\\n\" for a line break.")
+        )
+    );
+    let err = axes
+        .annotate("a\r\nb", at, AnnotateOptions::default())
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Axes.annotate(): text holds U+000D (a carriage return) at index 1; text cannot hold \
+         control characters."
+    );
+    assert_eq!(err.hint(), Some("use \"\\n\" alone for a line break."));
+    assert_eq!(axes.annotations().len(), 2);
+}
+
+#[test]
+fn laying_out_text_refuses_line_breaks() {
+    let lib = lib();
+    let fonts = lib.with_figure_fonts(&[crate::Font::INTER]).unwrap();
+    let style = crate::TextStyle {
+        face: crate::FaceId::new(0),
+        weight: crate::Weight::Regular,
+        size: 10.0,
+        tabular_figures: false,
+    };
+    let err = fonts.layout("a\nb", &style).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "SceneFonts.layout(): the text \"a\\nb\" holds a line break at index 1; labels and names \
+         are one line."
+    );
+    let mut scene = Scene::new(10.0, 10.0, crate::Rgba::RED);
+    assert!(
+        scene
+            .push_text(
+                &fonts,
+                "\u{7f}",
+                style,
+                crate::Point::default(),
+                crate::Rgba::RED
+            )
+            .is_err()
+    );
+    assert!(scene.items.is_empty());
+}
+
+/// A 6 by 4 in figure without ticks, with a title of three lines, a subtitle of two and an
+/// annotation of two.
+fn lines_figure() -> Figure {
+    use crate::{AnnotateOptions, AxisValue};
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title("Station output\nDaily mean\nMW")
+        .subtitle("Measured hourly\n2026")
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap()
+        .annotate(
+            "Peak\nof the season",
+            (AxisValue::Number(0.5), AxisValue::Number(0.3)),
+            AnnotateOptions {
+                offset: (40.0, 30.0),
+                ..AnnotateOptions::default()
+            },
+        )
+        .unwrap();
+    f
+}
+
+#[test]
+fn editable_svg_writes_one_text_element_per_line() {
+    use crate::render::{SvgText, render_svg};
+    let scene = lines_figure().to_scene(&lib()).unwrap();
+    let svg = render_svg(&scene, SvgText::Editable);
+    let doc = roxmltree::Document::parse(&svg).unwrap();
+    let texts: Vec<(String, f64)> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("text"))
+        .map(|n| {
+            let y = n.attribute("y").unwrap().parse().unwrap();
+            (n.text().unwrap_or_default().to_owned(), y)
+        })
+        .collect();
+    let expected = [
+        "Station output",
+        "Daily mean",
+        "MW",
+        "Measured hourly",
+        "2026",
+        "Peak",
+        "of the season",
+    ];
+    assert_eq!(
+        texts.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+        expected
+    );
+    for pair in texts[..5].windows(2).chain(texts[5..].windows(2)) {
+        assert!(pair[0].1 < pair[1].1, "{pair:?}");
+    }
+    assert!(!svg.contains('\t') && !svg.contains('\r') && !svg.contains("&#13;"));
+    // As outlines, every line is a path and no text element is left.
+    let outlines = render_svg(&scene, SvgText::Outlines);
+    assert!(!outlines.contains("<text"));
+    let paths = |svg: &str| svg.matches("<path").count();
+    let mut one = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    one.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title("Station output")
+        .subtitle("Measured hourly")
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap()
+        .annotate(
+            "Peak",
+            (crate::AxisValue::Number(0.5), crate::AxisValue::Number(0.3)),
+            crate::AnnotateOptions {
+                offset: (40.0, 30.0),
+                ..crate::AnnotateOptions::default()
+            },
+        )
+        .unwrap();
+    let one = render_svg(&one.to_scene(&lib()).unwrap(), SvgText::Outlines);
+    assert_eq!(paths(&outlines), paths(&one) + 4);
+}
+
+#[test]
+fn legend_labels_are_checked_when_added_even_with_the_legend_hidden() {
+    use crate::{
+        BoxOptions, Distribution, LegendStyle, RuleOptions, Series, SizeSpec, ValueLabels,
+    };
+    let refused = [
+        (
+            "bad\tlabel",
+            "U+0009 (a tab) at index 3",
+            "text cannot hold control characters.",
+        ),
+        (
+            "a\nb",
+            "a line break at index 1",
+            "legend labels are one line.",
+        ),
+        (
+            "nul\0",
+            "U+0000 at index 3",
+            "text cannot hold control characters.",
+        ),
+        (
+            "x\u{85}",
+            "U+0085 at index 1",
+            "text cannot hold control characters.",
+        ),
+        (
+            "\u{2028}",
+            "U+2028 (a line separator) at index 0",
+            "text cannot hold line or paragraph separators.",
+        ),
+    ];
+    for (label, what, reason) in refused {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        a.legend(LegendStyle::None, SizeSpec::Auto).unwrap();
+        let err = a
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1.0, 2.0],
+                LineOptions {
+                    label: label.into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.line(): label holds {what}; {reason}")
+        );
+        assert_eq!(err.parameter(), Some("label"));
+        let err = a
+            .hline(
+                1.5,
+                RuleOptions {
+                    label: label.into(),
+                    ..RuleOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.hline(): label holds {what}; {reason}")
+        );
+        assert!(a.marks().is_empty(), "{label:?}");
+        f.to_scene(&lib()).unwrap();
+
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+        a.legend(LegendStyle::None, SizeSpec::Auto).unwrap();
+        let series = |second: &str| {
+            vec![
+                Series {
+                    label: "North".into(),
+                    values: vec![1.0, 2.0],
+                    ..Series::default()
+                },
+                Series {
+                    label: second.into(),
+                    values: vec![2.0, 1.0],
+                    ..Series::default()
+                },
+            ]
+        };
+        let categories = || vec!["A".to_owned(), "B".to_owned()];
+        let err = a
+            .grouped_bar(categories(), series(label), ValueLabels::default())
+            .unwrap_err();
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.grouped_bar(): series[1].label holds {what}; {reason}")
+        );
+        assert_eq!(err.parameter(), Some("series"));
+        let err = a
+            .stacked_bar(categories(), series(label), ValueLabels::default())
+            .unwrap_err();
+        assert!(err.to_string().contains("series[1].label holds"), "{err}");
+        let distributions = vec![Distribution {
+            label: label.into(),
+            groups: vec![vec![1.0, 2.0], vec![2.0, 3.0]],
+            ..Distribution::default()
+        }];
+        let err = a.grouped_box_plot(categories(), distributions).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.grouped_box(): distributions[0].label holds {what}; {reason}")
+        );
+        let err = a
+            .box_plot(
+                categories(),
+                vec![vec![1.0, 2.0], vec![2.0, 3.0]],
+                BoxOptions {
+                    label: label.into(),
+                    ..BoxOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("label holds"), "{err}");
+        assert!(a.marks().is_empty(), "{label:?}");
+
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        a.legend(LegendStyle::None, SizeSpec::Auto).unwrap();
+        let x = || AxisData::Numbers(vec![0.0, 1.0]);
+        let y = || AxisData::Numbers(vec![1.0, 2.0]);
+        let err = a
+            .grouped_line(
+                vec![("North".into(), x(), y()), (label.into(), x(), y())],
+                crate::Dash::Solid,
+                SizeSpec::Auto,
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Axes.line(): groups[1] holds {what}; {reason}")
+        );
+        assert_eq!(err.parameter(), Some("groups"));
+        assert!(a.marks().is_empty(), "{label:?}");
+    }
+}
+
+#[test]
+fn a_system_family_name_is_one_line() {
+    for (family, message, hint) in [
+        (
+            "DejaVu Sans\n",
+            "Font.system(): family holds a line break at index 11; font family names are one \
+             line.",
+            "line breaks are supported in titles, subtitles, text() and annotate().",
+        ),
+        (
+            "Inter\t",
+            "Font.system(): family holds U+0009 (a tab) at index 5; text cannot hold control \
+             characters.",
+            "use spaces instead of tabs.",
+        ),
+        (
+            "\0",
+            "Font.system(): family holds U+0000 at index 0; text cannot hold control characters.",
+            "remove the character.",
+        ),
+    ] {
+        let err = crate::Font::system(family).unwrap_err();
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        assert_eq!(err.to_string(), message);
+        assert_eq!((err.parameter(), err.hint()), (Some("family"), Some(hint)));
+    }
+    // An empty name is still a usage error.
+    assert!(matches!(
+        crate::Font::system("").unwrap_err(),
+        Error::Usage { .. }
+    ));
+}
+
+/// The height named by a `the figure is … pt tall; at least … pt is needed …` error.
+fn named_height(err: &Error) -> f64 {
+    let message = err.to_string();
+    message
+        .split_once(" pt tall; at least ")
+        .and_then(|(_, rest)| rest.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{message}"))
+}
+
+#[test]
+fn the_height_named_for_a_short_figure_leaves_room_for_a_right_or_inside_legend() {
+    use crate::{LegendPosition, LegendStyle, SizeSpec};
+    let labels = ["North", "South", "East", "West"];
+    for position in [LegendPosition::Right, LegendPosition::Best] {
+        for count in [1, 4] {
+            // One panel.
+            let single = |height: f64| {
+                let mut f = Figure::new(6.0, height, Theme::pigment()).unwrap();
+                let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+                a.title("One\nTwo")
+                    .legend_at(LegendStyle::Header, position, SizeSpec::Auto)
+                    .unwrap();
+                for label in &labels[..count] {
+                    a.line(
+                        AxisData::Numbers(vec![0.0, 1.0]),
+                        &[0.0, 1.0],
+                        LineOptions {
+                            label: (*label).into(),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                f
+            };
+            let needed = named_height(&single(0.5).to_scene(&lib()).unwrap_err());
+            single(needed / 72.0)
+                .to_scene(&lib())
+                .unwrap_or_else(|err| panic!("{position:?} {count}: {needed} pt: {err}"));
+            // A grid of two rows, one panel spanning both.
+            let grid = |height: f64| {
+                let mut f =
+                    Figure::with_grid(8.0, height, Theme::pigment(), Grid::new(2, 2).unwrap())
+                        .unwrap();
+                for (row, col, row_span) in [(0, 0, 2), (0, 1, 1), (1, 1, 1)] {
+                    let mut a = f
+                        .add_axes_at(
+                            Placement {
+                                row: GridIndex::At(row),
+                                col: GridIndex::At(col),
+                                row_span,
+                                ..Placement::default()
+                            },
+                            ScaleKind::Linear,
+                            ScaleKind::Linear,
+                        )
+                        .unwrap();
+                    a.title("One\nTwo")
+                        .legend_at(LegendStyle::Header, position, SizeSpec::Auto)
+                        .unwrap();
+                    for label in &labels[..count] {
+                        a.line(
+                            AxisData::Numbers(vec![0.0, 1.0]),
+                            &[0.0, 1.0],
+                            LineOptions {
+                                label: (*label).into(),
+                                ..LineOptions::default()
+                            },
+                        )
+                        .unwrap();
+                    }
+                }
+                f
+            };
+            let needed = named_height(&grid(0.5).to_scene(&lib()).unwrap_err());
+            grid(needed / 72.0)
+                .to_scene(&lib())
+                .unwrap_or_else(|err| panic!("grid {position:?} {count}: {needed} pt: {err}"));
+        }
+    }
+}
+
+/// The height `err` asks the figure of height `height` pt to grow to: the named height of a
+/// short figure, or the height plus the shortfall of a colorbar room error.
+fn remedy(err: &Error, height: f64) -> f64 {
+    let message = err.to_string();
+    if let Some((_, rest)) = message.split_once("the colorbar needs ") {
+        let numbers: Vec<f64> = rest
+            .split(|c: char| !c.is_ascii_digit() && c != '.')
+            .filter_map(|n| n.parse().ok())
+            .collect();
+        assert_eq!(err.hint(), Some("increase the figure height."), "{message}");
+        return height + numbers[0] - numbers[1];
+    }
+    named_height(err)
+}
+
+#[test]
+fn the_height_a_colorbar_error_asks_for_leaves_room_for_the_legend() {
+    use crate::{
+        ColorBy, ColorbarOptions, ColorbarPosition, LegendPosition, LegendStyle, PointColor,
+        ScatterOptions, SizeSpec,
+    };
+    fn add(a: &mut crate::AxesMut<'_>, legend: LegendPosition, colorbar: ColorbarPosition) {
+        a.title("One\nTwo")
+            .legend_at(LegendStyle::Header, legend, SizeSpec::Auto)
+            .unwrap();
+        for label in ["North", "South", "East"] {
+            a.line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[0.0, 1.0],
+                LineOptions {
+                    label: label.into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+        a.scatter(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            ScatterOptions {
+                color: PointColor::By(ColorBy::new(vec![0.0, 1.0])),
+                ..ScatterOptions::default()
+            },
+        )
+        .unwrap()
+        .colorbar(ColorbarOptions {
+            label: "C".into(),
+            position: Some(colorbar),
+            ..ColorbarOptions::default()
+        })
+        .unwrap();
+    }
+    let single = |legend, colorbar, height: f64| {
+        let mut f = Figure::new(8.0, height / 72.0, Theme::pigment()).unwrap();
+        add(
+            &mut f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap(),
+            legend,
+            colorbar,
+        );
+        f
+    };
+    let grid = |legend, colorbar, height: f64| {
+        let mut f = Figure::with_grid(
+            8.0,
+            height / 72.0,
+            Theme::pigment(),
+            Grid::new(2, 1).unwrap(),
+        )
+        .unwrap();
+        for row in 0..2 {
+            add(
+                &mut f
+                    .add_axes_at(
+                        Placement {
+                            row: GridIndex::At(row),
+                            ..Placement::default()
+                        },
+                        ScaleKind::Linear,
+                        ScaleKind::Linear,
+                    )
+                    .unwrap(),
+                legend,
+                colorbar,
+            );
+        }
+        f
+    };
+    type Build<'a> = &'a dyn Fn(LegendPosition, ColorbarPosition, f64) -> Figure;
+    let builds: [(&str, Build<'_>); 2] = [("single", &single), ("grid", &grid)];
+    let mut colorbar_errors = 0;
+    for (kind, build) in builds {
+        for legend in [LegendPosition::Right, LegendPosition::Best] {
+            for colorbar in [ColorbarPosition::Bottom, ColorbarPosition::Right] {
+                // Every height whose error names a height or a shortfall gets one that renders.
+                for height in (40..=480).step_by(7) {
+                    let height = f64::from(height);
+                    let Err(err) = build(legend, colorbar, height).to_scene(&lib()) else {
+                        continue;
+                    };
+                    let message = err.to_string();
+                    if message.contains("the colorbar needs") {
+                        colorbar_errors += 1;
+                    } else if !message.contains(" pt tall; at least ") {
+                        continue;
+                    }
+                    let enough = remedy(&err, height);
+                    build(legend, colorbar, enough)
+                        .to_scene(&lib())
+                        .unwrap_or_else(|again| {
+                            panic!(
+                                "{kind} {legend:?} {colorbar:?} at {height} pt: {err}; at \
+                                 {enough} pt: {again}"
+                            )
+                        });
+                }
+            }
+        }
+    }
+    assert!(colorbar_errors > 0, "no case reached the colorbar error");
+}
+
+#[test]
+fn grouped_label_errors_name_their_group() {
+    use crate::{Distribution, Series, SizeSpec, ValueLabels};
+    let group = |err: &Error| match err {
+        Error::Style { message, .. } => message.group(),
+        other => panic!("{other}"),
+    };
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    let x = || AxisData::Numbers(vec![0.0, 1.0]);
+    let err = a
+        .grouped_line(
+            vec![("North".into(), x(), x()), ("bad\n".into(), x(), x())],
+            crate::Dash::Solid,
+            SizeSpec::Auto,
+        )
+        .unwrap_err();
+    assert_eq!(group(&err), Some(1), "{err}");
+    let err = a
+        .line(
+            x(),
+            &[1.0, 2.0],
+            LineOptions {
+                label: "bad\n".into(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(group(&err), None, "{err}");
+
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+    let series = vec![
+        Series {
+            label: "North".into(),
+            values: vec![1.0],
+            ..Series::default()
+        },
+        Series {
+            label: "bad\t".into(),
+            values: vec![2.0],
+            ..Series::default()
+        },
+    ];
+    let err = a
+        .grouped_bar(vec!["A".into()], series, ValueLabels::default())
+        .unwrap_err();
+    assert_eq!(group(&err), Some(1), "{err}");
+    let distributions = vec![Distribution {
+        label: "bad\n".into(),
+        groups: vec![vec![1.0, 2.0]],
+        ..Distribution::default()
+    }];
+    let err = a
+        .grouped_box_plot(vec!["A".into()], distributions)
+        .unwrap_err();
+    assert_eq!(group(&err), None, "{err}");
+}

@@ -1887,6 +1887,10 @@ mod header_tests;
 mod font_error_tests;
 
 #[cfg(test)]
+#[path = "line_break_tests.rs"]
+mod line_break_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{AxisData, Grid, GridIndex, LineOptions, Placement};
@@ -2324,7 +2328,7 @@ mod tests {
         // Each title starts at its plot's left edge and sits above it, its row's top in the
         // first row at the padding.
         for l in [&a, &b, &c] {
-            let title = l.title.as_ref().expect("a title");
+            let title = l.title.as_ref().expect("a title").first();
             assert_eq!(title.x, l.plot.x);
             assert!(title.y < l.plot.y);
         }

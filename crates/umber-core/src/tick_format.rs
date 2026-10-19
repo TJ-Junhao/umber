@@ -271,8 +271,8 @@ impl TickFormat {
     /// ```
     pub fn affix(&self, prefix: &str, suffix: &str) -> Result<TickFormat> {
         const CONTEXT: &str = "TickFormat.affix()";
-        check_text(CONTEXT, "prefix", "prefix", prefix)?;
-        check_text(CONTEXT, "suffix", "suffix", suffix)?;
+        check_text(CONTEXT, "prefix", "prefix", prefix, "tick labels")?;
+        check_text(CONTEXT, "suffix", "suffix", suffix, "tick labels")?;
         Ok(TickFormat {
             style: self.style,
             prefix: prefix.to_owned(),

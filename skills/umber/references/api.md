@@ -141,6 +141,12 @@ right, so the text stays on that side and never covers the point. The arrow runs
 2 pt beyond the text to 3 pt short of the point, with a filled head, in the color of
 the text. The annotation changes neither the limits nor the layout.
 
+``"\n"`` breaks the text into lines: the first line is placed as a text of one line,
+each further line 1.2 sizes below the one before it. Each line is aligned on the side
+of the text that faces the point: left-aligned when the offset points right,
+right-aligned when it points left, centred when it points straight up or down. The
+arrow starts at the box around all lines.
+
 Args:
     text: The text, at least one and at most 1,000 characters.
     at: The point ``(x, y)``, given as for ``text()``.
@@ -160,9 +166,9 @@ Raises:
     TypeError: If an argument has the wrong type, as for ``text()``, or ``offset`` is
         not a pair of numbers.
     DataError: As for ``text()``.
-    StyleError: If ``text`` is too long, or ``offset`` is not finite or is zero.
-        Rendering raises it as for ``text()``, and when less than 10 pt lie between
-        the text and the point for an arrow.
+    StyleError: If ``text`` is too long or holds a character ``text()`` refuses, or
+        ``offset`` is not finite or is zero. Rendering raises it as for ``text()``, and
+        when less than 10 pt lie between the text and the point for an arrow.
     UsageError: If ``text`` is empty.
 
 Example:
@@ -208,7 +214,8 @@ Raises:
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, or names and numbers do not match the x
         axis.
-    StyleError: If ``label`` is too long.
+        It is also raised for a line break or other control character in a category name.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the y axis is a category axis.
 
@@ -255,7 +262,7 @@ Raises:
     DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, ``x`` is not in non-decreasing order, or a
         value of ``low`` is above the value of ``high`` at the same index.
-    StyleError: If ``label`` is too long.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If either axis is a category axis.
 
 Example:
@@ -313,6 +320,7 @@ Raises:
         the data cannot be plotted: lengths differ, a category repeats, a
         height is infinite or not positive on a log axis, or neither axis is a
         category axis.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If ``label`` or a category name is too long, or ``format`` is
         ``TickFormat.iso()``. Rendering raises it when a value label does not fit
         inside the plot: under explicit limits, or on a plot too small for it.
@@ -400,6 +408,7 @@ Raises:
     DataError: If group counts differ, categories repeat, or samples are not
         numeric, are infinite, exceed the supported range or are not positive on
         a log axis.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If a label or category name is too long.
     UsageError: If neither axis or both axes are category axes.
 
@@ -470,8 +479,8 @@ Raises:
     UsageError: If either axis is a category axis (type checkers refuse such axes, so
         this is raised only for calls they do not check), or a ``ColorBy`` differs in
         ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
-    StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
-        range set by ``clim()``.
+    StyleError: If ``label`` is too long or holds a line break or another control
+        character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
 
 Example:
 
@@ -545,7 +554,8 @@ Returns:
 
 Raises:
     TypeError: If an argument has the wrong type.
-    StyleError: If the label exceeds 1,000 characters or holds a lone surrogate.
+    StyleError: If the label exceeds 1,000 characters, or holds a lone surrogate, a
+        line break or another control character: colorbar labels are one line.
     UsageError: If no color-mapped mark has been added yet.
 
 Example:
@@ -679,7 +689,7 @@ Raises:
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         no value is finite, a value is infinite or not positive on a log
         axis, or the values do not suit the x axis.
-    StyleError: If ``label`` is too long.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the y axis is not linear.
 
@@ -779,6 +789,7 @@ Raises:
     DataError: If the data cannot be plotted: ``series`` is empty, a series has a
         different length, a category repeats, a height is infinite or not positive on
         a log axis, or neither axis is a category axis.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
         Rendering raises it when a value label does not fit inside the plot, as in
         ``bar()``.
@@ -821,6 +832,7 @@ Raises:
     DataError: If distributions are empty, group counts differ, categories repeat,
         or a sample is infinite, exceeds the supported range or is not positive
         on a log axis.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If a category name is too long.
     UsageError: If neither axis or both axes are category axes.
 
@@ -860,6 +872,7 @@ Raises:
     DataError: If distributions are empty, group counts differ, categories repeat,
         or a sample is infinite, exceeds the supported range or is not positive
         on a log axis.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If a category name is too long.
     UsageError: If neither axis or both axes are category axes.
 
@@ -915,6 +928,7 @@ Raises:
     DataError: If ``values`` is not shaped ``(len(y_categories), len(x_categories))``,
         a category repeats, or a value is infinite, beyond 1e300 in magnitude, or not
         positive on a log scale.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If a category name is too long, ``center`` is not finite or comes
         with a log scale, ``format`` is ``TickFormat.iso()``, or the color range set by
         ``clim()`` does not suit ``scale`` or ``center``.
@@ -1019,7 +1033,8 @@ Raises:
         a value is infinite, the edges are fewer than two, not finite or not
         increasing, finite values lie outside the edges, or the x axis is a category
         axis.
-    StyleError: If the number of bins is out of range, or ``label`` is too long.
+    StyleError: If the number of bins is out of range, or ``label`` is too long or
+        holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the x axis is a log axis, or ``cumulative=True`` comes with
         ``Stat.DENSITY``, whose densities do not add up.
@@ -1108,7 +1123,7 @@ Returns:
 Raises:
     TypeError: If an argument has the wrong type.
     DataError: If ``y`` is not finite, or not positive on a log axis.
-    StyleError: If ``label`` is too long.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If the y axis is a category axis.
 
 Example:
@@ -1145,7 +1160,8 @@ Returns:
 Raises:
     TypeError: If an argument has the wrong type.
     DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
-    StyleError: If ``low`` is not below ``high``, or ``label`` is too long.
+    StyleError: If ``low`` is not below ``high``, or ``label`` is too long or holds a
+        line break or another control character.
     UsageError: If the y axis is a category axis.
 
 Example:
@@ -1196,7 +1212,8 @@ Raises:
         two distinct values, the line would reach beyond 1e300, the density would
         exceed 1e300, or the x axis is a category axis.
     StyleError: If ``bandwidth`` is not a finite number greater than 0, is so narrow
-        that the line would need more than 16,384 points, or ``label`` is too long.
+        that the line would need more than 16,384 points, or ``label`` is too long or
+        holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the x axis is a log or time axis, or the y axis is not linear.
 
@@ -1290,7 +1307,8 @@ Raises:
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, or names and numbers do not match the x
         axis.
-    StyleError: If ``label`` is too long.
+        It is also raised for a line break or other control character in a category name.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the y axis is a category axis.
 
@@ -1406,8 +1424,9 @@ Raises:
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the
         axes, or a ``ColorBy`` does not have one value per point.
-    StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
-        range set by ``clim()``.
+        It is also raised for a line break or other control character in a category name.
+    StyleError: If ``label`` is too long or holds a line break or another control
+        character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         both axes are category axes (type checkers accept such axes, so
         this is raised when the call runs), a ``ColorBy`` comes with a label, or its
@@ -1502,6 +1521,7 @@ Raises:
         different length, a category repeats, a height is infinite or not positive on
         a log axis, a stack exceeds the supported magnitude, or neither axis is a
         category axis.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
         Rendering raises it when a value label does not fit inside its segment with
         2 pt to spare on every side.
@@ -1550,7 +1570,7 @@ Raises:
     TypeError: If an argument has the wrong type.
     DataError: If lengths differ, a value is infinite, a magnitude is too large, a
         value is not positive or is too small on a log axis, or x has the wrong kind.
-    StyleError: If ``label`` is too long.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If the y axis is a category axis.
 
 Example:
@@ -1600,7 +1620,8 @@ Raises:
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the x
         axis, or x is not in non-decreasing order.
-    StyleError: If ``label`` is too long.
+        It is also raised for a line break or other control character in a category name.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the y axis is a category axis.
 
@@ -1645,7 +1666,8 @@ Returns:
 Raises:
     TypeError: If an argument has the wrong type.
     DataError: If categories repeat, group counts differ, or samples are invalid.
-    StyleError: If jitter is non-finite or outside 0 to 0.5, or label is too long.
+    StyleError: If jitter is non-finite or outside 0 to 0.5, or ``label`` is too long
+        or holds a line break or another control character.
     UsageError: If the axes are not one category axis and one numeric axis.
 
 Example:
@@ -1664,6 +1686,9 @@ Axes.subtitle(self, text: str, *, size: Size=Size.AUTO) -> Self
 
 Set the subtitle, shown under the title.
 
+``"\n"`` breaks the subtitle into lines, 1.2 sizes apart, each aligned by the theme's
+title alignment; the header grows by every further line, and blank lines are kept.
+
 Args:
     text: The subtitle, at most 1,000 characters. An empty string removes it.
     size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
@@ -1674,9 +1699,10 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long. Rendering raises it if the text is wider
-        than the panel's plot width (for a one-cell figure, than the figure inside
-        its padding, with or without a twin y axis).
+    StyleError: If ``text`` is too long, or holds a control character other than
+        ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
+        if the widest line is wider than the panel's plot width (for a one-cell figure,
+        than the figure inside its padding, with or without a twin y axis).
 
 Example:
 
@@ -1715,7 +1741,8 @@ Returns:
 Raises:
     TypeError: If an argument has the wrong type.
     DataError: If categories repeat, group counts differ, or samples are invalid.
-    StyleError: If label is too long, or a category cannot fit its points at render.
+    StyleError: If ``label`` is too long or holds a line break or another control
+        character, or a category cannot fit its points at render.
     UsageError: If the axes are not one category axis and one numeric axis.
 
 Example:
@@ -1738,6 +1765,10 @@ The aligned edge of the text, or its centre, is at the point, and so is the vert
 centre of the text. The text is drawn over the marks and changes neither the limits nor
 the layout; overlap with other elements is not checked.
 
+``"\n"`` breaks the text into lines: the first line is placed as a text of one line,
+each further line 1.2 sizes below the one before it, and each line is aligned on the
+point by ``align``. Blank lines are kept.
+
 Args:
     text: The text, at least one and at most 1,000 characters.
     at: The point ``(x, y)``, each in the values of its axis: a number on a linear or
@@ -1757,8 +1788,9 @@ Raises:
     DataError: If a coordinate is not finite, beyond 1e300 in magnitude or not
         positive on a log axis. Rendering raises it when no mark of these axes has the
         category of the point.
-    StyleError: If ``text`` is too long. Rendering raises it when the point lies
-        outside the limits or the text reaches past the figure.
+    StyleError: If ``text`` is too long, or holds a control character other than
+        ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
+        when the point lies outside the limits or the text reaches past the figure.
     UsageError: If ``text`` is empty.
 
 Example:
@@ -1779,6 +1811,9 @@ Axes.title(self, text: str, *, size: Size=Size.AUTO) -> Self
 
 Set the title, shown above the plot.
 
+``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
+title alignment; the header grows by every further line, and blank lines are kept.
+
 Args:
     text: The title, at most 1,000 characters. An empty string removes it.
     size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
@@ -1789,9 +1824,10 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long. Rendering raises it if the text is wider
-        than the panel's plot width (for a one-cell figure, than the figure inside
-        its padding, with or without a twin y axis).
+    StyleError: If ``text`` is too long, or holds a control character other than
+        ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
+        if the widest line is wider than the panel's plot width (for a one-cell figure,
+        than the figure inside its padding, with or without a twin y axis).
 
 Example:
 
@@ -1867,6 +1903,7 @@ Raises:
     DataError: If group counts differ, categories repeat, or samples are not
         numeric, are infinite, exceed the supported range or are not positive on
         a log axis.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If a label or category name is too long.
     UsageError: If neither axis or both axes are category axes.
 
@@ -1914,7 +1951,7 @@ Raises:
     TypeError: If an argument has the wrong type, including a number on a category
         axis or a name on a linear or log axis.
     DataError: If ``x`` is not finite, or not positive on a log axis.
-    StyleError: If ``label`` is too long.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If both axes are category axes. Type checkers accept such axes,
         so this is raised when the call runs.
 
@@ -1957,7 +1994,8 @@ Returns:
 Raises:
     TypeError: If an argument has the wrong type.
     DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
-    StyleError: If ``low`` is not below ``high``, or ``label`` is too long.
+    StyleError: If ``low`` is not below ``high``, or ``label`` is too long or holds a
+        line break or another control character.
     UsageError: If the x axis is a category axis.
 
 Example:
@@ -2006,7 +2044,8 @@ Raises:
     DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the y
         axis, or a value of ``low`` is above the value of ``high`` at the same index.
-    StyleError: If ``label`` is too long.
+        It is also raised for a line break or other control character in a category name.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If the x axis is a category axis.
 
 Example:
@@ -2037,8 +2076,9 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long. Rendering raises it if the label is wider
-        than the plot.
+    StyleError: If ``text`` is too long, or holds a line break, another control
+        character or a line or paragraph separator: axis labels are one line.
+        Rendering raises it if the label is wider than the plot.
 
 Example:
 
@@ -2209,7 +2249,9 @@ Returns:
 
 Raises:
     TypeError: If ``positions`` or ``labels`` has the wrong type.
-    DataError: If ``positions`` cannot be read as numbers or ``labels`` as names.
+    DataError: If ``positions`` cannot be read as numbers or ``labels`` as names, or
+        a label holds a line break or another control character: tick labels are one
+        line.
     StyleError: If a position is not valid, the number of labels differs from the
         number of positions, or a label is too long.
     UsageError: If the x axis is a category axis, or the x tick format is not
@@ -2261,7 +2303,8 @@ Raises:
     DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the x axis,
         or a value of ``low`` is above the value of ``high`` at the same index.
-    StyleError: If ``label`` is too long.
+        It is also raised for a line break or other control character in a category name.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If the y axis is a category axis.
 
 Example:
@@ -2290,9 +2333,10 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long. Rendering raises it if the label is wider
-        than the plot and its left y tick column, or the plot alone for a right twin
-        label.
+    StyleError: If ``text`` is too long, or holds a line break, another control
+        character or a line or paragraph separator: axis labels are one line.
+        Rendering raises it if the label is wider than the plot and its left y tick
+        column, or the plot alone for a right twin label.
 
 Example:
 
@@ -2459,7 +2503,9 @@ Returns:
 
 Raises:
     TypeError: If ``positions`` or ``labels`` has the wrong type.
-    DataError: If ``positions`` cannot be read as numbers or ``labels`` as names.
+    DataError: If ``positions`` cannot be read as numbers or ``labels`` as names, or
+        a label holds a line break or another control character: tick labels are one
+        line.
     StyleError: If a position is not valid, the number of labels differs from the
         number of positions, or a label is too long.
     UsageError: If the y tick format is not
@@ -2989,7 +3035,8 @@ Returns:
 
 Raises:
     TypeError: If ``code`` is not a ``str``.
-    StyleError: If ``code`` is not a valid hex color.
+    StyleError: If ``code`` is not a valid hex color, or holds a line break or another
+        control character.
 
 Example:
 
@@ -3627,6 +3674,9 @@ Set the figure subtitle, shown under its title and above every panel.
 
 Its alignment follows the figure title, as set by ``Theme.with_title_align()``.
 
+``"\n"`` breaks the subtitle into lines, 1.2 sizes apart, each aligned by the theme's
+title alignment; the header grows by every further line, and blank lines are kept.
+
 Args:
     text: The subtitle, at most 1,000 characters. An empty string removes it.
     size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
@@ -3637,8 +3687,10 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long or holds a lone surrogate. Rendering raises
-        it if the text is wider than the figure's room inside its padding.
+    StyleError: If ``text`` is too long, or holds a lone surrogate, a control
+        character other than ``"\n"`` (such as a tab) or a line or paragraph
+        separator. Rendering raises it if the widest line is wider than the figure's
+        room inside its padding.
 
 Example:
 
@@ -3661,6 +3713,9 @@ The default figure title is 1.5 times the panel title size. ``Size.times(k)``
 follows that ratio; ``Size.pt(p)`` uses exactly p points. Alignment follows the
 theme's ``with_title_align()`` setting.
 
+``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
+title alignment; the header grows by every further line, and blank lines are kept.
+
 Args:
     text: The title, at most 1,000 characters. An empty string removes it.
     size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
@@ -3671,8 +3726,10 @@ Returns:
 
 Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-    StyleError: If ``text`` is too long or holds a lone surrogate. Rendering raises
-        it if the text is wider than the figure's room inside its padding.
+    StyleError: If ``text`` is too long, or holds a lone surrogate, a control
+        character other than ``"\n"`` (such as a tab) or a line or paragraph
+        separator. Rendering raises it if the widest line is wider than the figure's
+        room inside its padding.
 
 Example:
 
@@ -4002,6 +4059,8 @@ Returns:
 
 Raises:
     TypeError: If ``family`` is not a string or ``bold_fallback`` is not a bool.
+    StyleError: If ``family`` is too long, or holds a line break or another control
+        character.
     UsageError: If the name is empty, the family is not installed, or its selected files
         cannot be read. An unknown family reports the closest installed names.
 
@@ -4423,6 +4482,9 @@ PieAxes.title(self, text: str, *, size: Size=Size.AUTO) -> Self
 
 Set the title above this pie panel.
 
+``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
+title alignment; the header grows by every further line, and blank lines are kept.
+
 Args:
     text: Title text, at most 1,000 characters; empty removes it.
     size: ``Size.AUTO`` follows the theme, ``Size.times(k)`` multiplies the scaled
@@ -4433,9 +4495,10 @@ Returns:
 
 Raises:
     TypeError: If text or size has the wrong type.
-    StyleError: If text is too long or cannot be displayed. Rendering raises it if
-        the title is wider than its panel (for a one-cell figure, than the figure
-        inside its padding).
+    StyleError: If text is too long or cannot be displayed: it holds a lone surrogate,
+        a control character other than ``"\n"`` (such as a tab) or a line or
+        paragraph separator. Rendering raises it if the widest line is wider than its
+        panel (for a one-cell figure, than the figure inside its padding).
 
 Example:
 
@@ -5702,7 +5765,8 @@ Returns:
 
 Raises:
     TypeError: If ``prefix`` or ``suffix`` is not a ``str``.
-    StyleError: If ``prefix`` or ``suffix`` is too long.
+    StyleError: If ``prefix`` or ``suffix`` is too long, or holds a line break or
+        another control character: tick labels are one line.
 
 Example:
 
@@ -5960,6 +6024,7 @@ Raises:
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a category repeats, or a
         height is infinite.
+        It is also raised for a line break or other control character in a category name.
     StyleError: If ``label`` or a category name is too long, or ``format`` is
         ``TickFormat.iso()``.
     UsageError: If ``format`` or ``size`` is given without ``annotate``, or ``by`` comes
@@ -6012,7 +6077,8 @@ Raises:
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         a value is infinite, the edges are not valid, or finite values lie
         outside them.
-    StyleError: If the number of bins is out of range, or ``label`` is too long.
+    StyleError: If the number of bins is out of range, or ``label`` is too long or holds
+        a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         ``cumulative=True`` comes with ``Stat.DENSITY``.
 
@@ -6058,7 +6124,7 @@ Raises:
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a value is infinite, or
         ``x`` holds names.
-    StyleError: If ``label`` is too long.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
 
     UsageError: If ``by`` comes with an explicit color or a non-empty label.
 
@@ -6142,7 +6208,7 @@ Raises:
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a value is infinite,
         ``x`` holds names, or a ``ColorBy`` does not have one value per point.
-    StyleError: If ``label`` is too long.
+    StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         a ``ColorBy`` comes with a label.
 

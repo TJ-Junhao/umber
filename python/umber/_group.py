@@ -83,7 +83,7 @@ def _name(context: str, index: int, value: object) -> str:
             parameter="by",
             hint="give every group a non-empty name.",
         )
-    return checked_text(context, "by", f"by[{index}]", value, DataError)
+    return checked_text(context, "by", f"by[{index}]", value, DataError, one_line="group names")
 
 
 class _Labels(NamedTuple):
@@ -112,6 +112,14 @@ def _plain_strings(array: npt.NDArray[Any]) -> bool:
     """Check exact string types in bulk, without calling user-defined methods."""
     types = np.asarray(np.frompyfunc(type, 1, 1)(array), dtype=object)
     return bool(np.all(np.isin(types, np.array([str, np.str_], dtype=object))))
+
+
+def _holds_nul(array: npt.NDArray[Any]) -> bool:
+    """Whether a string of an object array of exact strings holds a NUL character."""
+    # The NUL is passed as an object array: NumPy would make a string scalar of it, and
+    # fixed-width Unicode drops trailing NULs.
+    nul = np.array("\0", dtype=object)
+    return bool(np.any(np.frompyfunc(str.__contains__, 2, 1)(array, nul)))
 
 
 def _column_labels(context: str, by: Values[str]) -> _Labels | None:
@@ -174,7 +182,7 @@ def _column_labels(context: str, by: Values[str]) -> _Labels | None:
 def _labels(context: str, by: Values[str]) -> _Labels:
     """Factor a type-checked column, preserving invalid mixed-list elements."""
     if np.ma.isMaskedArray(by):
-        names(context, "by", by)
+        names(context, "by", by, one_line="group names")
     native = _column_labels(context, by)
     if native is not None:
         return native
@@ -191,8 +199,9 @@ def _labels(context: str, by: Values[str]) -> _Labels:
     checked = False
     if array.dtype.kind not in "UT":
         original = array
-        if _plain_strings(array):
-            # Exact strings can be converted in bulk without invoking __str__.
+        if _plain_strings(array) and not _holds_nul(array):
+            # Exact strings can be converted in bulk without invoking __str__. A NUL, which
+            # fixed-width Unicode would drop, is refused by the scalar checks instead.
             array = np.asarray(array, dtype=str)
             # Fixed-width Unicode drops trailing NULs. Keep scalar validation for
             # empty or long names so that conversion cannot hide the first error.
@@ -511,7 +520,7 @@ def call(
             parameter=info[0],
             hint=info[1],
         ) from None
-    name = _args.text(context, "label", label)
+    name = _args.text(context, "label", label, one_line="legend labels")
     if by is AUTO:
         method.plain(columns, name)
         return

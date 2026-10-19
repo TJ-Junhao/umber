@@ -683,7 +683,7 @@ def test_object_group_names_check_length_before_unicode_conversion(size: int) ->
 
 
 @pytest.mark.parametrize("size", [3, 4])
-def test_trailing_nul_group_names_keep_conversion_and_error_order(size: int) -> None:
+def test_group_names_holding_nul_are_refused_before_the_length_check(size: int) -> None:
     from umber._group import split_by
 
     factories: list[Callable[[list[str]], Any]] = [
@@ -693,14 +693,14 @@ def test_trailing_nul_group_names_keep_conversion_and_error_order(size: int) -> 
         lambda values: pd.Series(pd.Categorical(values)),
     ]
     for factory in factories:
-        with pytest.raises(ub.DataError) as caught:
-            split_by("Axes.line()", factory(["B", "\0", "A"]), np.arange(size))
-        expected = "by[1] is empty" if size == 3 else "by has 3 values but columns[0] has 4"
-        assert expected in str(caught.value)
-        if size == 3:
-            groups = split_by("Axes.line()", factory(["A\0", "A", "B"]), np.arange(size))
-            assert [name for name, _ in groups] == ["A", "B"]
-            assert groups[0][1][0].tolist() == [0, 1]
+        for names, index in ((["B", "\0", "A"], 0), (["A\0", "A", "B"], 1)):
+            with pytest.raises(ub.DataError) as caught:
+                split_by("Axes.line()", factory(names), np.arange(size))
+            row = names.index(next(name for name in names if "\0" in name))
+            assert str(caught.value) == (
+                f"Axes.line(): by[{row}] holds U+0000 at index {index}; text cannot hold "
+                "control characters."
+            )
 
 
 @pytest.mark.parametrize("method", METHODS)

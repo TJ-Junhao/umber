@@ -6,6 +6,7 @@
 
 use super::rule::AxisValue;
 use crate::error::number;
+use crate::text::Lines;
 use crate::{
     Align, ColorSpec, Error, MAX_MAGNITUDE, MIN_LOG_VALUE, Result, ScaleKind, SizeSpec, Transform,
 };
@@ -163,6 +164,9 @@ impl Annotation {
             .with_parameter("text")
             .with_hint("pass the text to write."));
         }
+        Lines::Many
+            .check_style(context, "text", text)
+            .map_err(|error| error.with_parameter("text"))?;
         check_coordinate(context, Coordinate::X, x_kind, &x)?;
         check_coordinate(context, Coordinate::Y, y_kind, &y)?;
         if let AnnotationPlacement::Offset { offset, .. } = placement {

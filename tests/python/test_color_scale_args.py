@@ -53,7 +53,12 @@ INTEGER_CALLS: list[ScalarCall] = [
 ALL_CALLS: list[
     tuple[Callable[[object], object], str, str, Callable[[str, str, object], object]]
 ] = [
-    (lambda value: ub.Color.hex(cast(str, value)), "Color.hex()", "code", _args.text),
+    (
+        lambda value: ub.Color.hex(cast(str, value)),
+        "Color.hex()",
+        "code",
+        lambda context, name, value: _args.text(context, name, value, one_line="color codes"),
+    ),
     *[(call, context, parameter, _args.real) for call, context, parameter in REAL_CALLS],
     *[(call, context, parameter, _args.integer) for call, context, parameter in INTEGER_CALLS],
 ]
@@ -78,7 +83,7 @@ def test_none_uses_the_shared_type_message(
 @pytest.mark.parametrize("code", ["\ud800", "#12\udfff", "x" * 1001])
 def test_hex_uses_the_shared_text_checks(code: str) -> None:
     with pytest.raises(ub.StyleError) as expected:
-        _args.text("Color.hex()", "code", code)
+        _args.text("Color.hex()", "code", code, one_line="color codes")
     with pytest.raises(ub.StyleError) as caught:
         ub.Color.hex(code)
     assert str(caught.value) == str(expected.value)

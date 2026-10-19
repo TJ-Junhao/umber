@@ -209,7 +209,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             return self._register_twin(target, self._x, scale)
 
     def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
-        """Set the title, shown above the plot.
+        r"""Set the title, shown above the plot.
+
+        ``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
+        title alignment; the header grows by every further line, and blank lines are kept.
 
         Args:
             text: The title, at most 1,000 characters. An empty string removes it.
@@ -221,9 +224,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long. Rendering raises it if the text is wider
-                than the panel's plot width (for a one-cell figure, than the figure inside
-                its padding, with or without a twin y axis).
+            StyleError: If ``text`` is too long, or holds a control character other than
+                ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
+                if the widest line is wider than the panel's plot width (for a one-cell figure,
+                than the figure inside its padding, with or without a twin y axis).
 
         Example:
             >>> import umber as ub
@@ -234,12 +238,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
             self._native.title(
-                self._target, self._col, _args.text(context, "text", text), _size.native(size)
+                self._target,
+                self._col,
+                _args.multiline_text(context, "text", text),
+                _size.native(size),
             )
             return self
 
     def subtitle(self, text: str, *, size: Size = Size.AUTO) -> Self:
-        """Set the subtitle, shown under the title.
+        r"""Set the subtitle, shown under the title.
+
+        ``"\n"`` breaks the subtitle into lines, 1.2 sizes apart, each aligned by the theme's
+        title alignment; the header grows by every further line, and blank lines are kept.
 
         Args:
             text: The subtitle, at most 1,000 characters. An empty string removes it.
@@ -251,9 +261,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long. Rendering raises it if the text is wider
-                than the panel's plot width (for a one-cell figure, than the figure inside
-                its padding, with or without a twin y axis).
+            StyleError: If ``text`` is too long, or holds a control character other than
+                ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
+                if the widest line is wider than the panel's plot width (for a one-cell figure,
+                than the figure inside its padding, with or without a twin y axis).
 
         Example:
             >>> import umber as ub
@@ -264,7 +275,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
             self._native.subtitle(
-                self._target, self._col, _args.text(context, "text", text), _size.native(size)
+                self._target,
+                self._col,
+                _args.multiline_text(context, "text", text),
+                _size.native(size),
             )
             return self
 
@@ -281,8 +295,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long. Rendering raises it if the label is wider
-                than the plot.
+            StyleError: If ``text`` is too long, or holds a line break, another control
+                character or a line or paragraph separator: axis labels are one line.
+                Rendering raises it if the label is wider than the plot.
 
         Example:
             >>> import umber as ub
@@ -293,7 +308,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
             self._native.xlabel(
-                self._target, self._col, _args.text(context, "text", text), _size.native(size)
+                self._target,
+                self._col,
+                _args.text(context, "text", text, one_line="axis labels"),
+                _size.native(size),
             )
             return self
 
@@ -310,9 +328,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long. Rendering raises it if the label is wider
-                than the plot and its left y tick column, or the plot alone for a right twin
-                label.
+            StyleError: If ``text`` is too long, or holds a line break, another control
+                character or a line or paragraph separator: axis labels are one line.
+                Rendering raises it if the label is wider than the plot and its left y tick
+                column, or the plot alone for a right twin label.
 
         Example:
             >>> import umber as ub
@@ -323,7 +342,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
             self._native.ylabel(
-                self._target, self._col, _args.text(context, "text", text), _size.native(size)
+                self._target,
+                self._col,
+                _args.text(context, "text", text, one_line="axis labels"),
+                _size.native(size),
             )
             return self
 
@@ -506,7 +528,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``positions`` or ``labels`` has the wrong type.
-            DataError: If ``positions`` cannot be read as numbers or ``labels`` as names.
+            DataError: If ``positions`` cannot be read as numbers or ``labels`` as names, or
+                a label holds a line break or another control character: tick labels are one
+                line.
             StyleError: If a position is not valid, the number of labels differs from the
                 number of positions, or a label is too long.
             UsageError: If the x axis is a category axis, or the x tick format is not
@@ -523,11 +547,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "labels", labels)
             if self._x == _TIME:
                 times = _time.micros(context, "positions", positions)
-                texts = names(context, "labels", labels, check_length=False)
+                texts = names(context, "labels", labels, one_line="tick labels", check_length=False)
                 self._native.xticks_labeled_time(self._target, self._col, times, texts)
                 return self
             places = floats(context, "positions", positions)
-            texts = names(context, "labels", labels, check_length=False)
+            texts = names(context, "labels", labels, one_line="tick labels", check_length=False)
             self._native.xticks_labeled(self._target, self._col, places, texts)
             return self
 
@@ -548,7 +572,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``positions`` or ``labels`` has the wrong type.
-            DataError: If ``positions`` cannot be read as numbers or ``labels`` as names.
+            DataError: If ``positions`` cannot be read as numbers or ``labels`` as names, or
+                a label holds a line break or another control character: tick labels are one
+                line.
             StyleError: If a position is not valid, the number of labels differs from the
                 number of positions, or a label is too long.
             UsageError: If the y tick format is not
@@ -565,11 +591,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "labels", labels)
             if self._y == _TIME:
                 times = _time.micros(context, "positions", positions)
-                texts = names(context, "labels", labels, check_length=False)
+                texts = names(context, "labels", labels, one_line="tick labels", check_length=False)
                 self._native.yticks_labeled_time(self._target, self._col, times, texts)
                 return self
             places = floats(context, "positions", positions)
-            texts = names(context, "labels", labels, check_length=False)
+            texts = names(context, "labels", labels, one_line="tick labels", check_length=False)
             self._native.yticks_labeled(self._target, self._col, places, texts)
             return self
 
@@ -773,7 +799,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, or names and numbers do not match the x
                 axis.
-            StyleError: If ``label`` is too long.
+                It is also raised for a line break or other control character in a category name.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 the y axis is a category axis.
 
@@ -858,7 +885,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, or names and numbers do not match the x
                 axis.
-            StyleError: If ``label`` is too long.
+                It is also raised for a line break or other control character in a category name.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 the y axis is a category axis.
 
@@ -945,8 +973,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, names and numbers do not match the
                 axes, or a ``ColorBy`` does not have one value per point.
-            StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
-                range set by ``clim()``.
+                It is also raised for a line break or other control character in a category name.
+            StyleError: If ``label`` is too long or holds a line break or another control
+                character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 both axes are category axes (type checkers accept such axes, so
                 this is raised when the call runs), a ``ColorBy`` comes with a label, or its
@@ -1058,8 +1087,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             UsageError: If either axis is a category axis (type checkers refuse such axes, so
                 this is raised only for calls they do not check), or a ``ColorBy`` differs in
                 ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
-            StyleError: If ``label`` is too long, or a ``ColorBy`` does not suit the color
-                range set by ``clim()``.
+            StyleError: If ``label`` is too long or holds a line break or another control
+                character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
 
         Example:
             >>> import umber as ub
@@ -1081,7 +1110,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             xs = _limit_values(context, "x", x, self._x)
             ys = _limit_values(context, "y", y, self._y)
             values = floats(context, "sizes", sizes)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.bubbles(self._target, self._col, xs, ys, values, name, spec, shape.value)
             return self
 
@@ -1120,7 +1149,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If lengths differ, a value is infinite, a magnitude is too large, a
                 value is not positive or is too small on a log axis, or x has the wrong kind.
-            StyleError: If ``label`` is too long.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If the y axis is a category axis.
 
         Example:
@@ -1138,7 +1167,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             extent = _size_argument(context, "size", size)
             xs = self._x_values(context, x)
             ys = self._y_values(context, y)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.stem(self._target, self._col, xs, ys, name, spec, shape.value, extent)
             return self
 
@@ -1195,6 +1224,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 the data cannot be plotted: lengths differ, a category repeats, a
                 height is infinite or not positive on a log axis, or neither axis is a
                 category axis.
+                It is also raised for a line break or other control character in a category name.
             StyleError: If ``label`` or a category name is too long, or ``format`` is
                 ``TickFormat.iso()``. Rendering raises it when a value label does not fit
                 inside the plot: under explicit limits, or on a plot too small for it.
@@ -1279,6 +1309,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If group counts differ, categories repeat, or samples are not
                 numeric, are infinite, exceed the supported range or are not positive on
                 a log axis.
+                It is also raised for a line break or other control character in a category name.
             StyleError: If a label or category name is too long.
             UsageError: If neither axis or both axes are category axes.
 
@@ -1297,7 +1328,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             category_names = names(context, "categories", categories)
             values = _series.group_values(context, groups)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.box_plot(self._target, self._col, category_names, values, name, spec)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
@@ -1326,6 +1357,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If distributions are empty, group counts differ, categories repeat,
                 or a sample is infinite, exceeds the supported range or is not positive
                 on a log axis.
+                It is also raised for a line break or other control character in a category name.
             StyleError: If a category name is too long.
             UsageError: If neither axis or both axes are category axes.
 
@@ -1378,6 +1410,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If the data cannot be plotted: ``series`` is empty, a series has a
                 different length, a category repeats, a height is infinite or not positive on
                 a log axis, or neither axis is a category axis.
+                It is also raised for a line break or other control character in a category name.
             StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
                 Rendering raises it when a value label does not fit inside the plot, as in
                 ``bar()``.
@@ -1436,6 +1469,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 different length, a category repeats, a height is infinite or not positive on
                 a log axis, a stack exceeds the supported magnitude, or neither axis is a
                 category axis.
+                It is also raised for a line break or other control character in a category name.
             StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
                 Rendering raises it when a value label does not fit inside its segment with
                 2 pt to spare on every side.
@@ -1560,7 +1594,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 a value is infinite, the edges are fewer than two, not finite or not
                 increasing, finite values lie outside the edges, or the x axis is a category
                 axis.
-            StyleError: If the number of bins is out of range, or ``label`` is too long.
+            StyleError: If the number of bins is out of range, or ``label`` is too long or
+                holds a line break or another control character.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 the x axis is a log axis, or ``cumulative=True`` comes with
                 ``Stat.DENSITY``, whose densities do not add up.
@@ -1876,7 +1911,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, names and numbers do not match the x
                 axis, or x is not in non-decreasing order.
-            StyleError: If ``label`` is too long.
+                It is also raised for a line break or other control character in a category name.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 the y axis is a category axis.
 
@@ -1955,7 +1991,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If ``y`` is not finite, or not positive on a log axis.
-            StyleError: If ``label`` is too long.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If the y axis is a category axis.
 
         Example:
@@ -1971,7 +2007,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             if isinstance(value, int):
                 self._native.hline_time(
                     self._target, self._col, value, name, spec, style.value, extent
@@ -2017,7 +2053,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type, including a number on a category
                 axis or a name on a linear or log axis.
             DataError: If ``x`` is not finite, or not positive on a log axis.
-            StyleError: If ``label`` is too long.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If both axes are category axes. Type checkers accept such axes,
                 so this is raised when the call runs.
 
@@ -2036,7 +2072,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 spec = _color_argument(context, color)
                 style = instance(context, "dash", dash, Dash, _DASH_HINT)
                 extent = _size_argument(context, "width", width)
-                name = _args.text(context, "label", label)
+                name = _args.text(context, "label", label, one_line="legend labels")
                 self._native.vline_time(
                     self._target, self._col, when, name, spec, style.value, extent
                 )
@@ -2050,8 +2086,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
             if isinstance(position, str):
-                position = _args.checked_text(context, "x", "x", position, DataError)
-            name = _args.text(context, "label", label)
+                position = _args.checked_text(
+                    context, "x", "x", position, DataError, one_line="category names"
+                )
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.vline(self._target, self._col, position, name, spec, style.value, extent)
             return self
 
@@ -2083,7 +2121,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
-            StyleError: If ``low`` is not below ``high``, or ``label`` is too long.
+            StyleError: If ``low`` is not below ``high``, or ``label`` is too long or holds a
+                line break or another control character.
             UsageError: If the y axis is a category axis.
 
         Example:
@@ -2098,14 +2137,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 end = _time.instant(context, "high", high)
                 _args.require_text(context, "label", label)
                 spec = _color_argument(context, color)
-                name = _args.text(context, "label", label)
+                name = _args.text(context, "label", label, one_line="legend labels")
                 self._native.hspan_time(self._target, self._col, start, end, name, spec)
                 return self
             lower = real(context, "low", low)
             upper = real(context, "high", high)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.hspan(self._target, self._col, lower, upper, name, spec)
             return self
 
@@ -2140,7 +2179,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
-            StyleError: If ``low`` is not below ``high``, or ``label`` is too long.
+            StyleError: If ``low`` is not below ``high``, or ``label`` is too long or holds a
+                line break or another control character.
             UsageError: If the x axis is a category axis.
 
         Example:
@@ -2155,14 +2195,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 end = _time.instant(context, "high", high)
                 _args.require_text(context, "label", label)
                 spec = _color_argument(context, color)
-                name = _args.text(context, "label", label)
+                name = _args.text(context, "label", label, one_line="legend labels")
                 self._native.vspan_time(self._target, self._col, start, end, name, spec)
                 return self
             lower = real(context, "low", low)
             upper = real(context, "high", high)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.vspan(self._target, self._col, lower, upper, name, spec)
             return self
 
@@ -2202,7 +2242,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, ``x`` is not in non-decreasing order, or a
                 value of ``low`` is above the value of ``high`` at the same index.
-            StyleError: If ``label`` is too long.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If either axis is a category axis.
 
         Example:
@@ -2222,7 +2262,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             )
             lows = floats(context, "low", low)
             highs = floats(context, "high", high)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             if xs.dtype == np.int64:
                 times = cast(MicrosArray, xs)
                 self._native.band_time(self._target, self._col, times, lows, highs, name, spec)
@@ -2274,7 +2314,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, names and numbers do not match the x axis,
                 or a value of ``low`` is above the value of ``high`` at the same index.
-            StyleError: If ``label`` is too long.
+                It is also raised for a line break or other control character in a category name.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If the y axis is a category axis.
 
         Example:
@@ -2294,7 +2335,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             xs = self._x_values(context, x)
             lows = _limit_values(context, "low", low, self._y)
             highs = _limit_values(context, "high", high, self._y)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.y_error_bars(
                 self._target, self._col, xs, lows, highs, name, spec, extent, flag
             )
@@ -2343,7 +2384,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, names and numbers do not match the y
                 axis, or a value of ``low`` is above the value of ``high`` at the same index.
-            StyleError: If ``label`` is too long.
+                It is also raised for a line break or other control character in a category name.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If the x axis is a category axis.
 
         Example:
@@ -2365,7 +2407,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             ys = self._y_values(context, y)
             lows = _limit_values(context, "low", low, self._x)
             highs = _limit_values(context, "high", high, self._x)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.x_error_bars(
                 self._target, self._col, ys, lows, highs, name, spec, extent, flag
             )
@@ -2451,6 +2493,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If group counts differ, categories repeat, or samples are not
                 numeric, are infinite, exceed the supported range or are not positive on
                 a log axis.
+                It is also raised for a line break or other control character in a category name.
             StyleError: If a label or category name is too long.
             UsageError: If neither axis or both axes are category axes.
 
@@ -2469,7 +2512,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             category_names = names(context, "categories", categories)
             values = _series.group_values(context, groups)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.violin(self._target, self._col, category_names, values, name, spec)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
@@ -2498,6 +2541,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If distributions are empty, group counts differ, categories repeat,
                 or a sample is infinite, exceeds the supported range or is not positive
                 on a log axis.
+                It is also raised for a line break or other control character in a category name.
             StyleError: If a category name is too long.
             UsageError: If neither axis or both axes are category axes.
 
@@ -2579,7 +2623,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If an argument has the wrong type.
-            StyleError: If the label exceeds 1,000 characters or holds a lone surrogate.
+            StyleError: If the label exceeds 1,000 characters, or holds a lone surrogate, a
+                line break or another control character: colorbar labels are one line.
             UsageError: If no color-mapped mark has been added yet.
 
         Example:
@@ -2613,7 +2658,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 )
             )
             instance(context, "size", size, Size, _SIZE_HINT)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="colorbar labels")
             self._native.colorbar(
                 self._target,
                 self._col,
@@ -2672,6 +2717,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If ``values`` is not shaped ``(len(y_categories), len(x_categories))``,
                 a category repeats, or a value is infinite, beyond 1e300 in magnitude, or not
                 positive on a log scale.
+                It is also raised for a line break or other control character in a category name.
             StyleError: If a category name is too long, ``center`` is not finite or comes
                 with a log scale, ``format`` is ``TickFormat.iso()``, or the color range set by
                 ``clim()`` does not suit ``scale`` or ``center``.
@@ -2888,7 +2934,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If categories repeat, group counts differ, or samples are invalid.
-            StyleError: If jitter is non-finite or outside 0 to 0.5, or label is too long.
+            StyleError: If jitter is non-finite or outside 0 to 0.5, or ``label`` is too long
+                or holds a line break or another control character.
             UsageError: If the axes are not one category axis and one numeric axis.
 
         Example:
@@ -2906,7 +2953,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             paint = _color_argument(context, color)
             category_names = names(context, "categories", categories)
             values = _series.group_values(context, groups)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.strip(
                 self._target, self._col, category_names, values, name, paint, extent, spread
             )
@@ -2945,7 +2992,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If categories repeat, group counts differ, or samples are invalid.
-            StyleError: If label is too long, or a category cannot fit its points at render.
+            StyleError: If ``label`` is too long or holds a line break or another control
+                character, or a category cannot fit its points at render.
             UsageError: If the axes are not one category axis and one numeric axis.
 
         Example:
@@ -2962,7 +3010,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             paint = _color_argument(context, color)
             category_names = names(context, "categories", categories)
             values = _series.group_values(context, groups)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="legend labels")
             self._native.swarm(self._target, self._col, category_names, values, name, paint, extent)
             return cast("Axes[X, Y]", self)
 
@@ -3006,7 +3054,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If ``by`` has invalid names or differs in length from the data; or if
                 no value is finite, a value is infinite or not positive on a log
                 axis, or the values do not suit the x axis.
-            StyleError: If ``label`` is too long.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 the y axis is not linear.
 
@@ -3101,7 +3149,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 two distinct values, the line would reach beyond 1e300, the density would
                 exceed 1e300, or the x axis is a category axis.
             StyleError: If ``bandwidth`` is not a finite number greater than 0, is so narrow
-                that the line would need more than 16,384 points, or ``label`` is too long.
+                that the line would need more than 16,384 points, or ``label`` is too long or
+                holds a line break or another control character.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 the x axis is a log or time axis, or the y axis is not linear.
 
@@ -3167,11 +3216,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         size: Size = Size.AUTO,
         color: Color = Color.AUTO,
     ) -> Self:
-        """Write text at a data position.
+        r"""Write text at a data position.
 
         The aligned edge of the text, or its centre, is at the point, and so is the vertical
         centre of the text. The text is drawn over the marks and changes neither the limits nor
         the layout; overlap with other elements is not checked.
+
+        ``"\n"`` breaks the text into lines: the first line is placed as a text of one line,
+        each further line 1.2 sizes below the one before it, and each line is aligned on the
+        point by ``align``. Blank lines are kept.
 
         Args:
             text: The text, at least one and at most 1,000 characters.
@@ -3192,8 +3245,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             DataError: If a coordinate is not finite, beyond 1e300 in magnitude or not
                 positive on a log axis. Rendering raises it when no mark of these axes has the
                 category of the point.
-            StyleError: If ``text`` is too long. Rendering raises it when the point lies
-                outside the limits or the text reaches past the figure.
+            StyleError: If ``text`` is too long, or holds a control character other than
+                ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
+                when the point lies outside the limits or the text reaches past the figure.
             UsageError: If ``text`` is empty.
 
         Example:
@@ -3211,7 +3265,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             instance(context, "size", size, Size, _SIZE_HINT)
             spec = _color_argument(context, color)
             point = self._point(context, pair)
-            content = _args.text(context, "text", text)
+            content = _args.multiline_text(context, "text", text)
             self._native.text(
                 self._target, self._col, content, point, style.value, _size.native(size), spec
             )
@@ -3227,7 +3281,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         size: Size = Size.AUTO,
         color: Color = Color.AUTO,
     ) -> Self:
-        """Write text a fixed distance from a data position, with an arrow to it.
+        r"""Write text a fixed distance from a data position, with an arrow to it.
 
         The text sits ``offset`` points from the point, so it looks the same at any data range
         or figure size. The direction of the offset, in eight sectors of 45°, decides which
@@ -3236,6 +3290,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         right, so the text stays on that side and never covers the point. The arrow runs from
         2 pt beyond the text to 3 pt short of the point, with a filled head, in the color of
         the text. The annotation changes neither the limits nor the layout.
+
+        ``"\n"`` breaks the text into lines: the first line is placed as a text of one line,
+        each further line 1.2 sizes below the one before it. Each line is aligned on the side
+        of the text that faces the point: left-aligned when the offset points right,
+        right-aligned when it points left, centred when it points straight up or down. The
+        arrow starts at the box around all lines.
 
         Args:
             text: The text, at least one and at most 1,000 characters.
@@ -3256,9 +3316,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type, as for ``text()``, or ``offset`` is
                 not a pair of numbers.
             DataError: As for ``text()``.
-            StyleError: If ``text`` is too long, or ``offset`` is not finite or is zero.
-                Rendering raises it as for ``text()``, and when less than 10 pt lie between
-                the text and the point for an arrow.
+            StyleError: If ``text`` is too long or holds a character ``text()`` refuses, or
+                ``offset`` is not finite or is zero. Rendering raises it as for ``text()``, and
+                when less than 10 pt lie between the text and the point for an arrow.
             UsageError: If ``text`` is empty.
 
         Example:
@@ -3276,7 +3336,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             instance(context, "size", size, Size, _SIZE_HINT)
             spec = _color_argument(context, color)
             point = self._point(context, pair)
-            content = _args.text(context, "text", text)
+            content = _args.multiline_text(context, "text", text)
             self._native.annotate(
                 self._target, self._col, content, point, shift, drawn, _size.native(size), spec
             )
@@ -3522,7 +3582,9 @@ def _coordinate(context: str, scale: Scale[Any], value: object) -> float | str |
     The form is a category name, a time in microseconds, or a ``float``.
     """
     if scale == _CATEGORY:
-        return _args.checked_text(context, "at", "at", cast(str, value), DataError)
+        return _args.checked_text(
+            context, "at", "at", cast(str, value), DataError, one_line="category names"
+        )
     if scale == _TIME:
         return _time.instant(context, "at", value)
     return real(context, "at", value)

@@ -6,6 +6,8 @@
 //! drawn with another bundled family, then with fallback fonts: the system fonts for
 //! [`FontLibrary::bundled`], or explicit font files for [`FontLibrary::with_fallbacks`].
 //! Characters that no font covers are drawn as the primary font's `.notdef` glyph.
+//! Text is laid out one line at a time: [`SceneFonts::layout`] refuses a line break, any other
+//! control character and the line and paragraph separators, which have no glyphs.
 //!
 //! All lengths are in points. Outlines are y-down with the baseline at `y = 0` of the origin
 //! passed to [`TextLayout::outline`]. Runs are placed left to right in logical order; there is
@@ -37,20 +39,21 @@
 //! ```
 
 // Module layering, lowest first; each module uses only the ones listed before it:
-// - `style`, `guard`, `cmap`, `outline` and `marks` are leaves;
+// - `style`, `guard`, `cmap`, `outline`, `marks` and `lines` are leaves;
 // - `font` owns font identity, font bytes and parsed faces (uses `cmap`, `outline`);
 // - `shaping` owns the shaper callbacks, features and plan reuse (uses `font`);
 // - `runs` owns splitting text into runs and grouping them by font (uses `font`, `marks`);
 // - `layout` owns placed glyphs and `TextLayout` (uses `font`, `shaping`, `runs`, `outline`,
 //   `guard`);
 // - `system` owns system font discovery, lookup and shaping tables (uses `font`, `cmap`,
-//   `guard`);
+//   `guard`, `lines`);
 // - `library` coordinates one layout call over all of them, and resolves the fonts of a scene.
 mod cmap;
 mod font;
 mod guard;
 mod layout;
 mod library;
+mod lines;
 mod marks;
 mod outline;
 mod runs;
@@ -66,5 +69,6 @@ pub(crate) use layout::{GlyphRun, PlacedGlyph, ProgramId, RunFont};
 pub use layout::{TextGlyphs, TextLayout};
 pub(crate) use library::CheckedStyle;
 pub use library::{FontLibrary, SceneFonts};
+pub(crate) use lines::Lines;
 pub use style::{FaceId, TextStyle};
 pub(crate) use system::find_family;

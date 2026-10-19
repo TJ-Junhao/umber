@@ -1,10 +1,16 @@
-"""Type checks and conversions for scalar, text and path arguments.
+r"""Type checks and conversions for scalar, text and path arguments.
 
 Each function takes the API call's context (such as ``"Axes.title()"``), the parameter name
 and the value the caller passed, and returns the value in the plain form the native module
-takes. A value of the wrong type raises ``TypeError``; text that is too long or cannot be
-encoded as UTF-8 raises ``StyleError``. Every error carries the parameter name and a hint.
-Range checks on the values themselves belong to the core library, not to these functions.
+takes. A value of the wrong type raises ``TypeError``; text that is too long, cannot be
+encoded as UTF-8 or holds a character text cannot hold raises ``StyleError``. Every error
+carries the parameter name and a hint. Range checks on the values themselves belong to the
+core library, not to these functions.
+
+Only ``"\n"`` breaks a line, and only in titles, subtitles and the text of ``Axes.text()`` and
+``Axes.annotate()`` (``multiline_text``); all other text is one line (``text``,
+``checked_text``). No text may hold another control character (U+0000 to U+001F, U+007F to
+U+009F) or a line or paragraph separator (U+2028, U+2029).
 """
 
 import math
@@ -35,6 +41,10 @@ _REPR_LENGTH: Final = 40
 # Python refuses to format ints of more than 4300 digits.
 _REPR_INT_BITS: Final = 128
 _SURROGATE: Final = re.compile(r"[\ud800-\udfff]")
+# The characters text of one line may not hold, and those text of several lines may not hold:
+# the same but for "\n".
+_ONE_LINE_REFUSED: Final = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+_LINES_REFUSED: Final = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029]")
 
 _TEXT_HINT: Final = "pass a str; convert other values with str()."
 _REAL_HINT: Final = "pass a number such as 1.5."
@@ -46,6 +56,29 @@ _TOO_LONG_HINT: Final = "shorten the text; it would not fit the figure."
 _SURROGATE_HINT: Final = (
     'remove the character, or replace it: value.encode("utf-8", "replace").decode().'
 )
+_LINE_BREAK_HINT: Final = "line breaks are supported in titles, subtitles, text() and annotate()."
+_SEPARATORS: Final = "\u2028\u2029"
+# What a refused character is, after its code point, where its code point alone does not say.
+_CHARACTER_NAMES: Final = {
+    "\t": " (a tab)",
+    "\r": " (a carriage return)",
+    "\u2028": " (a line separator)",
+    "\u2029": " (a paragraph separator)",
+}
+_ONE_LINE_HINTS: Final = {
+    "\n": _LINE_BREAK_HINT,
+    "\t": "use spaces instead of tabs.",
+    "\r": "remove the carriage return.",
+    "\u2028": "remove the separator.",
+    "\u2029": "remove the separator.",
+}
+_LINES_HINTS: Final = {
+    "\t": 'use spaces instead of tabs, and "\\n" for a line break.',
+    "\r": 'use "\\n" alone for a line break.',
+    "\u2028": 'use "\\n" for a line break.',
+    "\u2029": 'use "\\n" for a line break.',
+}
+_CHARACTER_HINT: Final = "remove the character."
 
 
 _QUALNAME: Final[Any] = type.__dict__["__qualname__"]
@@ -182,41 +215,27 @@ def _wrong_type(context: str, name: str, value: object, expected: str, hint: str
     return new_error(TypeError, context, message, parameter=name, hint=hint)
 
 
-def checked_text(
+def _character_message(label: str, found: re.Match[str]) -> str:
+    """The message for a control character or separator ``found`` in the string ``label``."""
+    character = found.group()
+    code = f"U+{ord(character):04X}{_CHARACTER_NAMES.get(character, '')}"
+    reason = (
+        "text cannot hold line or paragraph separators."
+        if character in _SEPARATORS
+        else "text cannot hold control characters."
+    )
+    return f"{label} holds {code} at index {found.start()}; {reason}"
+
+
+def _plain(
     context: str,
     name: str,
     label: str,
     value: str,
-    unencodable: type[DataError] | type[StyleError],
-    *,
-    check_length: bool = True,
+    invalid: type[DataError] | type[StyleError],
+    check_length: bool,
 ) -> str:
-    """Apply text rules to a string and return it as a plain ``str``.
-
-    Args:
-        context: The API call, such as ``"Axes.bar()"``.
-        name: The parameter the string belongs to.
-        label: How the message names the string: the parameter, or an element such as
-            ``"categories[2]"``.
-        value: The string, possibly of a ``str`` subclass.
-        unencodable: The error class for a string holding a lone surrogate: ``StyleError``
-            for text arguments, ``DataError`` for names in data.
-        check_length: Whether to apply the length cap here; false when core checks it in
-            the context of the other arguments. UTF-8 encoding is always checked.
-
-    Returns:
-        The string as a plain ``str``.
-
-    Raises:
-        StyleError: ``check_length`` is true and the string exceeds ``MAX_TEXT_LENGTH``.
-        DataError: The string holds a lone surrogate and ``unencodable`` is ``DataError``.
-
-    Example:
-        >>> from umber._args import checked_text
-        >>> from umber._errors import DataError
-        >>> checked_text("Axes.bar()", "categories", "categories[0]", "North", DataError)
-        'North'
-    """
+    """Return the string as a plain ``str`` after the length and encoding checks."""
     # The checks run on the plain ``str`` that is passed on, so a subclass that overrides
     # ``__len__`` or ``__str__`` cannot change what they see.
     plain = str.__str__(value)
@@ -231,7 +250,68 @@ def checked_text(
         message = (
             f"{label} has a lone surrogate at index {found.start()}; text must be valid Unicode."
         )
-        raise new_error(unencodable, context, message, parameter=name, hint=_SURROGATE_HINT)
+        raise new_error(invalid, context, message, parameter=name, hint=_SURROGATE_HINT)
+    return plain
+
+
+def checked_text(
+    context: str,
+    name: str,
+    label: str,
+    value: str,
+    invalid: type[DataError] | type[StyleError],
+    *,
+    one_line: str,
+    check_length: bool = True,
+) -> str:
+    """Apply the rules of text of one line to a string and return it as a plain ``str``.
+
+    Args:
+        context: The API call, such as ``"Axes.bar()"``.
+        name: The parameter the string belongs to.
+        label: How the message names the string: the parameter, or an element such as
+            ``"categories[2]"``.
+        value: The string, possibly of a ``str`` subclass.
+        invalid: The error class for a string holding a lone surrogate, a line break or
+            another refused character: ``StyleError`` for text arguments, ``DataError`` for
+            names in data.
+        one_line: What the string is, in the plural, for the message on a line break, such as
+            ``"category names"``: ``"categories[2] holds a line break at index 5; category
+            names are one line."``.
+        check_length: Whether to apply the length cap here; false when core checks it in
+            the context of the other arguments. UTF-8 encoding and the characters are always
+            checked.
+
+    Returns:
+        The string as a plain ``str``.
+
+    Raises:
+        StyleError: ``check_length`` is true and the string exceeds ``MAX_TEXT_LENGTH``.
+        DataError: The string holds a lone surrogate, a line break, another control
+            character (U+0000 to U+001F, U+007F to U+009F) or a line or paragraph separator
+            (U+2028, U+2029), and ``invalid`` is ``DataError``; ``StyleError`` when
+            ``invalid`` is ``StyleError``.
+
+    Example:
+        >>> from umber._args import checked_text
+        >>> from umber._errors import DataError
+        >>> checked_text(
+        ...     "Axes.bar()", "categories", "categories[0]", "North", DataError,
+        ...     one_line="category names",
+        ... )
+        'North'
+    """
+    plain = _plain(context, name, label, value, invalid, check_length)
+    found = _ONE_LINE_REFUSED.search(plain)
+    if found is not None:
+        character = found.group()
+        message = (
+            f"{label} holds a line break at index {found.start()}; {one_line} are one line."
+            if character == "\n"
+            else _character_message(label, found)
+        )
+        hint = _ONE_LINE_HINTS.get(character, _CHARACTER_HINT)
+        raise new_error(invalid, context, message, parameter=name, hint=hint)
     return plain
 
 
@@ -256,13 +336,15 @@ def require_text(context: str, name: str, value: object) -> None:
         raise _wrong_type(context, name, value, "a str", _TEXT_HINT)
 
 
-def text(context: str, name: str, value: object, *, hint: str = _TEXT_HINT) -> str:
-    """Check a text argument, such as a title or a label, and return it as a plain ``str``.
+def text(context: str, name: str, value: object, *, one_line: str, hint: str = _TEXT_HINT) -> str:
+    r"""Check a text argument of one line, such as a label, and return it as a plain ``str``.
 
     Args:
-        context: The API call, such as ``"Axes.title()"``.
+        context: The API call, such as ``"Axes.xlabel()"``.
         name: The parameter name.
         value: The value passed. ``str`` subclasses are accepted.
+        one_line: What the text is, in the plural, for the message on a line break, such as
+            ``"axis labels"``.
         hint: The hint for a value of another type.
 
     Returns:
@@ -270,22 +352,63 @@ def text(context: str, name: str, value: object, *, hint: str = _TEXT_HINT) -> s
 
     Raises:
         TypeError: The value is not a ``str``.
-        StyleError: The text is longer than ``MAX_TEXT_LENGTH`` characters or holds a lone
-            surrogate, which cannot be encoded as UTF-8.
+        StyleError: The text is longer than ``MAX_TEXT_LENGTH`` characters, holds a lone
+            surrogate, which cannot be encoded as UTF-8, or holds a line break, another
+            control character or a line or paragraph separator.
 
     Example:
         >>> from umber._args import text
-        >>> text("Axes.title()", "text", "Revenue")
+        >>> text("Axes.xlabel()", "text", "Revenue", one_line="axis labels")
         'Revenue'
         >>> try:
-        ...     text("Axes.title()", "text", 42)
-        ... except TypeError as err:
+        ...     text("Axes.xlabel()", "text", "Hours\nUTC", one_line="axis labels")
+        ... except ValueError as err:
         ...     print(err)
-        Axes.title(): text is int; text must be a str.
+        Axes.xlabel(): text holds a line break at index 5; axis labels are one line.
     """
     if not isinstance(value, str):
         raise _wrong_type(context, name, value, "a str", hint)
-    return checked_text(context, name, name, value, StyleError)
+    return checked_text(context, name, name, value, StyleError, one_line=one_line)
+
+
+def multiline_text(context: str, name: str, value: object) -> str:
+    r"""Check a text argument that ``"\n"`` breaks into lines and return it as a plain ``str``.
+
+    Titles, subtitles and the text of ``Axes.text()`` and ``Axes.annotate()`` take lines.
+
+    Args:
+        context: The API call, such as ``"Axes.title()"``.
+        name: The parameter name.
+        value: The value passed. ``str`` subclasses are accepted.
+
+    Returns:
+        The text as a plain ``str``.
+
+    Raises:
+        TypeError: The value is not a ``str``.
+        StyleError: The text is longer than ``MAX_TEXT_LENGTH`` characters, holds a lone
+            surrogate, or holds a control character other than ``"\n"`` or a line or
+            paragraph separator.
+
+    Example:
+        >>> from umber._args import multiline_text
+        >>> multiline_text("Axes.title()", "text", "Revenue\nper quarter")
+        'Revenue\nper quarter'
+        >>> try:
+        ...     multiline_text("Axes.title()", "text", "Rev\tenue")
+        ... except ValueError as err:
+        ...     print(err)
+        Axes.title(): text holds U+0009 (a tab) at index 3; text cannot hold control characters.
+    """
+    if not isinstance(value, str):
+        raise _wrong_type(context, name, value, "a str", _TEXT_HINT)
+    plain = _plain(context, name, name, value, StyleError, True)
+    found = _LINES_REFUSED.search(plain)
+    if found is not None:
+        hint = _LINES_HINTS.get(found.group(), _CHARACTER_HINT)
+        message = _character_message(name, found)
+        raise new_error(StyleError, context, message, parameter=name, hint=hint)
+    return plain
 
 
 def real(

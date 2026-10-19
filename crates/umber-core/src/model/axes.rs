@@ -10,6 +10,7 @@ use super::mark::Mark;
 use super::share::{AxisSettings, ExplicitLimits};
 use super::ticks::{AxisTicks, ExplicitTicks};
 use crate::error::number;
+use crate::text::Lines;
 use crate::{
     ContinuousScale, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec,
     TickFormat,
@@ -81,7 +82,69 @@ pub(super) enum TwinLink {
     Twin(usize),
 }
 
+/// Where the legend labels of the marks added by one call come from, for naming a label in an
+/// error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LabelSource {
+    /// The `label` of the call's options.
+    Options,
+    /// The `label` of each of the call's `series`, as `series[i].label`.
+    Series,
+    /// The `label` of each of the call's `distributions`, as `distributions[i].label`.
+    Distributions,
+    /// The name of each of the call's `groups`, as `groups[i]`.
+    Groups,
+}
+
+impl LabelSource {
+    /// `error` about the `i`-th label, marked with its group as the other errors about one of
+    /// several series or groups are; options and distributions are not groups.
+    fn locate(self, error: crate::Error, i: usize) -> crate::Error {
+        match self {
+            Self::Series | Self::Groups => error.in_group(i),
+            Self::Options | Self::Distributions => error,
+        }
+    }
+
+    /// The parameter, and how a message names the `i`-th label.
+    fn name(self, i: usize) -> (&'static str, String) {
+        match self {
+            Self::Options => ("label", "label".to_owned()),
+            Self::Series => ("series", format!("series[{i}].label")),
+            Self::Distributions => ("distributions", format!("distributions[{i}].label")),
+            Self::Groups => ("groups", format!("groups[{i}]")),
+        }
+    }
+}
+
+/// Legend labels are one line.
+const LEGEND_LABELS: Lines = Lines::One("legend labels");
+
 impl Axes {
+    /// Adds `marks` after checking every legend label they hold, from `source`, whether or not a
+    /// legend shows it: all of them or, on error, none.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Style` under `context` for the first label that holds a line break, another
+    /// control character or a line or paragraph separator: legend labels are one line.
+    pub(super) fn add_marks(
+        &mut self,
+        context: &'static str,
+        source: LabelSource,
+        marks: impl IntoIterator<Item = Mark>,
+    ) -> crate::Result<()> {
+        let marks: Vec<Mark> = marks.into_iter().collect();
+        for (i, label) in marks.iter().flat_map(Mark::labels).enumerate() {
+            let (parameter, name) = source.name(i);
+            LEGEND_LABELS
+                .check_style(context, &name, label)
+                .map_err(|error| source.locate(error.with_parameter(parameter), i))?;
+        }
+        self.marks.extend(marks);
+        Ok(())
+    }
+
     /// Empty axes covering `cells`, with an x axis of scale kind `x` and a y axis of scale kind
     /// `y`.
     pub(super) fn new(

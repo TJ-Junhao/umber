@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use super::annotation::{AnnotateOptions, Annotation, AnnotationPlacement, TextOptions};
 use super::axes::Axes;
+use super::axes::LabelSource;
 use super::axis_data::{AxisData, SharedValues, XySeries};
 use super::band::{BandMark, BandOptions};
 use super::bar::{Arrangement, BarGroupMark, BarInput, BarMark, BarOptions, Series, ValueLabels};
@@ -181,8 +182,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the title.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
+    /// and if the text holds a control character other than `"\n"` or a line or paragraph
+    /// separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -201,8 +207,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the subtitle.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
+    /// and if the text holds a control character other than `"\n"` or a line or paragraph
+    /// separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -221,7 +232,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the x axis label.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the plot.
+    /// Rendering returns `Error::Style` if the text is wider than the plot, and if it holds a
+    /// line break or another control character: axis labels are one line.
     ///
     /// # Examples
     ///
@@ -241,7 +253,8 @@ impl<'a> AxesMut<'a> {
     /// Sets the y axis label, drawn horizontally above the plot.
     ///
     /// Rendering returns `Error::Style` if the left label exceeds the plot and its y tick
-    /// column, or the right twin label exceeds the plot width.
+    /// column, or the right twin label exceeds the plot width, and if the text holds a line
+    /// break or another control character: axis labels are one line.
     ///
     /// # Examples
     ///
@@ -731,7 +744,7 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, LINE_GAP_HINT)?;
-        axes.marks.push(Mark::line(series, options));
+        axes.add_marks(CONTEXT, LabelSource::Options, [Mark::line(series, options)])?;
         Ok(self)
     }
 
@@ -806,7 +819,11 @@ impl<'a> AxesMut<'a> {
         check_scatter_label(CONTEXT, &options.color, &options.label)?;
         self.figure
             .check_shared_point_color(self.index, &options.color, CONTEXT)?;
-        self.axes_mut().marks.push(Mark::scatter(series, options));
+        self.axes_mut().add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::scatter(series, options)],
+        )?;
         Ok(self)
     }
 
@@ -894,14 +911,16 @@ impl<'a> AxesMut<'a> {
         check_point_color(CONTEXT, axes, &options.color, x.len())?;
         self.figure
             .check_shared_point_color(self.index, &options.color, CONTEXT)?;
-        self.axes_mut()
-            .marks
-            .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
+        self.axes_mut().add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::Bubbles(super::bubbles::BubbleMark::new(
                 SharedValues::Numbers(x),
                 SharedValues::Numbers(y),
                 sizes,
                 options,
-            )));
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -952,11 +971,13 @@ impl<'a> AxesMut<'a> {
         check_point_color(CONTEXT, axes, &options.color, x.len())?;
         self.figure
             .check_shared_point_color(self.index, &options.color, CONTEXT)?;
-        self.axes_mut()
-            .marks
-            .push(Mark::Bubbles(super::bubbles::BubbleMark::new(
+        self.axes_mut().add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::Bubbles(super::bubbles::BubbleMark::new(
                 x, y, sizes, options,
-            )));
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -1015,7 +1036,11 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
-        axes.marks.push(Mark::Stem(StemMark::new(series, options)));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::Stem(StemMark::new(series, options))],
+        )?;
         Ok(self)
     }
 
@@ -1083,7 +1108,7 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, AREA_GAP_HINT)?;
-        axes.marks.push(Mark::area(series, options));
+        axes.add_marks(CONTEXT, LabelSource::Options, [Mark::area(series, options)])?;
         Ok(self)
     }
 
@@ -1145,7 +1170,7 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
         let mark = StackedAreaMark::new(CONTEXT, axes.x, y, SharedValues::Numbers(x), series)?;
-        axes.marks.push(Mark::StackedArea(mark));
+        axes.add_marks(CONTEXT, LabelSource::Series, [Mark::StackedArea(mark)])?;
         Ok(self)
     }
 
@@ -1235,7 +1260,7 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes(CONTEXT, axes.x, axes.y)?;
         let mark = BarMark::new(CONTEXT, along, values, categories, heights, options)?;
-        axes.marks.push(Mark::Bar(mark));
+        axes.add_marks(CONTEXT, LabelSource::Options, [Mark::Bar(mark)])?;
         Ok(self)
     }
 
@@ -1352,7 +1377,7 @@ impl<'a> AxesMut<'a> {
             series,
         )?
         .annotated(context, annotation)?;
-        axes.marks.push(Mark::GroupedBar(mark));
+        axes.add_marks(context, LabelSource::Series, [Mark::GroupedBar(mark)])?;
         Ok(self)
     }
 
@@ -1385,7 +1410,7 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes("Axes.box()", axes.x, axes.y)?;
         let mark = BoxMark::new(along, values, categories, groups, options)?;
-        axes.marks.push(Mark::Box(mark));
+        axes.add_marks("Axes.box()", LabelSource::Options, [Mark::Box(mark)])?;
         Ok(self)
     }
 
@@ -1414,7 +1439,11 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes("Axes.grouped_box()", axes.x, axes.y)?;
         let mark = BoxGroupMark::new(along, values, categories, distributions)?;
-        axes.marks.push(Mark::GroupedBox(mark));
+        axes.add_marks(
+            "Axes.grouped_box()",
+            LabelSource::Distributions,
+            [Mark::GroupedBox(mark)],
+        )?;
         Ok(self)
     }
 
@@ -1449,7 +1478,7 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes("Axes.violin()", axes.x, axes.y)?;
         let mark = ViolinMark::new(along, values, categories, groups, options)?;
-        axes.marks.push(Mark::Violin(mark));
+        axes.add_marks("Axes.violin()", LabelSource::Options, [Mark::Violin(mark)])?;
         Ok(self)
     }
 
@@ -1478,7 +1507,11 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes("Axes.grouped_violin()", axes.x, axes.y)?;
         let mark = ViolinGroupMark::new(along, values, categories, distributions)?;
-        axes.marks.push(Mark::GroupedViolin(mark));
+        axes.add_marks(
+            "Axes.grouped_violin()",
+            LabelSource::Distributions,
+            [Mark::GroupedViolin(mark)],
+        )?;
         Ok(self)
     }
 
@@ -1544,7 +1577,7 @@ impl<'a> AxesMut<'a> {
             series,
         )?
         .annotated(CONTEXT, annotation)?;
-        axes.marks.push(Mark::StackedBar(mark));
+        axes.add_marks(CONTEXT, LabelSource::Series, [Mark::StackedBar(mark)])?;
         Ok(self)
     }
 
@@ -1644,7 +1677,7 @@ impl<'a> AxesMut<'a> {
         check_numeric_y(CONTEXT, axes.y)?;
         check_no_time_x(CONTEXT, axes.x, "a linear x axis")?;
         let mark = HistMark::new(CONTEXT, axes.x, values, options)?;
-        axes.marks.push(Mark::Hist(mark));
+        axes.add_marks(CONTEXT, LabelSource::Options, [Mark::Hist(mark)])?;
         Ok(self)
     }
 
@@ -1713,7 +1746,11 @@ impl<'a> AxesMut<'a> {
         check_series_y(CONTEXT, axes.y)?;
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, LINE_GAP_HINT)?;
         check_step_order(CONTEXT, series.x())?;
-        axes.marks.push(Mark::Step(StepMark::new(series, options)));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::Step(StepMark::new(series, options))],
+        )?;
         Ok(self)
     }
 
@@ -1742,8 +1779,11 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let y_transform = check_numeric_y(CONTEXT, axes.y)?;
         check_reference_value(CONTEXT, "y", REFERENCE_LINE, y, y_transform)?;
-        axes.marks
-            .push(Mark::HLine(HLineMark::new(AxisValue::Number(y), options)));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::HLine(HLineMark::new(AxisValue::Number(y), options))],
+        )?;
         Ok(self)
     }
 
@@ -1787,7 +1827,11 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         check_not_two_categories(CONTEXT, axes.x, axes.y)?;
         check_vline_x(CONTEXT, axes.x, &x)?;
-        axes.marks.push(Mark::VLine(VLineMark::new(x, options)));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::VLine(VLineMark::new(x, options))],
+        )?;
         Ok(self)
     }
 
@@ -1818,10 +1862,14 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
         check_span(CONTEXT, (low, high), y)?;
-        axes.marks.push(Mark::HSpan(SpanMark::new(
-            SpanBounds::Numbers([low, high]),
-            options,
-        )));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::HSpan(SpanMark::new(
+                SpanBounds::Numbers([low, high]),
+                options,
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -1870,10 +1918,14 @@ impl<'a> AxesMut<'a> {
             .with_hint("vspan needs a numeric x axis; use vline on a category."));
         };
         check_span(CONTEXT, (low, high), transform)?;
-        axes.marks.push(Mark::VSpan(SpanMark::new(
-            SpanBounds::Numbers([low, high]),
-            options,
-        )));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::VSpan(SpanMark::new(
+                SpanBounds::Numbers([low, high]),
+                options,
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -1956,8 +2008,11 @@ impl<'a> AxesMut<'a> {
         let y = check_numeric_y(CONTEXT, axes.y)?;
         let x = SharedValues::Numbers(x);
         check_band(CONTEXT, axes.x, y, (&x, &low, &high))?;
-        axes.marks
-            .push(Mark::Band(BandMark::new(x, low, high, options)));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::Band(BandMark::new(x, low, high, options))],
+        )?;
         Ok(self)
     }
 
@@ -2043,13 +2098,17 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
         check_y_error_bars(CONTEXT, axes.x, y, &x, (&low, &high))?;
-        axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
-            ErrorBarOrientation::Vertical,
-            x,
-            SharedValues::Numbers(low),
-            SharedValues::Numbers(high),
-            options,
-        )));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::ErrorBars(ErrorBarMark::new(
+                ErrorBarOrientation::Vertical,
+                x,
+                SharedValues::Numbers(low),
+                SharedValues::Numbers(high),
+                options,
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -2149,13 +2208,17 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         check_not_two_categories(CONTEXT, axes.x, axes.y)?;
         check_x_error_bars(CONTEXT, axes.x, axes.y, &y, (&low, &high))?;
-        axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
-            ErrorBarOrientation::Horizontal,
-            y,
-            SharedValues::Numbers(low),
-            SharedValues::Numbers(high),
-            options,
-        )));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::ErrorBars(ErrorBarMark::new(
+                ErrorBarOrientation::Horizontal,
+                y,
+                SharedValues::Numbers(low),
+                SharedValues::Numbers(high),
+                options,
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -2372,7 +2435,7 @@ impl<'a> AxesMut<'a> {
             return Err(Error::usage(CONTEXT, "this axes has no color-mapped mark.")
                 .with_hint("add a heatmap, mesh, hist2d, hexbin, or a scatter with color=ColorBy(...) first."));
         }
-        super::check_text(CONTEXT, "label", "label", &options.label)?;
+        super::check_text(CONTEXT, "label", "label", &options.label, "colorbar labels")?;
         self.axes_mut().colorbar = options;
         Ok(self)
     }
@@ -2608,8 +2671,11 @@ impl<'a> AxesMut<'a> {
             .with_parameter("y")
             .with_hint(SharedAxis::Y.time_scale_hint()));
         }
-        axes.marks
-            .push(Mark::HLine(HLineMark::new(AxisValue::Time(y), options)));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::HLine(HLineMark::new(AxisValue::Time(y), options))],
+        )?;
         Ok(self)
     }
 
@@ -2644,10 +2710,14 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         check_time_axis_for_span(CONTEXT, SharedAxis::Y, axes.y)?;
         check_time_span(CONTEXT, (low, high))?;
-        axes.marks.push(Mark::HSpan(SpanMark::new(
-            SpanBounds::Times([low, high]),
-            options,
-        )));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::HSpan(SpanMark::new(
+                SpanBounds::Times([low, high]),
+                options,
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -2683,10 +2753,14 @@ impl<'a> AxesMut<'a> {
         check_not_two_categories(CONTEXT, axes.x, axes.y)?;
         check_time_axis_for_span(CONTEXT, SharedAxis::X, axes.x)?;
         check_time_span(CONTEXT, (low, high))?;
-        axes.marks.push(Mark::VSpan(SpanMark::new(
-            SpanBounds::Times([low, high]),
-            options,
-        )));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::VSpan(SpanMark::new(
+                SpanBounds::Times([low, high]),
+                options,
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -2724,8 +2798,11 @@ impl<'a> AxesMut<'a> {
         let y = check_numeric_y(CONTEXT, axes.y)?;
         let x = SharedValues::Times(x);
         check_band(CONTEXT, axes.x, y, (&x, &low, &high))?;
-        axes.marks
-            .push(Mark::Band(BandMark::new(x, low, high, options)));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::Band(BandMark::new(x, low, high, options))],
+        )?;
         Ok(self)
     }
 
@@ -2759,7 +2836,7 @@ impl<'a> AxesMut<'a> {
         let axes = self.axes_mut();
         let y = check_numeric_y(CONTEXT, axes.y)?;
         let mark = StackedAreaMark::new(CONTEXT, axes.x, y, SharedValues::Times(x), series)?;
-        axes.marks.push(Mark::StackedArea(mark));
+        axes.add_marks(CONTEXT, LabelSource::Series, [Mark::StackedArea(mark)])?;
         Ok(self)
     }
 
@@ -2796,13 +2873,17 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.y_error_bars()";
         let axes = self.axes_mut();
         check_time_error_bars(CONTEXT, SharedAxis::Y, (axes.x, axes.y), &x, (&low, &high))?;
-        axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
-            ErrorBarOrientation::Vertical,
-            x,
-            SharedValues::Times(low),
-            SharedValues::Times(high),
-            options,
-        )));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::ErrorBars(ErrorBarMark::new(
+                ErrorBarOrientation::Vertical,
+                x,
+                SharedValues::Times(low),
+                SharedValues::Times(high),
+                options,
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -2838,13 +2919,17 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.x_error_bars()";
         let axes = self.axes_mut();
         check_time_error_bars(CONTEXT, SharedAxis::X, (axes.x, axes.y), &y, (&low, &high))?;
-        axes.marks.push(Mark::ErrorBars(ErrorBarMark::new(
-            ErrorBarOrientation::Horizontal,
-            y,
-            SharedValues::Times(low),
-            SharedValues::Times(high),
-            options,
-        )));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::ErrorBars(ErrorBarMark::new(
+                ErrorBarOrientation::Horizontal,
+                y,
+                SharedValues::Times(low),
+                SharedValues::Times(high),
+                options,
+            ))],
+        )?;
         Ok(self)
     }
 
@@ -2947,8 +3032,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the title and its size. Points ignore font scale; multiples follow it.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
+    /// and if the text holds a control character other than `"\n"` or a line or paragraph
+    /// separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -2970,8 +3060,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the subtitle and its size, relative to the theme's body size or in points.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
+    /// and if the text holds a control character other than `"\n"` or a line or paragraph
+    /// separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -2993,7 +3088,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the x axis label and its size, relative to the theme's body size or in points.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the plot.
+    /// Rendering returns `Error::Style` if the text is wider than the plot, and if it holds a
+    /// line break or another control character: axis labels are one line.
     ///
     /// # Examples
     ///
@@ -3016,7 +3112,8 @@ impl<'a> AxesMut<'a> {
     /// Sets the y axis label and its size, relative to the theme's body size or in points.
     ///
     /// Rendering returns `Error::Style` if the left label exceeds the plot and its y tick
-    /// column, or the right twin label exceeds the plot width.
+    /// column, or the right twin label exceeds the plot width, and if the text holds a line
+    /// break or another control character: axis labels are one line.
     ///
     /// # Examples
     ///
@@ -3135,9 +3232,15 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes("Axes.strip()", axes.x, axes.y)?;
-        super::check_text("Axes.strip()", "label", "label", &options.label)?;
+        super::check_text(
+            "Axes.strip()",
+            "label",
+            "label",
+            &options.label,
+            "legend labels",
+        )?;
         let mark = super::StripMark::new(along, values, categories, groups, options)?;
-        axes.marks.push(Mark::Strip(mark));
+        axes.add_marks("Axes.strip()", LabelSource::Options, [Mark::Strip(mark)])?;
         Ok(self)
     }
 
@@ -3164,9 +3267,15 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes("Axes.swarm()", axes.x, axes.y)?;
-        super::check_text("Axes.swarm()", "label", "label", &options.label)?;
+        super::check_text(
+            "Axes.swarm()",
+            "label",
+            "label",
+            &options.label,
+            "legend labels",
+        )?;
         let mark = super::SwarmMark::new(along, values, categories, groups, options)?;
-        axes.marks.push(Mark::Swarm(mark));
+        axes.add_marks("Axes.swarm()", LabelSource::Options, [Mark::Swarm(mark)])?;
         Ok(self)
     }
 
@@ -3222,7 +3331,7 @@ impl<'a> AxesMut<'a> {
         check_numeric_y(CONTEXT, axes.y)?;
         check_no_time_x(CONTEXT, axes.x, "a linear x axis")?;
         let mark = HistGroupMark::new(CONTEXT, axes.x, series, options)?;
-        axes.marks.push(Mark::GroupedHist(mark));
+        axes.add_marks(CONTEXT, LabelSource::Series, [Mark::GroupedHist(mark)])?;
         Ok(self)
     }
 
@@ -3262,7 +3371,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.ecdf()";
         let axes = self.axes_mut();
         let mark = EcdfMark::new(CONTEXT, (axes.x, axes.y), values, options)?;
-        axes.marks.push(Mark::Ecdf(mark));
+        axes.add_marks(CONTEXT, LabelSource::Options, [Mark::Ecdf(mark)])?;
         Ok(self)
     }
 
@@ -3307,7 +3416,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.kde()";
         let axes = self.axes_mut();
         let mark = KdeMark::new(CONTEXT, (axes.x, axes.y), ("values", values), options)?;
-        axes.marks.push(Mark::Kde(mark));
+        axes.add_marks(CONTEXT, LabelSource::Options, [Mark::Kde(mark)])?;
         Ok(self)
     }
 
@@ -3372,7 +3481,11 @@ impl<'a> AxesMut<'a> {
                 .map_err(|error| error.in_group(i))
             })
             .collect::<Result<Vec<_>>>()?;
-        axes.marks.extend(marks.into_iter().map(Mark::Kde));
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Series,
+            marks.into_iter().map(Mark::Kde),
+        )?;
         Ok(self)
     }
 
@@ -3383,7 +3496,13 @@ impl<'a> AxesMut<'a> {
     /// color at its body size unless `options` say otherwise, and changes neither the limits nor
     /// the layout; overlap with other elements is not checked.
     ///
-    /// Errors leave the axes unchanged: an empty `text` is `Error::Usage`; a coordinate that does
+    /// `"\n"` breaks the text into lines: the first line is placed as a text of one line, each
+    /// further line 1.2 sizes below the one before it, and each line is aligned on the point by
+    /// `options.align`. An empty line is kept.
+    ///
+    /// Errors leave the axes unchanged: an empty `text` is `Error::Usage`; a control character
+    /// other than `"\n"`, or a line or paragraph separator (U+2028, U+2029), in `text` is
+    /// `Error::Style`, naming `text`; a coordinate that does
     /// not suit its axis, or is not finite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not
     /// positive on a log axis, is `Error::Data`, naming `at`. Rendering fails with
     /// `Error::Style` when the point lies outside the limits or the text reaches past the
@@ -3433,6 +3552,12 @@ impl<'a> AxesMut<'a> {
     /// towards the point and stops 3 pt short of it: a 0.75 pt shaft and a filled head 5 pt long
     /// and 3.5 pt wide, in the color of the text. The annotation changes neither the limits nor
     /// the layout.
+    ///
+    /// `"\n"` breaks the text into lines: the first line is placed as a text of one line, each
+    /// further line 1.2 sizes below the one before it. Each line is aligned on the side of the
+    /// text that faces the point: left-aligned when the offset points right, right-aligned when
+    /// it points left, centred when it points straight up or down. The arrow starts at the box
+    /// around all lines.
     ///
     /// Errors leave the axes unchanged: those of [`AxesMut::text`], then an offset that is not
     /// finite or is zero is `Error::Style`, naming `offset`. Rendering fails as for
@@ -3750,7 +3875,8 @@ impl<'a> AxesMut<'a> {
                     .map_err(|error| error.in_group(i))
             })
             .collect::<Result<Vec<_>>>()?;
-        self.axes_mut().marks.extend(marks);
+        self.axes_mut()
+            .add_marks(CONTEXT, LabelSource::Groups, marks)?;
         Ok(self)
     }
 
@@ -3777,7 +3903,8 @@ impl<'a> AxesMut<'a> {
             .enumerate()
             .map(|(i, (label, series))| make_mark(label, series).map_err(|error| error.in_group(i)))
             .collect::<Result<Vec<_>>>()?;
-        self.axes_mut().marks.extend(marks);
+        self.axes_mut()
+            .add_marks(context, LabelSource::Groups, marks)?;
         Ok(self)
     }
 }

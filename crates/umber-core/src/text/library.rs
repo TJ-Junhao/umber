@@ -18,6 +18,7 @@ use skrifa::instance::{LocationRef, Size};
 use super::font::{Face, FaceMetrics, FontHandle, FontKey, ShapingFont};
 use super::guard::{guarded, lock};
 use super::layout::TextLayout;
+use super::lines::Lines;
 use super::runs::{self, TextRun, group_by_font};
 use super::shaping::{EXTENTS_PER_LAYOUT, Funcs, ShapedRun, Shaper, features};
 use super::style::{FaceId, TextStyle};
@@ -581,6 +582,10 @@ impl std::fmt::Debug for SceneFonts<'_> {
 /// The context of the errors of fonts made by [`FontLibrary::with_figure_fonts`].
 const LAYOUT_CONTEXT: &str = "SceneFonts.layout()";
 
+/// What a line of drawn text is: every text that reaches the fonts is one line, and text of
+/// several lines is split into its lines first.
+const DRAWN_TEXT: Lines = Lines::One("labels and names");
+
 /// The hint of the error for a face that names no font.
 const UNKNOWN_FACE_HINT: &str = "name a face by the index of a font given to with_figure_fonts.";
 
@@ -686,11 +691,16 @@ impl SceneFonts<'_> {
     /// (at most 16 per character). Characters beyond these limits are drawn as `.notdef`. This
     /// bounds the work a single string can cause.
     ///
+    /// Text is one line: a line break, another control character (U+0000 to U+001F, U+007F to
+    /// U+009F) or a line or paragraph separator (U+2028, U+2029) has no glyph to draw.
+    ///
     /// # Errors
     ///
     /// `Error::Usage` when `style.face` names none of these fonts, and `Error::Style`, naming
     /// `text` and the font, when the font has no face for `style.weight` and bold fallback is
-    /// disabled. The bundled fonts have a face for every weight.
+    /// disabled. The bundled fonts have a face for every weight. `Error::Style`, naming `text`
+    /// and the index of the character, when `text` holds a line break, another control
+    /// character or a line or paragraph separator.
     ///
     /// # Examples
     ///
@@ -703,6 +713,7 @@ impl SceneFonts<'_> {
     /// let large = fonts.layout("Signal", &TextStyle { size: 20.0, ..style })?.width();
     /// assert!((large - 2.0 * small).abs() < 1e-3);
     /// assert!(fonts.layout("Signal", &TextStyle { face: FaceId::new(1), ..style }).is_err());
+    /// assert!(fonts.layout("Line one\nLine two", &style).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn layout(&self, text: &str, style: &TextStyle) -> Result<TextLayout> {
@@ -716,8 +727,21 @@ impl SceneFonts<'_> {
     ///
     /// As [`SceneFonts::layout`]: the error of a missing weight names `text`.
     pub(crate) fn check(&self, text: &str, style: &TextStyle) -> Result<CheckedStyle> {
-        self.primary(style)
-            .map_err(|unavailable| self.error(unavailable, Some(text)))
+        let checked = self
+            .primary(style)
+            .map_err(|unavailable| self.error(unavailable, Some(text)))?;
+        self.check_lines(&format!("the text {}", quoted(text)), text, DRAWN_TEXT)?;
+        Ok(checked)
+    }
+
+    /// Checks that `text`, named `subject` in the message, holds only the characters text of
+    /// `lines` may hold: `Error::Style` in the context of these fonts otherwise.
+    ///
+    /// # Errors
+    ///
+    /// As [`Lines::check_style`].
+    pub(crate) fn check_lines(&self, subject: &str, text: &str, lines: Lines) -> Result<()> {
+        lines.check_style(self.context, subject, text)
     }
 
     /// Shapes `text` with the checked style `style` and measures it, as

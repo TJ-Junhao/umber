@@ -284,6 +284,43 @@ impl Mark {
         })
     }
 
+    /// The legend labels the mark holds, in series order, whether or not a legend shows them;
+    /// empty labels included, and none for a mark that takes no label.
+    pub(super) fn labels(&self) -> Vec<&str> {
+        match self {
+            Mark::Line(m) => vec![m.options().label.as_str()],
+            Mark::Scatter(m) => vec![m.options.label.as_str()],
+            Mark::Bubbles(m) => vec![m.options().label.as_str()],
+            Mark::Stem(m) => vec![m.options().label.as_str()],
+            Mark::Area(m) => vec![m.options().label.as_str()],
+            Mark::Bar(m) => vec![m.options().label.as_str()],
+            Mark::Violin(m) => vec![m.options().label.as_str()],
+            Mark::GroupedViolin(m) => m.distributions().map(|d| d.label()).collect(),
+            Mark::Box(m) => vec![m.options().label.as_str()],
+            Mark::GroupedBox(m) => m.distributions().map(|d| d.label()).collect(),
+            Mark::GroupedBar(m) | Mark::StackedBar(m) => m.series().map(|s| s.label()).collect(),
+            Mark::StackedArea(m) => m.series().map(|s| s.label()).collect(),
+            Mark::Hist(m) => vec![m.label()],
+            Mark::Step(m) => vec![m.options().label.as_str()],
+            Mark::HLine(m) => vec![m.options().label.as_str()],
+            Mark::VLine(m) => vec![m.options().label.as_str()],
+            Mark::HSpan(m) | Mark::VSpan(m) => vec![m.options().label.as_str()],
+            Mark::Band(m) => vec![m.options().label.as_str()],
+            Mark::ErrorBars(m) => vec![m.options().label.as_str()],
+            Mark::Strip(m) => vec![m.options().label.as_str()],
+            Mark::Swarm(m) => vec![m.options().label.as_str()],
+            Mark::GroupedHist(m) => m.series().map(|s| s.label()).collect(),
+            Mark::Ecdf(m) => vec![m.options().label.as_str()],
+            Mark::Kde(m) => vec![m.options().label.as_str()],
+            Mark::Heatmap(_)
+            | Mark::Mesh(_)
+            | Mark::Hist2d(_)
+            | Mark::Hexbin(_)
+            | Mark::Contour(_)
+            | Mark::Events(_) => Vec::new(),
+        }
+    }
+
     /// The colormap, scale and center the mark maps its colors with; `None` for a mark that is
     /// not color-mapped.
     pub(super) fn color_scale(&self) -> Option<ColorScaleSpec> {

@@ -223,7 +223,7 @@ class Figure:
                 )
             )
             instance(context, "size", size, Size, _SIZE_HINT)
-            name = _args.text(context, "label", label)
+            name = _args.text(context, "label", label, one_line="colorbar labels")
             self._native.figure_colorbar(
                 name,
                 placement,
@@ -233,11 +233,14 @@ class Figure:
             return self
 
     def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
-        """Set the figure title, shown above every panel and the merged legend.
+        r"""Set the figure title, shown above every panel and the merged legend.
 
         The default figure title is 1.5 times the panel title size. ``Size.times(k)``
         follows that ratio; ``Size.pt(p)`` uses exactly p points. Alignment follows the
         theme's ``with_title_align()`` setting.
+
+        ``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
+        title alignment; the header grows by every further line, and blank lines are kept.
 
         Args:
             text: The title, at most 1,000 characters. An empty string removes it.
@@ -249,8 +252,10 @@ class Figure:
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long or holds a lone surrogate. Rendering raises
-                it if the text is wider than the figure's room inside its padding.
+            StyleError: If ``text`` is too long, or holds a lone surrogate, a control
+                character other than ``"\n"`` (such as a tab) or a line or paragraph
+                separator. Rendering raises it if the widest line is wider than the figure's
+                room inside its padding.
 
         Example:
             >>> import umber as ub
@@ -261,13 +266,18 @@ class Figure:
             context = "Figure.title()"
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
-            self._native.figure_title(_args.text(context, "text", text), _size.native(size))
+            self._native.figure_title(
+                _args.multiline_text(context, "text", text), _size.native(size)
+            )
             return self
 
     def subtitle(self, text: str, *, size: Size = Size.AUTO) -> Self:
-        """Set the figure subtitle, shown under its title and above every panel.
+        r"""Set the figure subtitle, shown under its title and above every panel.
 
         Its alignment follows the figure title, as set by ``Theme.with_title_align()``.
+
+        ``"\n"`` breaks the subtitle into lines, 1.2 sizes apart, each aligned by the theme's
+        title alignment; the header grows by every further line, and blank lines are kept.
 
         Args:
             text: The subtitle, at most 1,000 characters. An empty string removes it.
@@ -279,8 +289,10 @@ class Figure:
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long or holds a lone surrogate. Rendering raises
-                it if the text is wider than the figure's room inside its padding.
+            StyleError: If ``text`` is too long, or holds a lone surrogate, a control
+                character other than ``"\n"`` (such as a tab) or a line or paragraph
+                separator. Rendering raises it if the widest line is wider than the figure's
+                room inside its padding.
 
         Example:
             >>> import umber as ub
@@ -292,7 +304,9 @@ class Figure:
             context = "Figure.subtitle()"
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
-            self._native.figure_subtitle(_args.text(context, "text", text), _size.native(size))
+            self._native.figure_subtitle(
+                _args.multiline_text(context, "text", text), _size.native(size)
+            )
             return self
 
     def add_axes(

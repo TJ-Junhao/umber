@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::index::{FaceIndex, Verdict};
 use crate::fonts::Weight;
+use crate::text::Lines;
 use crate::text::font::Face;
 use crate::text::guard::{guarded, lock};
 
@@ -151,7 +152,10 @@ fn check_family(family: &str) -> crate::Result<()> {
         .with_parameter("family")
         .with_hint("check the installed family names."));
     }
-    Ok(())
+    // A family name is one line of text, as in the Python API.
+    Lines::One("font family names")
+        .check_style("Font.system()", "family", family)
+        .map_err(|error| error.with_parameter("family"))
 }
 
 /// Faces from one source are inspected together, so a collection is mapped only once.

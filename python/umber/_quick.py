@@ -121,7 +121,7 @@ def line(
         DataError: If ``by`` has invalid names or differs in length from the data; or if
             the data cannot be plotted: lengths differ, a value is infinite, or
             ``x`` holds names.
-        StyleError: If ``label`` is too long.
+        StyleError: If ``label`` is too long or holds a line break or another control character.
 
         UsageError: If ``by`` comes with an explicit color or a non-empty label.
 
@@ -175,7 +175,7 @@ def scatter(
         DataError: If ``by`` has invalid names or differs in length from the data; or if
             the data cannot be plotted: lengths differ, a value is infinite,
             ``x`` holds names, or a ``ColorBy`` does not have one value per point.
-        StyleError: If ``label`` is too long.
+        StyleError: If ``label`` is too long or holds a line break or another control character.
         UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
             a ``ColorBy`` comes with a label.
 
@@ -233,6 +233,7 @@ def bar(
         DataError: If ``by`` has invalid names or differs in length from the data; or if
             the data cannot be plotted: lengths differ, a category repeats, or a
             height is infinite.
+            It is also raised for a line break or other control character in a category name.
         StyleError: If ``label`` or a category name is too long, or ``format`` is
             ``TickFormat.iso()``.
         UsageError: If ``format`` or ``size`` is given without ``annotate``, or ``by`` comes
@@ -303,7 +304,8 @@ def hist(
         DataError: If ``by`` has invalid names or differs in length from the data; or if
             a value is infinite, the edges are not valid, or finite values lie
             outside them.
-        StyleError: If the number of bins is out of range, or ``label`` is too long.
+        StyleError: If the number of bins is out of range, or ``label`` is too long or holds
+            a line break or another control character.
         UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
             ``cumulative=True`` comes with ``Stat.DENSITY``.
 

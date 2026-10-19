@@ -900,6 +900,7 @@ mod tests {
         let f = figure(6.0, 4.0, Theme::pigment(), &names(3));
         let layout = plan_figure(&f, (0, 0), FontLibrary::global()).1;
         let (title, subtitle) = (layout.title.unwrap(), layout.subtitle.unwrap());
+        let (title, subtitle) = (title.first(), subtitle.first());
         let row = &layout.legend;
         assert_eq!(rows_of(row), [0, 0, 0]);
         let first = &row.entries()[0];

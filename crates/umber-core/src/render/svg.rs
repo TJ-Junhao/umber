@@ -809,10 +809,14 @@ mod tests {
     #[test]
     fn svg_escapes_text_and_attributes() {
         let mut scene = Scene::new(100.0, 40.0, WHITE);
-        let source = "a<b & \"c\" 'd'\u{0007}e";
+        let source = "a<b & \"c\" 'd'e";
         scene
             .push_text(&inter_fonts(), source, inter(12.0), p(5.0, 20.0), RED)
             .unwrap();
+        // Laying text out refuses control characters; a hand-built item may still hold one.
+        if let Some(Item::Text(t)) = scene.items.first_mut() {
+            t.text = "a<b & \"c\" 'd'\u{0007}e".to_owned();
+        }
         let svg = render_svg(&scene, SvgText::Editable);
         let doc = parse(&svg);
         let texts: Vec<_> = doc

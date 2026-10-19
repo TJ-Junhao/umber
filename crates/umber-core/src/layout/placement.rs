@@ -1,7 +1,9 @@
 //! Panel legend positions and deterministic placement inside the plot.
 
 use super::inset::CONTAINMENT_TOLERANCE;
-use super::{Area, Frame, Layout, LayoutInput, LegendRow, MeasuredLegend, legend_too_wide, widths};
+use super::{
+    Area, Frame, Layout, LayoutInput, LegendRow, MIN_PLOT, MeasuredLegend, legend_too_wide, widths,
+};
 use crate::resolve::ResolvedMark;
 use crate::{Error, LegendPosition, Result};
 
@@ -83,6 +85,21 @@ pub(crate) fn best_fits(legend: &MeasuredLegend<'_>, plot: &Area) -> bool {
     column.is_empty()
         || (column.width() + 4.0 * BEST_PADDING <= plot.width + CONTAINMENT_TOLERANCE
             && column.height() + 4.0 * BEST_PADDING <= plot.height + CONTAINMENT_TOLERANCE)
+}
+
+/// The least plot height `legend` leaves room for at its position, at least [`MIN_PLOT`]: a
+/// column right of the plot needs the plot as tall as the column, and one inside the plot
+/// ([`LegendPosition::Best`]) the column with its padding and inset on both sides, as
+/// [`check`] requires.
+pub(super) fn least_plot_height(legend: &MeasuredLegend<'_>) -> f64 {
+    let column = legend.column(0.0);
+    let needed = match legend.position {
+        _ if column.is_empty() => 0.0,
+        LegendPosition::Right => column.height(),
+        LegendPosition::Best => column.height() + 4.0 * BEST_PADDING,
+        LegendPosition::TopLeft | LegendPosition::TopRight | LegendPosition::Bottom => 0.0,
+    };
+    MIN_PLOT.max(needed)
 }
 
 /// Attributes a narrow plot to its right legend only when its text has non-negative room.
