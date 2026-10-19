@@ -1,6 +1,7 @@
 """Figure titles, subtitles and immutable title alignment."""
 
 import copy
+import re
 from collections.abc import Callable
 from typing import cast
 from xml.etree import ElementTree as ET
@@ -159,3 +160,137 @@ def test_copy_keeps_independent_figure_text(clone: Callable[[ub.Figure], ub.Figu
     twin.title("Changed").subtitle("")
     assert twin.to_svg() != before
     assert original.to_svg() == before
+
+
+@pytest.mark.parametrize("render", ["to_png", "to_svg", "to_pdf"])
+@pytest.mark.parametrize("kind", ["axes", "figure"])
+def test_long_title_reproduction_raises_at_render(render: str, kind: str) -> None:
+    fig = ub.Figure(6, 4)
+    ax = fig.add_axes().line([0, 1], [0.0, 1.0])
+    if kind == "axes":
+        text = "A very long title that certainly cannot fit in six inches of width at all, size"
+        ax.title(text, size=ub.Size.pt(18))
+        container = "panel"
+        hint = "make the figure wider or pass a smaller size=."
+    else:
+        text = "A very long figure title that certainly cannot fit in six inches of width at all"
+        fig.title(text)
+        container = "figure"
+        hint = "make the figure wider or lower the font scale with Theme.with_font_scale()."
+    call = cast(Callable[[], bytes | str], getattr(fig, render))
+    with pytest.raises(ub.StyleError) as caught:
+        call()
+    shown = '"' + text[:38] + "…"
+    match = re.fullmatch(
+        re.escape(f"Figure.{render}(): the title {shown} is ")
+        + r"(\d+)"
+        + re.escape(f" pt wide; the {container} has 408 pt."),
+        str(caught.value),
+    )
+    assert match is not None
+    assert int(match[1]) > 408
+    assert details(caught.value) == (None, hint)
+
+
+@pytest.mark.parametrize("render", ["to_png", "to_svg", "to_pdf"])
+@pytest.mark.parametrize("align", [ub.Align.LEFT, ub.Align.CENTER, ub.Align.RIGHT])
+@pytest.mark.parametrize(
+    ("kind", "subtitle"),
+    [
+        (kind, subtitle)
+        for kind in ("figure", "axes", "grid", "span", "twin")
+        for subtitle in (False, True)
+    ]
+    + [("pie", False)],
+)
+@pytest.mark.parametrize("size", [ub.Size.AUTO, ub.Size.times(1.4), ub.Size.pt(18)])
+def test_titles_fit_their_own_room(
+    render: str, align: ub.Align, kind: str, subtitle: bool, size: ub.Size
+) -> None:
+    cols = 3 if kind == "span" else 2 if kind == "grid" else 1
+    fig = ub.Figure(6, 4, cols=cols, theme=ub.Theme.PIGMENT.with_title_align(align))
+    target: ub.Figure | ub.Axes | ub.PieAxes
+    if kind == "figure":
+        target = fig
+    elif kind == "pie":
+        target = fig.add_pie_axes().pie(["A"], [1])
+    else:
+        ax = fig.add_axes(col=0, col_span=2 if kind == "span" else 1)
+        ax.xticks([]).yticks([])
+        target = ax
+        if kind in ("grid", "span"):
+            fig.add_axes(col=cols - 1).xticks([]).yticks([])
+        elif kind == "twin":
+            target = ax.twin_y().yticks([])
+    name = "subtitle" if subtitle else "title"
+    setter = cast(Callable[..., object], getattr(target, name))
+    setter("W" * 100, size=size)
+    call = cast(Callable[[], bytes | str], getattr(fig, render))
+    with pytest.raises(ub.StyleError) as caught:
+        call()
+    prefix = "row 0, col 0: " if cols > 1 else ""
+    room = 264 if kind == "span" else 192 if kind == "grid" else 408
+    container = "figure" if kind == "figure" else "panel"
+    assert str(caught.value).startswith(
+        f'Figure.{render}(): {prefix}the {name} "' + "W" * 38 + "… is "
+    )
+    assert str(caught.value).endswith(f"pt wide; the {container} has {room} pt.")
+    hint = (
+        "make the figure wider or pass a smaller size=."
+        if size == ub.Size.pt(18)
+        else "make the figure wider or lower the font scale with Theme.with_font_scale()."
+    )
+    assert details(caught.value) == (None, hint)
+    setter("Fits", size=size)
+    assert call()
+
+
+@pytest.mark.parametrize("render", ["to_png", "to_svg", "to_pdf"])
+@pytest.mark.parametrize("kind", ["axes", "grid", "span", "twin-left", "twin-right"])
+@pytest.mark.parametrize("axis", ["x", "y"])
+@pytest.mark.parametrize("size", [ub.Size.AUTO, ub.Size.times(1.4), ub.Size.pt(18)])
+def test_axis_titles_fit_their_own_room(render: str, kind: str, axis: str, size: ub.Size) -> None:
+    cols = 3 if kind == "span" else 2 if kind == "grid" else 1
+    fig = ub.Figure(6, 4, cols=cols)
+    ax = fig.add_axes(col=0, col_span=2 if kind == "span" else 1).xticks([]).yticks([])
+    if cols > 1:
+        fig.add_axes(col=cols - 1).xticks([]).yticks([])
+    elif kind.startswith("twin"):
+        right = ax.twin_y().yticks([])
+        if kind == "twin-right":
+            ax = right
+    setter = ax.xlabel if axis == "x" else ax.ylabel
+    setter("W" * 100, size=size)
+    call = cast(Callable[[], bytes | str], getattr(fig, render))
+    with pytest.raises(ub.StyleError) as caught:
+        call()
+    prefix = "row 0, col 0: " if cols > 1 else ""
+    room = 264 if kind == "span" else 192 if kind == "grid" else 408
+    match = re.fullmatch(
+        re.escape(f"Figure.{render}(): {prefix}the {axis} axis label is ")
+        + r"(\d+)"
+        + re.escape(f" pt wide; the panel has {room} pt."),
+        str(caught.value),
+    )
+    assert match is not None
+    assert int(match[1]) > room
+    remedy = (
+        "pass a smaller size=."
+        if size == ub.Size.pt(18)
+        else "lower the font scale with Theme.with_font_scale()."
+    )
+    assert details(caught.value) == (None, f"make the figure wider or {remedy}")
+    setter("Fits", size=size)
+    assert call()
+
+
+@pytest.mark.parametrize("render", ["to_png", "to_svg", "to_pdf"])
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_long_axis_title_reproduction_raises_at_render(render: str, axis: str) -> None:
+    fig = ub.Figure(6, 4)
+    ax = fig.add_axes().line([0, 1], [0.0, 1.0])
+    setter = ax.xlabel if axis == "x" else ax.ylabel
+    setter("W" * 100)
+    call = cast(Callable[[], bytes | str], getattr(fig, render))
+    with pytest.raises(ub.StyleError, match=f"the {axis} axis label is"):
+        call()

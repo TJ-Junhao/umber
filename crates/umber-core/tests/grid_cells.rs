@@ -66,13 +66,17 @@ fn a_panel_title_wider_than_its_panel_fails() {
     let err = render_error(&f);
     let message = err.to_string();
     assert!(
-        message.starts_with(
-            "Figure.to_scene(): row 0, col 0: the title is 512 pt wide; the panel has "
-        ),
+        message.starts_with(&format!(
+            "Figure.to_scene(): row 0, col 0: the title \"{}\" is 512 pt wide; the panel has ",
+            "W".repeat(35)
+        )),
         "{message}"
     );
     assert!(message.ends_with(" pt."), "{message}");
-    assert_eq!(err.hint(), Some("shorten the title or widen the figure."));
+    assert_eq!(
+        err.hint(),
+        Some("make the figure wider or lower the font scale with Theme.with_font_scale().")
+    );
 
     // A title that fits stays left of the right panel's title.
     f.axes_at_mut(GridIndex::At(0), GridIndex::At(0))

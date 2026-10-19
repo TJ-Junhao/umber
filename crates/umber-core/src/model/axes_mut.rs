@@ -181,6 +181,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the title.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the panel's header box.
+    ///
     /// # Examples
     ///
     /// ```
@@ -197,6 +199,8 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Sets the subtitle.
+    ///
+    /// Rendering returns `Error::Style` if the text is wider than the panel's header box.
     ///
     /// # Examples
     ///
@@ -215,6 +219,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the x axis label.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the plot.
+    ///
     /// # Examples
     ///
     /// ```
@@ -231,6 +237,8 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Sets the y axis label.
+    ///
+    /// Rendering returns `Error::Style` if the text is wider than the plot.
     ///
     /// # Examples
     ///
@@ -2936,6 +2944,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the title and its size. Points ignore font scale; multiples follow it.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the panel's header box.
+    ///
     /// # Examples
     ///
     /// ```
@@ -2955,6 +2965,8 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Sets the subtitle and its size, relative to the theme's body size or in points.
+    ///
+    /// Rendering returns `Error::Style` if the text is wider than the panel's header box.
     ///
     /// # Examples
     ///
@@ -2976,6 +2988,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the x axis label and its size, relative to the theme's body size or in points.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the plot.
+    ///
     /// # Examples
     ///
     /// ```
@@ -2995,6 +3009,8 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Sets the y axis label and its size, relative to the theme's body size or in points.
+    ///
+    /// Rendering returns `Error::Style` if the text is wider than the plot.
     ///
     /// # Examples
     ///

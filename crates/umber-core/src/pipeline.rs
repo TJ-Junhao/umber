@@ -1309,7 +1309,7 @@ fn plan(
         planned[i].1.legend = layout::placement::best(input.legend, &layout.plot, &marks);
     }
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = planned.into_iter().unzip();
-    layout::check_panel_contents(&grid, &layouts)?;
+    layout::check_panel_contents(&grid, &layouts, &solution.panels)?;
     header.check(figure, context)?;
     Ok(FigurePlan {
         header,
@@ -2601,7 +2601,7 @@ mod tests {
                 layout::place_panel(input, resolved, bands, slot)
             })
             .collect();
-        layout::check_panel_contents(&grid, &layouts)?;
+        layout::check_panel_contents(&grid, &layouts, &solution.panels)?;
         Ok(resolved.into_iter().zip(layouts).collect())
     }
 

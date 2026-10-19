@@ -183,6 +183,8 @@ impl Figure {
 
     /// Sets the figure title, above the panels and the merged legend.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the figure inside its padding.
+    ///
     /// # Examples
     ///
     /// ```
@@ -198,6 +200,8 @@ impl Figure {
     }
 
     /// Sets the figure subtitle, below its title and above the merged legend.
+    ///
+    /// Rendering returns `Error::Style` if the text is wider than the figure inside its padding.
     ///
     /// # Examples
     ///
@@ -1030,6 +1034,8 @@ impl Figure {
     /// Sets the figure title and its size. Multiples use 1.5 times the theme's panel title
     /// size, including font scale; points ignore both multipliers.
     ///
+    /// Rendering returns `Error::Style` if the text is wider than the figure inside its padding.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1046,6 +1052,8 @@ impl Figure {
     }
 
     /// Sets the figure subtitle and its size, relative to the theme's body size or in points.
+    ///
+    /// Rendering returns `Error::Style` if the text is wider than the figure inside its padding.
     ///
     /// # Examples
     ///

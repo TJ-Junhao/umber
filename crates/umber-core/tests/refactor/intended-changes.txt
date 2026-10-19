@@ -1,1 +1,24 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change.
+# Titles and axis titles that do not fit now raise StyleError instead of being clipped.
+# Keep the maximum font scale with enough width for its text.
+fig-font-scale-max
+# Keep the narrow layout at font scale 3 with titles and axis labels that fit.
+fig-squeezed-layout-no-x-ticks
+# Keep ASCII, multibyte and fallback-font text at font scale 10 with fitting labels.
+fig-text-truncated-no-ticks
+# Keep 50 header-row entries on a narrow figure with fitting title and axis text.
+fig-legend-narrow-50-entries
+# Keep header-row legends at font scale 10 with fitting title and axis text.
+fig-legend-font-scale-max
+# Keep chip legends at font scale 10 with fitting title and axis text.
+fig-legend-chips-font-scale-max
+# Keep 50 chips on a narrow figure with fitting title and axis text.
+fig-legend-chips-narrow-50-entries
+# Keep direct labels at font scale 10 with fitting title and axis text.
+fig-direct-font-scale-max
+# Keep 50 direct-labelled lines on a tiny plot with fitting title and axis text.
+fig-direct-tiny-50-lines
+# Record the original oversized title configurations alongside the existing tick errors.
+errors/x-label-overflow
+# Use quoted title text and size-dependent hints for grid title and axis-label errors.
+errors/grid-room

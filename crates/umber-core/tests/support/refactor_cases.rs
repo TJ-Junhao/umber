@@ -1471,21 +1471,24 @@ fn label_cases(lib: &FontLibrary, add: &mut impl FnMut(&str, Scene)) {
         add(name, to_scene(&f, lib));
     }
 
-    // At the largest font scale the header, the tick labels and the axis labels take about
-    // 10 in, so that figure is 12 in tall.
-    for (name, scale, height) in [
-        ("fig-font-scale-max", 10.0, 12.0),
-        ("fig-font-scale-tiny", 1.0e-30, 4.0),
+    // At the largest font scale the header, tick labels and axis labels need a wider and
+    // taller figure. The original 6 in width is recorded in errors/x-label-overflow.txt.
+    for (name, scale, width, height) in [
+        ("fig-font-scale-max", 10.0, 20.0, 12.0),
+        ("fig-font-scale-tiny", 1.0e-30, 6.0, 4.0),
     ] {
-        add(name, to_scene(&font_scale_figure(scale, height), lib));
+        add(
+            name,
+            to_scene(&font_scale_figure(scale, width, height), lib),
+        );
     }
 }
 
-/// A 6 in wide graphite figure `height` in tall at font `scale`, on a linear x and a log y
+/// A `width` by `height` in graphite figure at font `scale`, on a linear x and a log y
 /// axis, with a title, a subtitle, axis labels and one line.
-fn font_scale_figure(scale: f64, height: f64) -> Figure {
+fn font_scale_figure(scale: f64, width: f64, height: f64) -> Figure {
     let theme = Theme::graphite().with_font_scale(scale).unwrap();
-    let mut f = figure(6.0, height, theme, linear(), log(10.0));
+    let mut f = figure(width, height, theme, linear(), log(10.0));
     labelled(&mut f, "Font scale");
     axes(&mut f)
         .line(

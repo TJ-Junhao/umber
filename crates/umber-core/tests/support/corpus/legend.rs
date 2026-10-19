@@ -1,7 +1,7 @@
 //! Output-gate cases for legend figures.
 //!
-//! The cases write only new output files, so no existing manifest entry changes. See
-//! `scripts/check-refactor-output.sh`.
+//! Narrow and maximum-font-scale figures keep short titles and axis labels that fit, while
+//! their original oversized text is recorded in `errors/x-label-overflow.txt`.
 //!
 //! Covered: the header row with 1, 3 and 20 entries (wrapping), with and without a title and
 //! subtitle, at the largest font scale, in a 1 in wide figure with 50 entries, in every theme;
@@ -33,11 +33,42 @@ use std::fmt::Write as _;
 use umber_core::figure::{AxisData, BarOptions, HistOptions, LineOptions, ScatterOptions};
 use umber_core::{ColorSpec, Dash, Figure, FontLibrary, LegendStyle, ScaleKind, Series, Theme};
 
-use super::super::{Output, axes, emit_scene, figure, labelled, linear, numbers, record, wobble};
+use super::super::{
+    Log, Output, axes, emit_scene, figure, labelled, linear, numbers, record, wobble,
+};
+
+const FITTED_TEXT_CASES: [&str; 6] = [
+    "fig-legend-narrow-50-entries",
+    "fig-legend-font-scale-max",
+    "fig-legend-chips-font-scale-max",
+    "fig-legend-chips-narrow-50-entries",
+    "fig-direct-font-scale-max",
+    "fig-direct-tiny-50-lines",
+];
+
+/// The original text of the narrow and maximum-font-scale figures, before shortening it.
+pub(super) fn title_room_errors(lib: &FontLibrary) -> String {
+    let mut rec = Log::default();
+    rec.section("Figure::to_scene, legend figures whose titles previously ran outside the figure");
+    for (name, figure) in figures()
+        .into_iter()
+        .filter(|(name, _)| FITTED_TEXT_CASES.contains(name))
+    {
+        rec.result(name, figure.to_scene(lib).map(drop), |()| String::new());
+    }
+    rec.out
+}
 
 /// Passes every output of this area to `sink`, in a fixed order.
 pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
-    for (name, figure) in figures() {
+    for (name, mut figure) in figures() {
+        if FITTED_TEXT_CASES.contains(&name) {
+            axes(&mut figure)
+                .title("I")
+                .subtitle("I")
+                .xlabel("I")
+                .ylabel("I");
+        }
         emit_scene(name, &figure.to_scene(lib).unwrap(), sink);
     }
     sink(Output {

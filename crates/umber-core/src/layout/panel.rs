@@ -266,6 +266,66 @@ impl Header {
     }
 }
 
+/// The size remedy for text that follows the font scale or uses fixed points.
+fn text_size_hint(size: crate::SizeSpec) -> &'static str {
+    match size {
+        crate::SizeSpec::Auto | crate::SizeSpec::Times(_) => {
+            "make the figure wider or lower the font scale with Theme.with_font_scale()."
+        }
+        crate::SizeSpec::Points(_) => "make the figure wider or pass a smaller size=.",
+    }
+}
+
+/// Checks a header line against the width of the box used to align it.
+pub(super) fn check_title_width(
+    label: Option<&Label>,
+    size: crate::SizeSpec,
+    room: f64,
+    name: &str,
+    container: &str,
+    context: &'static str,
+) -> Result<()> {
+    if let Some(label) = label
+        && label.width() > room + super::inset::CONTAINMENT_TOLERANCE
+    {
+        let (width, room) = super::widths(label.width(), room);
+        let hint = text_size_hint(size);
+        return Err(crate::Error::style(
+            context,
+            format!(
+                "the {name} {} is {width} pt wide; the {container} has {room} pt.",
+                crate::error::quoted(&label.text)
+            ),
+        )
+        .with_hint(hint));
+    }
+    Ok(())
+}
+
+/// Both axis titles are horizontal and must fit the plot width, on single panels and grids.
+pub(super) fn check_axis_titles(
+    layout: &Layout,
+    axes: &crate::Axes,
+    context: &'static str,
+) -> Result<()> {
+    for (label, size, axis) in [
+        (layout.xlabel.as_ref(), axes.xlabel_size(), "x"),
+        (layout.ylabel.as_ref(), axes.ylabel_size(), "y"),
+    ] {
+        if let Some(label) = label
+            && label.width() > layout.plot.width + super::inset::CONTAINMENT_TOLERANCE
+        {
+            let (width, room) = super::widths(label.width(), layout.plot.width);
+            return Err(crate::Error::style(
+                context,
+                format!("the {axis} axis label is {width} pt wide; the panel has {room} pt."),
+            )
+            .with_hint(text_size_hint(size)));
+        }
+    }
+    Ok(())
+}
+
 /// The figure-wide header, placed inside the canvas padding above the grid.
 #[derive(Debug, Clone)]
 pub(crate) struct FigureHeader {
@@ -325,11 +385,17 @@ impl FigureHeader {
         })
     }
 
-    /// Checks that every merged entry fits the inner canvas width. A figure without panels
-    /// must still have room for its header and the bottom padding.
+    /// Checks that titles and merged entries fit the inner canvas width. A figure without
+    /// panels must still have room for its header and the bottom padding.
     pub fn check(&self, figure: &Figure, context: &'static str) -> Result<()> {
-        self.legend
-            .check_width(figure.width_in() * 72.0 - 2.0 * PADDING, context)?;
+        let room = figure.width_in() * 72.0 - 2.0 * PADDING;
+        for (label, size, name) in [
+            (self.title.as_ref(), figure.title_size(), "title"),
+            (self.subtitle.as_ref(), figure.subtitle_size(), "subtitle"),
+        ] {
+            check_title_width(label, size, room, name, "figure", context)?;
+        }
+        self.legend.check_width(room, context)?;
         if figure.panels().next().is_none()
             && self.bottom > PADDING
             && self.bottom + PADDING > figure.height_in() * 72.0

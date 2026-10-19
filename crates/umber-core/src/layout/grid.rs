@@ -1437,29 +1437,59 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
     })
 }
 
-/// Checks that the texts of every panel of `input`, placed as in `layouts` (in the same
-/// order), stay in the panel's cells, on a grid of more than one cell; a figure of one cell
-/// is not checked. Text that does not would run into a neighbouring cell. The final layout is
-/// checked, after the second pass of the layout, whose plots can be wider than the first's.
-///
-/// In panel order, then in this order: the title, the subtitle and every legend row entry must
-/// end within the plot width from the plot's left edge; the x axis label and the y axis label
-/// must be at most as wide as the plot; every direct label must end within the panel's frame.
+/// Checks the final texts of every panel of `input`, placed as in `layouts` and `slots`
+/// (in the same order). Titles and subtitles must fit their header box on every figure;
+/// axis labels must be at most as wide as the plot. Twin y axis titles, colorbars and legends
+/// must also fit their room. On a grid of more than one cell, direct labels must end within
+/// the panel's frame, so that text cannot run into a neighbouring cell.
 ///
 /// # Errors
 ///
 /// `Error::Style` in `input.context` for the first text that does not, with the widths in
 /// whole points: the room rounded down, the text's width rounded up and at least one point more.
-/// - `row {r}, col {c}: the title is {w} pt wide; the panel has {p} pt.` (likewise
-///   `the subtitle`, `the x axis label` and `the y axis label`), hint
-///   `shorten the title or widen the figure.` (naming the text);
+/// - `the title "…" is {w} pt wide; the panel has {p} pt.` (likewise `the subtitle`),
+///   with the hint to widen the figure or reduce the font scale (fixed-point sizes instead
+///   suggest a smaller `size=`); on a grid, prefixed with `row {r}, col {c}: `;
+/// - `the x axis label is {w} pt wide; the panel has {p} pt.` (likewise `the y axis label`),
+///   with the same size-dependent hint as titles; on a grid, prefixed
+///   with `row {r}, col {c}: `;
 /// - `row {r}, col {c}: the legend label "…" is {w} pt wide; the panel has {p} pt.`, with `p`
 ///   the room from the label's start to the plot's right edge;
 /// - `row {r}, col {c}: the direct label "…" is {w} pt wide; at most {m} pt fits beside the
 ///   plot.`, with `m` the room from the label's start to the frame's right edge.
 ///
 /// Both legend errors have the hint `shorten the label or widen the figure.`
-pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) -> Result<()> {
+pub(crate) fn check_panel_contents(
+    input: &GridInput<'_>,
+    layouts: &[Layout],
+    slots: &[PanelSlot],
+) -> Result<()> {
+    for ((panel, layout), slot) in input.panels.iter().zip(layouts).zip(slots) {
+        for (label, size, name) in [
+            (layout.title.as_ref(), panel.axes.title_size(), "title"),
+            (
+                layout.subtitle.as_ref(),
+                panel.axes.subtitle_size(),
+                "subtitle",
+            ),
+        ] {
+            super::panel::check_title_width(
+                label,
+                size,
+                slot.header.right - slot.header.left,
+                name,
+                "panel",
+                input.context,
+            )
+            .map_err(|error| {
+                if input.is_single() {
+                    error
+                } else {
+                    in_panel(panel.axes.cells(), error)
+                }
+            })?;
+        }
+    }
     for (panel, layout) in input.panels.iter().zip(layouts) {
         match panel.axes {
             crate::model::Layer::Primary(_) => {}
@@ -1474,6 +1504,17 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
                     },
                 )?;
             }
+        }
+    }
+    for (panel, layout) in input.panels.iter().zip(layouts) {
+        if let Some(axes) = panel.axes.cartesian() {
+            super::panel::check_axis_titles(layout, axes, input.context).map_err(|error| {
+                if input.is_single() {
+                    error
+                } else {
+                    in_panel(panel.axes.cells(), error)
+                }
+            })?;
         }
     }
     for (panel, layout) in input.panels.iter().zip(layouts) {
@@ -1505,50 +1546,7 @@ pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) ->
     };
     for (panel, layout) in input.panels.iter().zip(layouts) {
         let cells = panel.axes.cells();
-        let plot = layout.plot;
-        let named: [(Option<&Label>, &str, &'static str); 2] = [
-            (
-                layout.title.as_ref(),
-                "the title",
-                "shorten the title or widen the figure.",
-            ),
-            (
-                layout.subtitle.as_ref(),
-                "the subtitle",
-                "shorten the subtitle or widen the figure.",
-            ),
-        ];
-        let axis: [(Option<&Label>, &str, &'static str); 2] = [
-            (
-                layout.xlabel.as_ref(),
-                "the x axis label",
-                "shorten the x axis label or widen the figure.",
-            ),
-            (
-                layout.ylabel.as_ref(),
-                "the y axis label",
-                "shorten the y axis label or widen the figure.",
-            ),
-        ];
-        for (label, name, hint) in named {
-            if let Some(label) = label
-                && label.width() > plot.width + CONTAINMENT_TOLERANCE
-            {
-                let (w, p) = widths(label.width(), plot.width);
-                let message = format!("{name} is {w} pt wide; the panel has {p} pt.");
-                return Err(too_wide(cells, message, hint));
-            }
-        }
         super::placement::check(panel, layout, false).map_err(|err| in_panel(cells, err))?;
-        for (label, name, hint) in axis {
-            if let Some(label) = label
-                && label.width() > plot.width + CONTAINMENT_TOLERANCE
-            {
-                let (w, p) = widths(label.width(), plot.width);
-                let message = format!("{name} is {w} pt wide; the panel has {p} pt.");
-                return Err(too_wide(cells, message, hint));
-            }
-        }
         for label in layout.direct.iter().filter_map(|d| d.label.as_ref()) {
             if label.x + label.width() > layout.frame.right() + CONTAINMENT_TOLERANCE {
                 let (w, m) = widths(label.width(), layout.frame.right() - label.x);
@@ -2098,21 +2096,25 @@ mod tests {
         };
         let text = "Station output";
         for (which, name, hint) in [
-            (0, "the title", "shorten the title or widen the figure."),
+            (
+                0,
+                "the title \"Station output\"",
+                "make the figure wider or lower the font scale with Theme.with_font_scale().",
+            ),
             (
                 1,
-                "the subtitle",
-                "shorten the subtitle or widen the figure.",
+                "the subtitle \"Station output\"",
+                "make the figure wider or lower the font scale with Theme.with_font_scale().",
             ),
             (
                 2,
                 "the x axis label",
-                "shorten the x axis label or widen the figure.",
+                "make the figure wider or lower the font scale with Theme.with_font_scale().",
             ),
             (
                 3,
                 "the y axis label",
-                "shorten the y axis label or widen the figure.",
+                "make the figure wider or lower the font scale with Theme.with_font_scale().",
             ),
         ] {
             let probe = titled_columns(864.0, text, which);

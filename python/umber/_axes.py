@@ -221,7 +221,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long.
+            StyleError: If ``text`` is too long. Rendering raises it if the text is wider
+                than this panel's title room.
 
         Example:
             >>> import umber as ub
@@ -249,7 +250,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long.
+            StyleError: If ``text`` is too long. Rendering raises it if the text is wider
+                than this panel's title room.
 
         Example:
             >>> import umber as ub
@@ -277,7 +279,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long.
+            StyleError: If ``text`` is too long. Rendering raises it if the label is wider
+                than the plot.
 
         Example:
             >>> import umber as ub
@@ -305,7 +308,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
-            StyleError: If ``text`` is too long.
+            StyleError: If ``text`` is too long. Rendering raises it if the label is wider
+                than the plot.
 
         Example:
             >>> import umber as ub

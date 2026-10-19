@@ -30,6 +30,8 @@ mod panel;
 pub(crate) mod pie;
 pub(crate) mod placement;
 mod program;
+#[cfg(test)]
+mod title_tests;
 pub(crate) mod twin;
 
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
@@ -1535,7 +1537,7 @@ mod tests {
     }
 
     #[test]
-    fn tiny_figures_and_long_text_lay_out() {
+    fn tiny_figures_refuse_long_titles() {
         let long: String = "Station output ".repeat(34).chars().take(500).collect();
         assert_eq!(long.chars().count(), 500);
         for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
@@ -1567,26 +1569,19 @@ mod tests {
                         .unwrap();
                     f
                 };
-                // A 1 in square has no room for the header and the axis labels; a figure as tall
-                // as the error names has.
+                // Enough height for the header and axes still does not give the title room.
                 let need = named_height(&overflow(&build(1.0))).unwrap();
-                let f = build(need / 72.0);
-                let (_, layout) = plan_of(&f);
-                assert!(layout.plot.width >= 1.0 && layout.plot.height >= 1.0);
-                for v in [
-                    layout.plot.x,
-                    layout.plot.y,
-                    layout.plot.width,
-                    layout.plot.height,
-                ] {
-                    assert!(v.is_finite());
-                }
-                let scene = f.to_scene(lib()).unwrap();
-                assert_scene_bounded(&scene);
+                let error = overflow(&build(need / 72.0));
+                assert!(
+                    error
+                        .to_string()
+                        .contains(&format!("the title {}", quoted(&long)))
+                );
+                assert!(error.to_string().ends_with("the panel has 48 pt."));
             }
         }
 
-        // Text far wider than any figure is cut to a prefix that fits.
+        // Text far wider than any figure is measured up to the shaping cap, then refused.
         let huge = "W".repeat(20_000);
         let theme = Theme::pigment().with_font_scale(10.0).unwrap();
         let build = |height: f64| {
@@ -1607,11 +1602,13 @@ mod tests {
             f
         };
         let f = build(named_height(&overflow(&build(1.0))).unwrap() / 72.0);
-        let (_, layout) = plan_of(&f);
-        let title = layout.title.as_ref().unwrap();
-        assert!(title.width() <= MAX_TEXT_WIDTH && title.width() > MAX_TEXT_WIDTH * 0.9);
-        assert!(huge.starts_with(&title.text));
-        assert_scene_bounded(&f.to_scene(lib()).unwrap());
+        let error = overflow(&f);
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("the title {}", quoted(&huge)))
+        );
+        assert!(error.to_string().ends_with("the panel has 48 pt."));
         // A tick label as wide is cut the same way, and then named in the error. Without y
         // ticks: their labels at this font scale leave no room for the plot, and the error would
         // name them (see `y_labels_that_leave_no_room_for_the_plot_fail_naming_the_widest`).

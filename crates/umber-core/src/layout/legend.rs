@@ -1369,12 +1369,14 @@ mod tests {
                     // Without ticks: x tick labels too wide for these figures, and y tick labels
                     // that leave no room for the plot, fail the layout, which `layout::tests`
                     // covers.
+                    // Even one monospaced character at scale 10 needs more than 1 in.
+                    let width = if scale == 10.0 && w == 1.0 { 2.0 } else { w };
                     let build = |height: f64| {
-                        let mut f = Figure::new(w, height, theme.clone()).ok()?;
+                        let mut f = Figure::new(width, height, theme.clone()).ok()?;
                         let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
-                        axes.title("Station output")
-                            .subtitle("Daily mean, MW")
-                            .ylabel("MW")
+                        axes.title("I")
+                            .subtitle("I")
+                            .ylabel("I")
                             .xticks(&[])
                             .unwrap()
                             .yticks(&[])
@@ -1860,11 +1862,7 @@ mod tests {
                     // Without ticks: x tick labels too wide for these figures, and y tick labels
                     // that leave no room for the plot, fail the layout, which `layout::tests`
                     // covers.
-                    axes.title("Crowded")
-                        .xticks(&[])
-                        .unwrap()
-                        .yticks(&[])
-                        .unwrap();
+                    axes.title("I").xticks(&[]).unwrap().yticks(&[]).unwrap();
                     for k in 0..n {
                         axes.line(
                             AxisData::Numbers(vec![0.0, 1.0]),

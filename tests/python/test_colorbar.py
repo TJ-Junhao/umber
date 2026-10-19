@@ -247,7 +247,7 @@ def test_colorbar_room_error_minimum_renders(
             ax.colorbar("Intensity", position=ub.ColorbarPosition.BOTTOM)
         elif case in ("single_legend", "single_narrow_legend"):
             fig = ub.Figure(size, 3)
-            ax = fig.add_axes().ylabel("Height")
+            ax = fig.add_axes()
             ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
             ax.colorbar("A fairly long colorbar label" if case == "single_legend" else "")
             ax.line([1, 2], [1, 2], label="A long legend label").legend(
