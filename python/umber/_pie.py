@@ -69,7 +69,11 @@ class PieAxes:
                         f"PieAxes.{name}()",
                         "this panel has no Cartesian axes; use pie, title or legend.",
                         parameter=None,
-                        hint="use Figure.add_axes() for Cartesian marks and axis settings.",
+                        hint=(
+                            "twin the original axes, or stop sharing x."
+                            if name == "twin_y"
+                            else "use Figure.add_axes() for Cartesian marks and axis settings."
+                        ),
                     )
             raise AttributeError(name)
 

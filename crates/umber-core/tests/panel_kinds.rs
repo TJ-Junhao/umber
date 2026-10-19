@@ -35,7 +35,7 @@ fn panels_expose_their_kind_without_cartesian_state_on_pies() {
     let mut kinds = Vec::new();
     for panel in copy.panels() {
         kinds.push(match panel {
-            Panel::Cartesian(axes) => ("cartesian", axes.title_text()),
+            Panel::Cartesian(axes, _) => ("cartesian", axes.title_text()),
             Panel::Pie(pie) => ("pie", pie.title_text()),
         });
     }

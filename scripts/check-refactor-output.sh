@@ -121,6 +121,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/text_size.rs
   crates/umber-core/tests/support/corpus/ticks.rs
   crates/umber-core/tests/support/corpus/time.rs
+  crates/umber-core/tests/support/corpus/twin_y.rs
   crates/umber-core/tests/support/corpus/violin.rs
   crates/umber-core/tests/support/corpus/x_end_label.rs
   crates/umber-core/tests/support/refactor_cases.rs

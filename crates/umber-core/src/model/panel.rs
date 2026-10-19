@@ -15,7 +15,7 @@ use crate::SizeSpec;
 /// figure.add_pie_axes()?.title("Parts");
 /// for panel in figure.panels() {
 ///     match panel {
-///         Panel::Cartesian(axes) => assert!(axes.marks().is_empty()),
+///         Panel::Cartesian(axes, _) => assert!(axes.marks().is_empty()),
 ///         Panel::Pie(pie) => assert_eq!(pie.title_text(), "Parts"),
 ///     }
 /// }
@@ -23,8 +23,8 @@ use crate::SizeSpec;
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Panel<'a> {
-    /// Cartesian scales, marks and axis settings.
-    Cartesian(&'a Axes),
+    /// Cartesian axes and their optional right-hand numeric y axes, in the same grid cells.
+    Cartesian(&'a Axes, Option<&'a Axes>),
     /// A pie or donut with no Cartesian scales or marks.
     Pie(&'a PiePanel),
 }
@@ -43,7 +43,7 @@ impl<'a> Panel<'a> {
     /// ```
     pub fn cells(self) -> CellRange {
         match self {
-            Self::Cartesian(axes) => axes.cells(),
+            Self::Cartesian(axes, _) => axes.cells(),
             Self::Pie(pie) => pie.cells(),
         }
     }
@@ -61,42 +61,42 @@ impl<'a> Panel<'a> {
     /// ```
     pub fn title_text(self) -> &'a str {
         match self {
-            Self::Cartesian(axes) => axes.title_text(),
+            Self::Cartesian(axes, _) => axes.title_text(),
             Self::Pie(pie) => pie.title_text(),
         }
     }
 
     pub(crate) fn cartesian(self) -> Option<&'a Axes> {
         match self {
-            Self::Cartesian(axes) => Some(axes),
+            Self::Cartesian(axes, _) => Some(axes),
             Self::Pie(_) => None,
         }
     }
 
     pub(crate) fn title_size(self) -> SizeSpec {
         match self {
-            Self::Cartesian(axes) => axes.title_size(),
+            Self::Cartesian(axes, _) => axes.title_size(),
             Self::Pie(pie) => pie.title_size,
         }
     }
 
     pub(crate) fn legend_size(self) -> SizeSpec {
         match self {
-            Self::Cartesian(axes) => axes.legend_size(),
+            Self::Cartesian(axes, _) => axes.legend_size(),
             Self::Pie(pie) => pie.legend_size,
         }
     }
 
     pub(crate) fn subtitle_text(self) -> &'a str {
         match self {
-            Self::Cartesian(axes) => axes.subtitle_text(),
+            Self::Cartesian(axes, _) => axes.subtitle_text(),
             Self::Pie(_) => "",
         }
     }
 
     pub(crate) fn subtitle_size(self) -> SizeSpec {
         match self {
-            Self::Cartesian(axes) => axes.subtitle_size(),
+            Self::Cartesian(axes, _) => axes.subtitle_size(),
             Self::Pie(_) => SizeSpec::Auto,
         }
     }
@@ -104,7 +104,7 @@ impl<'a> Panel<'a> {
 
 impl<'a> From<&'a Axes> for Panel<'a> {
     fn from(axes: &'a Axes) -> Self {
-        Self::Cartesian(axes)
+        Self::Cartesian(axes, None)
     }
 }
 

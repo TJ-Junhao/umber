@@ -574,9 +574,153 @@ impl Figure {
         self.panels().filter_map(Panel::cartesian)
     }
 
+    /// Draw layers in panel order, with a twin immediately after its original axes.
+    /// Both layers occupy the same cells; only the original owns the panel header.
+    pub(crate) fn layers(&self) -> impl Iterator<Item = Panel<'_>> {
+        self.panels()
+            .flat_map(|panel| match panel {
+                Panel::Cartesian(axes, twin) => [
+                    Some(Panel::Cartesian(axes, None)),
+                    twin.map(|axes| Panel::Cartesian(axes, None)),
+                ],
+                Panel::Pie(_) => [Some(panel), None],
+            })
+            .flatten()
+    }
+
+    /// Every Cartesian axes, including right-hand axes in their panel's cells.
+    pub(crate) fn cartesian_axes(&self) -> impl Iterator<Item = &Axes> {
+        self.layers().filter_map(Panel::cartesian)
+    }
+
+    /// Adds the right-hand axes to one Cartesian panel, without occupying another cell.
+    pub(super) fn add_twin_y(&mut self, index: usize, y: ScaleKind) -> Result<AxesMut<'_>> {
+        use super::axes::TwinLink;
+        const CONTEXT: &str = "Axes.twin_y()";
+        const HINT: &str = "twin the original axes, or stop sharing x.";
+        let axes = &self.axes[index];
+        let problem = match axes.twin {
+            TwinLink::Left(_) => {
+                Some("these axes are already a twin; only the original axes can be twinned.")
+            }
+            TwinLink::Right(_) => {
+                Some("these axes already have a twin; a panel has at most two y axes.")
+            }
+            TwinLink::None if self.grid.share_x() != super::Share::None => {
+                Some("x is shared in the grid; a twin needs an unshared x axis.")
+            }
+            TwinLink::None => None,
+        };
+        if let Some(problem) = problem {
+            return Err(Error::usage(CONTEXT, problem).with_hint(HINT));
+        }
+        if !matches!(axes.y, ScaleKind::Linear | ScaleKind::Log { .. }) {
+            return Err(
+                Error::usage(CONTEXT, "y is not numeric; a twin needs numeric y axes.")
+                    .with_hint("use a linear or log y scale for the original axes."),
+            );
+        }
+        if !matches!(y, ScaleKind::Linear | ScaleKind::Log { .. }) {
+            return Err(Error::usage(
+                CONTEXT,
+                "scale is not numeric; the right y axis needs a linear or log scale.",
+            )
+            .with_parameter("scale")
+            .with_hint("pass Scale.linear() or Scale.log()."));
+        }
+        let mut twin = Axes::new(
+            axes.x,
+            y,
+            axes.cells,
+            Arc::clone(&axes.x_settings),
+            Arc::default(),
+        );
+        twin.twin = TwinLink::Left(index);
+        twin.title.clone_from(&axes.title);
+        twin.subtitle.clone_from(&axes.subtitle);
+        twin.xlabel.clone_from(&axes.xlabel);
+        twin.title_size = axes.title_size;
+        twin.subtitle_size = axes.subtitle_size;
+        twin.xlabel_size = axes.xlabel_size;
+        twin.legend = axes.legend;
+        twin.legend_position = axes.legend_position;
+        twin.legend_size = axes.legend_size;
+        if self.grid.share_color() != super::Share::None {
+            twin.color_limits = axes.color_limits;
+        }
+        let right = self.axes.len();
+        self.axes.push(twin);
+        self.axes[index].twin = TwinLink::Right(right);
+        Ok(AxesMut::new(self, right))
+    }
+
+    /// Finds the right-hand axes of a Cartesian panel.
+    fn twin_index_at(&self, row: GridIndex, col: GridIndex) -> Result<usize> {
+        let index = self.cartesian_index(self.index_at(row, col)?)?;
+        match self.axes[index].twin {
+            super::axes::TwinLink::Right(right) => Ok(right),
+            super::axes::TwinLink::None | super::axes::TwinLink::Left(_) => Err(Error::usage(
+                "Figure.twin_axes_at()",
+                "this panel has no right-hand y axis.",
+            )
+            .with_hint("add one with Axes.twin_y() first.")),
+        }
+    }
+
+    /// Returns the right-hand axes at this panel's top-left cell.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, GridIndex, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.twin_y(ScaleKind::Linear)?;
+    /// assert_eq!(f.twin_axes_at(GridIndex::Auto, GridIndex::Auto)?.y_scale(), ScaleKind::Linear);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn twin_axes_at(&self, row: GridIndex, col: GridIndex) -> Result<&Axes> {
+        Ok(&self.axes[self.twin_index_at(row, col)?])
+    }
+
+    /// Returns a mutable handle of the right-hand axes at this panel's top-left cell.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, GridIndex, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.twin_y(ScaleKind::Linear)?;
+    /// f.twin_axes_at_mut(GridIndex::Auto, GridIndex::Auto)?.ylabel("Rate");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn twin_axes_at_mut(&mut self, row: GridIndex, col: GridIndex) -> Result<AxesMut<'_>> {
+        let index = self.twin_index_at(row, col)?;
+        Ok(AxesMut::new(self, index))
+    }
+
+    /// Applies a panel-wide setting to the original axes and its twin together.
+    pub(super) fn set_panel(&mut self, index: usize, mut set: impl FnMut(&mut Axes)) {
+        use super::axes::TwinLink;
+        let other = match self.axes[index].twin {
+            TwinLink::None => None,
+            TwinLink::Left(other) | TwinLink::Right(other) => Some(other),
+        };
+        set(&mut self.axes[index]);
+        if let Some(other) = other {
+            set(&mut self.axes[other]);
+        }
+    }
+
     fn panel_view(&self, index: PanelIndex) -> Panel<'_> {
         match index {
-            PanelIndex::Cartesian(index) => Panel::Cartesian(&self.axes[index]),
+            PanelIndex::Cartesian(index) => {
+                let axes = &self.axes[index];
+                let twin = match axes.twin {
+                    super::axes::TwinLink::Right(right) => Some(&self.axes[right]),
+                    super::axes::TwinLink::None | super::axes::TwinLink::Left(_) => None,
+                };
+                Panel::Cartesian(axes, twin)
+            }
             PanelIndex::Pie(index) => Panel::Pie(&self.pies[index]),
         }
     }
@@ -709,9 +853,11 @@ impl Figure {
             .with_hint(hint));
         }
         let key = self.color_group_of(cell.row(), cell.col());
-        for other in self.cartesian_panels().filter(|axes| {
+        for other in self.cartesian_axes().filter(|axes| {
             let c = axes.cells();
-            self.color_group_of(c.row(), c.col()) == key && c != cell
+            self.grid.share_color() != super::Share::None
+                && self.color_group_of(c.row(), c.col()) == key
+                && !std::ptr::eq(*axes, &self.axes[index])
         }) {
             if let Some(existing) = other.marks().iter().find_map(super::Mark::color_scale) {
                 spec.check_shared(&existing, other.cells(), context, parameter)?;
@@ -722,6 +868,17 @@ impl Figure {
 
     /// Validates all members, then records and propagates shared color limits atomically.
     pub(super) fn set_color_limits(&mut self, index: usize, limits: (f64, f64)) -> Result<()> {
+        if self.grid.share_color() == super::Share::None {
+            for spec in self.axes[index]
+                .marks()
+                .iter()
+                .filter_map(super::Mark::color_scale)
+            {
+                spec.check_range(limits, "Axes.clim()", None)?;
+            }
+            self.axes[index].color_limits = Some(limits);
+            return Ok(());
+        }
         let c = self.axes[index].cells();
         let cell = super::Cell {
             row: c.row(),
@@ -736,7 +893,7 @@ impl Figure {
             )
         };
         let key = key_of(c);
-        for axes in self.cartesian_panels() {
+        for axes in self.cartesian_axes() {
             let other = axes.cells();
             if key_of(other) == key
                 && let Some(spec) = axes.marks().iter().find_map(super::Mark::color_scale)
@@ -777,6 +934,10 @@ impl Figure {
         proposed: AxisSettings,
         context: &'static str,
     ) -> Result<()> {
+        if matches!(axis, SharedAxis::Y) && self.axes[index].is_twin() {
+            self.axes[index].y_settings = Arc::new(proposed);
+            return Ok(());
+        }
         let cells = self.axes[index].cells();
         let cell = super::Cell {
             row: cells.row(),
@@ -793,7 +954,9 @@ impl Figure {
         let settings = Arc::clone(&group.settings);
         for axes in &mut self.axes {
             let c = axes.cells();
-            if share::group_key(&self.grid, mode, c.row(), c.col()) == key {
+            if share::group_key(&self.grid, mode, c.row(), c.col()) == key
+                && !(matches!(axis, SharedAxis::Y) && axes.is_twin())
+            {
                 match axis {
                     SharedAxis::X => axes.x_settings = Arc::clone(&settings),
                     SharedAxis::Y => axes.y_settings = Arc::clone(&settings),
@@ -923,6 +1086,10 @@ impl Figure {
         style: crate::LegendStyle,
         size: SizeSpec,
     ) -> Result<()> {
+        let index = match self.axes[index].twin {
+            super::axes::TwinLink::Left(parent) => parent,
+            super::axes::TwinLink::None | super::axes::TwinLink::Right(_) => index,
+        };
         if self.has_merged_legend()
             && style != crate::LegendStyle::None
             && size != SizeSpec::Auto

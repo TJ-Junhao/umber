@@ -1793,6 +1793,42 @@ Example:
 >>> ax = ub.Figure().add_axes().title("Revenue")
 ```
 
+### `umber.Axes.twin_y`
+
+```text
+Axes.twin_y(self: 'Axes[X, float]', *, scale: Scale[float]=Scale.linear()) -> 'Axes[X, float]'
+```
+
+Add a numeric y axis on the right, sharing this panel's x axis.
+
+The two axes have independent y scales, limits, ticks and labels. Their x settings
+are shared in both directions. Marks use one palette and legend; grid lines come
+from the left axis. Keep the returned axes to add marks or change its settings.
+
+Args:
+    scale: The right y scale, ``Scale.linear()`` or ``Scale.log()``.
+
+Returns:
+    New axes in this panel, with the same x value type and numeric y values.
+
+Raises:
+    TypeError: If ``scale`` is not a ``Scale``.
+    UsageError: If either y scale is not numeric, these axes already have a twin,
+        these axes are a twin, or the grid shares x.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> fig = ub.Figure()
+>>> left = fig.add_axes(x=ub.Scale.category())
+>>> _ = left.bar(["Jan", "Feb"], [40, 55], label="Rainfall")
+>>> right = left.twin_y()
+>>> _ = right.line(["Jan", "Feb"], [7, 9], label="Temperature")
+>>> right.figure is fig
+True
+```
+
 ### `umber.Axes.violin`
 
 ```text

@@ -127,6 +127,7 @@ mod corpus {
     pub mod text_size;
     pub mod ticks;
     pub mod time;
+    pub mod twin_y;
     pub mod violin;
     pub mod x_end_label;
 }
@@ -212,6 +213,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::font_file::cases(&lib, &mut sink);
     corpus::by::cases(&lib, &mut sink);
     corpus::contour::cases(&lib, &mut sink);
+    corpus::twin_y::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -2117,7 +2119,13 @@ mod record {
                 );
             }
             match a {
-                umber_core::Panel::Cartesian(a) => out.push_str(&axes(a)),
+                umber_core::Panel::Cartesian(a, twin) => {
+                    out.push_str(&axes(a));
+                    if let Some(twin) = twin {
+                        out.push_str("  twin y\n");
+                        out.push_str(&axes(twin));
+                    }
+                }
                 umber_core::Panel::Pie(pie) => {
                     let _ = writeln!(out, "  pie title={}", text(pie.title_text()));
                 }

@@ -30,6 +30,7 @@ mod panel;
 pub(crate) mod pie;
 pub(crate) mod placement;
 mod program;
+pub(crate) mod twin;
 
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
 pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};
@@ -232,6 +233,7 @@ impl Layout {
         let edge = self
             .y_tick_labels
             .iter()
+            .filter(|label| label.x < self.plot.x)
             .map(|label| label.x + label.width())
             .fold(self.frame.x, f64::max);
         (self.plot.x - edge).max(0.0)

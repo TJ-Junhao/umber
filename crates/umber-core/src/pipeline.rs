@@ -50,7 +50,7 @@ fn panels<'a>(
 ) -> Result<Vec<Panel<'a>>> {
     let theme = figure.theme();
     let mut panels: Vec<_> = figure
-        .panels()
+        .layers()
         .zip(resolve::resolve_figure_marks(figure))
         .map(|(axes, marks)| {
             let legend = match axes {
@@ -67,7 +67,7 @@ fn panels<'a>(
                     }
                     measured
                 }
-                crate::Panel::Cartesian(axes) => {
+                crate::Panel::Cartesian(axes, _) => {
                     if figure.has_merged_legend() {
                         let style = axes.legend_style().unwrap_or(theme.legend_style());
                         MeasuredLegend::measure(
@@ -82,7 +82,7 @@ fn panels<'a>(
                 }
             };
             let labels = match axes {
-                crate::Panel::Cartesian(axes) => BarLabels::measure(theme, lib, axes, &marks)?,
+                crate::Panel::Cartesian(axes, _) => BarLabels::measure(theme, lib, axes, &marks)?,
                 crate::Panel::Pie(_) => BarLabels::default(),
             };
             Ok(Panel {
@@ -94,6 +94,12 @@ fn panels<'a>(
             })
         })
         .collect::<Result<_>>()?;
+    for i in 1..panels.len() {
+        if panels[i].axes.cartesian().is_some_and(Axes::is_twin) {
+            let (left, right) = panels.split_at_mut(i);
+            left[i - 1].legend.join_row(&mut right[0].legend);
+        }
+    }
     resolve_colors(figure, &mut panels, groups);
     Ok(panels)
 }
@@ -137,7 +143,7 @@ fn check_contour_levels(
     context: &'static str,
 ) -> Result<()> {
     const HINT: &str = "pass the same levels to every contour that shares a colorbar.";
-    let panels: Vec<_> = figure.panels().collect();
+    let panels: Vec<_> = figure.layers().collect();
     for source in 0..panels.len() {
         if groups.color.get(source) != Some(&Some(source)) {
             continue;
@@ -688,14 +694,20 @@ fn plan(
     let ends: Vec<_> = panels
         .iter()
         .map(|panel| match panel.axes {
-            crate::Panel::Cartesian(_) => panel.labels.end_reaches(),
+            crate::Panel::Cartesian(_, _) => panel.labels.end_reaches(),
             crate::Panel::Pie(_) => Vec::new(),
         })
         .collect();
     let mut fits = BubbleFits::new(&marks, &ends, &limits, groups);
     let show_labels: Vec<_> = panels
         .iter()
-        .map(|panel| label_visibility(figure, panel.axes.cells()))
+        .map(|panel| {
+            if panel.axes.cartesian().is_some_and(Axes::is_twin) {
+                [false, true]
+            } else {
+                label_visibility(figure, panel.axes.cells())
+            }
+        })
         .collect();
     let has_shared_colorbar = shared
         && layout::ColorbarSide::shared(figure).is_some()
@@ -1242,34 +1254,45 @@ fn plan(
         }
     }
 
-    let planned: Vec<(Resolved, Layout)> = inputs
+    layout::twin::align_placed(&inputs, &mut bands, &solution);
+    let mut planned: Vec<(Resolved, Layout)> = inputs
         .iter()
         .zip(resolved)
         .zip(bands)
         .zip(&solution.panels)
-        .zip(panels)
-        .map(|((((input, resolved), bands), slot), panel)| {
-            let mut layout = layout::place_panel(input, &resolved, bands, slot);
-            if input.legend.position == crate::LegendPosition::Best
-                && !layout.legend.is_empty()
-                && layout::placement::best_fits(input.legend, &layout.plot)
-            {
-                let marks = panel
-                    .marks
-                    .iter()
-                    .map(|mark| {
-                        let item =
-                            draw::marks(theme, lib, &resolved, &layout, std::slice::from_ref(mark))
-                                .map_err(|err| in_cell(figure, panel.axes, err))?;
-                        let geometry = item.map(|item| crate::coverage::Geometry::of(&item));
-                        Ok(mark.for_coverage(geometry))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                layout.legend = layout::placement::best(input.legend, &layout.plot, &marks);
-            }
-            Ok((resolved, layout))
+        .map(|(((input, resolved), bands), slot)| {
+            let layout = layout::place_panel(input, &resolved, bands, slot);
+            (resolved, layout)
         })
-        .collect::<Result<_>>()?;
+        .collect();
+    for (i, input) in inputs.iter().enumerate() {
+        let layout = &planned[i].1;
+        if input.legend.position != crate::LegendPosition::Best
+            || layout.legend.is_empty()
+            || !layout::placement::best_fits(input.legend, &layout.plot)
+        {
+            continue;
+        }
+        let twin = panels
+            .get(i + 1)
+            .filter(|panel| panel.axes.cartesian().is_some_and(Axes::is_twin))
+            .map(|_| i + 1);
+        let marks = std::iter::once(i)
+            .chain(twin)
+            .flat_map(|j| {
+                let panel = &panels[j];
+                let (resolved, layout) = &planned[j];
+                panel.marks.iter().map(move |mark| {
+                    let item =
+                        draw::marks(theme, lib, resolved, layout, std::slice::from_ref(mark))
+                            .map_err(|err| in_cell(figure, panel.axes, err))?;
+                    let geometry = item.map(|item| crate::coverage::Geometry::of(&item));
+                    Ok(mark.for_coverage(geometry))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        planned[i].1.legend = layout::placement::best(input.legend, &layout.plot, &marks);
+    }
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = planned.into_iter().unzip();
     layout::check_panel_contents(&grid, &layouts)?;
     header.check(figure, context)?;
@@ -1598,7 +1621,7 @@ pub(crate) fn try_plan_panels(
 #[cfg(test)]
 fn panel_index(figure: &Figure, (row, col): (usize, usize)) -> usize {
     figure
-        .panels()
+        .layers()
         .position(|axes| axes.cells().row() == row && axes.cells().col() == col)
         .expect("the cell holds axes")
 }
@@ -1711,9 +1734,10 @@ fn scene_with_labels(
     }
     let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
     let mut annotations = Vec::new();
-    for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
+    let mut paired_legend = None;
+    for (i, (panel, (resolved, layout))) in panels.iter().zip(&planned.panels).enumerate() {
         let axes = match panel.axes {
-            crate::Panel::Cartesian(axes) => axes,
+            crate::Panel::Cartesian(axes, _) => axes,
             crate::Panel::Pie(pie_panel) => {
                 scene.push(draw::chrome(theme, layout));
                 if let Some(pie) = &pie_panel.pie {
@@ -1763,8 +1787,19 @@ fn scene_with_labels(
         if let Some(values) = values {
             scene.push(values);
         }
-        if let Some(legend) = draw::legend::legend(theme, layout) {
-            scene.push(legend);
+        let legend = draw::legend::legend(theme, layout);
+        if panels
+            .get(i + 1)
+            .is_some_and(|panel| panel.axes.cartesian().is_some_and(Axes::is_twin))
+        {
+            paired_legend = legend;
+        } else {
+            if let Some(legend) = paired_legend.take() {
+                scene.push(legend);
+            }
+            if let Some(legend) = legend {
+                scene.push(legend);
+            }
         }
         if resolved.draws_baseline(axes.marks(), axes.baseline_visibility()) {
             scene.push(draw::baseline(theme, layout));
@@ -2979,7 +3014,7 @@ mod tests {
             let Ok(planned) = try_plan_panels(figure, lib) else {
                 return Ok(());
             };
-            for ((resolved, layout), axes) in planned.iter().zip(figure.panels()) {
+            for ((resolved, layout), axes) in planned.iter().zip(figure.layers()) {
                 let limits = Limits::of(axes);
                 for side in Side::BOTH {
                     if !side.is_automatic(&limits) {

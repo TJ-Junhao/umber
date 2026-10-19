@@ -351,12 +351,15 @@ impl ShareGroups {
     fn colors(figure: &Figure) -> Vec<Option<usize>> {
         let mut first = BTreeMap::new();
         figure
-            .panels()
+            .layers()
             .enumerate()
             .map(|(i, panel)| {
                 let axes = panel.cartesian()?;
                 if !axes.marks().iter().any(|mark| mark.color_scale().is_some()) {
                     return None;
+                }
+                if figure.grid().share_color() == Share::None {
+                    return Some(i);
                 }
                 let c = axes.cells();
                 let key = figure.color_group_of(c.row(), c.col());
@@ -370,12 +373,15 @@ impl ShareGroups {
         let representatives = |axis: SharedAxis| {
             let mut first = BTreeMap::new();
             figure
-                .panels()
+                .layers()
                 .enumerate()
                 .map(|(i, axes)| {
                     let Some(axes) = axes.cartesian() else {
                         return i;
                     };
+                    if matches!(axis, SharedAxis::Y) && axes.is_twin() {
+                        return i;
+                    }
                     let c = axes.cells();
                     let key = match axis {
                         SharedAxis::X => figure.x_group_of(c.row(), c.col()),
@@ -427,7 +433,7 @@ impl ShareGroups {
             ),
         };
         figure
-            .panels()
+            .layers()
             .enumerate()
             .map(|(i, axes)| {
                 if self.color[i] != Some(i) {
@@ -435,7 +441,7 @@ impl ShareGroups {
                 }
                 let (start, span, own_end) = dimensions(axes.cells());
                 let end = figure
-                    .panels()
+                    .layers()
                     .map(|other| dimensions(other.cells()))
                     .filter(|(other, size, _)| *other < start + span && start < other + size)
                     .map(|(_, _, end)| end)

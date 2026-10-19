@@ -316,9 +316,9 @@ impl<'a> Legend<'a> {
         let mut seen = HashSet::new();
         let mut seen_bubbles = false;
         let mut row = Vec::new();
-        for (axes, marks) in figure.panels().zip(marks) {
+        for (axes, marks) in figure.layers().zip(marks) {
             let axes = match axes {
-                crate::Panel::Cartesian(axes) => axes,
+                crate::Panel::Cartesian(axes, _) => axes,
                 crate::Panel::Pie(_) => continue,
             };
             let style = axes.legend_style().unwrap_or(figure.theme().legend_style());

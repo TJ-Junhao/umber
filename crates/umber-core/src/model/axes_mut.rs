@@ -156,6 +156,24 @@ impl<'a> AxesMut<'a> {
         AxesMut { figure, index }
     }
 
+    /// Adds numeric y axes on the right, sharing this axes' x scale and panel.
+    /// A twin cannot itself be twinned, and x cannot be shared with another grid panel.
+    /// A second call on the original axes is also an error; use `Figure::twin_axes_at_mut`
+    /// to retrieve the existing twin. Failed calls change nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut left = f.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// left.twin_y(ScaleKind::Linear)?.ylabel("Temperature");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn twin_y(&mut self, scale: ScaleKind) -> Result<AxesMut<'_>> {
+        self.figure.add_twin_y(self.index, scale)
+    }
+
     /// The axes, for a setter to change.
     fn axes_mut(&mut self) -> &mut Axes {
         self.figure.panel_mut(self.index)
@@ -585,10 +603,11 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn legend(&mut self, style: LegendStyle, size: SizeSpec) -> Result<&mut Self> {
         self.figure.check_legend_size(self.index, style, size)?;
-        let axes = self.axes_mut();
-        axes.legend = Some(style);
-        axes.legend_position = None;
-        axes.legend_size = size;
+        self.figure.set_panel(self.index, |axes| {
+            axes.legend = Some(style);
+            axes.legend_position = None;
+            axes.legend_size = size;
+        });
         Ok(self)
     }
 
@@ -622,10 +641,11 @@ impl<'a> AxesMut<'a> {
             ).with_parameter("position").with_hint("drop position=, or use another legend style."));
         }
         self.figure.check_legend_size(self.index, style, size)?;
-        let axes = self.axes_mut();
-        axes.legend = Some(style);
-        axes.legend_position = Some(position);
-        axes.legend_size = size;
+        self.figure.set_panel(self.index, |axes| {
+            axes.legend = Some(style);
+            axes.legend_position = Some(position);
+            axes.legend_size = size;
+        });
         Ok(self)
     }
 
@@ -2916,9 +2936,10 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn title_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
-        let axes = self.axes_mut();
-        axes.title = text.to_owned();
-        axes.title_size = size;
+        self.figure.set_panel(self.index, |axes| {
+            axes.title = text.to_owned();
+            axes.title_size = size;
+        });
         self
     }
 
@@ -2935,9 +2956,10 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn subtitle_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
-        let axes = self.axes_mut();
-        axes.subtitle = text.to_owned();
-        axes.subtitle_size = size;
+        self.figure.set_panel(self.index, |axes| {
+            axes.subtitle = text.to_owned();
+            axes.subtitle_size = size;
+        });
         self
     }
 
@@ -2954,9 +2976,10 @@ impl<'a> AxesMut<'a> {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn xlabel_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
-        let axes = self.axes_mut();
-        axes.xlabel = text.to_owned();
-        axes.xlabel_size = size;
+        self.figure.set_panel(self.index, |axes| {
+            axes.xlabel = text.to_owned();
+            axes.xlabel_size = size;
+        });
         self
     }
 

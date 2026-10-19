@@ -66,6 +66,17 @@ pub struct Axes {
     pub(super) legend_size: SizeSpec,
     /// The text written at data positions, in the order it was added.
     pub(super) annotations: Vec<Annotation>,
+    /// The other numeric y axes in this Cartesian panel, when present.
+    pub(super) twin: TwinLink,
+}
+
+/// Stable storage indices connect the two axes without adding a grid cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum TwinLink {
+    #[default]
+    None,
+    Right(usize),
+    Left(usize),
 }
 
 impl Axes {
@@ -100,6 +111,7 @@ impl Axes {
             ylabel_size: SizeSpec::Auto,
             legend_size: SizeSpec::Auto,
             annotations: Vec::new(),
+            twin: TwinLink::None,
         }
     }
 
@@ -577,6 +589,11 @@ impl Axes {
     #[must_use]
     pub fn annotations(&self) -> &[Annotation] {
         &self.annotations
+    }
+
+    /// Whether this axes supplies the right-hand y scale of its panel.
+    pub(crate) fn is_twin(&self) -> bool {
+        matches!(self.twin, TwinLink::Left(_))
     }
 }
 

@@ -406,6 +406,28 @@ impl<'a> MeasuredLegend<'a> {
         })
     }
 
+    /// Moves the other y axis's row into this panel's single legend, retaining its direct
+    /// labels so that their anchors are placed with their own y scale.
+    pub fn join_row(&mut self, other: &mut Self) {
+        let Some(row) = other.row.take() else {
+            return;
+        };
+        if let Some(own) = &mut self.row {
+            own.row_height = own.row_height.max(row.row_height);
+            own.ascent = own.ascent.max(row.ascent);
+            own.descent = own.descent.max(row.descent);
+            for entry in row.entries {
+                if !own.entries.iter().any(|known| {
+                    known.label.text == entry.label.text && known.swatch == entry.swatch
+                }) {
+                    own.entries.push(entry);
+                }
+            }
+        } else {
+            self.row = Some(row);
+        }
+    }
+
     /// The header row, absent when the entries sit beside, below or inside the plot.
     pub fn header_within(&self, left: f64, right: f64) -> LegendRow {
         match self.position {

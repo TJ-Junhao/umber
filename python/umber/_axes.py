@@ -138,10 +138,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
     # The native figure is the one the axes' figure owns; it holds every mark and text. The
     # axes are found there by the row and column of their top-left cell.
-    __slots__ = ("_col", "_figure", "_native", "_row", "_x", "_y")
+    __slots__ = ("_col", "_figure", "_native", "_row", "_target", "_x", "_y")
     _figure: "umber.Figure"
     _native: _umber.Figure
     _row: int
+    _target: int | _umber.TwinAxes
     _col: int
     _x: Scale[X]
     _y: Scale[Y]
@@ -169,6 +170,42 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         return self._figure
 
+    def twin_y(self: "Axes[X, float]", *, scale: Scale[float] = Scale.linear()) -> "Axes[X, float]":
+        """Add a numeric y axis on the right, sharing this panel's x axis.
+
+        The two axes have independent y scales, limits, ticks and labels. Their x settings
+        are shared in both directions. Marks use one palette and legend; grid lines come
+        from the left axis. Keep the returned axes to add marks or change its settings.
+
+        Args:
+            scale: The right y scale, ``Scale.linear()`` or ``Scale.log()``.
+
+        Returns:
+            New axes in this panel, with the same x value type and numeric y values.
+
+        Raises:
+            TypeError: If ``scale`` is not a ``Scale``.
+            UsageError: If either y scale is not numeric, these axes already have a twin,
+                these axes are a twin, or the grid shares x.
+
+        Example:
+            >>> import umber as ub
+            >>> fig = ub.Figure()
+            >>> left = fig.add_axes(x=ub.Scale.category())
+            >>> _ = left.bar(["Jan", "Feb"], [40, 55], label="Rainfall")
+            >>> right = left.twin_y()
+            >>> _ = right.line(["Jan", "Feb"], [7, 9], label="Temperature")
+            >>> right.figure is fig
+            True
+        """
+        with api_call():
+            context = "Axes.twin_y()"
+            instance(context, "scale", scale, Scale, "pass Scale.linear() or Scale.log().")
+            target = self._native.twin_y(self._target, self._col, *_scale.native(scale))
+            axes = attach(self._figure, self._native, self._x, scale, self._row, self._col)
+            object.__setattr__(axes, "_target", target)
+            return axes
+
     def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
         """Set the title, shown above the plot.
 
@@ -193,7 +230,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
             self._native.title(
-                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+                self._target, self._col, _args.text(context, "text", text), _size.native(size)
             )
             return self
 
@@ -221,7 +258,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
             self._native.subtitle(
-                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+                self._target, self._col, _args.text(context, "text", text), _size.native(size)
             )
             return self
 
@@ -249,7 +286,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
             self._native.xlabel(
-                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+                self._target, self._col, _args.text(context, "text", text), _size.native(size)
             )
             return self
 
@@ -277,7 +314,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             _args.require_text(context, "text", text)
             instance(context, "size", size, Size, _SIZE_HINT)
             self._native.ylabel(
-                self._row, self._col, _args.text(context, "text", text), _size.native(size)
+                self._target, self._col, _args.text(context, "text", text), _size.native(size)
             )
             return self
 
@@ -312,11 +349,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             if self._x == _TIME:
                 start = _time.instant(context, "low", low)
                 end = _time.instant(context, "high", high)
-                self._native.xlim_time(self._row, self._col, start, end)
+                self._native.xlim_time(self._target, self._col, start, end)
                 return self
             lower = real(context, "low", low)
             upper = real(context, "high", high)
-            self._native.xlim(self._row, self._col, lower, upper)
+            self._native.xlim(self._target, self._col, lower, upper)
             return self
 
     def ylim(self: SY, low: Y, high: Y) -> SY:
@@ -349,11 +386,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             if self._y == _TIME:
                 start = _time.instant(context, "low", low)
                 end = _time.instant(context, "high", high)
-                self._native.ylim_time(self._row, self._col, start, end)
+                self._native.ylim_time(self._target, self._col, start, end)
                 return self
             lower = real(context, "low", low)
             upper = real(context, "high", high)
-            self._native.ylim(self._row, self._col, lower, upper)
+            self._native.ylim(self._target, self._col, lower, upper)
             return self
 
     def xticks(self: SX, positions: Values[X]) -> SX:
@@ -395,9 +432,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             context = "Axes.xticks()"
             if self._x == _TIME:
                 places = _time.micros(context, "positions", positions)
-                self._native.xticks_time(self._row, self._col, places)
+                self._native.xticks_time(self._target, self._col, places)
                 return self
-            self._native.xticks(self._row, self._col, floats(context, "positions", positions))
+            self._native.xticks(self._target, self._col, floats(context, "positions", positions))
             return self
 
     def yticks(self: SY, positions: Values[Y]) -> SY:
@@ -437,9 +474,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             context = "Axes.yticks()"
             if self._y == _TIME:
                 places = _time.micros(context, "positions", positions)
-                self._native.yticks_time(self._row, self._col, places)
+                self._native.yticks_time(self._target, self._col, places)
                 return self
-            self._native.yticks(self._row, self._col, floats(context, "positions", positions))
+            self._native.yticks(self._target, self._col, floats(context, "positions", positions))
             return self
 
     def xticks_labeled(self: SX, positions: Values[X], labels: Values[str]) -> SX:
@@ -478,11 +515,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             if self._x == _TIME:
                 times = _time.micros(context, "positions", positions)
                 texts = names(context, "labels", labels, check_length=False)
-                self._native.xticks_labeled_time(self._row, self._col, times, texts)
+                self._native.xticks_labeled_time(self._target, self._col, times, texts)
                 return self
             places = floats(context, "positions", positions)
             texts = names(context, "labels", labels, check_length=False)
-            self._native.xticks_labeled(self._row, self._col, places, texts)
+            self._native.xticks_labeled(self._target, self._col, places, texts)
             return self
 
     def yticks_labeled(self: SY, positions: Values[Y], labels: Values[str]) -> SY:
@@ -520,11 +557,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             if self._y == _TIME:
                 times = _time.micros(context, "positions", positions)
                 texts = names(context, "labels", labels, check_length=False)
-                self._native.yticks_labeled_time(self._row, self._col, times, texts)
+                self._native.yticks_labeled_time(self._target, self._col, times, texts)
                 return self
             places = floats(context, "positions", positions)
             texts = names(context, "labels", labels, check_length=False)
-            self._native.yticks_labeled(self._row, self._col, places, texts)
+            self._native.yticks_labeled(self._target, self._col, places, texts)
             return self
 
     def xtick_format(self: SX, format: TickFormat) -> SX:
@@ -554,7 +591,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             checked = instance("Axes.xtick_format()", "format", format, TickFormat, _FORMAT_HINT)
-            self._native.xtick_format(self._row, self._col, _ticks.native(checked))
+            self._native.xtick_format(self._target, self._col, _ticks.native(checked))
             return self
 
     def ytick_format(self: SY, format: TickFormat) -> SY:
@@ -584,7 +621,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             checked = instance("Axes.ytick_format()", "format", format, TickFormat, _FORMAT_HINT)
-            self._native.ytick_format(self._row, self._col, _ticks.native(checked))
+            self._native.ytick_format(self._target, self._col, _ticks.native(checked))
             return self
 
     def baseline(self, *, shown: bool | Auto) -> Self:
@@ -627,7 +664,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     hint="pass True or False, or ub.AUTO to follow the marks.",
                 )
             )
-            self._native.baseline(self._row, self._col, flag)
+            self._native.baseline(self._target, self._col, flag)
             return self
 
     def legend(
@@ -682,10 +719,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             instance("Axes.legend()", "size", size, Size, _SIZE_HINT)
             if isinstance(position, LegendPosition):
                 self._native.legend_at(
-                    self._row, self._col, member.value, position.value, _size.native(size)
+                    self._target, self._col, member.value, position.value, _size.native(size)
                 )
             else:
-                self._native.legend(self._row, self._col, member.value, _size.native(size))
+                self._native.legend(self._target, self._col, member.value, _size.native(size))
             return self
 
     def line(
@@ -753,7 +790,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     y=partial(self._y_values, context, y),
                     draw=partial(
                         self._native.line,
-                        self._row,
+                        self._target,
                         self._col,
                         color=spec,
                         dash=style.value,
@@ -761,7 +798,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     ),
                     draw_groups=partial(
                         self._native.grouped_line,
-                        self._row,
+                        self._target,
                         self._col,
                         dash=style.value,
                         width=extent,
@@ -838,7 +875,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     y=partial(self._y_values, context, y),
                     draw=partial(
                         self._native.area,
-                        self._row,
+                        self._target,
                         self._col,
                         color=spec,
                         dash=style.value,
@@ -846,7 +883,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     ),
                     draw_groups=partial(
                         self._native.grouped_area,
-                        self._row,
+                        self._target,
                         self._col,
                         dash=style.value,
                         width=extent,
@@ -931,7 +968,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     y=partial(self._y_values, context, y),
                     draw=partial(
                         self._native.scatter,
-                        self._row,
+                        self._target,
                         self._col,
                         color=spec,
                         marker=shape.value,
@@ -939,7 +976,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     ),
                     draw_groups=partial(
                         self._native.grouped_scatter,
-                        self._row,
+                        self._target,
                         self._col,
                         marker=shape.value,
                         size=extent,
@@ -1033,7 +1070,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             ys = _limit_values(context, "y", y, self._y)
             values = floats(context, "sizes", sizes)
             name = _args.text(context, "label", label)
-            self._native.bubbles(self._row, self._col, xs, ys, values, name, spec, shape.value)
+            self._native.bubbles(self._target, self._col, xs, ys, values, name, spec, shape.value)
             return self
 
     def stem(
@@ -1090,7 +1127,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             xs = self._x_values(context, x)
             ys = self._y_values(context, y)
             name = _args.text(context, "label", label)
-            self._native.stem(self._row, self._col, xs, ys, name, spec, shape.value, extent)
+            self._native.stem(self._target, self._col, xs, ys, name, spec, shape.value, extent)
             return self
 
     def bar(
@@ -1177,7 +1214,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     heights=partial(floats, context, "heights", heights),
                     draw=partial(
                         self._native.bar,
-                        self._row,
+                        self._target,
                         self._col,
                         color=spec,
                         annotate=shows,
@@ -1186,7 +1223,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     ),
                     draw_groups=partial(
                         self._native.bar_by,
-                        self._row,
+                        self._target,
                         self._col,
                         annotate=shows,
                         format=labelled,
@@ -1249,7 +1286,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             category_names = names(context, "categories", categories)
             values = _series.group_values(context, groups)
             name = _args.text(context, "label", label)
-            self._native.box_plot(self._row, self._col, category_names, values, name, spec)
+            self._native.box_plot(self._target, self._col, category_names, values, name, spec)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -1293,7 +1330,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "categories", categories)
             arguments = _distribution_arguments(context, distributions)
             category_names = names(context, "categories", categories)
-            self._native.grouped_box_plot(self._row, self._col, category_names, arguments)
+            self._native.grouped_box_plot(self._target, self._col, category_names, arguments)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -1349,7 +1386,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             labels = _value_labels(context, annotate, format, size)
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
-            self._native.grouped_bar(self._row, self._col, category_names, arguments, *labels)
+            self._native.grouped_bar(self._target, self._col, category_names, arguments, *labels)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -1407,7 +1444,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             labels = _value_labels(context, annotate, format, size)
             arguments = _series_arguments(context, series)
             category_names = names(context, "categories", categories)
-            self._native.stacked_bar(self._row, self._col, category_names, arguments, *labels)
+            self._native.stacked_bar(self._target, self._col, category_names, arguments, *labels)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -1454,10 +1491,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             arguments = _series_arguments(context, series)
             if self._x == _TIME:
                 times = _time.micros(context, "x", x)
-                self._native.stacked_area_time(self._row, self._col, times, arguments)
+                self._native.stacked_area_time(self._target, self._col, times, arguments)
                 return self
             xs = floats(context, "x", x)
-            self._native.stacked_area(self._row, self._col, xs, arguments)
+            self._native.stacked_area(self._target, self._col, xs, arguments)
             return self
 
     def hist(
@@ -1544,7 +1581,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
             def draw(samples: FloatArray, *, label: str) -> None:
                 self._native.hist(
-                    self._row,
+                    self._target,
                     self._col,
                     samples,
                     floats(context, "bins", bins) if edges else count,
@@ -1557,7 +1594,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
             def draw_groups(series: list[_group.NativeSeries]) -> None:
                 self._native.grouped_hist(
-                    self._row,
+                    self._target,
                     self._col,
                     series,
                     floats(context, "bins", bins) if edges else count,
@@ -1671,7 +1708,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         parameter=name,
                         hint=f"pass one more edge than the number of {dimension}.",
                     )
-            self._native.mesh(self._row, self._col, xs, ys, data, *colors, drawn)
+            self._native.mesh(self._target, self._col, xs, ys, data, *colors, drawn)
             return self
 
     def hist2d(
@@ -1727,7 +1764,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             drawn = _render_argument(context, render)
             _numeric_cells(context, self, time=False)
             xs, ys = floats(context, "x", x), floats(context, "y", y)
-            self._native.hist2d(self._row, self._col, xs, ys, counts, *colors[:3], drawn)
+            self._native.hist2d(self._target, self._col, xs, ys, counts, *colors[:3], drawn)
             return self
 
     def hexbin(
@@ -1779,7 +1816,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             colors = _cell_colors(context, cmap, scale, AUTO)
             _numeric_cells(context, self, time=False)
             xs, ys = floats(context, "x", x), floats(context, "y", y)
-            self._native.hexbin(self._row, self._col, xs, ys, count, *colors[:3])
+            self._native.hexbin(self._target, self._col, xs, ys, count, *colors[:3])
             return self
 
     def step(
@@ -1857,7 +1894,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     y=partial(self._y_values, context, y),
                     draw=partial(
                         self._native.step,
-                        self._row,
+                        self._target,
                         self._col,
                         position=position.value,
                         color=spec,
@@ -1866,7 +1903,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     ),
                     draw_groups=partial(
                         self._native.grouped_step,
-                        self._row,
+                        self._target,
                         self._col,
                         position=position.value,
                         dash=style.value,
@@ -1925,10 +1962,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             name = _args.text(context, "label", label)
             if isinstance(value, int):
                 self._native.hline_time(
-                    self._row, self._col, value, name, spec, style.value, extent
+                    self._target, self._col, value, name, spec, style.value, extent
                 )
             else:
-                self._native.hline(self._row, self._col, value, name, spec, style.value, extent)
+                self._native.hline(self._target, self._col, value, name, spec, style.value, extent)
             return self
 
     def vline(
@@ -1988,7 +2025,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 style = instance(context, "dash", dash, Dash, _DASH_HINT)
                 extent = _size_argument(context, "width", width)
                 name = _args.text(context, "label", label)
-                self._native.vline_time(self._row, self._col, when, name, spec, style.value, extent)
+                self._native.vline_time(
+                    self._target, self._col, when, name, spec, style.value, extent
+                )
                 return self
             # The kind of x follows the x axis: a name on a category axis, a number otherwise.
             if self._x == _CATEGORY:
@@ -2001,7 +2040,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             if isinstance(position, str):
                 position = _args.checked_text(context, "x", "x", position, DataError)
             name = _args.text(context, "label", label)
-            self._native.vline(self._row, self._col, position, name, spec, style.value, extent)
+            self._native.vline(self._target, self._col, position, name, spec, style.value, extent)
             return self
 
     def hspan(
@@ -2048,14 +2087,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 _args.require_text(context, "label", label)
                 spec = _color_argument(context, color)
                 name = _args.text(context, "label", label)
-                self._native.hspan_time(self._row, self._col, start, end, name, spec)
+                self._native.hspan_time(self._target, self._col, start, end, name, spec)
                 return self
             lower = real(context, "low", low)
             upper = real(context, "high", high)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             name = _args.text(context, "label", label)
-            self._native.hspan(self._row, self._col, lower, upper, name, spec)
+            self._native.hspan(self._target, self._col, lower, upper, name, spec)
             return self
 
     def vspan(
@@ -2105,14 +2144,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 _args.require_text(context, "label", label)
                 spec = _color_argument(context, color)
                 name = _args.text(context, "label", label)
-                self._native.vspan_time(self._row, self._col, start, end, name, spec)
+                self._native.vspan_time(self._target, self._col, start, end, name, spec)
                 return self
             lower = real(context, "low", low)
             upper = real(context, "high", high)
             _args.require_text(context, "label", label)
             spec = _color_argument(context, color)
             name = _args.text(context, "label", label)
-            self._native.vspan(self._row, self._col, lower, upper, name, spec)
+            self._native.vspan(self._target, self._col, lower, upper, name, spec)
             return self
 
     def band(
@@ -2174,10 +2213,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             name = _args.text(context, "label", label)
             if xs.dtype == np.int64:
                 times = cast(MicrosArray, xs)
-                self._native.band_time(self._row, self._col, times, lows, highs, name, spec)
+                self._native.band_time(self._target, self._col, times, lows, highs, name, spec)
             else:
                 numbers = cast(FloatArray, xs)
-                self._native.band(self._row, self._col, numbers, lows, highs, name, spec)
+                self._native.band(self._target, self._col, numbers, lows, highs, name, spec)
             return self
 
     def y_error_bars(
@@ -2245,7 +2284,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             highs = _limit_values(context, "high", high, self._y)
             name = _args.text(context, "label", label)
             self._native.y_error_bars(
-                self._row, self._col, xs, lows, highs, name, spec, extent, flag
+                self._target, self._col, xs, lows, highs, name, spec, extent, flag
             )
             return self
 
@@ -2316,7 +2355,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             highs = _limit_values(context, "high", high, self._x)
             name = _args.text(context, "label", label)
             self._native.x_error_bars(
-                self._row, self._col, ys, lows, highs, name, spec, extent, flag
+                self._target, self._col, ys, lows, highs, name, spec, extent, flag
             )
             return self
 
@@ -2419,7 +2458,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             category_names = names(context, "categories", categories)
             values = _series.group_values(context, groups)
             name = _args.text(context, "label", label)
-            self._native.violin(self._row, self._col, category_names, values, name, spec)
+            self._native.violin(self._target, self._col, category_names, values, name, spec)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -2463,7 +2502,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             check_names_type(context, "categories", categories)
             arguments = _distribution_arguments(context, distributions)
             category_names = names(context, "categories", categories)
-            self._native.grouped_violin(self._row, self._col, category_names, arguments)
+            self._native.grouped_violin(self._target, self._col, category_names, arguments)
             # The self type only restricts the call: these are the Axes[X, Y] it was made on.
             return cast("Axes[X, Y]", self)
 
@@ -2495,7 +2534,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             context = "Axes.clim()"
             lo = real(context, "low", low)
             hi = real(context, "high", high)
-            self._native.clim(self._row, self._col, lo, hi)
+            self._native.clim(self._target, self._col, lo, hi)
             return self
 
     def colorbar(
@@ -2564,7 +2603,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             instance(context, "size", size, Size, _SIZE_HINT)
             name = _args.text(context, "label", label)
             self._native.colorbar(
-                self._row,
+                self._target,
                 self._col,
                 name,
                 placement,
@@ -2652,7 +2691,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 # The core refuses the axes before it reads the data, with its own error.
                 empty = np.empty(0, dtype=np.float64)
                 self._native.heatmap(
-                    self._row,
+                    self._target,
                     self._col,
                     [],
                     [],
@@ -2676,7 +2715,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 hint="pass one row per y category.",
             )
             self._native.heatmap(
-                self._row,
+                self._target,
                 self._col,
                 x_names,
                 y_names,
@@ -2714,7 +2753,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             instance("Axes.xtick_labels()", "size", size, Size, _SIZE_HINT)
-            self._native.xtick_labels(self._row, self._col, _size.native(size))
+            self._native.xtick_labels(self._target, self._col, _size.native(size))
             return self
 
     def ytick_labels(self, *, size: Size = Size.AUTO) -> Self:
@@ -2740,7 +2779,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """
         with api_call():
             instance("Axes.ytick_labels()", "size", size, Size, _SIZE_HINT)
-            self._native.ytick_labels(self._row, self._col, _size.native(size))
+            self._native.ytick_labels(self._target, self._col, _size.native(size))
             return self
 
     def events(
@@ -2797,7 +2836,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     raise _event_error(context, error) from None
             else:
                 converted.extend(_series.group_values(context, positions, name="positions"))
-            self._native.events(self._row, self._col, row_names, converted, extent, stroke, paint)
+            self._native.events(
+                self._target, self._col, row_names, converted, extent, stroke, paint
+            )
             return cast("Axes[X, Y]", self)
 
     def strip(
@@ -2855,7 +2896,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             values = _series.group_values(context, groups)
             name = _args.text(context, "label", label)
             self._native.strip(
-                self._row, self._col, category_names, values, name, paint, extent, spread
+                self._target, self._col, category_names, values, name, paint, extent, spread
             )
             return cast("Axes[X, Y]", self)
 
@@ -2910,7 +2951,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             category_names = names(context, "categories", categories)
             values = _series.group_values(context, groups)
             name = _args.text(context, "label", label)
-            self._native.swarm(self._row, self._col, category_names, values, name, paint, extent)
+            self._native.swarm(self._target, self._col, category_names, values, name, paint, extent)
             return cast("Axes[X, Y]", self)
 
     def ecdf(
@@ -2984,7 +3025,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     values=partial(_limit_values, context, "values", values, self._x),
                     draw=partial(
                         self._native.ecdf,
-                        self._row,
+                        self._target,
                         self._col,
                         complementary=flag,
                         color=spec,
@@ -2993,7 +3034,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     ),
                     draw_groups=partial(
                         self._native.grouped_ecdf,
-                        self._row,
+                        self._target,
                         self._col,
                         complementary=flag,
                         dash=style.value,
@@ -3086,7 +3127,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     values=partial(floats, context, "values", values),
                     draw=partial(
                         self._native.kde,
-                        self._row,
+                        self._target,
                         self._col,
                         bandwidth=width_of,
                         color=spec,
@@ -3095,7 +3136,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     ),
                     draw_groups=partial(
                         self._native.grouped_kde,
-                        self._row,
+                        self._target,
                         self._col,
                         bandwidth=width_of,
                         dash=style.value,
@@ -3160,7 +3201,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             point = self._point(context, pair)
             content = _args.text(context, "text", text)
             self._native.text(
-                self._row, self._col, content, point, style.value, _size.native(size), spec
+                self._target, self._col, content, point, style.value, _size.native(size), spec
             )
             return self
 
@@ -3225,7 +3266,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             point = self._point(context, pair)
             content = _args.text(context, "text", text)
             self._native.annotate(
-                self._row, self._col, content, point, shift, drawn, _size.native(size), spec
+                self._target, self._col, content, point, shift, drawn, _size.native(size), spec
             )
             return self
 
@@ -3375,7 +3416,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             if count is None and levels is not AUTO:
                 given = floats(context, "levels", levels)
             self._native.contour(
-                self._row,
+                self._target,
                 self._col,
                 xs,
                 ys,
@@ -3743,6 +3784,7 @@ def attach(
     object.__setattr__(axes, "_figure", figure)
     object.__setattr__(axes, "_native", native)
     object.__setattr__(axes, "_row", row)
+    object.__setattr__(axes, "_target", row)
     object.__setattr__(axes, "_col", col)
     object.__setattr__(axes, "_x", x)
     object.__setattr__(axes, "_y", y)

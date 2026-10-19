@@ -183,7 +183,7 @@ fn explicit(t: Option<&ExplicitTicks>) -> String {
 fn snapshot(f: &Figure) -> String {
     let mut out = record::figure(f);
     for panel in f.panels() {
-        let umber_core::Panel::Cartesian(a) = panel else {
+        let umber_core::Panel::Cartesian(a, _) = panel else {
             continue;
         };
         out.push_str(&format!(

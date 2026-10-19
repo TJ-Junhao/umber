@@ -459,7 +459,7 @@ impl<'a> Limits<'a> {
     /// The scales, explicit limits and tick settings of `axes`.
     pub fn of(panel: impl Into<crate::Panel<'a>>) -> Limits<'a> {
         let axes = match panel.into() {
-            crate::Panel::Cartesian(axes) => axes,
+            crate::Panel::Cartesian(axes, _) => axes,
             crate::Panel::Pie(_) => {
                 return Limits {
                     x: AxisLimits::Category,
@@ -890,7 +890,7 @@ fn categories<'a, 'm: 'a>(
 /// no `x`. On a grid of more than one cell the message starts with the axes' top-left cell, as
 /// the layout errors of [`pipeline::scene`](crate::pipeline) do.
 pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result<()> {
-    for axes in figure.cartesian_panels() {
+    for axes in figure.cartesian_axes() {
         if axes.x_scale() != ScaleKind::Category {
             continue;
         }
@@ -909,7 +909,7 @@ pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result
         let key = figure.x_group_of(cells.row(), cells.col());
         let scale = CategoryScale::from_first_appearance(
             figure
-                .cartesian_panels()
+                .cartesian_axes()
                 .filter(|member| {
                     let c = member.cells();
                     figure.x_group_of(c.row(), c.col()) == key
@@ -3837,12 +3837,25 @@ pub(crate) fn resolve_axes_marks<'a>(
 /// of the colorbar ticks: the colorbar's own format, the figure's under shared colors, or else
 /// the panel's y tick format.
 pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>> {
-    let slots = label_slots(figure.cartesian_panels().flat_map(|axes| axes.marks()));
+    let slots = label_slots(figure.cartesian_axes().flat_map(|axes| axes.marks()));
     let shared = figure.grid().share_color() != crate::Share::None;
+    let mut next_auto = slots.len();
     figure
-        .panels()
+        .layers()
         .map(|panel| match panel {
-            crate::Panel::Cartesian(axes) => {
+            crate::Panel::Cartesian(axes, _) => {
+                if !axes.is_twin() {
+                    next_auto = slots.len();
+                }
+                let start = next_auto;
+                next_auto += axes
+                    .marks()
+                    .iter()
+                    .flat_map(color_sources)
+                    .filter(|(label, color)| {
+                        label.is_empty() && matches!(color, ColorSpec::Auto(_))
+                    })
+                    .count();
                 let orientation = Limits::of(axes).orientation();
                 let colorbar = if shared {
                     figure.colorbar_options()
@@ -3850,7 +3863,13 @@ pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>
                     axes.colorbar_options()
                 };
                 let format = colorbar.format.as_ref().unwrap_or(axes.y_tick_format());
-                resolve_panel_marks(axes.marks(), orientation, (figure.theme(), format), &slots)
+                resolve_panel_marks_from(
+                    axes.marks(),
+                    orientation,
+                    (figure.theme(), format),
+                    &slots,
+                    start,
+                )
             }
             crate::Panel::Pie(_) => Vec::new(),
         })
@@ -3917,11 +3936,29 @@ fn label_slots<'a>(marks: impl Iterator<Item = &'a Mark>) -> BTreeMap<&'a str, u
 
 /// Resolves a panel, whose axes have `orientation`, against the label slots of its figure; its
 /// contours write their levels in `colorbar_format` unless they have a format of their own.
+#[cfg(test)]
 fn resolve_panel_marks<'a>(
     marks: &'a [Mark],
     orientation: Orientation,
     (theme, colorbar_format): (&Theme, &TickFormat),
     slots: &BTreeMap<&str, usize>,
+) -> Vec<ResolvedMark<'a>> {
+    resolve_panel_marks_from(
+        marks,
+        orientation,
+        (theme, colorbar_format),
+        slots,
+        slots.len(),
+    )
+}
+
+/// Continues the automatic palette sequence across the two axes of a Cartesian panel.
+fn resolve_panel_marks_from<'a>(
+    marks: &'a [Mark],
+    orientation: Orientation,
+    (theme, colorbar_format): (&Theme, &TickFormat),
+    slots: &BTreeMap<&str, usize>,
+    mut next_auto: usize,
 ) -> Vec<ResolvedMark<'a>> {
     let bubble_maximum = marks
         .iter()
@@ -3936,7 +3973,6 @@ fn resolve_panel_marks<'a>(
         })
         .fold(0.0, f64::max);
     let palette = theme.palette();
-    let mut next_auto = slots.len();
     let mut color_of = |spec: ColorSpec, label: &str| {
         let slot = if matches!(spec, ColorSpec::Auto(_)) {
             if let Some(&slot) = slots.get(label) {
