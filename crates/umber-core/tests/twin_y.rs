@@ -108,11 +108,17 @@ fn twin_pdf_is_valid_and_matches_png() {
     assert_eq!(pdf, f.to_pdf().unwrap());
     let dir = pdf_check::scratch("twin-y");
     let path = pdf_check::write(&dir, "axes.pdf", &pdf);
-    pdf_check::assert_qpdf_clean(&path);
-    let text = pdf_check::extracted_text(&path);
-    for label in ["Left units", "Right units", "Left series", "Right series"] {
-        assert!(text.contains(label), "{label}: {text}");
+    if pdf_check::have("qpdf") {
+        pdf_check::assert_qpdf_clean(&path);
     }
-    pdf_check::assert_matches_png(&path, &f.to_png(144).unwrap(), 144);
+    if pdf_check::have("pdftotext") {
+        let text = pdf_check::extracted_text(&path);
+        for label in ["Left units", "Right units", "Left series", "Right series"] {
+            assert!(text.contains(label), "{label}: {text}");
+        }
+    }
+    if pdf_check::have("pdftoppm") {
+        pdf_check::assert_matches_png(&path, &f.to_png(144).unwrap(), 144);
+    }
     assert!(f.to_svg(SvgText::Editable).unwrap().contains("Right units"));
 }
