@@ -478,7 +478,7 @@ impl Theme {
             marker_size: 6.0,
             marker_alpha: 0.85,
             bar_corner_radius: 0.0,
-            hist_gap: 0.0,
+            hist_gap: 1.0,
             panel_gap: 24.0,
             cap_width: 8.0,
             stem_width: 1.5,
@@ -1576,7 +1576,7 @@ impl Theme {
     /// ```
     /// use umber_core::{Dash, Font, FillStyle, GridLines, LegendStyle, Theme, Rgba};
     ///
-    /// let theme = Theme::pigment().with_hist_gap(1.0)?;
+    /// let theme = Theme::pigment().with_hist_gap(2.0)?;
     /// # let _ = theme;
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -1686,7 +1686,7 @@ mod tests {
         );
         assert_eq!(p.line_width(), 2.0);
         assert_eq!((p.marker_size(), p.marker_alpha()), (6.0, 0.85));
-        assert_eq!((p.bar_corner_radius(), p.hist_gap()), (0.0, 0.0));
+        assert_eq!((p.bar_corner_radius(), p.hist_gap()), (0.0, 1.0));
         assert_eq!(
             hexes(&p),
             [
