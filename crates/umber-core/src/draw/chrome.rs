@@ -4,7 +4,7 @@
 use super::mapping::point;
 use super::stroke::stroke_width;
 use crate::geometry::{Path, Point};
-use crate::layout::{Label, Layout};
+use crate::layout::{Label, Layout, TextBlock};
 use crate::resolve::ValueAxis;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle, TextItem};
 use crate::{Dash, GridLines, Rgba, Theme};
@@ -45,14 +45,19 @@ pub(super) fn text(label: &Label, color: Rgba) -> Item {
     ))
 }
 
+/// Each line of `block` as a text item in `color`, top down.
+pub(super) fn block_items(block: &TextBlock, color: Rgba) -> impl Iterator<Item = Item> + '_ {
+    block.lines().map(move |line| text(line, color))
+}
+
 /// The figure title, subtitle and merged legend as one unclipped group, omitted when empty.
 pub(crate) fn figure_header(theme: &Theme, header: &crate::layout::FigureHeader) -> Option<Item> {
     let mut items = Vec::new();
     if let Some(title) = &header.title {
-        items.push(text(title, theme.text_color()));
+        items.extend(block_items(title, theme.text_color()));
     }
     if let Some(subtitle) = &header.subtitle {
-        items.push(text(subtitle, theme.muted_color()));
+        items.extend(block_items(subtitle, theme.muted_color()));
     }
     super::legend::row(theme, header.legend.entries(), &mut items);
     (!items.is_empty()).then_some(Item::Group { clip: None, items })
@@ -101,11 +106,11 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
     for label in layout.y_tick_labels.iter().chain(&layout.x_tick_labels) {
         items.push(text(label, muted));
     }
-    if let Some(label) = &layout.title {
-        items.push(text(label, theme.text_color()));
+    if let Some(title) = &layout.title {
+        items.extend(block_items(title, theme.text_color()));
     }
-    if let Some(label) = &layout.subtitle {
-        items.push(text(label, muted));
+    if let Some(subtitle) = &layout.subtitle {
+        items.extend(block_items(subtitle, muted));
     }
     for label in layout.ylabel.iter().chain(&layout.xlabel) {
         items.push(text(label, theme.text_color()));

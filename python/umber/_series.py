@@ -57,7 +57,7 @@ class Series:
                 ``str``.
             DataError: If ``values`` is not one-dimensional or not numeric, for example
                 text, bool or datetime data or a ``None`` among the numbers.
-            StyleError: If ``label`` is too long.
+            StyleError: If ``label`` is too long or holds a line break or another control character.
             AttributeError: If called again on an existing series, which is immutable.
 
         Example:
@@ -72,7 +72,7 @@ class Series:
             require_text(context, "label", label)
             check_floats_type(context, "values", values)
             shade = instance(context, "color", color, Color, _COLOR_HINT)
-            name = text(context, "label", label)
+            name = text(context, "label", label, one_line="legend labels")
             data = floats(context, "values", values)
             _fill(self, name, data, shade)
 
@@ -180,7 +180,8 @@ class Distribution:
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If a group is not one-dimensional or not numeric.
-            StyleError: If the label is too long.
+            StyleError: If the label is too long or holds a line break or another control
+                character.
             AttributeError: If called again on an existing immutable distribution.
 
         Example:
@@ -194,7 +195,7 @@ class Distribution:
             require_text(context, "label", label)
             check_groups_type(context, groups)
             shade = instance(context, "color", color, Color, _COLOR_HINT)
-            name = text(context, "label", label)
+            name = text(context, "label", label, one_line="legend labels")
             data = group_values(context, groups)
             _fill_distribution(self, name, data, shade)
 

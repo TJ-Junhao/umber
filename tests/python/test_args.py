@@ -20,6 +20,7 @@ from umber._args import (
     checked_text,
     instance,
     integer,
+    multiline_text,
     path,
     real,
     short_repr,
@@ -56,9 +57,9 @@ class Label(str):
 
 
 def test_text_returns_plain_str() -> None:
-    assert text("Axes.title()", "text", "Revenue") == "Revenue"
+    assert text("Axes.title()", "text", "Revenue", one_line="axis labels") == "Revenue"
     for value in (Label("Revenue"), np.str_("Revenue")):
-        result = text("Axes.title()", "text", value)
+        result = text("Axes.title()", "text", value, one_line="axis labels")
         assert type(result) is str
         assert result == "Revenue"
 
@@ -68,7 +69,9 @@ def test_text_returns_plain_str() -> None:
     [(42, "int"), (None, "None"), (b"title", "bytes"), (["a"], "list"), (1.5, "float")],
 )
 def test_text_rejects_other_types(value: object, shown: str) -> None:
-    assert error(TypeError, lambda: text("Axes.title()", "text", value)) == (
+    assert error(
+        TypeError, lambda: text("Axes.title()", "text", value, one_line="axis labels")
+    ) == (
         f"Axes.title(): text is {shown}; text must be a str.",
         "text",
         TEXT_HINT,
@@ -78,7 +81,13 @@ def test_text_rejects_other_types(value: object, shown: str) -> None:
 def test_text_uses_the_given_type_error_hint() -> None:
     assert error(
         TypeError,
-        lambda: text("Color.hex()", "code", 42, hint='pass a string such as "#3366B8".'),
+        lambda: text(
+            "Color.hex()",
+            "code",
+            42,
+            one_line="color codes",
+            hint='pass a string such as "#3366B8".',
+        ),
     ) == (
         "Color.hex(): code is int; code must be a str.",
         "code",
@@ -88,8 +97,10 @@ def test_text_uses_the_given_type_error_hint() -> None:
 
 def test_text_length_cap() -> None:
     assert MAX_TEXT_LENGTH == 1000
-    assert text("Axes.title()", "text", "x" * 1000) == "x" * 1000
-    assert error(ub.StyleError, lambda: text("Axes.title()", "text", "x" * 1001)) == (
+    assert text("Axes.title()", "text", "x" * 1000, one_line="axis labels") == "x" * 1000
+    assert error(
+        ub.StyleError, lambda: text("Axes.title()", "text", "x" * 1001, one_line="axis labels")
+    ) == (
         "Axes.title(): text has 1,001 characters; text must be at most 1,000 characters.",
         "text",
         TOO_LONG_HINT,
@@ -98,11 +109,13 @@ def test_text_length_cap() -> None:
 
 def test_text_cap_counts_characters_not_bytes() -> None:
     wide = "水" * 1000
-    assert text("Axes.title()", "text", wide) == wide
+    assert text("Axes.title()", "text", wide, one_line="axis labels") == wide
 
 
 def test_text_rejects_a_lone_surrogate() -> None:
-    assert error(ub.StyleError, lambda: text("Axes.xlabel()", "text", "ab\udc80c")) == (
+    assert error(
+        ub.StyleError, lambda: text("Axes.xlabel()", "text", "ab\udc80c", one_line="axis labels")
+    ) == (
         "Axes.xlabel(): text has a lone surrogate at index 2; text must be valid Unicode.",
         "text",
         SURROGATE_HINT,
@@ -110,17 +123,26 @@ def test_text_rejects_a_lone_surrogate() -> None:
 
 
 def test_text_accepts_paired_surrogates_written_as_one_character() -> None:
-    assert text("Axes.title()", "text", "\U0001f600") == "\U0001f600"
+    assert text("Axes.title()", "text", "\U0001f600", one_line="axis labels") == "\U0001f600"
 
 
 def test_text_length_is_checked_before_the_surrogate() -> None:
-    message, _, _ = error(ub.StyleError, lambda: text("Axes.title()", "text", "\ud800" * 1001))
+    message, _, _ = error(
+        ub.StyleError, lambda: text("Axes.title()", "text", "\ud800" * 1001, one_line="axis labels")
+    )
     assert "1,001 characters" in message
 
 
 def test_checked_text_uses_the_given_label_and_class() -> None:
     def call() -> str:
-        return checked_text("Axes.bar()", "categories", "categories[3]", "\ud800", ub.DataError)
+        return checked_text(
+            "Axes.bar()",
+            "categories",
+            "categories[3]",
+            "\ud800",
+            ub.DataError,
+            one_line="category names",
+        )
 
     assert error(ub.DataError, call) == (
         "Axes.bar(): categories[3] has a lone surrogate at index 0; text must be valid Unicode.",
@@ -130,11 +152,127 @@ def test_checked_text_uses_the_given_label_and_class() -> None:
     long = "y" * 1001
     assert error(
         ub.StyleError,
-        lambda: checked_text("Axes.bar()", "categories", "categories[0]", long, ub.DataError),
+        lambda: checked_text(
+            "Axes.bar()",
+            "categories",
+            "categories[0]",
+            long,
+            ub.DataError,
+            one_line="category names",
+        ),
     ) == (
         "Axes.bar(): categories[0] has 1,001 characters; text must be at most 1,000 characters.",
         "categories",
         TOO_LONG_HINT,
+    )
+
+
+LINE_BREAK_HINT = "line breaks are supported in titles, subtitles, text() and annotate()."
+
+
+def test_text_of_one_line_refuses_a_line_break() -> None:
+    assert error(
+        ub.StyleError, lambda: text("Axes.xlabel()", "text", "Hours\nUTC", one_line="axis labels")
+    ) == (
+        "Axes.xlabel(): text holds a line break at index 5; axis labels are one line.",
+        "text",
+        LINE_BREAK_HINT,
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "message", "hint"),
+    [
+        (
+            "a\tb",
+            "text holds U+0009 (a tab) at index 1; text cannot hold control characters.",
+            "use spaces instead of tabs.",
+        ),
+        (
+            "a\r",
+            "text holds U+000D (a carriage return) at index 1; text cannot hold control "
+            "characters.",
+            "remove the carriage return.",
+        ),
+        (
+            "\x00",
+            "text holds U+0000 at index 0; text cannot hold control characters.",
+            "remove the character.",
+        ),
+        (
+            "ab\x7f",
+            "text holds U+007F at index 2; text cannot hold control characters.",
+            "remove the character.",
+        ),
+        (
+            "\x9f",
+            "text holds U+009F at index 0; text cannot hold control characters.",
+            "remove the character.",
+        ),
+        (
+            "a\u2029",
+            "text holds U+2029 (a paragraph separator) at index 1; text cannot hold line or "
+            "paragraph separators.",
+            "remove the separator.",
+        ),
+    ],
+)
+def test_text_of_one_line_refuses_control_characters(value: str, message: str, hint: str) -> None:
+    assert error(
+        ub.StyleError, lambda: text("Axes.xlabel()", "text", value, one_line="axis labels")
+    ) == (f"Axes.xlabel(): {message}", "text", hint)
+
+
+def test_neighbours_of_the_refused_ranges_are_text() -> None:
+    value = " ~\xa0\u2027\u202a\U0001f600"
+    assert text("Axes.xlabel()", "text", value, one_line="axis labels") == value
+    assert multiline_text("Axes.title()", "text", value) == value
+
+
+def test_multiline_text_takes_line_breaks_and_refuses_other_control_characters() -> None:
+    assert multiline_text("Axes.title()", "text", "\nLine one\n\nLine two\n") == (
+        "\nLine one\n\nLine two\n"
+    )
+    assert error(ub.StyleError, lambda: multiline_text("Axes.title()", "text", "a\n\tb")) == (
+        "Axes.title(): text holds U+0009 (a tab) at index 2; text cannot hold control characters.",
+        "text",
+        'use spaces instead of tabs, and "\\n" for a line break.',
+    )
+    assert error(ub.StyleError, lambda: multiline_text("Axes.title()", "text", "a\r\nb")) == (
+        "Axes.title(): text holds U+000D (a carriage return) at index 1; text cannot hold "
+        "control characters.",
+        "text",
+        'use "\\n" alone for a line break.',
+    )
+    assert error(TypeError, lambda: multiline_text("Axes.title()", "text", 4)) == (
+        "Axes.title(): text is int; text must be a str.",
+        "text",
+        TEXT_HINT,
+    )
+    # The length and the encoding are checked first.
+    message, _, _ = error(
+        ub.StyleError, lambda: multiline_text("Axes.title()", "text", "\t" * 1001)
+    )
+    assert "1,001 characters" in message
+    message, _, _ = error(ub.StyleError, lambda: multiline_text("Axes.title()", "text", "\ud800\t"))
+    assert "lone surrogate" in message
+
+
+def test_checked_text_refuses_control_characters_in_the_given_class() -> None:
+    assert error(
+        ub.DataError,
+        lambda: checked_text(
+            "Axes.bar()",
+            "categories",
+            "categories[2]",
+            "North\nSouth",
+            ub.DataError,
+            one_line="category names",
+        ),
+    ) == (
+        "Axes.bar(): categories[2] holds a line break at index 5; category names are one line.",
+        "categories",
+        LINE_BREAK_HINT,
     )
 
 
@@ -430,7 +568,7 @@ class FakeLength(str):
 @pytest.mark.parametrize(("context", "name"), [("Axes.title()", "text"), ("Axes.line()", "label")])
 def test_text_cap_ignores_an_overridden_length(context: str, name: str) -> None:
     value = FakeLength("x" * 1001)
-    assert error(ub.StyleError, lambda: text(context, name, value)) == (
+    assert error(ub.StyleError, lambda: text(context, name, value, one_line="labels")) == (
         f"{context}: {name} has 1,001 characters; text must be at most 1,000 characters.",
         name,
         TOO_LONG_HINT,

@@ -187,8 +187,12 @@ impl<'a> PieAxesMut<'a> {
 
     /// Sets the panel title at the theme's title size.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than its panel, or the figure
-    /// inside its padding for a one-cell figure.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than its panel, or the
+    /// figure inside its padding for a one-cell figure, and if the text holds a control
+    /// character other than `"\n"` or a line or paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -204,8 +208,12 @@ impl<'a> PieAxesMut<'a> {
 
     /// Sets the title and its per-call size.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than its panel, or the figure
-    /// inside its padding for a one-cell figure.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than its panel, or the
+    /// figure inside its padding for a one-cell figure, and if the text holds a control
+    /// character other than `"\n"` or a line or paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -277,6 +285,7 @@ impl Pie {
             return Err(Error::data(CONTEXT, format!("categories has {} entries and values has {}; both must have the same nonzero length.", categories.len(), values.len()))
                 .with_parameter("values").with_hint("pass one nonnegative value per category, with at least one positive value."));
         }
+        super::validation::check_names(CONTEXT, "categories", &categories)?;
         let mut seen = std::collections::HashSet::new();
         for (i, name) in categories.iter().enumerate() {
             if name.is_empty() {
@@ -287,7 +296,7 @@ impl Pie {
                 .with_parameter("categories")
                 .with_hint("give every slice a non-empty name."));
             }
-            super::check_text(CONTEXT, "categories", "category", name)?;
+            super::check_text(CONTEXT, "categories", "category", name, "slice names")?;
             if !seen.insert(name) {
                 return Err(Error::data(
                     CONTEXT,

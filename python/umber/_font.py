@@ -228,6 +228,8 @@ class Font:
 
         Raises:
             TypeError: If ``family`` is not a string or ``bold_fallback`` is not a bool.
+            StyleError: If ``family`` is too long, or holds a line break or another control
+                character.
             UsageError: If the name is empty, the family is not installed, or its selected files
                 cannot be read. An unknown family reports the closest installed names.
 
@@ -241,7 +243,7 @@ class Font:
             True
         """
         with api_call():
-            family = _args.text("Font.system()", "family", family)
+            family = _args.text("Font.system()", "family", family, one_line="font family names")
             _args.boolean("Font.system()", "bold_fallback", bold_fallback)
             value = _umber.font_system(family, bold_fallback)
             return _new((_SYSTEM, value))

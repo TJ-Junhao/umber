@@ -45,7 +45,7 @@ use std::collections::HashMap;
 use crate::error::{number, quoted};
 use crate::model::Axes;
 use crate::resolve::{AxisTick, Baseline, NormalizedPos, ValueAxis};
-use crate::text::{CheckedStyle, FaceId, SceneFonts};
+use crate::text::{CheckedStyle, FaceId, Lines, SceneFonts};
 use crate::{Error, FontLibrary, Result, SizeSpec, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
@@ -153,6 +153,123 @@ impl Label {
     pub fn width(&self) -> f64 {
         f64::from(self.layout.width())
     }
+
+    /// The text and its width, for checks against the room it is placed in.
+    pub(crate) fn extent(&self) -> TextExtent<'_> {
+        TextExtent {
+            text: &self.text,
+            width: self.width(),
+        }
+    }
+}
+
+/// A measured text and its width: the advance width of a [`Label`], the widest line of a
+/// [`TextBlock`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TextExtent<'a> {
+    /// The text, line breaks included.
+    pub text: &'a str,
+    /// The width.
+    pub width: f64,
+}
+
+/// The distance between the baselines of consecutive lines of a text, as a multiple of its
+/// font size. Titles, subtitles and the text of [`AxesMut::text`](crate::AxesMut::text) and
+/// [`AxesMut::annotate`](crate::AxesMut::annotate) break into lines at `"\n"`.
+pub(crate) const LINE_PITCH: f64 = 1.2;
+
+/// Measured text of one or more lines, split at `"\n"`, and placed: the first line where a
+/// text of one line would be, each further line [`LINE_PITCH`] sizes below the one before it,
+/// and each line aligned on its own.
+#[derive(Debug, Clone)]
+pub(crate) struct TextBlock {
+    /// The text, line breaks included.
+    pub text: String,
+    /// The first line.
+    first: Label,
+    /// The lines after the first, top down; an empty line is a line too.
+    rest: Vec<Label>,
+}
+
+impl TextBlock {
+    /// Measures each line of `text` in `style` after checking that `text`, named `subject` in
+    /// messages, holds no control character other than `"\n"`.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Style` naming `subject` for a refused character (see [`Lines`]); as [`measure`]
+    /// for a line that cannot be laid out.
+    fn measure(
+        lib: &SceneFonts<'_>,
+        subject: &str,
+        text: &str,
+        style: TextStyle,
+    ) -> Result<TextBlock> {
+        lib.check_lines(subject, text, Lines::Many)?;
+        let mut lines = text.split('\n');
+        let first = measure(lib, lines.next().unwrap_or_default(), style)?;
+        let rest = lines
+            .map(|line| measure(lib, line, style))
+            .collect::<Result<_>>()?;
+        Ok(TextBlock {
+            text: text.to_owned(),
+            first,
+            rest,
+        })
+    }
+
+    /// The first line.
+    pub fn first(&self) -> &Label {
+        &self.first
+    }
+
+    /// The lines, top down.
+    pub fn lines(&self) -> impl Iterator<Item = &Label> {
+        std::iter::once(&self.first).chain(&self.rest)
+    }
+
+    /// The width of the widest line.
+    pub fn width(&self) -> f64 {
+        self.rest
+            .iter()
+            .map(Label::width)
+            .fold(self.first.width(), f64::max)
+    }
+
+    /// The text and the width of its widest line.
+    pub(crate) fn extent(&self) -> TextExtent<'_> {
+        TextExtent {
+            text: &self.text,
+            width: self.width(),
+        }
+    }
+
+    /// The distance between consecutive baselines.
+    pub fn pitch(&self) -> f64 {
+        LINE_PITCH * f64::from(self.first.style.size)
+    }
+
+    /// How far the last baseline lies below the first: 0 for one line.
+    pub fn below_first(&self) -> f64 {
+        if self.rest.is_empty() {
+            0.0
+        } else {
+            self.rest.len() as f64 * self.pitch()
+        }
+    }
+
+    /// Places the first baseline at `baseline` and each further one [`TextBlock::pitch`]
+    /// below the one before it, and the left end of each line at `left_of(width)` for its
+    /// width.
+    pub(crate) fn place(&mut self, baseline: f64, left_of: impl Fn(f64) -> f64) {
+        let pitch = self.pitch();
+        self.first.x = left_of(self.first.width());
+        self.first.y = baseline;
+        for (i, line) in self.rest.iter_mut().enumerate() {
+            line.x = left_of(line.width());
+            line.y = baseline + (i + 1) as f64 * pitch;
+        }
+    }
 }
 
 /// The geometry of one axes.
@@ -165,9 +282,9 @@ pub(crate) struct Layout {
     #[cfg(test)]
     pub header_bottom: f64,
     /// The title, if not empty.
-    pub title: Option<Label>,
+    pub title: Option<TextBlock>,
     /// The subtitle, if not empty.
-    pub subtitle: Option<Label>,
+    pub subtitle: Option<TextBlock>,
     /// The legend row, under the subtitle; empty when the legend has no row entries.
     pub legend: LegendRow,
     /// The direct labels, right of the ends of their lines, in series order.
@@ -573,37 +690,49 @@ pub(crate) fn centered_tick_label(
     Ok(label)
 }
 
-/// What text drawn at data positions is set as: the body text of annotations, or the values
-/// written on bars, in the tick label style.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PlotText {
-    /// The text of [`AxesMut::text`](crate::AxesMut::text) and
-    /// [`AxesMut::annotate`](crate::AxesMut::annotate).
-    Annotation,
-    /// A value written on a bar.
-    Value,
-}
-
-/// `text` shaped as `kind` in `theme` at the per-call `size` (resolved as [`text_size`]
-/// resolves it), unplaced: text that the layout measures but reserves no room for, since it is
-/// drawn at data positions over the plot.
+/// A value written on a bar: `text` shaped in the tick label style of `theme` at the per-call
+/// `size` (resolved as [`text_size`] resolves it), unplaced. The layout measures it but reserves
+/// no room for it, since it is drawn at a data position over the plot.
 ///
 /// # Errors
 ///
 /// As [`measure`].
-pub(crate) fn plot_text(
+pub(crate) fn value_text(
     lib: &SceneFonts<'_>,
     theme: &Theme,
     text: &str,
-    kind: PlotText,
     size: SizeSpec,
 ) -> Result<Label> {
-    let role = match kind {
-        PlotText::Annotation => TextRole::Body,
-        PlotText::Value => TextRole::Tick,
-    };
-    let style = Styles::new(theme, TextRole::Title, StyleSizes::default()).sized(theme, role, size);
+    let style = Styles::new(theme, TextRole::Title, StyleSizes::default()).sized(
+        theme,
+        TextRole::Tick,
+        size,
+    );
     measure(lib, text, style)
+}
+
+/// The text of [`AxesMut::text`](crate::AxesMut::text) or
+/// [`AxesMut::annotate`](crate::AxesMut::annotate), named `subject` in messages: `text` shaped
+/// line by line in the body style of `theme` at the per-call `size` (resolved as [`text_size`]
+/// resolves it), unplaced. The layout measures it but reserves no room for it, since it is
+/// drawn at a data position over the plot.
+///
+/// # Errors
+///
+/// As [`TextBlock::measure`].
+pub(crate) fn annotation_text(
+    lib: &SceneFonts<'_>,
+    theme: &Theme,
+    subject: &str,
+    text: &str,
+    size: SizeSpec,
+) -> Result<TextBlock> {
+    let style = Styles::new(theme, TextRole::Title, StyleSizes::default()).sized(
+        theme,
+        TextRole::Body,
+        size,
+    );
+    TextBlock::measure(lib, subject, text, style)
 }
 
 /// The baseline of text with `ascent` and `descent` in a line box of `height` whose top is
@@ -1495,6 +1624,7 @@ mod tests {
             PADDING + 1.25 * ts + 2.0 + 1.35 * bs + 8.0
         ));
         let (t, s) = (both.title.unwrap(), both.subtitle.unwrap());
+        let (t, s) = (t.first(), s.first());
         assert!(t.y < s.y && t.x == PADDING && s.x == PADDING);
 
         f.single_axes_mut().title("");

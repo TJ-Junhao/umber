@@ -1608,7 +1608,7 @@ pub(crate) fn check_panel_contents(
             ),
         ] {
             super::panel::check_text_width(
-                label,
+                label.map(super::TextBlock::extent),
                 size,
                 slot.header.right - slot.header.left,
                 name,
@@ -1690,7 +1690,7 @@ pub(crate) fn check_panel_contents(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::Layout;
+    use crate::layout::{Label, Layout, TextBlock};
     use crate::model::{AxesMut, AxisData, BarOptions, Figure, GridIndex, LineOptions, Placement};
     use crate::pipeline::try_plan_panels;
     use crate::{FontLibrary, LegendStyle, ScaleKind};
@@ -2247,14 +2247,12 @@ mod tests {
             let width = {
                 let (_, layout) = &layouts(&probe).unwrap()[1];
                 [
-                    &layout.title,
-                    &layout.subtitle,
-                    &layout.xlabel,
-                    &layout.ylabel,
+                    layout.title.as_ref().map(TextBlock::width),
+                    layout.subtitle.as_ref().map(TextBlock::width),
+                    layout.xlabel.as_ref().map(Label::width),
+                    layout.ylabel.as_ref().map(Label::width),
                 ][which]
-                    .as_ref()
                     .unwrap()
-                    .width()
             };
             let boundary = 48.0 + 2.0 * width;
             let failing = boundary.ceil() - 1.0;

@@ -15,6 +15,7 @@ use crate::binning::{BinCount, BinSpec, HistBinning, HistBins, MAX_BINS};
 use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE, too_narrow};
 use crate::stacking::Totals;
+use crate::text::Lines;
 use crate::{ContinuousScale, Error, Instant, Result, ScaleKind, Transform};
 
 /// The hint for an x axis of the wrong kind for limits or numeric data.
@@ -152,9 +153,8 @@ fn check_axis_data(
 ) -> Result<()> {
     let name = axis.name();
     match (data, kind) {
-        (AxisData::Categories(_), ScaleKind::Category) | (AxisData::Times(_), ScaleKind::Time) => {
-            Ok(())
-        }
+        (AxisData::Categories(names), ScaleKind::Category) => check_names(context, name, names),
+        (AxisData::Times(_), ScaleKind::Time) => Ok(()),
         (AxisData::Numbers(values), ScaleKind::Linear) => {
             check_numbers(context, (name, name), values, Transform::Linear, gap_hint)
         }
@@ -1573,6 +1573,7 @@ pub(super) fn check_categories(
             SharedAxis::Y => "pass y=Scale.category() to Figure.add_axes().",
         }));
     }
+    check_names(context, parameter, categories)?;
     let mut first_index: HashMap<&str, usize> = HashMap::with_capacity(categories.len());
     for (i, name) in categories.iter().enumerate() {
         if let Some(first) = first_index.insert(name, i) {
@@ -1698,30 +1699,54 @@ pub(super) fn grouped(n: usize) -> String {
     out
 }
 
-/// Checks a text argument, shown as `name` in the message (`"prefix"`, `"labels[2]"`), that the
-/// Python parameter `parameter` holds: at most 1,000 characters, or `Error::Style` under
-/// `context`. Longer text could not fit a figure.
+/// Checks a text argument of one line, shown as `name` in the message (`"prefix"`,
+/// `"labels[2]"`), that the Python parameter `parameter` holds: at most 1,000 characters, and
+/// no line break or other control character (see [`Lines`]), or `Error::Style` under
+/// `context`. Longer text could not fit a figure. `what` names what the text is, in the plural,
+/// for the message on a line break: `"tick labels"`.
 pub(crate) fn check_text(
     context: &'static str,
     parameter: &'static str,
     name: &str,
     text: &str,
+    what: &'static str,
 ) -> Result<()> {
     let count = text.chars().count();
-    if count <= MAX_TEXT_CHARS {
-        return Ok(());
+    if count > MAX_TEXT_CHARS {
+        return Err(Error::style(
+            context,
+            format!(
+                "{name} has {count} characters; text must be at most {max} characters.",
+                count = grouped(count),
+                max = grouped(MAX_TEXT_CHARS),
+            ),
+        )
+        .with_parameter(parameter)
+        .with_hint("shorten the text; it would not fit the figure."));
     }
-    Err(Error::style(
-        context,
-        format!(
-            "{name} has {count} characters; text must be at most {max} characters.",
-            count = grouped(count),
-            max = grouped(MAX_TEXT_CHARS),
-        ),
-    )
-    .with_parameter(parameter)
-    .with_hint("shorten the text; it would not fit the figure."))
+    Lines::One(what)
+        .check_style(context, name, text)
+        .map_err(|error| error.with_parameter(parameter))
 }
+
+/// Checks the names in `names`, the data of the Python parameter `parameter` shown as
+/// `{parameter}[i]` in the message, for characters a one-line name may not hold (see
+/// [`Lines`]): `Error::Data` under `context` for the first name that holds one.
+pub(super) fn check_names(
+    context: &'static str,
+    parameter: &'static str,
+    names: &[String],
+) -> Result<()> {
+    for (i, name) in names.iter().enumerate() {
+        CATEGORY_NAMES
+            .check_data(context, &format!("{parameter}[{i}]"), name)
+            .map_err(|error| error.with_parameter(parameter))?;
+    }
+    Ok(())
+}
+
+/// Category names are one line.
+const CATEGORY_NAMES: Lines = Lines::One("category names");
 
 /// The transform of `axis`, of scale kind `kind`, for the tick setter `context`, or
 /// `Error::Usage` on a category axis, whose ticks are its categories. `what` names what the
@@ -1990,7 +2015,13 @@ pub(super) fn check_tick_labels(
         .with_parameter("labels"));
     }
     for (i, label) in labels.iter().enumerate() {
-        check_text(context, "labels", &format!("labels[{i}]"), label)?;
+        check_text(
+            context,
+            "labels",
+            &format!("labels[{i}]"),
+            label,
+            "tick labels",
+        )?;
     }
     Ok(())
 }

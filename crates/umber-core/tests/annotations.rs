@@ -240,6 +240,156 @@ fn annotate_side_follows_offset() {
     }
 }
 
+/// The line items of the text of several lines whose first line is `first`, top down: the
+/// text items that follow it in drawing order, `count` in all.
+fn lines<'a>(scene: &'a Scene, first: &str, count: usize) -> Vec<&'a TextItem> {
+    let texts: Vec<&TextItem> = leaves(&scene.items)
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::Text(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    let start = texts
+        .iter()
+        .position(|t| t.text == first)
+        .unwrap_or_else(|| panic!("no text {first:?}"));
+    texts[start..start + count].to_vec()
+}
+
+/// The box of the lines `lines`: the widest line's extent, from the first line's top to the
+/// last line's descent.
+fn lines_box(scene: &Scene, lines: &[&TextItem]) -> [f64; 4] {
+    let [_, top, _, _] = text_box(scene, lines[0]);
+    let [_, _, _, bottom] = text_box(scene, lines[lines.len() - 1]);
+    let left = lines
+        .iter()
+        .map(|t| f64::from(t.origin.x))
+        .fold(f64::INFINITY, f64::min);
+    let right = lines
+        .iter()
+        .map(|t| f64::from(t.origin.x + t.width))
+        .fold(f64::NEG_INFINITY, f64::max);
+    [left, top, right, bottom]
+}
+
+#[test]
+fn text_lines_start_where_one_line_does() {
+    for (align, share) in [
+        (Align::Left, 0.0),
+        (Align::Center, 0.5),
+        (Align::Right, 1.0),
+    ] {
+        let options = TextOptions {
+            align,
+            ..TextOptions::default()
+        };
+        let mut one = points(&[(5.0, 5.0)]);
+        axes(&mut one)
+            .text("Peak", (number(5.0), number(5.0)), options)
+            .unwrap();
+        let mut many = points(&[(5.0, 5.0)]);
+        axes(&mut many)
+            .text("Peak\nof the season\n", (number(5.0), number(5.0)), options)
+            .unwrap();
+        let (one, many) = (render(&one), render(&many));
+        let single = text(&one, "Peak");
+        let lines = lines(&many, "Peak", 3);
+        assert_eq!(
+            lines.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(),
+            ["Peak", "of the season", ""]
+        );
+        assert_eq!(lines[0].origin, single.origin, "{align:?}");
+        let pitch = 1.2 * f64::from(single.style.size);
+        let centre = f64::from(markers(&many)[0].x);
+        for (i, line) in lines.iter().enumerate() {
+            let dy = f64::from(line.origin.y - lines[0].origin.y);
+            assert!(close(dy, i as f64 * pitch), "{align:?} line {i}: {dy}");
+            let at = f64::from(line.origin.x) + share * f64::from(line.width);
+            assert!(close(at, centre), "{align:?} line {i}: {at} vs {centre}");
+        }
+    }
+}
+
+#[test]
+fn annotation_lines_face_the_point_and_the_arrow_leaves_their_box() {
+    let sides = [
+        ((0.0, 40.0), 0.5),
+        ((36.0, 36.0), 0.0),
+        ((40.0, 0.0), 0.0),
+        ((36.0, -36.0), 0.0),
+        ((0.0, -40.0), 0.5),
+        ((-36.0, -36.0), 1.0),
+        ((-40.0, 0.0), 1.0),
+        ((-36.0, 36.0), 1.0),
+    ];
+    for (offset, share) in sides {
+        let options = AnnotateOptions {
+            offset,
+            ..AnnotateOptions::default()
+        };
+        let mut one = points(&[(5.0, 5.0)]);
+        axes(&mut one)
+            .annotate("Peak", (number(5.0), number(5.0)), options)
+            .unwrap();
+        let mut many = points(&[(5.0, 5.0)]);
+        axes(&mut many)
+            .annotate(
+                "Peak\nof the wet season",
+                (number(5.0), number(5.0)),
+                options,
+            )
+            .unwrap();
+        let (one, many) = (render(&one), render(&many));
+        let lines = lines(&many, "Peak", 2);
+        assert_eq!(lines[1].text, "of the wet season");
+        // The first line is where the text of one line is; the second is one pitch below it,
+        // aligned on the side of the box that faces the point.
+        assert_eq!(lines[0].origin, text(&one, "Peak").origin, "{offset:?}");
+        let pitch = 1.2 * f64::from(lines[0].style.size);
+        assert!(close(
+            f64::from(lines[1].origin.y - lines[0].origin.y),
+            pitch
+        ));
+        let edge = |t: &TextItem| f64::from(t.origin.x) + share * f64::from(t.width);
+        assert!(close(edge(lines[0]), edge(lines[1])), "{offset:?}");
+        // The shaft starts 2 pt beyond the edge of the box of both lines, on the line from its
+        // centre.
+        let [left, top, right, bottom] = lines_box(&many, &lines);
+        let start = arrow(&many).0[0];
+        let (cx, cy) = ((left + right) / 2.0, (top + bottom) / 2.0);
+        let (dx, dy) = (f64::from(start.x) - cx, f64::from(start.y) - cy);
+        let to_edge = ((right - left) / 2.0 / dx.abs()).min((bottom - top) / 2.0 / dy.abs());
+        let beyond = dx.hypot(dy) * (1.0 - to_edge);
+        assert!(close(beyond, 2.0), "{offset:?}: {beyond}");
+        let point = markers(&many)[0];
+        assert!(close(distance(arrow(&many).2[1], point), 3.0), "{offset:?}");
+    }
+}
+
+#[test]
+fn text_of_several_lines_must_stay_on_the_figure() {
+    // The first line fits; the further lines reach past the bottom edge.
+    let mut f = points(&[(5.0, 0.2)]);
+    axes(&mut f)
+        .ylim(0.0, 10.0)
+        .unwrap()
+        .text(
+            "low\n1\n2\n3\n4\n5",
+            (number(5.0), number(0.2)),
+            TextOptions::default(),
+        )
+        .unwrap();
+    let err = f.to_scene(FontLibrary::global()).unwrap_err();
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert!(
+        err.to_string()
+            .contains("the text \"low\\n1\\n2\\n3\\n4\\n5\" reaches"),
+        "{err}"
+    );
+    assert!(err.to_string().contains("past the bottom edge"), "{err}");
+}
+
 /// The items of the annotations of the one axes of `scene`: its last group.
 fn annotation_items(scene: &Scene) -> Vec<&Item> {
     leaves(std::slice::from_ref(scene.items.last().unwrap()))

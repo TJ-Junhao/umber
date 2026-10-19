@@ -181,8 +181,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the title.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
+    /// and if the text holds a control character other than `"\n"` or a line or paragraph
+    /// separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -201,8 +206,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the subtitle.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
+    /// and if the text holds a control character other than `"\n"` or a line or paragraph
+    /// separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -221,7 +231,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the x axis label.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the plot.
+    /// Rendering returns `Error::Style` if the text is wider than the plot, and if it holds a
+    /// line break or another control character: axis labels are one line.
     ///
     /// # Examples
     ///
@@ -241,7 +252,8 @@ impl<'a> AxesMut<'a> {
     /// Sets the y axis label, drawn horizontally above the plot.
     ///
     /// Rendering returns `Error::Style` if the left label exceeds the plot and its y tick
-    /// column, or the right twin label exceeds the plot width.
+    /// column, or the right twin label exceeds the plot width, and if the text holds a line
+    /// break or another control character: axis labels are one line.
     ///
     /// # Examples
     ///
@@ -2372,7 +2384,7 @@ impl<'a> AxesMut<'a> {
             return Err(Error::usage(CONTEXT, "this axes has no color-mapped mark.")
                 .with_hint("add a heatmap, mesh, hist2d, hexbin, or a scatter with color=ColorBy(...) first."));
         }
-        super::check_text(CONTEXT, "label", "label", &options.label)?;
+        super::check_text(CONTEXT, "label", "label", &options.label, "colorbar labels")?;
         self.axes_mut().colorbar = options;
         Ok(self)
     }
@@ -2947,8 +2959,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the title and its size. Points ignore font scale; multiples follow it.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
+    /// and if the text holds a control character other than `"\n"` or a line or paragraph
+    /// separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -2970,8 +2987,13 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the subtitle and its size, relative to the theme's body size or in points.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis.
+    /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
+    /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
+    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
+    /// and if the text holds a control character other than `"\n"` or a line or paragraph
+    /// separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -2993,7 +3015,8 @@ impl<'a> AxesMut<'a> {
 
     /// Sets the x axis label and its size, relative to the theme's body size or in points.
     ///
-    /// Rendering returns `Error::Style` if the text is wider than the plot.
+    /// Rendering returns `Error::Style` if the text is wider than the plot, and if it holds a
+    /// line break or another control character: axis labels are one line.
     ///
     /// # Examples
     ///
@@ -3016,7 +3039,8 @@ impl<'a> AxesMut<'a> {
     /// Sets the y axis label and its size, relative to the theme's body size or in points.
     ///
     /// Rendering returns `Error::Style` if the left label exceeds the plot and its y tick
-    /// column, or the right twin label exceeds the plot width.
+    /// column, or the right twin label exceeds the plot width, and if the text holds a line
+    /// break or another control character: axis labels are one line.
     ///
     /// # Examples
     ///
@@ -3135,7 +3159,13 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes("Axes.strip()", axes.x, axes.y)?;
-        super::check_text("Axes.strip()", "label", "label", &options.label)?;
+        super::check_text(
+            "Axes.strip()",
+            "label",
+            "label",
+            &options.label,
+            "legend labels",
+        )?;
         let mark = super::StripMark::new(along, values, categories, groups, options)?;
         axes.marks.push(Mark::Strip(mark));
         Ok(self)
@@ -3164,7 +3194,13 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
         let (along, values) = check_band_axes("Axes.swarm()", axes.x, axes.y)?;
-        super::check_text("Axes.swarm()", "label", "label", &options.label)?;
+        super::check_text(
+            "Axes.swarm()",
+            "label",
+            "label",
+            &options.label,
+            "legend labels",
+        )?;
         let mark = super::SwarmMark::new(along, values, categories, groups, options)?;
         axes.marks.push(Mark::Swarm(mark));
         Ok(self)
@@ -3383,7 +3419,13 @@ impl<'a> AxesMut<'a> {
     /// color at its body size unless `options` say otherwise, and changes neither the limits nor
     /// the layout; overlap with other elements is not checked.
     ///
-    /// Errors leave the axes unchanged: an empty `text` is `Error::Usage`; a coordinate that does
+    /// `"\n"` breaks the text into lines: the first line is placed as a text of one line, each
+    /// further line 1.2 sizes below the one before it, and each line is aligned on the point by
+    /// `options.align`. An empty line is kept.
+    ///
+    /// Errors leave the axes unchanged: an empty `text` is `Error::Usage`; a control character
+    /// other than `"\n"`, or a line or paragraph separator (U+2028, U+2029), in `text` is
+    /// `Error::Style`, naming `text`; a coordinate that does
     /// not suit its axis, or is not finite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not
     /// positive on a log axis, is `Error::Data`, naming `at`. Rendering fails with
     /// `Error::Style` when the point lies outside the limits or the text reaches past the
@@ -3433,6 +3475,12 @@ impl<'a> AxesMut<'a> {
     /// towards the point and stops 3 pt short of it: a 0.75 pt shaft and a filled head 5 pt long
     /// and 3.5 pt wide, in the color of the text. The annotation changes neither the limits nor
     /// the layout.
+    ///
+    /// `"\n"` breaks the text into lines: the first line is placed as a text of one line, each
+    /// further line 1.2 sizes below the one before it. Each line is aligned on the side of the
+    /// text that faces the point: left-aligned when the offset points right, right-aligned when
+    /// it points left, centred when it points straight up or down. The arrow starts at the box
+    /// around all lines.
     ///
     /// Errors leave the axes unchanged: those of [`AxesMut::text`], then an offset that is not
     /// finite or is zero is `Error::Style`, naming `offset`. Rendering fails as for

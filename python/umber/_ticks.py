@@ -171,7 +171,8 @@ class TickFormat:
 
         Raises:
             TypeError: If ``prefix`` or ``suffix`` is not a ``str``.
-            StyleError: If ``prefix`` or ``suffix`` is too long.
+            StyleError: If ``prefix`` or ``suffix`` is too long, or holds a line break or
+                another control character: tick labels are one line.
 
         Example:
             >>> import umber as ub
@@ -182,8 +183,8 @@ class TickFormat:
             context = "TickFormat.affix()"
             _args.require_text(context, "prefix", prefix)
             _args.require_text(context, "suffix", suffix)
-            before = _args.text(context, "prefix", prefix)
-            after = _args.text(context, "suffix", suffix)
+            before = _args.text(context, "prefix", prefix, one_line="tick labels")
+            after = _args.text(context, "suffix", suffix, one_line="tick labels")
             return _checked(self._kind, self._decimals, before, after)
 
     def _key(self) -> tuple[int, int, str, str]:

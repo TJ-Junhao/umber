@@ -481,7 +481,13 @@ def _name_error(context: str, name: str, index: int, value: object, *, mixed: bo
 
 
 def _names(
-    context: str, name: str, data: _Data, *, mixed: bool, check_length: bool = True
+    context: str,
+    name: str,
+    data: _Data,
+    *,
+    mixed: bool,
+    one_line: str,
+    check_length: bool = True,
 ) -> list[str]:
     if isinstance(data, np.ndarray):
         _check_one_dimensional(context, name, data)
@@ -500,7 +506,13 @@ def _names(
         try:
             result.append(
                 checked_text(
-                    context, name, f"{name}[{index}]", value, DataError, check_length=check_length
+                    context,
+                    name,
+                    f"{name}[{index}]",
+                    value,
+                    DataError,
+                    one_line=one_line,
+                    check_length=check_length,
                 )
             )
         except UmberError as error:
@@ -555,17 +567,27 @@ def floats(context: str, name: str, values: object) -> FloatArray:
     return _floats(context, name, data, mixed=False)
 
 
-def names(context: str, name: str, values: object, *, check_length: bool = True) -> list[str]:
+def names(
+    context: str,
+    name: str,
+    values: object,
+    *,
+    one_line: str = "category names",
+    check_length: bool = True,
+) -> list[str]:
     """Convert names, such as bar categories, to a ``list`` of ``str``.
 
     Sequences of ``str`` (``str`` subclasses become ``str``), NumPy string or object arrays
-    and pandas or polars Series of strings are accepted. Lone surrogates are refused. The
+    and pandas or polars Series of strings are accepted. Lone surrogates, line breaks, other
+    control characters and line or paragraph separators are refused: names are one line. The
     ``MAX_TEXT_LENGTH`` cap is applied here unless the native call checks it instead.
 
     Args:
         context: The API call, such as ``"Axes.bar()"``.
         name: The parameter name.
         values: The data passed.
+        one_line: What the names are, in the plural, for the message on a line break:
+            ``"category names"`` unless they are, for example, ``"tick labels"``.
         check_length: Whether to check name length here; false when the native call checks it.
 
     Returns:
@@ -574,7 +596,8 @@ def names(context: str, name: str, values: object, *, check_length: bool = True)
     Raises:
         TypeError: The data is text, a single value, or a container without an order.
         DataError: The data is a masked array, is not one-dimensional, has a non-text dtype,
-            holds an element that is not a ``str``, or a name holds a lone surrogate.
+            holds an element that is not a ``str``, or a name holds a lone surrogate, a line
+            break, another control character or a line or paragraph separator.
         StyleError: A name is longer than ``MAX_TEXT_LENGTH`` characters.
 
     Example:
@@ -583,7 +606,7 @@ def names(context: str, name: str, values: object, *, check_length: bool = True)
         ['North', 'South']
     """
     data = _data(context, name, values, str_hint=_NAMES_HINT, masked_hint=_MASKED_NAMES_HINT)
-    return _names(context, name, data, mixed=False, check_length=check_length)
+    return _names(context, name, data, mixed=False, one_line=one_line, check_length=check_length)
 
 
 def axis_values(context: str, name: str, values: object) -> FloatArray | list[str]:
@@ -615,7 +638,7 @@ def axis_values(context: str, name: str, values: object) -> FloatArray | list[st
     """
     data = _data(context, name, values, str_hint=_AXIS_HINT, masked_hint=_MASKED_HINT)
     if _starts_with_name(data):
-        return _names(context, name, data, mixed=True)
+        return _names(context, name, data, mixed=True, one_line="category names")
     return _floats(context, name, data, mixed=True)
 
 

@@ -182,7 +182,8 @@ class Color:
 
         Raises:
             TypeError: If ``code`` is not a ``str``.
-            StyleError: If ``code`` is not a valid hex color.
+            StyleError: If ``code`` is not a valid hex color, or holds a line break or another
+                control character.
 
         Example:
             >>> import umber as ub
@@ -190,7 +191,13 @@ class Color:
             Color.hex("#3366B880")
         """
         with api_call():
-            text = _args.text("Color.hex()", "code", code, hint='pass a string such as "#3366B8".')
+            text = _args.text(
+                "Color.hex()",
+                "code",
+                code,
+                one_line="color codes",
+                hint='pass a string such as "#3366B8".',
+            )
             return _new(_FIXED, _umber.color_hex(text), 1.0)
 
     @staticmethod

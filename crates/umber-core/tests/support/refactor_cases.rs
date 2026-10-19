@@ -26,6 +26,8 @@
 //!   subtitle each on its own. `font_scale` at its maximum of 10 and at 1e-30. Labels wider than
 //!   the layout's text width limit, which are cut to a prefix on a character boundary (in
 //!   `corpus/x_end_label.rs`, with tiny figures and crowded category names).
+//! - Titles, subtitles, figure and pie titles, text and annotations of several lines, and the
+//!   errors for line breaks and control characters (in `corpus/line_breaks.rs`).
 //! - Text: every bundled font in both weights, with and without tabular figures, as scene text
 //!   and as layout metrics; characters drawn only by the in-memory fallback font; characters no
 //!   font draws.
@@ -113,6 +115,7 @@ mod corpus {
     pub mod kde;
     pub mod legend;
     pub mod legend_position;
+    pub mod line_breaks;
     pub mod mesh;
     pub mod pie;
     pub mod plot_height;
@@ -214,6 +217,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::by::cases(&lib, &mut sink);
     corpus::contour::cases(&lib, &mut sink);
     corpus::twin_y::cases(&lib, &mut sink);
+    corpus::line_breaks::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

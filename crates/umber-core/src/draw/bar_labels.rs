@@ -15,7 +15,7 @@ use super::mapping::axis_value;
 use super::{MarkContext, mark_context};
 use crate::bubble_fit::EndReach;
 use crate::error::{number, quoted};
-use crate::layout::{Area, Label, Layout, PlotText, plot_text};
+use crate::layout::{Area, Label, Layout, value_text};
 use crate::model::{Axes, ValueLabels};
 use crate::resolve::{AxisScale, Orientation, Resolved, ResolvedMark};
 use crate::scene::Item;
@@ -100,7 +100,7 @@ impl BarLabels {
     ///
     /// # Errors
     ///
-    /// As [`plot_text`], for the first label that cannot be laid out.
+    /// As [`value_text`], for the first label that cannot be laid out.
     pub(crate) fn measure(
         theme: &Theme,
         lib: &SceneFonts<'_>,
@@ -136,7 +136,7 @@ impl BarLabels {
                     };
                     let label = content
                         .map(|content| {
-                            plot_text(lib, theme, &content, PlotText::Value, annotated.labels.size)
+                            value_text(lib, theme, &content, annotated.labels.size)
                                 .map(|label| ValueLabel { value, label })
                         })
                         .transpose()?;

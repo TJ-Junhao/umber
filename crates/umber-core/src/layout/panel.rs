@@ -11,13 +11,18 @@ use super::inset::TickSpan;
 use super::legend::{self, LegendRow};
 use super::{
     AXIS_LABEL_GAP, Area, BODY_LINE, END_LABEL_SHARE, HEADER_GAP, Label, Layout, LayoutInput,
-    PADDING, PlacedBaseline, StyleSizes, Styles, TITLE_GAP, TITLE_LINE, TextRole, X_LABEL_GAP,
-    Y_LABEL_CENTER, Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, metrics,
+    PADDING, PlacedBaseline, StyleSizes, Styles, TITLE_GAP, TITLE_LINE, TextBlock, TextExtent,
+    TextRole, X_LABEL_GAP, Y_LABEL_CENTER, Y_LABEL_GAP, baseline_in_line, figure_height_hint,
+    measure, metrics,
 };
+use crate::error::quoted;
 use crate::model::Layer;
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
-use crate::text::SceneFonts;
+use crate::text::{Lines, SceneFonts};
 use crate::{Align, Figure, Result};
+
+/// Axis labels are one line.
+const AXIS_LABELS: Lines = Lines::One("axis labels");
 
 /// The figure title size as a multiple of the theme's panel title size.
 pub(crate) const FIGURE_TITLE_SCALE: f32 = 1.5;
@@ -88,17 +93,26 @@ pub(crate) struct PanelSlot {
     pub frame: Frame,
 }
 
-/// One line of the header, measured: its label and the line box the label is centered in.
+/// A title or subtitle of the header, measured: its text and the line box its first line is
+/// centered in. Further lines take [`TextBlock::pitch`] each below that box.
 #[derive(Debug, Clone)]
 struct HeaderLine {
-    /// The label, not yet placed.
-    label: Label,
-    /// The height of the line box.
+    /// The text, not yet placed.
+    label: TextBlock,
+    /// The height of the first line's box.
     line: f64,
     /// The ascent of the label style's primary font.
     ascent: f64,
     /// The descent of the label style's primary font.
     descent: f64,
+}
+
+impl HeaderLine {
+    /// The height the text takes in the header: the first line's box and the pitch of each
+    /// further line.
+    fn height(&self) -> f64 {
+        self.line + self.label.below_first()
+    }
 }
 
 /// The header of a panel, measured: title, subtitle and legend row, top down.
@@ -124,21 +138,22 @@ struct Stacked {
     bottom: f64,
 }
 
-/// The header placed: its labels, the top of its legend row and its bottom.
+/// The header placed: its texts, the top of its legend row and its bottom.
 struct PlacedHeader {
-    title: Option<Label>,
-    subtitle: Option<Label>,
+    title: Option<TextBlock>,
+    subtitle: Option<TextBlock>,
     row: f64,
     bottom: f64,
 }
 
 impl Header {
-    /// Measures the shared title, subtitle and legend stack for a panel or a figure.
+    /// Measures the shared title, subtitle and legend stack for a panel or a figure. A title
+    /// or subtitle breaks into lines at `"\n"`.
     ///
     /// # Errors
     ///
-    /// As [`measure`], naming the title or subtitle: each text is measured before the
-    /// metrics of its style.
+    /// As [`TextBlock::measure`], naming the title or subtitle: each text is measured before
+    /// the metrics of its style.
     fn measure(
         title: &str,
         subtitle: &str,
@@ -148,7 +163,12 @@ impl Header {
     ) -> Result<Header> {
         let title = (!title.is_empty())
             .then(|| -> Result<HeaderLine> {
-                let label = measure(lib, title, styles.title)?;
+                let label = TextBlock::measure(
+                    lib,
+                    &format!("the title {}", quoted(title)),
+                    title,
+                    styles.title,
+                )?;
                 let (ascent, descent) = metrics(lib, &styles.title)?;
                 Ok(HeaderLine {
                     label,
@@ -160,7 +180,12 @@ impl Header {
             .transpose()?;
         let subtitle = (!subtitle.is_empty())
             .then(|| -> Result<HeaderLine> {
-                let label = measure(lib, subtitle, styles.body)?;
+                let label = TextBlock::measure(
+                    lib,
+                    &format!("the subtitle {}", quoted(subtitle)),
+                    subtitle,
+                    styles.body,
+                )?;
                 let (ascent, descent) = metrics(lib, &styles.body)?;
                 Ok(HeaderLine {
                     label,
@@ -191,7 +216,7 @@ impl Header {
         let mut y = top;
         let title = self.title.as_ref().map(|title| {
             let baseline = baseline_in_line(y, title.line, title.ascent, title.descent);
-            y += title.line;
+            y += title.height();
             baseline
         });
         let subtitle = self.subtitle.as_ref().map(|subtitle| {
@@ -199,7 +224,7 @@ impl Header {
                 y += TITLE_GAP;
             }
             let baseline = baseline_in_line(y, subtitle.line, subtitle.ascent, subtitle.descent);
-            y += subtitle.line;
+            y += subtitle.height();
             baseline
         });
         let row_top = match row {
@@ -248,14 +273,16 @@ impl Header {
         )
     }
 
-    /// The header stacked from `top` down with a legend row `row` tall (none when `None`), its
-    /// labels aligned within the header box. The row has its own alignment.
+    /// The header stacked from `top` down with a legend row `row` tall (none when `None`), each
+    /// line of its texts aligned within the header box. The row has its own alignment.
     fn place(self, box_: HeaderBox, align: Align, row: Option<f64>) -> PlacedHeader {
         let stacked = self.stack_with_row(box_.top, row);
-        let at = |line: HeaderLine, baseline: f64| Label {
-            x: align.position(line.label.width(), box_.left, box_.right),
-            y: baseline,
-            ..line.label
+        let at = |line: HeaderLine, baseline: f64| {
+            let mut block = line.label;
+            block.place(baseline, |width| {
+                align.position(width, box_.left, box_.right)
+            });
+            block
         };
         PlacedHeader {
             title: self.title.zip(stacked.title).map(|(t, y)| at(t, y)),
@@ -316,9 +343,10 @@ impl TextContainer {
     }
 }
 
-/// Checks a text against the horizontal extent in which it is placed.
+/// Checks a text, its widest line for a text of several lines, against the horizontal extent
+/// in which it is placed.
 pub(super) fn check_text_width(
-    label: Option<&Label>,
+    label: Option<TextExtent<'_>>,
     size: crate::SizeSpec,
     room: f64,
     kind: TextKind,
@@ -326,9 +354,9 @@ pub(super) fn check_text_width(
     context: &'static str,
 ) -> Result<()> {
     if let Some(label) = label
-        && label.width() > room + super::inset::CONTAINMENT_TOLERANCE
+        && label.width > room + super::inset::CONTAINMENT_TOLERANCE
     {
-        let (width, room) = super::widths(label.width(), room);
+        let (width, room) = super::widths(label.width, room);
         let hint = text_size_hint(size);
         let name = kind.name();
         let container = container.name();
@@ -336,7 +364,7 @@ pub(super) fn check_text_width(
             context,
             format!(
                 "the {name} {} is {width} pt wide; the {container} has {room} pt.",
-                crate::error::quoted(&label.text)
+                quoted(label.text)
             ),
         )
         .with_hint(hint));
@@ -368,7 +396,14 @@ pub(super) fn check_axis_titles(
         ),
         (layout.ylabel.as_ref(), axes.ylabel_size(), y_room, y_kind),
     ] {
-        check_text_width(label, size, room, kind, TextContainer::Panel, context)?;
+        check_text_width(
+            label.map(Label::extent),
+            size,
+            room,
+            kind,
+            TextContainer::Panel,
+            context,
+        )?;
     }
     Ok(())
 }
@@ -377,9 +412,9 @@ pub(super) fn check_axis_titles(
 #[derive(Debug, Clone)]
 pub(crate) struct FigureHeader {
     /// The title at one and a half times the panel title size.
-    pub title: Option<Label>,
+    pub title: Option<TextBlock>,
     /// The subtitle in the body style.
-    pub subtitle: Option<Label>,
+    pub subtitle: Option<TextBlock>,
     /// The merged legend, with each wrapped row aligned with the figure title.
     pub legend: LegendRow,
     /// Where the grid starts, including the gap below a non-empty header.
@@ -444,7 +479,14 @@ impl FigureHeader {
                 TextKind::Subtitle,
             ),
         ] {
-            check_text_width(label, size, room, name, TextContainer::Figure, context)?;
+            check_text_width(
+                label.map(TextBlock::extent),
+                size,
+                room,
+                name,
+                TextContainer::Figure,
+                context,
+            )?;
         }
         self.legend.check_width(room, context)?;
         if figure.panels().next().is_none()
@@ -563,7 +605,7 @@ impl PanelBands {
         context: &'static str,
     ) -> Result<()> {
         check_text_width(
-            self.ylabel.as_ref(),
+            self.ylabel.as_ref().map(Label::extent),
             axes.ylabel_size(),
             room,
             kind,
@@ -580,12 +622,12 @@ impl PanelBands {
             (
                 "title",
                 title.map_or("", |t| t.label.text.as_str()),
-                title.map_or(0.0, |t| t.line),
+                title.map_or(0.0, HeaderLine::height),
             ),
             (
                 "subtitle",
                 subtitle.map_or("", |t| t.label.text.as_str()),
-                subtitle.map_or(0.0, |t| t.line),
+                subtitle.map_or(0.0, HeaderLine::height),
             ),
             (
                 "x axis label",
@@ -779,6 +821,13 @@ pub(crate) fn measure_panel(
         Layer::Twin { axes, .. } => ("", axes.ylabel_text()),
         Layer::Primary(crate::Panel::Pie(_)) => ("", ""),
     };
+    for (axis, text) in [("x", xtext), ("y", ytext)] {
+        lib.check_lines(
+            &format!("the {axis} axis label {}", quoted(text)),
+            text,
+            AXIS_LABELS,
+        )?;
+    }
     let xlabel = (!xtext.is_empty())
         .then(|| measure(lib, xtext, xaxis))
         .transpose()?;
@@ -1312,8 +1361,11 @@ mod tests {
             let mut bits = Bits::default();
             bits.area("plot", &layout.plot);
             bits.num("header_bottom", layout.header_bottom);
-            bits.labels("title", &layout.title);
-            bits.labels("subtitle", &layout.subtitle);
+            bits.labels("title", layout.title.iter().flat_map(TextBlock::lines));
+            bits.labels(
+                "subtitle",
+                layout.subtitle.iter().flat_map(TextBlock::lines),
+            );
             bits.num("legend.height", layout.legend.height());
             for (i, entry) in layout.legend.entries().iter().enumerate() {
                 let name = format!("legend[{i}]");
@@ -1516,7 +1568,12 @@ mod tests {
             slot.header.right += 30.0;
             slot.header.top += 20.0;
             let moved = place_panel(input, &resolved, bands, &slot);
-            let title = |l: &Layout| l.title.as_ref().map(|t| (t.x, t.y)).unwrap();
+            let title = |l: &Layout| {
+                l.title
+                    .as_ref()
+                    .map(|t| (t.first().x, t.first().y))
+                    .unwrap()
+            };
             let (x, y) = title(&layout);
             let (mx, my) = title(&moved);
             assert!(

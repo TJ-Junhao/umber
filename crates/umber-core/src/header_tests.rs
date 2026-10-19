@@ -604,7 +604,7 @@ fn figure_title_is_one_and_a_half_title_sizes() {
         .unwrap();
         let title = planned.header.title.unwrap();
         assert_eq!(
-            title.style.size,
+            title.first().style.size,
             1.5 * f.theme().title_size() * f.theme().font_scale()
         );
     }
@@ -638,8 +638,8 @@ fn single_panel_left_alignment_is_unchanged() {
             left.to_scene(&lib).unwrap()
         );
         let (_, layout) = plan_figure(&left, (0, 0), &lib);
-        assert_eq!(layout.title.unwrap().x, PADDING);
-        assert_eq!(layout.subtitle.unwrap().x, PADDING);
+        assert_eq!(layout.title.unwrap().first().x, PADDING);
+        assert_eq!(layout.subtitle.unwrap().first().x, PADDING);
     }
 }
 
@@ -777,11 +777,22 @@ fn merged_rows_wrap_and_align_independently_in_both_styles() {
                 assert!((start - align.position(end - start, PADDING, right)).abs() < 1e-9);
                 assert!(start >= PADDING - 1e-9 && end <= right + 1e-9);
             }
-            for label in planned.header.title.iter().chain(&planned.header.subtitle) {
+            for label in planned
+                .header
+                .title
+                .iter()
+                .chain(&planned.header.subtitle)
+                .flat_map(|block| block.lines())
+            {
                 assert_eq!(label.x, align.position(label.width(), PADDING, right));
             }
             let panel = &planned.panels[0].1;
-            for label in panel.title.iter().chain(&panel.subtitle) {
+            for label in panel
+                .title
+                .iter()
+                .chain(&panel.subtitle)
+                .flat_map(|block| block.lines())
+            {
                 assert_eq!(
                     label.x,
                     align.position(label.width(), panel.plot.x, panel.plot.right())
@@ -940,7 +951,7 @@ fn per_panel_legends_do_not_follow_title_alignment() {
                 (p.plot.x, p.plot.right())
             };
             assert_eq!(p.legend.entries()[0].swatch.x, left);
-            let title = p.title.as_ref().unwrap();
+            let title = p.title.as_ref().unwrap().first();
             assert_eq!(title.x, align.position(title.width(), left, right));
         }
     }
