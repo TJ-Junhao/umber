@@ -37,6 +37,12 @@ pub enum CmapChoice {
 /// ([`AxesMut::clim`](super::AxesMut::clim) sets it). A NaN value leaves its point undrawn;
 /// the point's position still counts in the axis limits.
 ///
+/// Mapped fills stay opaque. Points get an opaque 0.5 pt outline that contrasts with the
+/// background for nearby fill colors, fading to the background color as the Oklab distance
+/// grows. The outline darkens against a light background and lightens against a dark one;
+/// fills and the colorbar are unchanged. A mapped scatter has no legend entry. Bubble legend
+/// swatches and size references stay neutral, with their usual background-colored outline.
+///
 /// With a `center`, the mapping is diverging and symmetric: the color range is `center ± d`,
 /// where `d` is the larger distance from `center` to either end of the values (or of the
 /// explicit color range), and `center` maps to the middle of the colormap.

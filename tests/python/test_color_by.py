@@ -6,6 +6,7 @@ import pickle
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+from xml.etree import ElementTree
 
 import numpy as np
 import pandas as pd
@@ -73,6 +74,42 @@ def test_lists_arrays_and_series_match() -> None:
     assert len(outputs) == 1
 
 
+def _marker_styles(svg: str) -> list[dict[str, str]]:
+    ns = "{http://www.w3.org/2000/svg}"
+    return [
+        group.attrib
+        for group in ElementTree.fromstring(svg).iter(f"{ns}g")
+        if group.find(f"{ns}use") is not None
+    ]
+
+
+@pytest.mark.parametrize(
+    ("theme", "background", "center_fill", "center_stroke"),
+    [
+        (ub.Theme.PIGMENT, "#FAF6F0", "#F3EDE4", "#ACA69E"),
+        (ub.Theme.GRAPHITE, "#FFFFFF", "#F5F5F5", "#AFAFAF"),
+        (ub.Theme.MIDNIGHT, "#121419", "#2A2F3A", "#41454E"),
+    ],
+)
+def test_centered_color_by_outline_in_png_svg_and_pdf(
+    theme: ub.Theme, background: str, center_fill: str, center_stroke: str
+) -> None:
+    fig = ub.Figure(6, 4, theme=theme)
+    fig.add_axes().scatter([1, 2, 3], [1, 2, 1], color=ub.ColorBy([-1, 0, 1], center=0))
+    assert fig.to_png().startswith(b"\x89PNG\r\n\x1a\n")
+    assert fig.to_pdf().startswith(b"%PDF-")
+    for text in (ub.SvgText.EDITABLE, ub.SvgText.OUTLINES):
+        markers = _marker_styles(fig.to_svg(text=text))
+        assert len(markers) == 3
+        assert all(marker["stroke-width"] == "0.5" for marker in markers)
+        assert markers[1]["fill"] == center_fill
+        assert markers[1]["stroke"] == center_stroke != background
+        assert markers[0]["stroke"] == markers[2]["stroke"] == background
+        assert all(
+            "fill-opacity" not in marker and "stroke-opacity" not in marker for marker in markers
+        )
+
+
 def test_points_take_the_mapped_colors() -> None:
     # Mapped fills are opaque, as explicit colors are under a theme without marker opacity.
     mapped = axes().scatter([1, 2], [1, 2], color=ub.ColorBy([0, 10], GRAYS))
@@ -86,10 +123,17 @@ def test_points_take_the_mapped_colors() -> None:
     faded = axes().scatter([1], [1], color=ub.Color.BLACK).scatter([2], [2], color=ub.Color.WHITE)
     mapped.colorbar(position=ub.ColorbarPosition.NONE)
     assert mapped.figure.to_svg() != faded.figure.to_svg()
-    assert mapped.figure.to_svg() == explicit.figure.to_svg()
+    mapped_styles = _marker_styles(mapped.figure.to_svg())
+    explicit_styles = _marker_styles(explicit.figure.to_svg())
+    assert [style["fill"] for style in mapped_styles] == [
+        style["fill"] for style in explicit_styles
+    ]
+    assert all("fill-opacity" not in style for style in mapped_styles + explicit_styles)
+    assert all(style["stroke-width"] == "0.5" for style in mapped_styles)
+    assert all(style["stroke-width"] == "0.8" for style in explicit_styles)
     clamped = axes().clim(0, 10).scatter([1, 2], [1, 2], color=ub.ColorBy([-50, 50], GRAYS))
     clamped.colorbar(position=ub.ColorbarPosition.NONE)
-    assert clamped.figure.to_svg() == explicit.figure.to_svg()
+    assert clamped.figure.to_svg() == mapped.figure.to_svg()
 
 
 def test_a_mapped_scatter_takes_no_palette_color() -> None:

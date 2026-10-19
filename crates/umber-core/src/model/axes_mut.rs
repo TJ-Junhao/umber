@@ -759,7 +759,10 @@ impl<'a> AxesMut<'a> {
     /// number one per point (`Error::Data`); the colormap, scale and center must be those of
     /// the axes' other color-mapped marks (`Error::Usage`) and suit the color limits of
     /// [`AxesMut::clim`] (`Error::Style`). A color-mapped scatter has no legend entry: a
-    /// non-empty label is an `Error::Usage`.
+    /// non-empty label is an `Error::Usage`. Mapped fills stay opaque and get a 0.5 pt outline
+    /// that contrasts with the background for nearby fill colors, fading to the background
+    /// color as the Oklab distance grows. Uniform colors keep the theme's marker alpha and
+    /// their 0.8 pt background-colored outline.
     ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
     /// [`AxisData`] without copying them, use [`AxesMut::scatter_shared`].
@@ -833,8 +836,11 @@ impl<'a> AxesMut<'a> {
     /// finite x and y coordinates maps to [`Theme::bubble_max_radius`](crate::Theme::bubble_max_radius).
     /// Zero sizes and NaN coordinates draw nothing; a zero-size point's position still counts
     /// in the axis domains like any point. The remaining markers draw in input order with the
-    /// scatter outline. Up to three true-size reference circles appear once, after the first
-    /// labelled bubble entry, using the axes' y tick format. Repeated labels keep the larger
+    /// scatter outline: 0.5 pt for mapped colors, contrasting when the fill is close to the
+    /// background in Oklab and fading to the background color otherwise; 0.8 pt in the
+    /// background color for uniform colors. Mapped fills stay opaque; uniform fills keep
+    /// the theme's marker alpha. Up to three true-size reference circles appear once, after the
+    /// first labelled bubble entry, using the axes' y tick format. Repeated labels keep the larger
     /// circle; labels that round to zero are omitted. If all labels round to zero, only the
     /// largest reference circle remains, with an automatic label for its size, without the y
     /// format or its affixes. An all-zero or empty scale has only label entries.
@@ -857,7 +863,7 @@ impl<'a> AxesMut<'a> {
     /// or sizes above 1e300 give `Error::Data`; coordinates follow the scatter rules.
     /// A color mapping follows the scatter rules too, except that a color-mapped bubble mark
     /// keeps its label: its legend entry and size references are drawn in the theme's text
-    /// color. Errors change nothing.
+    /// color, keeping their usual background-colored outline. Errors change nothing.
     ///
     /// # Examples
     ///
