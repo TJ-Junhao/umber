@@ -115,5 +115,4 @@ fn twin_pdf_is_valid_and_matches_png() {
     }
     pdf_check::assert_matches_png(&path, &f.to_png(144).unwrap(), 144);
     assert!(f.to_svg(SvgText::Editable).unwrap().contains("Right units"));
-    std::fs::remove_dir_all(dir).unwrap();
 }
