@@ -116,7 +116,7 @@ def test_frontmatter_version_matches() -> None:
         assert description is not None
         assert description[1] == (
             '"Plot data in Python with umber: line, scatter, bar, histogram, box, violin, '
-            "heatmap and other charts, saved as PNG or SVG. Use when writing or changing "
+            "heatmap, contour, pie and other charts, saved as PNG, SVG or PDF. Use when writing or changing "
             "code that makes charts with umber, or when turning matplotlib code into "
             'umber code."'
         )
