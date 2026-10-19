@@ -33,6 +33,7 @@ EXPECTED = [
     "LegendPosition",
     "LegendStyle",
     "Marker",
+    "PieAxes",
     "Render",
     "Scale",
     "Share",
@@ -52,6 +53,7 @@ EXPECTED = [
     "bar",
     "hist",
     "line",
+    "pie",
     "scatter",
 ]
 
@@ -80,7 +82,7 @@ def test_exported_classes_report_the_package_as_their_module() -> None:
 
 def test_quick_functions_are_exported_as_functions() -> None:
     functions = {name for name in umber.__all__ if inspect.isfunction(getattr(umber, name))}
-    assert functions == {"bar", "hist", "line", "scatter"}
+    assert functions == {"bar", "hist", "line", "pie", "scatter"}
 
 
 def test_enums_are_exported_as_enums() -> None:

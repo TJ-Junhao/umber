@@ -358,7 +358,7 @@ fn every_shared_setter_checks_other_members_and_preserves_copies() {
         .unwrap();
         // Inserting an earlier panel must not change the identity of the member that set it.
         add(&mut f, 0, 0, 3.0);
-        let axes: Vec<_> = f.panels().collect();
+        let axes: Vec<_> = f.cartesian_panels().collect();
         assert!(std::sync::Arc::ptr_eq(
             &axes[0].x_settings,
             &axes[1].x_settings

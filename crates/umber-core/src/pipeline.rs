@@ -26,7 +26,7 @@ use crate::{Error, FontLibrary, Result, Theme, draw};
 /// theme, and its legend, measured. They are made once, before layout.
 struct Panel<'a> {
     /// The axes.
-    axes: &'a Axes,
+    axes: crate::Panel<'a>,
     /// The axes' marks, resolved.
     marks: Vec<ResolvedMark<'a>>,
     /// The axes' legend, measured.
@@ -53,18 +53,38 @@ fn panels<'a>(
         .panels()
         .zip(resolve::resolve_figure_marks(figure))
         .map(|(axes, marks)| {
-            let legend = if figure.has_merged_legend() {
-                let style = axes.legend_style().unwrap_or(theme.legend_style());
-                MeasuredLegend::measure(
-                    theme,
-                    &Legend::panel(style, &marks, &Limits::of(axes), true),
-                    lib,
-                    figure.legend_size(),
-                )?
-            } else {
-                measure_legend(theme, axes, &marks, lib)?
+            let legend = match axes {
+                crate::Panel::Pie(panel) => {
+                    let mut measured = MeasuredLegend::measure(
+                        theme,
+                        &Legend::pie(panel.legend, panel.pie.as_ref()),
+                        lib,
+                        panel.legend_size,
+                    )?;
+                    if panel.legend != crate::LegendStyle::Direct {
+                        measured.position =
+                            panel.legend_position.unwrap_or(theme.legend_position());
+                    }
+                    measured
+                }
+                crate::Panel::Cartesian(axes) => {
+                    if figure.has_merged_legend() {
+                        let style = axes.legend_style().unwrap_or(theme.legend_style());
+                        MeasuredLegend::measure(
+                            theme,
+                            &Legend::panel(style, &marks, &Limits::of(axes), true),
+                            lib,
+                            figure.legend_size(),
+                        )?
+                    } else {
+                        measure_legend(theme, axes, &marks, lib)?
+                    }
+                }
             };
-            let labels = BarLabels::measure(theme, lib, axes, &marks)?;
+            let labels = match axes {
+                crate::Panel::Cartesian(axes) => BarLabels::measure(theme, lib, axes, &marks)?,
+                crate::Panel::Pie(_) => BarLabels::default(),
+            };
             Ok(Panel {
                 axes,
                 marks,
@@ -85,7 +105,10 @@ fn resolve_colors(figure: &Figure, panels: &mut [Panel<'_>], groups: &ShareGroup
         if groups.color[i] != Some(i) {
             continue;
         }
-        let format = color_tick_format(figure, &panels[i]).0.clone();
+        let Some((format, _)) = color_tick_format(figure, &panels[i]) else {
+            continue;
+        };
+        let format = format.clone();
         let marks = panels
             .iter()
             .enumerate()
@@ -93,7 +116,7 @@ fn resolve_colors(figure: &Figure, panels: &mut [Panel<'_>], groups: &ShareGroup
             .flat_map(|(_, panel)| panel.marks.iter());
         let color = ResolvedColorScale::resolve(
             marks,
-            panels[i].axes.color_limits(),
+            panels[i].axes.cartesian().and_then(Axes::color_limits),
             (figure.theme(), &format),
         );
         for (j, panel) in panels.iter_mut().enumerate() {
@@ -114,7 +137,7 @@ fn check_contour_levels(
     context: &'static str,
 ) -> Result<()> {
     const HINT: &str = "pass the same levels to every contour that shares a colorbar.";
-    let panels: Vec<&Axes> = figure.panels().collect();
+    let panels: Vec<_> = figure.panels().collect();
     for source in 0..panels.len() {
         if groups.color.get(source) != Some(&Some(source)) {
             continue;
@@ -124,12 +147,46 @@ fn check_contour_levels(
             .iter()
             .enumerate()
             .filter(|(i, _)| groups.color.get(*i) == Some(&Some(source)));
-        for (i, axes) in members {
-            let contours = axes.marks().iter().filter_map(|mark| match mark {
-                crate::model::Mark::Contour(contour) if contour.color_scale().is_some() => {
-                    Some(contour)
+        for (i, panel) in members {
+            let Some(axes) = panel.cartesian() else {
+                continue;
+            };
+            let contours = axes.marks().iter().filter_map(|mark| {
+                use crate::model::Mark;
+                match mark {
+                    Mark::Contour(contour) => contour.color_scale().map(|_| contour),
+                    Mark::Line(_)
+                    | Mark::Scatter(_)
+                    | Mark::Bubbles(_)
+                    | Mark::Stem(_)
+                    | Mark::Heatmap(_)
+                    | Mark::Area(_)
+                    | Mark::Bar(_)
+                    | Mark::Violin(_)
+                    | Mark::GroupedViolin(_)
+                    | Mark::Box(_)
+                    | Mark::GroupedBox(_)
+                    | Mark::GroupedBar(_)
+                    | Mark::StackedBar(_)
+                    | Mark::StackedArea(_)
+                    | Mark::Mesh(_)
+                    | Mark::Hist2d(_)
+                    | Mark::Hexbin(_)
+                    | Mark::Hist(_)
+                    | Mark::Step(_)
+                    | Mark::HLine(_)
+                    | Mark::VLine(_)
+                    | Mark::HSpan(_)
+                    | Mark::VSpan(_)
+                    | Mark::Band(_)
+                    | Mark::ErrorBars(_)
+                    | Mark::Events(_)
+                    | Mark::Strip(_)
+                    | Mark::Swarm(_)
+                    | Mark::GroupedHist(_)
+                    | Mark::Ecdf(_)
+                    | Mark::Kde(_) => None,
                 }
-                _ => None,
             });
             for contour in contours {
                 let values = contour.levels();
@@ -386,23 +443,21 @@ fn color_side(side: layout::ColorbarSide) -> Side {
 fn color_tick_format<'a>(
     figure: &'a Figure,
     panel: &'a Panel<'_>,
-) -> (&'a crate::TickFormat, AutomaticTickTarget) {
+) -> Option<(&'a crate::TickFormat, AutomaticTickTarget)> {
     let shared = figure.grid().share_color() != crate::Share::None;
+    let axes = panel.axes.cartesian()?;
     let options = if shared {
         figure.colorbar_options()
     } else {
-        panel.axes.colorbar_options()
+        axes.colorbar_options()
     };
-    (
-        options
-            .format
-            .as_ref()
-            .unwrap_or(panel.axes.y_tick_format()),
+    Some((
+        options.format.as_ref().unwrap_or(axes.y_tick_format()),
         AutomaticTickTarget::Colorbar {
             shared,
             inherited: options.format.is_none(),
         },
-    )
+    ))
 }
 
 /// Relabels and spaces a visible colorbar without changing its norm or colormap.
@@ -412,8 +467,9 @@ fn choose_color_ticks(
     resolved: &mut Resolved,
     room: &layout::TickRoom<'_>,
 ) {
-    if let Some(color) = &resolved.color {
-        let (format, _) = color_tick_format(figure, panel);
+    if let Some(color) = &resolved.color
+        && let Some((format, _)) = color_tick_format(figure, panel)
+    {
         resolved.color = Some(color.with_ticks(room, format));
     }
 }
@@ -526,8 +582,22 @@ fn plan(
         .iter()
         .map(|panel| {
             Ok([
-                layout::TickFont::sized(lib, theme, panel.axes.xtick_size())?,
-                layout::TickFont::sized(lib, theme, panel.axes.ytick_size())?,
+                layout::TickFont::sized(
+                    lib,
+                    theme,
+                    panel
+                        .axes
+                        .cartesian()
+                        .map_or(crate::SizeSpec::Auto, Axes::xtick_size),
+                )?,
+                layout::TickFont::sized(
+                    lib,
+                    theme,
+                    panel
+                        .axes
+                        .cartesian()
+                        .map_or(crate::SizeSpec::Auto, Axes::ytick_size),
+                )?,
             ])
         })
         .collect::<Result<_>>()?;
@@ -563,7 +633,11 @@ fn plan(
                     .and_then(|_| layout::ColorbarSide::shared(figure))
                     .map(color_side)
             } else {
-                layout::ColorbarSide::resolve(panel.axes, theme).map(color_side)
+                panel
+                    .axes
+                    .cartesian()
+                    .and_then(|axes| layout::ColorbarSide::resolve(axes, theme))
+                    .map(color_side)
             }
         })
         .collect();
@@ -613,7 +687,10 @@ fn plan(
         panels.iter().map(|panel| panel.marks.as_slice()).collect();
     let ends: Vec<_> = panels
         .iter()
-        .map(|panel| panel.labels.end_reaches())
+        .map(|panel| match panel.axes {
+            crate::Panel::Cartesian(_) => panel.labels.end_reaches(),
+            crate::Panel::Pie(_) => Vec::new(),
+        })
         .collect();
     let mut fits = BubbleFits::new(&marks, &ends, &limits, groups);
     let show_labels: Vec<_> = panels
@@ -1157,8 +1234,8 @@ fn plan(
         if color_sides[i].is_some()
             && let Some(color) = &r.color
             && !matches!(color.norm, crate::color_scale::Norm::Log { .. })
+            && let Some((format, target)) = color_tick_format(figure, &panels[i])
         {
-            let (format, target) = color_tick_format(figure, &panels[i]);
             format
                 .check_automatic_ticks(&color.ticks, color.norm.range(), target, context)
                 .map_err(|error| in_cell(figure, panels[i].axes, error))?;
@@ -1284,7 +1361,10 @@ fn plan_cells(
             seen_states.push(state);
         }
         for (i, panel) in panels.iter_mut().enumerate() {
-            let limits = [panel.axes.x_limits(), panel.axes.y_limits()];
+            let Some(axes) = panel.axes.cartesian() else {
+                continue;
+            };
+            let limits = [axes.x_limits(), axes.y_limits()];
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
                 || groups.y.iter().filter(|&&g| g == groups.y[i]).count() > 1;
             // Hexbins without paired finite points count no cells, and leave the others alone.
@@ -1632,6 +1712,22 @@ fn scene_with_labels(
     let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
     let mut annotations = Vec::new();
     for (panel, (resolved, layout)) in panels.iter().zip(&planned.panels) {
+        let axes = match panel.axes {
+            crate::Panel::Cartesian(axes) => axes,
+            crate::Panel::Pie(pie_panel) => {
+                scene.push(draw::chrome(theme, layout));
+                if let Some(pie) = &pie_panel.pie {
+                    let placed =
+                        layout::pie::place(pie, pie_panel.legend, layout.plot, theme, fonts)
+                            .map_err(|err| in_cell(figure, panel.axes, err))?;
+                    scene.push(draw::pie::draw(theme, &placed));
+                }
+                if let Some(legend) = draw::legend::legend(theme, layout) {
+                    scene.push(legend);
+                }
+                continue;
+            }
+        };
         draw::check_images(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
         draw::check_points(resolved, layout, &panel.marks, context)
@@ -1648,7 +1744,7 @@ fn scene_with_labels(
             resolved,
             layout,
             &panel.marks,
-            (panel.axes.y_tick_format(), context),
+            (axes.y_tick_format(), context),
         )
         .map_err(|err| in_cell(figure, panel.axes, err))?;
         if let Some(notes) = notes {
@@ -1658,7 +1754,7 @@ fn scene_with_labels(
             theme,
             resolved,
             layout,
-            panel.axes,
+            axes,
             &panel.marks,
             &panel.labels,
             context,
@@ -1670,7 +1766,7 @@ fn scene_with_labels(
         if let Some(legend) = draw::legend::legend(theme, layout) {
             scene.push(legend);
         }
-        if resolved.draws_baseline(panel.axes.marks(), panel.axes.baseline_visibility()) {
+        if resolved.draws_baseline(axes.marks(), axes.baseline_visibility()) {
             scene.push(draw::baseline(theme, layout));
         }
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
@@ -1681,7 +1777,7 @@ fn scene_with_labels(
             fonts,
             resolved,
             layout,
-            panel.axes.annotations(),
+            axes.annotations(),
             (width, height),
             context,
         )
@@ -1705,12 +1801,12 @@ fn scene_with_labels(
 
 /// `err`, an error of the axes `axes` of `figure`, naming the axes' top-left cell first on a
 /// grid of more than one cell, as layout errors do.
-fn in_cell(figure: &Figure, axes: &Axes, err: Error) -> Error {
+fn in_cell<'a>(figure: &Figure, panel: impl Into<crate::Panel<'a>>, err: Error) -> Error {
     let grid = figure.grid();
     if grid.rows() * grid.cols() == 1 {
         return err;
     }
-    let cells = axes.cells();
+    let cells = panel.into().cells();
     err.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
 }
 

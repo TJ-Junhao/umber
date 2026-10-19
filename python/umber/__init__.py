@@ -38,7 +38,8 @@ from umber._enums import (
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
 from umber._font import Font
-from umber._quick import bar, hist, line, scatter
+from umber._pie import PieAxes
+from umber._quick import bar, hist, line, pie, scatter
 from umber._scale import Scale
 from umber._series import Distribution, Series
 from umber._size import Size
@@ -82,6 +83,7 @@ __all__ = [
     "LegendPosition",
     "LegendStyle",
     "Marker",
+    "PieAxes",
     "Render",
     "Scale",
     "Share",
@@ -101,6 +103,7 @@ __all__ = [
     "bar",
     "hist",
     "line",
+    "pie",
     "scatter",
 ]
 
@@ -141,6 +144,7 @@ _report_package_as_module(
     LegendPosition,
     LegendStyle,
     Marker,
+    PieAxes,
     Render,
     Scale,
     Share,
@@ -158,5 +162,6 @@ _report_package_as_module(
     bar,
     hist,
     line,
+    pie,
     scatter,
 )

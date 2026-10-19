@@ -6,8 +6,9 @@
 use umber_core::scene::{Item, Scene, TextItem};
 use umber_core::{
     Align, AnnotateOptions, AxesMut, AxisData, AxisValue, BarOptions, ColorSpec, Error, Figure,
-    FontLibrary, Grid, GridIndex, HeatmapOptions, Instant, LogBase, Paint, Placement, Point, Rgba,
-    ScaleKind, ScatterOptions, Series, SizeSpec, TextOptions, Theme, TickFormat, ValueLabels,
+    FontLibrary, Grid, GridIndex, HeatmapOptions, Instant, LogBase, Paint, PieOptions, Placement,
+    Point, Rgba, ScaleKind, ScatterOptions, Series, SizeSpec, TextOptions, Theme, TickFormat,
+    ValueLabels,
 };
 
 const TOLERANCE: f64 = 2e-3;
@@ -964,6 +965,69 @@ fn annotations_are_painted_after_every_panel() {
         matches!(last.as_slice(), [Item::Text(t)] if t.text == "OVERLAY"),
         "{last:?}"
     );
+}
+
+#[test]
+fn annotations_and_bar_labels_render_with_a_pie_panel() {
+    for pie_col in [0, 1] {
+        let mut f =
+            Figure::with_grid(10.0, 4.0, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
+        f.title("Mixed panels");
+        let at = |col| Placement {
+            row: GridIndex::At(0),
+            col: GridIndex::At(col),
+            row_span: 1,
+            col_span: 1,
+        };
+        let mut axes = f
+            .add_axes_at(at(1 - pie_col), ScaleKind::Category, ScaleKind::Linear)
+            .unwrap();
+        axes.bar(
+            names(&["A", "B"]),
+            &[1.25, -2.5],
+            BarOptions {
+                annotation: annotated(),
+                ..BarOptions::default()
+            },
+        )
+        .unwrap();
+        axes.annotate(
+            "OVERLAY",
+            (AxisValue::Category("A".into()), number(0.0)),
+            AnnotateOptions {
+                arrow: false,
+                ..AnnotateOptions::default()
+            },
+        )
+        .unwrap();
+        f.add_pie_axes_at(at(pie_col))
+            .unwrap()
+            .title("Pie panel")
+            .pie(
+                names(&["First", "Second"]),
+                &[1.0, 3.0],
+                PieOptions::default(),
+            )
+            .unwrap();
+
+        let scene = render(&f);
+        for label in ["Mixed panels", "Pie panel", "1.25", "\u{2212}2.5"] {
+            text(&scene, label);
+        }
+        for label in ["1.25", "\u{2212}2.5"] {
+            assert!(inside(text_box(&scene, text(&scene, label)), plot(&scene)));
+        }
+        assert!(leaves(&scene.items).iter().any(|item| matches!(
+            item,
+            Item::Fill { path, .. }
+                if path.verbs().iter().any(|verb| matches!(verb, umber_core::PathVerb::CubicTo(..)))
+        )));
+        let last = annotation_items(&scene);
+        assert!(
+            matches!(last.as_slice(), [Item::Text(t)] if t.text == "OVERLAY"),
+            "{last:?}"
+        );
+    }
 }
 
 #[test]

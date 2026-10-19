@@ -56,6 +56,7 @@ mod line;
 mod mapping;
 mod marker;
 mod mesh;
+pub(crate) mod pie;
 mod rule;
 mod scatter;
 pub(crate) use scatter::{MARKER_OUTLINE, marker_reach};

@@ -114,6 +114,7 @@ mod corpus {
     pub mod legend;
     pub mod legend_position;
     pub mod mesh;
+    pub mod pie;
     pub mod plot_height;
     pub mod rules;
     pub mod share;
@@ -205,6 +206,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::hist_variants::cases(&lib, &mut sink);
     corpus::ecdf::cases(&lib, &mut sink);
     corpus::kde::cases(&lib, &mut sink);
+    corpus::pie::cases(&lib, &mut sink);
     corpus::annotation::cases(&lib, &mut sink);
     corpus::bar_labels::cases(&lib, &mut sink);
     corpus::font_file::cases(&lib, &mut sink);
@@ -2114,7 +2116,12 @@ mod record {
                     c.col_span()
                 );
             }
-            out.push_str(&axes(a));
+            match a {
+                umber_core::Panel::Cartesian(a) => out.push_str(&axes(a)),
+                umber_core::Panel::Pie(pie) => {
+                    let _ = writeln!(out, "  pie title={}", text(pie.title_text()));
+                }
+            }
         }
         out
     }

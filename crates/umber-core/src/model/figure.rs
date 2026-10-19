@@ -6,6 +6,8 @@ use std::sync::Arc;
 use super::axes::Axes;
 use super::axes_mut::AxesMut;
 use super::grid::{CellRange, Grid, GridIndex, Placement};
+use super::panel::{Panel, PanelIndex};
+use super::pie::PiePanel;
 use super::share::{self, AxisSettings, Group, Setting, SharedAxis};
 use super::validation::check_figure_size;
 use crate::{Error, Result, ScaleKind, SizeSpec, Theme};
@@ -46,7 +48,10 @@ pub struct Figure {
     title: String,
     subtitle: String,
     /// The placed axes, in row-major order of their top-left cells. No two cover one cell.
-    panels: Vec<Axes>,
+    panels: Vec<PanelIndex>,
+    /// Kind-specific storage keeps mutable handles independent of row-major insertion.
+    axes: Vec<Axes>,
+    pies: Vec<PiePanel>,
     /// Settings stored once per x group, keyed independently of panel insertion order.
     x_groups: BTreeMap<usize, Group>,
     /// Settings stored once per y group.
@@ -102,6 +107,8 @@ impl Figure {
             title: String::new(),
             subtitle: String::new(),
             panels: Vec::new(),
+            axes: Vec::new(),
+            pies: Vec::new(),
             x_groups: BTreeMap::new(),
             y_groups: BTreeMap::new(),
             color_groups: BTreeMap::new(),
@@ -327,11 +334,34 @@ impl Figure {
         x: ScaleKind,
         y: ScaleKind,
     ) -> Result<AxesMut<'_>> {
+        let (cells, position) = self.empty_cells(at)?;
+        let (row, col) = (cells.row(), cells.col());
+        share::check_add(self, cells, x, y)?;
+        let x_key = self.x_group_of(row, col);
+        let y_key = self.y_group_of(row, col);
+        let mut axes = Axes::new(
+            x,
+            y,
+            cells,
+            Arc::clone(&self.x_groups.entry(x_key).or_default().settings),
+            Arc::clone(&self.y_groups.entry(y_key).or_default().settings),
+        );
+        axes.color_limits = self
+            .color_groups
+            .get(&self.color_group_of(row, col))
+            .and_then(|group| group.limits);
+        let index = self.axes.len();
+        self.axes.push(axes);
+        self.panels.insert(position, PanelIndex::Cartesian(index));
+        Ok(AxesMut::new(self, index))
+    }
+
+    /// Validates occupancy and finds the row-major position before either kind is stored.
+    fn empty_cells(&self, at: Placement) -> Result<(CellRange, usize)> {
         let cells = self.placement_cells(at)?;
         let (row, col) = (cells.row(), cells.col());
         let taken = cells.iter().find_map(|cell| {
-            self.panels
-                .iter()
+            self.panels()
                 .find(|axes| axes.cells().contains(cell.row, cell.col))
                 .map(|axes| (cell, axes.cells()))
         });
@@ -349,22 +379,77 @@ impl Figure {
             .with_parameter("row")
             .with_hint("each cell holds one axes; pick an empty cell."));
         }
-        share::check_add(self, cells, x, y)?;
-        let x_key = self.x_group_of(row, col);
-        let y_key = self.y_group_of(row, col);
-        let x_settings = Arc::clone(&self.x_groups.entry(x_key).or_default().settings);
-        let y_settings = Arc::clone(&self.y_groups.entry(y_key).or_default().settings);
-        // Panels stay in row-major order of their top-left cells, which no two share.
+        let position = self.panels.partition_point(|&index| {
+            let cells = self.panel_view(index).cells();
+            (cells.row(), cells.col()) < (row, col)
+        });
+        Ok((cells, position))
+    }
+
+    /// Adds a pie panel to a single-cell figure.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_pie_axes()?.title("Parts");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn add_pie_axes(&mut self) -> Result<super::PieAxesMut<'_>> {
+        self.add_pie_axes_at(Placement::default())
+    }
+
+    /// Adds a pie panel at a grid position. Pie panels occupy cells but do not share axes.
+    /// Position and occupancy errors follow [`Figure::add_axes_at`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Grid, GridIndex, Placement, Theme};
+    /// let mut f = Figure::with_grid(12.0, 4.0, Theme::pigment(), Grid::new(1, 2)?)?;
+    /// f.add_pie_axes_at(Placement { col: GridIndex::At(1), ..Default::default() })?;
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn add_pie_axes_at(&mut self, at: Placement) -> Result<super::PieAxesMut<'_>> {
+        let (cells, position) = self
+            .empty_cells(at)
+            .map_err(|err| err.with_context("Figure.add_pie_axes()"))?;
+        let index = self.pies.len();
+        self.pies.push(PiePanel::new(cells));
+        self.panels.insert(position, PanelIndex::Pie(index));
+        Ok(super::PieAxesMut::new(self, index))
+    }
+
+    /// Returns an existing pie panel's restricted handle.
+    /// `Error::Usage` if the cell does not start a pie panel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, GridIndex, Theme};
+    /// let mut f = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// f.add_pie_axes()?;
+    /// f.pie_axes_at_mut(GridIndex::Auto, GridIndex::Auto)?.title("Parts");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn pie_axes_at_mut(
+        &mut self,
+        row: GridIndex,
+        col: GridIndex,
+    ) -> Result<super::PieAxesMut<'_>> {
         let index = self
-            .panels
-            .partition_point(|axes| (axes.cells().row(), axes.cells().col()) < (row, col));
-        let mut axes = Axes::new(x, y, cells, x_settings, y_settings);
-        axes.color_limits = self
-            .color_groups
-            .get(&self.color_group_of(row, col))
-            .and_then(|group| group.limits);
-        self.panels.insert(index, axes);
-        Ok(AxesMut::new(self, index))
+            .index_at(row, col)
+            .map_err(|err| err.with_context("Figure.pie_axes_at()"))?;
+        match index {
+            PanelIndex::Pie(index) => Ok(super::PieAxesMut::new(self, index)),
+            PanelIndex::Cartesian(_) => Err(Error::usage(
+                "Figure.pie_axes_at()",
+                "this panel is Cartesian; a pie needs PieAxes.",
+            )
+            .with_parameter("row")
+            .with_hint("create a pie panel with Figure.add_pie_axes().")),
+        }
     }
 
     /// The cells that an axes added at `at` would cover on this figure's grid, checked as
@@ -441,6 +526,7 @@ impl Figure {
     /// ```
     pub fn axes_at(&self, row: GridIndex, col: GridIndex) -> Result<&Axes> {
         let index = self.index_at(row, col)?;
+        let index = self.cartesian_index(index)?;
         Ok(self.panel(index))
     }
 
@@ -460,10 +546,11 @@ impl Figure {
     /// ```
     pub fn axes_at_mut(&mut self, row: GridIndex, col: GridIndex) -> Result<AxesMut<'_>> {
         let index = self.index_at(row, col)?;
+        let index = self.cartesian_index(index)?;
         Ok(AxesMut::new(self, index))
     }
 
-    /// The placed axes, in row-major order of their top-left cells.
+    /// The placed Cartesian and pie panels, in row-major order of their top-left cells.
     ///
     /// # Examples
     ///
@@ -479,8 +566,19 @@ impl Figure {
     /// assert_eq!(titles, ["A", "C"]);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn panels(&self) -> impl Iterator<Item = &Axes> {
-        self.panels.iter()
+    pub fn panels(&self) -> impl Iterator<Item = Panel<'_>> {
+        self.panels.iter().map(|&index| self.panel_view(index))
+    }
+
+    pub(crate) fn cartesian_panels(&self) -> impl Iterator<Item = &Axes> {
+        self.panels().filter_map(Panel::cartesian)
+    }
+
+    fn panel_view(&self, index: PanelIndex) -> Panel<'_> {
+        match index {
+            PanelIndex::Cartesian(index) => Panel::Cartesian(&self.axes[index]),
+            PanelIndex::Pie(index) => Panel::Pie(&self.pies[index]),
+        }
     }
 
     /// The theme.
@@ -532,12 +630,20 @@ impl Figure {
     /// The axes at `index` among the panels. Every [`AxesMut`] holds an index in range for as
     /// long as it borrows the figure.
     pub(super) fn panel(&self, index: usize) -> &Axes {
-        &self.panels[index]
+        &self.axes[index]
     }
 
     /// The axes at `index` among the panels, to change; see [`Figure::panel`].
     pub(super) fn panel_mut(&mut self, index: usize) -> &mut Axes {
-        &mut self.panels[index]
+        &mut self.axes[index]
+    }
+
+    pub(super) fn pie_panel(&self, index: usize) -> &PiePanel {
+        &self.pies[index]
+    }
+
+    pub(super) fn pie_panel_mut(&mut self, index: usize) -> &mut PiePanel {
+        &mut self.pies[index]
     }
 
     /// The stable x group key of a cell.
@@ -582,7 +688,7 @@ impl Figure {
         context: &'static str,
         parameter: Option<&'static str>,
     ) -> Result<()> {
-        let cell = self.panels[index].cells();
+        let cell = self.axes[index].cells();
         let crossed = match self.grid.share_color() {
             super::Share::Row if cell.row_span() > 1 => Some((
                 "rows",
@@ -603,7 +709,7 @@ impl Figure {
             .with_hint(hint));
         }
         let key = self.color_group_of(cell.row(), cell.col());
-        for other in self.panels.iter().filter(|axes| {
+        for other in self.cartesian_panels().filter(|axes| {
             let c = axes.cells();
             self.color_group_of(c.row(), c.col()) == key && c != cell
         }) {
@@ -616,7 +722,7 @@ impl Figure {
 
     /// Validates all members, then records and propagates shared color limits atomically.
     pub(super) fn set_color_limits(&mut self, index: usize, limits: (f64, f64)) -> Result<()> {
-        let c = self.panels[index].cells();
+        let c = self.axes[index].cells();
         let cell = super::Cell {
             row: c.row(),
             col: c.col(),
@@ -630,7 +736,7 @@ impl Figure {
             )
         };
         let key = key_of(c);
-        for axes in &self.panels {
+        for axes in self.cartesian_panels() {
             let other = axes.cells();
             if key_of(other) == key
                 && let Some(spec) = axes.marks().iter().find_map(super::Mark::color_scale)
@@ -653,7 +759,7 @@ impl Figure {
             .entry(key)
             .or_default()
             .set(cell, limits)?;
-        for axes in &mut self.panels {
+        for axes in &mut self.axes {
             if key_of(axes.cells()) == key {
                 axes.color_limits = Some(limits);
             }
@@ -671,7 +777,7 @@ impl Figure {
         proposed: AxisSettings,
         context: &'static str,
     ) -> Result<()> {
-        let cells = self.panels[index].cells();
+        let cells = self.axes[index].cells();
         let cell = super::Cell {
             row: cells.row(),
             col: cells.col(),
@@ -685,7 +791,7 @@ impl Figure {
         let group = groups.entry(key).or_default();
         group.set(axis, setting, cell, proposed, context)?;
         let settings = Arc::clone(&group.settings);
-        for axes in &mut self.panels {
+        for axes in &mut self.axes {
             let c = axes.cells();
             if share::group_key(&self.grid, mode, c.row(), c.col()) == key {
                 match axis {
@@ -697,9 +803,18 @@ impl Figure {
         Ok(())
     }
 
+    /// Keeps Cartesian mutable handles away from circular panels.
+    fn cartesian_index(&self, index: PanelIndex) -> Result<usize> {
+        match index {
+            PanelIndex::Cartesian(index) => Ok(index),
+            PanelIndex::Pie(_) => Err(Error::usage(AXES_AT, "this panel is PieAxes; Cartesian methods need Cartesian axes.")
+                .with_parameter("row").with_hint("use Figure.pie_axes_at() for this pie panel, or Figure.add_axes() for Cartesian marks.")),
+        }
+    }
+
     /// The index among the panels of the axes whose top-left cell is at `row`, `col`, with the
     /// errors of [`Figure::axes_at`].
-    fn index_at(&self, row: GridIndex, col: GridIndex) -> Result<usize> {
+    fn index_at(&self, row: GridIndex, col: GridIndex) -> Result<PanelIndex> {
         let (rows, cols) = (self.grid.rows(), self.grid.cols());
         let row = auto_index(AXES_AT, Dimension::ROW, row, rows)?;
         let col = auto_index(AXES_AT, Dimension::COL, col, cols)?;
@@ -708,14 +823,15 @@ impl Figure {
         let Some(index) = self
             .panels
             .iter()
-            .position(|axes| axes.cells().contains(row, col))
+            .copied()
+            .find(|&index| self.panel_view(index).cells().contains(row, col))
         else {
             return Err(
                 Error::usage(AXES_AT, format!("row {row}, col {col} holds no axes."))
                     .with_hint("add one with add_axes(row=, col=) first."),
             );
         };
-        let cells = self.panel(index).cells();
+        let cells = self.panel_view(index).cells();
         if (cells.row(), cells.col()) != (row, col) {
             return Err(Error::usage(
                 AXES_AT,
@@ -782,9 +898,15 @@ impl Figure {
 
     /// Panels with a visible legend and an explicit size; AUTO contributes no setting.
     fn sized_legends(&self) -> impl Iterator<Item = (usize, &Axes)> {
-        self.panels.iter().enumerate().filter(|(_, axes)| {
-            axes.legend_size != SizeSpec::Auto && axes.legend != Some(crate::LegendStyle::None)
-        })
+        self.panels
+            .iter()
+            .filter_map(|index| match *index {
+                PanelIndex::Cartesian(index) => Some((index, &self.axes[index])),
+                PanelIndex::Pie(_) => None,
+            })
+            .filter(|(_, axes)| {
+                axes.legend_size != SizeSpec::Auto && axes.legend != Some(crate::LegendStyle::None)
+            })
     }
 
     /// The agreed explicit size of the merged legend, or the theme size when none is set.
@@ -942,7 +1064,7 @@ fn span_in_grid(dim: Dimension, start: usize, span: i64, size: usize) -> Result<
 impl Figure {
     /// Every member points to the allocation held by its x and y groups.
     pub(super) fn assert_group_settings_shared(&self) {
-        for axes in &self.panels {
+        for axes in self.cartesian_panels() {
             let cells = axes.cells();
             let x = &self.x_groups[&self.x_group_of(cells.row(), cells.col())];
             let y = &self.y_groups[&self.y_group_of(cells.row(), cells.col())];
@@ -1016,7 +1138,7 @@ mod tests {
         // The handle changes the axes it was found for.
         f.axes_at_mut(GridIndex::At(1), GridIndex::At(2))?
             .title("corner");
-        let titles: Vec<&str> = f.panels().map(Axes::title_text).collect();
+        let titles: Vec<&str> = f.panels().map(Panel::title_text).collect();
         assert_eq!(titles, ["wide", "corner"]);
         Ok(())
     }
@@ -1329,7 +1451,7 @@ mod tests {
             .unwrap()
             .title(&format!("{row}{col}"));
         }
-        let order: Vec<&str> = f.panels().map(Axes::title_text).collect();
+        let order: Vec<&str> = f.panels().map(Panel::title_text).collect();
         assert_eq!(order, ["00", "01", "10", "20", "22"]);
         assert!(f.to_scene(FontLibrary::global()).is_ok());
     }
