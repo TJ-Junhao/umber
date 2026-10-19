@@ -553,16 +553,23 @@ fn pdf_text_extracts_each_occurrence() {
         if have("qpdf") {
             assert_qpdf_clean(&path);
         }
+        // Readers differ in how many spaces they infer between words (older MuPDF adds one after
+        // a combining mark), so the characters and their order are compared, not the spacing.
         if have("pdftotext") {
-            assert_eq!(one_line(&path), text, "{name}");
+            assert_eq!(words(&one_line(&path)), words(text), "{name}");
         }
         if have("mutool") {
-            assert_eq!(mupdf_line(&path), text, "{name} (MuPDF)");
+            assert_eq!(words(&mupdf_line(&path)), words(text), "{name} (MuPDF)");
         }
         if pdfjs && let Some(extracted) = pdfjs_text(&path) {
-            assert_eq!(extracted, text, "{name} (pdf.js)");
+            assert_eq!(words(&extracted), words(text), "{name} (pdf.js)");
         }
     }
+}
+
+/// `text` with every run of whitespace written as one space and none at either end.
+fn words(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[test]
