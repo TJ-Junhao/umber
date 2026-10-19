@@ -110,6 +110,63 @@ def demand() -> None:
     fig.save_png(OUT / "time-pigment.png", dpi=DPI)
 
 
+def channels() -> None:
+    """Visits by channel as an annotated donut, in the Pigment theme."""
+    ax = ub.Figure(6, 4, theme=ub.Theme.PIGMENT).add_pie_axes()
+    ax.title("Visits by channel")
+    ax.pie(
+        ["Search", "Direct", "Social", "Email", "Other"],
+        [41, 24, 17, 11, 7],
+        hole=0.55,
+        annotate=True,
+    )
+    ax.figure.save_png(OUT / "pie-pigment.png", dpi=DPI)
+
+
+def elevation() -> None:
+    """A filled elevation map with labelled level lines, in the Graphite theme."""
+    x = np.linspace(-3, 3, 121)
+    y = np.linspace(-2, 2, 81)
+    gx, gy = np.meshgrid(x, y)
+    z = (
+        1.2 * np.exp(-((gx - 1.0) ** 2) - (gy - 0.4) ** 2)
+        + 0.8 * np.exp(-((gx + 1.2) ** 2) / 0.8 - (gy + 0.5) ** 2 / 0.6)
+        - 0.15 * gx
+    )
+    fig = ub.Figure(6, 4, theme=ub.Theme.GRAPHITE)
+    ax = fig.add_axes()
+    ax.title("Elevation").xlabel("km").ylabel("km")
+    ax.contour(x, y, z, style=ub.Contour.BOTH, annotate=True)
+    ax.colorbar("km")
+    fig.save_png(OUT / "contour-graphite.png", dpi=DPI)
+
+
+def weather() -> None:
+    """Monthly rainfall bars and a temperature line on a twin y axis, in the Midnight theme."""
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    rainfall = [52, 48, 55, 61, 72, 84, 91, 88, 70, 64, 58, 54]
+    temperature = [4, 5, 9, 13, 18, 22, 25, 24, 20, 14, 9, 5]
+    fig = ub.Figure(6, 4, theme=ub.Theme.MIDNIGHT)
+    left = fig.add_axes(x=ub.Scale.category())
+    left.title("A year of weather").bar(months, rainfall, label="Rainfall").ylabel("mm")
+    left.twin_y().line(months, temperature, label="Temperature").ylabel("°C")
+    fig.save_png(OUT / "twin-midnight.png", dpi=DPI)
+
+
+def requests() -> None:
+    """A time series with an annotated peak and dip and a target line, in the Pigment theme."""
+    days = np.datetime64("2026-03-01") + np.arange(21)
+    load = [21, 22, 24, 33, 25, 23, 15, 20, 23, 24, 27, 25, 24, 26, 28, 27, 25, 22, 24, 26, 25]
+    fig = ub.Figure(6, 4, theme=ub.Theme.PIGMENT)
+    ax = fig.add_axes(x=ub.Scale.time())
+    ax.title("Requests").subtitle("Three weeks in March 2026").ylabel("requests / s")
+    ax.line(days, load).hline(30.0, color=ub.Color.GRAY, dash=ub.Dash.DASHED).ylim(10, 40)
+    ax.annotate("Release", (days[3], 33.0), offset=(28, 14))
+    ax.annotate("Outage", (days[6], 15.0), offset=(22, -20))
+    ax.text("Target", (days[16], 32.0), color=ub.Color.GRAY)
+    fig.save_png(OUT / "annotations-pigment.png", dpi=DPI)
+
+
 def main() -> None:
     """Render every README image."""
     OUT.mkdir(parents=True, exist_ok=True)
@@ -120,6 +177,10 @@ def main() -> None:
     correlations()
     density()
     demand()
+    channels()
+    elevation()
+    weather()
+    requests()
 
 
 if __name__ == "__main__":

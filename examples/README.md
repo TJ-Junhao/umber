@@ -18,6 +18,9 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `bars.py`: a bar chart, a grouped bar chart and a stacked bar chart.
 - `by.py`: long-form columns grouped with `by=` into lines, side-by-side bars, ECDFs and a stacked histogram.
 - `box.py`: plain and grouped box plots, with Tukey whiskers and outliers.
+- `strip.py`: jittered samples over box plots.
+- `swarm.py`: non-overlapping samples over horizontal violins.
+- `events.py`: arrival times in one row per station on a time axis.
 - `violin.py`: plain and grouped violin plots comparing sample distributions across regions.
 - `horizontal.py`: horizontal grouped bars, horizontal box plots and a dot plot on a category y axis.
 - `histogram.py`: a histogram with a chosen number of bins.
